@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/example/">
+    <Project Path="src\AspNetCoreWebApi.Example\AspNetCoreWebApi.Example.csproj" Type="Classic C#" />
+  </Folder>
+  <Folder Name="/src/" />
+  <Folder Name="/src/1.Core/">
+    <Project Path="src\CrestCreates.Core\CrestCreates.Core.csproj" Type="Classic C#" />
+    <Project Path="src\CrestCreates.Extensions\CrestCreates.Extensions.csproj" Type="Classic C#" />
+    <Project Path="src\CrestCreates.Modularity\CrestCreates.Modularity.csproj" Type="Classic C#" />
+    <Project Path="src\CrestCreates.SourceGenerator\CrestCreates.SourceGenerator.csproj" Type="Classic C#" />
+  </Folder>
+  <Folder Name="/src/2.Infrastructure/">
+    <Project Path="src\CrestCreates.Data\CrestCreates.Data.csproj" Type="Classic C#" />
+    <Project Path="src\CrestCreates.Service\CrestCreates.Service.csproj" Type="Classic C#" />
+  </Folder>
+  <Folder Name="/src/WebApp/">
+    <Project Path="src\CrestCreates.WebAppExtensions\CrestCreates.WebAppExtensions.csproj" Type="Classic C#" />
+  </Folder>
+</Solution>
