@@ -1,10 +1,9 @@
 ﻿using System;
 using System.Collections.Immutable;
-using CrestCreates.SourceGenerator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-namespace CrestCreates.CodeAnalyzer
+namespace CrestCreates.WebApp.SourceGenerator.CodeAnalyzer
 {
     /// <summary>
     /// 通用增量生成器抽象基类

@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace CrestCreates.CodeAnalyzer.Model;
+namespace CrestCreates.WebApp.SourceGenerator.CodeAnalyzer.Model;
 
 public record ConstructorInfo(List<ParameterInfo> Parameters)
 {

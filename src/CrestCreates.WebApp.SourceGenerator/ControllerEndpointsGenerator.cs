@@ -1,8 +1,7 @@
 using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
-using CrestCreates.CodeAnalyzer;
-using CrestCreates.SourceGenerator;
+using CrestCreates.WebApp.SourceGenerator.CodeAnalyzer;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 

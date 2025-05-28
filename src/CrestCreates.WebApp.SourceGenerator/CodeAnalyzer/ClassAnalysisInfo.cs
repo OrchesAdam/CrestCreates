@@ -1,7 +1,7 @@
 ﻿using System.Collections.Generic;
-using CrestCreates.CodeAnalyzer.Model;
+using CrestCreates.WebApp.SourceGenerator.CodeAnalyzer.Model;
 
-namespace CrestCreates.SourceGenerator;
+namespace CrestCreates.WebApp.SourceGenerator.CodeAnalyzer;
 
 public record ClassAnalysisInfo(
     string FullName,

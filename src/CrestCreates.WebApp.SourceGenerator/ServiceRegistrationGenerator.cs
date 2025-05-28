@@ -3,10 +3,9 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
-using CrestCreates.CodeAnalyzer;
-using CrestCreates.CodeAnalyzer.Model;
 using CrestCreates.DependencyInjection;
-using CrestCreates.SourceGenerator;
+using CrestCreates.WebApp.SourceGenerator.CodeAnalyzer;
+using CrestCreates.WebApp.SourceGenerator.CodeAnalyzer.Model;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 

@@ -1,4 +1,4 @@
-﻿namespace CrestCreates.CodeAnalyzer.Model;
+﻿namespace CrestCreates.WebApp.SourceGenerator.CodeAnalyzer.Model;
 
 public record ServiceAttributeInfo(
     string ServiceType,
