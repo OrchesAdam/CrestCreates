@@ -245,24 +245,15 @@ public class ModuleInterfaceGenerator : IIncrementalGenerator
         }
         sb.AppendLine("        }");
         sb.AppendLine();        // 重写核心方法
-        sb.AppendLine("        public override void ConfigureServices(IServiceCollection services)");
+        sb.AppendLine("        public virtual void ConfigureServices(IServiceCollection services)");
         sb.AppendLine("        {");
-        sb.AppendLine("            base.ConfigureServices(services);");
         sb.AppendLine("            // 在此处添加服务配置");
         sb.AppendLine("        }");
         sb.AppendLine();
 
-        sb.AppendLine("        public override void Initialize(IServiceProvider serviceProvider)");
+        sb.AppendLine("        public virtual Task ConfigureServicesAsync(IServiceCollection services)");
         sb.AppendLine("        {");
-        sb.AppendLine("            base.Initialize(serviceProvider);");
-        sb.AppendLine("            // 在此处添加初始化逻辑");
-        sb.AppendLine("        }");
-        sb.AppendLine();
-
-        sb.AppendLine("        public override void Shutdown(IServiceProvider serviceProvider)");
-        sb.AppendLine("        {");
-        sb.AppendLine("            // 在此处添加关闭逻辑");
-        sb.AppendLine("            base.Shutdown(serviceProvider);");
+        sb.AppendLine("            // 在此处添加服务配置");
         sb.AppendLine("        }");
         sb.AppendLine();
 

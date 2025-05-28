@@ -6,17 +6,6 @@ namespace CrestCreates.Modularity
 {
     public abstract class CrestCreatesModuleBase : ICrestCreatesModule
     {
-        public virtual void ConfigureServices(IServiceCollection services)
-        {
-        }
-
-        public virtual void Initialize(IServiceProvider serviceProvider)
-        {
-        }
-
-        public virtual void Shutdown(IServiceProvider serviceProvider)
-        {
-        }
         
         public virtual void OnPreApplicationInitialization()
         {
@@ -50,6 +39,16 @@ namespace CrestCreates.Modularity
         }
 
         public virtual Task OnPostApplicationShutdownAsync()
+        {
+            return Task.CompletedTask;
+        }
+
+        public virtual void ConfigureServices(IServiceCollection services)
+        {
+            
+        }
+
+        public virtual Task ConfigureServicesAsync(IServiceCollection services)
         {
             return Task.CompletedTask;
         }
