@@ -1,16 +1,10 @@
-﻿using System;
-using CrestCreates.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection;
-
-namespace CrestCreates.Modularity
+﻿namespace CrestCreates.Modularity
 {
     /// <summary>
     /// 
     /// </summary>
-    public interface ICrestCreatesModule
+    public interface ICrestCreatesModule : IOnPostApplicationInitialization, IOnPostApplicationShutdown, IOnPreApplicationInitialization, IOnPreApplicationShutdown
     {
-        void ConfigureServices(IServiceCollection services);
-        void Initialize(IServiceProvider serviceProvider);
-        void Shutdown(IServiceProvider serviceProvider);
+        
     }
 }

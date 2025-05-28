@@ -2,13 +2,13 @@
     <PropertyGroup>
         <!-- Enable central package management, https://learn.microsoft.com/en-us/nuget/consume-packages/Central-Package-Management -->
         <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
-    </PropertyGroup>
-    <ItemGroup>
+    </PropertyGroup>    <ItemGroup>
         <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.5"/>
         <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="4.14.0"/>
         <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0"/>
         <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.5"/>
         <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="9.0.5"/>
+        <PackageVersion Include="Microsoft.Extensions.Options" Version="9.0.5"/>
         <PackageVersion Include="System.Text.Json" Version="9.0.5"/>
 
         <PackageVersion Include="Microsoft.AspNetCore.Hosting.Abstractions" Version="2.3.0" />

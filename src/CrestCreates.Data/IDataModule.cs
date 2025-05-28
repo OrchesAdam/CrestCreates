@@ -29,7 +29,7 @@ public class DataModuleOptions
 /// 数据模块接口
 /// </summary>
 [ModuleInterface(ConfigurationType = typeof(DataModuleOptions))]
-public interface IDataModule : IOnPreApplicationInitialization, IOnPostApplicationInitialization
+public interface IDataModule : ICrestCreatesModule
 {
     /// <summary>
     /// 初始化数据库

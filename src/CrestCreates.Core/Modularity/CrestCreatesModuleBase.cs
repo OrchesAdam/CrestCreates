@@ -4,11 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Modularity
 {
-    public abstract class CrestCreatesModuleBase : ICrestCreatesModule,
-        IOnPreApplicationInitialization,
-        IOnPostApplicationInitialization,
-        IOnPreApplicationShutdown,
-        IOnPostApplicationShutdown
+    public abstract class CrestCreatesModuleBase : ICrestCreatesModule
     {
         public virtual void ConfigureServices(IServiceCollection services)
         {
