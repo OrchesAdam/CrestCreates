@@ -25,6 +25,7 @@ public class ModuleInfo
     }
 }
 
+[Generator]
 public class ModuleRegistrarGenerator : CommonIncrementalGenerator
 {
     protected override string GeneratorName => "ModuleRegistrarGenerator";
@@ -104,7 +105,7 @@ public class ModuleRegistrarGenerator : CommonIncrementalGenerator
             classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             classSymbol.Name,
             implementsICrestCreatesModule, // 如果实现了ICrestCreatesModule接口，则标记为服务
-            new List<string> { "Module" },
+            ["Module"],
             new ServiceDescriptorInfo(
                 classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 classSymbol.Name,
@@ -182,34 +183,39 @@ public class ModuleRegistrarGenerator : CommonIncrementalGenerator
     // This overload is redundant and not used; removed to avoid errors.
     private List<string> GetModuleDependencies(ClassAnalysisInfo classInfo, Compilation compilation)
     {
-        if (classInfo == null || classInfo.ServiceInfo == null)
-            return new List<string>();
+        if (classInfo.ServiceInfo == null)
+        {
+            return [];
+        }
 
         var dependencyTypes = new List<string>();
 
         // 获取模块的依赖项
         var classSymbol = compilation.GetTypeByMetadataName(classInfo.FullName);
-        if (classSymbol != null)
+        if (classSymbol == null)
         {
-            // 查找类上的ModuleAttribute特性
-            var moduleAttribute = classSymbol.GetAttributes()
-                .FirstOrDefault(attr => attr.AttributeClass?.Name == ClassAttributeName ||
-                               attr.AttributeClass?.Name == ClassAttributeName.Replace("Attribute", ""));
+            return dependencyTypes;
+        }
+        // 查找类上的ModuleAttribute特性
+        var moduleAttribute = classSymbol.GetAttributes()
+            .FirstOrDefault(attr => attr.AttributeClass?.Name == ClassAttributeName ||
+                                    attr.AttributeClass?.Name == ClassAttributeName.Replace("Attribute", ""));
 
-            // 从特性构造函数参数中提取依赖类型
-            if (moduleAttribute != null && moduleAttribute.ConstructorArguments.Any())
+        // 从特性构造函数参数中提取依赖类型
+        if (moduleAttribute == null || !moduleAttribute.ConstructorArguments.Any())
+        {
+            return dependencyTypes;
+        }
+        var dependencies = moduleAttribute.ConstructorArguments.First();
+        if (dependencies.Kind != TypedConstantKind.Array || !dependencies.Values.Any())
+        {
+            return dependencyTypes;
+        }
+        foreach (var dep in dependencies.Values)
+        {
+            if (dep.Value is ITypeSymbol typeSymbol)
             {
-                var dependencies = moduleAttribute.ConstructorArguments.First();
-                if (dependencies.Kind == TypedConstantKind.Array && dependencies.Values.Any())
-                {
-                    foreach (var dep in dependencies.Values)
-                    {
-                        if (dep.Value is ITypeSymbol typeSymbol)
-                        {
-                            dependencyTypes.Add(typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
-                        }
-                    }
-                }
+                dependencyTypes.Add(typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
             }
         }
 
@@ -280,15 +286,14 @@ public class ModuleRegistrarGenerator : CommonIncrementalGenerator
         }
         
         // 检查是否有循环依赖
-        if (temporaryMarked.Contains(module.TypeName))
+        if (!temporaryMarked.Add(module.TypeName))
         {
             // 发现循环依赖，但为了不中断流程，我们记录警告并继续
             throw new InvalidOperationException($"Circular dependency detected for module {module.TypeName}. Please review the module dependencies.");
         }
         
         // 临时标记为正在访问
-        temporaryMarked.Add(module.TypeName);
-        
+
         // 先访问所有依赖项
         foreach (var dependency in module.Dependencies)
         {
@@ -311,9 +316,7 @@ public class ModuleRegistrarGenerator : CommonIncrementalGenerator
         {
             result.Add(module);
         }
-    }
-
-    private string GenerateModuleRegistrarCode(List<ModuleInfo> moduleInfos)
+    }    private string GenerateModuleRegistrarCode(List<ModuleInfo> moduleInfos)
     {
         // 对模块按照依赖关系进行排序
         var sortedModules = SortModulesByDependencies(moduleInfos);
@@ -329,13 +332,10 @@ public class ModuleRegistrarGenerator : CommonIncrementalGenerator
         sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
         sb.AppendLine("using System.Linq;");
+        sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine("using CrestCreates.Modularity;");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
-        sb.AppendLine("using Microsoft.AspNetCore.Builder;");
-        sb.AppendLine("using Microsoft.Extensions.Hosting;");
-        sb.AppendLine();
-
-        // 创建类的命名空间和类头
+        sb.AppendLine();        // 创建类的命名空间和类头
         sb.AppendLine("namespace CrestCreates.Generated.Modules");
         sb.AppendLine("{");
 
@@ -353,8 +353,8 @@ public class ModuleRegistrarGenerator : CommonIncrementalGenerator
         sb.AppendLine("        public static readonly Type[] ModuleTypes = new Type[]");
         sb.AppendLine("        {");
 
-        // 添加每个模块类型
-        foreach (var module in moduleInfos)
+        // 添加每个模块类型，使用排序后的模块列表
+        foreach (var module in sortedModules)
         {
             sb.AppendLine($"            typeof({module.TypeName}),");
         }
@@ -389,9 +389,7 @@ public class ModuleRegistrarGenerator : CommonIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine("            return services;");
         sb.AppendLine("        }");
-        sb.AppendLine();
-
-        // 添加配置模块的扩展方法
+        sb.AppendLine();        // 添加配置模块的扩展方法
         sb.AppendLine("        /// <summary>");
         sb.AppendLine("        /// 配置所有模块的服务");
         sb.AppendLine("        /// </summary>");
@@ -409,6 +407,58 @@ public class ModuleRegistrarGenerator : CommonIncrementalGenerator
         sb.AppendLine("            return services;");
         sb.AppendLine("        }");
         sb.AppendLine();
+          // 添加过滤版本的配置模块方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 配置符合条件的模块的服务");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static IServiceCollection ConfigureModules(this IServiceCollection services, Func<Type, bool> filter)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            var serviceProvider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = false });");
+        sb.AppendLine();
+        sb.AppendLine("            // 按模块间的依赖关系顺序配置服务");
+        sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder().Where(filter))");
+        sb.AppendLine("            {");
+        sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
+        sb.AppendLine("                module?.ConfigureServices(services);");
+        sb.AppendLine("            }");
+        sb.AppendLine();
+        sb.AppendLine("            return services;");
+        sb.AppendLine("        }");
+        sb.AppendLine();        // 添加执行应用程序初始化前操作的方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 执行所有模块的应用程序初始化前操作");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static void PreAppInitialize(IServiceProvider serviceProvider)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            // 按模块间的依赖关系顺序执行");
+        sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder())");
+        sb.AppendLine("            {");
+        sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
+        sb.AppendLine("                if (module is IOnPreApplicationInitialization preInitModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    preInitModule.OnPreApplicationInitialization();");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        
+        // 添加执行应用程序初始化前操作的异步方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 异步执行所有模块的应用程序初始化前操作");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static async Task PreAppInitializeAsync(IServiceProvider serviceProvider)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            // 按模块间的依赖关系顺序执行");
+        sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder())");
+        sb.AppendLine("            {");
+        sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
+        sb.AppendLine("                if (module is IOnPreApplicationInitialization preInitModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await preInitModule.OnPreApplicationInitializationAsync();");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine();
 
         // 添加初始化模块的方法
         sb.AppendLine("        /// <summary>");
@@ -423,7 +473,78 @@ public class ModuleRegistrarGenerator : CommonIncrementalGenerator
         sb.AppendLine("                module?.Initialize(serviceProvider);");
         sb.AppendLine("            }");
         sb.AppendLine("        }");
+        sb.AppendLine();        // 添加执行应用程序初始化后操作的方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 执行所有模块的应用程序初始化后操作");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static void PostAppInitialize(IServiceProvider serviceProvider)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            // 按模块间的依赖关系顺序执行");
+        sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder())");
+        sb.AppendLine("            {");
+        sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
+        sb.AppendLine("                if (module is IOnPostApplicationInitialization postInitModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    postInitModule.OnPostApplicationInitialization();");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
         sb.AppendLine();
+        
+        // 添加执行应用程序初始化后操作的异步方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 异步执行所有模块的应用程序初始化后操作");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static async Task PostAppInitializeAsync(IServiceProvider serviceProvider)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            // 按模块间的依赖关系顺序执行");
+        sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder())");
+        sb.AppendLine("            {");
+        sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
+        sb.AppendLine("                if (module is IOnPostApplicationInitialization postInitModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await postInitModule.OnPostApplicationInitializationAsync();");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+
+        // 添加执行应用程序关闭前操作的方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 执行所有模块的应用程序关闭前操作");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static void PreAppShutdown(IServiceProvider serviceProvider)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            // 按与初始化相反的顺序执行关闭前操作");
+        sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder().Reverse())");
+        sb.AppendLine("            {");
+        sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
+        sb.AppendLine("                if (module is IOnPreApplicationShutdown preShutdownModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    preShutdownModule.OnPreApplicationShutdown();");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+
+        // 添加执行应用程序关闭前操作的异步方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 异步执行所有模块的应用程序关闭前操作");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static async Task PreAppShutdownAsync(IServiceProvider serviceProvider)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            // 按与初始化相反的顺序执行关闭前操作");
+        sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder().Reverse())");
+        sb.AppendLine("            {");
+        sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
+        sb.AppendLine("                if (module is IOnPreApplicationShutdown preShutdownModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await preShutdownModule.OnPreApplicationShutdownAsync();");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+
         // 添加关闭模块的方法
         sb.AppendLine("        /// <summary>");
         sb.AppendLine("        /// 关闭所有模块");
@@ -435,94 +556,209 @@ public class ModuleRegistrarGenerator : CommonIncrementalGenerator
         sb.AppendLine("            {");
         sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
         sb.AppendLine("                module?.Shutdown(serviceProvider);");
-        sb.AppendLine("            }");
-        sb.AppendLine("        }");
-        sb.AppendLine();        // 添加WebApplicationBuilder扩展方法
+        sb.AppendLine("            }");        sb.AppendLine("        }");
+        sb.AppendLine();
+        
+        // 添加执行应用程序关闭后操作的方法
         sb.AppendLine("        /// <summary>");
-        sb.AppendLine("        /// 添加并配置所有CrestCreates模块");
+        sb.AppendLine("        /// 执行所有模块的应用程序关闭后操作");
         sb.AppendLine("        /// </summary>");
-        sb.AppendLine("        public static WebApplicationBuilder AddCrestCreatesModules(this WebApplicationBuilder builder)");
+        sb.AppendLine("        public static void PostAppShutdown(IServiceProvider serviceProvider)");
         sb.AppendLine("        {");
-        sb.AppendLine("            // 注册所有模块");
-        sb.AppendLine("            builder.Services.AddModules();");
-        sb.AppendLine();
-        sb.AppendLine("            // 配置模块服务");
-        sb.AppendLine("            builder.Services.ConfigureModules();");
-        sb.AppendLine();
-        sb.AppendLine("            return builder;");
-        sb.AppendLine("        }");
-        sb.AppendLine();
-
-        // 添加带过滤器的WebApplicationBuilder扩展方法
-        sb.AppendLine("        /// <summary>");
-        sb.AppendLine("        /// 添加并配置符合指定条件的CrestCreates模块");
-        sb.AppendLine("        /// </summary>");
-        sb.AppendLine("        public static WebApplicationBuilder AddCrestCreatesModules(this WebApplicationBuilder builder, Func<Type, bool> filter)");
-        sb.AppendLine("        {");
-        sb.AppendLine("            // 注册符合条件的模块");
-        sb.AppendLine("            foreach (var moduleType in ModuleTypes.Where(filter))");
-        sb.AppendLine("            {");
-        sb.AppendLine("                builder.Services.AddSingleton(moduleType);");
-        sb.AppendLine("            }");
-        sb.AppendLine();
-        sb.AppendLine("            // 配置模块服务");
-        sb.AppendLine("            var serviceProvider = builder.Services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = false });");
-        sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder().Where(filter))");
+        sb.AppendLine("            // 按与初始化相反的顺序执行关闭后操作");
+        sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder().Reverse())");
         sb.AppendLine("            {");
         sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
-        sb.AppendLine("                module?.ConfigureServices(builder.Services);");
-        sb.AppendLine("            }");
-        sb.AppendLine();
-        sb.AppendLine("            return builder;");
-        sb.AppendLine("        }");
+        sb.AppendLine("                if (module is IOnPostApplicationShutdown postShutdownModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    postShutdownModule.OnPostApplicationShutdown();");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");        sb.AppendLine("        }");
         sb.AppendLine();
 
-        // 添加WebApplication扩展方法
+        // 添加执行应用程序关闭后操作的异步方法
         sb.AppendLine("        /// <summary>");
-        sb.AppendLine("        /// 初始化所有CrestCreates模块");
+        sb.AppendLine("        /// 异步执行所有模块的应用程序关闭后操作");
         sb.AppendLine("        /// </summary>");
-        sb.AppendLine("        public static WebApplication InitializeCrestCreatesModules(this WebApplication app)");
+        sb.AppendLine("        public static async Task PostAppShutdownAsync(IServiceProvider serviceProvider)");
         sb.AppendLine("        {");
-        sb.AppendLine("            // 初始化模块");
-        sb.AppendLine("            InitializeModules(app.Services);");
-        sb.AppendLine();
-        sb.AppendLine("            // 注册应用程序关闭时的模块关闭逻辑");
-        sb.AppendLine("            app.Lifetime.ApplicationStopping.Register(() =>");
+        sb.AppendLine("            // 按与初始化相反的顺序执行关闭后操作");
+        sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder().Reverse())");
         sb.AppendLine("            {");
-        sb.AppendLine("                ShutdownModules(app.Services);");
-        sb.AppendLine("            });");
+        sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
+        sb.AppendLine("                if (module is IOnPostApplicationShutdown postShutdownModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await postShutdownModule.OnPostApplicationShutdownAsync();");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine();        // 添加初始化模块及其生命周期钩子的综合方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 完整初始化所有模块，包括前置钩子、初始化和后置钩子");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static void InitializeModulesWithLifecycleHooks(IServiceProvider serviceProvider)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            // 1. 执行应用程序初始化前操作");
+        sb.AppendLine("            PreAppInitialize(serviceProvider);");
         sb.AppendLine();
-        sb.AppendLine("            return app;");
+        sb.AppendLine("            // 2. 初始化模块");
+        sb.AppendLine("            InitializeModules(serviceProvider);");
+        sb.AppendLine();
+        sb.AppendLine("            // 3. 执行应用程序初始化后操作");
+        sb.AppendLine("            PostAppInitialize(serviceProvider);");
         sb.AppendLine("        }");
         sb.AppendLine();
         
-        // 添加带过滤器的WebApplication扩展方法
+        // 添加异步初始化模块及其生命周期钩子的综合方法
         sb.AppendLine("        /// <summary>");
-        sb.AppendLine("        /// 初始化符合指定条件的CrestCreates模块");
+        sb.AppendLine("        /// 异步完整初始化所有模块，包括前置钩子、初始化和后置钩子");
         sb.AppendLine("        /// </summary>");
-        sb.AppendLine("        public static WebApplication InitializeCrestCreatesModules(this WebApplication app, Func<Type, bool> filter)");
+        sb.AppendLine("        public static async Task InitializeModulesWithLifecycleHooksAsync(IServiceProvider serviceProvider)");
         sb.AppendLine("        {");
-        sb.AppendLine("            // 按模块间的依赖关系顺序初始化");
+        sb.AppendLine("            // 1. 执行应用程序初始化前操作");
+        sb.AppendLine("            await PreAppInitializeAsync(serviceProvider);");
+        sb.AppendLine();
+        sb.AppendLine("            // 2. 初始化模块");
+        sb.AppendLine("            InitializeModules(serviceProvider);");
+        sb.AppendLine();
+        sb.AppendLine("            // 3. 执行应用程序初始化后操作");
+        sb.AppendLine("            await PostAppInitializeAsync(serviceProvider);");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        
+        // 添加关闭模块及其生命周期钩子的综合方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 完整关闭所有模块，包括前置钩子、关闭和后置钩子");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static void ShutdownModulesWithLifecycleHooks(IServiceProvider serviceProvider)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            // 1. 执行应用程序关闭前操作");
+        sb.AppendLine("            PreAppShutdown(serviceProvider);");
+        sb.AppendLine();
+        sb.AppendLine("            // 2. 关闭模块");
+        sb.AppendLine("            ShutdownModules(serviceProvider);");
+        sb.AppendLine();
+        sb.AppendLine("            // 3. 执行应用程序关闭后操作");
+        sb.AppendLine("            PostAppShutdown(serviceProvider);");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        
+        // 添加异步关闭模块及其生命周期钩子的综合方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 异步完整关闭所有模块，包括前置钩子、关闭和后置钩子");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static async Task ShutdownModulesWithLifecycleHooksAsync(IServiceProvider serviceProvider)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            // 1. 执行应用程序关闭前操作");
+        sb.AppendLine("            await PreAppShutdownAsync(serviceProvider);");
+        sb.AppendLine();
+        sb.AppendLine("            // 2. 关闭模块");
+        sb.AppendLine("            ShutdownModules(serviceProvider);");
+        sb.AppendLine();
+        sb.AppendLine("            // 3. 执行应用程序关闭后操作");
+        sb.AppendLine("            await PostAppShutdownAsync(serviceProvider);");
+        sb.AppendLine("        }");
+        sb.AppendLine();        // 添加过滤版本的初始化模块及其生命周期钩子的综合方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 完整初始化符合条件的模块，包括前置钩子、初始化和后置钩子");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static void InitializeModulesWithLifecycleHooks(IServiceProvider serviceProvider, Func<Type, bool> filter)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            // 按模块间的依赖关系顺序执行");
         sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder().Where(filter))");
         sb.AppendLine("            {");
-        sb.AppendLine("                var module = (ICrestCreatesModule)app.Services.GetService(moduleType);");
-        sb.AppendLine("                module?.Initialize(app.Services);");
-        sb.AppendLine("            }");
-        sb.AppendLine();
-        sb.AppendLine("            // 注册应用程序关闭时的模块关闭逻辑");
-        sb.AppendLine("            app.Lifetime.ApplicationStopping.Register(() =>");
-        sb.AppendLine("            {");
-        sb.AppendLine("                // 按与初始化相反的顺序关闭模块");
-        sb.AppendLine("                foreach (var moduleType in GetModuleLoadingOrder().Where(filter).Reverse())");
+        sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
+        sb.AppendLine("                // 1. 执行初始化前操作");
+        sb.AppendLine("                if (module is IOnPreApplicationInitialization preInitModule)");
         sb.AppendLine("                {");
-        sb.AppendLine("                    var module = (ICrestCreatesModule)app.Services.GetService(moduleType);");
-        sb.AppendLine("                    module?.Shutdown(app.Services);");
+        sb.AppendLine("                    preInitModule.OnPreApplicationInitialization();");
         sb.AppendLine("                }");
-        sb.AppendLine("            });");
-        sb.AppendLine();
-        sb.AppendLine("            return app;");
+        sb.AppendLine("                // 2. 初始化");
+        sb.AppendLine("                module?.Initialize(serviceProvider);");
+        sb.AppendLine("                // 3. 执行初始化后操作");
+        sb.AppendLine("                if (module is IOnPostApplicationInitialization postInitModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    postInitModule.OnPostApplicationInitialization();");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
         sb.AppendLine("        }");
-        sb.AppendLine();        // 添加获取模块加载顺序的方法
+        sb.AppendLine();
+        
+        // 添加过滤版本的异步初始化模块及其生命周期钩子的综合方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 异步完整初始化符合条件的模块，包括前置钩子、初始化和后置钩子");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static async Task InitializeModulesWithLifecycleHooksAsync(IServiceProvider serviceProvider, Func<Type, bool> filter)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            // 按模块间的依赖关系顺序执行");
+        sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder().Where(filter))");
+        sb.AppendLine("            {");
+        sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
+        sb.AppendLine("                // 1. 执行初始化前操作");
+        sb.AppendLine("                if (module is IOnPreApplicationInitialization preInitModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await preInitModule.OnPreApplicationInitializationAsync();");
+        sb.AppendLine("                }");
+        sb.AppendLine("                // 2. 初始化");
+        sb.AppendLine("                module?.Initialize(serviceProvider);");
+        sb.AppendLine("                // 3. 执行初始化后操作");
+        sb.AppendLine("                if (module is IOnPostApplicationInitialization postInitModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await postInitModule.OnPostApplicationInitializationAsync();");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine();        // 添加过滤版本的关闭模块及其生命周期钩子的综合方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 完整关闭符合条件的模块，包括前置钩子、关闭和后置钩子");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static void ShutdownModulesWithLifecycleHooks(IServiceProvider serviceProvider, Func<Type, bool> filter)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            // 按与初始化相反的顺序执行关闭操作");
+        sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder().Where(filter).Reverse())");
+        sb.AppendLine("            {");
+        sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
+        sb.AppendLine("                // 1. 执行关闭前操作");
+        sb.AppendLine("                if (module is IOnPreApplicationShutdown preShutdownModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    preShutdownModule.OnPreApplicationShutdown();");
+        sb.AppendLine("                }");
+        sb.AppendLine("                // 2. 关闭");
+        sb.AppendLine("                module?.Shutdown(serviceProvider);");
+        sb.AppendLine("                // 3. 执行关闭后操作");
+        sb.AppendLine("                if (module is IOnPostApplicationShutdown postShutdownModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    postShutdownModule.OnPostApplicationShutdown();");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        
+        // 添加过滤版本的异步关闭模块及其生命周期钩子的综合方法
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// 异步完整关闭符合条件的模块，包括前置钩子、关闭和后置钩子");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine("        public static async Task ShutdownModulesWithLifecycleHooksAsync(IServiceProvider serviceProvider, Func<Type, bool> filter)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            // 按与初始化相反的顺序执行关闭操作");
+        sb.AppendLine("            foreach (var moduleType in GetModuleLoadingOrder().Where(filter).Reverse())");
+        sb.AppendLine("            {");
+        sb.AppendLine("                var module = (ICrestCreatesModule)serviceProvider.GetService(moduleType);");
+        sb.AppendLine("                // 1. 执行关闭前操作");
+        sb.AppendLine("                if (module is IOnPreApplicationShutdown preShutdownModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await preShutdownModule.OnPreApplicationShutdownAsync();");
+        sb.AppendLine("                }");
+        sb.AppendLine("                // 2. 关闭");
+        sb.AppendLine("                module?.Shutdown(serviceProvider);");
+        sb.AppendLine("                // 3. 执行关闭后操作");
+        sb.AppendLine("                if (module is IOnPostApplicationShutdown postShutdownModule)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await postShutdownModule.OnPostApplicationShutdownAsync();");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine();// 添加获取模块加载顺序的方法
         sb.AppendLine("        /// <summary>");
         sb.AppendLine("        /// 获取考虑依赖关系的模块加载顺序");
         sb.AppendLine("        /// </summary>");

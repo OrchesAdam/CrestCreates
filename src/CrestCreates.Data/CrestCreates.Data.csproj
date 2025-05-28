@@ -6,4 +6,12 @@
         <LangVersion>Latest</LangVersion>
     </PropertyGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\CrestCreates.Core\CrestCreates.Core.csproj" />
+      <ProjectReference Include="..\CrestCreates.SourceGenerator\CrestCreates.SourceGenerator.csproj" >
+          <OutputItemType>analyzer</OutputItemType>
+          <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      </ProjectReference>
+    </ItemGroup>
+
 </Project>

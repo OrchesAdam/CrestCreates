@@ -1,0 +1,61 @@
+﻿using System;
+using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace CrestCreates.Modularity
+{
+    public abstract class CrestCreatesModuleBase : ICrestCreatesModule,
+        IOnPreApplicationInitialization,
+        IOnPostApplicationInitialization,
+        IOnPreApplicationShutdown,
+        IOnPostApplicationShutdown
+    {
+        public virtual void ConfigureServices(IServiceCollection services)
+        {
+        }
+
+        public virtual void Initialize(IServiceProvider serviceProvider)
+        {
+        }
+
+        public virtual void Shutdown(IServiceProvider serviceProvider)
+        {
+        }
+        
+        public virtual void OnPreApplicationInitialization()
+        {
+        }
+
+        public virtual Task OnPreApplicationInitializationAsync()
+        {
+            return Task.CompletedTask;
+        }
+
+        public virtual void OnPostApplicationInitialization()
+        {
+        }
+
+        public virtual Task OnPostApplicationInitializationAsync()
+        {
+            return Task.CompletedTask;
+        }
+
+        public virtual void OnPreApplicationShutdown()
+        {
+        }
+
+        public virtual Task OnPreApplicationShutdownAsync()
+        {
+            return Task.CompletedTask;
+        }
+
+        public virtual void OnPostApplicationShutdown()
+        {
+        }
+
+        public virtual Task OnPostApplicationShutdownAsync()
+        {
+            return Task.CompletedTask;
+        }
+    }
+}

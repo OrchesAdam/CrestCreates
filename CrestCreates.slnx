@@ -6,7 +6,6 @@
   <Folder Name="/src/1.Core/">
     <Project Path="src\CrestCreates.Core\CrestCreates.Core.csproj" Type="Classic C#" />
     <Project Path="src\CrestCreates.Extensions\CrestCreates.Extensions.csproj" Type="Classic C#" />
-    <Project Path="src\CrestCreates.Modularity\CrestCreates.Modularity.csproj" Type="Classic C#" />
     <Project Path="src\CrestCreates.SourceGenerator\CrestCreates.SourceGenerator.csproj" Type="Classic C#" />
   </Folder>
   <Folder Name="/src/2.Infrastructure/">
