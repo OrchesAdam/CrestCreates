@@ -1,11 +1,10 @@
-﻿using System.Collections.Generic;
+﻿using System;
 using System.Collections.Immutable;
-using System.Linq;
-using System.Text;
+using CrestCreates.SourceGenerator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-namespace CrestCreates.SourceGenerator
+namespace CrestCreates.CodeAnalyzer
 {
     /// <summary>
     /// 通用增量生成器抽象基类
@@ -124,7 +123,7 @@ namespace CrestCreates.SourceGenerator
                       {{
                           public static class {GeneratorName}DebugInfo
                           {{
-                              public static readonly string GeneratedAt = DateTimeOffset.Now.ToString();
+                              public static readonly string GeneratedAt = ""{DateTimeOffset.Now.ToString()}"";
                               public static readonly string Message = ""{GeneratorName} is working"";
                           }}
                       }}";

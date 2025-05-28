@@ -4,7 +4,8 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
-using CrestCreates.SourceGenerator.Model;
+using CrestCreates.CodeAnalyzer;
+using CrestCreates.CodeAnalyzer.Model;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
@@ -37,8 +38,7 @@ public class ModuleInterfaceGenerator : CommonIncrementalGenerator
 
         // 获取语义模型和符号
         var semanticModel = context.SemanticModel;
-        var interfaceSymbol = semanticModel.GetDeclaredSymbol(interfaceDeclaration) as INamedTypeSymbol;
-        if (interfaceSymbol == null)
+        if (semanticModel.GetDeclaredSymbol(interfaceDeclaration) is not INamedTypeSymbol interfaceSymbol)
         {
             return null;
         }
@@ -119,7 +119,7 @@ public class ModuleInterfaceGenerator : CommonIncrementalGenerator
                 {
                     { "DependencyTypes", string.Join(",", dependencyTypes) },
                     { "ConfigurationType", configurationType ?? string.Empty },
-                    { "Methods", System.Text.Json.JsonSerializer.Serialize(interfaceMethods) },
+                    { "Methods", JsonSerializer.Serialize(interfaceMethods) },
                     { "Interfaces", string.Join(",", implementedInterfaces) }
                 },
                 implementedInterfaces

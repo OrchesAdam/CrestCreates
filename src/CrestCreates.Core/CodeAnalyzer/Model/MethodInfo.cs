@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace CrestCreates.SourceGenerator.Model;
+namespace CrestCreates.CodeAnalyzer.Model;
 
 /// <summary>
 /// 方法信息模型

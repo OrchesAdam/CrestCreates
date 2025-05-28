@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
+using CrestCreates.CodeAnalyzer;
+using CrestCreates.CodeAnalyzer.Model;
 using CrestCreates.Modularity;
-using CrestCreates.SourceGenerator.Model;
+using CrestCreates.SourceGenerator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-namespace CrestCreates.SourceGenerator;
+namespace CrestCreates.WebApp.SourceGenerator;
 
 // 模块信息记录类，用于生成模块注册代码
 public class ModuleInfo

@@ -3,12 +3,14 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using CrestCreates.CodeAnalyzer;
+using CrestCreates.CodeAnalyzer.Model;
 using CrestCreates.DependencyInjection;
-using CrestCreates.SourceGenerator.Model;
+using CrestCreates.SourceGenerator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-namespace CrestCreates.SourceGenerator
+namespace CrestCreates.WebApp.SourceGenerator
 {
     /// <summary>
     /// 服务注册生成器

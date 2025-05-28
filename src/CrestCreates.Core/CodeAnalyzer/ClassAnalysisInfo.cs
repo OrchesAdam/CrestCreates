@@ -1,5 +1,5 @@
 ﻿using System.Collections.Generic;
-using CrestCreates.SourceGenerator.Model;
+using CrestCreates.CodeAnalyzer.Model;
 
 namespace CrestCreates.SourceGenerator;
 

@@ -2,6 +2,9 @@
   <Folder Name="/example/">
     <Project Path="src\AspNetCoreWebApi.Example\AspNetCoreWebApi.Example.csproj" Type="Classic C#" />
   </Folder>
+  <Folder Name="/others/">
+    <File Path="Directory.Packages.props" />
+  </Folder>
   <Folder Name="/src/" />
   <Folder Name="/src/1.Core/">
     <Project Path="src\CrestCreates.Core\CrestCreates.Core.csproj" Type="Classic C#" />
@@ -13,6 +16,7 @@
     <Project Path="src\CrestCreates.Service\CrestCreates.Service.csproj" Type="Classic C#" />
   </Folder>
   <Folder Name="/src/WebApp/">
+    <Project Path="src\CrestCreates.WebApp.SourceGenerator\CrestCreates.WebApp.SourceGenerator.csproj" Type="Classic C#" />
     <Project Path="src\CrestCreates.WebAppExtensions\CrestCreates.WebAppExtensions.csproj" Type="Classic C#" />
   </Folder>
 </Solution>
