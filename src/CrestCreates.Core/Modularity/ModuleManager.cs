@@ -27,7 +27,7 @@ public class ModuleManager
     /// <summary>
     /// 注册模块类型
     /// </summary>
-    /// <param name="moduleType">模块类型</param>
+    /// <typeparam name="T">模块类型</typeparam>
     public void RegisterModule<T>() where T : class, ICrestCreatesModule
     {
         RegisterModule(typeof(T));
