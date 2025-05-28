@@ -207,6 +207,7 @@ namespace CrestCreates.SourceGenerator
                 classSymbol.ContainingNamespace.ToDisplayString(),
                 serviceAttributes,
                 primaryConstructor,
+                null,
                 GetImplementedInterfaces(namedTypeSymbol)
             );
         }
@@ -342,6 +343,7 @@ namespace CrestCreates.SourceGenerator
                     var paraInfo = c.Parameters.Select(p => new ParameterInfo(
                         p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         p.Name,
+                        null,
                         p.HasExplicitDefaultValue,
                         p.HasExplicitDefaultValue ? p.ExplicitDefaultValue?.ToString() : null
                     )).ToList();

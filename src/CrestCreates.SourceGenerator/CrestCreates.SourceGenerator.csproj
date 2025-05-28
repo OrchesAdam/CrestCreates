@@ -14,7 +14,8 @@
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all"/>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
+        <PackageReference Include="System.Text.Json" Version="9.0.5" />
 
     </ItemGroup>
     <ItemGroup>
@@ -25,7 +26,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\CrestCreates.Core\CrestCreates.Core.csproj" PrivateAssets="all"/>
+        <ProjectReference Include="..\CrestCreates.Core\CrestCreates.Core.csproj" PrivateAssets="all" />
     </ItemGroup>
 
     <PropertyGroup>

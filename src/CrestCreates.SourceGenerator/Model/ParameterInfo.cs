@@ -7,15 +7,25 @@ public record ConstructorInfo(List<ParameterInfo> Parameters)
     public List<ParameterInfo> Parameters { get; } = Parameters;
 }
 
-public record ParameterInfo(
-    string Type,
-    string Name,
-    bool HasDefaultValue,
-    string? DefaultValue
-)
+/// <summary>
+/// 参数信息模型
+/// </summary>
+public class ParameterInfo
 {
-    public string Type { get; } = Type;
-    public string Name { get; } = Name;
-    public bool HasDefaultValue { get; } = HasDefaultValue;
-    public string? DefaultValue { get; } = DefaultValue;
+    public string Name { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty;
+    public string? RefKind { get; set; } = "None";
+    public bool HasDefaultValue { get; set; }
+    public string? DefaultValue { get; set; } = "null";
+
+    public ParameterInfo() { }
+
+    public ParameterInfo(string name, string type, string? refKind, bool hasDefaultValue, string? defaultValue)
+    {
+        Name = name;
+        Type = type;
+        RefKind = refKind;
+        HasDefaultValue = hasDefaultValue;
+        DefaultValue = defaultValue;
+    }
 }

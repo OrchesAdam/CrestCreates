@@ -112,6 +112,7 @@ public class ModuleRegistrarGenerator : CommonIncrementalGenerator
                 classSymbol.ContainingNamespace.ToDisplayString(),
                 serviceAttributes,
                 null,
+                null,
                 implementedInterfaces
             )
         );
