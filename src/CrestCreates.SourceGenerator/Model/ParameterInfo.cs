@@ -2,12 +2,12 @@
 
 namespace CrestCreates.SourceGenerator.Model;
 
-internal record ConstructorInfo(List<ParameterInfo> Parameters)
+public record ConstructorInfo(List<ParameterInfo> Parameters)
 {
     public List<ParameterInfo> Parameters { get; } = Parameters;
 }
 
-internal record ParameterInfo(
+public record ParameterInfo(
     string Type,
     string Name,
     bool HasDefaultValue,

@@ -1,6 +1,6 @@
 ﻿namespace CrestCreates.SourceGenerator.Model;
 
-internal record ServiceAttributeInfo(
+public record ServiceAttributeInfo(
     string ServiceType,
     string Lifetime,
     bool RegisterAsImplementedInterfaces,

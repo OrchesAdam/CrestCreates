@@ -2,7 +2,7 @@
 
 namespace CrestCreates.SourceGenerator.Model;
 
-internal record ServiceDescriptorInfo(
+public record ServiceDescriptorInfo(
     string FullTypeName,
     string ClassName,
     string Namespace,

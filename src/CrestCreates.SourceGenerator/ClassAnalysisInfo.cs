@@ -3,7 +3,7 @@ using CrestCreates.SourceGenerator.Model;
 
 namespace CrestCreates.SourceGenerator;
 
-internal record ClassAnalysisInfo(
+public record ClassAnalysisInfo(
     string FullName,
     string ClassName,
     bool HasServiceAttributes,
