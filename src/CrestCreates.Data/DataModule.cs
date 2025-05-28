@@ -1,5 +1,7 @@
 ﻿
 
+using Microsoft.Extensions.DependencyInjection;
+
 namespace CrestCreates.Data
 {
     // 数据模块实现部分类

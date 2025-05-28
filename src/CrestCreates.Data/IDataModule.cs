@@ -23,6 +23,16 @@ public class DataModuleOptions
     /// 数据库类型
     /// </summary>
     public string DatabaseType { get; set; } = "SqlServer";
+    
+    /// <summary>
+    /// 命令超时时间（秒）
+    /// </summary>
+    public int CommandTimeout { get; set; } = 30;
+    
+    /// <summary>
+    /// 是否启用连接池
+    /// </summary>
+    public bool EnableConnectionPooling { get; set; } = true;
 }
 
 /// <summary>

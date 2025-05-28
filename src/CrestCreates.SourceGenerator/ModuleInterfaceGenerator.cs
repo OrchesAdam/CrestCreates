@@ -64,18 +64,36 @@ public class ModuleInterfaceGenerator : IIncrementalGenerator
         if (!inheritsICrestCreatesModule)
         {
             return null;
-        }
-
-        // 获取 ModuleInterfaceAttribute 特性（如果存在）
+        }        // 获取 ModuleInterfaceAttribute 特性（如果存在）
         var moduleInterfaceAttribute = interfaceSymbol.GetAttributes()
             .FirstOrDefault(attr => attr.AttributeClass?.Name == "ModuleInterfaceAttribute" ||
                                    attr.AttributeClass?.Name == "ModuleInterface");
+
+        // 获取 DependsOnAttribute 特性（如果存在）
+        var dependsOnAttribute = interfaceSymbol.GetAttributes()
+            .FirstOrDefault(attr => attr.AttributeClass?.Name == "DependsOnAttribute" ||
+                                   attr.AttributeClass?.Name == "DependsOn");
 
         // 获取模块依赖项
         var dependencyTypes = new List<string>();
         string? configurationType = null;
 
-        if (moduleInterfaceAttribute != null)
+        // 从 DependsOnAttribute 获取依赖项（优先级更高）
+        if (dependsOnAttribute != null && dependsOnAttribute.ConstructorArguments.Any())
+        {
+            var dependencies = dependsOnAttribute.ConstructorArguments.First();
+            if (dependencies.Kind == TypedConstantKind.Array && dependencies.Values.Any())
+            {
+                foreach (var dep in dependencies.Values)
+                {
+                    if (dep.Value is ITypeSymbol typeSymbol)
+                    {
+                        dependencyTypes.Add(typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+                    }
+                }
+            }
+        }        // 如果没有 DependsOnAttribute，尝试从 ModuleInterfaceAttribute 获取依赖项（向后兼容）
+        else if (moduleInterfaceAttribute != null)
         {
             // 从特性构造函数参数获取依赖项
             if (moduleInterfaceAttribute.ConstructorArguments.Any())
@@ -92,8 +110,11 @@ public class ModuleInterfaceGenerator : IIncrementalGenerator
                     }
                 }
             }
+        }
 
-            // 从命名参数获取配置类型
+        // 从 ModuleInterfaceAttribute 的命名参数获取配置类型
+        if (moduleInterfaceAttribute != null)
+        {
             foreach (var namedArgument in moduleInterfaceAttribute.NamedArguments)
             {
                 if (namedArgument.Key == "ConfigurationType" && namedArgument.Value.Value is ITypeSymbol configTypeSymbol)
@@ -244,18 +265,6 @@ public class ModuleInterfaceGenerator : IIncrementalGenerator
             sb.AppendLine($"            _configuration = serviceProvider.GetService<IOptions<{configurationType}>>()?.Value;");
         }
         sb.AppendLine("        }");
-        sb.AppendLine();        // 重写核心方法
-        sb.AppendLine("        public virtual void ConfigureServices(IServiceCollection services)");
-        sb.AppendLine("        {");
-        sb.AppendLine("            // 在此处添加服务配置");
-        sb.AppendLine("        }");
-        sb.AppendLine();
-
-        sb.AppendLine("        public virtual Task ConfigureServicesAsync(IServiceCollection services)");
-        sb.AppendLine("        {");
-        sb.AppendLine("            // 在此处添加服务配置");
-        sb.AppendLine("        }");
-        sb.AppendLine();
 
         // 为自定义方法生成虚拟实现
         foreach (var method in customMethods)

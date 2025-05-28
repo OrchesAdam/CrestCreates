@@ -9,7 +9,7 @@ namespace CrestCreates.Modularity;
 public class ModuleInterfaceAttribute : Attribute
 {
     /// <summary>
-    /// 此模块依赖的其他模块类型
+    /// 此模块依赖的其他模块类型（向后兼容）
     /// </summary>
     public Type[] DependsOn { get; }
     

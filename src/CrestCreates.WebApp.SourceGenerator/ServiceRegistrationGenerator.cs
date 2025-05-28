@@ -341,10 +341,9 @@ namespace CrestCreates.WebApp.SourceGenerator
                 .Where(c => c is { DeclaredAccessibility: Accessibility.Public, IsStatic: false })
                 .Select(c =>
                 {
-                    Debug.WriteLine($"Constructor: {c.Name}");
-                    var paraInfo = c.Parameters.Select(p => new ParameterInfo(
-                        p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                    Debug.WriteLine($"Constructor: {c.Name}");                    var paraInfo = c.Parameters.Select(p => new ParameterInfo(
                         p.Name,
+                        p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         null,
                         p.HasExplicitDefaultValue,
                         p.HasExplicitDefaultValue ? p.ExplicitDefaultValue?.ToString() : null
