@@ -20,6 +20,6 @@
     <Project Path="src\CrestCreates.WebAppExtensions\CrestCreates.WebAppExtensions.csproj" Type="Classic C#" />
   </Folder>
   <Folder Name="/test/">
-    <Project Path="src\CrestCreates.Tests\CrestCreates.Tests.csproj" Type="Classic C#" />
+    <Project Path="test\CrestCreates.Tests\CrestCreates.Tests.csproj" Type="Classic C#" />
   </Folder>
 </Solution>

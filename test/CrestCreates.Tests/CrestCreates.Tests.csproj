@@ -23,9 +23,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\CrestCreates.Core\CrestCreates.Core.csproj" />
-    <ProjectReference Include="..\CrestCreates.Data\CrestCreates.Data.csproj" />
-    <ProjectReference Include="..\CrestCreates.Service\CrestCreates.Service.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Core\CrestCreates.Core.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Data\CrestCreates.Data.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Service\CrestCreates.Service.csproj" />
   </ItemGroup>
 
 </Project>
