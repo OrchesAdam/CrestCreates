@@ -38,7 +38,6 @@ public class DataModuleOptions
 /// <summary>
 /// 数据模块接口
 /// </summary>
-[ModuleInterface(ConfigurationType = typeof(DataModuleOptions))]
 public interface IDataModule : ICrestCreatesModule
 {
     /// <summary>
