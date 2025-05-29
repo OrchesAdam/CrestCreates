@@ -1,25 +1,27 @@
 <Solution>
   <Folder Name="/example/">
-    <Project Path="src\AspNetCoreWebApi.Example\AspNetCoreWebApi.Example.csproj" Type="Classic C#" />
+    <Project Path="src/CrestCreates.Repositories.EFCore.Example/Repositories.EFCore.Example.csproj" />
+    <Project Path="src\AspNetCoreWebApi.Example\AspNetCoreWebApi.Example.csproj" />
   </Folder>
   <Folder Name="/others/">
     <File Path="Directory.Packages.props" />
   </Folder>
   <Folder Name="/src/" />
   <Folder Name="/src/1.Core/">
-    <Project Path="src\CrestCreates.Core\CrestCreates.Core.csproj" Type="Classic C#" />
-    <Project Path="src\CrestCreates.Extensions\CrestCreates.Extensions.csproj" Type="Classic C#" />
-    <Project Path="src\CrestCreates.SourceGenerator\CrestCreates.SourceGenerator.csproj" Type="Classic C#" />
+    <Project Path="src\CrestCreates.Core\CrestCreates.Core.csproj" />
+    <Project Path="src\CrestCreates.Extensions\CrestCreates.Extensions.csproj" />
+    <Project Path="src\CrestCreates.SourceGenerator\CrestCreates.SourceGenerator.csproj" />
   </Folder>
   <Folder Name="/src/2.Infrastructure/">
-    <Project Path="src\CrestCreates.Data\CrestCreates.Data.csproj" Type="Classic C#" />
-    <Project Path="src\CrestCreates.Service\CrestCreates.Service.csproj" Type="Classic C#" />
+    <Project Path="src\CrestCreates.Data\CrestCreates.Data.csproj" />
+    <Project Path="src/CrestCreates.Repositories.EFCore/CrestCreates.Repositories.EFCore.csproj" />
+    <Project Path="src\CrestCreates.Service\CrestCreates.Service.csproj" />
   </Folder>
   <Folder Name="/src/WebApp/">
-    <Project Path="src\CrestCreates.WebApp.SourceGenerator\CrestCreates.WebApp.SourceGenerator.csproj" Type="Classic C#" />
-    <Project Path="src\CrestCreates.WebAppExtensions\CrestCreates.WebAppExtensions.csproj" Type="Classic C#" />
+    <Project Path="src\CrestCreates.WebApp.SourceGenerator\CrestCreates.WebApp.SourceGenerator.csproj" />
+    <Project Path="src\CrestCreates.WebAppExtensions\CrestCreates.WebAppExtensions.csproj" />
   </Folder>
   <Folder Name="/test/">
-    <Project Path="test\CrestCreates.Tests\CrestCreates.Tests.csproj" Type="Classic C#" />
+    <Project Path="test\CrestCreates.Tests\CrestCreates.Tests.csproj" />
   </Folder>
 </Solution>
