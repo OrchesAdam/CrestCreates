@@ -1,0 +1,26 @@
+{
+  "greeting": "你好",
+  "farewell": "再见",
+  "error": {
+    "notFound": "未找到资源",
+    "unauthorized": "未授权访问"
+  },
+  "validation": {
+    "required": "此字段是必填的",
+    "email": "请输入有效的电子邮件地址"
+  },
+  "user": {
+    "create": {
+      "success": "用户创建成功",
+      "failure": "用户创建失败"
+    },
+    "update": {
+      "success": "用户更新成功",
+      "failure": "用户更新失败"
+    }
+  },
+  "product": {
+    "addToCart": "已添加到购物车",
+    "removeFromCart": "已从购物车中移除"
+  }
+}

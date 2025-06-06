@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <RootNamespace>CrestCreates.Domain.Shared</RootNamespace>
+    <AssemblyName>CrestCreates.Domain.Shared</AssemblyName>
+    <OutputType>Library</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Domain.Shared 是最基础的项目，不依赖任何其他项目 -->
+  </ItemGroup>
+
+</Project>

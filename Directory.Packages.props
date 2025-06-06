@@ -1,29 +1,73 @@
 <Project>
-    <PropertyGroup>
-        <!-- Enable central package management, https://learn.microsoft.com/en-us/nuget/consume-packages/Central-Package-Management -->
-        <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
-    </PropertyGroup>    <ItemGroup>
-        <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.5"/>
-        <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="4.14.0"/>
-        <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0"/>
-        <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="9.0.5"/>
-        <PackageVersion Include="Microsoft.Extensions.Options" Version="9.0.5"/>
-        <PackageVersion Include="System.Text.Json" Version="9.0.5"/>
+  
+  <!-- 启用中央包管理 -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
 
-        <PackageVersion Include="Microsoft.AspNetCore.Hosting.Abstractions" Version="2.3.0" />
-        <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.5" />
-        
-        <!-- Entity Framework Core packages -->
-        <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="6.0.0" />
-        <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="6.0.0" />
-        <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="6.0.0" />        <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="6.0.0" />
-        <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
-        <PackageVersion Include="Microsoft.Extensions.Logging" Version="6.0.0" />
-        
-        <!-- Test packages -->
-        <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.6.0" />
-        <PackageVersion Include="xunit" Version="2.4.2" />
-        <PackageVersion Include="xunit.runner.visualstudio" Version="2.4.3" />
-        <PackageVersion Include="coverlet.collector" Version="6.0.0" />
-    </ItemGroup>
+  <!-- 全局包版本管理 -->
+  <ItemGroup>
+    <!-- Microsoft 核心包 -->
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.4" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="6.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="6.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="6.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="6.0.0" />
+    
+    <!-- Entity Framework Core -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="6.0.25" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="6.0.25" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Tools" Version="6.0.25" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="6.0.25" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="6.0.25" />
+    
+    <!-- ORM 提供程序 -->
+    <PackageVersion Include="SqlSugarCore" Version="5.1.4.104" />
+    <PackageVersion Include="FreeSql" Version="3.2.800" />
+      <!-- 中介者模式 -->
+    <PackageVersion Include="MediatR" Version="11.1.0" />
+    <PackageVersion Include="MediatR.Extensions.Microsoft.DependencyInjection" Version="11.1.0" />
+    
+    <!-- 验证 -->
+    <PackageVersion Include="FluentValidation" Version="11.8.1" />
+    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="11.8.1" />
+    
+    <!-- 映射 -->
+    <PackageVersion Include="AutoMapper" Version="12.0.1" />
+    <PackageVersion Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1" />
+    
+    <!-- 测试框架 -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageVersion Include="xunit" Version="2.6.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.0" />
+    <PackageVersion Include="Moq" Version="4.20.69" />
+    <PackageVersion Include="FluentAssertions" Version="6.12.0" />
+    
+    <!-- 代码分析 -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Common" Version="4.8.0" />    <!-- Web 相关 -->
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="6.0.25" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="6.0.25" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="6.0.25" />
+    <PackageVersion Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+    <PackageVersion Include="Newtonsoft.Json" Version="13.0.3" />
+      <!-- 缓存 -->
+    <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="6.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Caching.Redis" Version="6.0.25" />
+    <PackageVersion Include="StackExchange.Redis" Version="2.7.10" />
+    
+    <!-- 日志 -->
+    <PackageVersion Include="Serilog" Version="3.1.1" />
+    <PackageVersion Include="Serilog.Extensions.Hosting" Version="8.0.0" />
+    <PackageVersion Include="Serilog.Sinks.Console" Version="5.0.1" />
+    <PackageVersion Include="Serilog.Sinks.File" Version="5.0.0" />
+    
+    <!-- 其他工具包 -->
+    <PackageVersion Include="System.Text.Json" Version="6.0.8" />
+    <PackageVersion Include="System.ComponentModel.Annotations" Version="5.0.0" />
+  </ItemGroup>
+
 </Project>

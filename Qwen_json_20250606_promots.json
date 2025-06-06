@@ -1,0 +1,65 @@
+{
+  "frameworkName": "CrestCreates",
+  "description": "基于ASP.NET Core + Source Generator的全AoT模块化框架，提供领域驱动设计与基础设施即代码能力",
+  "features": {
+    "core": [
+      "领域驱动设计（值对象/聚合根/领域事件）",
+      "全功能UoW（事务管理+变更追踪）",
+      "多日志适配器（Serilog/ILoggerProvider集成）",
+      "多ORM支持（EF Core 8+/SqlSugar 6+/FreeSql 3+）",
+      "多语言支持（ResourceManager+JsonResource）",
+      "数据库多租户（鉴别器模式+连接字符串工厂）",
+      "RBAC授权体系（OpenID Connect+PolicyServer）",
+      "Dotnet Aspire集成（分布式原语支持）"
+    ],
+    "testing": {
+      "unitTestBase": "xUnit+Moq的领域服务测试基类",
+      "integrationTest": "Docker容器化数据库+TestHost集成测试"
+    }
+  },
+  "sourceGeneration": {
+    "entityGenerator": {
+      "trigger": "[Entity]特性标记的POCO类",
+      "output": {
+        "repositoryInterface": "IRepository<TEntity, TId>",
+        "repositoryImplementation": "EfCoreRepository/SqlSugarRepository等适配实现",
+        "queryExtensions": "分页查询+动态条件构建器",
+        "auditing": "自动添加IAuditedEntity接口实现",
+        "ormMappings": "静态ORM映射配置类（无运行时反射）"
+      }
+    },
+    "serviceGenerator": {
+      "registration": "IServiceCollection编译时注册",
+      "lifestyle": "Scoped生命周期管理",
+      "apiController": "RESTful API控制器基类生成"
+    },
+    "moduleGenerator": {
+      "registration": "通过[Module]特性标记后自动注册到HostBuilder",
+      "lifecycleHooks": [
+        "OnPreInitialize()",
+        "OnPostInitialize()",
+        "OnConfigureServices()",
+        "OnApplicationInitialization()"
+      ],
+      "dependencyResolution": "编译时模块依赖拓扑排序",
+      "others":"所有的模板用独立的文件存储"
+    }
+  },
+  "architecture": {
+    "layering": {
+      "Domain": ["Entities/ValueObjects/Repositories"],
+      "Application": ["Services/DTOs/AutomapperProfiles"],
+      "Infrastructure": ["ORM适配/消息总线/缓存实现"],
+      "Web": ["Controllers/Middleware/ClientSDK"]
+    },
+    "modularity": {
+      "moduleSystem": "特性标记+源生成的模块注册系统",
+      "extensionPoints": "Partial类扩展+虚方法Hook机制"
+    }
+  },
+  "developmentGuide": {
+    "codegenWorkflow": "实体定义→生成基础CRUD→扩展业务逻辑→模块组合",
+    "aotOptimization": "完全避免运行时反射，所有DI配置/ORM映射编译时生成",
+    "testingApproach": "测试基类继承+AutoFixture数据构造"
+  }
+}
