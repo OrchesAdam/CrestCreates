@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
@@ -8,6 +9,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using CrestCreates.CodeGenerator.Authorization;
 
 namespace CrestCreates.CodeGenerator.ControllerGenerator
 {
@@ -125,6 +127,7 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             builder.AppendLine("using System.Threading.Tasks;");
             builder.AppendLine("using Microsoft.AspNetCore.Mvc;");
             builder.AppendLine("using Microsoft.Extensions.Logging;");
+            builder.AppendLine("using CrestCreates.Infrastructure.Authorization;");
             builder.AppendLine($"using {namespaceName};");
             
             builder.AppendLine();
@@ -135,7 +138,9 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             builder.AppendLine("    /// </summary>");
             builder.AppendLine("    [ApiController]");
             builder.AppendLine($"    [Route(\"{route}\")]");
+            
             builder.AppendLine($"    public partial class {controllerName}Controller : ControllerBase");
+
             builder.AppendLine("    {");
             builder.AppendLine($"        private readonly {serviceInterface} _service;");
             builder.AppendLine($"        private readonly ILogger<{controllerName}Controller> _logger;");
@@ -150,6 +155,23 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             builder.AppendLine("        }");
             builder.AppendLine();
             
+            // 获取授权配置
+            var generateAuthorization = GetAttributeProperty(serviceClass, "GenerateAuthorization", false);
+            var resourceName = GetAttributeProperty(serviceClass, "ResourceName", "");
+            var generateCrudPermissions = GetAttributeProperty(serviceClass, "GenerateCrudPermissions", true);
+            var defaultRoles = GetAttributeProperty<string[]>(serviceClass, "DefaultRoles", Array.Empty<string>());
+            var requireAll = GetAttributeProperty(serviceClass, "RequireAll", false);
+            var requireAuthorizationForAll = GetAttributeProperty(serviceClass, "RequireAuthorizationForAll", true);
+            
+            // 验证授权配置
+            ValidateAuthorizationConfig(context, serviceClass, generateAuthorization, resourceName);
+            
+            // 控制器级别的授权
+            if (generateAuthorization && requireAuthorizationForAll)
+            {
+                builder.AppendLine("    [Authorize]");
+            }
+            
             // 为每个公共方法生成API端点
             var methods = serviceClass.GetMembers().OfType<IMethodSymbol>()
                 .Where(m => m.DeclaredAccessibility == Accessibility.Public && 
@@ -158,7 +180,7 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
                 
             foreach (var method in methods)
             {
-                GenerateControllerAction(builder, method, serviceName);
+                GenerateControllerAction(builder, method, serviceName, generateAuthorization, resourceName, generateCrudPermissions, defaultRoles, requireAll, requireAuthorizationForAll);
             }
             
             builder.AppendLine("    }");
@@ -167,7 +189,7 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             context.AddSource($"{controllerName}Controller.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
-        private void GenerateControllerAction(StringBuilder builder, IMethodSymbol method, string serviceName)
+        private void GenerateControllerAction(StringBuilder builder, IMethodSymbol method, string serviceName, bool generateAuthorization, string resourceName, bool generateCrudPermissions, string[] defaultRoles, bool requireAll, bool requireAuthorizationForAll = true)
         {
             var methodName = method.Name;
             var returnType = method.ReturnType.ToDisplayString();
@@ -177,6 +199,13 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// {methodName}");
             builder.AppendLine("        /// </summary>");
+            
+            // 生成授权特性
+            if (generateAuthorization)
+            {
+                GenerateAuthorizationAttributes(builder, methodName, httpVerb, resourceName, generateCrudPermissions, defaultRoles, requireAll);
+            }
+            
             builder.AppendLine($"        [Http{httpVerb}(\"{routeTemplate}\")]");
             builder.AppendLine("        [ProducesResponseType(200)]");
             builder.AppendLine("        [ProducesResponseType(400)]");
@@ -301,7 +330,45 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             // 其他情况，使用方法名的小写形式
             return methodName.ToLowerInvariant();
         }
-
+        
+        private void GenerateAuthorizationAttributes(StringBuilder builder, string methodName, string httpVerb, string resourceName, bool generateCrudPermissions, string[] defaultRoles, bool requireAll)
+        {
+            if (string.IsNullOrEmpty(resourceName))
+            {
+                // 如果没有指定资源名称，使用方法名的前缀
+                resourceName = AuthorizationHelper.GetResourceNameFromMethodName(methodName);
+            }
+            
+            var attributes = AuthorizationHelper.GenerateAuthorizationAttributes(
+                methodName, 
+                httpVerb, 
+                resourceName, 
+                generateCrudPermissions, 
+                defaultRoles, 
+                requireAll);
+            
+            if (!string.IsNullOrEmpty(attributes))
+            {
+                builder.AppendLine("        " + attributes);
+            }
+        }
+        
+        private void ValidateAuthorizationConfig(SourceProductionContext context, INamedTypeSymbol serviceClass, bool generateAuthorization, string resourceName)
+        {
+            if (generateAuthorization)
+            {
+                if (string.IsNullOrEmpty(resourceName))
+                {
+                    // 生成警告：资源名称为空
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        new DiagnosticDescriptor("CCCG004", "Authorization configuration warning",
+                            $"GenerateAuthorization is true but ResourceName is empty for service {serviceClass.Name}. Resource name will be inferred from method names.",
+                            "CodeGeneration", DiagnosticSeverity.Warning, true),
+                        serviceClass.Locations[0]));
+                }
+            }
+        }
+        
         private T GetAttributeProperty<T>(ISymbol symbol, string propertyName, T defaultValue)
         {
             if (symbol == null)
@@ -317,8 +384,22 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             var namedArg = attr.NamedArguments
                 .FirstOrDefault(arg => arg.Key == propertyName);
 
-            if (namedArg.Key == propertyName && namedArg.Value.Value is T value)
-                return value;
+            if (namedArg.Key == propertyName)
+            {
+                if (namedArg.Value.Value is T value)
+                    return value;
+                
+                // 处理数组类型
+                if (typeof(T).IsArray && namedArg.Value.Value is IEnumerable<object> arrayValues)
+                {
+                    var elementType = typeof(T).GetElementType();
+                    if (elementType == typeof(string))
+                    {
+                        var stringArray = arrayValues.OfType<string>().ToArray();
+                        return (T)(object)stringArray;
+                    }
+                }
+            }
 
             return defaultValue;
         }

@@ -68,22 +68,22 @@ namespace CrestCreates.CodeGenerator.Authorization
             // 1. 检查是否有自定义权限
             if (_config.CustomPermissions.TryGetValue(methodName, out var customPermission))
             {
-                attributes.Add(GeneratePermissionAttribute(customPermission));
+                attributes.Add(AuthorizationHelper.GeneratePermissionAttribute(customPermission, _config.RequireAll));
             }
             // 2. 根据 HTTP 方法生成 CRUD 权限
             else if (_config.GenerateCrudPermissions)
             {
-                var permission = MapHttpMethodToPermission(httpMethod);
+                var permission = AuthorizationHelper.MapHttpMethodToPermission(httpMethod);
                 if (!string.IsNullOrEmpty(permission))
                 {
-                    attributes.Add(GeneratePermissionAttribute($"{_config.ResourceName}.{permission}"));
+                    attributes.Add(AuthorizationHelper.GeneratePermissionAttribute($"{_config.ResourceName}.{permission}", _config.RequireAll));
                 }
             }
 
             // 3. 添加角色要求
             if (_config.DefaultRoles != null && _config.DefaultRoles.Length > 0)
             {
-                attributes.Add(GenerateRoleAttribute(_config.DefaultRoles));
+                attributes.Add(AuthorizationHelper.GenerateRoleAttribute(_config.DefaultRoles));
             }
 
             return string.Join("\r\n        ", attributes);
