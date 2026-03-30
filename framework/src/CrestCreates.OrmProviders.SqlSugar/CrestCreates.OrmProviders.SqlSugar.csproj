@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.OrmProviders.Abstract\CrestCreates.OrmProviders.Abstract.csproj" />
+    <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+    <PackageReference Include="SqlSugarCore" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

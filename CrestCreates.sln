@@ -1,29 +1,52 @@
-﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{63262E9D-6FD6-48E8-B520-D4993395B740}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.Domain.Shared", "src\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj", "{D7D76AF4-7B44-4744-BD91-7BAE52BC1422}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.Domain.Shared", "framework\src\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj", "{D7D76AF4-7B44-4744-BD91-7BAE52BC1422}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.Domain", "src\CrestCreates.Domain\CrestCreates.Domain.csproj", "{CEC3956E-CF1E-43B3-ABB8-CD9C3E085619}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.Domain", "framework\src\CrestCreates.Domain\CrestCreates.Domain.csproj", "{CEC3956E-CF1E-43B3-ABB8-CD9C3E085619}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.Application.Contracts", "src\CrestCreates.Application.Contracts\CrestCreates.Application.Contracts.csproj", "{FA5B27B0-2C13-4754-A65D-26DEAA1AD8F0}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.Application.Contracts", "framework\src\CrestCreates.Application.Contracts\CrestCreates.Application.Contracts.csproj", "{FA5B27B0-2C13-4754-A65D-26DEAA1AD8F0}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.Application", "src\CrestCreates.Application\CrestCreates.Application.csproj", "{5105905E-E3DE-464A-B5A5-339DC7226A04}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.Application", "framework\src\CrestCreates.Application\CrestCreates.Application.csproj", "{5105905E-E3DE-464A-B5A5-339DC7226A04}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.Infrastructure", "src\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj", "{BA5159D6-534F-4C28-BCDC-3B250D543576}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.Infrastructure", "framework\src\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj", "{BA5159D6-534F-4C28-BCDC-3B250D543576}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.Web", "src\CrestCreates.Web\CrestCreates.Web.csproj", "{2AFA3812-BF4C-4BCA-BEC9-7F87775D98D1}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.Web", "framework\src\CrestCreates.Web\CrestCreates.Web.csproj", "{2AFA3812-BF4C-4BCA-BEC9-7F87775D98D1}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{B2FE2D13-225C-4EC8-8465-73E50953F1B8}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "framework\tools", "{B2FE2D13-225C-4EC8-8465-73E50953F1B8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.CodeGenerator", "tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj", "{11DC02F7-D28E-448D-85AB-0C0901E00B5D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.CodeGenerator", "framework\tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj", "{11DC02F7-D28E-448D-85AB-0C0901E00B5D}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "test", "test", "{CF91114D-789D-49C8-BF0C-8D34D546CE04}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "test", "framework\test", "{CF91114D-789D-49C8-BF0C-8D34D546CE04}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.CodeGenerator.Tests", "test\CrestCreates.CodeGenerator.Tests\CrestCreates.CodeGenerator.Tests.csproj", "{A1C9E572-195F-4028-B44B-4139305B55D4}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.CodeGenerator.Tests", "framework\test\CrestCreates.CodeGenerator.Tests\CrestCreates.CodeGenerator.Tests.csproj", "{A1C9E572-195F-4028-B44B-4139305B55D4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.OrmProviders.Abstract", "framework\src\CrestCreates.OrmProviders.Abstract\CrestCreates.OrmProviders.Abstract.csproj", "{3AA41DF7-2AFE-46DA-A614-F34691D4F8A0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.OrmProviders.FreeSqlProvider", "framework\src\CrestCreates.OrmProviders.FreeSqlProvider\CrestCreates.OrmProviders.FreeSqlProvider.csproj", "{89082868-7B57-4FD7-B950-FE84F470D083}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.OrmProviders.SqlSugar", "framework\src\CrestCreates.OrmProviders.SqlSugar\CrestCreates.OrmProviders.SqlSugar.csproj", "{8E31E6F1-3821-4DFD-BB7C-3C46AAD6448D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.OrmProviders.EFCore", "framework\src\CrestCreates.OrmProviders.EFCore\CrestCreates.OrmProviders.EFCore.csproj", "{7ED3DD8C-2030-46AD-8EA7-981F80E721A1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Infrastructure", "Infrastructure", "{212B8F4E-69D0-4C26-9E48-3F51756614EB}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Domain", "Domain", "{A1B2C3D4-E5F6-4748-A9B0-1C2D3E4F5A6B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "OrmProviders", "OrmProviders", "{C9841B2A-B68C-415E-BA5E-9A6E43809098}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "MultiTenancy", "MultiTenancy", "{3EC4D4B4-48E2-4026-8860-3C9208FE8238}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.MultiTenancy.Abstract", "framework\src\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj", "{82D7B619-83DB-4849-AEA2-4F095C777DBB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.MultiTenancy", "framework\src\CrestCreates.MultiTenancy\CrestCreates.MultiTenancy.csproj", "{873FC837-5D7A-4F32-A376-456EECDA091B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Database", "Database", "{F9A1B2C3-D4E5-4F6A-B7C8-D9E0F1A2B3C4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.DbContextProvider.Abstract", "framework\src\CrestCreates.DbContextProvider.Abstract\CrestCreates.DbContextProvider.Abstract.csproj", "{A5B6C7D8-E9F0-4A1B-8C2D-3E4F5A6B7C8D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -66,15 +89,55 @@ Global
 		{A1C9E572-195F-4028-B44B-4139305B55D4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A1C9E572-195F-4028-B44B-4139305B55D4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A1C9E572-195F-4028-B44B-4139305B55D4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3AA41DF7-2AFE-46DA-A614-F34691D4F8A0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3AA41DF7-2AFE-46DA-A614-F34691D4F8A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3AA41DF7-2AFE-46DA-A614-F34691D4F8A0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3AA41DF7-2AFE-46DA-A614-F34691D4F8A0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{89082868-7B57-4FD7-B950-FE84F470D083}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{89082868-7B57-4FD7-B950-FE84F470D083}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{89082868-7B57-4FD7-B950-FE84F470D083}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{89082868-7B57-4FD7-B950-FE84F470D083}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8E31E6F1-3821-4DFD-BB7C-3C46AAD6448D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8E31E6F1-3821-4DFD-BB7C-3C46AAD6448D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8E31E6F1-3821-4DFD-BB7C-3C46AAD6448D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8E31E6F1-3821-4DFD-BB7C-3C46AAD6448D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7ED3DD8C-2030-46AD-8EA7-981F80E721A1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7ED3DD8C-2030-46AD-8EA7-981F80E721A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7ED3DD8C-2030-46AD-8EA7-981F80E721A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7ED3DD8C-2030-46AD-8EA7-981F80E721A1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{82D7B619-83DB-4849-AEA2-4F095C777DBB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{82D7B619-83DB-4849-AEA2-4F095C777DBB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{82D7B619-83DB-4849-AEA2-4F095C777DBB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{82D7B619-83DB-4849-AEA2-4F095C777DBB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{873FC837-5D7A-4F32-A376-456EECDA091B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{873FC837-5D7A-4F32-A376-456EECDA091B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{873FC837-5D7A-4F32-A376-456EECDA091B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{873FC837-5D7A-4F32-A376-456EECDA091B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A5B6C7D8-E9F0-4A1B-8C2D-3E4F5A6B7C8D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A5B6C7D8-E9F0-4A1B-8C2D-3E4F5A6B7C8D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A5B6C7D8-E9F0-4A1B-8C2D-3E4F5A6B7C8D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A5B6C7D8-E9F0-4A1B-8C2D-3E4F5A6B7C8D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		{D7D76AF4-7B44-4744-BD91-7BAE52BC1422} = {63262E9D-6FD6-48E8-B520-D4993395B740}
-		{CEC3956E-CF1E-43B3-ABB8-CD9C3E085619} = {63262E9D-6FD6-48E8-B520-D4993395B740}
 		{FA5B27B0-2C13-4754-A65D-26DEAA1AD8F0} = {63262E9D-6FD6-48E8-B520-D4993395B740}
 		{5105905E-E3DE-464A-B5A5-339DC7226A04} = {63262E9D-6FD6-48E8-B520-D4993395B740}
 		{BA5159D6-534F-4C28-BCDC-3B250D543576} = {63262E9D-6FD6-48E8-B520-D4993395B740}
 		{2AFA3812-BF4C-4BCA-BEC9-7F87775D98D1} = {63262E9D-6FD6-48E8-B520-D4993395B740}
 		{11DC02F7-D28E-448D-85AB-0C0901E00B5D} = {B2FE2D13-225C-4EC8-8465-73E50953F1B8}
 		{A1C9E572-195F-4028-B44B-4139305B55D4} = {CF91114D-789D-49C8-BF0C-8D34D546CE04}
+		{212B8F4E-69D0-4C26-9E48-3F51756614EB} = {63262E9D-6FD6-48E8-B520-D4993395B740}
+		{A1B2C3D4-E5F6-4748-A9B0-1C2D3E4F5A6B} = {63262E9D-6FD6-48E8-B520-D4993395B740}
+		{D7D76AF4-7B44-4744-BD91-7BAE52BC1422} = {A1B2C3D4-E5F6-4748-A9B0-1C2D3E4F5A6B}
+		{CEC3956E-CF1E-43B3-ABB8-CD9C3E085619} = {A1B2C3D4-E5F6-4748-A9B0-1C2D3E4F5A6B}
+		{C9841B2A-B68C-415E-BA5E-9A6E43809098} = {212B8F4E-69D0-4C26-9E48-3F51756614EB}
+		{3AA41DF7-2AFE-46DA-A614-F34691D4F8A0} = {C9841B2A-B68C-415E-BA5E-9A6E43809098}
+		{7ED3DD8C-2030-46AD-8EA7-981F80E721A1} = {C9841B2A-B68C-415E-BA5E-9A6E43809098}
+		{89082868-7B57-4FD7-B950-FE84F470D083} = {C9841B2A-B68C-415E-BA5E-9A6E43809098}
+		{8E31E6F1-3821-4DFD-BB7C-3C46AAD6448D} = {C9841B2A-B68C-415E-BA5E-9A6E43809098}
+		{3EC4D4B4-48E2-4026-8860-3C9208FE8238} = {212B8F4E-69D0-4C26-9E48-3F51756614EB}
+		{82D7B619-83DB-4849-AEA2-4F095C777DBB} = {3EC4D4B4-48E2-4026-8860-3C9208FE8238}
+		{873FC837-5D7A-4F32-A376-456EECDA091B} = {3EC4D4B4-48E2-4026-8860-3C9208FE8238}
+		{A5B6C7D8-E9F0-4A1B-8C2D-3E4F5A6B7C8D} = {F9A1B2C3-D4E5-4F6A-B7C8-D9E0F1A2B3C4}
+		{F9A1B2C3-D4E5-4F6A-B7C8-D9E0F1A2B3C4} = {63262E9D-6FD6-48E8-B520-D4993395B740}
 	EndGlobalSection
 EndGlobal

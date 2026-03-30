@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CrestCreates.Infrastructure</RootNamespace>
+    <AssemblyName>CrestCreates.Infrastructure</AssemblyName>
+    <OutputType>Library</OutputType>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="SqlSugarCore" />
+    <PackageReference Include="FreeSql" />
+    <PackageReference Include="AutoMapper" />
+    <PackageReference Include="MediatR" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.Extensions.Logging" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="Serilog.Sinks.MSSqlServer" />
+    <PackageReference Include="Serilog.Sinks.Seq" />
+    <PackageReference Include="Serilog.Enrichers.Environment" />
+    <PackageReference Include="Serilog.Enrichers.Thread" />
+    <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" />
+    <PackageReference Include="Microsoft.AspNetCore.Authorization" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc" />
+    <PackageReference Include="StackExchange.Redis" />
+    <PackageReference Include="RabbitMQ.Client" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+    <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="..\CrestCreates.OrmProviders.Abstract\CrestCreates.OrmProviders.Abstract.csproj" />
+    <ProjectReference Include="..\CrestCreates.OrmProviders.EFCore\CrestCreates.OrmProviders.EFCore.csproj" />
+    <ProjectReference Include="..\CrestCreates.OrmProviders.SqlSugar\CrestCreates.OrmProviders.SqlSugar.csproj" />
+    <ProjectReference Include="..\CrestCreates.OrmProviders.FreeSqlProvider\CrestCreates.OrmProviders.FreeSqlProvider.csproj" />
+  </ItemGroup>
+
+</Project>

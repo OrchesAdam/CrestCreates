@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CrestCreates.OrmProviders.Tests</RootNamespace>
+    <AssemblyName>CrestCreates.OrmProviders.Tests</AssemblyName>
+    <OutputType>Library</OutputType>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 项目引用 -->
+    <ProjectReference Include="..\..\src\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.OrmProviders.FreeSqlProvider\CrestCreates.OrmProviders.FreeSqlProvider.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.OrmProviders.SqlSugar\CrestCreates.OrmProviders.SqlSugar.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 包引用 -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Moq" />
+    <PackageReference Include="FluentAssertions" />
+  </ItemGroup>
+
+</Project>
