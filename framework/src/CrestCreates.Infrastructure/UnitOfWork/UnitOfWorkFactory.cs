@@ -1,9 +1,7 @@
 using System;
+using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using CrestCreates.Domain.UnitOfWork;
-using CrestCreates.OrmProviders.EFCore.UnitOfWork;
-using CrestCreates.OrmProviders.SqlSugar.UnitOfWork;
-using CrestCreates.OrmProviders.FreeSqlProvider.UnitOfWork;
 
 namespace CrestCreates.Infrastructure.UnitOfWork
 {
@@ -45,13 +43,25 @@ namespace CrestCreates.Infrastructure.UnitOfWork
         /// </summary>
         public IUnitOfWork Create(OrmProvider provider)
         {
-            return provider switch
+            string typeName = provider switch
             {
-                OrmProvider.EfCore => _serviceProvider.GetRequiredService<EfCoreUnitOfWork>(),
-                OrmProvider.SqlSugar => _serviceProvider.GetRequiredService<SqlSugarUnitOfWork>(),
-                OrmProvider.FreeSql => _serviceProvider.GetRequiredService<FreeSqlUnitOfWork>(),
+                OrmProvider.EfCore => "CrestCreates.OrmProviders.EFCore.UnitOfWork.EfCoreUnitOfWork",
+                OrmProvider.SqlSugar => "CrestCreates.OrmProviders.SqlSugar.UnitOfWork.SqlSugarUnitOfWork",
+                OrmProvider.FreeSql => "CrestCreates.OrmProviders.FreeSqlProvider.UnitOfWork.FreeSqlUnitOfWork",
                 _ => throw new NotSupportedException($"ORM provider '{provider}' is not supported")
             };
+
+            // 尝试获取工作单元实例
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                var type = assembly.GetType(typeName);
+                if (type != null && typeof(IUnitOfWork).IsAssignableFrom(type))
+                {
+                    return (IUnitOfWork)_serviceProvider.GetRequiredService(type);
+                }
+            }
+
+            throw new NotSupportedException($"ORM provider '{provider}' is not supported or the unit of work type not found");
         }
     }
 
@@ -91,12 +101,13 @@ namespace CrestCreates.Infrastructure.UnitOfWork
     {
         private readonly IUnitOfWorkFactory _factory;
         private readonly OrmProvider _defaultProvider;
-        private IUnitOfWork _current;
+        private IUnitOfWork? _current;
 
         public UnitOfWorkManager(IUnitOfWorkFactory factory, OrmProvider defaultProvider = OrmProvider.EfCore)
         {
             _factory = factory ?? throw new ArgumentNullException(nameof(factory));
             _defaultProvider = defaultProvider;
+            _current = null;
         }
 
         /// <summary>

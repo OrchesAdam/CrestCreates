@@ -205,27 +205,145 @@ services.AddScoped<IUnitOfWork, SqlSugarUnitOfWork>();
 
 ### 4. 事件总线
 
-#### 4.1 使用本地事件总线
+#### 4.1 领域事件
+
+**定义领域事件**：
 
 ```csharp
-public class ProductService
+using CrestCreates.Domain.DomainEvents;
+
+public class ProductCreatedEvent : DomainEvent
 {
-    private readonly IEventBus _eventBus;
-    
-    public ProductService(IEventBus eventBus)
+    public Guid ProductId { get; }
+    public string ProductName { get; }
+
+    public ProductCreatedEvent(Guid productId, string productName)
     {
-        _eventBus = eventBus;
-    }
-    
-    public async Task CreateProductAsync(Product product, CancellationToken cancellationToken = default)
-    {
-        // 创建产品
-        await _eventBus.PublishAsync(new ProductCreatedEvent(product), cancellationToken);
+        ProductId = productId;
+        ProductName = productName;
     }
 }
 ```
 
-#### 4.2 使用分布式事件总线
+**在实体中添加领域事件**：
+
+```csharp
+using CrestCreates.Domain.Entities;
+using CrestCreates.Domain.DomainEvents;
+
+public class Product : AggregateRoot<Guid>
+{
+    public string Name { get; private set; }
+    public decimal Price { get; private set; }
+    public bool IsActive { get; private set; }
+    
+    public Product(string name, decimal price)
+    {
+        Id = Guid.NewGuid();
+        Name = name;
+        Price = price;
+        IsActive = true;
+        
+        // 添加领域事件
+        AddDomainEvent(new ProductCreatedEvent(Id, name));
+    }
+    
+    public void ChangePrice(decimal newPrice)
+    {
+        if (newPrice <= 0)
+            throw new ArgumentException("Price must be greater than zero");
+        
+        Price = newPrice;
+        AddDomainEvent(new ProductPriceChangedEvent(Id, newPrice));
+    }
+    
+    public void Deactivate()
+    {
+        IsActive = false;
+        AddDomainEvent(new ProductDeactivatedEvent(Id));
+    }
+}
+```
+
+**实现事件处理器**：
+
+```csharp
+using MediatR;
+using System.Threading;
+using System.Threading.Tasks;
+
+public class ProductCreatedEventHandler : INotificationHandler<ProductCreatedEvent>
+{
+    public async Task Handle(ProductCreatedEvent notification, CancellationToken cancellationToken)
+    {
+        // 处理产品创建事件，例如发送通知、更新统计数据等
+        Console.WriteLine($"Product created: {notification.ProductName} (ID: {notification.ProductId})");
+        await Task.CompletedTask;
+    }
+}
+
+public class ProductPriceChangedEventHandler : INotificationHandler<ProductPriceChangedEvent>
+{
+    public async Task Handle(ProductPriceChangedEvent notification, CancellationToken cancellationToken)
+    {
+        // 处理价格变更事件
+        Console.WriteLine($"Product price changed: ID={notification.ProductId}, New Price={notification.NewPrice}");
+        await Task.CompletedTask;
+    }
+}
+```
+
+**注册事件处理器**：
+
+在 `Startup.cs` 中注册领域事件处理器：
+
+```csharp
+using CrestCreates.Infrastructure.EventBus;
+
+// 注册领域事件处理器
+services.AddDomainEventHandlers();
+
+// 或指定程序集
+services.AddDomainEventHandlers(typeof(ProductCreatedEventHandler).Assembly);
+```
+
+**工作单元自动发布领域事件**：
+
+工作单元会在事务提交时自动发布实体中的领域事件：
+
+```csharp
+public class ProductService
+{
+    private readonly IProductRepository _productRepository;
+    private readonly IUnitOfWork _unitOfWork;
+    
+    public ProductService(IProductRepository productRepository, IUnitOfWork unitOfWork)
+    {
+        _productRepository = productRepository;
+        _unitOfWork = unitOfWork;
+    }
+    
+    public async Task CreateProductAsync(string name, decimal price, CancellationToken cancellationToken = default)
+    {
+        var product = new Product(name, price);
+        await _productRepository.AddAsync(product, cancellationToken);
+        
+        // 保存变更并自动发布领域事件
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+    
+    public async Task UpdateProductPriceAsync(Guid productId, decimal newPrice, CancellationToken cancellationToken = default)
+    {
+        var product = await _productRepository.GetByIdAsync(productId, cancellationToken);
+        product.ChangePrice(newPrice);
+        
+        // 保存变更并自动发布领域事件
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+}
+```
+
+#### 4.2 分布式事件总线
 
 1. **配置 RabbitMQ**：
    ```csharp

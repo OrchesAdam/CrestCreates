@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using System.Threading;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Entities;
 using CrestCreates.OrmProviders.Abstract.UnitOfWorkBase;
+using CrestCreates.Infrastructure.EventBus;
 
 namespace CrestCreates.OrmProviders.EFCore.UnitOfWork
 {
@@ -13,13 +15,11 @@ namespace CrestCreates.OrmProviders.EFCore.UnitOfWork
     {
         private readonly DbContext _dbContext;
         private IDbContextTransaction? _currentTransaction;
-        private readonly CrestCreates.Domain.DomainEvents.IDomainEventPublisher _domainEventPublisher;
 
         public EfCoreUnitOfWork(DbContext dbContext, IDomainEventPublisher domainEventPublisher) 
             : base(domainEventPublisher)
         {
             _dbContext = dbContext;
-            _domainEventPublisher = domainEventPublisher;
         }
 
         public override async Task BeginTransactionAsync()
@@ -71,11 +71,11 @@ namespace CrestCreates.OrmProviders.EFCore.UnitOfWork
             return await _dbContext.SaveChangesAsync();
         }
 
-        public async Task<int> SaveChangesWithEventsAsync()
+        public async Task<int> SaveChangesWithEventsAsync(CancellationToken cancellationToken = default)
         {
             var entities = GetEntitiesWithDomainEvents();
             var result = await SaveChangesAsync();
-            await PublishDomainEventsAsync(entities);
+            await PublishDomainEventsAsync(entities, cancellationToken);
             return result;
         }
 
@@ -92,10 +92,10 @@ namespace CrestCreates.OrmProviders.EFCore.UnitOfWork
                 if (domainEventsProperty != null && clearDomainEventsMethod != null)
                 {
                     var domainEvents = domainEventsProperty.GetValue(entry.Entity) as System.Collections.Generic.IReadOnlyCollection<IDomainEvent>;
-                if (domainEvents != null && domainEvents.Count > 0)
-                {
-                    entities.Add(entry.Entity);
-                }
+                    if (domainEvents != null && domainEvents.Count > 0)
+                    {
+                        entities.Add(entry.Entity);
+                    }
                 }
             }
             

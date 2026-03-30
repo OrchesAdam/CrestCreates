@@ -4,6 +4,7 @@
     <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.OrmProviders.Abstract\CrestCreates.OrmProviders.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+    <ProjectReference Include="..\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

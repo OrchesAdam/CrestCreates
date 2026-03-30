@@ -9,7 +9,7 @@ namespace CrestCreates.OrmProviders.Abstract.UnitOfWorkBase
 {
     public abstract class UnitOfWorkWithEvents : IUnitOfWork
     {
-        private readonly IDomainEventPublisher _domainEventPublisher;
+        protected readonly IDomainEventPublisher _domainEventPublisher;
 
         protected UnitOfWorkWithEvents(IDomainEventPublisher domainEventPublisher)
         {

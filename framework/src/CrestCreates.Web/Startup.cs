@@ -13,10 +13,9 @@ using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Infrastructure.EventBus.Local;
-using CrestCreates.OrmProviders.EFCore.UnitOfWork;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
-using CrestCreates.OrmProviders.EFCore.MultiTenancy;
+using CrestCreates.Infrastructure.UnitOfWork;
 using CrestCreates.Infrastructure.Logging;
+using CrestCreates.OrmProviders.EFCore.DbContexts;
 
 namespace CrestCreates.Web
 {
@@ -65,11 +64,10 @@ namespace CrestCreates.Web
             services.AddEventBus();
 
             // 添加工作单元
-            services.AddScoped<IUnitOfWork, EfCoreUnitOfWork>();
+            services.AddUnitOfWork(OrmProvider.EfCore);
 
             // 添加多租户支持
             services.AddSingleton<ICurrentTenant, CurrentTenant>();
-            services.AddScoped<ITenantConnectionStringResolver, TenantConnectionStringResolver>();
 
             // 添加本地化
             services.AddScoped<ILocalizationProvider, JsonResourceLocalizationProvider>(sp => 

@@ -16,6 +16,7 @@
     <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
     <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.MultiTenancy\CrestCreates.MultiTenancy.csproj" />
+    <ProjectReference Include="..\CrestCreates.OrmProviders.EFCore\CrestCreates.OrmProviders.EFCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -669,22 +669,20 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 sourceCode += "    /// </summary>\n";
                 sourceCode += "    public static class " + entityName + "FreeSqlMapping\n";
                 sourceCode += "    {\n";
-                sourceCode += "        public static void Configure(ICodeFirst codeFirst)\n";
+                sourceCode += "        public static void Configure(IFreeSql freeSql)\n";
                 sourceCode += "        {\n";
-                sourceCode += "            codeFirst.Entity<" + entityName + ">(eb =>\n";
+                sourceCode += "            // 使用 ConfigEntity 配置实体映射\n";
+                sourceCode += "            freeSql.CodeFirst.ConfigEntity<" + entityName + ">(eb =>\n";
                 sourceCode += "            {\n";
-                sourceCode += "                eb.ToTable(\"" + tableName + "\");\n";
-                sourceCode += "                eb.HasKey(e => e.Id);\n";
-                sourceCode += "                \n";
-                sourceCode += "                // 属性映射配置\n";
-                sourceCode += GeneratePropertyMappings(entityClass, "FreeSql");
-                sourceCode += "                \n";
-                sourceCode += "                // 审计字段映射\n";
-                sourceCode += IsAudited(entityClass) ? GenerateFreeSqlAuditMappings() : string.Empty;
-                sourceCode += "                \n";
-                sourceCode += "                // 索引配置\n";
-                sourceCode += GenerateIndexMappings(entityClass, "FreeSql");
+                sourceCode += "                eb.Name(\"" + tableName + "\");\n";
+                sourceCode += GenerateFreeSqlPropertyMappings(entityClass);
                 sourceCode += "            });\n";
+                sourceCode += "        }\n";
+                sourceCode += "        \n";
+                sourceCode += "        public static void SyncStructure(IFreeSql freeSql)\n";
+                sourceCode += "        {\n";
+                sourceCode += "            // 同步数据库结构\n";
+                sourceCode += "            freeSql.CodeFirst.SyncStructure<" + entityName + ">();\n";
                 sourceCode += "        }\n";
                 sourceCode += "    }\n";
                 sourceCode += "}";
@@ -909,6 +907,33 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                         mappings.AppendLine("                .HasMaxLength(255)");
                         mappings.AppendLine("                .IsRequired(" + (prop.NullableAnnotation != NullableAnnotation.Annotated ? "true" : "false") + ");");
                     }
+                }
+            }
+
+            return mappings.ToString();
+        }
+
+        private string GenerateFreeSqlPropertyMappings(INamedTypeSymbol entityClass)
+        {
+            var properties = GetEntityProperties(entityClass);
+            var mappings = new StringBuilder();
+
+            // 配置主键
+            mappings.AppendLine("                eb.Property(a => a.Id).IsPrimary(true);");
+
+            foreach (var prop in properties)
+            {
+                if (prop.Type.SpecialType == SpecialType.System_String)
+                {
+                    mappings.AppendLine("                eb.Property(a => a." + prop.Name + ").StringLength(255);");
+                }
+                else if (prop.Type.SpecialType == SpecialType.System_Decimal)
+                {
+                    mappings.AppendLine("                eb.Property(a => a." + prop.Name + ").Precision(18, 2);");
+                }
+                else if (prop.Type.SpecialType == SpecialType.System_DateTime)
+                {
+                    mappings.AppendLine("                eb.Property(a => a." + prop.Name + ").DbType(\"datetime\");");
                 }
             }
 

@@ -35,9 +35,6 @@
     <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
     <ProjectReference Include="..\CrestCreates.OrmProviders.Abstract\CrestCreates.OrmProviders.Abstract.csproj" />
-    <ProjectReference Include="..\CrestCreates.OrmProviders.EFCore\CrestCreates.OrmProviders.EFCore.csproj" />
-    <ProjectReference Include="..\CrestCreates.OrmProviders.SqlSugar\CrestCreates.OrmProviders.SqlSugar.csproj" />
-    <ProjectReference Include="..\CrestCreates.OrmProviders.FreeSqlProvider\CrestCreates.OrmProviders.FreeSqlProvider.csproj" />
   </ItemGroup>
 
 </Project>
