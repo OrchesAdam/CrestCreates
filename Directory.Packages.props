@@ -63,6 +63,8 @@
     <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="7.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="7.0.0" />
     <PackageVersion Include="StackExchange.Redis" Version="2.7.10" />
+    <PackageVersion Include="Castle.Core" Version="5.1.1" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions" Version="8.0.0" />
     <!-- 日志 -->
     <PackageVersion Include="Serilog" Version="3.1.1" />
     <PackageVersion Include="Serilog.Extensions.Hosting" Version="8.0.0" />
