@@ -9,9 +9,8 @@
     <!-- 禁用自动生成程序集信息以避免冲突 -->
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
-    <!-- 启用源代码生成器文件输出 -->
+    <!-- 禁用源代码生成器文件输出，避免编译冲突 -->
     <EmitCompilerGeneratedFiles>false</EmitCompilerGeneratedFiles>
-    <CompilerGeneratedFilesOutputPath>Generated</CompilerGeneratedFilesOutputPath>
   </PropertyGroup>
   <ItemGroup>
     <!-- 引用CodeGenerator作为分析器 -->
