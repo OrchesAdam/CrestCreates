@@ -17,7 +17,8 @@ namespace CrestCreates.CodeGenerator.Tests.Entities
         public Guid CustomerId { get; private set; }
         public decimal TotalAmount { get; private set; }
         public DateTime OrderDate { get; private set; }
-        public OrderStatus Status { get; private set; }        public string Notes { get; private set; } = string.Empty;
+        public OrderStatus Status { get; private set; }
+        public string Notes { get; private set; } = string.Empty;
 
         public TestOrder()
         {

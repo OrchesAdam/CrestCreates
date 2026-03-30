@@ -37,12 +37,12 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         {
             var arg = moduleAttribute.ConstructorArguments[0];
             if (arg.Kind == TypedConstantKind.Array)
-                dependencies.AddRange(arg.Values.Select(v => v.Value?.ToString() ?? ""));
+                dependencies.AddRange(arg.Values.Select(v => v.Value is System.Type type ? type.FullName ?? v.Value.ToString() : v.Value?.ToString() ?? ""));
         }
 
         var namedArgs = moduleAttribute.NamedArguments.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Value);
         var dependsOn = namedArgs.TryGetValue("DependsOn", out var dv) && dv is ImmutableArray<TypedConstant> types
-            ? types.Select(t => t.Value?.ToString() ?? "").ToList() : dependencies;
+            ? types.Select(t => t.Value is System.Type type ? type.FullName ?? t.Value.ToString() : t.Value?.ToString() ?? "").ToList() : dependencies;
         var order = namedArgs.TryGetValue("Order", out var ov) && ov is int o ? o : 0;
         var autoRegister = namedArgs.TryGetValue("AutoRegisterServices", out var av) && av is bool b ? b : true;
 
@@ -95,6 +95,8 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
         sb.AppendLine("using Microsoft.Extensions.Hosting;");
         sb.AppendLine("using Microsoft.Extensions.Logging;");
+        sb.AppendLine("using System;");
+        sb.AppendLine("using CrestCreates.Infrastructure.Modularity;");
         sb.AppendLine("namespace CrestCreates.Infrastructure.Modularity;");
         sb.AppendLine("public static class AutoModuleRegistration {");
         sb.Append("    public static readonly System.Collections.Generic.IReadOnlyList<string> RegisteredModules = new[] { ");
@@ -102,17 +104,63 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         sb.AppendLine(" };");
         sb.AppendLine("    public static IHostBuilder RegisterModules(this IHostBuilder hostBuilder) {");
         sb.AppendLine("        return hostBuilder.ConfigureServices((context, services) => {");
-        sb.AppendLine("            var logger = services.BuildServiceProvider().GetService<ILogger<IModule>>();");
         foreach (var m in modules) sb.AppendLine($"            services.AddSingleton<{m.FullName}>();");
+        sb.AppendLine("        }).ConfigureServices((context, services) => {");
         sb.AppendLine("            var sp = services.BuildServiceProvider();");
-        foreach (var m in modules) sb.AppendLine($"            logger?.LogInformation(\"[PreInit] {m.Name}\"); sp.GetRequiredService<{m.FullName}>().OnPreInitialize();");
-        foreach (var m in modules) sb.AppendLine($"            logger?.LogInformation(\"[Init] {m.Name}\"); sp.GetRequiredService<{m.FullName}>().OnInitialize();");
-        foreach (var m in modules) sb.AppendLine($"            logger?.LogInformation(\"[PostInit] {m.Name}\"); sp.GetRequiredService<{m.FullName}>().OnPostInitialize();");
-        foreach (var m in modules) sb.AppendLine($"            logger?.LogInformation(\"[ConfigureServices] {m.Name}\"); sp.GetRequiredService<{m.FullName}>().OnConfigureServices(services);");
+        sb.AppendLine("            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();");
+        sb.AppendLine("            var logger = loggerFactory.CreateLogger<IModule>();");
+        sb.AppendLine("            logger?.LogInformation(\"Starting module initialization process...\");");
+        foreach (var m in modules) {
+            sb.AppendLine("            try {");
+            sb.AppendLine($"                logger?.LogInformation(\"[PreInit] {m.Name}\");");
+            sb.AppendLine($"                sp.GetRequiredService<{m.FullName}>().OnPreInitialize();");
+            sb.AppendLine("            } catch (Exception ex) {");
+            sb.AppendLine($"                logger?.LogError(ex, \"Error during PreInit phase of module {m.Name}\");");
+            sb.AppendLine("                throw;");
+            sb.AppendLine("            }");
+        }
+        foreach (var m in modules) {
+            sb.AppendLine("            try {");
+            sb.AppendLine($"                logger?.LogInformation(\"[Init] {m.Name}\");");
+            sb.AppendLine($"                sp.GetRequiredService<{m.FullName}>().OnInitialize();");
+            sb.AppendLine("            } catch (Exception ex) {");
+            sb.AppendLine($"                logger?.LogError(ex, \"Error during Init phase of module {m.Name}\");");
+            sb.AppendLine("                throw;");
+            sb.AppendLine("            }");
+        }
+        foreach (var m in modules) {
+            sb.AppendLine("            try {");
+            sb.AppendLine($"                logger?.LogInformation(\"[PostInit] {m.Name}\");");
+            sb.AppendLine($"                sp.GetRequiredService<{m.FullName}>().OnPostInitialize();");
+            sb.AppendLine("            } catch (Exception ex) {");
+            sb.AppendLine($"                logger?.LogError(ex, \"Error during PostInit phase of module {m.Name}\");");
+            sb.AppendLine("                throw;");
+            sb.AppendLine("            }");
+        }
+        foreach (var m in modules) {
+            sb.AppendLine("            try {");
+            sb.AppendLine($"                logger?.LogInformation(\"[ConfigureServices] {m.Name}\");");
+            sb.AppendLine($"                sp.GetRequiredService<{m.FullName}>().OnConfigureServices(services);");
+            sb.AppendLine("            } catch (Exception ex) {");
+            sb.AppendLine($"                logger?.LogError(ex, \"Error during ConfigureServices phase of module {m.Name}\");");
+            sb.AppendLine("                throw;");
+            sb.AppendLine("            }");
+        }
+        sb.AppendLine("            logger?.LogInformation(\"Module initialization process completed.\");");
         sb.AppendLine("        }); }");
         sb.AppendLine("    public static IHost InitializeModules(this IHost host) {");
         sb.AppendLine("        var logger = host.Services.GetService<ILogger<IModule>>();");
-        foreach (var m in modules) sb.AppendLine($"        logger?.LogInformation(\"[AppInit] {m.Name}\"); host.Services.GetRequiredService<{m.FullName}>().OnApplicationInitialization(host);");
+        sb.AppendLine("        logger?.LogInformation(\"Starting application initialization process for modules...\");");
+        foreach (var m in modules) {
+            sb.AppendLine("        try {");
+            sb.AppendLine($"            logger?.LogInformation(\"[AppInit] {m.Name}\");");
+            sb.AppendLine($"            host.Services.GetRequiredService<{m.FullName}>().OnApplicationInitialization(host);");
+            sb.AppendLine("        } catch (Exception ex) {");
+            sb.AppendLine($"            logger?.LogError(ex, \"Error during ApplicationInitialization phase of module {m.Name}\");");
+            sb.AppendLine("            throw;");
+            sb.AppendLine("        }");
+        }
+        sb.AppendLine("        logger?.LogInformation(\"Application initialization process for modules completed.\");");
         sb.AppendLine("        return host; } }");
         context.AddSource("AutoModuleRegistration.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
     }

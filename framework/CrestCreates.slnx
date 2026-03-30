@@ -13,8 +13,6 @@
     <Project Path="src/CrestCreates.OrmProviders.EFCore/CrestCreates.OrmProviders.EFCore.csproj" />
     <Project Path="src/CrestCreates.OrmProviders.FreeSqlProvider/CrestCreates.OrmProviders.FreeSqlProvider.csproj" />
     <Project Path="src/CrestCreates.OrmProviders.SqlSugar/CrestCreates.OrmProviders.SqlSugar.csproj" />
-    <Project Path="src/CrestCreates.ModuleA/ModuleA.csproj" />
-    <Project Path="src/CrestCreates.ModuleB/ModuleB.csproj" />
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/CrestCreates.CodeGenerator.Tests/CrestCreates.CodeGenerator.Tests.csproj" />

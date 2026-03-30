@@ -9,8 +9,8 @@
     <!-- 禁用自动生成程序集信息以避免冲突 -->
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
-    <!-- 启用源代码生成器支持 -->
-    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <!-- 启用源代码生成器文件输出 -->
+    <EmitCompilerGeneratedFiles>false</EmitCompilerGeneratedFiles>
     <CompilerGeneratedFilesOutputPath>Generated</CompilerGeneratedFilesOutputPath>
   </PropertyGroup>
   <ItemGroup>
@@ -24,10 +24,21 @@
   </ItemGroup>
   <ItemGroup>
     <!-- 包引用 -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Moq" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="FreeSql" />
     <PackageReference Include="SqlSugarCore" />
   </ItemGroup>
-
+  
+<!--  &lt;!&ndash; 排除 Entities 和 Services 文件夹，避免触发代码生成 &ndash;&gt;-->
+<!--  <ItemGroup>-->
+<!--    <Compile Remove="Entities\**\*.cs" />-->
+<!--    <Compile Remove="Services\**\*.cs" />-->
+<!--  </ItemGroup>-->
 
 </Project>

@@ -17,7 +17,8 @@ namespace CrestCreates.CodeGenerator.Tests.Entities
         public string Description { get; private set; } = string.Empty;
         public decimal Price { get; private set; }
         public int Stock { get; private set; }
-        public bool IsActive { get; private set; } = true;        public TestProduct()
+        public bool IsActive { get; private set; } = true;
+        public TestProduct()
         {
             // EF Core构造函数
         }

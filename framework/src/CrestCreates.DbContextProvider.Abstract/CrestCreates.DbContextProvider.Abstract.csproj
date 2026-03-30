@@ -8,7 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Domain\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
   </ItemGroup>
+
 
 </Project>

@@ -17,7 +17,8 @@ namespace CrestCreates.CodeGenerator.Tests.Entities
         public string LastName { get; private set; } = string.Empty;
         public string Email { get; private set; } = string.Empty;
         public string PhoneNumber { get; private set; } = string.Empty;
-        public DateTime BirthDate { get; private set; }        public bool IsVip { get; private set; }
+        public DateTime BirthDate { get; private set; }
+        public bool IsVip { get; private set; }
 
         public TestCustomer()
         {
