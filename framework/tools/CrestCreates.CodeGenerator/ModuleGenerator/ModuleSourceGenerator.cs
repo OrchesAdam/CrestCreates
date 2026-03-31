@@ -37,14 +37,51 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         {
             var arg = moduleAttribute.ConstructorArguments[0];
             if (arg.Kind == TypedConstantKind.Array)
-                dependencies.AddRange(arg.Values.Select(v => v.Value is System.Type type ? type.FullName ?? v.Value.ToString() : v.Value?.ToString() ?? ""));
+            {
+                foreach (var value in arg.Values)
+                {
+                    if (value.Value is System.Type type)
+                    {
+                        dependencies.Add(type.FullName ?? type.Name);
+                    }
+                    else if (value.Value != null)
+                    {
+                        dependencies.Add(value.Value.ToString()!);
+                    }
+                }
+            }
         }
 
-        var namedArgs = moduleAttribute.NamedArguments.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Value);
-        var dependsOn = namedArgs.TryGetValue("DependsOn", out var dv) && dv is ImmutableArray<TypedConstant> types
-            ? types.Select(t => t.Value is System.Type type ? type.FullName ?? t.Value.ToString() : t.Value?.ToString() ?? "").ToList() : dependencies;
-        var order = namedArgs.TryGetValue("Order", out var ov) && ov is int o ? o : 0;
-        var autoRegister = namedArgs.TryGetValue("AutoRegisterServices", out var av) && av is bool b ? b : true;
+        var dependsOn = dependencies;
+        var order = 0;
+        var autoRegister = true;
+
+        foreach (var namedArg in moduleAttribute.NamedArguments)
+        {
+            if (namedArg.Key == "DependsOn" && namedArg.Value.Value is ImmutableArray<TypedConstant> types)
+            {
+                dependsOn = new List<string>();
+                foreach (var type in types)
+                {
+                    if (type.Value is System.Type t)
+                    {
+                        dependsOn.Add(t.FullName ?? t.Name);
+                    }
+                    else if (type.Value != null)
+                    {
+                        dependsOn.Add(type.Value.ToString()!);
+                    }
+                }
+            }
+            else if (namedArg.Key == "Order" && namedArg.Value.Value is int o)
+            {
+                order = o;
+            }
+            else if (namedArg.Key == "AutoRegisterServices" && namedArg.Value.Value is bool b)
+            {
+                autoRegister = b;
+            }
+        }
 
         return new ModuleInfo(symbol.Name, symbol.ContainingNamespace.ToDisplayString(), dependsOn, order, autoRegister);
     }
