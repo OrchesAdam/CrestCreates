@@ -127,8 +127,10 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             builder.AppendLine("using System.Threading.Tasks;");
             builder.AppendLine("using Microsoft.AspNetCore.Mvc;");
             builder.AppendLine("using Microsoft.Extensions.Logging;");
+            builder.AppendLine("using FluentValidation;");
             builder.AppendLine("using CrestCreates.Infrastructure.Authorization;");
             builder.AppendLine($"using {namespaceName};");
+            builder.AppendLine($"using {namespaceName}.Validators;");
             
             builder.AppendLine();
             builder.AppendLine($"namespace {namespaceName}.Controllers");
@@ -144,14 +146,17 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             builder.AppendLine("    {");
             builder.AppendLine($"        private readonly {serviceInterface} _service;");
             builder.AppendLine($"        private readonly ILogger<{controllerName}Controller> _logger;");
+            builder.AppendLine("        private readonly IValidatorFactory _validatorFactory;");
             builder.AppendLine();
             
             builder.AppendLine($"        public {controllerName}Controller(");
             builder.AppendLine($"            {serviceInterface} service,");
-            builder.AppendLine($"            ILogger<{controllerName}Controller> logger)");
+            builder.AppendLine($"            ILogger<{controllerName}Controller> logger,");
+            builder.AppendLine("            IValidatorFactory validatorFactory)");
             builder.AppendLine("        {");
             builder.AppendLine("            _service = service ?? throw new ArgumentNullException(nameof(service));");
             builder.AppendLine("            _logger = logger ?? throw new ArgumentNullException(nameof(logger));");
+            builder.AppendLine("            _validatorFactory = validatorFactory ?? throw new ArgumentNullException(nameof(validatorFactory));");
             builder.AppendLine("        }");
             builder.AppendLine();
             
@@ -180,7 +185,7 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
                 
             foreach (var method in methods)
             {
-                GenerateControllerAction(builder, method, serviceName, generateAuthorization, resourceName, generateCrudPermissions, defaultRoles, requireAll, requireAuthorizationForAll);
+                GenerateControllerAction(builder, method, serviceName, namespaceName, generateAuthorization, resourceName, generateCrudPermissions, defaultRoles, requireAll, requireAuthorizationForAll);
             }
             
             builder.AppendLine("    }");
@@ -189,7 +194,7 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             context.AddSource($"{controllerName}Controller.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
-        private void GenerateControllerAction(StringBuilder builder, IMethodSymbol method, string serviceName, bool generateAuthorization, string resourceName, bool generateCrudPermissions, string[] defaultRoles, bool requireAll, bool requireAuthorizationForAll = true)
+        private void GenerateControllerAction(StringBuilder builder, IMethodSymbol method, string serviceName, string namespaceName, bool generateAuthorization, string resourceName, bool generateCrudPermissions, string[] defaultRoles, bool requireAll, bool requireAuthorizationForAll = true)
         {
             var methodName = method.Name;
             var returnType = method.ReturnType.ToDisplayString();
@@ -228,6 +233,28 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             builder.AppendLine("            try");
             builder.AppendLine("            {");
             
+            // 添加验证逻辑
+            foreach (var parameter in method.Parameters)
+            {
+                var paramType = parameter.Type;
+                var paramName = parameter.Name;
+                if (IsDtoType(paramType))
+                {
+                    builder.AppendLine($"                // 验证 {paramName}");
+                    builder.AppendLine($"                var validator = _validatorFactory.GetValidator<{paramType.ToDisplayString()}>();");
+                    builder.AppendLine($"                if (validator != null)");
+                    builder.AppendLine("                {");
+                    builder.AppendLine($"                    var validationResult = await validator.ValidateAsync({paramName});");
+                    builder.AppendLine("                    if (!validationResult.IsValid)");
+                    builder.AppendLine("                    {");
+                    builder.AppendLine($"                        _logger.LogWarning(\"Validation failed for {paramName}\");");
+                    builder.AppendLine("                        return BadRequest(validationResult.Errors);");
+                    builder.AppendLine("                    }");
+                    builder.AppendLine("                }");
+                    builder.AppendLine();
+                }
+            }
+            
             // 方法实现
             if (returnType == "void" || returnType == "System.Threading.Tasks.Task")
             {
@@ -250,10 +277,30 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             builder.AppendLine($"                _logger.LogWarning(ex, \"Bad request in {methodName}\");");
             builder.AppendLine("                return BadRequest(ex.Message);");
             builder.AppendLine("            }");
+            builder.AppendLine($"            catch (global::{namespaceName}.Exceptions.{serviceName}ValidationException ex)");
+            builder.AppendLine("            {");
+            builder.AppendLine($"                _logger.LogWarning(ex, \"Validation error in {methodName}\");");
+            builder.AppendLine("                return BadRequest(ex.Message);");
+            builder.AppendLine("            }");
+            builder.AppendLine($"            catch (global::{namespaceName}.Exceptions.{serviceName}NotFoundException ex)");
+            builder.AppendLine("            {");
+            builder.AppendLine($"                _logger.LogWarning(ex, \"Not found error in {methodName}\");");
+            builder.AppendLine("                return NotFound(ex.Message);");
+            builder.AppendLine("            }");
+            builder.AppendLine($"            catch (global::{namespaceName}.Exceptions.{serviceName}BusinessException ex)");
+            builder.AppendLine("            {");
+            builder.AppendLine($"                _logger.LogWarning(ex, \"Business error in {methodName}\");");
+            builder.AppendLine("                return BadRequest(ex.Message);");
+            builder.AppendLine("            }");
+            builder.AppendLine($"            catch (global::{namespaceName}.Exceptions.{serviceName}Exception ex)");
+            builder.AppendLine("            {");
+            builder.AppendLine($"                _logger.LogError(ex, \"Service error in {methodName}\");");
+            builder.AppendLine("                return StatusCode(500, ex.Message);");
+            builder.AppendLine("            }");
             builder.AppendLine("            catch (Exception ex)");
             builder.AppendLine("            {");
-            builder.AppendLine($"                _logger.LogError(ex, \"Error in {methodName}\");");
-            builder.AppendLine("                return StatusCode(500, \"An error occurred while processing your request.\");");
+            builder.AppendLine($"                _logger.LogError(ex, \"Unexpected error in {methodName}\");");
+            builder.AppendLine("                return StatusCode(500, \"An unexpected error occurred while processing your request.\");");
             builder.AppendLine("            }");
             builder.AppendLine("        }");
             builder.AppendLine();
@@ -402,6 +449,15 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             }
 
             return defaultValue;
+        }
+
+        private bool IsDtoType(ITypeSymbol type)
+        {
+            var typeName = type.Name;
+            return typeName.EndsWith("Dto") || 
+                   typeName.EndsWith("Request") || 
+                   typeName.EndsWith("Input") || 
+                   typeName.EndsWith("Command");
         }
     }
 }
