@@ -12,7 +12,7 @@ using CrestCreates.Domain.Entities;
 using CrestCreates.OrmProviders.EFCore.UnitOfWork;
 using CrestCreates.OrmProviders.SqlSugar.UnitOfWork;
 using CrestCreates.OrmProviders.FreeSqlProvider.UnitOfWork;
-using CrestCreates.Infrastructure.EventBus.Local;
+using CrestCreates.EventBus.Local;
 using CrestCreates.EventBus.Tests.Events;
 
 namespace CrestCreates.EventBus.Tests

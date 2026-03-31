@@ -9,7 +9,7 @@ using FluentAssertions;
 using MediatR;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Entities;
-using CrestCreates.Infrastructure.EventBus.Local;
+using CrestCreates.EventBus.Local;
 using CrestCreates.EventBus.Tests.Events;
 
 namespace CrestCreates.EventBus.Tests

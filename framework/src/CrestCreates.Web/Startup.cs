@@ -12,7 +12,7 @@ using CrestCreates.Domain.UnitOfWork;
 using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.DomainEvents;
-using CrestCreates.Infrastructure.EventBus.Local;
+using CrestCreates.EventBus.Local;
 using CrestCreates.Infrastructure.UnitOfWork;
 using CrestCreates.Infrastructure.Logging;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
@@ -61,7 +61,8 @@ namespace CrestCreates.Web
             services.AddMediatR(typeof(Startup).Assembly);
 
             // 添加事件总线
-            services.AddEventBus();
+            services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, CrestCreates.EventBus.Local.LocalEventBus>();
+            services.AddScoped<CrestCreates.Domain.DomainEvents.IDomainEventPublisher, CrestCreates.EventBus.Local.DomainEventPublisher>();
 
             // 添加工作单元
             services.AddUnitOfWork(OrmProvider.EfCore);

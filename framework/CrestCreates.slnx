@@ -2,6 +2,11 @@
   <Folder Name="/src/">
     <Project Path="src/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
     <Project Path="src/CrestCreates.Application/CrestCreates.Application.csproj" />
+    <Project Path="src/CrestCreates.EventBus.Abstract/CrestCreates.EventBus.Abstract.csproj" />
+    <Project Path="src/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj" />
+    <Project Path="src/CrestCreates.EventBus.Kafka/CrestCreates.EventBus.Kafka.csproj" />
+    <Project Path="src/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />
+    <Project Path="src/CrestCreates.EventBus.RabbitMQ/CrestCreates.EventBus.RabbitMQ.csproj" />
     <Project Path="src/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
     <Project Path="src/CrestCreates.Web/CrestCreates.Web.csproj" />
     <Project Path="src/CrestCreates.DbContextProvider.Abstract/CrestCreates.DbContextProvider.Abstract.csproj" />

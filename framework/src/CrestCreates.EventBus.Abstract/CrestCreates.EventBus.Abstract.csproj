@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CrestCreates.EventBus.Abstract</RootNamespace>
+    <AssemblyName>CrestCreates.EventBus.Abstract</AssemblyName>
+    <OutputType>Library</OutputType>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

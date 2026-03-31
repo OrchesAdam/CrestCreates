@@ -29,6 +29,7 @@
     <PackageVersion Include="SqlSugarCore" Version="5.1.4.104" />
     <PackageVersion Include="FreeSql" Version="3.5.215" />
     <PackageVersion Include="FreeSql.Provider.Sqlite" Version="3.5.215" />
+    <PackageVersion Include="SQLitePCLRaw.bundle_green" Version="2.1.8" />
     <!-- 中介者模式 -->
     <PackageVersion Include="MediatR" Version="11.1.0" />
     <PackageVersion Include="MediatR.Extensions.Microsoft.DependencyInjection" Version="11.1.0" />

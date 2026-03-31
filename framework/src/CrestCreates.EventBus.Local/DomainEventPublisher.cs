@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 using MediatR;
 using CrestCreates.Domain.DomainEvents;
 
-namespace CrestCreates.Infrastructure.EventBus.Local
+namespace CrestCreates.EventBus.Local
 {
     public class DomainEventPublisher : IDomainEventPublisher
     {

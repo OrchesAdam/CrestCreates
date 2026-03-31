@@ -29,7 +29,6 @@
     <PackageReference Include="Microsoft.AspNetCore.Authorization" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc" />
     <PackageReference Include="StackExchange.Redis" />
-    <PackageReference Include="RabbitMQ.Client" />
     <PackageReference Include="Castle.Core" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />

@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CrestCreates.EventBus.Kafka</RootNamespace>
+    <AssemblyName>CrestCreates.EventBus.Kafka</AssemblyName>
+    <OutputType>Library</OutputType>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.EventBus.Abstract\CrestCreates.EventBus.Abstract.csproj" />
+    <ProjectReference Include="..\CrestCreates.EventBus.Local\CrestCreates.EventBus.Local.csproj" />
+    <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+    <ProjectReference Include="..\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
+  </ItemGroup>
+
+
+
+</Project>

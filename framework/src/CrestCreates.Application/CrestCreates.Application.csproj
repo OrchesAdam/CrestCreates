@@ -12,6 +12,9 @@
     <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
     <ProjectReference Include="..\CrestCreates.Application.Contracts\CrestCreates.Application.Contracts.csproj" />
     <ProjectReference Include="..\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
+    <ProjectReference Include="..\CrestCreates.EventBus.Abstract\CrestCreates.EventBus.Abstract.csproj" />
+    <ProjectReference Include="..\CrestCreates.EventBus.Local\CrestCreates.EventBus.Local.csproj" />
+    <ProjectReference Include="..\CrestCreates.EventBus.EventStore\CrestCreates.EventBus.EventStore.csproj" />
   </ItemGroup>
 
   <ItemGroup>

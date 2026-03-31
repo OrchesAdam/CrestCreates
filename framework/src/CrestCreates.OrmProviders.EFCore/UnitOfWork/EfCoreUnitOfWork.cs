@@ -7,7 +7,6 @@ using Microsoft.EntityFrameworkCore.Storage;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Entities;
 using CrestCreates.OrmProviders.Abstract.UnitOfWorkBase;
-using CrestCreates.Infrastructure.EventBus;
 
 namespace CrestCreates.OrmProviders.EFCore.UnitOfWork
 {

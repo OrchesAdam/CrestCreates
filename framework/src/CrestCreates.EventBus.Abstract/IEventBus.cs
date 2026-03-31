@@ -2,7 +2,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.DomainEvents;
 
-namespace CrestCreates.Infrastructure.EventBus
+namespace CrestCreates.EventBus.Abstract
 {
     public interface IEventBus
     {

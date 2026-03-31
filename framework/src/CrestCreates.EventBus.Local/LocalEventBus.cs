@@ -2,9 +2,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using MediatR;
 using CrestCreates.Domain.DomainEvents;
-using CrestCreates.Infrastructure.EventBus;
+using CrestCreates.EventBus.Abstract;
 
-namespace CrestCreates.Infrastructure.EventBus.Local
+namespace CrestCreates.EventBus.Local
 {
     public class LocalEventBus : IEventBus
     {
