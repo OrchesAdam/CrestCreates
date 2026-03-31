@@ -6,5 +6,9 @@ namespace CrestCreates.Infrastructure.Logging
     {
         void Configure();
         void SetLogLevel(string categoryName, LogLevel logLevel);
+        LogLevel GetLogLevel(string categoryName);
+        void SetGlobalLogLevel(LogLevel logLevel);
+        LogLevel GetGlobalLogLevel();
+        void UpdateConfiguration(LoggingConfiguration configuration);
     }
 }

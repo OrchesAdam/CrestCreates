@@ -14,8 +14,8 @@ namespace CrestCreates.Infrastructure.Logging
 {
     public class SerilogLoggerAdapter : ILoggerProviderAdapter
     {
-        private readonly Logger _logger;
-        private readonly LoggingConfiguration _configuration;
+        private Logger _logger;
+        private LoggingConfiguration _configuration;
         private readonly Dictionary<string, LogLevel> _logLevels = new Dictionary<string, LogLevel>();
 
         public SerilogLoggerAdapter(LoggingConfiguration configuration)
@@ -31,12 +31,40 @@ namespace CrestCreates.Infrastructure.Logging
 
         public void Configure()
         {
-            // 配置已在构造函数中完成
+            // 重新创建日志记录器以应用新配置
+            _logger.Dispose();
+            _logger = CreateLogger();
+        }
+
+        public void UpdateConfiguration(LoggingConfiguration configuration)
+        {
+            _configuration = configuration;
+            Configure();
         }
 
         public void SetLogLevel(string categoryName, LogLevel logLevel)
         {
             _logLevels[categoryName] = logLevel;
+        }
+
+        public LogLevel GetLogLevel(string categoryName)
+        {
+            if (_logLevels.TryGetValue(categoryName, out var logLevel))
+            {
+                return logLevel;
+            }
+            return _configuration.MinimumLevel;
+        }
+
+        public void SetGlobalLogLevel(LogLevel logLevel)
+        {
+            _configuration.MinimumLevel = logLevel;
+            Configure();
+        }
+
+        public LogLevel GetGlobalLogLevel()
+        {
+            return _configuration.MinimumLevel;
         }
 
         public void Dispose()
