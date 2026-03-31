@@ -1,36 +1,17 @@
 using System;
-using System.IO;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using DotNet.Testcontainers.Builders;
-using DotNet.Testcontainers.Configurations;
-using DotNet.Testcontainers.Containers;
 using Xunit;
+using CrestCreates.OrmProviders.EFCore.DbContexts;
 
 namespace CrestCreates.IntegrationTests
 {
     public class WebApplicationFactory<TStartup> : WebApplicationFactory<TStartup>, IAsyncLifetime where TStartup : class
     {
-        private readonly TestcontainersContainer _dbContainer;
-        private readonly string _connectionString;
-        
-        public WebApplicationFactory()
-        {
-            _dbContainer = new TestcontainersBuilder<MsSqlTestcontainer>()
-                .WithDatabase(new MsSqlTestcontainerConfiguration
-                {
-                    Password = "St1ongPassw0rd!",
-                    Database = "CrestCreatesTestDb"
-                })
-                .Build();
-                
-            _connectionString = _dbContainer.ConnectionString;
-        }
-        
         protected override IHostBuilder CreateHostBuilder()
         {
             var builder = Host.CreateDefaultBuilder()
@@ -46,7 +27,7 @@ namespace CrestCreates.IntegrationTests
         {
             builder.ConfigureServices(services =>
             {
-                // 替换数据库上下文为测试数据库
+                // 替换数据库上下文为SQLite内存数据库
                 var descriptor = services.SingleOrDefault(
                     d => d.ServiceType == 
                         typeof(DbContextOptions<CrestCreatesDbContext>));
@@ -58,7 +39,7 @@ namespace CrestCreates.IntegrationTests
 
                 services.AddDbContext<CrestCreatesDbContext>(options =>
                 {
-                    options.UseSqlServer(_connectionString);
+                    options.UseSqlite("Data Source=:memory:");
                 });
                 
                 // 确保数据库创建和迁移
@@ -68,19 +49,20 @@ namespace CrestCreates.IntegrationTests
                     var scopedServices = scope.ServiceProvider;
                     var db = scopedServices.GetRequiredService<CrestCreatesDbContext>();
                     
+                    db.Database.OpenConnection();
                     db.Database.EnsureCreated();
                 }
             });
         }
         
-        public async Task InitializeAsync()
+        public Task InitializeAsync()
         {
-            await _dbContainer.StartAsync();
+            return Task.CompletedTask;
         }
 
-        public new async Task DisposeAsync()
+        public Task DisposeAsync()
         {
-            await _dbContainer.StopAsync();
+            return Task.CompletedTask;
         }
     }
 }

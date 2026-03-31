@@ -50,5 +50,10 @@ namespace CrestCreates.TestBase
         {
             return Fixture.CreateMany<T>(count);
         }
+
+        public virtual void Dispose()
+        {
+            // 子类可以重写此方法来释放资源
+        }
     }
 }
