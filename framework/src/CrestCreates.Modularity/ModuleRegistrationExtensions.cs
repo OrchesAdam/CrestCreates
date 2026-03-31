@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-namespace CrestCreates.Infrastructure.Modularity
+namespace CrestCreates.Modularity
 {
     public static class ModuleRegistrationExtensions
     {

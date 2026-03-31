@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using CrestCreates.Infrastructure.Modularity;
+using CrestCreates.Modularity;
 
 namespace CrestCreates.EventBus.EventStore
 {

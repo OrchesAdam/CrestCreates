@@ -909,6 +909,121 @@ public class ProductService
 }
 ```
 
+## 模块化注册功能
+
+### 1. 概述
+
+CrestCreates 框架现在支持使用模块化方式注册和配置 ORM 提供程序。通过模块化注册，您可以更灵活地管理 ORM 服务的生命周期和依赖关系。
+
+### 2. 核心模块
+
+#### 2.1 OrmModuleBase
+
+`OrmModuleBase` 是所有 ORM 模块的基类，提供了通用的服务注册逻辑：
+
+```csharp
+public abstract class OrmModuleBase
+{
+    public abstract void RegisterOrmServices(IServiceCollection services);
+    
+    public virtual void ConfigureServices(IServiceCollection services)
+    {
+        // 注册工作单元基础服务
+        services.AddScoped<IUnitOfWorkFactory, UnitOfWorkFactory>();
+        services.AddScoped<IUnitOfWorkManager>(sp =>
+            new UnitOfWorkManager(sp.GetRequiredService<IUnitOfWorkFactory>(), GetOrmProvider()));
+
+        // 注册具体 ORM 服务
+        RegisterOrmServices(services);
+    }
+    
+    protected abstract OrmProvider GetOrmProvider();
+}
+```
+
+#### 2.2 具体 ORM 模块
+
+框架为每种 ORM 实现提供了专门的模块：
+
+- **EfCoreOrmModule**：EF Core 实现的模块
+- **FreeSqlOrmModule**：FreeSql 实现的模块
+- **SqlSugarOrmModule**：SqlSugar 实现的模块
+
+### 3. 使用方法
+
+#### 3.1 在应用程序启动时注册 ORM 模块
+
+在 `Startup.cs` 或 `Program.cs` 中，您可以使用以下方式注册 ORM 模块：
+
+```csharp
+// 方法 1：直接注册特定 ORM 模块
+services.AddScoped<EfCoreOrmModule>();
+
+// 方法 2：使用 OrmModule 进行配置
+services.AddScoped<OrmModule>();
+```
+
+#### 3.2 配置 ORM 提供者
+
+您可以在 `appsettings.json` 中配置默认的 ORM 提供者：
+
+```json
+{
+  "OrmProvider": "EfCore" // 可选值：EfCore, FreeSql, SqlSugar
+}
+```
+
+#### 3.3 依赖注入使用
+
+在服务中，您可以直接注入 ORM 相关的接口：
+
+```csharp
+public class ProductService
+{
+    private readonly IRepository<Product, Guid> _repository;
+    private readonly IUnitOfWorkEnhanced _unitOfWork;
+
+    public ProductService(
+        IRepository<Product, Guid> repository,
+        IUnitOfWorkEnhanced unitOfWork)
+    {
+        _repository = repository;
+        _unitOfWork = unitOfWork;
+    }
+
+    // 业务方法...
+}
+```
+
+### 4. 示例：完整的启动配置
+
+```csharp
+// Program.cs
+var builder = WebApplication.CreateBuilder(args);
+
+// 注册 ORM 模块
+builder.Services.AddScoped<EfCoreOrmModule>();
+
+// 或者使用配置驱动的方式
+// builder.Services.AddScoped<OrmModule>();
+
+var app = builder.Build();
+
+// 应用程序配置...
+
+app.Run();
+```
+
+### 5. 优势
+
+使用模块化注册的优势：
+
+1. **统一管理**：所有 ORM 服务通过模块统一管理
+2. **灵活配置**：通过配置文件轻松切换 ORM 实现
+3. **依赖注入**：充分利用 .NET 的依赖注入系统
+4. **可扩展性**：易于添加新的 ORM 实现
+5. **一致性**：与框架的其他模块保持一致的注册方式
+
 ## 总结
 
 通过这套统一的抽象层，您可以：
@@ -918,5 +1033,6 @@ public class ProductService
 3. **提高可测试性**：基于接口编程，便于单元测试
 4. **支持高级功能**：多租户、软删除、审计等开箱即用
 5. **性能优化**：提供多种性能优化选项
+6. **模块化管理**：通过模块系统统一管理 ORM 服务
 
 开始使用这套抽象层，让您的数据访问代码更加优雅和强大！

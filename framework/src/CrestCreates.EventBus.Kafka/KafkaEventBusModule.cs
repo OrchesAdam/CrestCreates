@@ -1,7 +1,7 @@
 using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
-using CrestCreates.Infrastructure.Modularity;
+using CrestCreates.Modularity;
 
 namespace CrestCreates.EventBus.Kafka
 {

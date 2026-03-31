@@ -4,7 +4,7 @@ using System.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
-using CrestCreates.Infrastructure.Modularity;
+using CrestCreates.Modularity;
 using CrestCreates.CodeGenerator.Tests.Modules;
 
 namespace CrestCreates.CodeGenerator.Tests

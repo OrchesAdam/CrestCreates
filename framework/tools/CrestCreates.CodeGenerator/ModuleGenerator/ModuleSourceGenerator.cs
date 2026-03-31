@@ -96,8 +96,8 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         sb.AppendLine("using Microsoft.Extensions.Hosting;");
         sb.AppendLine("using Microsoft.Extensions.Logging;");
         sb.AppendLine("using System;");
-        sb.AppendLine("using CrestCreates.Infrastructure.Modularity;");
-        sb.AppendLine("namespace CrestCreates.Infrastructure.Modularity;");
+        sb.AppendLine("using CrestCreates.Modularity;");
+        sb.AppendLine("namespace CrestCreates.Modularity;");
         sb.AppendLine("public static class AutoModuleRegistration {");
         sb.Append("    public static readonly System.Collections.Generic.IReadOnlyList<string> RegisteredModules = new[] { ");
         sb.Append(string.Join(", ", modules.Select(m => $"\"{m.FullName}\"")));

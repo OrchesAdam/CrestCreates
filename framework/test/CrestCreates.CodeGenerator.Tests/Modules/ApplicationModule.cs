@@ -1,6 +1,6 @@
 using System;
 using CrestCreates.Domain.Shared.Attributes;
-using CrestCreates.Infrastructure.Modularity;
+using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;

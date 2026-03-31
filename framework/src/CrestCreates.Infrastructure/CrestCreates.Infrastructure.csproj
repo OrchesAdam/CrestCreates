@@ -37,9 +37,9 @@
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
-    <ProjectReference Include="..\CrestCreates.OrmProviders.Abstract\CrestCreates.OrmProviders.Abstract.csproj" />
-    <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.Application.Contracts\CrestCreates.Application.Contracts.csproj" />
+    <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Hosting;
-using CrestCreates.Infrastructure.Modularity;
+using CrestCreates.Modularity;
 
 namespace CrestCreates.Web
 {
