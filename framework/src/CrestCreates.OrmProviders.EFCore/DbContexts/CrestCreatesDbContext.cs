@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.OrmProviders.Abstract.Abstractions;
+using CrestCreates.Domain.Examples;
 
 namespace CrestCreates.OrmProviders.EFCore.DbContexts
 {
@@ -17,14 +18,50 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
             
         }
 
-        // DbSet properties for your entities go here
-        // Example:
-        // public DbSet<YourEntity> YourEntities { get; set; }
+        // DbSet properties for your entities
+        public DbSet<Product> Products { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
-            // Configure your entity mappings here
+            
+            // Configure Product entity
+            modelBuilder.Entity<Product>(entity =>
+            {
+                entity.ToTable("Products");
+                
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).ValueGeneratedNever();
+                
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+                entity.Property(e => e.Description).HasMaxLength(1000);
+                
+                // Map Money value object as owned entity
+                entity.OwnsOne(e => e.Price, price =>
+                {
+                    price.Property(p => p.Amount).HasColumnType("decimal(18,2)");
+                    price.Property(p => p.Currency).HasMaxLength(3);
+                });
+                
+                // Map ProductType enum as int
+                entity.Property(e => e.Type).HasConversion<int>();
+                
+                entity.Property(e => e.StockCount).IsRequired();
+                
+                // Audit fields
+                entity.Property(e => e.CreationTime).IsRequired();
+                entity.Property(e => e.CreatorId);
+                entity.Property(e => e.LastModificationTime);
+                entity.Property(e => e.LastModifierId);
+                
+                // Soft delete
+                entity.Property(e => e.IsDeleted).IsRequired().HasDefaultValue(false);
+                entity.Property(e => e.DeletionTime);
+                entity.Property(e => e.DeleterId);
+                
+                // Global filter for soft delete
+                entity.HasQueryFilter(e => !e.IsDeleted);
+            });
         }
 
         // IEntityFrameworkCoreDbContext implementation

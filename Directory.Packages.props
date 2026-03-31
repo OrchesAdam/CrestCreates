@@ -21,12 +21,14 @@
     <!-- Entity Framework Core -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="7.0.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="7.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="7.0.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Tools" Version="7.0.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="7.0.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="7.0.0" />
     <!-- ORM 提供程序 -->
     <PackageVersion Include="SqlSugarCore" Version="5.1.4.104" />
     <PackageVersion Include="FreeSql" Version="3.5.215" />
+    <PackageVersion Include="FreeSql.Provider.Sqlite" Version="3.5.215" />
     <!-- 中介者模式 -->
     <PackageVersion Include="MediatR" Version="11.1.0" />
     <PackageVersion Include="MediatR.Extensions.Microsoft.DependencyInjection" Version="11.1.0" />

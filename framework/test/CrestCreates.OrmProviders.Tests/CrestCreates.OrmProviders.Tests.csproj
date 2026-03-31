@@ -23,6 +23,8 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="FreeSql.Provider.Sqlite" />
+    <PackageReference Include="coverlet.collector" />
   </ItemGroup>
 
 </Project>

@@ -2,17 +2,45 @@ using System;
 using System.Threading.Tasks;
 using Xunit;
 using CrestCreates.OrmProviders.FreeSqlProvider.Repositories;
+using CrestCreates.OrmProviders.FreeSqlProvider.UnitOfWork;
 using CrestCreates.Domain.Entities;
+using FreeSql;
 
 namespace CrestCreates.OrmProviders.Tests
 {
-    public class FreeSqlRepositoryTests
+    // 具体的 FreeSql 仓储实现
+    public class TestFreeSqlRepository<TEntity, TKey> : FreeSqlRepository<TEntity, TKey>
+        where TEntity : class, IEntity<TKey>
+        where TKey : IEquatable<TKey>
     {
+        public TestFreeSqlRepository(FreeSqlUnitOfWorkManager uowManager) : base(uowManager, null)
+        {}
+    }
+
+    public class FreeSqlRepositoryTests : OrmTestBase
+    {
+        private readonly IFreeSql _freeSql;
+        private readonly FreeSqlUnitOfWorkManager _uowManager;
+
+        public FreeSqlRepositoryTests()
+        {
+            // 创建内存数据库
+            _freeSql = new FreeSqlBuilder()
+                .UseConnectionString(DataType.Sqlite, "DataSource=:memory:")
+                .Build();
+            
+            // 自动迁移表结构
+            _freeSql.CodeFirst.SyncStructure<TestOrder>();
+            _freeSql.CodeFirst.SyncStructure<TestSoftDeleteEntity>();
+            
+            _uowManager = new FreeSqlUnitOfWorkManager(_freeSql);
+        }
+
         [Fact]
         public async Task AddAsync_ShouldAddEntity()
         {
             // Arrange
-            var repository = new FreeSqlRepository<TestOrder, long>();
+            var repository = new TestFreeSqlRepository<TestOrder, long>(_uowManager);
             var order = new TestOrder(1, "ORD-001", Guid.NewGuid(), 100.00m);
 
             // Act
@@ -28,7 +56,7 @@ namespace CrestCreates.OrmProviders.Tests
         public async Task GetByIdAsync_ShouldReturnEntity()
         {
             // Arrange
-            var repository = new FreeSqlRepository<TestOrder, long>();
+            var repository = new TestFreeSqlRepository<TestOrder, long>(_uowManager);
             var order = new TestOrder(1, "ORD-001", Guid.NewGuid(), 100.00m);
             await repository.AddAsync(order);
 
@@ -44,7 +72,7 @@ namespace CrestCreates.OrmProviders.Tests
         public async Task UpdateAsync_ShouldUpdateEntity()
         {
             // Arrange
-            var repository = new FreeSqlRepository<TestOrder, long>();
+            var repository = new TestFreeSqlRepository<TestOrder, long>(_uowManager);
             var order = new TestOrder(1, "ORD-001", Guid.NewGuid(), 100.00m);
             await repository.AddAsync(order);
             order.SetOrderNumber("ORD-002");
@@ -61,16 +89,48 @@ namespace CrestCreates.OrmProviders.Tests
         public async Task DeleteAsync_ShouldDeleteEntity()
         {
             // Arrange
-            var repository = new FreeSqlRepository<TestOrder, long>();
+            var repository = new TestFreeSqlRepository<TestOrder, long>(_uowManager);
             var order = new TestOrder(1, "ORD-001", Guid.NewGuid(), 100.00m);
             await repository.AddAsync(order);
 
             // Act
-            await repository.DeleteAsync(1);
+            await repository.DeleteAsync(order);
             var result = await repository.GetByIdAsync(1);
 
             // Assert
             Assert.Null(result);
+        }
+
+        [Fact]
+        public async Task SoftDelete_ShouldMarkEntityAsDeleted()
+        {
+            // Arrange
+            var repository = new TestFreeSqlRepository<TestSoftDeleteEntity, long>(_uowManager);
+            var entity = new TestSoftDeleteEntity(1, "Test Entity");
+            await repository.AddAsync(entity);
+
+            // Act
+            await repository.DeleteAsync(entity);
+            var result = await repository.GetByIdAsync(1);
+
+            // Assert
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public async Task GetAllAsync_ShouldReturnAllEntities()
+        {
+            // Arrange
+            var repository = new TestFreeSqlRepository<TestOrder, long>(_uowManager);
+            await repository.AddAsync(new TestOrder(1, "Order 1", Guid.NewGuid(), 100.00m));
+            await repository.AddAsync(new TestOrder(2, "Order 2", Guid.NewGuid(), 200.00m));
+
+            // Act
+            var result = await repository.GetAllAsync();
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Equal(2, result.Count);
         }
     }
 
