@@ -36,13 +36,16 @@ namespace CrestCreates.OrmProviders.EFCore.UnitOfWork
         {
             try
             {
-                await SaveChangesWithEventsAsync();
+                var entities = GetEntitiesWithDomainEvents();
+                await SaveChangesAsync();
 
                 if (_currentTransaction != null)
                 {
                     await _currentTransaction.CommitAsync();
                     DisposeTransaction();
                 }
+
+                await PublishDomainEventsAsync(entities);
             }
             catch
             {
@@ -117,10 +120,37 @@ namespace CrestCreates.OrmProviders.EFCore.UnitOfWork
                     {
                         foreach (var domainEvent in domainEvents)
                         {
-                            await _domainEventPublisher.PublishAsync(domainEvent, cancellationToken);
+                            await PublishWithRetryAsync(domainEvent, cancellationToken);
                         }
                         clearDomainEventsMethod.Invoke(entity, null);
                     }
+                }
+            }
+        }
+
+        private async Task PublishWithRetryAsync(IDomainEvent domainEvent, CancellationToken cancellationToken = default, int maxRetries = 3)
+        {
+            int retryCount = 0;
+            while (true)
+            {
+                try
+                {
+                    await _domainEventPublisher.PublishAsync(domainEvent, cancellationToken);
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    retryCount++;
+                    if (retryCount >= maxRetries)
+                    {
+                        // 记录错误但不影响事务
+                        // 实际应用中应该使用日志系统
+                        Console.WriteLine($"Failed to publish event after {maxRetries} retries: {ex.Message}");
+                        break;
+                    }
+                    
+                    // 指数退避
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, retryCount)), cancellationToken);
                 }
             }
         }

@@ -54,9 +54,13 @@ namespace CrestCreates.OrmProviders.SqlSugar.UnitOfWork
 
             try
             {
-                await SaveChangesWithEventsAsync();
+                var entities = new List<object>(_trackedEntities);
+                await SaveChangesAsync();
                 await Task.Run(() => _sqlSugarClient.Ado.CommitTran());
                 _isTransactionStarted = false;
+
+                await PublishDomainEventsAsync(entities);
+                _trackedEntities.Clear();
             }
             catch
             {
@@ -143,10 +147,40 @@ namespace CrestCreates.OrmProviders.SqlSugar.UnitOfWork
                     {
                         foreach (var domainEvent in domainEvents)
                         {
-                            await _domainEventPublisher.PublishAsync(domainEvent, cancellationToken);
+                            await PublishWithRetryAsync(domainEvent, cancellationToken);
                         }
                         clearDomainEventsMethod.Invoke(entity, null);
                     }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 带重试机制的事件发布
+        /// </summary>
+        private async Task PublishWithRetryAsync(IDomainEvent domainEvent, CancellationToken cancellationToken = default, int maxRetries = 3)
+        {
+            int retryCount = 0;
+            while (true)
+            {
+                try
+                {
+                    await _domainEventPublisher.PublishAsync(domainEvent, cancellationToken);
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    retryCount++;
+                    if (retryCount >= maxRetries)
+                    {
+                        // 记录错误但不影响事务
+                        // 实际应用中应该使用日志系统
+                        Console.WriteLine($"Failed to publish event after {maxRetries} retries: {ex.Message}");
+                        break;
+                    }
+                    
+                    // 指数退避
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, retryCount)), cancellationToken);
                 }
             }
         }

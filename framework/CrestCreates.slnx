@@ -16,6 +16,10 @@
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/CrestCreates.CodeGenerator.Tests/CrestCreates.CodeGenerator.Tests.csproj" />
+    <Project Path="test/CrestCreates.Domain.Tests/CrestCreates.Domain.Tests.csproj" />
+    <Project Path="test/CrestCreates.EventBus.Tests/CrestCreates.EventBus.Tests.csproj" />
+    <Project Path="test/CrestCreates.Infrastructure.Tests/CrestCreates.Infrastructure.Tests.csproj" />
+    <Project Path="test/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj" />

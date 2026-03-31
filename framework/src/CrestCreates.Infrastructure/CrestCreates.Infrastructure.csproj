@@ -12,6 +12,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
+
     <PackageReference Include="SqlSugarCore" />
     <PackageReference Include="FreeSql" />
     <PackageReference Include="AutoMapper" />

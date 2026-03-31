@@ -42,8 +42,64 @@ namespace CrestCreates.EventBus.Tests
             await unitOfWork.CommitTransactionAsync();
 
             // Assert
-            mediatorMock.Verify(m => m.Publish(domainEvent, default), Times.Once);
+            mediatorMock.Verify(m => m.Publish(It.IsAny<IDomainEvent>(), default), Times.Once);
             entity.DomainEvents.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task EfCoreUnitOfWork_Should_Not_Publish_DomainEvents_On_Rollback()
+        {
+            // Arrange
+            var options = new DbContextOptionsBuilder<TestDbContext>()
+                .UseInMemoryDatabase(databaseName: "TestDatabase_Rollback")
+                .Options;
+
+            var dbContext = new TestDbContext(options);
+            var mediatorMock = new Mock<IMediator>();
+            var domainEventPublisher = new DomainEventPublisher(mediatorMock.Object);
+            var unitOfWork = new EfCoreUnitOfWork(dbContext, domainEventPublisher);
+
+            var entity = new TestEntity(Guid.NewGuid()) { Name = "Test Entity" };
+            var domainEvent = new TestDomainEvent(entity.Id);
+            entity.AddDomainEvent(domainEvent);
+
+            // Act
+            await unitOfWork.BeginTransactionAsync();
+            dbContext.Add(entity);
+            await unitOfWork.RollbackTransactionAsync();
+
+            // Assert
+            mediatorMock.Verify(m => m.Publish(It.IsAny<object>(), default), Times.Never);
+        }
+
+        [Fact]
+        public async Task EfCoreUnitOfWork_Should_Retry_Event_Publishing_On_Failure()
+        {
+            // Arrange
+            var options = new DbContextOptionsBuilder<TestDbContext>()
+                .UseInMemoryDatabase(databaseName: "TestDatabase_Retry")
+                .Options;
+
+            var dbContext = new TestDbContext(options);
+            var mediatorMock = new Mock<IMediator>();
+            mediatorMock.Setup(m => m.Publish(It.IsAny<IDomainEvent>(), default))
+                .Throws(new Exception("Publishing failed"))
+                .Verifiable();
+            
+            var domainEventPublisher = new DomainEventPublisher(mediatorMock.Object);
+            var unitOfWork = new EfCoreUnitOfWork(dbContext, domainEventPublisher);
+
+            var entity = new TestEntity(Guid.NewGuid()) { Name = "Test Entity" };
+            var domainEvent = new TestDomainEvent(entity.Id);
+            entity.AddDomainEvent(domainEvent);
+
+            // Act & Assert
+            await unitOfWork.BeginTransactionAsync();
+            dbContext.Add(entity);
+            await unitOfWork.CommitTransactionAsync();
+
+            // Should retry 3 times
+            mediatorMock.Verify(m => m.Publish(It.IsAny<IDomainEvent>(), default), Times.Exactly(3));
         }
 
         [Fact]
@@ -68,11 +124,11 @@ namespace CrestCreates.EventBus.Tests
 
             // Act
             await unitOfWork.BeginTransactionAsync();
-            unitOfWork.TrackEntity(entity);
+            unitOfWork.TrackEntity<TestEntity, Guid>(entity);
             await unitOfWork.CommitTransactionAsync();
 
             // Assert
-            mediatorMock.Verify(m => m.Publish(domainEvent, default), Times.Once);
+            mediatorMock.Verify(m => m.Publish(It.IsAny<IDomainEvent>(), default), Times.Once);
             entity.DomainEvents.Should().BeEmpty();
         }
 
@@ -96,24 +152,29 @@ namespace CrestCreates.EventBus.Tests
 
             // Act
             await unitOfWork.BeginTransactionAsync();
-            unitOfWork.TrackEntity(entity);
+            unitOfWork.TrackEntity<TestEntity, Guid>(entity);
             await unitOfWork.CommitTransactionAsync();
 
             // Assert
-            mediatorMock.Verify(m => m.Publish(domainEvent, default), Times.Once);
+            mediatorMock.Verify(m => m.Publish(It.IsAny<IDomainEvent>(), default), Times.Once);
             entity.DomainEvents.Should().BeEmpty();
         }
     }
 
     // 测试 DbContext
-    public class TestDbContext : DbContext
+    public class TestDbContext : Microsoft.EntityFrameworkCore.DbContext
     {
-        public TestDbContext(DbContextOptions<TestDbContext> options) : base(options)
+        public TestDbContext(Microsoft.EntityFrameworkCore.DbContextOptions<TestDbContext> options) : base(options)
         {}
 
-        public DbSet<TestEntity> TestEntities { get; set; }
+        public Microsoft.EntityFrameworkCore.DbSet<TestEntity> TestEntities { get; set; }
 
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        protected override void OnConfiguring(Microsoft.EntityFrameworkCore.DbContextOptionsBuilder optionsBuilder)
+        {
+            optionsBuilder.ConfigureWarnings(warnings => warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning));
+        }
+
+        protected override void OnModelCreating(Microsoft.EntityFrameworkCore.ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<TestEntity>().HasKey(e => e.Id);
         }

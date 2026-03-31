@@ -1,73 +1,129 @@
 using System;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using StackExchange.Redis;
-using System.Text.Json;
 
 namespace CrestCreates.Infrastructure.Caching
 {
     public class RedisCache : ICache
     {
+        private readonly ConnectionMultiplexer _connectionMultiplexer;
         private readonly IDatabase _database;
-        private readonly JsonSerializerOptions _jsonSerializerOptions;
 
-        public RedisCache(IConnectionMultiplexer connectionMultiplexer)
+        public RedisCache(string connectionString)
         {
+            _connectionMultiplexer = ConnectionMultiplexer.Connect(connectionString);
+            _database = _connectionMultiplexer.GetDatabase();
+        }
+
+        public RedisCache(ConnectionMultiplexer connectionMultiplexer)
+        {
+            _connectionMultiplexer = connectionMultiplexer;
             _database = connectionMultiplexer.GetDatabase();
-            _jsonSerializerOptions = new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                WriteIndented = false,
-                IncludeFields = true
-            };
         }
 
         public async Task<T> GetAsync<T>(string key, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var value = await _database.StringGetAsync(key);
-            if (value.HasValue)
+            
+            try
             {
-                string jsonValue = value.ToString();
-                return JsonSerializer.Deserialize<T>(jsonValue, _jsonSerializerOptions);
+                var value = await _database.StringGetAsync(key);
+                if (value.HasValue)
+                {
+                    return JsonSerializer.Deserialize<T>(value.ToString());
+                }
+                return default;
             }
-            return default;
+            catch (RedisConnectionException ex)
+            {
+                // 处理 Redis 连接失败，返回默认值
+                Console.WriteLine($"Redis connection error: {ex.Message}");
+                return default;
+            }
         }
 
         public async Task SetAsync<T>(string key, T value, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var jsonValue = JsonSerializer.Serialize(value, _jsonSerializerOptions);
-            if (expiration.HasValue)
+            
+            try
             {
-                await _database.StringSetAsync(key, jsonValue, expiration.Value);
+                var jsonValue = JsonSerializer.Serialize(value);
+                if (expiration.HasValue)
+                {
+                    await _database.StringSetAsync(key, jsonValue, expiration.Value);
+                }
+                else
+                {
+                    await _database.StringSetAsync(key, jsonValue);
+                }
             }
-            else
+            catch (RedisConnectionException ex)
             {
-                await _database.StringSetAsync(key, jsonValue);
+                // 处理 Redis 连接失败，记录错误但不影响主流程
+                Console.WriteLine($"Redis connection error: {ex.Message}");
             }
         }
 
         public async Task RemoveAsync(string key, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await _database.KeyDeleteAsync(key);
+            
+            try
+            {
+                await _database.KeyDeleteAsync(key);
+            }
+            catch (RedisConnectionException ex)
+            {
+                // 处理 Redis 连接失败，记录错误但不影响主流程
+                Console.WriteLine($"Redis connection error: {ex.Message}");
+            }
         }
 
         public async Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return await _database.KeyExistsAsync(key);
+            
+            try
+            {
+                return await _database.KeyExistsAsync(key);
+            }
+            catch (RedisConnectionException ex)
+            {
+                // 处理 Redis 连接失败，返回 false
+                Console.WriteLine($"Redis connection error: {ex.Message}");
+                return false;
+            }
         }
 
         public async Task ClearAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var endpoints = _database.Multiplexer.GetEndPoints();
-            foreach (var endpoint in endpoints)
+            
+            try
             {
-                var server = _database.Multiplexer.GetServer(endpoint);
+                var server = _connectionMultiplexer.GetServer(_connectionMultiplexer.GetEndPoints()[0]);
                 await server.FlushDatabaseAsync(_database.Database);
+            }
+            catch (RedisConnectionException ex)
+            {
+                // 处理 Redis 连接失败，记录错误但不影响主流程
+                Console.WriteLine($"Redis connection error: {ex.Message}");
+            }
+        }
+
+        // 健康检查方法
+        public bool IsHealthy()
+        {
+            try
+            {
+                return _connectionMultiplexer.IsConnected;
+            }
+            catch
+            {
+                return false;
             }
         }
     }
