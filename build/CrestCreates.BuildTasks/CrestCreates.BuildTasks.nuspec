@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>CrestCreates.BuildTasks</id>
+    <version>1.0.0</version>
+    <title>CrestCreates Module Discovery Build Tasks</title>
+    <authors>CrestCreates Team</authors>
+    <description>MSBuild tasks for automatic module discovery and registration in CrestCreates framework</description>
+    <copyright>Copyright © 2024</copyright>
+    <license type="expression">MIT</license>
+    <projectUrl>https://github.com/crestcreates/crestcreates</projectUrl>
+    <tags>crestcreates module msbuild</tags>
+    <developmentDependency>true</developmentDependency>
+    <dependencies>
+      <group targetFramework="net10.0" />
+    </dependencies>
+  </metadata>
+  <files>
+    <!-- Build tasks DLL -->
+    <file src="bin\Release\net10.0\CrestCreates.BuildTasks.dll" target="build\net10.0\CrestCreates.BuildTasks.dll" />
+    
+    <!-- MSBuild props and targets -->
+    <file src="build\CrestCreates.BuildTasks.props" target="build\CrestCreates.BuildTasks.props" />
+    <file src="build\CrestCreates.BuildTasks.targets" target="build\CrestCreates.BuildTasks.targets" />
+    
+    <!-- Documentation -->
+    <file src="..\..\docs\ModuleDiscovery.md" target="docs\ModuleDiscovery.md" />
+  </files>
+</package>

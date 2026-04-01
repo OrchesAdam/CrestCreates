@@ -1,0 +1,84 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  
+  <!-- 
+    CrestCreates Build Tasks Targets File
+    This file contains the MSBuild targets for module discovery
+  -->
+  
+  <!-- Import the build tasks assembly -->
+  <UsingTask TaskName="CrestCreates.BuildTasks.ScanModulesFromSource" AssemblyFile="$(MSBuildThisFileDirectory)net10.0\CrestCreates.BuildTasks.dll" />
+  <UsingTask TaskName="CrestCreates.BuildTasks.CollectModuleManifests" AssemblyFile="$(MSBuildThisFileDirectory)net10.0\CrestCreates.BuildTasks.dll" />
+  <UsingTask TaskName="CrestCreates.BuildTasks.GenerateAggregatedModuleCode" AssemblyFile="$(MSBuildThisFileDirectory)net10.0\CrestCreates.BuildTasks.dll" />
+  
+  <!-- 
+    Target: GenerateModuleManifest
+    Description: Scans source files for [Module] attributes and generates a manifest
+    Runs: Before Build
+  -->
+  <Target Name="GenerateModuleManifest"
+          BeforeTargets="BeforeBuild"
+          Condition="'$(EnableModuleManifestGeneration)' == 'true'">
+    
+    <PropertyGroup>
+      <_ModuleSourceFiles>@(Compile->'%(FullPath)')</_ModuleSourceFiles>
+    </PropertyGroup>
+    
+    <ScanModulesFromSource
+      SourceFiles="$(_ModuleSourceFiles)"
+      OutputPath="$(ModuleManifestOutputPath)" />
+    
+    <Message Text="[CrestCreates] Generated module manifest: $(ModuleManifestOutputPath)" Importance="high" />
+  </Target>
+  
+  <!-- 
+    Target: CollectAndGenerateAggregatedModules
+    Description: Collects modules from referenced projects and generates registration code
+    Runs: After GenerateModuleManifest
+  -->
+  <Target Name="CollectAndGenerateAggregatedModules"
+          AfterTargets="GenerateModuleManifest"
+          Condition="'$(EnableModuleManifestGeneration)' == 'true' AND Exists('$(ModuleManifestOutputPath)')">
+    
+    <ItemGroup>
+      <_ModuleManifestFiles Include="$(ModuleManifestOutputPath)" />
+    </ItemGroup>
+    
+    <Message Text="[CrestCreates] Looking for module manifests in referenced projects..." Importance="high" />
+    
+    <ItemGroup>
+      <_ReferencedProjectPaths Include="@(ProjectReference->'%(FullPath)')" />
+    </ItemGroup>
+    
+    <CollectModuleManifests
+      ModuleManifestFiles="@(_ModuleManifestFiles)"
+      ReferencedProjectPaths="@(_ReferencedProjectPaths)"
+      OutputPath="$(AggregatedModuleManifestPath)" />
+    
+    <Message Text="[CrestCreates] Collected modules to: $(AggregatedModuleManifestPath)" Importance="high" />
+    
+    <GenerateAggregatedModuleCode
+      ModuleManifestFile="$(AggregatedModuleManifestPath)"
+      OutputPath="$(AggregatedModuleCodePath)"
+      Namespace="$(RootNamespace)" />
+    
+    <Message Text="[CrestCreates] Generated module registration code: $(AggregatedModuleCodePath)" Importance="high" />
+    
+    <!-- Include the generated file in compilation -->
+    <ItemGroup>
+      <Compile Include="$(AggregatedModuleCodePath)" />
+    </ItemGroup>
+  </Target>
+  
+  <!-- 
+    Target: CleanModuleManifests
+    Description: Cleans up generated module manifests during clean build
+    Runs: During Clean
+  -->
+  <Target Name="CleanModuleManifests" AfterTargets="Clean">
+    <Delete Files="$(ModuleManifestOutputPath)" Condition="Exists('$(ModuleManifestOutputPath)')" />
+    <Delete Files="$(AggregatedModuleManifestPath)" Condition="Exists('$(AggregatedModuleManifestPath)')" />
+    <Delete Files="$(AggregatedModuleCodePath)" Condition="Exists('$(AggregatedModuleCodePath)')" />
+    <Message Text="[CrestCreates] Cleaned module manifests" Importance="normal" />
+  </Target>
+  
+</Project>
