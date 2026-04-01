@@ -20,6 +20,7 @@
     <ProjectReference Include="..\..\src\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- 包引用 -->

@@ -26,6 +26,7 @@
     <Project Path="src/CrestCreates.Validation/CrestCreates.Validation.csproj" />
   </Folder>
   <Folder Name="/src/Module/">
+    <Project Path="src/CrestCreates.AspNetCore/CrestCreates.AspNetCore.csproj" />
     <Project Path="src/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
     <Project Path="src/CrestCreates.FileManagement/CrestCreates.FileManagement.csproj" />
     <Project Path="src/CrestCreates.HealthCheck.AspNetCore/CrestCreates.HealthCheck.AspNetCore.csproj" />
@@ -50,6 +51,8 @@
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/CrestCreates.CodeGenerator.Tests/CrestCreates.CodeGenerator.Tests.csproj" />
+    <Project Path="test/CrestCreates.Core/CrestCreates.Core.csproj" />
+    <Project Path="test/CrestCreates.Data/CrestCreates.Data.csproj" />
     <Project Path="test/CrestCreates.Database.Migrations.Tests/CrestCreates.Database.Migrations.Tests.csproj" />
     <Project Path="test/CrestCreates.DistributedTransaction.Tests/CrestCreates.DistributedTransaction.Tests.csproj" />
     <Project Path="test/CrestCreates.Domain.Tests/CrestCreates.Domain.Tests.csproj" />
@@ -59,6 +62,7 @@
     <Project Path="test/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj" />
     <Project Path="tools/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj" />
   </Folder>
 </Solution>

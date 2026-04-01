@@ -52,6 +52,9 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.Common" Version="4.8.0" />
+    <!-- MSBuild -->
+    <PackageVersion Include="Microsoft.Build.Framework" Version="17.10.4" />
+    <PackageVersion Include="Microsoft.Build.Utilities.Core" Version="17.10.4" />
     <!-- Web 相关 -->
     <PackageVersion Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.2.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Http" Version="2.2.2" />

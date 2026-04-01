@@ -5,12 +5,16 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 
 namespace CrestCreates.CodeGenerator.ModuleGenerator;
 
 [Generator]
 public class ModuleSourceGenerator : IIncrementalGenerator
 {
+    private const string ModuleMarkerAttribute = "ModuleAttribute";
+    private const string DependsOnAttribute = "DependsOn";
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var modulesProvider = context.SyntaxProvider
@@ -20,6 +24,27 @@ public class ModuleSourceGenerator : IIncrementalGenerator
             .Where(static m => m is not null);
 
         context.RegisterSourceOutput(modulesProvider.Collect(), GenerateModuleCode);
+
+        context.RegisterPostInitializationOutput(static context =>
+        {
+            context.AddSource("ModuleDescriptor.g.cs", SourceText.From(@"
+namespace CrestCreates.Modularity
+{
+    public readonly struct ModuleDescriptor
+    {
+        public ModuleDescriptor(System.Type moduleType, int order, bool autoRegisterServices)
+        {
+            ModuleType = moduleType;
+            Order = order;
+            AutoRegisterServices = autoRegisterServices;
+        }
+
+        public System.Type ModuleType { get; }
+        public int Order { get; }
+        public bool AutoRegisterServices { get; }
+    }
+}", Encoding.UTF8));
+        });
     }
 
     private static ModuleInfo? GetModuleInfo(GeneratorSyntaxContext context)
@@ -29,7 +54,7 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         if (symbol is null) return null;
 
         var moduleAttribute = symbol.GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.Name == "ModuleAttribute");
+            .FirstOrDefault(a => a.AttributeClass?.Name == ModuleMarkerAttribute);
         if (moduleAttribute is null) return null;
 
         var dependencies = new List<string>();
@@ -58,7 +83,7 @@ public class ModuleSourceGenerator : IIncrementalGenerator
 
         foreach (var namedArg in moduleAttribute.NamedArguments)
         {
-            if (namedArg.Key == "DependsOn" && namedArg.Value.Value is ImmutableArray<TypedConstant> types)
+            if (namedArg.Key == DependsOnAttribute && namedArg.Value.Value is ImmutableArray<TypedConstant> types)
             {
                 dependsOn = new List<string>();
                 foreach (var type in types)
@@ -91,115 +116,198 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         var validModules = modules.Where(m => m is not null).Cast<ModuleInfo>().ToList();
         if (validModules.Count == 0) return;
 
-        var sortedModules = TopologicalSort(validModules);
-        if (sortedModules is null)
-        {
-            context.ReportDiagnostic(Diagnostic.Create(new DiagnosticDescriptor("MODULE001", "Circular dependency", "Module dependencies contain circular reference", "ModuleGenerator", DiagnosticSeverity.Error, true), Location.None));
-            return;
-        }
-        GenerateRegistrationCode(context, sortedModules);
+        GenerateModuleExtensions(context, validModules);
     }
 
-    private static List<ModuleInfo>? TopologicalSort(List<ModuleInfo> modules)
+    private static void GenerateModuleExtensions(SourceProductionContext context, List<ModuleInfo> modules)
+    {
+        var sortedModules = TopologicalSort(modules);
+
+        GenerateAutoModuleRegistration(context, sortedModules);
+
+        foreach (var module in modules)
+        {
+            var extensionCode = GenerateSingleModuleExtension(module);
+            context.AddSource($"{module.Name}Extensions.g.cs", SourceText.From(extensionCode, Encoding.UTF8));
+        }
+    }
+
+    private static void GenerateAutoModuleRegistration(SourceProductionContext context, List<ModuleInfo> sortedModules)
+    {
+        var moduleListJson = System.Text.Json.JsonSerializer.Serialize(sortedModules.Select(m => new
+        {
+            m.FullName,
+            m.Name,
+            m.Namespace,
+            m.DependsOn,
+            m.Order,
+            m.AutoRegisterServices
+        }).ToList());
+
+        var sb = new StringBuilder();
+        sb.AppendLine("#nullable enable");
+        sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
+        sb.AppendLine("using Microsoft.Extensions.Hosting;");
+        sb.AppendLine("using Microsoft.Extensions.Logging;");
+        sb.AppendLine("using System;");
+        sb.AppendLine("using System.Collections.Generic;");
+        sb.AppendLine("using System.Linq;");
+        sb.AppendLine("using CrestCreates.Modularity;");
+        sb.AppendLine();
+        sb.AppendLine("namespace CrestCreates.Modularity {");
+        sb.AppendLine();
+        sb.AppendLine("    public class ModuleInfo {");
+        sb.AppendLine("        public string FullName { get; set; } = string.Empty;");
+        sb.AppendLine("        public string Name { get; set; } = string.Empty;");
+        sb.AppendLine("        public string Namespace { get; set; } = string.Empty;");
+        sb.AppendLine("        public List<string> DependsOn { get; set; } = new();");
+        sb.AppendLine("        public int Order { get; set; }");
+        sb.AppendLine("        public bool AutoRegisterServices { get; set; }");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    public static class ModuleDescriptorRegistry {");
+        sb.AppendLine("        private static readonly List<ModuleDescriptor> _descriptors = new();");
+        sb.AppendLine("        private static readonly object _lock = new();");
+        sb.AppendLine("        private static bool _initialized = false;");
+        sb.AppendLine("        ");
+        sb.AppendLine("        public static void Register(System.Type moduleType, int order, bool autoRegisterServices) {");
+        sb.AppendLine("            lock (_lock) {");
+        sb.AppendLine("                if (_descriptors.Any(d => d.ModuleType == moduleType)) return;");
+        sb.AppendLine("                _descriptors.Add(new ModuleDescriptor(moduleType, order, autoRegisterServices));");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine("        ");
+        sb.AppendLine("        public static IReadOnlyList<ModuleDescriptor> GetDescriptors() {");
+        sb.AppendLine("            lock (_lock) {");
+        sb.AppendLine("                if (!_initialized) {");
+        sb.AppendLine("                    _initialized = true;");
+        sb.AppendLine("                    var modules = System.Text.Json.JsonSerializer.Deserialize<List<ModuleInfo>>(ModuleListJson);");
+        sb.AppendLine("                    if (modules != null) {");
+        sb.AppendLine("                        foreach (var moduleJson in modules) {");
+        sb.AppendLine("                            var moduleType = System.Type.GetType(moduleJson.FullName);");
+        sb.AppendLine("                            if (moduleType != null) {");
+        sb.AppendLine("                                _descriptors.Add(new ModuleDescriptor(moduleType, moduleJson.Order, moduleJson.AutoRegisterServices));");
+        sb.AppendLine("                            }");
+        sb.AppendLine("                        }");
+        sb.AppendLine("                    }");
+        sb.AppendLine("                }");
+        sb.AppendLine("                return _descriptors.OrderBy(d => d.Order).ToList();");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine("        ");
+        sb.AppendLine($"        private static readonly string ModuleListJson = @\"{moduleListJson.Replace("\"", "\"\"")}\";");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    public static class ModuleAutoInitializer {");
+        sb.Append("        public static readonly IReadOnlyList<string> RegisteredModules = new[] { ");
+        sb.Append(string.Join(", ", sortedModules.Select(m => $"\"{m.FullName}\"")));
+        sb.AppendLine(" };");
+        sb.AppendLine();
+        sb.AppendLine("        public static IHostBuilder RegisterModules(this IHostBuilder hostBuilder) {");
+        sb.AppendLine("            return hostBuilder.ConfigureServices((context, services) => {");
+        sb.AppendLine("                var descriptors = ModuleDescriptorRegistry.GetDescriptors();");
+        sb.AppendLine("                foreach (var descriptor in descriptors) {");
+        sb.AppendLine("                    services.AddSingleton(descriptor.ModuleType);");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }).ConfigureServices((context, services) => {");
+        sb.AppendLine("                var descriptors = ModuleDescriptorRegistry.GetDescriptors();");
+        sb.AppendLine("                var sp = services.BuildServiceProvider();");
+        sb.AppendLine("                var loggerFactory = sp.GetService<ILoggerFactory>();");
+        sb.AppendLine("                var logger = loggerFactory?.CreateLogger<IModule>();");
+        sb.AppendLine("                ");
+        sb.AppendLine("                foreach (var descriptor in descriptors) {");
+        sb.AppendLine("                    try { logger?.LogInformation(\"[PreInit] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
+        sb.AppendLine("                    try { ((IModule)sp.GetRequiredService(descriptor.ModuleType)).OnPreInitialize(); } catch (Exception ex) { logger?.LogError(ex, \"Error during PreInit phase\"); throw; }");
+        sb.AppendLine("                }");
+        sb.AppendLine("                ");
+        sb.AppendLine("                foreach (var descriptor in descriptors) {");
+        sb.AppendLine("                    try { logger?.LogInformation(\"[Init] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
+        sb.AppendLine("                    try { ((IModule)sp.GetRequiredService(descriptor.ModuleType)).OnInitialize(); } catch (Exception ex) { logger?.LogError(ex, \"Error during Init phase\"); throw; }");
+        sb.AppendLine("                }");
+        sb.AppendLine("                ");
+        sb.AppendLine("                foreach (var descriptor in descriptors) {");
+        sb.AppendLine("                    try { logger?.LogInformation(\"[PostInit] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
+        sb.AppendLine("                    try { ((IModule)sp.GetRequiredService(descriptor.ModuleType)).OnPostInitialize(); } catch (Exception ex) { logger?.LogError(ex, \"Error during PostInit phase\"); throw; }");
+        sb.AppendLine("                }");
+        sb.AppendLine("                ");
+        sb.AppendLine("                foreach (var descriptor in descriptors.Where(d => d.AutoRegisterServices)) {");
+        sb.AppendLine("                    try { logger?.LogInformation(\"[ConfigureServices] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
+        sb.AppendLine("                    try { ((IModule)sp.GetRequiredService(descriptor.ModuleType)).OnConfigureServices(services); } catch (Exception ex) { logger?.LogError(ex, \"Error during ConfigureServices phase\"); throw; }");
+        sb.AppendLine("                }");
+        sb.AppendLine("            });");
+        sb.AppendLine("        }");
+        sb.AppendLine("        ");
+        sb.AppendLine("        public static IHost InitializeModules(this IHost host) {");
+        sb.AppendLine("            var logger = host.Services.GetService<ILogger<IModule>>();");
+        sb.AppendLine("            var descriptors = ModuleDescriptorRegistry.GetDescriptors();");
+        sb.AppendLine("            ");
+        sb.AppendLine("            foreach (var descriptor in descriptors) {");
+        sb.AppendLine("                try { logger?.LogInformation(\"[AppInit] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
+        sb.AppendLine("                try { ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnApplicationInitialization(host); } catch (Exception ex) { logger?.LogError(ex, \"Error during AppInit phase\"); throw; }");
+        sb.AppendLine("            }");
+        sb.AppendLine("            ");
+        sb.AppendLine("            return host;");
+        sb.AppendLine("        }");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        context.AddSource("AutoModuleRegistration.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+    }
+
+    private static List<ModuleInfo> TopologicalSort(List<ModuleInfo> modules)
     {
         var sorted = new List<ModuleInfo>();
         var visited = new HashSet<string>();
         var visiting = new HashSet<string>();
         foreach (var module in modules.OrderBy(m => m.Order))
-            if (!Visit(module, modules, visited, visiting, sorted)) return null;
+            Visit(module, modules, visited, visiting, sorted);
         return sorted;
     }
 
-    private static bool Visit(ModuleInfo module, List<ModuleInfo> all, HashSet<string> visited, HashSet<string> visiting, List<ModuleInfo> sorted)
+    private static void Visit(ModuleInfo module, List<ModuleInfo> all, HashSet<string> visited, HashSet<string> visiting, List<ModuleInfo> sorted)
     {
-        if (visited.Contains(module.Name)) return true;
-        if (visiting.Contains(module.Name)) return false;
+        if (visited.Contains(module.Name)) return;
+        if (visiting.Contains(module.Name)) return;
         visiting.Add(module.Name);
         foreach (var depName in module.DependsOn)
         {
             var dep = all.FirstOrDefault(m => m.Name == depName || m.FullName == depName);
-            if (dep is not null && !Visit(dep, all, visited, visiting, sorted)) return false;
+            if (dep is not null) Visit(dep, all, visited, visiting, sorted);
         }
         visiting.Remove(module.Name);
         visited.Add(module.Name);
         sorted.Add(module);
-        return true;
     }
 
-    private static void GenerateRegistrationCode(SourceProductionContext context, List<ModuleInfo> modules)
+    private static string GenerateSingleModuleExtension(ModuleInfo module)
     {
         var sb = new StringBuilder();
+        sb.AppendLine("#nullable enable");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
         sb.AppendLine("using Microsoft.Extensions.Hosting;");
-        sb.AppendLine("using Microsoft.Extensions.Logging;");
         sb.AppendLine("using System;");
         sb.AppendLine("using CrestCreates.Modularity;");
-        sb.AppendLine("namespace CrestCreates.Modularity;");
-        sb.AppendLine("public static class AutoModuleRegistration {");
-        sb.Append("    public static readonly System.Collections.Generic.IReadOnlyList<string> RegisteredModules = new[] { ");
-        sb.Append(string.Join(", ", modules.Select(m => $"\"{m.FullName}\"")));
-        sb.AppendLine(" };");
-        sb.AppendLine("    public static IHostBuilder RegisterModules(this IHostBuilder hostBuilder) {");
-        sb.AppendLine("        return hostBuilder.ConfigureServices((context, services) => {");
-        foreach (var m in modules) sb.AppendLine($"            services.AddSingleton<{m.FullName}>();");
-        sb.AppendLine("        }).ConfigureServices((context, services) => {");
-        sb.AppendLine("            var sp = services.BuildServiceProvider();");
-        sb.AppendLine("            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();");
-        sb.AppendLine("            var logger = loggerFactory.CreateLogger<IModule>();");
-        sb.AppendLine("            logger?.LogInformation(\"Starting module initialization process...\");");
-        foreach (var m in modules) {
-            sb.AppendLine("            try {");
-            sb.AppendLine($"                logger?.LogInformation(\"[PreInit] {m.Name}\");");
-            sb.AppendLine($"                sp.GetRequiredService<{m.FullName}>().OnPreInitialize();");
-            sb.AppendLine("            } catch (Exception ex) {");
-            sb.AppendLine($"                logger?.LogError(ex, \"Error during PreInit phase of module {m.Name}\");");
-            sb.AppendLine("                throw;");
-            sb.AppendLine("            }");
-        }
-        foreach (var m in modules) {
-            sb.AppendLine("            try {");
-            sb.AppendLine($"                logger?.LogInformation(\"[Init] {m.Name}\");");
-            sb.AppendLine($"                sp.GetRequiredService<{m.FullName}>().OnInitialize();");
-            sb.AppendLine("            } catch (Exception ex) {");
-            sb.AppendLine($"                logger?.LogError(ex, \"Error during Init phase of module {m.Name}\");");
-            sb.AppendLine("                throw;");
-            sb.AppendLine("            }");
-        }
-        foreach (var m in modules) {
-            sb.AppendLine("            try {");
-            sb.AppendLine($"                logger?.LogInformation(\"[PostInit] {m.Name}\");");
-            sb.AppendLine($"                sp.GetRequiredService<{m.FullName}>().OnPostInitialize();");
-            sb.AppendLine("            } catch (Exception ex) {");
-            sb.AppendLine($"                logger?.LogError(ex, \"Error during PostInit phase of module {m.Name}\");");
-            sb.AppendLine("                throw;");
-            sb.AppendLine("            }");
-        }
-        foreach (var m in modules) {
-            sb.AppendLine("            try {");
-            sb.AppendLine($"                logger?.LogInformation(\"[ConfigureServices] {m.Name}\");");
-            sb.AppendLine($"                sp.GetRequiredService<{m.FullName}>().OnConfigureServices(services);");
-            sb.AppendLine("            } catch (Exception ex) {");
-            sb.AppendLine($"                logger?.LogError(ex, \"Error during ConfigureServices phase of module {m.Name}\");");
-            sb.AppendLine("                throw;");
-            sb.AppendLine("            }");
-        }
-        sb.AppendLine("            logger?.LogInformation(\"Module initialization process completed.\");");
-        sb.AppendLine("        }); }");
-        sb.AppendLine("    public static IHost InitializeModules(this IHost host) {");
-        sb.AppendLine("        var logger = host.Services.GetService<ILogger<IModule>>();");
-        sb.AppendLine("        logger?.LogInformation(\"Starting application initialization process for modules...\");");
-        foreach (var m in modules) {
-            sb.AppendLine("        try {");
-            sb.AppendLine($"            logger?.LogInformation(\"[AppInit] {m.Name}\");");
-            sb.AppendLine($"            host.Services.GetRequiredService<{m.FullName}>().OnApplicationInitialization(host);");
-            sb.AppendLine("        } catch (Exception ex) {");
-            sb.AppendLine($"            logger?.LogError(ex, \"Error during ApplicationInitialization phase of module {m.Name}\");");
-            sb.AppendLine("            throw;");
-            sb.AppendLine("        }");
-        }
-        sb.AppendLine("        logger?.LogInformation(\"Application initialization process for modules completed.\");");
-        sb.AppendLine("        return host; } }");
-        context.AddSource("AutoModuleRegistration.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+        sb.AppendLine();
+        sb.AppendLine($"namespace {module.Namespace}");
+        sb.AppendLine("{");
+        sb.AppendLine($"    public static class {module.Name}Extensions");
+        sb.AppendLine("    {");
+        sb.AppendLine($"        public static IServiceCollection Add{module.Name}(this IServiceCollection services)");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            services.AddSingleton<{module.FullName}>();");
+        sb.AppendLine($"            ModuleDescriptorRegistry.Register(typeof({module.FullName}), {module.Order}, {module.AutoRegisterServices.ToString().ToLower()});");
+        sb.AppendLine($"            return services;");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        sb.AppendLine($"        public static IHostBuilder Add{module.Name}(this IHostBuilder hostBuilder)");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            return hostBuilder.ConfigureServices((context, services) => services.Add{module.Name}());");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        sb.AppendLine($"        public static {module.FullName} Get{module.Name}(this IServiceProvider services) => services.GetRequiredService<{module.FullName}>();");
+        sb.AppendLine($"        public static {module.FullName}? TryGet{module.Name}(this IServiceProvider services) => services.GetService<{module.FullName}>();");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        return sb.ToString();
     }
 
     private class ModuleInfo
@@ -212,7 +320,7 @@ public class ModuleSourceGenerator : IIncrementalGenerator
             Order = order;
             AutoRegisterServices = autoRegisterServices;
         }
-        
+
         public string Name { get; }
         public string Namespace { get; }
         public List<string> DependsOn { get; }

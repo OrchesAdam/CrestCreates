@@ -18,6 +18,7 @@ using CrestCreates.Infrastructure.Logging;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
 using CrestCreates.Web.Middlewares;
 using CrestCreates.Domain.Shared;
+using CrestCreates.Modularity;
 
 namespace CrestCreates.Web
 {
@@ -32,7 +33,6 @@ namespace CrestCreates.Web
 
         public void ConfigureServices(IServiceCollection services)
         {
-            // 添加Serilog日志
             services.AddSerilogLogging(config =>
             {
                 config.MinimumLevel = Microsoft.Extensions.Logging.LogLevel.Information;
@@ -41,53 +41,48 @@ namespace CrestCreates.Web
                 config.FilePath = "logs/log-.txt";
             });
 
-            // 添加MVC
             services.AddControllers()
                 .AddJsonOptions(options =>
                 {
                     options.JsonSerializerOptions.PropertyNamingPolicy = null;
                 });
 
-            // Swagger
             services.AddEndpointsApiExplorer();
             services.AddSwaggerGen(c =>
             {
                 c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo { Title = "CrestCreates API", Version = "v1" });
             });
 
-            // 添加DbContext
             services.AddDbContext<CrestCreatesDbContext>(options =>
                 options.UseSqlServer(Configuration.GetConnectionString("Default")));
 
-            // 添加工作单元
             services.AddUnitOfWork(OrmProvider.EfCore);
 
-            // 添加MediatR
             services.AddMediatR(typeof(Startup).Assembly);
 
-            // 添加事件总线
             services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, CrestCreates.EventBus.Local.LocalEventBus>();
             services.AddScoped<CrestCreates.Domain.DomainEvents.IDomainEventPublisher, CrestCreates.EventBus.Local.DomainEventPublisher>();
 
-            // 添加多租户支持
             services.AddSingleton<ICurrentTenant, CurrentTenant>();
 
-            // 添加本地化
-            services.AddScoped<ILocalizationProvider, JsonResourceLocalizationProvider>(sp => 
+            services.AddScoped<ILocalizationProvider, JsonResourceLocalizationProvider>(sp =>
                 new JsonResourceLocalizationProvider("Localization/Resources"));
-            
-            // 添加缓存系统
+
             services.AddCaching(config =>
             {
-                config.Provider = "memory"; // 可以切换为 "redis"
+                config.Provider = "memory";
                 config.DefaultExpiration = TimeSpan.FromMinutes(30);
             });
-            
-            // 添加Automapper
+
             services.AddAutoMapper(typeof(Startup).Assembly);
 
-            // TODO: 添加生成的服务（需要实现）
-            // services.AddGeneratedServices();
+            Console.WriteLine("=== Module Auto Registration Demo ===");
+            Console.WriteLine("Modules discovered and registered:");
+            foreach (var moduleName in ModuleAutoInitializer.RegisteredModules)
+            {
+                Console.WriteLine($"  - {moduleName}");
+            }
+            Console.WriteLine();
         }
 
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
@@ -99,10 +94,7 @@ namespace CrestCreates.Web
                 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "CrestCreates API v1"));
             }
 
-            // 使用异常处理中间件
             app.UseExceptionHandling();
-
-            app.UseHttpsRedirection();
 
             app.UseRouting();
 

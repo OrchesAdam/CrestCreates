@@ -1,0 +1,26 @@
+<Project>
+  <UsingTask TaskName="CrestCreates.BuildTasks.ScanModulesFromSource" AssemblyFile="$(MSBuildThisFileDirectory)CrestCreates.BuildTasks.dll" />
+  <UsingTask TaskName="CrestCreates.BuildTasks.CollectModuleManifests" AssemblyFile="$(MSBuildThisFileDirectory)CrestCreates.BuildTasks.dll" />
+  <UsingTask TaskName="CrestCreates.BuildTasks.GenerateAggregatedModuleCode" AssemblyFile="$(MSBuildThisFileDirectory)CrestCreates.BuildTasks.dll" />
+
+  <PropertyGroup>
+    <EnableModuleManifestGeneration Condition="'$(EnableModuleManifestGeneration)' == ''">true</EnableModuleManifestGeneration>
+    <ModuleManifestOutputPath Condition="'$(ModuleManifestOutputPath)' == ''">$(IntermediateOutputPath)ModuleManifest.json</ModuleManifestOutputPath>
+  </PropertyGroup>
+
+  <Target Name="GenerateModuleManifest"
+          BeforeTargets="BeforeBuild"
+          Condition="'$(EnableModuleManifestGeneration)' == 'true'">
+
+    <PropertyGroup>
+      <_ModuleSourceFiles>@(Compile->'%(FullPath)')</_ModuleSourceFiles>
+    </PropertyGroup>
+
+    <ScanModulesFromSource
+      SourceFiles="$(_ModuleSourceFiles)"
+      OutputPath="$(ModuleManifestOutputPath)" />
+
+    <Message Text="Generated module manifest: $(ModuleManifestOutputPath)" Importance="high" />
+  </Target>
+
+</Project>

@@ -1,0 +1,55 @@
+<Project>
+  <UsingTask TaskName="CrestCreates.BuildTasks.ScanModulesFromSource" AssemblyFile="$(MSBuildThisFileDirectory)bin\Debug\net10.0\CrestCreates.BuildTasks.dll" />
+  <UsingTask TaskName="CrestCreates.BuildTasks.CollectModuleManifests" AssemblyFile="$(MSBuildThisFileDirectory)bin\Debug\net10.0\CrestCreates.BuildTasks.dll" />
+  <UsingTask TaskName="CrestCreates.BuildTasks.GenerateAggregatedModuleCode" AssemblyFile="$(MSBuildThisFileDirectory)bin\Debug\net10.0\CrestCreates.BuildTasks.dll" />
+
+  <PropertyGroup>
+    <EnableModuleManifestGeneration Condition="'$(EnableModuleManifestGeneration)' == ''">true</EnableModuleManifestGeneration>
+    <ModuleManifestOutputPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\ModuleManifest.json</ModuleManifestOutputPath>
+    <AggregatedModuleManifestPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\AggregatedModuleManifest.json</AggregatedModuleManifestPath>
+    <AggregatedModuleCodePath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\ModuleAutoInitializer.g.cs</AggregatedModuleCodePath>
+  </PropertyGroup>
+
+  <Target Name="GenerateModuleManifest"
+          BeforeTargets="BeforeBuild"
+          Condition="'$(EnableModuleManifestGeneration)' == 'true'">
+
+    <PropertyGroup>
+      <_ModuleSourceFiles>@(Compile->'%(FullPath)')</_ModuleSourceFiles>
+    </PropertyGroup>
+
+    <ScanModulesFromSource
+      SourceFiles="$(_ModuleSourceFiles)"
+      OutputPath="$(ModuleManifestOutputPath)" />
+
+    <Message Text="Generated module manifest at $(ModuleManifestOutputPath)" Importance="high" />
+  </Target>
+
+  <Target Name="CollectAndGenerateAggregatedModules"
+          AfterTargets="GenerateModuleManifest"
+          Condition="'$(EnableModuleManifestGeneration)' == 'true' AND Exists('$(ModuleManifestOutputPath)')">
+
+    <ItemGroup>
+      <_ModuleManifestFiles Include="$(ModuleManifestOutputPath)" />
+    </ItemGroup>
+
+    <Message Text="Looking for module manifests in referenced projects..." Importance="high" />
+
+    <ItemGroup>
+      <_ReferencedProjectPaths Include="@(ProjectReference->'%(FullPath)')" />
+    </ItemGroup>
+
+    <CollectModuleManifests
+      ModuleManifestFiles="@(_ModuleManifestFiles)"
+      ReferencedProjectPaths="@(_ReferencedProjectPaths)"
+      OutputPath="$(AggregatedModuleManifestPath)" />
+
+    <GenerateAggregatedModuleCode
+      ModuleManifestFile="$(AggregatedModuleManifestPath)"
+      OutputPath="$(AggregatedModuleCodePath)"
+      Namespace="$(RootNamespace)" />
+
+    <Message Text="Generated aggregated module code at $(AggregatedModuleCodePath)" Importance="high" />
+  </Target>
+
+</Project>
