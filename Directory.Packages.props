@@ -54,8 +54,19 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.Common" Version="4.8.0" />
     <!-- Web 相关 -->
     <PackageVersion Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.2.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Http" Version="2.2.2" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.ViewFeatures" Version="2.2.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Antiforgery" Version="2.2.0" />
+    <PackageVersion Include="Microsoft.Extensions.Localization" Version="7.0.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Localization" Version="2.2.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="8.0.0" />
 
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="6.0.25" />
+    <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="6.0.25" />
+    <PackageVersion Include="Microsoft.Extensions.Identity.Core" Version="6.0.25" />
+    <PackageVersion Include="Microsoft.IdentityModel.Tokens" Version="6.34.0" />
+    <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="6.34.0" />
+    <PackageVersion Include="Quartz" Version="3.8.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="6.0.25" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="6.5.0" />
 
@@ -89,5 +100,7 @@
     <PackageVersion Include="Microsoft.AspNetCore.Aspire.SQLServer" Version="8.0.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Aspire.Redis" Version="8.0.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Aspire.Messaging" Version="8.0.1" />
+    <PackageVersion Include="Microsoft.AspNetCore.Identity" Version="2.2.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.HttpsPolicy" Version="2.2.0" />
   </ItemGroup>
 </Project>

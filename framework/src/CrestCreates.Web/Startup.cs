@@ -16,6 +16,7 @@ using CrestCreates.EventBus.Local;
 using CrestCreates.Infrastructure.UnitOfWork;
 using CrestCreates.Infrastructure.Logging;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
+using CrestCreates.Web.Middlewares;
 
 namespace CrestCreates.Web
 {
@@ -94,6 +95,9 @@ namespace CrestCreates.Web
                 app.UseSwagger();
                 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "CrestCreates API v1"));
             }
+
+            // 使用异常处理中间件
+            app.UseExceptionHandling();
 
             app.UseHttpsRedirection();
 
