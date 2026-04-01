@@ -65,52 +65,52 @@ public class DynamicApiSourceGenerator : IIncrementalGenerator
             {
                 if (member is IMethodSymbol methodSymbol)
                 {
-                var methodInfo = new DynamicApiMethodInfo
-                {
-                    Name = methodSymbol.Name,
-                    ReturnType = methodSymbol.ReturnType.ToDisplayString(),
-                    Parameters = methodSymbol.Parameters.Select(p => new DynamicApiParameterInfo
+                    var methodInfo = new DynamicApiMethodInfo
                     {
-                        Name = p.Name,
-                        Type = p.Type.ToDisplayString()
-                    }).ToList()
-                };
+                        Name = methodSymbol.Name,
+                        ReturnType = methodSymbol.ReturnType.ToDisplayString(),
+                        Parameters = methodSymbol.Parameters.Select(p => new DynamicApiParameterInfo
+                        {
+                            Name = p.Name,
+                            Type = p.Type.ToDisplayString()
+                        }).ToList()
+                    };
 
-                var httpMethodAttr = methodSymbol.GetAttributes()
-                    .FirstOrDefault(a => a.AttributeClass?.Name == "HttpMethodAttribute");
-                if (httpMethodAttr != null && httpMethodAttr.ConstructorArguments.Length > 0)
-                {
-                    methodInfo.HttpMethod = httpMethodAttr.ConstructorArguments[0].Value?.ToString() ?? "GET";
-                }
-
-                var routeAttr = methodSymbol.GetAttributes()
-                    .FirstOrDefault(a => a.AttributeClass?.Name == "RouteAttribute");
-                if (routeAttr != null && routeAttr.ConstructorArguments.Length > 0)
-                {
-                    methodInfo.RouteTemplate = routeAttr.ConstructorArguments[0].Value?.ToString() ?? "";
-                }
-
-                var authorizeAttr = methodSymbol.GetAttributes()
-                    .FirstOrDefault(a => a.AttributeClass?.Name == "AuthorizeAttribute");
-                if (authorizeAttr != null)
-                {
-                    methodInfo.RequireAuthorization = true;
-                    foreach (var namedArg in authorizeAttr.NamedArguments)
+                    var httpMethodAttr = methodSymbol.GetAttributes()
+                        .FirstOrDefault(a => a.AttributeClass?.Name == "HttpMethodAttribute");
+                    if (httpMethodAttr != null && httpMethodAttr.ConstructorArguments.Length > 0)
                     {
-                        if (namedArg.Key == "Roles" && namedArg.Value.Value is string roles)
+                        methodInfo.HttpMethod = httpMethodAttr.ConstructorArguments[0].Value?.ToString() ?? "GET";
+                    }
+
+                    var routeAttr = methodSymbol.GetAttributes()
+                        .FirstOrDefault(a => a.AttributeClass?.Name == "RouteAttribute");
+                    if (routeAttr != null && routeAttr.ConstructorArguments.Length > 0)
+                    {
+                        methodInfo.RouteTemplate = routeAttr.ConstructorArguments[0].Value?.ToString() ?? "";
+                    }
+
+                    var authorizeAttr = methodSymbol.GetAttributes()
+                        .FirstOrDefault(a => a.AttributeClass?.Name == "AuthorizeAttribute");
+                    if (authorizeAttr != null)
+                    {
+                        methodInfo.RequireAuthorization = true;
+                        foreach (var namedArg in authorizeAttr.NamedArguments)
                         {
-                            methodInfo.Roles = roles;
-                        }
-                        else if (namedArg.Key == "Policy" && namedArg.Value.Value is string policy)
-                        {
-                            methodInfo.Policy = policy;
+                            if (namedArg.Key == "Roles" && namedArg.Value.Value is string roles)
+                            {
+                                methodInfo.Roles = roles;
+                            }
+                            else if (namedArg.Key == "Policy" && namedArg.Value.Value is string policy)
+                            {
+                                methodInfo.Policy = policy;
+                            }
                         }
                     }
-                }
 
-                methods.Add(methodInfo);
+                    methods.Add(methodInfo);
+                }
             }
-        }
         }
 
         return new DynamicApiInfo(
@@ -195,7 +195,8 @@ public class DynamicApiSourceGenerator : IIncrementalGenerator
         context.AddSource($"{controllerName}Controller.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
     }
 
-    private static void GenerateActionMethod(StringBuilder sb, DynamicApiMethodInfo method, string controllerName, string namespaceName)
+    private static void GenerateActionMethod(StringBuilder sb, DynamicApiMethodInfo method, string controllerName,
+        string namespaceName)
     {
         var httpMethod = string.IsNullOrEmpty(method.HttpMethod) ? "Get" : method.HttpMethod;
         var routeTemplate = string.IsNullOrEmpty(method.RouteTemplate) ? "" : method.RouteTemplate;
@@ -215,6 +216,7 @@ public class DynamicApiSourceGenerator : IIncrementalGenerator
             {
                 sb.Append($"(Policy=\"{method.Policy}\")");
             }
+
             sb.AppendLine("]");
         }
 
@@ -259,7 +261,8 @@ public class DynamicApiSourceGenerator : IIncrementalGenerator
 
     private class DynamicApiInfo
     {
-        public DynamicApiInfo(string name, string ns, string route, string controllerName, string area, bool enableAuthorization, List<DynamicApiMethodInfo> methods)
+        public DynamicApiInfo(string name, string ns, string route, string controllerName, string area,
+            bool enableAuthorization, List<DynamicApiMethodInfo> methods)
         {
             Name = name;
             Namespace = ns;

@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using Castle.DynamicProxy;
 using CrestCreates.Infrastructure.Caching.Attributes;
@@ -57,14 +58,108 @@ namespace CrestCreates.Infrastructure.Caching.Interceptors
             
             if (typeof(Task).IsAssignableFrom(returnType))
             {
-                var resultType = returnType.IsGenericType ? returnType.GetGenericArguments()[0] : typeof(object);
-                var method = typeof(CachingInterceptor).GetMethod(nameof(InterceptCacheableAsync), BindingFlags.NonPublic | BindingFlags.Instance);
-                var genericMethod = method?.MakeGenericMethod(resultType);
-                genericMethod?.Invoke(this, new object[] { invocation, attribute });
+                if (returnType.IsGenericType)
+                {
+                    var taskType = returnType.GetGenericTypeDefinition();
+                    var resultType = returnType.GetGenericArguments()[0];
+                    
+                    if (taskType == typeof(Task<>))
+                    {
+                        HandleGenericTask(invocation, attribute, resultType);
+                    }
+                    else
+                    {
+                        HandleNonGenericTask(invocation, attribute);
+                    }
+                }
+                else
+                {
+                    HandleNonGenericTask(invocation, attribute);
+                }
             }
             else
             {
                 InterceptCacheableSync(invocation, attribute);
+            }
+        }
+        
+        private void HandleNonGenericTask(IInvocation invocation, CacheableAttribute attribute)
+        {
+            var parameters = invocation.Method.GetParameters();
+            
+            if (!_expressionParser.EvaluateCondition(attribute.Condition, invocation.Arguments, parameters))
+            {
+                invocation.Proceed();
+                return;
+            }
+
+            var cacheKey = GenerateCacheKey(attribute.CacheName, attribute.Key, invocation.Arguments, parameters);
+            
+            var cachedValue = _cache.GetAsync<object>(cacheKey).GetAwaiter().GetResult();
+            if (cachedValue != null)
+            {
+                _logger.LogDebug("Cache hit for key: {CacheKey}", cacheKey);
+                invocation.ReturnValue = Task.CompletedTask;
+                return;
+            }
+
+            _logger.LogDebug("Cache miss for key: {CacheKey}", cacheKey);
+            invocation.Proceed();
+
+            var task = (Task)invocation.ReturnValue;
+            task.GetAwaiter().GetResult();
+            
+            var expiration = TimeSpan.FromSeconds(attribute.Expiration);
+            _cache.SetAsync(cacheKey, new object(), expiration).GetAwaiter().GetResult();
+            _logger.LogDebug("Cached value for key: {CacheKey}", cacheKey);
+        }
+        
+        private void HandleGenericTask(IInvocation invocation, CacheableAttribute attribute, Type resultType)
+        {
+            var parameters = invocation.Method.GetParameters();
+            
+            if (!_expressionParser.EvaluateCondition(attribute.Condition, invocation.Arguments, parameters))
+            {
+                invocation.Proceed();
+                return;
+            }
+
+            var cacheKey = GenerateCacheKey(attribute.CacheName, attribute.Key, invocation.Arguments, parameters);
+            
+            // 尝试从缓存获取值
+            var getMethod = typeof(ICache).GetMethod("GetAsync", new[] { typeof(string), typeof(CancellationToken) });
+            var genericGetMethod = getMethod?.MakeGenericMethod(resultType);
+            var cachedValue = genericGetMethod?.Invoke(_cache, new object[] { cacheKey, CancellationToken.None });
+            
+            if (cachedValue != null)
+            {
+                _logger.LogDebug("Cache hit for key: {CacheKey}", cacheKey);
+                var taskFromResultMethod = typeof(Task).GetMethod("FromResult");
+                if (taskFromResultMethod != null)
+                {
+                    var genericTaskFromResultMethod = taskFromResultMethod.MakeGenericMethod(resultType);
+                    invocation.ReturnValue = genericTaskFromResultMethod.Invoke(null, new[] { cachedValue });
+                }
+                else
+                {
+                    invocation.Proceed();
+                }
+                return;
+            }
+
+            _logger.LogDebug("Cache miss for key: {CacheKey}", cacheKey);
+            invocation.Proceed();
+
+            var task = invocation.ReturnValue;
+            var taskResultProperty = task.GetType().GetProperty("Result");
+            var result = taskResultProperty?.GetValue(task);
+            
+            if (result != null && !_expressionParser.EvaluateCondition(attribute.Unless, new object[] { result }, new[] { new FakeParameterInfo("result", resultType) }))
+            {
+                var expiration = TimeSpan.FromSeconds(attribute.Expiration);
+                var setMethod = typeof(ICache).GetMethod("SetAsync", new[] { typeof(string), typeof(object), typeof(TimeSpan?), typeof(CancellationToken) });
+                setMethod?.Invoke(_cache, new object[] { cacheKey, result, expiration, CancellationToken.None });
+                _logger.LogDebug("Cached value for key: {CacheKey}", cacheKey);
             }
         }
 
@@ -100,42 +195,7 @@ namespace CrestCreates.Infrastructure.Caching.Interceptors
             }
         }
 
-        private async Task<T?> InterceptCacheableAsync<T>(IInvocation invocation, CacheableAttribute attribute)
-        {
-            var parameters = invocation.Method.GetParameters();
-            
-            if (!_expressionParser.EvaluateCondition(attribute.Condition, invocation.Arguments, parameters))
-            {
-                invocation.Proceed();
-                var task = (Task<T>)invocation.ReturnValue;
-                return await task;
-            }
 
-            var cacheKey = GenerateCacheKey(attribute.CacheName, attribute.Key, invocation.Arguments, parameters);
-            
-            var cachedValue = await _cache.GetAsync<T>(cacheKey);
-            if (cachedValue != null)
-            {
-                _logger.LogDebug("Cache hit for key: {CacheKey}", cacheKey);
-                invocation.ReturnValue = Task.FromResult(cachedValue);
-                return cachedValue;
-            }
-
-            _logger.LogDebug("Cache miss for key: {CacheKey}", cacheKey);
-            invocation.Proceed();
-
-            var taskResult = (Task<T>)invocation.ReturnValue;
-            var result = await taskResult;
-            
-            if (result != null && !_expressionParser.EvaluateCondition(attribute.Unless, new object[] { result }, new[] { new FakeParameterInfo("result", typeof(T)) }))
-            {
-                var expiration = TimeSpan.FromSeconds(attribute.Expiration);
-                await _cache.SetAsync(cacheKey, result, expiration);
-                _logger.LogDebug("Cached value for key: {CacheKey}", cacheKey);
-            }
-
-            return result;
-        }
 
         private void InterceptCachePut(IInvocation invocation, CachePutAttribute attribute)
         {
@@ -144,10 +204,15 @@ namespace CrestCreates.Infrastructure.Caching.Interceptors
             var returnType = invocation.Method.ReturnType;
             if (typeof(Task).IsAssignableFrom(returnType))
             {
-                var resultType = returnType.IsGenericType ? returnType.GetGenericArguments()[0] : typeof(object);
-                var method = typeof(CachingInterceptor).GetMethod(nameof(HandleCachePutAsync), BindingFlags.NonPublic | BindingFlags.Instance);
-                var genericMethod = method?.MakeGenericMethod(resultType);
-                genericMethod?.Invoke(this, new object[] { invocation, attribute, null });
+                if (returnType.IsGenericType)
+                {
+                    var resultType = returnType.GetGenericArguments()[0];
+                    HandleCachePutGenericTask(invocation, attribute, resultType);
+                }
+                else
+                {
+                    HandleCachePutNonGenericTask(invocation, attribute);
+                }
             }
             else
             {
@@ -173,7 +238,7 @@ namespace CrestCreates.Infrastructure.Caching.Interceptors
             }
         }
 
-        private async Task HandleCachePutAsync<T>(IInvocation invocation, CachePutAttribute attribute, object? result = null)
+        private void HandleCachePutNonGenericTask(IInvocation invocation, CachePutAttribute attribute)
         {
             var parameters = invocation.Method.GetParameters();
             
@@ -182,21 +247,32 @@ namespace CrestCreates.Infrastructure.Caching.Interceptors
 
             var cacheKey = GenerateCacheKey(attribute.CacheName, attribute.Key, invocation.Arguments, parameters);
             
-            T? valueToCache;
-            if (result != null)
-            {
-                valueToCache = (T)result;
-            }
-            else
-            {
-                var task = (Task<T>)invocation.ReturnValue;
-                valueToCache = await task;
-            }
+            var task = (Task)invocation.ReturnValue;
+            task.GetAwaiter().GetResult();
+            
+            var expiration = TimeSpan.FromSeconds(attribute.Expiration);
+            _cache.SetAsync(cacheKey, new object(), expiration).GetAwaiter().GetResult();
+            _logger.LogDebug("Cache put for key: {CacheKey}", cacheKey);
+        }
 
-            if (valueToCache != null && !_expressionParser.EvaluateCondition(attribute.Unless, new object[] { valueToCache! }, new[] { new FakeParameterInfo("result", typeof(T)) }))
+        private void HandleCachePutGenericTask(IInvocation invocation, CachePutAttribute attribute, Type resultType)
+        {
+            var parameters = invocation.Method.GetParameters();
+            
+            if (!_expressionParser.EvaluateCondition(attribute.Condition, invocation.Arguments, parameters))
+                return;
+
+            var cacheKey = GenerateCacheKey(attribute.CacheName, attribute.Key, invocation.Arguments, parameters);
+            
+            var task = invocation.ReturnValue;
+            var taskResultProperty = task.GetType().GetProperty("Result");
+            var result = taskResultProperty?.GetValue(task);
+            
+            if (result != null && !_expressionParser.EvaluateCondition(attribute.Unless, new object[] { result }, new[] { new FakeParameterInfo("result", resultType) }))
             {
                 var expiration = TimeSpan.FromSeconds(attribute.Expiration);
-                await _cache.SetAsync(cacheKey, valueToCache, expiration);
+                var setMethod = typeof(ICache).GetMethod("SetAsync", new[] { typeof(string), typeof(object), typeof(TimeSpan?), typeof(CancellationToken) });
+                setMethod?.Invoke(_cache, new object[] { cacheKey, result, expiration, CancellationToken.None });
                 _logger.LogDebug("Cache put for key: {CacheKey}", cacheKey);
             }
         }

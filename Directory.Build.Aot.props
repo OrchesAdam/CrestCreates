@@ -1,0 +1,42 @@
+<Project>
+  <!-- AoT 编译支持配置 -->
+  <PropertyGroup>
+    <!-- 启用 AoT 编译 -->
+    <PublishAot>true</PublishAot>
+    <TrimMode>partial</TrimMode>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    
+    <!-- 优化配置 -->
+    <Optimize>true</Optimize>
+    <DebugType>pdbonly</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+    
+    <!-- 运行时标识符 -->
+    <RuntimeIdentifiers>win-x64;linux-x64;osx-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+  
+  <!-- 为 AoT 编译添加必要的包引用 -->
+  <ItemGroup>
+    <!-- 为 Web 项目添加 AoT 支持 -->
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Aot" Version="8.0.0" Condition="$(TargetFramework.Contains('wasm'))" />
+    
+    <!-- 为控制台和服务器项目添加 AoT 支持 -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Aot" Version="8.0.0" Condition="!$(TargetFramework.Contains('wasm'))" />
+  </ItemGroup>
+  
+  <!-- 配置修剪行为 -->
+  <ItemGroup>
+    <!-- 保留必要的类型和成员 -->
+    <TrimmerRootAssembly Include="CrestCreates.Domain" />
+    <TrimmerRootAssembly Include="CrestCreates.Infrastructure" />
+    <TrimmerRootAssembly Include="CrestCreates.Web" />
+  </ItemGroup>
+  
+  <!-- 为特定项目添加 AoT 配置 -->
+  <Target Name="ConfigureAotForWeb" BeforeTargets="Build" Condition="$(MSBuildProjectName.Contains('Web'))">
+    <PropertyGroup>
+      <PublishAot>true</PublishAot>
+      <TrimMode>partial</TrimMode>
+    </PropertyGroup>
+  </Target>
+</Project>
