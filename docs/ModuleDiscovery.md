@@ -348,6 +348,99 @@ private string GenerateCode(List<ModuleManifest> modules)
 }
 ```
 
+## NuGet 分发
+
+### 打包
+
+使用提供的 PowerShell 脚本打包：
+
+```powershell
+# 进入 BuildTasks 目录
+cd build/CrestCreates.BuildTasks
+
+# 执行打包脚本（默认版本 1.0.0）
+.\pack.ps1
+
+# 指定版本号
+.\pack.ps1 -Version "1.1.0"
+
+# 指定配置和输出目录
+.\pack.ps1 -Version "1.1.0" -Configuration "Release" -OutputDirectory "C:\NuGetPackages"
+```
+
+### 包结构
+
+NuGet 包包含以下文件：
+
+```
+CrestCreates.BuildTasks.1.0.0.nupkg
+├── build/
+│   ├── CrestCreates.BuildTasks.props      # 自动导入的 props
+│   ├── CrestCreates.BuildTasks.targets    # 构建目标
+│   └── net10.0/
+│       └── CrestCreates.BuildTasks.dll    # 构建任务 DLL
+├── docs/
+│   └── ModuleDiscovery.md                 # 详细文档
+└── CrestCreates.BuildTasks.nuspec         # 包元数据
+```
+
+### 安装使用
+
+#### 通过 NuGet 包管理器
+
+```bash
+dotnet add package CrestCreates.BuildTasks
+```
+
+#### 通过 PackageReference
+
+```xml
+<PackageReference Include="CrestCreates.BuildTasks" Version="1.0.0">
+  <PrivateAssets>all</PrivateAssets>
+  <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+</PackageReference>
+```
+
+### 工作原理（NuGet 场景）
+
+1. **自动导入**: NuGet 会自动导入 `build/CrestCreates.BuildTasks.props` 和 `.targets`
+2. **DLL 路径解析**: 使用 `$(MSBuildThisFileDirectory)` 变量定位 DLL，不依赖硬编码路径
+3. **构建时执行**: 在编译时自动执行模块扫描和代码生成
+4. **零配置**: 安装后即可使用，无需手动导入 props 文件
+
+### 本地测试
+
+在发布到 NuGet.org 之前，可以先测试本地包：
+
+```powershell
+# 1. 创建本地 NuGet 源
+dotnet nuget add source "C:\LocalNuGet" --name LocalFeed
+
+# 2. 打包并推送到本地源
+.\pack.ps1 -Version "1.0.0-beta1"
+dotnet nuget push .\artifacts\CrestCreates.BuildTasks.1.0.0-beta1.nupkg --source LocalFeed
+
+# 3. 在测试项目中安装
+# 在项目目录执行
+dotnet add package CrestCreates.BuildTasks --version "1.0.0-beta1" --source LocalFeed
+```
+
+### 发布到 NuGet.org
+
+```powershell
+# 获取 API Key 从 https://www.nuget.org/account/apikeys
+dotnet nuget push .\artifacts\CrestCreates.BuildTasks.1.0.0.nupkg `
+  --api-key YOUR_API_KEY `
+  --source https://api.nuget.org/v3/index.json
+```
+
+### 注意事项
+
+1. **版本一致性**: 确保所有项目使用相同版本的 BuildTasks 包
+2. **开发依赖**: 包标记为 `developmentDependency`，不会传递到依赖项目
+3. **目标框架**: 当前支持 .NET 10.0，确保项目目标框架匹配
+4. **清理构建**: 升级包版本后建议执行 `dotnet clean` 再重新构建
+
 ## 版本历史
 
 - **v1.0**: 初始版本，支持基本的模块扫描和注册
@@ -359,3 +452,4 @@ private string GenerateCode(List<ModuleManifest> modules)
 - [模块系统架构](./ModuleSystem.md)
 - [IModule 接口文档](./IModule.md)
 - [模块生命周期](./ModuleLifecycle.md)
+- [BuildTasks README](../build/CrestCreates.BuildTasks/README.md)

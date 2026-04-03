@@ -1,36 +1,37 @@
-﻿using CrestCreates.Data;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-namespace CrestCreates.Web.Module;
+namespace LibraryManagement.Domain.Modules;
 
-[Module]
-public class WebModule : IModule
+[Module(Order = -200)]
+public class DomainModule : IModule
 {
     public void OnPreInitialize()
     {
-        throw new System.NotImplementedException();
+        // 领域层预初始化逻辑
     }
 
     public void OnInitialize()
     {
-        throw new System.NotImplementedException();
+        // 领域层初始化逻辑
     }
 
     public void OnPostInitialize()
     {
-        throw new System.NotImplementedException();
+        // 领域层后初始化逻辑
     }
 
     public void OnConfigureServices(IServiceCollection services)
     {
-        throw new System.NotImplementedException();
+        // 注册领域层服务
+        // 领域层通常不包含需要注册到 DI 的服务
+        // 实体和值对象由仓储层管理
     }
 
     public void OnApplicationInitialization(IHost host)
     {
-        throw new System.NotImplementedException();
+        // 应用初始化逻辑
     }
 }

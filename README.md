@@ -35,7 +35,15 @@ CrestCreates/
 │   │   └── CrestCreates.CodeGenerator/     # 代码生成器
 │   └── test/              # 测试项目
 ├── samples/               # 示例项目
-│   └── CrestCreates.Sample.Web/            # Web API 示例
+│   ├── CrestCreates.Sample.Web/            # Web API 示例
+│   └── LibraryManagement/                  # 图书馆管理系统示例
+│       ├── LibraryManagement.Application/  # 应用服务
+│       ├── LibraryManagement.Application.Contracts/ # 应用服务接口
+│       ├── LibraryManagement.Domain/       # 领域模型
+│       ├── LibraryManagement.Domain.Shared/ # 共享领域
+│       ├── LibraryManagement.EntityFrameworkCore/ # EF Core 实现
+│       └── LibraryManagement.Web/          # Web API
+├── CrestCreates.sln       # 统一解决方案文件
 └── Directory.Packages.props  # 中央包管理
 ```
 
@@ -200,12 +208,31 @@ CrestCreates 框架提供了强大的代码生成器，支持以下功能：
 
 ## 示例项目
 
-框架包含一个完整的示例项目 `CrestCreates.Sample.Web`，演示了：
+框架包含以下示例项目：
 
+### 1. CrestCreates.Sample.Web
+
+一个基础的 Web API 示例，演示了：
 - 框架模块的注册和使用
 - 健康检查的集成
 - 任务调度的使用
 - 示例任务和控制器
+
+### 2. LibraryManagement
+
+一个完整的图书馆管理系统示例，演示了：
+- 完整的领域驱动设计 (DDD) 实现
+- 分层架构（领域层、应用层、基础设施层、表现层）
+- 实体框架 Core 集成
+- 完整的 CRUD 操作
+- 领域事件和应用服务
+- 模块化设计和依赖注入
+
+#### 主要功能：
+- 图书管理（添加、编辑、删除、查询）
+- 作者管理（添加、编辑、删除、查询）
+- 借阅管理（借阅、归还、查询）
+- 读者管理（添加、编辑、删除、查询）
 
 ## 配置和依赖
 
