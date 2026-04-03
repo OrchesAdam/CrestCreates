@@ -2,10 +2,15 @@ using System;
 using System.Collections.Generic;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Entities.Auditing;
+using CrestCreates.Domain.Shared.Attributes;
+using CrestCreates.Domain.Shared.Enums;
 using LibraryManagement.Domain.Shared.Constants;
 
 namespace LibraryManagement.Domain.Entities;
 
+[GenerateRepository(OrmProvider = OrmProvider.EfCore)]
+[GenerateCrudService(GenerateDto = true, GenerateController = true, ServiceRoute = "api/categories")]
+[GenerateQueryBuilder]
 public class Category : AuditedEntity<Guid>
 {
     public string Name { get; private set; } = string.Empty;

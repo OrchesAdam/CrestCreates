@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Repositories;
@@ -32,7 +33,7 @@ namespace CrestCreates.Infrastructure.Caching.Repository
             _defaultExpiration = defaultExpiration ?? TimeSpan.FromMinutes(10);
         }
 
-        public async Task<TEntity?> GetByIdAsync(TId id)
+        public async Task<TEntity?> GetByIdAsync(TId id, CancellationToken cancellationToken = default)
         {
             var cacheKey = GenerateCacheKey("byid", id);
             
@@ -43,7 +44,7 @@ namespace CrestCreates.Infrastructure.Caching.Repository
                 return cached;
             }
 
-            var entity = await _innerRepository.GetByIdAsync(id);
+            var entity = await _innerRepository.GetByIdAsync(id, cancellationToken);
             if (entity != null)
             {
                 await _cache.SetAsync(cacheKey, entity, _defaultExpiration);
@@ -53,7 +54,7 @@ namespace CrestCreates.Infrastructure.Caching.Repository
             return entity;
         }
 
-        public async Task<List<TEntity>> GetAllAsync()
+        public async Task<List<TEntity>> GetAllAsync(CancellationToken cancellationToken = default)
         {
             var cacheKey = GenerateCacheKey("all");
             
@@ -64,40 +65,40 @@ namespace CrestCreates.Infrastructure.Caching.Repository
                 return cached;
             }
 
-            var entities = await _innerRepository.GetAllAsync();
+            var entities = await _innerRepository.GetAllAsync(cancellationToken);
             await _cache.SetAsync(cacheKey, entities, _defaultExpiration);
             _logger.LogDebug("Cached all {EntityType}, count: {Count}", typeof(TEntity).Name, entities.Count);
 
             return entities;
         }
 
-        public async Task<TEntity> AddAsync(TEntity entity)
+        public async Task<TEntity> AddAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
-            var result = await _innerRepository.AddAsync(entity);
+            var result = await _innerRepository.AddAsync(entity, cancellationToken);
             await InvalidateEntityCacheAsync(entity.Id);
             await InvalidateAllCacheAsync();
             _logger.LogDebug("Invalidated cache after adding {EntityType} with id {Id}", typeof(TEntity).Name, entity.Id);
             return result;
         }
 
-        public async Task<TEntity> UpdateAsync(TEntity entity)
+        public async Task<TEntity> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
-            var result = await _innerRepository.UpdateAsync(entity);
+            var result = await _innerRepository.UpdateAsync(entity, cancellationToken);
             await InvalidateEntityCacheAsync(entity.Id);
             await InvalidateAllCacheAsync();
             _logger.LogDebug("Invalidated cache after updating {EntityType} with id {Id}", typeof(TEntity).Name, entity.Id);
             return result;
         }
 
-        public async Task DeleteAsync(TEntity entity)
+        public async Task DeleteAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
-            await _innerRepository.DeleteAsync(entity);
+            await _innerRepository.DeleteAsync(entity, cancellationToken);
             await InvalidateEntityCacheAsync(entity.Id);
             await InvalidateAllCacheAsync();
             _logger.LogDebug("Invalidated cache after deleting {EntityType} with id {Id}", typeof(TEntity).Name, entity.Id);
         }
 
-        public async Task<List<TEntity>> FindAsync(Expression<Func<TEntity, bool>> predicate)
+        public async Task<List<TEntity>> FindAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
             var predicateKey = predicate.ToString().GetHashCode().ToString("x");
             var cacheKey = GenerateCacheKey("find", predicateKey);
@@ -109,7 +110,7 @@ namespace CrestCreates.Infrastructure.Caching.Repository
                 return cached;
             }
 
-            var entities = await _innerRepository.FindAsync(predicate);
+            var entities = await _innerRepository.FindAsync(predicate, cancellationToken);
             await _cache.SetAsync(cacheKey, entities, _defaultExpiration);
             _logger.LogDebug("Cached find {EntityType} with predicate {PredicateKey}, count: {Count}", typeof(TEntity).Name, predicateKey, entities.Count);
 

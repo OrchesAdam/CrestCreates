@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using CrestCreates.Domain.UnitOfWork;
 using CrestCreates.Domain.Shared;
+using CrestCreates.Domain.Shared.Enums;
 
 namespace CrestCreates.Infrastructure.UnitOfWork
 {

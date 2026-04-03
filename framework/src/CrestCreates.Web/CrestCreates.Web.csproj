@@ -21,6 +21,7 @@
     <ProjectReference Include="..\CrestCreates.OrmProviders.EFCore\CrestCreates.OrmProviders.EFCore.csproj" />
     <ProjectReference Include="..\CrestCreates.EventBus.Abstract\CrestCreates.EventBus.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.EventBus.Local\CrestCreates.EventBus.Local.csproj" />
+    <ProjectReference Include="..\CrestCreates.DataFilter\CrestCreates.DataFilter.csproj" />
   </ItemGroup>
 
   <ItemGroup>

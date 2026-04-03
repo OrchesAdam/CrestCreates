@@ -40,8 +40,7 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
                 attr.AttributeClass != null && (
                     attr.AttributeClass.Name == "ServiceAttribute" ||
                     attr.AttributeClass.Name == "Service" ||
-                    attr.AttributeClass.ToDisplayString().EndsWith(".ServiceAttribute") ||
-                    attr.AttributeClass.ToDisplayString().EndsWith(".Service")
+                    attr.AttributeClass.ToDisplayString() == "CrestCreates.Domain.Shared.Attributes.ServiceAttribute"
                 ));
         }
 
@@ -94,16 +93,16 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
                 GenerateServiceRegistration(context, uniqueServices.ToArray());
                 
                 // 生成服务扩展方法
-                foreach (var service in uniqueServices)
-                {
-                    GenerateServiceExtensions(context, service);
-                }
+                // foreach (var service in uniqueServices)
+                // {
+                //     GenerateServiceExtensions(context, service);
+                // }
                 
                 // 生成服务测试基类
-                foreach (var service in uniqueServices)
-                {
-                    GenerateServiceTestBase(context, service);
-                }
+                // foreach (var service in uniqueServices)
+                // {
+                //     GenerateServiceTestBase(context, service);
+                // }
             }
             catch (Exception ex)
             {
@@ -359,8 +358,8 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
             builder.AppendLine("        public static IServiceCollection AddGeneratedServices(this IServiceCollection services)");
             builder.AppendLine("        {");
             builder.AppendLine("            // 注册 FluentValidation");
-            builder.AppendLine("            services.AddValidatorsFromAssembly(typeof(AutoServiceRegistration).Assembly);");
-            builder.AppendLine("            services.AddTransient<IValidatorFactory, ServiceProviderValidatorFactory>();");
+            builder.AppendLine("            // services.AddValidatorsFromAssembly(typeof(AutoServiceRegistration).Assembly);");
+            builder.AppendLine("            // services.AddTransient<IValidatorFactory, ServiceProviderValidatorFactory>();");
             builder.AppendLine();
 
             foreach (var service in serviceClasses)

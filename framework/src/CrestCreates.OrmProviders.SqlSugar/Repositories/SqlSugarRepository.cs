@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Threading;
 using System.Threading.Tasks;
 using SqlSugar;
 using CrestCreates.Domain.Entities;
@@ -23,7 +24,7 @@ namespace CrestCreates.OrmProviders.SqlSugar.Repositories
             _logger = logger;
         }
 
-        public virtual async Task<TEntity> GetByIdAsync(TKey id)
+        public virtual async Task<TEntity> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -40,7 +41,7 @@ namespace CrestCreates.OrmProviders.SqlSugar.Repositories
             }
         }
 
-        public virtual async Task<List<TEntity>> GetAllAsync()
+        public virtual async Task<List<TEntity>> GetAllAsync(CancellationToken cancellationToken = default)
         {
             try
             {
@@ -57,7 +58,7 @@ namespace CrestCreates.OrmProviders.SqlSugar.Repositories
             }
         }
 
-        public virtual async Task<TEntity> AddAsync(TEntity entity)
+        public virtual async Task<TEntity> AddAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -74,7 +75,7 @@ namespace CrestCreates.OrmProviders.SqlSugar.Repositories
             }
         }
 
-        public virtual async Task<List<TEntity>> FindAsync(Expression<Func<TEntity, bool>> predicate)
+        public virtual async Task<List<TEntity>> FindAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -92,7 +93,7 @@ namespace CrestCreates.OrmProviders.SqlSugar.Repositories
             }
         }
 
-        public virtual async Task<TEntity> UpdateAsync(TEntity entity)
+        public virtual async Task<TEntity> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -109,7 +110,7 @@ namespace CrestCreates.OrmProviders.SqlSugar.Repositories
             }
         }
 
-        public virtual async Task DeleteAsync(TEntity entity)
+        public virtual async Task DeleteAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
             try
             {

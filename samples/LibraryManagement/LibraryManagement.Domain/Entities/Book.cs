@@ -1,11 +1,16 @@
 using System;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Entities.Auditing;
+using CrestCreates.Domain.Shared.Attributes;
+using CrestCreates.Domain.Shared.Enums;
 using LibraryManagement.Domain.Shared.Constants;
 using LibraryManagement.Domain.Shared.Enums;
 
 namespace LibraryManagement.Domain.Entities;
 
+[GenerateRepository(OrmProvider = OrmProvider.EfCore)]
+[GenerateCrudService(GenerateDto = true, GenerateController = true, ServiceRoute = "api/books")]
+[GenerateQueryBuilder]
 public class Book : AuditedEntity<Guid>
 {
     public string Title { get; private set; } = string.Empty;

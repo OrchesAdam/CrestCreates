@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq.Expressions;
+using System.Threading;
 using System.Threading.Tasks;
 using FreeSql;
 using CrestCreates.Domain.Entities;
@@ -45,12 +46,12 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Repositories
         /// <summary>
         /// 根据 ID 获取实体
         /// </summary>
-        public virtual async Task<TEntity> GetByIdAsync(TKey id)
+        public virtual async Task<TEntity> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
         {
             try
             {
                 _logger?.LogDebug("Getting entity {EntityType} by id: {Id}", typeof(TEntity).Name, id);
-                var result = await Select.Where(e => e.Id.Equals(id)).FirstAsync();
+                var result = await Select.Where(e => e.Id.Equals(id)).FirstAsync(cancellationToken);
                 _logger?.LogDebug("Got entity {EntityType} by id: {Id}", typeof(TEntity).Name, id);
                 return result;
             }
@@ -64,12 +65,12 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Repositories
         /// <summary>
         /// 获取所有实体
         /// </summary>
-        public virtual async Task<List<TEntity>> GetAllAsync()
+        public virtual async Task<List<TEntity>> GetAllAsync(CancellationToken cancellationToken = default)
         {
             try
             {
                 _logger?.LogDebug("Getting all entities {EntityType}", typeof(TEntity).Name);
-                var result = await Select.ToListAsync();
+                var result = await Select.ToListAsync(cancellationToken);
                 _logger?.LogDebug("Got {Count} entities {EntityType}", result.Count, typeof(TEntity).Name);
                 return result;
             }
@@ -83,12 +84,12 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Repositories
         /// <summary>
         /// 添加实体
         /// </summary>
-        public virtual async Task<TEntity> AddAsync(TEntity entity)
+        public virtual async Task<TEntity> AddAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
             try
             {
                 _logger?.LogDebug("Adding entity {EntityType}", typeof(TEntity).Name);
-                await InsertAsync(entity);
+                await InsertAsync(entity, cancellationToken);
                 _logger?.LogDebug("Added entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
                 return entity;
             }
@@ -102,12 +103,12 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Repositories
         /// <summary>
         /// 更新实体
         /// </summary>
-        public virtual async Task<TEntity> UpdateAsync(TEntity entity)
+        public virtual async Task<TEntity> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
             try
             {
                 _logger?.LogDebug("Updating entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
-                await base.UpdateAsync(entity);
+                await base.UpdateAsync(entity, cancellationToken);
                 _logger?.LogDebug("Updated entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
                 return entity;
             }
@@ -121,12 +122,12 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Repositories
         /// <summary>
         /// 删除实体
         /// </summary>
-        public virtual async Task DeleteAsync(TEntity entity)
+        public virtual async Task DeleteAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
             try
             {
                 _logger?.LogDebug("Deleting entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
-                await base.DeleteAsync(entity);
+                await base.DeleteAsync(entity, cancellationToken);
                 _logger?.LogDebug("Deleted entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
             }
             catch (Exception ex)
@@ -139,12 +140,12 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Repositories
         /// <summary>
         /// 根据条件查找实体
         /// </summary>
-        public virtual async Task<List<TEntity>> FindAsync(Expression<Func<TEntity, bool>> predicate)
+        public virtual async Task<List<TEntity>> FindAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
             try
             {
                 _logger?.LogDebug("Finding entities {EntityType}", typeof(TEntity).Name);
-                var result = await Select.Where(predicate).ToListAsync();
+                var result = await Select.Where(predicate).ToListAsync(cancellationToken);
                 _logger?.LogDebug("Found {Count} entities {EntityType}", result.Count, typeof(TEntity).Name);
                 return result;
             }

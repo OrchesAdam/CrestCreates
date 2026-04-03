@@ -1,4 +1,4 @@
-namespace CrestCreates.Domain.Shared
+namespace CrestCreates.Domain.Shared.Enums
 {
     /// <summary>
     /// ORM 提供者类型
@@ -8,16 +8,16 @@ namespace CrestCreates.Domain.Shared
         /// <summary>
         /// Entity Framework Core
         /// </summary>
-        EfCore,
-        
+        EfCore = 0,
+
         /// <summary>
         /// SqlSugar
         /// </summary>
-        SqlSugar,
-        
+        SqlSugar = 1,
+
         /// <summary>
         /// FreeSql
         /// </summary>
-        FreeSql
+        FreeSql = 2
     }
 }
