@@ -5,7 +5,7 @@ using CrestCreates.Domain.Shared.Attributes;
 
 namespace CrestCreates.CodeGenerator.Tests.Services
 {
-    [Service(
+    [CrestService(
         GenerateController = true,
         GenerateAuthorization = true,
         ResourceName = "Product",

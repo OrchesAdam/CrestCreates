@@ -16,7 +16,7 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
     {
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
-            // 创建增量数据源：查找带有ServiceAttribute的类
+            // 创建增量数据源：查找带有ServiceAttribute的类或继承自CrestAppServiceBase的类
             var serviceClasses = context.SyntaxProvider
                 .CreateSyntaxProvider(
                     predicate: static (node, _) => IsServiceCandidate(node),
@@ -30,18 +30,52 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
 
         private static bool IsServiceCandidate(SyntaxNode node)
         {
-            return node is ClassDeclarationSyntax classDeclaration &&
-                   classDeclaration.AttributeLists.Count > 0;
+            if (node is ClassDeclarationSyntax classDeclaration)
+            {
+                // 检查是否有Service属性
+                if (classDeclaration.AttributeLists.Count > 0)
+                    return true;
+                
+                // 检查类名是否以AppService结尾
+                if (classDeclaration.Identifier.Text.EndsWith("AppService"))
+                    return true;
+                
+                // 检查是否有基类
+                if (classDeclaration.BaseList != null)
+                    return true;
+            }
+            
+            return false;
         }
 
         private static bool HasServiceAttribute(INamedTypeSymbol symbol)
         {
             return symbol.GetAttributes().Any(attr =>
                 attr.AttributeClass != null && (
-                    attr.AttributeClass.Name == "ServiceAttribute" ||
+                    attr.AttributeClass.Name == "CrestServiceAttribute" ||
                     attr.AttributeClass.Name == "Service" ||
-                    attr.AttributeClass.ToDisplayString() == "CrestCreates.Domain.Shared.Attributes.ServiceAttribute"
+                    attr.AttributeClass.ToDisplayString() == "CrestCreates.Domain.Shared.Attributes.CrestServiceAttribute"
                 ));
+        }
+
+        private static bool InheritsFromCrestAppServiceBase(INamedTypeSymbol symbol)
+        {
+            var current = symbol.BaseType;
+            while (current != null)
+            {
+                if (current.Name == "CrestAppServiceBase" || 
+                    current.ToDisplayString().StartsWith("CrestCreates.Application.Services.CrestAppServiceBase"))
+                {
+                    return true;
+                }
+                current = current.BaseType;
+            }
+            return false;
+        }
+
+        private static bool IsAppServiceClass(INamedTypeSymbol symbol)
+        {
+            return symbol.Name.EndsWith("AppService");
         }
 
         private static INamedTypeSymbol? GetServiceClass(GeneratorSyntaxContext context)
@@ -49,7 +83,10 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
             var classDeclaration = (ClassDeclarationSyntax)context.Node;
             var symbol = context.SemanticModel.GetDeclaredSymbol(classDeclaration) as INamedTypeSymbol;
             
-            if (symbol != null && HasServiceAttribute(symbol))
+            if (symbol != null && 
+                (HasServiceAttribute(symbol) || 
+                 InheritsFromCrestAppServiceBase(symbol) || 
+                 IsAppServiceClass(symbol)))
             {
                 return symbol;
             }
@@ -71,38 +108,18 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
 
             try
             {
-                // 先生成服务接口（如果不存在）
                 foreach (var service in uniqueServices)
                 {
-                    GenerateServiceInterface(context, service);
+                    // 仅对带有Service属性的类生成完整代码，保持向后兼容
+                    if (HasServiceAttribute(service))
+                    {
+                        GenerateServiceInterface(context, service);
+                        GenerateServiceExceptions(context, service);
+                        GenerateValidators(context, service);
+                    }
                 }
-                
-                // 生成服务异常类
-                foreach (var service in uniqueServices)
-                {
-                    GenerateServiceExceptions(context, service);
-                }
-                
-                // 生成验证器
-                foreach (var service in uniqueServices)
-                {
-                    GenerateValidators(context, service);
-                }
-                
-                // 生成服务注册代码
+
                 GenerateServiceRegistration(context, uniqueServices.ToArray());
-                
-                // 生成服务扩展方法
-                // foreach (var service in uniqueServices)
-                // {
-                //     GenerateServiceExtensions(context, service);
-                // }
-                
-                // 生成服务测试基类
-                // foreach (var service in uniqueServices)
-                // {
-                //     GenerateServiceTestBase(context, service);
-                // }
             }
             catch (Exception ex)
             {
@@ -380,14 +397,23 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
                     }
                 }
 
-                var lifetimeEnum = GetAttributeProperty(service, "Lifetime", 0);
-                var lifetime = lifetimeEnum switch
+                string lifetime;
+                // 如果有Service属性，从属性中获取生命周期；否则默认使用Scoped
+                if (HasServiceAttribute(service))
                 {
-                    0 => "Scoped",
-                    1 => "Singleton",
-                    2 => "Transient",
-                    _ => "Scoped"
-                };
+                    var lifetimeEnum = GetAttributeProperty(service, "Lifetime", 0);
+                    lifetime = lifetimeEnum switch
+                    {
+                        0 => "Scoped",
+                        1 => "Singleton",
+                        2 => "Transient",
+                        _ => "Scoped"
+                    };
+                }
+                else
+                {
+                    lifetime = "Scoped";
+                }
                 
                 builder.AppendLine($"            // {service.Name} - {lifetime}");
                 if (hasInterface && interfaceType != null)
@@ -580,7 +606,7 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
                 return defaultValue;
                 
             var attr = symbol.GetAttributes()
-                .FirstOrDefault(attr => attr.AttributeClass?.Name == "ServiceAttribute" || 
+                .FirstOrDefault(attr => attr.AttributeClass?.Name == "CrestServiceAttribute" || 
                                      attr.AttributeClass?.Name == "Service");
 
             if (attr == null)
@@ -727,9 +753,9 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
                     
                     default:
                         // 复杂类型，检查是否是集合
-                        if (propertyType is INamedTypeSymbol namedType && 
-                            namedType.IsGenericType && 
-                            namedType.ConstructedFrom.Name == "List" && 
+                        if (propertyType is INamedTypeSymbol namedType &&
+                            namedType.IsGenericType &&
+                            namedType.ConstructedFrom.Name == "List" &&
                             namedType.TypeArguments.Length > 0)
                         {
                             builder.AppendLine($"            RuleFor(x => x.{propertyName}).NotEmpty().WithMessage(\"{propertyName} 不能为空\");");
@@ -739,5 +765,5 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
                 }
             }
         }
-}
+    }
 }

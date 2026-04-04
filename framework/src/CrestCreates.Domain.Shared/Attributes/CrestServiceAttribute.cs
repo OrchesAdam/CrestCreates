@@ -3,7 +3,7 @@ using System;
 namespace CrestCreates.Domain.Shared.Attributes
 {
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
-    public class ServiceAttribute : Attribute
+    public class CrestServiceAttribute : Attribute
     {
         public enum ServiceLifetime
         {

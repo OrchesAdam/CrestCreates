@@ -248,7 +248,7 @@ CrestCreates/
 
 1. 创建应用服务接口，定义服务方法
 2. 实现应用服务，协调领域对象完成用例
-3. 使用 `ServiceAttribute` 标记服务
+3. 使用 `CrestServiceAttribute` 标记服务
 
 ### 5. 配置 API 控制器
 

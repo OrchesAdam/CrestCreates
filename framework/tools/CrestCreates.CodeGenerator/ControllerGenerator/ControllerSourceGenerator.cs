@@ -40,9 +40,9 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
         {
             return symbol.GetAttributes().Any(attr =>
                 attr.AttributeClass != null && (
-                    attr.AttributeClass.Name == "ServiceAttribute" ||
+                    attr.AttributeClass.Name == "CrestServiceAttribute" ||
                     attr.AttributeClass.Name == "Service" ||
-                    attr.AttributeClass.ToDisplayString().EndsWith(".ServiceAttribute") ||
+                    attr.AttributeClass.ToDisplayString().EndsWith(".CrestServiceAttribute") ||
                     attr.AttributeClass.ToDisplayString().EndsWith(".Service")
                 ));
         }
@@ -422,7 +422,7 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
                 return defaultValue;
                 
             var attr = symbol.GetAttributes()
-                .FirstOrDefault(attr => attr.AttributeClass?.Name == "ServiceAttribute" || 
+                .FirstOrDefault(attr => attr.AttributeClass?.Name == "CrestServiceAttribute" || 
                                      attr.AttributeClass?.Name == "Service");
 
             if (attr == null)

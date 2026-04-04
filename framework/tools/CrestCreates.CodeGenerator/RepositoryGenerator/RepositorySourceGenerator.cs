@@ -31,8 +31,19 @@ namespace CrestCreates.CodeGenerator.RepositoryGenerator
                 .Where(static x => x is not null)
                 .Collect();
 
+            // 创建增量数据源：查找用户手动创建的仓储类（继承自仓储基类）
+            var manualRepositoryClasses = context.SyntaxProvider
+                .CreateSyntaxProvider(
+                    predicate: static (node, _) => IsManualRepositoryCandidate(node),
+                    transform: static (ctx, _) => GetManualRepositoryClass(ctx))
+                .Where(static x => x is not null)
+                .Collect();
+
+            // 组合两个数据源
+            var combined = repositoryClasses.Combine(manualRepositoryClasses);
+
             // 注册源代码生成
-            context.RegisterSourceOutput(repositoryClasses, ExecuteGeneration);
+            context.RegisterSourceOutput(combined, ExecuteGeneration);
         }
 
         /// <summary>
@@ -42,6 +53,71 @@ namespace CrestCreates.CodeGenerator.RepositoryGenerator
         {
             return node is ClassDeclarationSyntax classDeclaration &&
                    classDeclaration.AttributeLists.Count > 0;
+        }
+
+        /// <summary>
+        /// 判断节点是否为手动创建的仓储类（继承自仓储基类）
+        /// </summary>
+        private static bool IsManualRepositoryCandidate(SyntaxNode node)
+        {
+            if (node is not ClassDeclarationSyntax classDeclaration)
+                return false;
+
+            // 检查类名是否以Repository结尾，且不是以RepositoryBase结尾（基类本身不需要注册）
+            var className = classDeclaration.Identifier.Text;
+            if (!className.EndsWith("Repository", StringComparison.Ordinal) || 
+                className.EndsWith("RepositoryBase", StringComparison.Ordinal))
+                return false;
+
+            // 检查是否有基类
+            return classDeclaration.BaseList != null;
+        }
+
+        /// <summary>
+        /// 获取手动创建的仓储类符号
+        /// </summary>
+        private static INamedTypeSymbol? GetManualRepositoryClass(GeneratorSyntaxContext context)
+        {
+            var classDeclaration = (ClassDeclarationSyntax)context.Node;
+            var symbol = context.SemanticModel.GetDeclaredSymbol(classDeclaration) as INamedTypeSymbol;
+
+            if (symbol == null)
+                return null;
+
+            // 检查是否是抽象类（基类不注册）
+            if (symbol.IsAbstract)
+                return null;
+
+            // 检查是否继承自仓储基类
+            if (!IsRepositoryBaseClass(symbol.BaseType))
+                return null;
+
+            // 检查是否实现了对应的接口
+            var expectedInterfaceName = $"I{symbol.Name}";
+            var hasMatchingInterface = symbol.Interfaces.Any(i => i.Name == expectedInterfaceName);
+
+            return hasMatchingInterface ? symbol : null;
+        }
+
+        /// <summary>
+        /// 检查类型是否是仓储基类
+        /// </summary>
+        private static bool IsRepositoryBaseClass(INamedTypeSymbol? baseType)
+        {
+            while (baseType != null)
+            {
+                var baseTypeName = baseType.Name;
+                if (baseTypeName.EndsWith("RepositoryBase", StringComparison.Ordinal) ||
+                    baseTypeName == "EfCoreRepository" ||
+                    baseTypeName == "SqlSugarRepository" ||
+                    baseTypeName == "FreeSqlRepository" ||
+                    baseTypeName == "Repository")
+                {
+                    return true;
+                }
+                baseType = baseType.BaseType;
+            }
+            return false;
         }
 
         /// <summary>
@@ -124,27 +200,49 @@ namespace CrestCreates.CodeGenerator.RepositoryGenerator
         /// <summary>
         /// 执行代码生成
         /// </summary>
-        private void ExecuteGeneration(SourceProductionContext context, ImmutableArray<(INamedTypeSymbol Symbol, bool GenerateAsBaseClass, bool IsUsingNewAttribute)?> repositoryClasses)
+        private void ExecuteGeneration(SourceProductionContext context, (ImmutableArray<(INamedTypeSymbol Symbol, bool GenerateAsBaseClass, bool IsUsingNewAttribute)?> RepositoryClasses, ImmutableArray<INamedTypeSymbol?> ManualRepositoryClasses) combined)
         {
-            if (repositoryClasses.IsDefaultOrEmpty)
-                return;
-
-            // 去重处理
-            var uniqueEntities = repositoryClasses
-                .Where(x => x != null)
-                .Select(x => x.Value)
-                .Distinct()
-                .ToList();
-
             try
             {
-                foreach (var (entityClass, generateAsBaseClass, isUsingNewAttribute) in uniqueEntities)
+                // 处理原始的带有特性的实体类
+                if (!combined.RepositoryClasses.IsDefaultOrEmpty)
                 {
-                    // 只在使用新特性时才生成内容
-                    if (!isUsingNewAttribute) continue;
+                    // 去重处理
+                    var uniqueEntities = combined.RepositoryClasses
+                        .Where(x => x != null)
+                        .Select(x => x!.Value)
+                        .Distinct()
+                        .ToList();
 
-                    GenerateRepositoryInterface(context, entityClass);
-                    GenerateRepositoryImplementation(context, entityClass, generateAsBaseClass);
+                    foreach (var (entityClass, generateAsBaseClass, isUsingNewAttribute) in uniqueEntities)
+                    {
+                        // 只在使用新特性时才生成内容，且不生成基类（基类由EntitySourceGenerator负责）
+                        if (!isUsingNewAttribute) continue;
+
+                        GenerateRepositoryInterface(context, entityClass);
+                        // 不生成Repository实现类，由用户手动创建并继承EntitySourceGenerator生成的基类
+                        // GenerateRepositoryImplementation(context, entityClass, generateAsBaseClass);
+                    }
+                }
+
+                // 收集所有需要注册的仓储类（包括自动生成的和手动创建的）
+                var allRepositories = new List<INamedTypeSymbol>();
+
+                // 添加手动创建的仓储类
+                if (!combined.ManualRepositoryClasses.IsDefaultOrEmpty)
+                {
+                    var uniqueManualRepositories = combined.ManualRepositoryClasses
+                        .Where(x => x != null)
+                        .Distinct(SymbolEqualityComparer.Default)
+                        .Cast<INamedTypeSymbol>()
+                        .ToList();
+                    allRepositories.AddRange(uniqueManualRepositories);
+                }
+
+                // 生成依赖注入注册代码
+                if (allRepositories.Count > 0)
+                {
+                    GenerateRepositoryRegistration(context, allRepositories.ToArray());
                 }
             }
             catch (Exception ex)
@@ -155,6 +253,65 @@ namespace CrestCreates.CodeGenerator.RepositoryGenerator
                         "CodeGeneration", DiagnosticSeverity.Warning, true),
                     Location.None));
             }
+        }
+
+        /// <summary>
+        /// 生成仓储依赖注入注册代码
+        /// </summary>
+        private void GenerateRepositoryRegistration(SourceProductionContext context, INamedTypeSymbol[] repositoryClasses)
+        {
+            var builder = new StringBuilder();
+            builder.AppendLine("// <auto-generated />");
+            builder.AppendLine("using System;");
+            builder.AppendLine("using Microsoft.Extensions.DependencyInjection;");
+            builder.AppendLine();
+            builder.AppendLine("namespace CrestCreates.Infrastructure.DependencyInjection");
+            builder.AppendLine("{");
+            builder.AppendLine("    /// <summary>");
+            builder.AppendLine("    /// 自动生成的仓储注册扩展类");
+            builder.AppendLine("    /// </summary>");
+            builder.AppendLine("    public static class AutoRepositoryRegistration");
+            builder.AppendLine("    {");
+            builder.AppendLine("        /// <summary>");
+            builder.AppendLine("        /// 注册所有自动识别的仓储");
+            builder.AppendLine("        /// </summary>");
+            builder.AppendLine("        public static IServiceCollection AddGeneratedRepositories(this IServiceCollection services)");
+            builder.AppendLine("        {");
+
+            foreach (var repository in repositoryClasses)
+            {
+                var repositoryType = repository.ToDisplayString();
+                string? interfaceType = null;
+
+                // 查找该仓储的接口
+                var expectedInterfaceName = $"I{repository.Name}";
+                foreach (var interfaceSymbol in repository.Interfaces)
+                {
+                    if (interfaceSymbol.Name == expectedInterfaceName)
+                    {
+                        interfaceType = interfaceSymbol.ToDisplayString();
+                        break;
+                    }
+                }
+
+                builder.AppendLine($"            // {repository.Name} - Scoped");
+                if (interfaceType != null)
+                {
+                    builder.AppendLine($"            services.AddScoped<{interfaceType}, {repositoryType}>();");
+                }
+                else
+                {
+                    builder.AppendLine($"            services.AddScoped<{repositoryType}>();");
+                }
+                builder.AppendLine();
+            }
+
+            builder.AppendLine("            return services;");
+            builder.AppendLine("        }");
+            builder.AppendLine("    }");
+            builder.AppendLine("}");
+
+            context.AddSource("AutoRepositoryRegistration.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
         /// <summary>

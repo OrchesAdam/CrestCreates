@@ -47,12 +47,8 @@ namespace CrestCreates.CodeGenerator.QueryExtensionsGenerator
         {
             return symbol.GetAttributes().Any(attr =>
                 attr.AttributeClass != null && (
-                    attr.AttributeClass.Name == "GenerateEntityAttribute" ||
-                    attr.AttributeClass.Name == "GenerateEntity" ||
                     attr.AttributeClass.Name == "GenerateQueryBuilderAttribute" ||
                     attr.AttributeClass.Name == "GenerateQueryBuilder" ||
-                    attr.AttributeClass.ToDisplayString().EndsWith(".GenerateEntityAttribute") ||
-                    attr.AttributeClass.ToDisplayString().EndsWith(".GenerateEntity") ||
                     attr.AttributeClass.ToDisplayString().EndsWith(".GenerateQueryBuilderAttribute") ||
                     attr.AttributeClass.ToDisplayString().EndsWith(".GenerateQueryBuilder")
                 ));

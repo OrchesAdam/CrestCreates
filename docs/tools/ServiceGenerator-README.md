@@ -281,7 +281,7 @@ public class ProductServiceTests : ProductServiceTestBase
 
 ## 配置选项
 
-### ServiceAttribute 参数
+### CrestServiceAttribute 参数
 
 - **Lifetime**：服务生命周期（Scoped/Singleton/Transient，默认：Scoped）
 - **GenerateController**：是否生成API控制器（默认：true）
@@ -323,7 +323,7 @@ public class ProductServiceTests : ProductServiceTestBase
 ### 1. 服务设计
 ```csharp
 // ✅ 好的实践
-[Service(Lifetime = ServiceLifetime.Scoped)]
+[CrestService(Lifetime = CrestServiceAttribute.ServiceLifetime.Scoped)]
 public class ProductService : IProductService
 {
     private readonly IProductRepository _repository;

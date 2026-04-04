@@ -64,12 +64,8 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 attr.AttributeClass != null && (
                     attr.AttributeClass.Name == "GenerateCrudServiceAttribute" ||
                     attr.AttributeClass.Name == "GenerateCrudService" ||
-                    attr.AttributeClass.Name == "GenerateEntityAttribute" ||
-                    attr.AttributeClass.Name == "GenerateEntity" ||
                     attr.AttributeClass.ToDisplayString().EndsWith(".GenerateCrudServiceAttribute") ||
-                    attr.AttributeClass.ToDisplayString().EndsWith(".GenerateCrudService") ||
-                    attr.AttributeClass.ToDisplayString().EndsWith(".GenerateEntityAttribute") ||
-                    attr.AttributeClass.ToDisplayString().EndsWith(".GenerateEntity")
+                    attr.AttributeClass.ToDisplayString().EndsWith(".GenerateCrudService")
                 ));
         }
 

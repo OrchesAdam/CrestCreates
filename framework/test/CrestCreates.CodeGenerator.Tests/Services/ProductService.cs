@@ -26,8 +26,8 @@ namespace CrestCreates.CodeGenerator.Tests.Services
     /// 3. 服务扩展方法
     /// 4. 测试基类
     /// </summary>
-    [Service(
-        Lifetime = ServiceAttribute.ServiceLifetime.Scoped,
+    [CrestService(
+        Lifetime = CrestServiceAttribute.ServiceLifetime.Scoped,
         GenerateController = true,
         Route = "api/products"
     )]

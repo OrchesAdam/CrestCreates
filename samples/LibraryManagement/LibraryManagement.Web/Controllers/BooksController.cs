@@ -21,24 +21,10 @@ public class BooksController : ControllerBase
     [HttpGet("{id}")]
     public async Task<ActionResult<BookDto>> Get(Guid id, CancellationToken cancellationToken)
     {
-        var book = await _bookAppService.GetAsync(id, cancellationToken);
-        return Ok(book);
-    }
-
-    [HttpGet("isbn/{isbn}")]
-    public async Task<ActionResult<BookDto>> GetByIsbn(string isbn, CancellationToken cancellationToken)
-    {
-        var book = await _bookAppService.GetByIsbnAsync(isbn, cancellationToken);
+        var book = await _bookAppService.GetByIdAsync(id, cancellationToken);
         if (book == null)
             return NotFound();
         return Ok(book);
-    }
-
-    [HttpGet]
-    public async Task<ActionResult<PagedResult<BookDto>>> Search([FromQuery] BookSearchRequest request, CancellationToken cancellationToken)
-    {
-        var result = await _bookAppService.SearchAsync(request, cancellationToken);
-        return Ok(result);
     }
 
     [HttpPost]

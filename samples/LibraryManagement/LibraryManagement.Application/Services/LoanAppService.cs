@@ -1,5 +1,4 @@
 using AutoMapper;
-using CrestCreates.Domain.Shared.Attributes;
 using LibraryManagement.Application.Contracts.DTOs;
 using LibraryManagement.Application.Contracts.Interfaces;
 using LibraryManagement.Domain.Entities;
@@ -13,7 +12,6 @@ using System.Threading.Tasks;
 
 namespace LibraryManagement.Application.Services;
 
-[Service(GenerateController = false)]
 public class LoanAppService : ILoanAppService
 {
     private readonly ILoanRepository _loanRepository;
