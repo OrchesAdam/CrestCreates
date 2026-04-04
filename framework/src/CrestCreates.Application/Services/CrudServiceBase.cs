@@ -21,7 +21,14 @@ namespace CrestCreates.Application.Services
         where TEntity : class
         where TKey : IEquatable<TKey>
     {
-        protected readonly IRepository<TEntity, TKey> Repository;
+        /// <summary>
+        /// 仓储
+        /// </summary>
+        protected virtual IRepository<TEntity, TKey> Repository { get; }
+
+        /// <summary>
+        /// 映射器
+        /// </summary>
         protected readonly IMapper Mapper;
 
         protected CrudServiceBase(IRepository<TEntity, TKey> repository, IMapper mapper)

@@ -13,7 +13,7 @@ namespace CrestCreates.Application.Services
     /// <typeparam name="TDto">DTO 类型</typeparam>
     /// <typeparam name="TCreateDto">创建 DTO 类型</typeparam>
     /// <typeparam name="TUpdateDto">更新 DTO 类型</typeparam>
-    public interface ICrudService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>
+    public interface ICrudService<TEntity, in TKey, TDto, in TCreateDto, in TUpdateDto>
         where TEntity : class
         where TKey : IEquatable<TKey>
     {
