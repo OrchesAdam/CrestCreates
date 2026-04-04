@@ -84,8 +84,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.HealthCheck.Mv
 EndProject
 
 
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.EventBus.EventStore", "framework\src\CrestCreates.EventBus.EventStore\CrestCreates.EventBus.EventStore.csproj", "{00000000-0000-0000-0000-000000000000}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.EventBus.Kafka", "framework\src\CrestCreates.EventBus.Kafka\CrestCreates.EventBus.Kafka.csproj", "{00000000-0000-0000-0000-000000000000}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.EventBus.Local", "framework\src\CrestCreates.EventBus.Local\CrestCreates.EventBus.Local.csproj", "{00000000-0000-0000-0000-000000000000}"
@@ -140,6 +138,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.DistributedTransaction.CAP", "framework\src\CrestCreates.DistributedTransaction.CAP\CrestCreates.DistributedTransaction.CAP.csproj", "{986381D9-252D-4A11-AE32-CA5B68FC4CEC}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.BuildTasks", "framework\tools\CrestCreates.BuildTasks\CrestCreates.BuildTasks.csproj", "{D46BB279-8D87-4890-9C54-4CC3CFDB22AD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrestCreates.EventBus.EventStore", "framework\src\CrestCreates.EventBus.EventStore\CrestCreates.EventBus.EventStore.csproj", "{B5E3AF38-0B06-4601-B605-8070CC92F125}"
 EndProject
 
 Global
@@ -274,6 +274,12 @@ Global
 		{D46BB279-8D87-4890-9C54-4CC3CFDB22AD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D46BB279-8D87-4890-9C54-4CC3CFDB22AD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D46BB279-8D87-4890-9C54-4CC3CFDB22AD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B5E3AF38-0B06-4601-B605-8070CC92F125}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B5E3AF38-0B06-4601-B605-8070CC92F125}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B5E3AF38-0B06-4601-B605-8070CC92F125}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B5E3AF38-0B06-4601-B605-8070CC92F125}.Release|Any CPU.Build.0 = Release|Any CPU
+		{00000000-0000-0000-0000-000000000000}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{00000000-0000-0000-0000-000000000000}.Debug|Any CPU.Build.0 = Debug|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -323,6 +329,7 @@ Global
 		{2AFA3812-BF4C-4BCA-BEC9-7F87775D98D1} = {99AABBCC-DDDE-EEFF-0011-223344556677}
 		{986381D9-252D-4A11-AE32-CA5B68FC4CEC} = {33445566-7788-99AA-BBCC-DDEEFF001122}
 		{D46BB279-8D87-4890-9C54-4CC3CFDB22AD} = {8899AABB-CCDD-EEFF-0011-223344556677}
-		{00000000-0000-0000-0000-000000000000} = {66778899-AABB-CCDD-DEEE-FF0011223344}
+		{B5E3AF38-0B06-4601-B605-8070CC92F125} = {44556677-8899-AABB-CCDD-EEFF00112233}
+		{00000000-0000-0000-0000-000000000000} = {DC9817C4-77C5-4150-B652-D757324C60F8}
 	EndGlobalSection
 EndGlobal
