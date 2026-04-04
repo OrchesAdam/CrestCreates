@@ -11,10 +11,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Common;
 using CrestCreates.Application.Services;
+using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.DTOs;
 using CrestCreates.Domain.UnitOfWork;
+using CrestCreates.Infrastructure.Authorization;
 
 namespace LibraryManagement.Application.Services;
 
@@ -27,7 +29,7 @@ public class LoanAppService : CrestAppServiceBase<Loan, Guid, LoanDto, CreateLoa
     private readonly IMapper _mapper;
 
 
-    public LoanAppService(ICrestRepositoryBase<Loan, Guid> repository, IMapper mapper, IUnitOfWork unitOfWork, ILoanRepository loanRepository, IBookRepository bookRepository, IMemberRepository memberRepository) : base(repository, mapper, unitOfWork)
+    public LoanAppService(ICrestRepositoryBase<Loan, Guid> repository, IMapper mapper, IUnitOfWork unitOfWork, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, ILoanRepository loanRepository, IBookRepository bookRepository, IMemberRepository memberRepository) : base(repository, mapper, unitOfWork, currentUser, dataPermissionFilter, permissionChecker)
     {
         _loanRepository = loanRepository;
         _bookRepository = bookRepository;

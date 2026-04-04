@@ -4,9 +4,11 @@ using LibraryManagement.Application.Contracts.Interfaces;
 using LibraryManagement.Domain.Entities;
 using LibraryManagement.Domain.Repositories;
 using CrestCreates.Application.Services;
+using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.UnitOfWork;
+using CrestCreates.Infrastructure.Authorization;
 
 namespace LibraryManagement.Application.Services;
 
@@ -17,7 +19,7 @@ public class CategoryAppService :CrestAppServiceBase<Category, Guid, CategoryDto
     private readonly IMapper _mapper;
 
 
-    public CategoryAppService(ICrestRepositoryBase<Category, Guid> repository, IMapper mapper, IUnitOfWork unitOfWork, ICategoryRepository categoryRepository) : base(repository, mapper, unitOfWork)
+    public CategoryAppService(ICrestRepositoryBase<Category, Guid> repository, IMapper mapper, IUnitOfWork unitOfWork, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, ICategoryRepository categoryRepository) : base(repository, mapper, unitOfWork, currentUser, dataPermissionFilter, permissionChecker)
     {
         _categoryRepository = categoryRepository;
         _mapper = mapper;

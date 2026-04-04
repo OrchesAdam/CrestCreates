@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Xunit;
 using CrestCreates.OrmProviders.SqlSugar.Repositories;
@@ -14,6 +15,11 @@ namespace CrestCreates.OrmProviders.Tests
     {
         public TestSqlSugarRepository(ISqlSugarClient sqlSugarClient) : base(sqlSugarClient, null)
         {}
+
+        public override IQueryable<TEntity> GetQueryableUnfiltered()
+        {
+            throw new NotImplementedException();
+        }
     }
 
     public class SqlSugarRepositoryTests : OrmTestBase

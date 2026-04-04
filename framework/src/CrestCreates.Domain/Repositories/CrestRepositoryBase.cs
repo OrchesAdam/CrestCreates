@@ -4,14 +4,38 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Domain.DataFilter;
+using CrestCreates.Domain.Entities.Auditing;
 using CrestCreates.Domain.Shared.DTOs;
+using CrestCreates.MultiTenancy.Abstract;
 
 namespace CrestCreates.Domain.Repositories;
+
+public class TenantFilter { }
 
 public abstract class CrestRepositoryBase<TEntity, TKey> : ICrestRepositoryBase<TEntity, TKey>
     where TEntity : class
 {
-    public abstract IQueryable<TEntity> GetQueryable();
+    protected ICurrentTenant? CurrentTenant { get; set; }
+    protected DataFilterState? DataFilterState { get; set; }
+
+    public abstract IQueryable<TEntity> GetQueryableUnfiltered();
+
+    public virtual IQueryable<TEntity> GetQueryable()
+    {
+        var query = GetQueryableUnfiltered();
+
+        if (DataFilterState?.IsEnabled<TenantFilter>() == true && CurrentTenant != null)
+        {
+            if (typeof(IMustHaveTenant).IsAssignableFrom(typeof(TEntity)))
+            {
+                var tenantId = CurrentTenant.Id;
+                query = query.Where(e => ((IMustHaveTenant)e).TenantId == tenantId);
+            }
+        }
+
+        return query;
+    }
 
     public abstract Task<List<TEntity>> GetListAsync(CancellationToken cancellationToken = default);
 

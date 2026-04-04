@@ -1,63 +1,68 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
-using CrestCreates.DbContextProvider.Abstract;
+using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Repositories;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
+using CrestCreates.Domain.Shared.DTOs;
+using CrestCreates.MultiTenancy.Abstract;
+using Microsoft.EntityFrameworkCore;
+using IDbContextProvider = CrestCreates.DbContextProvider.Abstract;
 
 namespace CrestCreates.OrmProviders.EFCore.Repositories
 {
-    public class EfCoreRepository<TEntity, TId> : CrestRepositoryBase<TEntity, TId>
-        where TEntity : class, IEntity<TId>
-        where TId : IEquatable<TId>
+    public abstract class EfCoreRepositoryBase<TEntity, TKey> : CrestRepositoryBase<TEntity, TKey>
+        where TEntity : class, IEntity<TKey>
+        where TKey : IEquatable<TKey>
     {
-        private readonly IDataBaseContext _dbContext;
+        protected readonly IDbContextProvider.IDataBaseContext _dbContext;
 
-        public EfCoreRepository(IDataBaseContext dbContext)
+        public EfCoreRepositoryBase(
+            IDbContextProvider.IDataBaseContext dbContext,
+            ICurrentTenant currentTenant,
+            DataFilterState dataFilterState)
         {
             _dbContext = dbContext;
-        }
-
-        public override IQueryable<TEntity> GetQueryable()
-        {
-            var nativeQuery = _dbContext.Queryable<TEntity>().GetNativeQuery();
-            return nativeQuery as IQueryable<TEntity> ?? Enumerable.Empty<TEntity>().AsQueryable();
+            CurrentTenant = currentTenant;
+            DataFilterState = dataFilterState;
         }
 
         public override IQueryable<TEntity> GetQueryableUnfiltered()
         {
-            var nativeQuery = _dbContext.Queryable<TEntity>().GetNativeQuery();
-            return nativeQuery as IQueryable<TEntity> ?? Enumerable.Empty<TEntity>().AsQueryable();
+            return _dbContext.Queryable<TEntity>().GetNativeQuery() as IQueryable<TEntity>
+                ?? Enumerable.Empty<TEntity>().AsQueryable();
         }
+
+        protected IDbContextProvider.IDataBaseContext GetDbContext() => _dbContext;
 
         public override async Task<List<TEntity>> GetListAsync(CancellationToken cancellationToken = default)
         {
-            return await _dbContext.Queryable<TEntity>().ToListAsync(cancellationToken);
+            return await GetQueryable().ToListAsync(cancellationToken);
         }
 
         public override async Task<List<TEntity>> GetListAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            return await _dbContext.Queryable<TEntity>().Where(predicate).ToListAsync(cancellationToken);
+            return await GetQueryable().Where(predicate).ToListAsync(cancellationToken);
         }
 
         public override async Task<List<TEntity>> GetListAsync(Expression<Func<TEntity, bool>> predicate, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
         {
-            var query = _dbContext.Queryable<TEntity>().Where(predicate);
+            var query = GetQueryable().Where(predicate);
             query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
             return await query.ToListAsync(cancellationToken);
         }
 
-        public override async Task<TEntity?> GetAsync(TId id, CancellationToken cancellationToken = default)
+        public override async Task<TEntity?> GetAsync(TKey id, CancellationToken cancellationToken = default)
         {
-            return await _dbContext.Queryable<TEntity>().Where(e => e.Id.Equals(id)).FirstOrDefaultAsync(cancellationToken);
+            return await GetQueryable().Where(e => e.Id.Equals(id)).FirstOrDefaultAsync(cancellationToken);
         }
 
         public override async Task<TEntity?> GetAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            return await _dbContext.Queryable<TEntity>().Where(predicate).FirstOrDefaultAsync(cancellationToken);
+            return await GetQueryable().Where(predicate).FirstOrDefaultAsync(cancellationToken);
         }
 
         public override async Task<TEntity> InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
@@ -94,7 +99,7 @@ namespace CrestCreates.OrmProviders.EFCore.Repositories
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        public override async Task DeleteAsync(TId id, CancellationToken cancellationToken = default)
+        public override async Task DeleteAsync(TKey id, CancellationToken cancellationToken = default)
         {
             var entity = await GetAsync(id, cancellationToken);
             if (entity != null)
@@ -112,62 +117,68 @@ namespace CrestCreates.OrmProviders.EFCore.Repositories
 
         public override async Task DeleteRangeAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            var entities = await _dbContext.Queryable<TEntity>().Where(predicate).ToListAsync(cancellationToken);
+            var entities = await GetQueryable().Where(predicate).ToListAsync(cancellationToken);
             _dbContext.Set<TEntity>().RemoveRange(entities);
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        public override async Task<Domain.Shared.DTOs.PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, CancellationToken cancellationToken = default)
+        public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, CancellationToken cancellationToken = default)
         {
-            var result = await _dbContext.Queryable<TEntity>().ToPagedResultAsync(pageIndex, pageSize, cancellationToken);
-            return new Domain.Shared.DTOs.PagedResult<TEntity>(result.Items, (int)result.TotalCount, pageIndex, pageSize);
+            var query = GetQueryable();
+            var totalCount = await query.LongCountAsync(cancellationToken);
+            var items = await query.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+            return new PagedResult<TEntity>(items, (int)totalCount, pageIndex, pageSize);
         }
 
-        public override async Task<Domain.Shared.DTOs.PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
+        public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            var result = await _dbContext.Queryable<TEntity>().Where(predicate).ToPagedResultAsync(pageIndex, pageSize, cancellationToken);
-            return new Domain.Shared.DTOs.PagedResult<TEntity>(result.Items, (int)result.TotalCount, pageIndex, pageSize);
+            var query = GetQueryable().Where(predicate);
+            var totalCount = await query.LongCountAsync(cancellationToken);
+            var items = await query.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+            return new PagedResult<TEntity>(items, (int)totalCount, pageIndex, pageSize);
         }
 
-        public override async Task<Domain.Shared.DTOs.PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, bool>> predicate, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
+        public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, bool>> predicate, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
         {
-            var query = _dbContext.Queryable<TEntity>().Where(predicate);
+            var query = GetQueryable().Where(predicate);
             query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
-            var result = await query.ToPagedResultAsync(pageIndex, pageSize, cancellationToken);
-            return new Domain.Shared.DTOs.PagedResult<TEntity>(result.Items, (int)result.TotalCount, pageIndex, pageSize);
+            var totalCount = await query.LongCountAsync(cancellationToken);
+            var items = await query.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+            return new PagedResult<TEntity>(items, (int)totalCount, pageIndex, pageSize);
         }
 
-        public override async Task<Domain.Shared.DTOs.PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
+        public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
         {
-            var query = _dbContext.Queryable<TEntity>();
+            var query = GetQueryable();
             query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
-            var result = await query.ToPagedResultAsync(pageIndex, pageSize, cancellationToken);
-            return new Domain.Shared.DTOs.PagedResult<TEntity>(result.Items, (int)result.TotalCount, pageIndex, pageSize);
+            var totalCount = await query.LongCountAsync(cancellationToken);
+            var items = await query.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+            return new PagedResult<TEntity>(items, (int)totalCount, pageIndex, pageSize);
         }
 
         public override async Task<long> GetCountAsync(CancellationToken cancellationToken = default)
         {
-            return await _dbContext.Queryable<TEntity>().LongCountAsync(cancellationToken);
+            return await GetQueryable().LongCountAsync(cancellationToken);
         }
 
         public override async Task<long> GetCountAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            return await _dbContext.Queryable<TEntity>().Where(predicate).LongCountAsync(cancellationToken);
+            return await GetQueryable().Where(predicate).LongCountAsync(cancellationToken);
         }
 
         public override async Task<bool> AnyAsync(CancellationToken cancellationToken = default)
         {
-            return await _dbContext.Queryable<TEntity>().AnyAsync(cancellationToken);
+            return await GetQueryable().AnyAsync(cancellationToken);
         }
 
         public override async Task<bool> AnyAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            return await _dbContext.Queryable<TEntity>().AnyAsync(predicate, cancellationToken);
+            return await GetQueryable().AnyAsync(predicate, cancellationToken);
         }
 
-        public override async Task<bool> ExistsAsync(TId id, CancellationToken cancellationToken = default)
+        public override async Task<bool> ExistsAsync(TKey id, CancellationToken cancellationToken = default)
         {
-            return await _dbContext.Queryable<TEntity>().AnyAsync(e => e.Id.Equals(id), cancellationToken);
+            return await GetQueryable().AnyAsync(e => e.Id.Equals(id), cancellationToken);
         }
     }
 }

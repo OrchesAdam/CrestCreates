@@ -1,13 +1,13 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading;
+using CrestCreates.Domain.Shared.Enums;
 using Microsoft.AspNetCore.Http;
 
 namespace CrestCreates.Infrastructure.Authorization
 {
-    /// <summary>
-    /// 当前用户主体访问器实现
-    /// </summary>
     public class CurrentPrincipalAccessor : ICurrentPrincipalAccessor
     {
         private readonly IHttpContextAccessor _httpContextAccessor;
@@ -22,13 +22,11 @@ namespace CrestCreates.Infrastructure.Authorization
         {
             get
             {
-                // 优先使用手动设置的 Principal
                 if (_currentPrincipal.Value != null)
                 {
                     return _currentPrincipal.Value;
                 }
 
-                // 从 HTTP 上下文获取
                 return _httpContextAccessor?.HttpContext?.User;
             }
         }
@@ -60,59 +58,26 @@ namespace CrestCreates.Infrastructure.Authorization
         }
     }
 
-    /// <summary>
-    /// 当前用户访问器（简化版）
-    /// 提供用户ID、用户名、角色等快捷访问
-    /// </summary>
     public interface ICurrentUser
     {
-        /// <summary>
-        /// 用户ID
-        /// </summary>
         string Id { get; }
-
-        /// <summary>
-        /// 用户名
-        /// </summary>
         string UserName { get; }
-
-        /// <summary>
-        /// 是否已认证
-        /// </summary>
         bool IsAuthenticated { get; }
-
-        /// <summary>
-        /// 租户ID
-        /// </summary>
         string TenantId { get; }
-
-        /// <summary>
-        /// 角色列表
-        /// </summary>
         string[] Roles { get; }
-
-        /// <summary>
-        /// 查找声明值
-        /// </summary>
+        Guid? OrganizationId { get; }
+        IReadOnlyList<Guid> OrganizationIds { get; }
+        DataScope DataScope { get; }
         string FindClaimValue(string claimType);
-
-        /// <summary>
-        /// 查找所有声明值
-        /// </summary>
         string[] FindClaimValues(string claimType);
-
-        /// <summary>
-        /// 是否在指定角色中
-        /// </summary>
         bool IsInRole(string roleName);
+        bool IsInOrganization(Guid orgId);
     }
 
-    /// <summary>
-    /// 当前用户实现
-    /// </summary>
     public class CurrentUser : ICurrentUser
     {
         private readonly ICurrentPrincipalAccessor _principalAccessor;
+        private IReadOnlyList<Guid>? _organizationIds;
 
         public CurrentUser(ICurrentPrincipalAccessor principalAccessor)
         {
@@ -145,6 +110,64 @@ namespace CrestCreates.Infrastructure.Authorization
             }
         }
 
+        public Guid? OrganizationId
+        {
+            get
+            {
+                var orgIdStr = FindClaimValue("org_id") ?? FindClaimValue("organizationid");
+                if (Guid.TryParse(orgIdStr, out var orgId))
+                {
+                    return orgId;
+                }
+                return null;
+            }
+        }
+
+        public IReadOnlyList<Guid> OrganizationIds
+        {
+            get
+            {
+                if (_organizationIds != null)
+                    return _organizationIds;
+
+                var orgIds = new List<Guid>();
+                
+                if (OrganizationId.HasValue)
+                {
+                    orgIds.Add(OrganizationId.Value);
+                }
+
+                var orgIdsStr = FindClaimValue("org_ids");
+                if (!string.IsNullOrEmpty(orgIdsStr))
+                {
+                    var parts = orgIdsStr.Split(',', ';');
+                    foreach (var part in parts)
+                    {
+                        if (Guid.TryParse(part.Trim(), out var id) && !orgIds.Contains(id))
+                        {
+                            orgIds.Add(id);
+                        }
+                    }
+                }
+
+                _organizationIds = orgIds.AsReadOnly();
+                return _organizationIds;
+            }
+        }
+
+        public DataScope DataScope
+        {
+            get
+            {
+                var dataScopeStr = FindClaimValue("data_scope");
+                if (int.TryParse(dataScopeStr, out var dataScopeValue) && Enum.IsDefined(typeof(DataScope), dataScopeValue))
+                {
+                    return (DataScope)dataScopeValue;
+                }
+                return DataScope.Self;
+            }
+        }
+
         public string FindClaimValue(string claimType)
         {
             return _principalAccessor.Principal?.FindFirst(claimType)?.Value;
@@ -156,7 +179,7 @@ namespace CrestCreates.Infrastructure.Authorization
             if (claims == null)
                 return Array.Empty<string>();
 
-            var values = new System.Collections.Generic.List<string>();
+            var values = new List<string>();
             foreach (var claim in claims)
             {
                 if (!string.IsNullOrEmpty(claim.Value))
@@ -171,6 +194,11 @@ namespace CrestCreates.Infrastructure.Authorization
         public bool IsInRole(string roleName)
         {
             return _principalAccessor.Principal?.IsInRole(roleName) ?? false;
+        }
+
+        public bool IsInOrganization(Guid orgId)
+        {
+            return OrganizationIds.Contains(orgId);
         }
     }
 }

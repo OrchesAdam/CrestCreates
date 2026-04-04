@@ -1,10 +1,12 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using Xunit;
 using CrestCreates.OrmProviders.FreeSqlProvider.Repositories;
 using CrestCreates.OrmProviders.FreeSqlProvider.UnitOfWork;
 using CrestCreates.Domain.Entities;
 using FreeSql;
+using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.OrmProviders.Tests
 {
@@ -12,8 +14,14 @@ namespace CrestCreates.OrmProviders.Tests
         where TEntity : class, IEntity<TKey>
         where TKey : IEquatable<TKey>
     {
-        public TestFreeSqlRepository(FreeSqlUnitOfWorkManager uowManager) : base(uowManager, null)
-        {}
+        public TestFreeSqlRepository(FreeSqlUnitOfWorkManager uowManager, ILogger<FreeSqlRepository<TEntity, TKey>> logger = null) : base(uowManager, logger)
+        {
+        }
+
+        public override IQueryable<TEntity> GetQueryableUnfiltered()
+        {
+            throw new NotImplementedException();
+        }
     }
 
     public class FreeSqlRepositoryTests : OrmTestBase

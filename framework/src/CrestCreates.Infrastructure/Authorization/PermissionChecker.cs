@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using CrestCreates.Domain.Exceptions;
 
 namespace CrestCreates.Infrastructure.Authorization
 {
@@ -12,6 +13,7 @@ namespace CrestCreates.Infrastructure.Authorization
         Task<bool> IsGrantedAsync(ClaimsPrincipal principal, string permissionName);
         Task<MultiplePermissionGrantResult> IsGrantedAsync(string[] permissionNames);
         Task<MultiplePermissionGrantResult> IsGrantedAsync(ClaimsPrincipal principal, string[] permissionNames);
+        Task CheckAsync(string permissionName);
     }
 
     public class MultiplePermissionGrantResult
@@ -80,6 +82,14 @@ namespace CrestCreates.Infrastructure.Authorization
             }
 
             return new MultiplePermissionGrantResult(result);
+        }
+
+        public async Task CheckAsync(string permissionName)
+        {
+            if (!await IsGrantedAsync(permissionName))
+            {
+                throw new CrestPermissionException(permissionName);
+            }
         }
     }
 

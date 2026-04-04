@@ -4,9 +4,11 @@ using LibraryManagement.Application.Contracts.Interfaces;
 using LibraryManagement.Domain.Entities;
 using LibraryManagement.Domain.Repositories;
 using CrestCreates.Application.Services;
+using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.UnitOfWork;
+using CrestCreates.Infrastructure.Authorization;
 
 namespace LibraryManagement.Application.Services;
 
@@ -17,12 +19,13 @@ public class BookAppService : CrestAppServiceBase<Book,Guid, BookDto, CreateBook
     private readonly IMapper _mapper;
 
 
-    public BookAppService(ICrestRepositoryBase<Book, Guid> repository, IMapper mapper, IUnitOfWork unitOfWork, IBookRepository repository2) : base(repository, mapper, unitOfWork)
+    /// <inheritdoc />
+    public BookAppService(ICrestRepositoryBase<Book, Guid> repository, IMapper mapper, IUnitOfWork unitOfWork, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, IBookRepository repository2) : base(repository, mapper, unitOfWork, currentUser, dataPermissionFilter, permissionChecker)
     {
         _repository = repository2;
         _mapper = mapper;
     }
-    
+
     public async Task<BookDto?> GetByIsbnAsync(string isbn, CancellationToken cancellationToken = default)
     {
         var book = await _repository.GetByIsbnAsync(isbn, cancellationToken);
