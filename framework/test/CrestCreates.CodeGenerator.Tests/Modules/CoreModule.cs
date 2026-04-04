@@ -11,7 +11,7 @@ namespace CrestCreates.CodeGenerator.Tests.Modules
     /// 核心模块 - 无依赖的基础模块
     /// 演示模块的基本使用和生命周期钩子
     /// </summary>
-    [Module]
+    [CrestModule]
     public class CoreModule : ModuleBase
     {
         private ILogger<CoreModule>? _logger;

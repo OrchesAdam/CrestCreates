@@ -10,25 +10,11 @@ using Microsoft.Extensions.Hosting;
 
 namespace LibraryManagement.EntityFrameworkCore.Modules;
 
-[Module(typeof(ApplicationModule), Order = -50)]
-public class EntityFrameworkCoreModule : IModule
+[CrestModule(typeof(ApplicationModule), Order = -50)]
+public class EntityFrameworkCoreModule : ModuleBase
 {
-    public void OnPreInitialize()
-    {
-        // 基础设施层预初始化逻辑
-    }
-
-    public void OnInitialize()
-    {
-        // 基础设施层初始化逻辑
-    }
-
-    public void OnPostInitialize()
-    {
-        // 基础设施层后初始化逻辑
-    }
-
-    public void OnConfigureServices(IServiceCollection services)
+    
+    public override void OnConfigureServices(IServiceCollection services)
     {
         // 注册 DbContext
         services.AddDbContext<LibraryDbContext>((serviceProvider, options) =>
@@ -43,10 +29,5 @@ public class EntityFrameworkCoreModule : IModule
         services.AddScoped<ICategoryRepository, CategoryRepository>();
         services.AddScoped<IMemberRepository, MemberRepository>();
         services.AddScoped<ILoanRepository, LoanRepository>();
-    }
-
-    public void OnApplicationInitialization(IHost host)
-    {
-        // 应用初始化逻辑
     }
 }

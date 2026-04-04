@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Common;
 using CrestCreates.Application.Services;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;

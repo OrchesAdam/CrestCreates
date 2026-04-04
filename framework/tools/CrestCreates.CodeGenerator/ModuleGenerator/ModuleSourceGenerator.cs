@@ -12,7 +12,7 @@ namespace CrestCreates.CodeGenerator.ModuleGenerator;
 [Generator]
 public class ModuleSourceGenerator : IIncrementalGenerator
 {
-    private const string ModuleMarkerAttribute = "ModuleAttribute";
+    private const string ModuleMarkerAttribute = "CrestModuleAttribute";
     private const string DependsOnAttribute = "DependsOn";
 
     public void Initialize(IncrementalGeneratorInitializationContext context)

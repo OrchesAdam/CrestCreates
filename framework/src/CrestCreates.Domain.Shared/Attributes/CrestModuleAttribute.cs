@@ -7,20 +7,20 @@ namespace CrestCreates.Domain.Shared.Attributes
     /// 用于标记一个类为模块，模块会被自动注册到应用程序中
     /// </summary>
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-    public class ModuleAttribute : Attribute
+    public class CrestModuleAttribute : Attribute
     {
         /// <summary>
-        /// 初始化 ModuleAttribute
+        /// 初始化 CrestModuleAttribute
         /// </summary>
-        public ModuleAttribute()
+        public CrestModuleAttribute()
         {
         }
 
         /// <summary>
-        /// 初始化 ModuleAttribute 并指定依赖的模块类型
+        /// 初始化 CrestModuleAttribute 并指定依赖的模块类型
         /// </summary>
         /// <param name="dependsOn">依赖的模块类型数组</param>
-        public ModuleAttribute(params Type[] dependsOn)
+        public CrestModuleAttribute(params Type[] dependsOn)
         {
             DependsOn = dependsOn;
         }

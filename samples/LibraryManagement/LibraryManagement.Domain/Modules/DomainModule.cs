@@ -5,7 +5,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace LibraryManagement.Domain.Modules;
 
-[Module(Order = -200)]
+[CrestModule(Order = -200)]
 public class DomainModule : IModule
 {
     public void OnPreInitialize()

@@ -11,7 +11,7 @@ namespace CrestCreates.CodeGenerator.Tests.Modules
     /// 应用模块 - 依赖 CoreModule 和 DatabaseModule
     /// 演示多模块依赖和拓扑排序
     /// </summary>
-    [Module(typeof(CoreModule), typeof(DatabaseModule))]  // 依赖多个模块
+    [CrestModule(typeof(CoreModule), typeof(DatabaseModule))]  // 依赖多个模块
     public class ApplicationModule : ModuleBase
     {
         private ILogger<ApplicationModule>? _logger;

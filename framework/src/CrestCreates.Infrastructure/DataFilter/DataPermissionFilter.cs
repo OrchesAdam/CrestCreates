@@ -2,10 +2,10 @@ using System;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Threading.Tasks;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Entities.Auditing;
 using CrestCreates.Domain.Shared.Enums;
-using CrestCreates.Infrastructure.Authorization;
 
 namespace CrestCreates.Infrastructure.DataFilter
 {
@@ -27,7 +27,7 @@ namespace CrestCreates.Infrastructure.DataFilter
                 return Task.FromResult(query);
             }
 
-            var dataScope = _currentUser.DataScope;
+            var dataScope = (DataScope)_currentUser.DataScopeValue;
             query = ApplyTenantFilterAsync<TEntity>(query).Result;
 
             switch (dataScope)

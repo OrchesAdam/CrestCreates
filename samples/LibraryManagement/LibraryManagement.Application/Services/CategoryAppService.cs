@@ -4,6 +4,7 @@ using LibraryManagement.Application.Contracts.Interfaces;
 using LibraryManagement.Domain.Entities;
 using LibraryManagement.Domain.Repositories;
 using CrestCreates.Application.Services;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;

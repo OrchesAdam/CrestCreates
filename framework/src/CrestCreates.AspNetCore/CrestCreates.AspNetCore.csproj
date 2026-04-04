@@ -14,6 +14,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="..\CrestCreates.Application.Contracts\CrestCreates.Application.Contracts.csproj" />
+    <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+    <ProjectReference Include="..\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

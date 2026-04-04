@@ -7,11 +7,11 @@ using AutoMapper;
 using CrestCreates.Application.Contracts.DTOs.Common;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Application.Contracts.Query;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Entities.Auditing;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.UnitOfWork;
-using CrestCreates.Infrastructure.Authorization;
 using Microsoft.EntityFrameworkCore;
 
 namespace CrestCreates.Application.Services;

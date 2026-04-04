@@ -106,36 +106,36 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
     }
 
     private string? ExtractModuleAttribute(string content)
-    {
-        var startIndex = content.IndexOf("[Module");
-        if (startIndex < 0) return null;
-
-        var depth = 0;
-        var inBrackets = false;
-        var endIndex = startIndex;
-
-        for (int i = startIndex; i < content.Length; i++)
         {
-            var c = content[i];
-            
-            if (c == '[')
+            var startIndex = content.IndexOf("[CrestModule");
+            if (startIndex < 0) return null;
+
+            var depth = 0;
+            var inBrackets = false;
+            var endIndex = startIndex;
+
+            for (int i = startIndex; i < content.Length; i++)
             {
-                depth++;
-                inBrackets = true;
-            }
-            else if (c == ']')
-            {
-                depth--;
-                if (depth == 0 && inBrackets)
+                var c = content[i];
+                
+                if (c == '[')
                 {
-                    endIndex = i + 1;
-                    break;
+                    depth++;
+                    inBrackets = true;
+                }
+                else if (c == ']')
+                {
+                    depth--;
+                    if (depth == 0 && inBrackets)
+                    {
+                        endIndex = i + 1;
+                        break;
+                    }
                 }
             }
+
+            if (endIndex <= startIndex) return null;
+
+            return content.Substring(startIndex, endIndex - startIndex);
         }
-
-        if (endIndex <= startIndex) return null;
-
-        return content.Substring(startIndex, endIndex - startIndex);
-    }
 }

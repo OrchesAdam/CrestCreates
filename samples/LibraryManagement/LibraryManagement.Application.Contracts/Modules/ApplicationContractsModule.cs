@@ -6,7 +6,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace LibraryManagement.Application.Contracts.Modules;
 
-[Module(typeof(DomainModule), Order = -150)]
+[CrestModule(typeof(DomainModule), Order = -150)]
 public class ApplicationContractsModule : IModule
 {
     public void OnPreInitialize()

@@ -6,31 +6,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace CrestCreates.Web.Module;
 
-[Module]
-public class WebModule : IModule
+[CrestModule]
+public class WebModule : ModuleBase
 {
-    public void OnPreInitialize()
-    {
-        throw new System.NotImplementedException();
-    }
-
-    public void OnInitialize()
-    {
-        throw new System.NotImplementedException();
-    }
-
-    public void OnPostInitialize()
-    {
-        throw new System.NotImplementedException();
-    }
-
-    public void OnConfigureServices(IServiceCollection services)
-    {
-        throw new System.NotImplementedException();
-    }
-
-    public void OnApplicationInitialization(IHost host)
-    {
-        throw new System.NotImplementedException();
-    }
 }
