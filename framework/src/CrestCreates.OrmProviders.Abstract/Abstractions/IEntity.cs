@@ -1,5 +1,6 @@
 using System;
 using CrestCreates.Domain.Entities;
+using CrestCreates.Domain.Shared.Entities;
 
 namespace CrestCreates.OrmProviders.Abstract.Abstractions
 {

@@ -5,6 +5,7 @@ using Xunit;
 using CrestCreates.OrmProviders.FreeSqlProvider.Repositories;
 using CrestCreates.OrmProviders.FreeSqlProvider.UnitOfWork;
 using CrestCreates.Domain.Entities;
+using CrestCreates.Domain.Shared.Entities;
 using FreeSql;
 using Microsoft.Extensions.Logging;
 

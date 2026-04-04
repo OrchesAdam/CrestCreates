@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Repositories;
+using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
 
 namespace CrestCreates.OrmProviders.EFCore.Repositories

@@ -1,5 +1,6 @@
 using System;
 using CrestCreates.Domain.Entities;
+using CrestCreates.Domain.Shared.Entities;
 using Microsoft.AspNetCore.Identity;
 
 namespace CrestCreates.Identity.Entities

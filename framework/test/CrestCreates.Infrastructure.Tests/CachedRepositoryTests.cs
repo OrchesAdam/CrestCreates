@@ -9,6 +9,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Entities;
+using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.Infrastructure.Caching;
 using CrestCreates.Infrastructure.Caching.Repository;
 

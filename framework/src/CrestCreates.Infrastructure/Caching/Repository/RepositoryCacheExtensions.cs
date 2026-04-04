@@ -1,6 +1,7 @@
 using System;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Repositories;
+using CrestCreates.Domain.Shared.Entities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 

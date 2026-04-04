@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Repositories;
+using CrestCreates.Domain.Shared.Entities;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.Infrastructure.Caching.Repository

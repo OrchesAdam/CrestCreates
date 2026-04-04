@@ -1,6 +1,6 @@
 using System;
 
-namespace CrestCreates.Domain.Entities
+namespace CrestCreates.Domain.Shared.Entities
 {
     public interface IEntity<TId> where TId : IEquatable<TId>
     {

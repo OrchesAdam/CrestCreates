@@ -8,6 +8,7 @@ using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.DTOs;
+using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.EntityFrameworkCore;
 using IDbContextProvider = CrestCreates.DbContextProvider.Abstract;

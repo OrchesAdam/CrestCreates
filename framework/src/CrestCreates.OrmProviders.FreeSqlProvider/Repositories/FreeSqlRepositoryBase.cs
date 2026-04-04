@@ -8,6 +8,7 @@ using FreeSql;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.DTOs;
+using CrestCreates.Domain.Shared.Entities;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.OrmProviders.FreeSqlProvider.Repositories

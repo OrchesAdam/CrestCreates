@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.Entities;
+using CrestCreates.Domain.Shared.Entities;
 
 namespace CrestCreates.OrmProviders.Abstract.Abstractions
 {

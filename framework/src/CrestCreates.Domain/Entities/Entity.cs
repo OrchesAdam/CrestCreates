@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CrestCreates.Domain.DomainEvents;
+using CrestCreates.Domain.Shared.Entities;
 
 namespace CrestCreates.Domain.Entities
 {    public abstract class Entity<TId> : IEntity<TId> where TId : IEquatable<TId>

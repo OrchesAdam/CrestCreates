@@ -3,7 +3,7 @@ using CrestCreates.Domain.Entities.Auditing;
 
 namespace CrestCreates.Domain.Entities;
 
-public abstract class MustHaveTenantOrganizationEntity<TKey> : Entity<TKey>, IMustHaveTenantOrganization
+public abstract class MustHaveTenantOrganizationEntity<TKey> : Entity<TKey>, IMustHaveTenantOrganization<TKey>
     where TKey : IEquatable<TKey>
 {
     public string TenantId { get; set; } = string.Empty;

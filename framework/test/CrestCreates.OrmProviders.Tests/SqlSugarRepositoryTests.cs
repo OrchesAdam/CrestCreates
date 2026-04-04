@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Xunit;
 using CrestCreates.OrmProviders.SqlSugar.Repositories;
 using CrestCreates.Domain.Entities;
+using CrestCreates.Domain.Shared.Entities;
 using SqlSugar;
 
 namespace CrestCreates.OrmProviders.Tests

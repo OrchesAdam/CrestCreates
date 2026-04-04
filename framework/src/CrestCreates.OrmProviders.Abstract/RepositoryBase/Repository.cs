@@ -1,6 +1,7 @@
 ﻿using System.Linq.Expressions;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.Entities;
+using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.OrmProviders.Abstract.Abstractions;
 
 namespace CrestCreates.OrmProviders.Abstract.RepositoryBase;
