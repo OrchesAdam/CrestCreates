@@ -8,9 +8,7 @@ using LibraryManagement.Domain.Shared.Constants;
 
 namespace LibraryManagement.Domain.Entities;
 
-[GenerateRepository(OrmProvider = OrmProvider.EfCore)]
-[GenerateCrudService(GenerateDto = true, GenerateController = true, ServiceRoute = "api/categories")]
-[GenerateQueryBuilder]
+[Entity]
 public class Category : AuditedEntity<Guid>
 {
     public string Name { get; private set; } = string.Empty;

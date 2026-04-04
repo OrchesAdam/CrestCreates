@@ -3,11 +3,13 @@ using System.Collections.Generic;
 using System.Linq;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Entities.Auditing;
+using CrestCreates.Domain.Shared.Attributes;
 using LibraryManagement.Domain.Shared.Constants;
 using LibraryManagement.Domain.Shared.Enums;
 
 namespace LibraryManagement.Domain.Entities;
 
+[Entity]
 public class Member : AuditedEntity<Guid>
 {
     public string Name { get; private set; } = string.Empty;

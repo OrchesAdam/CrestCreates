@@ -46,7 +46,7 @@ namespace CrestCreates.Domain.Entities
             return Id.GetHashCode();
         }
 
-        public static bool operator ==(Entity<TId> left, Entity<TId> right)
+        public static bool operator ==(Entity<TId>? left, Entity<TId>? right)
         {
             if (left is null && right is null)
                 return true;

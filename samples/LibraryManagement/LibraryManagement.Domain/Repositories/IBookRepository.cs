@@ -7,7 +7,7 @@ using LibraryManagement.Domain.Entities;
 
 namespace LibraryManagement.Domain.Repositories;
 
-public interface IBookRepository : IRepository<Book, Guid>
+public interface IBookRepository : ICrestRepositoryBase<Book, Guid>
 {
     Task<Book?> GetByIsbnAsync(string isbn, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Book>> GetByCategoryAsync(Guid categoryId, CancellationToken cancellationToken = default);

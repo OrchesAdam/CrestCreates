@@ -8,7 +8,7 @@ using LibraryManagement.Domain.Shared.Enums;
 
 namespace LibraryManagement.Domain.Repositories;
 
-public interface ILoanRepository : IRepository<Loan, Guid>
+public interface ILoanRepository : ICrestRepositoryBase<Loan, Guid>
 {
     Task<IReadOnlyList<Loan>> GetByMemberAsync(Guid memberId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Loan>> GetByBookAsync(Guid bookId, CancellationToken cancellationToken = default);

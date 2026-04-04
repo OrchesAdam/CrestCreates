@@ -1,11 +1,13 @@
 using System;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Entities.Auditing;
+using CrestCreates.Domain.Shared.Attributes;
 using LibraryManagement.Domain.Shared.Constants;
 using LibraryManagement.Domain.Shared.Enums;
 
 namespace LibraryManagement.Domain.Entities;
 
+[Entity]
 public class Loan : AuditedEntity<Guid>
 {
     public Guid BookId { get; private set; }

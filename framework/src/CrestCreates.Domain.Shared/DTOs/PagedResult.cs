@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
-namespace LibraryManagement.Application.Contracts.DTOs;
+namespace CrestCreates.Domain.Shared.DTOs;
 
-public class PagedResult<T>
+public class PagedResult<TEntity>
 {
-    public IReadOnlyList<T> Items { get; set; } = new List<T>();
+    public IReadOnlyList<TEntity> Items { get; set; } = new List<TEntity>();
     public int TotalCount { get; set; }
     public int PageIndex { get; set; }
     public int PageSize { get; set; }
@@ -15,7 +15,7 @@ public class PagedResult<T>
 
     public PagedResult() { }
 
-    public PagedResult(IReadOnlyList<T> items, int totalCount, int pageIndex, int pageSize)
+    public PagedResult(IReadOnlyList<TEntity> items, int totalCount, int pageIndex, int pageSize)
     {
         Items = items;
         TotalCount = totalCount;

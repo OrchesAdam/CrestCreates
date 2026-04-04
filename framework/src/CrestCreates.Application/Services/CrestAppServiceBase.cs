@@ -12,11 +12,14 @@ using CrestCreates.Domain.UnitOfWork;
 
 namespace CrestCreates.Application.Services;
 
-public abstract class CrestAppServiceBase<TEntity, TDto, TCreateDto, TUpdateDto, TKey> : ICrestAppServiceBase<TEntity, TDto, TCreateDto, TUpdateDto, TKey>
+public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpdateDto> : ICrestAppServiceBase<TEntity,TKey, TDto, TCreateDto, TUpdateDto>
     where TEntity : class
     where TKey : IEquatable<TKey>
 {
-    protected readonly ICrestRepositoryBase<TEntity, TKey> Repository;
+    /// <summary>
+    /// 仓储
+    /// </summary>
+    protected virtual ICrestRepositoryBase<TEntity, TKey> Repository { get; }
     protected readonly IMapper Mapper;
     protected readonly IUnitOfWork UnitOfWork;
 
@@ -82,7 +85,7 @@ public abstract class CrestAppServiceBase<TEntity, TDto, TCreateDto, TUpdateDto,
         return Mapper.Map<List<TDto>>(entities);
     }
 
-    public virtual async Task<Contracts.DTOs.Common.PagedResult<TDto>> GetListAsync(PagedRequestDto request, CancellationToken cancellationToken = default)
+    public virtual async Task<PagedResultDto<TDto>> GetListAsync(PagedRequestDto request, CancellationToken cancellationToken = default)
     {
         await CheckPermissionAsync(ReadPermissionName, cancellationToken);
         var query = Repository.GetQueryable();
@@ -96,10 +99,10 @@ public abstract class CrestAppServiceBase<TEntity, TDto, TCreateDto, TUpdateDto,
         var entities = query.ToList();
         var dtos = Mapper.Map<List<TDto>>(entities);
 
-        return new Contracts.DTOs.Common.PagedResult<TDto>(dtos, totalCount, request.PageIndex, request.PageSize);
+        return new PagedResultDto<TDto>(dtos, totalCount, request.PageIndex, request.PageSize);
     }
 
-    public virtual async Task<Contracts.DTOs.Common.PagedResult<TDto>> QueryAsync(QueryRequest<TEntity> request, CancellationToken cancellationToken = default)
+    public virtual async Task<Contracts.DTOs.Common.PagedResultDto<TDto>> QueryAsync(QueryRequest<TEntity> request, CancellationToken cancellationToken = default)
     {
         return await GetListAsync(request, cancellationToken);
     }

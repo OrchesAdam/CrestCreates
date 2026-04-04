@@ -59,7 +59,7 @@ namespace CrestCreates.Application.Services
         /// <summary>
         /// 获取分页列表
         /// </summary>
-        public virtual async Task<Contracts.DTOs.Common.PagedResult<TDto>> GetListAsync(PagedRequestDto request)
+        public virtual async Task<Contracts.DTOs.Common.PagedResultDto<TDto>> GetListAsync(PagedRequestDto request)
         {
             var entities = await Repository.GetAllAsync();
             var totalCount = entities.Count;
@@ -71,7 +71,7 @@ namespace CrestCreates.Application.Services
 
             var dtos = Mapper.Map<List<TDto>>(pagedEntities);
 
-            return new Contracts.DTOs.Common.PagedResult<TDto>(
+            return new Contracts.DTOs.Common.PagedResultDto<TDto>(
                 dtos,
                 totalCount,
                 request.PageIndex,

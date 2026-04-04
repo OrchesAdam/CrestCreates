@@ -36,7 +36,7 @@ namespace CrestCreates.Application.Services
         /// </summary>
         /// <param name="request">分页请求</param>
         /// <returns>分页结果</returns>
-        Task<PagedResult<TDto>> GetListAsync(PagedRequestDto request);
+        Task<PagedResultDto<TDto>> GetListAsync(PagedRequestDto request);
 
         /// <summary>
         /// 更新实体

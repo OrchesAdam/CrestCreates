@@ -8,8 +8,7 @@ using LibraryManagement.Domain.Shared.Enums;
 
 namespace LibraryManagement.Domain.Entities;
 
-[GenerateEntity(OrmProvider.EfCore, GenerateCrudService = false, GenerateController = false)]
-[GenerateRepository]
+[Entity]
 public class Book : AuditedEntity<Guid>
 {
     public string Title { get; private set; } = string.Empty;

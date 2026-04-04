@@ -15,4 +15,8 @@
     <ProjectReference Include="..\..\..\framework\tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" PrivateAssets="true" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+  </ItemGroup>
+
 </Project>

@@ -1,0 +1,161 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/core/">
+    <Project Path="framework/src/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
+    <Project Path="framework/src/CrestCreates.Application/CrestCreates.Application.csproj" />
+    <Project Path="framework/src/CrestCreates.AspNetCore/CrestCreates.AspNetCore.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/src/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
+    <Project Path="framework/src/CrestCreates.Configuration/CrestCreates.Configuration.csproj" />
+    <Project Path="framework/src/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/src/CrestCreates.DbContextProvider.Abstract/CrestCreates.DbContextProvider.Abstract.csproj" />
+    <Project Path="framework/src/CrestCreates.DistributedTransaction/CrestCreates.DistributedTransaction.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/src/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+    <Project Path="framework/src/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <Project Path="framework/src/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/src/CrestCreates.EventBus.Abstract/CrestCreates.EventBus.Abstract.csproj">
+      <BuildType Solution="Release|*" Project="?" />
+      <Platform Solution="Release|*" Project="?" />
+      <Build Solution="Release|*" Project="false" />
+    </Project>
+    <Project Path="framework/src/CrestCreates.FileManagement/CrestCreates.FileManagement.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/src/CrestCreates.HealthCheck/CrestCreates.HealthCheck.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/src/CrestCreates.Identity/CrestCreates.Identity.csproj" />
+    <Project Path="framework/src/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
+    <Project Path="framework/src/CrestCreates.Localization/CrestCreates.Localization.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/src/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+    <Project Path="framework/src/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
+    <Project Path="framework/src/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
+    <Project Path="framework/src/CrestCreates.OrmProviders.Abstract/CrestCreates.OrmProviders.Abstract.csproj" />
+    <Project Path="framework/src/CrestCreates.Scheduling/CrestCreates.Scheduling.csproj" />
+    <Project Path="framework/src/CrestCreates.Security/CrestCreates.Security.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/src/CrestCreates.Testing/CrestCreates.Testing.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/src/CrestCreates.Validation/CrestCreates.Validation.csproj" />
+  </Folder>
+  <Folder Name="/src/modules/" />
+  <Folder Name="/src/modules/DistributedTransaction/">
+    <Project Path="framework/src/CrestCreates.DistributedTransaction.CAP/CrestCreates.DistributedTransaction.CAP.csproj" />
+  </Folder>
+  <Folder Name="/src/modules/EventBus/">
+    <Project Path="framework/src/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj" />
+    <Project Path="framework/src/CrestCreates.EventBus.Kafka/CrestCreates.EventBus.Kafka.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/src/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/src/CrestCreates.EventBus.RabbitMQ/CrestCreates.EventBus.RabbitMQ.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+  </Folder>
+  <Folder Name="/src/modules/HealthCheck/">
+    <Project Path="framework/src/CrestCreates.HealthCheck.AspNetCore/CrestCreates.HealthCheck.AspNetCore.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/src/CrestCreates.HealthCheck.Mvc/CrestCreates.HealthCheck.Mvc.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+  </Folder>
+  <Folder Name="/src/modules/OrmProviders/">
+    <Project Path="framework/src/CrestCreates.OrmProviders.EFCore/CrestCreates.OrmProviders.EFCore.csproj" />
+    <Project Path="framework/src/CrestCreates.OrmProviders.FreeSqlProvider/CrestCreates.OrmProviders.FreeSqlProvider.csproj" />
+    <Project Path="framework/src/CrestCreates.OrmProviders.SqlSugar/CrestCreates.OrmProviders.SqlSugar.csproj" />
+  </Folder>
+  <Folder Name="/src/modules/SchedulingJob/">
+    <Project Path="framework/src/CrestCreates.Scheduling.Quartz/CrestCreates.Scheduling.Quartz.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+  </Folder>
+  <Folder Name="/src/samples/">
+    <Project Path="framework/src/CrestCreates.Web/CrestCreates.Web.csproj" />
+  </Folder>
+  <Folder Name="/src/samples/LibraryManagement/">
+    <Project Path="samples/LibraryManagement/LibraryManagement.Application.Contracts/LibraryManagement.Application.Contracts.csproj" />
+    <Project Path="samples/LibraryManagement/LibraryManagement.Application/LibraryManagement.Application.csproj" />
+    <Project Path="samples/LibraryManagement/LibraryManagement.Domain.Shared/LibraryManagement.Domain.Shared.csproj" />
+    <Project Path="samples/LibraryManagement/LibraryManagement.Domain/LibraryManagement.Domain.csproj" />
+    <Project Path="samples/LibraryManagement/LibraryManagement.EntityFrameworkCore/LibraryManagement.EntityFrameworkCore.csproj" />
+    <Project Path="samples/LibraryManagement/LibraryManagement.Web/LibraryManagement.Web.csproj" />
+  </Folder>
+  <Folder Name="/src/test/">
+    <Project Path="framework/test/CrestCreates.CodeGenerator.Tests/CrestCreates.CodeGenerator.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.Database.Migrations.Tests/CrestCreates.Database.Migrations.Tests.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/test/CrestCreates.DistributedTransaction.Tests/CrestCreates.DistributedTransaction.Tests.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/test/CrestCreates.Domain.Tests/CrestCreates.Domain.Tests.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/test/CrestCreates.EventBus.Tests/CrestCreates.EventBus.Tests.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/test/CrestCreates.Infrastructure.Tests/CrestCreates.Infrastructure.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.OrmProviders.Tests/CrestCreates.OrmProviders.Tests.csproj">
+      <BuildType Project="?" />
+      <Platform Project="?" />
+      <Build Project="false" />
+    </Project>
+    <Project Path="framework/test/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
+  </Folder>
+  <Folder Name="/src/tools/">
+    <Project Path="framework/tools/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj" />
+    <Project Path="framework/tools/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj" />
+  </Folder>
+</Solution>

@@ -7,7 +7,7 @@ using LibraryManagement.Domain.Entities;
 
 namespace LibraryManagement.Domain.Repositories;
 
-public interface IMemberRepository : IRepository<Member, Guid>
+public interface IMemberRepository : ICrestRepositoryBase<Member, Guid>
 {
     Task<Member?> GetByEmailAsync(string email, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Member>> GetActiveMembersAsync(CancellationToken cancellationToken = default);

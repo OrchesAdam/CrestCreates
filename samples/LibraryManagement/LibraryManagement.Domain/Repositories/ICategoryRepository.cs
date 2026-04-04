@@ -7,7 +7,7 @@ using LibraryManagement.Domain.Entities;
 
 namespace LibraryManagement.Domain.Repositories;
 
-public interface ICategoryRepository : IRepository<Category, Guid>
+public interface ICategoryRepository : ICrestRepositoryBase<Category, Guid>
 {
     Task<Category?> GetByNameAsync(string name, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Category>> GetRootCategoriesAsync(CancellationToken cancellationToken = default);
