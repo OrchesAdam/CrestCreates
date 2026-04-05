@@ -1,4 +1,9 @@
 <Solution>
+  <Folder Name="/assests/">
+    <File Path="Directory.Build.Aot.props" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+  </Folder>
   <Folder Name="/src/" />
   <Folder Name="/src/core/">
     <Project Path="framework/src/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />

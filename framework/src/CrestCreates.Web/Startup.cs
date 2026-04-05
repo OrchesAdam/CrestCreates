@@ -51,7 +51,7 @@ namespace CrestCreates.Web
             services.AddEndpointsApiExplorer();
             services.AddSwaggerGen(c =>
             {
-                c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo { Title = "CrestCreates API", Version = "v1" });
+                c.SwaggerDoc("v1", new Microsoft.OpenApi.OpenApiInfo { Title = "CrestCreates API", Version = "v1" });
             });
 
             services.AddDbContext<CrestCreatesDbContext>(options =>
@@ -75,7 +75,7 @@ namespace CrestCreates.Web
                 config.DefaultExpiration = TimeSpan.FromMinutes(30);
             });
 
-            services.AddAutoMapper(typeof(Startup).Assembly);
+            
 
             Console.WriteLine("=== Module Auto Registration Demo ===");
             Console.WriteLine("Modules discovered and registered:");

@@ -19,7 +19,7 @@ public static class AuthorizationServiceCollectionExtensions
         services.TryAddScoped<IPermissionChecker, PermissionChecker>();
         services.TryAddScoped<IPermissionStore, InMemoryPermissionStore>();
         
-        services.AddAuthorization();
+        services.AddAuthorizationCore();
         
         return services;
     }

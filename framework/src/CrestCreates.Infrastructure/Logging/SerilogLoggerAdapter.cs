@@ -5,7 +5,6 @@ using Serilog;
 using Serilog.Core;
 using Serilog.Context;
 using Serilog.Events;
-using Serilog.Formatting.Compact;
 using Serilog.Sinks.File;
 using Serilog.Sinks.MSSqlServer;
 using Serilog.Sinks.Seq;

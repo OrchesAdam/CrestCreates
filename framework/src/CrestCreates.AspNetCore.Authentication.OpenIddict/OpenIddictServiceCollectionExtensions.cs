@@ -24,8 +24,8 @@ public static class OpenIddictServiceCollectionExtensions
                 serverOptions
                     .SetAuthorizationEndpointUris("/connect/authorize")
                     .SetTokenEndpointUris("/connect/token")
-                    .SetUserinfoEndpointUris("/connect/userinfo")
-                    .SetLogoutEndpointUris("/connect/logout");
+                    .SetUserInfoEndpointUris("/connect/userinfo");
+                    // .SetLogoutEndpointUris("/connect/logout");
 
                 if (options.EnableAuthorizationCodeFlow)
                 {

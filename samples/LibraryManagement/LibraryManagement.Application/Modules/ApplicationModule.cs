@@ -19,9 +19,6 @@ public class ApplicationModule : ModuleBase
         services.AddScoped<ICategoryAppService, CategoryAppService>();
         services.AddScoped<IMemberAppService, MemberAppService>();
         services.AddScoped<ILoanAppService, LoanAppService>();
-
-        // 注册 AutoMapper
-        services.AddAutoMapper(typeof(ApplicationModule).Assembly);
     }
 
 }

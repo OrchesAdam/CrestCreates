@@ -7,107 +7,104 @@
   <!-- 全局包版本管理 -->
   <ItemGroup>
     <!-- Microsoft 核心包 -->
-    <PackageVersion Include="FreeSql.DbContext" Version="3.5.215" />
-    <PackageVersion Include="Microsoft.Extensions.Logging" Version="8.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="7.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="7.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="7.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="7.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="7.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Options" Version="8.0.0" />
+    <PackageVersion Include="FreeSql.DbContext" Version="3.5.308" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.5" />
     <!-- Entity Framework Core -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="7.0.5" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="7.0.5" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="7.0.5" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="7.0.5" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Tools" Version="7.0.5" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="7.0.5" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="7.0.5" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.5" />
     <!-- ORM 提供程序 -->
-    <PackageVersion Include="SqlSugarCore" Version="5.1.4.104" />
-    <PackageVersion Include="FreeSql" Version="3.5.215" />
-    <PackageVersion Include="FreeSql.Provider.Sqlite" Version="3.5.215" />
-    <PackageVersion Include="SQLitePCLRaw.bundle_green" Version="2.1.8" />
+    <PackageVersion Include="SqlSugarCore" Version="5.1.4.214" />
+    <PackageVersion Include="FreeSql" Version="3.5.308" />
+    <PackageVersion Include="FreeSql.Provider.Sqlite" Version="3.5.308" />
+    <PackageVersion Include="SQLitePCLRaw.bundle_green" Version="2.1.11" />
     <!-- 中介者模式 -->
-    <PackageVersion Include="MediatR" Version="11.1.0" />
+    <PackageVersion Include="MediatR" Version="14.1.0" />
     <PackageVersion Include="MediatR.Extensions.Microsoft.DependencyInjection" Version="11.1.0" />
     <!-- 验证 -->
-    <PackageVersion Include="FluentValidation" Version="11.8.1" />
-    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="11.8.1" />
+    <PackageVersion Include="FluentValidation" Version="12.1.1" />
+    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
     <!-- 映射 -->
-    <PackageVersion Include="AutoMapper" Version="12.0.1" />
-    <PackageVersion Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1" />
+    <PackageVersion Include="AutoMapper" Version="16.1.1" />
     <!-- 测试框架 -->
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
-    <PackageVersion Include="xunit" Version="2.6.2" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="2.5.3" />
-    <PackageVersion Include="coverlet.collector" Version="6.0.0" />
-    <PackageVersion Include="Moq" Version="4.20.69" />
-    <PackageVersion Include="FluentAssertions" Version="6.12.0" />
-    <PackageVersion Include="AutoFixture" Version="4.17.0" />
-    <PackageVersion Include="AutoFixture.AutoMoq" Version="4.17.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="coverlet.collector" Version="8.0.1" />
+    <PackageVersion Include="Moq" Version="4.20.72" />
+    <PackageVersion Include="FluentAssertions" Version="8.9.0" />
+    <PackageVersion Include="AutoFixture" Version="4.18.1" />
+    <PackageVersion Include="AutoFixture.AutoMoq" Version="4.18.1" />
     <!-- 代码分析 -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.Common" Version="4.8.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.3.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.3.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Common" Version="5.3.0" />
     <!-- MSBuild -->
-    <PackageVersion Include="Microsoft.Build.Framework" Version="17.10.4" />
-    <PackageVersion Include="Microsoft.Build.Utilities.Core" Version="17.10.4" />
+    <PackageVersion Include="Microsoft.Build.Framework" Version="18.4.0" />
+    <PackageVersion Include="Microsoft.Build.Utilities.Core" Version="18.4.0" />
     <!-- Web 相关 -->
-    <PackageVersion Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.2.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.Http" Version="2.2.2" />
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.ViewFeatures" Version="2.2.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.Antiforgery" Version="2.2.0" />
-    <PackageVersion Include="Microsoft.Extensions.Localization" Version="7.0.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.Localization" Version="2.2.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="8.0.0" />
-
-    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="6.0.25" />
-    <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="6.0.25" />
-    <PackageVersion Include="Microsoft.Extensions.Identity.Core" Version="6.0.25" />
-    <PackageVersion Include="Microsoft.IdentityModel.Tokens" Version="6.34.0" />
-    <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="6.34.0" />
-    <PackageVersion Include="OpenIddict.AspNetCore" Version="4.9.0" />
-    <PackageVersion Include="OpenIddict.EntityFrameworkCore" Version="4.9.0" />
-    <PackageVersion Include="OpenIddict.Quartz" Version="4.9.0" />
-    <PackageVersion Include="Quartz" Version="3.8.1" />
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="6.0.25" />
-    <PackageVersion Include="Swashbuckle.AspNetCore" Version="6.5.0" />
-
-    <PackageVersion Include="Microsoft.AspNetCore.Authorization" Version="2.2.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.Mvc" Version="2.2.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.3.9" />
+    <PackageVersion Include="Microsoft.AspNetCore.Http" Version="2.3.9" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.ViewFeatures" Version="2.3.9" />
+    <PackageVersion Include="Microsoft.AspNetCore.Antiforgery" Version="2.3.9" />
+    <PackageVersion Include="Microsoft.Extensions.Localization" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.AspNetCore.Localization" Version="2.3.9" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Identity.Core" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.IdentityModel.Tokens" Version="8.17.0" />
+    <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.17.0" />
+    <PackageVersion Include="OpenIddict.AspNetCore" Version="7.4.0" />
+    <PackageVersion Include="OpenIddict.EntityFrameworkCore" Version="7.4.0" />
+    <PackageVersion Include="OpenIddict.Quartz" Version="7.4.0" />
+    <PackageVersion Include="Quartz" Version="3.17.1" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.5" />
+    <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.1.7" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authorization" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc" Version="2.3.9" />
     <PackageVersion Include="RabbitMQ.Client" Version="6.5.0" />
     <PackageVersion Include="Confluent.Kafka" Version="2.2.0" />
     <!-- 缓存 -->
-    <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="7.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="7.0.0" />
-    <PackageVersion Include="StackExchange.Redis" Version="2.7.10" />
-    <PackageVersion Include="Castle.Core" Version="5.1.1" />
-    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions" Version="8.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.5" />
+    <PackageVersion Include="StackExchange.Redis" Version="2.12.14" />
+    <PackageVersion Include="Castle.Core" Version="5.2.1" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions" Version="10.0.5" />
     <!-- 日志 -->
-    <PackageVersion Include="Serilog" Version="3.1.1" />
-    <PackageVersion Include="Serilog.Extensions.Hosting" Version="8.0.0" />
-    <PackageVersion Include="Serilog.Extensions.Logging" Version="8.0.0" />
-    <PackageVersion Include="Serilog.Sinks.Console" Version="5.0.1" />
-    <PackageVersion Include="Serilog.Sinks.File" Version="5.0.0" />
-    <PackageVersion Include="Serilog.Sinks.MSSqlServer" Version="6.4.0" />
-    <PackageVersion Include="Serilog.Sinks.Seq" Version="6.0.0" />
-    <PackageVersion Include="Serilog.Enrichers.Environment" Version="2.2.0" />
-    <PackageVersion Include="Serilog.Enrichers.Thread" Version="3.1.0" />
+    <PackageVersion Include="Serilog" Version="4.3.1" />
+    <PackageVersion Include="Serilog.Extensions.Hosting" Version="10.0.0" />
+    <PackageVersion Include="Serilog.Extensions.Logging" Version="10.0.0" />
+    <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageVersion Include="Serilog.Sinks.MSSqlServer" Version="9.0.3" />
+    <PackageVersion Include="Serilog.Sinks.Seq" Version="9.0.0" />
+    <PackageVersion Include="Serilog.Enrichers.Environment" Version="3.0.1" />
+    <PackageVersion Include="Serilog.Enrichers.Thread" Version="4.0.0" />
     <!-- 其他工具包 -->
-    <PackageVersion Include="System.Text.Json" Version="7.0.0" />
+    <PackageVersion Include="System.Text.Json" Version="10.0.5" />
     <PackageVersion Include="System.ComponentModel.Annotations" Version="5.0.0" />
-    <PackageVersion Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageVersion Include="Newtonsoft.Json" Version="13.0.4" />
     <!-- Dotnet Aspire -->
     <PackageVersion Include="Microsoft.AspNetCore.Aspire.Hosting" Version="8.0.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Aspire.Dashboard" Version="8.0.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Aspire.SQLServer" Version="8.0.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Aspire.Redis" Version="8.0.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Aspire.Messaging" Version="8.0.1" />
-    <PackageVersion Include="Microsoft.AspNetCore.Identity" Version="2.2.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.HttpsPolicy" Version="2.2.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Identity" Version="2.3.9" />
+    <PackageVersion Include="Microsoft.AspNetCore.HttpsPolicy" Version="2.3.9" />
   </ItemGroup>
 </Project>
