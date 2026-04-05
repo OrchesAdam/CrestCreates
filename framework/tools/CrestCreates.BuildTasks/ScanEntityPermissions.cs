@@ -25,7 +25,7 @@ public class ScanEntityPermissions : Task
             var permissions = new List<EntityPermissionInfo>();
 
             var classRegex = new Regex(
-                @"(?:public|internal|sealed|abstract|static|\s)+\s+class\s+(\w+Permissions)\s*(?:<[^>]+>)?\s*:\s*(?:\w+,\s*)*IEntityPermissions(?:\s*,\s*\w+)*",
+                @"(?:public|internal|sealed|abstract|static|partial|\s)+\s+(?:partial\s+)?class\s+(\w+Permissions)\s*(?:<[^>]+>)?\s*:\s*(?:\w+,\s*)*IEntityPermissions(?:\s*,\s*\w+)*",
                 RegexOptions.Compiled);
 
             var constRegex = new Regex(
@@ -93,7 +93,11 @@ public class ScanEntityPermissions : Task
                 Permissions = permissions
             };
 
-            var options = new JsonSerializerOptions { WriteIndented = true };
+            var options = new JsonSerializerOptions 
+            { 
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            };
             var json = JsonSerializer.Serialize(manifest, options);
 
             var dir = Path.GetDirectoryName(OutputPath);

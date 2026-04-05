@@ -838,7 +838,21 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             if (attr == null) return defaultValue;
 
             var namedArg = attr.NamedArguments.FirstOrDefault(arg => arg.Key == propertyName);
-            if (namedArg.Key == propertyName && namedArg.Value.Value is T value) return value;
+            if (namedArg.Key != propertyName) return defaultValue;
+
+            var typedConstant = namedArg.Value;
+
+            if (typeof(T) == typeof(string[]) && typedConstant.Kind == TypedConstantKind.Array)
+            {
+                var values = typedConstant.Values
+                    .Select(v => v.Value?.ToString())
+                    .Where(v => v != null)
+                    .Cast<string>()
+                    .ToArray();
+                return (T)(object)values;
+            }
+
+            if (typedConstant.Value is T value) return value;
 
             return defaultValue;
         }
