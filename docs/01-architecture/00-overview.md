@@ -94,7 +94,7 @@ flowchart TD
 
 - **IModule** 接口：定义模块的基本方法
 - **ModuleBase** 抽象类：提供模块的默认实现
-- **ModuleAttribute**：标记模块并指定依赖关系
+- **CrestModuleAttribute**：标记模块并指定依赖关系
 
 ### 模块生命周期
 

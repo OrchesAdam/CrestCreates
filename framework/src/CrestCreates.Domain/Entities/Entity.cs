@@ -4,10 +4,11 @@ using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Shared.Entities;
 
 namespace CrestCreates.Domain.Entities
-{    public abstract class Entity<TId> : IEntity<TId> where TId : IEquatable<TId>
+{
+    public abstract class Entity<TId> : IEntity<TId> where TId : IEquatable<TId>
     {
         public TId Id { get; protected set; } = default!;
-        
+
         private List<IDomainEvent> _domainEvents = new List<IDomainEvent>();
         public IReadOnlyCollection<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
 
@@ -38,7 +39,7 @@ namespace CrestCreates.Domain.Entities
                 return false;
 
             Entity<TId> other = (Entity<TId>)obj;
-            
+
             return Id.Equals(other.Id);
         }
 

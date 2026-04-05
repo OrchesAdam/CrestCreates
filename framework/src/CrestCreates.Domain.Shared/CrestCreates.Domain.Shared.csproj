@@ -7,8 +7,4 @@
     <OutputType>Library</OutputType>
   </PropertyGroup>
 
-  <ItemGroup>
-    <!-- Domain.Shared 是最基础的项目，不依赖任何其他项目 -->
-  </ItemGroup>
-
 </Project>

@@ -235,7 +235,7 @@ CrestCreates/
 
 1. 创建一个新的类库项目
 2. 实现 `IModule` 接口或继承 `ModuleBase`
-3. 使用 `ModuleAttribute` 标记模块
+3. 使用 `CrestModuleAttribute` 标记模块
 4. 在 `ConfigureServices` 方法中注册服务
 
 ### 3. 定义实体

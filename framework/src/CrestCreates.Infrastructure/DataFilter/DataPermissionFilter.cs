@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Entities.Auditing;
+using CrestCreates.Domain.Shared.DataFilter;
 using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.Domain.Shared.Enums;
 

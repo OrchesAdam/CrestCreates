@@ -93,11 +93,11 @@ public abstract class ModuleBase : IModule
 
 ```csharp
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
-public class ModuleAttribute : Attribute
+public class CrestModuleAttribute : Attribute
 {
     public Type[] Dependencies { get; }
     
-    public ModuleAttribute(params Type[] dependencies)
+    public CrestModuleAttribute(params Type[] dependencies)
     {
         Dependencies = dependencies;
     }
@@ -347,7 +347,7 @@ public class OrderService : IOrderService
 
 ### 2. 明确依赖关系
 
-- 使用 `ModuleAttribute` 声明依赖
+- 使用 `CrestModuleAttribute` 声明依赖
 - 避免循环依赖
 - 保持依赖关系简单
 

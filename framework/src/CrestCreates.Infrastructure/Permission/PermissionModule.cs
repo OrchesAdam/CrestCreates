@@ -1,4 +1,5 @@
 using CrestCreates.Domain.DataFilter;
+using CrestCreates.Domain.Shared.DataFilter;
 using CrestCreates.Infrastructure.DataFilter;
 using Microsoft.Extensions.DependencyInjection;
 

@@ -26,7 +26,7 @@ public abstract class ModuleBase : IModule
 - ✅ 模块元数据（Name, Description, Version）
 - ✅ 默认空实现，简化派生类编写
 
-#### ModuleAttribute 特性 (`Domain.Shared/Attributes/ModuleAttribute.cs`)
+#### CrestModuleAttribute 特性 (`Domain.Shared/Attributes/CrestModuleAttribute.cs`)
 ```csharp
 [Module(typeof(CoreModule), typeof(DatabaseModule))]
 public class ApplicationModule : ModuleBase
