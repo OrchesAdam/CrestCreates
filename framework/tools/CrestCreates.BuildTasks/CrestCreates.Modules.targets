@@ -2,10 +2,13 @@
   <UsingTask TaskName="CrestCreates.BuildTasks.ScanModulesFromSource" AssemblyFile="$(MSBuildThisFileDirectory)CrestCreates.BuildTasks.dll" />
   <UsingTask TaskName="CrestCreates.BuildTasks.CollectModuleManifests" AssemblyFile="$(MSBuildThisFileDirectory)CrestCreates.BuildTasks.dll" />
   <UsingTask TaskName="CrestCreates.BuildTasks.GenerateAggregatedModuleCode" AssemblyFile="$(MSBuildThisFileDirectory)CrestCreates.BuildTasks.dll" />
+  <UsingTask TaskName="CrestCreates.BuildTasks.ScanEntityPermissions" AssemblyFile="$(MSBuildThisFileDirectory)CrestCreates.BuildTasks.dll" />
 
   <PropertyGroup>
     <EnableModuleManifestGeneration Condition="'$(EnableModuleManifestGeneration)' == ''">true</EnableModuleManifestGeneration>
     <ModuleManifestOutputPath Condition="'$(ModuleManifestOutputPath)' == ''">$(IntermediateOutputPath)ModuleManifest.json</ModuleManifestOutputPath>
+    <EnableEntityPermissionsScan Condition="'$(EnableEntityPermissionsScan)' == ''">true</EnableEntityPermissionsScan>
+    <EntityPermissionsManifestOutputPath Condition="'$(EntityPermissionsManifestOutputPath)' == ''">$(IntermediateOutputPath)EntityPermissionsManifest.json</EntityPermissionsManifestOutputPath>
   </PropertyGroup>
 
   <Target Name="GenerateModuleManifest"
@@ -21,6 +24,17 @@
       OutputPath="$(ModuleManifestOutputPath)" />
 
     <Message Text="Generated module manifest: $(ModuleManifestOutputPath)" Importance="high" />
+  </Target>
+
+  <Target Name="ScanEntityPermissions"
+          AfterTargets="Build"
+          Condition="'$(EnableEntityPermissionsScan)' == 'true'">
+
+    <ScanEntityPermissions
+      SourceFiles="@(Compile)"
+      OutputPath="$(EntityPermissionsManifestOutputPath)" />
+
+    <Message Text="Generated entity permissions manifest: $(EntityPermissionsManifestOutputPath)" Importance="high" />
   </Target>
 
 </Project>

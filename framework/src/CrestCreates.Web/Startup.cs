@@ -20,6 +20,7 @@ using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.Web.Middlewares;
 using CrestCreates.Domain.Shared;
 using CrestCreates.Modularity;
+using CrestCreates.Aop.Extensions;
 
 namespace CrestCreates.Web
 {
@@ -75,7 +76,6 @@ namespace CrestCreates.Web
                 config.DefaultExpiration = TimeSpan.FromMinutes(30);
             });
 
-            
 
             Console.WriteLine("=== Module Auto Registration Demo ===");
             Console.WriteLine("Modules discovered and registered:");

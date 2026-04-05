@@ -7,7 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
     <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="..\CrestCreates.Aop.Abstractions\CrestCreates.Aop.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Authorization.Abstractions\CrestCreates.Authorization.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -18,15 +21,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options" />
-  </ItemGroup>
-
-  <!-- 排除 Examples 目录和部分高级 Resolvers(需要额外依赖)中的文件 -->
-  <ItemGroup>
-    <Compile Remove="Examples\**" />
-    <Compile Remove="Resolvers\OtherTenantResolvers.cs" />
-    <EmbeddedResource Remove="Examples\**" />
-    <None Remove="Examples\**" />
-    <None Include="Resolvers\OtherTenantResolvers.cs" />
+    <PackageReference Include="Rougamo.Extensions.DependencyInjection.Microsoft" />
   </ItemGroup>
 
 </Project>

@@ -16,7 +16,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" PrivateAssets="true" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\CrestCreates.Authorization.Abstractions\CrestCreates.Authorization.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="..\CrestCreates.DbContextProvider.Abstract\CrestCreates.DbContextProvider.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
   </ItemGroup>
 

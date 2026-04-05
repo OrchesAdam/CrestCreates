@@ -13,6 +13,7 @@ using CrestCreates.Domain.Entities.Auditing;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.DataFilter;
 using CrestCreates.Domain.Shared.Entities.Auditing;
+using CrestCreates.Domain.Shared.Permissions;
 using CrestCreates.Domain.UnitOfWork;
 using Microsoft.EntityFrameworkCore;
 
@@ -30,6 +31,8 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
     protected readonly IDataPermissionFilter DataPermissionFilter;
     protected readonly IPermissionChecker PermissionChecker;
 
+    protected IEntityPermissions? EntityPermissions { get; set; }
+
     protected CrestAppServiceBase(
         ICrestRepositoryBase<TEntity, TKey> repository,
         IMapper mapper,
@@ -46,10 +49,34 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         PermissionChecker = permissionChecker ?? throw new ArgumentNullException(nameof(permissionChecker));
     }
 
-    protected virtual string CreatePermissionName => $"{typeof(TEntity).Name}.Create";
-    protected virtual string UpdatePermissionName => $"{typeof(TEntity).Name}.Update";
-    protected virtual string DeletePermissionName => $"{typeof(TEntity).Name}.Delete";
-    protected virtual string ReadPermissionName => $"{typeof(TEntity).Name}.Read";
+    protected virtual string CreatePermissionName => EntityPermissions != null
+        ? $"{EntityPermissions.EntityName}.Create"
+        : $"{typeof(TEntity).Name}.Create";
+
+    protected virtual string UpdatePermissionName => EntityPermissions != null
+        ? $"{EntityPermissions.EntityName}.Update"
+        : $"{typeof(TEntity).Name}.Update";
+
+    protected virtual string DeletePermissionName => EntityPermissions != null
+        ? $"{EntityPermissions.EntityName}.Delete"
+        : $"{typeof(TEntity).Name}.Delete";
+
+    protected virtual string ReadPermissionName => EntityPermissions != null
+        ? $"{EntityPermissions.EntityName}.Get"
+        : $"{typeof(TEntity).Name}.Read";
+
+    protected virtual TPermissions GetEntityPermissions<TPermissions>() where TPermissions : IEntityPermissions, new()
+    {
+        return new TPermissions();
+    }
+
+    protected virtual async Task CheckEntityPermissionAsync(string action, CancellationToken cancellationToken = default)
+    {
+        var permissionName = EntityPermissions != null
+            ? $"{EntityPermissions.EntityName}.{action}"
+            : $"{typeof(TEntity).Name}.{action}";
+        await CheckPermissionAsync(permissionName, cancellationToken);
+    }
 
     protected virtual async Task CheckPermissionAsync(string permissionName, CancellationToken cancellationToken = default)
     {

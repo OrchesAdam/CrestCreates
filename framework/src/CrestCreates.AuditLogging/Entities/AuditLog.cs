@@ -36,12 +36,12 @@ namespace CrestCreates.AuditLogging.Entities
         /// <summary>
         /// 操作人ID
         /// </summary>
-        public string UserId { get; set; }
+        public string? UserId { get; set; }
 
         /// <summary>
         /// 操作人名称
         /// </summary>
-        public string UserName { get; set; }
+        public string? UserName { get; set; }
 
         /// <summary>
         /// 操作类型
@@ -51,27 +51,27 @@ namespace CrestCreates.AuditLogging.Entities
         /// <summary>
         /// 操作描述
         /// </summary>
-        public string Description { get; set; }
+        public string? Description { get; set; }
 
         /// <summary>
         /// 操作IP
         /// </summary>
-        public string ClientIpAddress { get; set; }
+        public string? ClientIpAddress { get; set; }
 
         /// <summary>
         /// 操作设备
         /// </summary>
-        public string ClientName { get; set; }
+        public string? ClientName { get; set; }
 
         /// <summary>
         /// 操作路径
         /// </summary>
-        public string Path { get; set; }
+        public string? Path { get; set; }
 
         /// <summary>
         /// 操作方法
         /// </summary>
-        public string HttpMethod { get; set; }
+        public string? HttpMethod { get; set; }
 
         /// <summary>
         /// 状态码
@@ -86,22 +86,22 @@ namespace CrestCreates.AuditLogging.Entities
         /// <summary>
         /// 请求参数
         /// </summary>
-        public string Request { get; set; }
+        public string? Request { get; set; }
 
         /// <summary>
         /// 响应结果
         /// </summary>
-        public string Response { get; set; }
+        public string? Response { get; set; }
 
         /// <summary>
         /// 异常信息
         /// </summary>
-        public string Exception { get; set; }
+        public string? Exception { get; set; }
 
         /// <summary>
         /// 租户ID
         /// </summary>
-        public string TenantId { get; set; }
+        public string? TenantId { get; set; }
 
         /// <summary>
         /// 额外信息

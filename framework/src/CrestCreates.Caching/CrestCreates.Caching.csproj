@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.Aop.Abstractions\CrestCreates.Aop.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Caching.Abstractions\CrestCreates.Caching.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />    
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="StackExchange.Redis"/>
+    <PackageReference Include="System.Runtime.Caching" />
+    <PackageReference Include="Rougamo.Extensions.DependencyInjection.Microsoft" />
+  </ItemGroup>
+
+</Project>

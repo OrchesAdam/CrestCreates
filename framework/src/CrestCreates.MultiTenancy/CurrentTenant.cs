@@ -5,10 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.MultiTenancy
 {
-    /// <summary>
-    /// 当前租户上下文实现
-    /// 使用 AsyncLocal 存储当前租户信息,支持异步流程
-    /// </summary>
     public class CurrentTenant : ICurrentTenant
     {
         private readonly AsyncLocal<TenantContextHolder> _currentTenant = new AsyncLocal<TenantContextHolder>();
@@ -39,6 +35,19 @@ namespace CrestCreates.MultiTenancy
             {
                 _currentTenant.Value = new TenantContextHolder { Tenant = oldTenant };
             });
+        }
+        
+        public void SetTenantId(string tenantId)
+        {
+            if (string.IsNullOrEmpty(tenantId))
+            {
+                _currentTenant.Value = new TenantContextHolder { Tenant = null };
+                return;
+            }
+            
+            var tenantProvider = _serviceProvider.GetRequiredService<ITenantProvider>();
+            var tenant = tenantProvider.GetTenantAsync(tenantId).GetAwaiter().GetResult();
+            _currentTenant.Value = new TenantContextHolder { Tenant = tenant };
         }
         
         private class TenantContextHolder

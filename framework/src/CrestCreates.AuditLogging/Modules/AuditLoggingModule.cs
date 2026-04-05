@@ -1,11 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
 using CrestCreates.Modularity;
 using CrestCreates.AuditLogging.Services;
-using CrestCreates.AuditLogging.Entities;
-using CrestCreates.Domain.Repositories;
+using CrestCreates.Domain.Shared.Attributes;
 
 namespace CrestCreates.AuditLogging.Modules
 {
+    [CrestModule]
     public class AuditLoggingModule : ModuleBase
     {
         public override void OnConfigureServices(IServiceCollection services)

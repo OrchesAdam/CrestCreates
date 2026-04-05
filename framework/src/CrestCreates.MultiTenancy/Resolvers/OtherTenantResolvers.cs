@@ -1,10 +1,10 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using CrestCreates.MultiTenancy.Abstractions;
 
 namespace CrestCreates.MultiTenancy.Resolvers
 {
@@ -109,7 +109,7 @@ namespace CrestCreates.MultiTenancy.Resolvers
 
         public Task<string> ResolveAsync(HttpContext httpContext)
         {
-            if (httpContext?.Request?.RouteValues == null)
+            if (httpContext?.Request?.Path == null)
             {
                 return Task.FromResult<string>(null);
             }
@@ -117,9 +117,9 @@ namespace CrestCreates.MultiTenancy.Resolvers
             // 从路由值中读取租户ID
             var routeKey = _options.TenantRouteKey ?? "tenantId";
             
-            if (httpContext.Request.RouteValues.TryGetValue(routeKey, out var tenantId))
+            if (httpContext.Request.Query.TryGetValue(routeKey, out var tenantId))
             {
-                var value = tenantId?.ToString();
+                var value = tenantId.ToString();
                 if (!string.IsNullOrWhiteSpace(value))
                 {
                     _logger.LogDebug("Tenant resolved from route data '{RouteKey}': {TenantId}", 

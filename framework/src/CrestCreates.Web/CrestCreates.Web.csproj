@@ -22,6 +22,7 @@
     <ProjectReference Include="..\CrestCreates.EventBus.Abstract\CrestCreates.EventBus.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.EventBus.Local\CrestCreates.EventBus.Local.csproj" />
     <ProjectReference Include="..\CrestCreates.DataFilter\CrestCreates.DataFilter.csproj" />
+    <ProjectReference Include="..\CrestCreates.Aop\CrestCreates.Aop.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -29,6 +30,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="DependencyInjection.StaticAccessor.Hosting" />
     <PackageReference Include="Swashbuckle.AspNetCore" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
   </ItemGroup>

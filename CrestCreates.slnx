@@ -6,11 +6,15 @@
   </Folder>
   <Folder Name="/src/" />
   <Folder Name="/src/core/">
+    <Project Path="framework/src/CrestCreates.Aop.Abstractions/CrestCreates.Aop.Abstractions.csproj" />
+    <Project Path="framework/src/CrestCreates.Aop/CrestCreates.Aop.csproj" />
     <Project Path="framework/src/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
     <Project Path="framework/src/CrestCreates.Application/CrestCreates.Application.csproj" />
     <Project Path="framework/src/CrestCreates.AspNetCore/CrestCreates.AspNetCore.csproj" />
     <Project Path="framework/src/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
     <Project Path="framework/src/CrestCreates.Authorization.Abstractions/CrestCreates.Authorization.Abstractions.csproj" />
+    <Project Path="framework/src/CrestCreates.Caching.Abstractions/CrestCreates.Caching.Abstractions.csproj" />
+    <Project Path="framework/src/CrestCreates.Caching/CrestCreates.Caching.csproj" />
     <Project Path="framework/src/CrestCreates.Configuration/CrestCreates.Configuration.csproj" />
     <Project Path="framework/src/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj" />
     <Project Path="framework/src/CrestCreates.DbContextProvider.Abstract/CrestCreates.DbContextProvider.Abstract.csproj" />

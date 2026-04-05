@@ -12,6 +12,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\framework\src\CrestCreates.Caching\CrestCreates.Caching.csproj" />
+    <ProjectReference Include="..\framework\src\CrestCreates.Caching.Abstractions\CrestCreates.Caching.Abstractions.csproj" />
+    <ProjectReference Include="..\framework\src\CrestCreates.AspNetCore.Authentication.OpenIddict\CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
     <ProjectReference Include="..\samples\Ecommerce\Ecommerce.Web\Ecommerce.Web.csproj" />
   </ItemGroup>
 

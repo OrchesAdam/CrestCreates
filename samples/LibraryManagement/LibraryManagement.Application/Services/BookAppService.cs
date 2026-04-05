@@ -10,7 +10,6 @@ using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.DataFilter;
 using CrestCreates.Domain.UnitOfWork;
-using CrestCreates.Infrastructure.Authorization;
 
 namespace LibraryManagement.Application.Services;
 
@@ -21,7 +20,6 @@ public class BookAppService : CrestAppServiceBase<Book,Guid, BookDto, CreateBook
     private readonly IMapper _mapper;
 
 
-    /// <inheritdoc />
     public BookAppService(ICrestRepositoryBase<Book, Guid> repository, IMapper mapper, IUnitOfWork unitOfWork, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, IBookRepository repository2) : base(repository, mapper, unitOfWork, currentUser, dataPermissionFilter, permissionChecker)
     {
         _repository = repository2;
