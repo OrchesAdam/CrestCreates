@@ -30,9 +30,26 @@
           AfterTargets="Build"
           Condition="'$(EnableEntityPermissionsScan)' == 'true'">
 
+    <ItemGroup>
+      <_EntityPermissionSourceFiles Include="@(Compile->'%(FullPath)')" />
+      <_EntityPermissionSourceFiles Include="$(CompilerGeneratedFilesOutputPath)\**\*Permissions.g.cs" Condition="'$(CompilerGeneratedFilesOutputPath)' != ''" />
+      <_EntityPermissionSourceFiles Include="$(IntermediateOutputPath)generated\**\*Permissions.g.cs" />
+    </ItemGroup>
+
     <ScanEntityPermissions
-      SourceFiles="@(Compile)"
+      SourceFiles="@(_EntityPermissionSourceFiles)"
       OutputPath="$(EntityPermissionsManifestOutputPath)" />
+
+    <Copy SourceFiles="$(EntityPermissionsManifestOutputPath)"
+          DestinationFolder="$(OutputPath)"
+          Condition="Exists('$(EntityPermissionsManifestOutputPath)')" />
+
+    <ItemGroup Condition="Exists('$(EntityPermissionsManifestOutputPath)')">
+      <Content Include="$(EntityPermissionsManifestOutputPath)"
+               Link="EntityPermissionsManifest.json"
+               CopyToOutputDirectory="PreserveNewest"
+               CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
 
     <Message Text="Generated entity permissions manifest: $(EntityPermissionsManifestOutputPath)" Importance="high" />
   </Target>

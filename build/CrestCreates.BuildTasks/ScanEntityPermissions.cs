@@ -3,7 +3,6 @@ using Microsoft.Build.Utilities;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Task = Microsoft.Build.Utilities.Task;
@@ -25,84 +24,65 @@ public class ScanEntityPermissions : Task
             var permissions = new List<EntityPermissionInfo>();
 
             var classRegex = new Regex(
-                @"(?:public|internal|sealed|abstract|static|partial|\s)+\s+(?:partial\s+)?class\s+(\w+Permissions)\s*(?:<[^>]+>)?\s*:\s*(?:\w+,\s*)*IEntityPermissions(?:\s*,\s*\w+)*",
+                @"(?:public|internal|sealed|abstract|static|partial|\s)+\s+(?:sealed\s+)?(?:partial\s+)?class\s+(\w+Permissions)\s*(?:<[^>]+>)?\s*:\s*(?:\w+,\s*)*IEntityPermissions(?:\s*,\s*\w+)*",
                 RegexOptions.Compiled);
-
             var constRegex = new Regex(
-                @"public\s+const\s+string\s+(\w+)\s*=\s*""([^""]+)""",
+                @"public\s+const\s+string\s+\w+\s*=\s*""([^""]+)""",
                 RegexOptions.Compiled);
-
-            var nsRegex = new Regex(
-                @"namespace\s+([\w\.]+)",
-                RegexOptions.Compiled);
-
-            var entityNameRegex = new Regex(
-                @"EntityName\s*=>\s*""([^""]+)""",
-                RegexOptions.Compiled);
-
-            var entityNamePropertyRegex = new Regex(
-                @"public\s+string\s+EntityName\s*{\s*get\s*}\s*=\s*""([^""]+)""",
-                RegexOptions.Compiled);
-            var moduleNameRegex = new Regex(
-                @"ModuleName\s*=>\s*""([^""]+)""",
-                RegexOptions.Compiled);
-            var moduleNamePropertyRegex = new Regex(
-                @"public\s+string\s+ModuleName\s*{\s*get\s*}\s*=\s*""([^""]+)""",
-                RegexOptions.Compiled);
-            var entityFullNameRegex = new Regex(
-                @"EntityFullName\s*=>\s*""([^""]+)""",
-                RegexOptions.Compiled);
-            var entityFullNamePropertyRegex = new Regex(
-                @"public\s+string\s+EntityFullName\s*{\s*get\s*}\s*=\s*""([^""]+)""",
-                RegexOptions.Compiled);
+            var nsRegex = new Regex(@"namespace\s+([\w\.]+)", RegexOptions.Compiled);
+            var entityNameRegex = new Regex(@"EntityName\s*=>\s*""([^""]+)""", RegexOptions.Compiled);
+            var entityNamePropertyRegex = new Regex(@"public\s+string\s+EntityName\s*{\s*get\s*}\s*=\s*""([^""]+)""", RegexOptions.Compiled);
+            var moduleNameRegex = new Regex(@"ModuleName\s*=>\s*""([^""]+)""", RegexOptions.Compiled);
+            var moduleNamePropertyRegex = new Regex(@"public\s+string\s+ModuleName\s*{\s*get\s*}\s*=\s*""([^""]+)""", RegexOptions.Compiled);
+            var entityFullNameRegex = new Regex(@"EntityFullName\s*=>\s*""([^""]+)""", RegexOptions.Compiled);
+            var entityFullNamePropertyRegex = new Regex(@"public\s+string\s+EntityFullName\s*{\s*get\s*}\s*=\s*""([^""]+)""", RegexOptions.Compiled);
 
             var visitedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var item in SourceFiles)
             {
                 var file = item.ItemSpec;
-                if (!File.Exists(file)) continue;
-                if (!file.EndsWith(".cs")) continue;
-                
+                if (!File.Exists(file) || !file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 var fullPath = Path.GetFullPath(file);
                 if (!visitedFiles.Add(fullPath)) continue;
 
                 var content = File.ReadAllText(fullPath);
-
                 var classMatch = classRegex.Match(content);
-                if (!classMatch.Success) continue;
+                if (!classMatch.Success)
+                {
+                    continue;
+                }
 
                 var className = classMatch.Groups[1].Value;
-
                 var nsMatch = nsRegex.Match(content);
                 var ns = nsMatch.Success ? nsMatch.Groups[1].Value : "Unknown";
-
-                var entityName = ExtractStringProperty(content, entityNameRegex, entityNamePropertyRegex);
-                var moduleName = ExtractStringProperty(content, moduleNameRegex, moduleNamePropertyRegex);
-                var entityFullName = ExtractStringProperty(content, entityFullNameRegex, entityFullNamePropertyRegex);
+                var entityName = ExtractStringProperty(content, entityNameRegex, entityNamePropertyRegex)
+                    ?? className.Replace("Permissions", "");
+                var moduleName = ExtractStringProperty(content, moduleNameRegex, moduleNamePropertyRegex) ?? string.Empty;
+                var entityFullName = ExtractStringProperty(content, entityFullNameRegex, entityFullNamePropertyRegex) ?? string.Empty;
 
                 var permissionList = new List<string>();
-                var constMatches = constRegex.Matches(content);
-                foreach (Match match in constMatches)
+                foreach (Match match in constRegex.Matches(content))
                 {
-                    var constValue = match.Groups[2].Value;
-                    permissionList.Add(constValue);
+                    permissionList.Add(match.Groups[1].Value);
                 }
 
                 if (permissionList.Count == 0)
                 {
-                    var entityPrefix = entityName ?? className.Replace("Permissions", "");
-                    if (!string.IsNullOrWhiteSpace(moduleName))
-                    {
-                        entityPrefix = $"{moduleName}.{entityPrefix}";
-                    }
+                    var entityPrefix = string.IsNullOrWhiteSpace(moduleName)
+                        ? entityName
+                        : $"{moduleName}.{entityName}";
                     permissionList = GenerateDefaultPermissions(entityPrefix);
                 }
 
                 permissions.Add(new EntityPermissionInfo
                 {
-                    ModuleName = moduleName ?? string.Empty,
-                    EntityName = entityName ?? className.Replace("Permissions", ""),
-                    EntityFullName = entityFullName ?? string.Empty,
+                    ModuleName = moduleName,
+                    EntityName = entityName,
+                    EntityFullName = entityFullName,
                     ClassName = className,
                     Namespace = ns,
                     Permissions = permissionList
@@ -116,21 +96,19 @@ public class ScanEntityPermissions : Task
                 Permissions = permissions
             };
 
-            var options = new JsonSerializerOptions 
-            { 
-                WriteIndented = true,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            };
-            var json = JsonSerializer.Serialize(manifest, options);
-
             var dir = Path.GetDirectoryName(OutputPath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             {
                 Directory.CreateDirectory(dir);
             }
 
-            File.WriteAllText(OutputPath, json);
-            Log.LogMessage(MessageImportance.High, 
+            File.WriteAllText(OutputPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            }));
+
+            Log.LogMessage(MessageImportance.High,
                 $"Generated entity permissions manifest at {OutputPath} with {permissions.Count} entities");
 
             return true;
@@ -142,10 +120,7 @@ public class ScanEntityPermissions : Task
         }
     }
 
-    private static string? ExtractStringProperty(
-        string content, 
-        Regex expressionRegex, 
-        Regex propertyRegex)
+    private static string? ExtractStringProperty(string content, Regex expressionRegex, Regex propertyRegex)
     {
         var propertyMatch = propertyRegex.Match(content);
         if (propertyMatch.Success)
@@ -154,12 +129,7 @@ public class ScanEntityPermissions : Task
         }
 
         var expressionMatch = expressionRegex.Match(content);
-        if (expressionMatch.Success)
-        {
-            return expressionMatch.Groups[1].Value;
-        }
-
-        return null;
+        return expressionMatch.Success ? expressionMatch.Groups[1].Value : null;
     }
 
     private static List<string> GenerateDefaultPermissions(string entityName)

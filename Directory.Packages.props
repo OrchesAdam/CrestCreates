@@ -80,8 +80,14 @@
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.1.7" />
     <PackageVersion Include="Microsoft.AspNetCore.Authorization" Version="10.0.5" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc" Version="2.3.9" />
-    <PackageVersion Include="RabbitMQ.Client" Version="6.5.0" />
-    <PackageVersion Include="Confluent.Kafka" Version="2.2.0" />
+    <PackageVersion Include="RabbitMQ.Client" Version="7.2.0" />
+    <PackageVersion Include="Confluent.Kafka" Version="2.12.0" />
+    <PackageVersion Include="DotNetCore.CAP" Version="10.0.1" />
+    <PackageVersion Include="DotNetCore.CAP.Dashboard" Version="10.0.1" />
+    <PackageVersion Include="DotNetCore.CAP.Kafka" Version="10.0.1" />
+    <PackageVersion Include="DotNetCore.CAP.PostgreSql" Version="10.0.1" />
+    <PackageVersion Include="DotNetCore.CAP.RabbitMQ" Version="10.0.1" />
+    <PackageVersion Include="DotNetCore.CAP.SqlServer" Version="10.0.1" />
     <!-- 缓存 -->
     <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="10.0.5" />
     <PackageVersion Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.5" />

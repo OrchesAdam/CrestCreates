@@ -1811,6 +1811,10 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 : namespaceName;
             
             var targetNamespace = $"{baseNamespace}.Domain.Permissions";
+            var moduleName = string.IsNullOrWhiteSpace(baseNamespace)
+                ? entityClass.ContainingAssembly.Name
+                : baseNamespace;
+            var permissionPrefix = $"{moduleName}.{entityName}";
 
             var defaultPermissions = new List<string> { "Create", "Update", "Delete", "Search", "Get", "Export" };
             
@@ -1829,23 +1833,32 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             sourceCode.AppendLine($"    /// <summary>");
             sourceCode.AppendLine($"    /// {entityName} 实体的权限定义");
             sourceCode.AppendLine($"    /// </summary>");
-            sourceCode.AppendLine($"    public partial class {entityName}Permissions : IEntityPermissions");
+            sourceCode.AppendLine($"    public sealed partial class {entityName}Permissions : IEntityPermissions");
             sourceCode.AppendLine("    {");
 
             foreach (var permission in permissions)
             {
-                sourceCode.AppendLine($"        public const string {permission} = \"{entityName}.{permission}\";");
+                var actionName = ToPermissionConstantName(permission);
+                var permissionValue = permission.Contains(".")
+                    ? permission
+                    : $"{permissionPrefix}.{permission}";
+                sourceCode.AppendLine($"        public const string {actionName} = \"{EscapeStringLiteral(permissionValue)}\";");
             }
 
             sourceCode.AppendLine();
-            sourceCode.AppendLine($"        public string EntityName => \"{entityName}\";");
+            sourceCode.AppendLine($"        public string ModuleName => \"{EscapeStringLiteral(moduleName)}\";");
+            sourceCode.AppendLine();
+            sourceCode.AppendLine($"        public string EntityName => \"{EscapeStringLiteral(entityName)}\";");
+            sourceCode.AppendLine();
+            sourceCode.AppendLine($"        public string EntityFullName => \"{EscapeStringLiteral(entityClass.ToDisplayString())}\";");
             sourceCode.AppendLine();
             sourceCode.AppendLine("        public IEnumerable<string> GetAllPermissions()");
             sourceCode.AppendLine("        {");
 
             foreach (var permission in permissions)
             {
-                sourceCode.AppendLine($"            yield return {permission};");
+                var actionName = ToPermissionConstantName(permission);
+                sourceCode.AppendLine($"            yield return {actionName};");
             }
 
             sourceCode.AppendLine("        }");
@@ -1855,6 +1868,34 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             sourceCode.AppendLine("}");
 
             context.AddSource($"{entityName}Permissions.g.cs", SourceText.From(sourceCode.ToString(), Encoding.UTF8));
+        }
+
+        private static string ToPermissionConstantName(string permission)
+        {
+            var actionName = permission.Contains(".")
+                ? permission.Split('.').Last()
+                : permission;
+
+            var builder = new StringBuilder(actionName.Length + 1);
+            foreach (var character in actionName)
+            {
+                builder.Append(char.IsLetterOrDigit(character) || character == '_' ? character : '_');
+            }
+
+            if (builder.Length == 0 || !SyntaxFacts.IsIdentifierStartCharacter(builder[0]))
+            {
+                builder.Insert(0, '_');
+            }
+
+            var identifier = builder.ToString();
+            return SyntaxFacts.GetKeywordKind(identifier) == SyntaxKind.None
+                ? identifier
+                : $"@{identifier}";
+        }
+
+        private static string EscapeStringLiteral(string value)
+        {
+            return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
     }
 }

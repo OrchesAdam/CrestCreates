@@ -9,6 +9,7 @@
   <UsingTask TaskName="CrestCreates.BuildTasks.ScanModulesFromSource" AssemblyFile="$(MSBuildThisFileDirectory)net10.0\CrestCreates.BuildTasks.dll" />
   <UsingTask TaskName="CrestCreates.BuildTasks.CollectModuleManifests" AssemblyFile="$(MSBuildThisFileDirectory)net10.0\CrestCreates.BuildTasks.dll" />
   <UsingTask TaskName="CrestCreates.BuildTasks.GenerateAggregatedModuleCode" AssemblyFile="$(MSBuildThisFileDirectory)net10.0\CrestCreates.BuildTasks.dll" />
+  <UsingTask TaskName="CrestCreates.BuildTasks.ScanEntityPermissions" AssemblyFile="$(MSBuildThisFileDirectory)net10.0\CrestCreates.BuildTasks.dll" />
   
   <!-- 
     Target: GenerateModuleManifest
@@ -78,7 +79,36 @@
     <Delete Files="$(ModuleManifestOutputPath)" Condition="Exists('$(ModuleManifestOutputPath)')" />
     <Delete Files="$(AggregatedModuleManifestPath)" Condition="Exists('$(AggregatedModuleManifestPath)')" />
     <Delete Files="$(AggregatedModuleCodePath)" Condition="Exists('$(AggregatedModuleCodePath)')" />
+    <Delete Files="$(EntityPermissionsManifestOutputPath)" Condition="Exists('$(EntityPermissionsManifestOutputPath)')" />
     <Message Text="[CrestCreates] Cleaned module manifests" Importance="normal" />
+  </Target>
+
+  <Target Name="ScanEntityPermissions"
+          AfterTargets="Build"
+          Condition="'$(EnableEntityPermissionsScan)' == 'true'">
+
+    <ItemGroup>
+      <_EntityPermissionSourceFiles Include="@(Compile->'%(FullPath)')" />
+      <_EntityPermissionSourceFiles Include="$(CompilerGeneratedFilesOutputPath)\**\*Permissions.g.cs" Condition="'$(CompilerGeneratedFilesOutputPath)' != ''" />
+      <_EntityPermissionSourceFiles Include="$(IntermediateOutputPath)generated\**\*Permissions.g.cs" />
+    </ItemGroup>
+
+    <ScanEntityPermissions
+      SourceFiles="@(_EntityPermissionSourceFiles)"
+      OutputPath="$(EntityPermissionsManifestOutputPath)" />
+
+    <Copy SourceFiles="$(EntityPermissionsManifestOutputPath)"
+          DestinationFolder="$(OutputPath)"
+          Condition="Exists('$(EntityPermissionsManifestOutputPath)')" />
+
+    <ItemGroup Condition="Exists('$(EntityPermissionsManifestOutputPath)')">
+      <Content Include="$(EntityPermissionsManifestOutputPath)"
+               Link="EntityPermissionsManifest.json"
+               CopyToOutputDirectory="PreserveNewest"
+               CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <Message Text="[CrestCreates] Generated entity permissions manifest: $(EntityPermissionsManifestOutputPath)" Importance="high" />
   </Target>
   
 </Project>

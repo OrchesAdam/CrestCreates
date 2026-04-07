@@ -2,12 +2,15 @@
   <UsingTask TaskName="CrestCreates.BuildTasks.ScanModulesFromSource" AssemblyFile="$(MSBuildThisFileDirectory)bin\Debug\net10.0\CrestCreates.BuildTasks.dll" />
   <UsingTask TaskName="CrestCreates.BuildTasks.CollectModuleManifests" AssemblyFile="$(MSBuildThisFileDirectory)bin\Debug\net10.0\CrestCreates.BuildTasks.dll" />
   <UsingTask TaskName="CrestCreates.BuildTasks.GenerateAggregatedModuleCode" AssemblyFile="$(MSBuildThisFileDirectory)bin\Debug\net10.0\CrestCreates.BuildTasks.dll" />
+  <UsingTask TaskName="CrestCreates.BuildTasks.ScanEntityPermissions" AssemblyFile="$(MSBuildThisFileDirectory)bin\Debug\net10.0\CrestCreates.BuildTasks.dll" />
 
   <PropertyGroup>
     <EnableModuleManifestGeneration Condition="'$(EnableModuleManifestGeneration)' == ''">true</EnableModuleManifestGeneration>
     <ModuleManifestOutputPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\ModuleManifest.json</ModuleManifestOutputPath>
     <AggregatedModuleManifestPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\AggregatedModuleManifest.json</AggregatedModuleManifestPath>
     <AggregatedModuleCodePath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\ModuleAutoInitializer.g.cs</AggregatedModuleCodePath>
+    <EnableEntityPermissionsScan Condition="'$(EnableEntityPermissionsScan)' == ''">true</EnableEntityPermissionsScan>
+    <EntityPermissionsManifestOutputPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\EntityPermissionsManifest.json</EntityPermissionsManifestOutputPath>
   </PropertyGroup>
 
   <Target Name="GenerateModuleManifest"
@@ -50,6 +53,34 @@
       Namespace="$(RootNamespace)" />
 
     <Message Text="Generated aggregated module code at $(AggregatedModuleCodePath)" Importance="high" />
+  </Target>
+
+  <Target Name="ScanEntityPermissions"
+          AfterTargets="Build"
+          Condition="'$(EnableEntityPermissionsScan)' == 'true'">
+
+    <ItemGroup>
+      <_EntityPermissionSourceFiles Include="@(Compile->'%(FullPath)')" />
+      <_EntityPermissionSourceFiles Include="$(CompilerGeneratedFilesOutputPath)\**\*Permissions.g.cs" Condition="'$(CompilerGeneratedFilesOutputPath)' != ''" />
+      <_EntityPermissionSourceFiles Include="$(IntermediateOutputPath)generated\**\*Permissions.g.cs" />
+    </ItemGroup>
+
+    <ScanEntityPermissions
+      SourceFiles="@(_EntityPermissionSourceFiles)"
+      OutputPath="$(EntityPermissionsManifestOutputPath)" />
+
+    <Copy SourceFiles="$(EntityPermissionsManifestOutputPath)"
+          DestinationFolder="$(OutputPath)"
+          Condition="Exists('$(EntityPermissionsManifestOutputPath)')" />
+
+    <ItemGroup Condition="Exists('$(EntityPermissionsManifestOutputPath)')">
+      <Content Include="$(EntityPermissionsManifestOutputPath)"
+               Link="EntityPermissionsManifest.json"
+               CopyToOutputDirectory="PreserveNewest"
+               CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <Message Text="Generated entity permissions manifest at $(EntityPermissionsManifestOutputPath)" Importance="high" />
   </Target>
 
 </Project>

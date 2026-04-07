@@ -50,20 +50,24 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
     }
 
     protected virtual string CreatePermissionName => EntityPermissions != null
-        ? $"{EntityPermissions.EntityName}.Create"
+        ? EntityPermissions.GetPermissionName("Create")
         : $"{typeof(TEntity).Name}.Create";
 
     protected virtual string UpdatePermissionName => EntityPermissions != null
-        ? $"{EntityPermissions.EntityName}.Update"
+        ? EntityPermissions.GetPermissionName("Update")
         : $"{typeof(TEntity).Name}.Update";
 
     protected virtual string DeletePermissionName => EntityPermissions != null
-        ? $"{EntityPermissions.EntityName}.Delete"
+        ? EntityPermissions.GetPermissionName("Delete")
         : $"{typeof(TEntity).Name}.Delete";
 
     protected virtual string ReadPermissionName => EntityPermissions != null
-        ? $"{EntityPermissions.EntityName}.Get"
-        : $"{typeof(TEntity).Name}.Read";
+        ? EntityPermissions.GetPermissionName("Get")
+        : $"{typeof(TEntity).Name}.Get";
+
+    protected virtual string SearchPermissionName => EntityPermissions != null
+        ? EntityPermissions.GetPermissionName("Search")
+        : $"{typeof(TEntity).Name}.Search";
 
     protected virtual TPermissions GetEntityPermissions<TPermissions>() where TPermissions : IEntityPermissions, new()
     {
@@ -73,7 +77,7 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
     protected virtual async Task CheckEntityPermissionAsync(string action, CancellationToken cancellationToken = default)
     {
         var permissionName = EntityPermissions != null
-            ? $"{EntityPermissions.EntityName}.{action}"
+            ? EntityPermissions.GetPermissionName(action)
             : $"{typeof(TEntity).Name}.{action}";
         await CheckPermissionAsync(permissionName, cancellationToken);
     }
@@ -194,7 +198,7 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
 
     public virtual async Task<IReadOnlyList<TDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        await CheckPermissionAsync(ReadPermissionName, cancellationToken);
+        await CheckPermissionAsync(SearchPermissionName, cancellationToken);
         var query = Repository.GetQueryable();
         query = await ApplyDataPermissionFilterAsync(query);
         var entities = query.ToList();
@@ -203,7 +207,7 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
 
     public virtual async Task<PagedResultDto<TDto>> GetListAsync(PagedRequestDto request, CancellationToken cancellationToken = default)
     {
-        await CheckPermissionAsync(ReadPermissionName, cancellationToken);
+        await CheckPermissionAsync(SearchPermissionName, cancellationToken);
         var query = Repository.GetQueryable();
         query = await ApplyDataPermissionFilterAsync(query);
 

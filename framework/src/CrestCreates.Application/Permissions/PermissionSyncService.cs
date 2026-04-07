@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -52,7 +53,9 @@ public class PermissionSyncService : IPermissionSyncService
                 return;
             }
 
-            var repository = _serviceProvider.GetService(typeof(IPermissionRepository)) as IPermissionRepository;
+            using var scope = (_serviceProvider.GetService(typeof(IServiceScopeFactory)) as IServiceScopeFactory)?.CreateScope();
+            var serviceProvider = scope?.ServiceProvider ?? _serviceProvider;
+            var repository = serviceProvider.GetService(typeof(IPermissionRepository)) as IPermissionRepository;
             if (repository == null)
             {
                 _logger.LogError("无法获取 IPermissionRepository 服务");
@@ -70,8 +73,10 @@ public class PermissionSyncService : IPermissionSyncService
                         var permission = new Permission
                         {
                             Name = permissionName,
-                            DisplayName = $"{entityInfo.EntityName}.{permissionName}",
-                            GroupName = entityInfo.EntityName,
+                            DisplayName = permissionName,
+                            GroupName = string.IsNullOrWhiteSpace(entityInfo.ModuleName)
+                                ? entityInfo.EntityName
+                                : $"{entityInfo.ModuleName}.{entityInfo.EntityName}",
                             IsEnabled = true
                         };
 

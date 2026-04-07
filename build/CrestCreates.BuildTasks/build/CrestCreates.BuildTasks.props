@@ -13,6 +13,9 @@
     <ModuleManifestOutputPath Condition="'$(ModuleManifestOutputPath)' == ''">$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\ModuleManifest.json</ModuleManifestOutputPath>
     <AggregatedModuleManifestPath Condition="'$(AggregatedModuleManifestPath)' == ''">$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\AggregatedModuleManifest.json</AggregatedModuleManifestPath>
     <AggregatedModuleCodePath Condition="'$(AggregatedModuleCodePath)' == ''">$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\ModuleAutoInitializer.g.cs</AggregatedModuleCodePath>
+
+    <EnableEntityPermissionsScan Condition="'$(EnableEntityPermissionsScan)' == ''">true</EnableEntityPermissionsScan>
+    <EntityPermissionsManifestOutputPath Condition="'$(EntityPermissionsManifestOutputPath)' == ''">$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\EntityPermissionsManifest.json</EntityPermissionsManifestOutputPath>
   </PropertyGroup>
   
 </Project>

@@ -81,6 +81,7 @@
     <Project Path="samples/LibraryManagement/LibraryManagement.Web/LibraryManagement.Web.csproj" />
   </Folder>
   <Folder Name="/src/test/">
+    <Project Path="framework/test/CrestCreates.Application.Tests/CrestCreates.Application.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.CodeGenerator.Tests/CrestCreates.CodeGenerator.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Database.Migrations.Tests/CrestCreates.Database.Migrations.Tests.csproj" />      
     <Project Path="framework/test/CrestCreates.DistributedTransaction.Tests/CrestCreates.DistributedTransaction.Tests.csproj" />       
