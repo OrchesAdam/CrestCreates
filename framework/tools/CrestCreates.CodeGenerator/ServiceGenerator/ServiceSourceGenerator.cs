@@ -1,11 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.IO;
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
@@ -108,6 +106,8 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
 
             try
             {
+                var generatedValidatorKeys = new HashSet<string>(StringComparer.Ordinal);
+
                 foreach (var service in uniqueServices)
                 {
                     // 仅对带有Service属性的类生成完整代码，保持向后兼容
@@ -115,7 +115,7 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
                     {
                         GenerateServiceInterface(context, service);
                         GenerateServiceExceptions(context, service);
-                        GenerateValidators(context, service);
+                        GenerateValidators(context, service, generatedValidatorKeys);
                     }
                 }
 
@@ -622,9 +622,8 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
         }
 
         // 生成验证器
-        private void GenerateValidators(SourceProductionContext context, INamedTypeSymbol serviceClass)
+        private void GenerateValidators(SourceProductionContext context, INamedTypeSymbol serviceClass, HashSet<string> generatedValidatorKeys)
         {
-            var serviceName = serviceClass.Name;
             var namespaceName = serviceClass.ContainingNamespace.ToDisplayString();
             
             // 获取服务的所有公共方法
@@ -635,7 +634,7 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
                            m.MethodKind == MethodKind.Ordinary);
             
             // 收集所有 DTO 类型
-            var dtoTypes = new HashSet<ITypeSymbol>();
+            var dtoTypes = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
             foreach (var method in methods)
             {
                 foreach (var parameter in method.Parameters)
@@ -651,6 +650,12 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
             // 为每个 DTO 生成验证器
             foreach (var dtoType in dtoTypes)
             {
+                var validatorKey = $"{namespaceName}:{dtoType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}";
+                if (!generatedValidatorKeys.Add(validatorKey))
+                {
+                    continue;
+                }
+
                 GenerateDtoValidator(context, dtoType, namespaceName);
             }
         }

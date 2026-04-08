@@ -144,7 +144,8 @@ namespace CrestCreates.EventBus.Tests
 
             var mediatorMock = new Mock<IMediator>();
             var domainEventPublisher = new DomainEventPublisher(mediatorMock.Object);
-            var unitOfWork = new FreeSqlUnitOfWork(freeSql, domainEventPublisher);
+            var unitOfWorkManager = new FreeSqlUnitOfWorkManager(freeSql);
+            var unitOfWork = new FreeSqlUnitOfWork(unitOfWorkManager, domainEventPublisher);
 
             var entity = new TestEntity(Guid.NewGuid()) { Name = "Test Entity" };
             var domainEvent = new TestDomainEvent(entity.Id);

@@ -1,5 +1,9 @@
+using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
+using CrestCreates.OrmProviders.Abstract;
+using CrestCreates.OrmProviders.EFCore.DbContexts;
+using CrestCreates.OrmProviders.EFCore.UnitOfWork;
 using LibraryManagement.Application.Modules;
 using LibraryManagement.Domain.Repositories;
 using LibraryManagement.EntityFrameworkCore.Repositories;
@@ -23,6 +27,14 @@ public class EntityFrameworkCoreModule : ModuleBase
             var connectionString = configuration.GetConnectionString("Default");
             options.UseSqlServer(connectionString);
         });
+
+        services.AddUnitOfWork(OrmProvider.EfCore);
+        services.AddScoped<EfCoreUnitOfWork>();
+        services.AddScoped<DbContext>(sp => sp.GetRequiredService<LibraryDbContext>());
+        services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
+            new EfCoreDbContextAdapter(sp.GetRequiredService<LibraryDbContext>()));
+        services.AddScoped<IDataBaseContext>(sp =>
+            sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
 
         // 注册仓储
         services.AddScoped<IBookRepository, BookRepository>();

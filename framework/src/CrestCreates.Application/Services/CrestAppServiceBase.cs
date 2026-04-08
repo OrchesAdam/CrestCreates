@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AutoMapper;
+using CrestCreates.Aop.Interceptors;
 using CrestCreates.Application.Contracts.DTOs.Common;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Application.Contracts.Query;
@@ -12,27 +13,60 @@ using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Entities.Auditing;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.DataFilter;
+using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.Domain.Shared.Permissions;
 using CrestCreates.Domain.UnitOfWork;
-using Microsoft.EntityFrameworkCore;
 
 namespace CrestCreates.Application.Services;
 
 public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpdateDto> : ICrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpdateDto>
-    where TEntity : class
+    where TEntity : class, IEntity<TKey>
     where TKey : IEquatable<TKey>
 {
     private readonly ICrestRepositoryBase<TEntity, TKey> _repository;
     protected virtual ICrestRepositoryBase<TEntity, TKey> Repository => _repository;
     protected readonly IMapper Mapper;
-    protected readonly IUnitOfWork UnitOfWork;
     protected readonly ICurrentUser CurrentUser;
     protected readonly IDataPermissionFilter DataPermissionFilter;
     protected readonly IPermissionChecker PermissionChecker;
 
+    public IServiceProvider? ServiceProvider { get; }
+
     protected IEntityPermissions? EntityPermissions { get; set; }
 
+    protected CrestAppServiceBase(
+        ICrestRepositoryBase<TEntity, TKey> repository,
+        IMapper mapper,
+        IServiceProvider serviceProvider,
+        ICurrentUser currentUser,
+        IDataPermissionFilter dataPermissionFilter,
+        IPermissionChecker permissionChecker)
+    {
+        _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+        Mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
+        ServiceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        CurrentUser = currentUser ?? throw new ArgumentNullException(nameof(currentUser));
+        DataPermissionFilter = dataPermissionFilter ?? throw new ArgumentNullException(nameof(dataPermissionFilter));
+        PermissionChecker = permissionChecker ?? throw new ArgumentNullException(nameof(permissionChecker));
+    }
+
+    [Obsolete("工作单元由 UnitOfWorkMoAttribute 统一管理。请注入 IServiceProvider 并使用包含 serviceProvider 参数的构造函数。")]
+    protected CrestAppServiceBase(
+        ICrestRepositoryBase<TEntity, TKey> repository,
+        IMapper mapper,
+        ICurrentUser currentUser,
+        IDataPermissionFilter dataPermissionFilter,
+        IPermissionChecker permissionChecker)
+    {
+        _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+        Mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
+        CurrentUser = currentUser ?? throw new ArgumentNullException(nameof(currentUser));
+        DataPermissionFilter = dataPermissionFilter ?? throw new ArgumentNullException(nameof(dataPermissionFilter));
+        PermissionChecker = permissionChecker ?? throw new ArgumentNullException(nameof(permissionChecker));
+    }
+
+    [Obsolete("工作单元由 UnitOfWorkMoAttribute 统一管理。请使用不包含 IUnitOfWork 参数的构造函数。")]
     protected CrestAppServiceBase(
         ICrestRepositoryBase<TEntity, TKey> repository,
         IMapper mapper,
@@ -40,13 +74,8 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         ICurrentUser currentUser,
         IDataPermissionFilter dataPermissionFilter,
         IPermissionChecker permissionChecker)
+        : this(repository, mapper, currentUser, dataPermissionFilter, permissionChecker)
     {
-        _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-        Mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
-        UnitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-        CurrentUser = currentUser ?? throw new ArgumentNullException(nameof(currentUser));
-        DataPermissionFilter = dataPermissionFilter ?? throw new ArgumentNullException(nameof(dataPermissionFilter));
-        PermissionChecker = permissionChecker ?? throw new ArgumentNullException(nameof(permissionChecker));
     }
 
     protected virtual string CreatePermissionName => EntityPermissions != null
@@ -152,25 +181,16 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         return Task.CompletedTask;
     }
 
+    [UnitOfWorkMo]
     public virtual async Task<TDto> CreateAsync(TCreateDto input, CancellationToken cancellationToken = default)
     {
         try
         {
             await CheckPermissionAsync(CreatePermissionName, cancellationToken);
-            await UnitOfWork.BeginTransactionAsync();
-            try
-            {
-                var entity = MapToEntity(input);
-                await SetCreationAuditPropertiesAsync(entity);
-                var createdEntity = await Repository.InsertAsync(entity, cancellationToken);
-                await UnitOfWork.CommitTransactionAsync();
-                return MapToDto(createdEntity);
-            }
-            catch
-            {
-                await UnitOfWork.RollbackTransactionAsync();
-                throw;
-            }
+            var entity = MapToEntity(input);
+            await SetCreationAuditPropertiesAsync(entity);
+            var createdEntity = await Repository.InsertAsync(entity, cancellationToken);
+            return MapToDto(createdEntity);
         }
         catch (System.Data.Common.DbException ex)
         {
@@ -187,7 +207,7 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         await CheckPermissionAsync(ReadPermissionName, cancellationToken);
         var query = Repository.GetQueryable();
         query = await ApplyDataPermissionFilterAsync(query);
-        var entity = query.FirstOrDefault(e => EF.Property<TKey>(e, "Id").Equals(id));
+        var entity = query.FirstOrDefault(e => e.Id.Equals(id));
         if (entity == null)
         {
             return default;
@@ -228,32 +248,23 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         return await GetListAsync(request, cancellationToken);
     }
 
+    [UnitOfWorkMo]
     public virtual async Task<TDto> UpdateAsync(TKey id, TUpdateDto input, CancellationToken cancellationToken = default)
     {
         try
         {
             await CheckPermissionAsync(UpdatePermissionName, cancellationToken);
-            await UnitOfWork.BeginTransactionAsync();
-            try
+            var entity = await Repository.GetAsync(id, cancellationToken);
+            if (entity == null)
             {
-                var entity = await Repository.GetAsync(id, cancellationToken);
-                if (entity == null)
-                {
-                    throw new KeyNotFoundException($"实体不存在: {id}");
-                }
+                throw new KeyNotFoundException($"实体不存在: {id}");
+            }
 
-                await ValidateDataOwnershipAsync(entity);
-                MapToEntity(input, entity);
-                await SetModificationAuditPropertiesAsync(entity);
-                var updatedEntity = await Repository.UpdateAsync(entity, cancellationToken);
-                await UnitOfWork.CommitTransactionAsync();
-                return MapToDto(updatedEntity);
-            }
-            catch
-            {
-                await UnitOfWork.RollbackTransactionAsync();
-                throw;
-            }
+            await ValidateDataOwnershipAsync(entity);
+            MapToEntity(input, entity);
+            await SetModificationAuditPropertiesAsync(entity);
+            var updatedEntity = await Repository.UpdateAsync(entity, cancellationToken);
+            return MapToDto(updatedEntity);
         }
         catch (KeyNotFoundException)
         {
@@ -269,27 +280,19 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         }
     }
 
+    [UnitOfWorkMo]
     public virtual async Task DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
         try
         {
             await CheckPermissionAsync(DeletePermissionName, cancellationToken);
-            await UnitOfWork.BeginTransactionAsync();
-            try
+            var entity = await Repository.GetAsync(id, cancellationToken);
+            if (entity != null)
             {
-                var entity = await Repository.GetAsync(id, cancellationToken);
-                if (entity != null)
-                {
-                    await ValidateDataOwnershipAsync(entity);
-                }
-                await Repository.DeleteAsync(id, cancellationToken);
-                await UnitOfWork.CommitTransactionAsync();
+                await ValidateDataOwnershipAsync(entity);
             }
-            catch
-            {
-                await UnitOfWork.RollbackTransactionAsync();
-                throw;
-            }
+
+            await Repository.DeleteAsync(id, cancellationToken);
         }
         catch (System.Data.Common.DbException ex)
         {
@@ -305,7 +308,7 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
     {
         var query = Repository.GetQueryable();
         query = await ApplyDataPermissionFilterAsync(query);
-        return query.Any(e => EF.Property<TKey>(e, "Id").Equals(id));
+        return query.Any(e => e.Id.Equals(id));
     }
 
     public virtual async Task<int> CountAsync(CancellationToken cancellationToken = default)

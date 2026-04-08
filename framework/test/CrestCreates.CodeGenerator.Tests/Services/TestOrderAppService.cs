@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using AutoMapper;
 using CrestCreates.Application.Contracts.DTOs.Common;
 using CrestCreates.Application.Services;
+using CrestCreates.Aop.Interceptors;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.CodeGenerator.Tests.Entities;
 using CrestCreates.CodeGenerator.Tests.Entities.Domain.Permissions;
@@ -11,7 +12,6 @@ using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.DataFilter;
-using CrestCreates.Domain.UnitOfWork;
 
 namespace CrestCreates.CodeGenerator.Tests.Services;
 
@@ -21,15 +21,16 @@ public class TestOrderAppService : CrestAppServiceBase<TestOrder, long, TestOrde
     public TestOrderAppService(
         ICrestRepositoryBase<TestOrder, long> repository,
         IMapper mapper,
-        IUnitOfWork unitOfWork,
+        IServiceProvider serviceProvider,
         ICurrentUser currentUser,
         IDataPermissionFilter dataPermissionFilter,
         IPermissionChecker permissionChecker)
-        : base(repository, mapper, unitOfWork, currentUser, dataPermissionFilter, permissionChecker)
+        : base(repository, mapper, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
     {
         EntityPermissions = TestOrderPermissions.Instance;
     }
 
+    [UnitOfWorkMo]
     public async Task<TestOrderDto> ConfirmOrderAsync(long id, CancellationToken cancellationToken = default)
     {
         await CheckEntityPermissionAsync("Confirm", cancellationToken);
@@ -46,6 +47,7 @@ public class TestOrderAppService : CrestAppServiceBase<TestOrder, long, TestOrde
         return Mapper.Map<TestOrderDto>(order);
     }
 
+    [UnitOfWorkMo]
     public async Task<TestOrderDto> ShipOrderAsync(long id, CancellationToken cancellationToken = default)
     {
         await CheckEntityPermissionAsync("Ship", cancellationToken);
@@ -62,6 +64,7 @@ public class TestOrderAppService : CrestAppServiceBase<TestOrder, long, TestOrde
         return Mapper.Map<TestOrderDto>(order);
     }
 
+    [UnitOfWorkMo]
     public async Task<TestOrderDto> CompleteOrderAsync(long id, CancellationToken cancellationToken = default)
     {
         await CheckEntityPermissionAsync("Complete", cancellationToken);
@@ -78,6 +81,7 @@ public class TestOrderAppService : CrestAppServiceBase<TestOrder, long, TestOrde
         return Mapper.Map<TestOrderDto>(order);
     }
 
+    [UnitOfWorkMo]
     public async Task<TestOrderDto> CancelOrderAsync(long id, CancellationToken cancellationToken = default)
     {
         await CheckEntityPermissionAsync("Cancel", cancellationToken);

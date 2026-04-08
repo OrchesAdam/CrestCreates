@@ -16,15 +16,15 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.UnitOfWork
     /// </summary>
     public class FreeSqlUnitOfWork : UnitOfWorkWithEvents
     {
-        private readonly IFreeSql _freeSql;
+        private readonly FreeSqlUnitOfWorkManager _unitOfWorkManager;
         private FreeSql.IUnitOfWork? _unitOfWork;
         private bool _disposed;
         private readonly List<object> _trackedEntities = new List<object>();
 
-        public FreeSqlUnitOfWork(IFreeSql freeSql, IDomainEventPublisher domainEventPublisher) 
+        public FreeSqlUnitOfWork(FreeSqlUnitOfWorkManager unitOfWorkManager, IDomainEventPublisher domainEventPublisher)
             : base(domainEventPublisher)
         {
-            _freeSql = freeSql ?? throw new ArgumentNullException(nameof(freeSql));
+            _unitOfWorkManager = unitOfWorkManager ?? throw new ArgumentNullException(nameof(unitOfWorkManager));
         }
 
         /// <summary>
@@ -37,8 +37,8 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.UnitOfWork
                 throw new InvalidOperationException("Transaction already in progress");
             }
 
-            // FreeSql 的 UnitOfWork 会自动开启事务
-            _unitOfWork = _freeSql.CreateUnitOfWork();
+            // 仓储从同一个 FreeSqlUnitOfWorkManager.Orm 获取连接，确保事务边界一致。
+            _unitOfWork = _unitOfWorkManager.Begin();
             return Task.CompletedTask;
         }
 

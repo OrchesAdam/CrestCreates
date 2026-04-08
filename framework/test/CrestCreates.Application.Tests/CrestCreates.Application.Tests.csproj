@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CrestCreates.Application\CrestCreates.Application.csproj" />
-    <ProjectReference Include="..\..\src\Domain\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="..\..\src\Domain\CrestCreates.Domain\CrestCreates.Domain.Shared.csproj" />
     <ProjectReference Include="..\..\src\Domain\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
   </ItemGroup>

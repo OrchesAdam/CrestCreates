@@ -31,10 +31,27 @@ namespace CrestCreates.OrmProviders.Abstract
         /// <exception cref="NotSupportedException">不支持的 ORM 提供者类型</exception>
         public virtual IUnitOfWork Create(OrmProvider provider)
         {
-            // 此方法应该在派生类中重写，或通过配置注入具体实现
+            var typeName = provider switch
+            {
+                OrmProvider.EfCore => "CrestCreates.OrmProviders.EFCore.UnitOfWork.EfCoreUnitOfWork",
+                OrmProvider.SqlSugar => "CrestCreates.OrmProviders.SqlSugar.UnitOfWork.SqlSugarUnitOfWork",
+                OrmProvider.FreeSql => "CrestCreates.OrmProviders.FreeSqlProvider.UnitOfWork.FreeSqlUnitOfWork",
+                _ => throw new NotSupportedException($"ORM provider '{provider}' is not supported.")
+            };
+
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                var type = assembly.GetType(typeName);
+                if (type != null && typeof(IUnitOfWork).IsAssignableFrom(type))
+                {
+                    var unitOfWork = _serviceProvider.GetService(type) as IUnitOfWork;
+                    return unitOfWork
+                        ?? throw new InvalidOperationException($"Unit of work type '{typeName}' is not registered.");
+                }
+            }
+
             throw new NotSupportedException(
-                $"ORM provider '{provider}' is not supported. " +
-                $"Please override this method or configure the factory properly.");
+                $"ORM provider '{provider}' is not supported or the unit of work type '{typeName}' was not found.");
         }
     }
 }

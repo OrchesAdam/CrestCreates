@@ -13,10 +13,23 @@ namespace CrestCreates.OrmProviders.Abstract
     public interface IUnitOfWorkManager
     {
         /// <summary>
+        /// 获取当前活动的工作单元，如果当前调用链没有工作单元则返回 null
+        /// </summary>
+        IUnitOfWork? CurrentOrNull { get; }
+
+        /// <summary>
         /// 获取当前活动的工作单元
         /// </summary>
         /// <exception cref="InvalidOperationException">当前没有活动的工作单元时抛出</exception>
         IUnitOfWork Current { get; }
+
+        /// <summary>
+        /// 开始工作单元作用域。默认会复用当前调用链中的工作单元，除非 requiresNew 为 true。
+        /// </summary>
+        IUnitOfWorkScope BeginScope(
+            bool isTransactional = true,
+            bool requiresNew = false,
+            OrmProvider? provider = null);
 
         /// <summary>
         /// 开始新的工作单元
@@ -45,5 +58,14 @@ namespace CrestCreates.OrmProviders.Abstract
         Task<TResult> ExecuteAsync<TResult>(
             Func<IUnitOfWork, Task<TResult>> action,
             OrmProvider? provider = null);
+    }
+
+    public interface IUnitOfWorkScope : IDisposable
+    {
+        IUnitOfWork UnitOfWork { get; }
+
+        bool IsOwner { get; }
+
+        bool IsTransactional { get; }
     }
 }

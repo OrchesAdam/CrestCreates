@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.UnitOfWork;
 
@@ -15,7 +16,7 @@ namespace CrestCreates.OrmProviders.Abstract
     {
         private readonly IUnitOfWorkFactory _factory;
         private readonly OrmProvider _defaultProvider;
-        private IUnitOfWork _current;
+        private readonly AsyncLocal<AmbientUnitOfWorkScope?> _currentScope = new();
 
         /// <summary>
         /// 构造函数
@@ -32,16 +33,37 @@ namespace CrestCreates.OrmProviders.Abstract
         /// 获取当前工作单元
         /// </summary>
         /// <exception cref="InvalidOperationException">当前没有活动的工作单元</exception>
+        public IUnitOfWork? CurrentOrNull => _currentScope.Value?.UnitOfWork;
+
         public IUnitOfWork Current
         {
             get
             {
-                if (_current == null)
+                var current = CurrentOrNull;
+                if (current == null)
                 {
                     throw new InvalidOperationException("No active unit of work. Call Begin() first.");
                 }
-                return _current;
+                return current;
             }
+        }
+
+        public IUnitOfWorkScope BeginScope(
+            bool isTransactional = true,
+            bool requiresNew = false,
+            OrmProvider? provider = null)
+        {
+            var current = CurrentOrNull;
+            if (current != null && !requiresNew)
+            {
+                return new UnitOfWorkScope(this, current, _currentScope.Value, isOwner: false, isTransactional);
+            }
+
+            var parentScope = _currentScope.Value;
+            var unitOfWork = _factory.Create(provider ?? _defaultProvider);
+            _currentScope.Value = new AmbientUnitOfWorkScope(unitOfWork, parentScope);
+
+            return new UnitOfWorkScope(this, unitOfWork, parentScope, isOwner: true, isTransactional);
         }
 
         /// <summary>
@@ -52,13 +74,7 @@ namespace CrestCreates.OrmProviders.Abstract
         /// <exception cref="InvalidOperationException">已存在活动的工作单元</exception>
         public IUnitOfWork Begin(OrmProvider? provider = null)
         {
-            if (_current != null)
-            {
-                throw new InvalidOperationException("A unit of work is already active.");
-            }
-
-            _current = _factory.Create(provider ?? _defaultProvider);
-            return _current;
+            return new ScopedUnitOfWorkProxy(BeginScope(requiresNew: true, provider: provider));
         }
 
         /// <summary>
@@ -70,26 +86,19 @@ namespace CrestCreates.OrmProviders.Abstract
         /// <returns>操作结果</returns>
         public TResult Execute<TResult>(Func<IUnitOfWork, TResult> action, OrmProvider? provider = null)
         {
-            using (var uow = _factory.Create(provider ?? _defaultProvider))
+            using (var scope = BeginScope(requiresNew: true, provider: provider))
             {
-                var previousUow = _current;
-                _current = uow;
-
                 try
                 {
-                    uow.BeginTransactionAsync().GetAwaiter().GetResult();
-                    var result = action(uow);
-                    uow.CommitTransactionAsync().GetAwaiter().GetResult();
+                    scope.UnitOfWork.BeginTransactionAsync().GetAwaiter().GetResult();
+                    var result = action(scope.UnitOfWork);
+                    scope.UnitOfWork.CommitTransactionAsync().GetAwaiter().GetResult();
                     return result;
                 }
                 catch
                 {
-                    uow.RollbackTransactionAsync().GetAwaiter().GetResult();
+                    scope.UnitOfWork.RollbackTransactionAsync().GetAwaiter().GetResult();
                     throw;
-                }
-                finally
-                {
-                    _current = previousUow;
                 }
             }
         }
@@ -105,27 +114,123 @@ namespace CrestCreates.OrmProviders.Abstract
             Func<IUnitOfWork, Task<TResult>> action,
             OrmProvider? provider = null)
         {
-            using (var uow = _factory.Create(provider ?? _defaultProvider))
+            using (var scope = BeginScope(requiresNew: true, provider: provider))
             {
-                var previousUow = _current;
-                _current = uow;
-
                 try
                 {
-                    await uow.BeginTransactionAsync();
-                    var result = await action(uow);
-                    await uow.CommitTransactionAsync();
+                    await scope.UnitOfWork.BeginTransactionAsync();
+                    var result = await action(scope.UnitOfWork);
+                    await scope.UnitOfWork.CommitTransactionAsync();
                     return result;
                 }
                 catch
                 {
-                    await uow.RollbackTransactionAsync();
+                    await scope.UnitOfWork.RollbackTransactionAsync();
                     throw;
                 }
-                finally
+            }
+        }
+
+        private void EndScope(UnitOfWorkScope scope)
+        {
+            if (!scope.IsOwner)
+            {
+                return;
+            }
+
+            if (!ReferenceEquals(CurrentOrNull, scope.UnitOfWork))
+            {
+                throw new InvalidOperationException("The unit of work scope was disposed out of order.");
+            }
+
+            _currentScope.Value = scope.ParentScope;
+            scope.UnitOfWork.Dispose();
+        }
+
+        private sealed class AmbientUnitOfWorkScope
+        {
+            public AmbientUnitOfWorkScope(IUnitOfWork unitOfWork, AmbientUnitOfWorkScope? parent)
+            {
+                UnitOfWork = unitOfWork;
+                Parent = parent;
+            }
+
+            public IUnitOfWork UnitOfWork { get; }
+
+            public AmbientUnitOfWorkScope? Parent { get; }
+        }
+
+        private sealed class UnitOfWorkScope : IUnitOfWorkScope
+        {
+            private readonly UnitOfWorkManager _manager;
+            private bool _disposed;
+
+            public UnitOfWorkScope(
+                UnitOfWorkManager manager,
+                IUnitOfWork unitOfWork,
+                AmbientUnitOfWorkScope? parentScope,
+                bool isOwner,
+                bool isTransactional)
+            {
+                _manager = manager;
+                UnitOfWork = unitOfWork;
+                ParentScope = parentScope;
+                IsOwner = isOwner;
+                IsTransactional = isTransactional;
+            }
+
+            public IUnitOfWork UnitOfWork { get; }
+
+            public AmbientUnitOfWorkScope? ParentScope { get; }
+
+            public bool IsOwner { get; }
+
+            public bool IsTransactional { get; }
+
+            public void Dispose()
+            {
+                if (_disposed)
                 {
-                    _current = previousUow;
+                    return;
                 }
+
+                _manager.EndScope(this);
+                _disposed = true;
+            }
+        }
+
+        private sealed class ScopedUnitOfWorkProxy : IUnitOfWork
+        {
+            private readonly IUnitOfWorkScope _scope;
+
+            public ScopedUnitOfWorkProxy(IUnitOfWorkScope scope)
+            {
+                _scope = scope;
+            }
+
+            public Task BeginTransactionAsync()
+            {
+                return _scope.UnitOfWork.BeginTransactionAsync();
+            }
+
+            public Task CommitTransactionAsync()
+            {
+                return _scope.UnitOfWork.CommitTransactionAsync();
+            }
+
+            public Task RollbackTransactionAsync()
+            {
+                return _scope.UnitOfWork.RollbackTransactionAsync();
+            }
+
+            public Task<int> SaveChangesAsync()
+            {
+                return _scope.UnitOfWork.SaveChangesAsync();
+            }
+
+            public void Dispose()
+            {
+                _scope.Dispose();
             }
         }
     }

@@ -2,11 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Threading;
+using CrestCreates.DbContextProvider.Abstract;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Entities;
 using CrestCreates.OrmProviders.Abstract.UnitOfWorkBase;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.OrmProviders.EFCore.UnitOfWork
 {
@@ -15,10 +17,23 @@ namespace CrestCreates.OrmProviders.EFCore.UnitOfWork
         private readonly DbContext _dbContext;
         private IDbContextTransaction? _currentTransaction;
 
-        public EfCoreUnitOfWork(DbContext dbContext, IDomainEventPublisher domainEventPublisher) 
+        [ActivatorUtilitiesConstructor]
+        public EfCoreUnitOfWork(IDataBaseContext dbContext, IDomainEventPublisher domainEventPublisher)
+            : this(GetDbContext(dbContext), domainEventPublisher)
+        {
+        }
+
+        public EfCoreUnitOfWork(DbContext dbContext, IDomainEventPublisher domainEventPublisher)
             : base(domainEventPublisher)
         {
             _dbContext = dbContext;
+        }
+
+        private static DbContext GetDbContext(IDataBaseContext dbContext)
+        {
+            return dbContext.GetNativeContext() as DbContext
+                ?? throw new InvalidOperationException(
+                    $"The configured {nameof(IDataBaseContext)} does not wrap an Entity Framework Core {nameof(DbContext)}.");
         }
 
         public override async Task BeginTransactionAsync()

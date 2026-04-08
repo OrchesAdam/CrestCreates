@@ -13,14 +13,14 @@ namespace CrestCreates.Domain.Shared.Attributes
         }
         
         public ServiceLifetime Lifetime { get; set; } = ServiceLifetime.Scoped;
-        public bool GenerateController { get; set; } = true;
+        public bool GenerateController { get; set; } = false;
         public string Route { get; set; } = "";
         
         // 授权配置
         public bool GenerateAuthorization { get; set; } = false;
         public string ResourceName { get; set; } = "";
         public bool GenerateCrudPermissions { get; set; } = true;
-        public string[] DefaultRoles { get; set; } = null;
+        public string[] DefaultRoles { get; set; } = Array.Empty<string>();
         public bool RequireAll { get; set; } = false;
         public bool RequireAuthorizationForAll { get; set; } = true;
     }

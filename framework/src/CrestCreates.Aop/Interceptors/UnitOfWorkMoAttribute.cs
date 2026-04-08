@@ -1,8 +1,9 @@
 using System;
+using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Aop.Abstractions;
 using CrestCreates.Aop.Extensions;
-using CrestCreates.Domain.UnitOfWork;
 using CrestCreates.OrmProviders.Abstract;
 using Microsoft.Extensions.Logging;
 using Rougamo;
@@ -13,8 +14,8 @@ namespace CrestCreates.Aop.Interceptors;
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class, AllowMultiple = false)]
 public class UnitOfWorkMoAttribute : AsyncMoAttribute
 {
+    private static readonly AsyncLocal<Stack<IUnitOfWorkScope?>?> CurrentScopes = new();
     private readonly bool _requiresTransaction;
-    private IUnitOfWork? _unitOfWork;
     public int Order => InterceptorOrders.UnitOfWork;
 
     public UnitOfWorkMoAttribute(bool requiresTransaction = true)
@@ -22,8 +23,11 @@ public class UnitOfWorkMoAttribute : AsyncMoAttribute
         _requiresTransaction = requiresTransaction;
     }
 
-    public override ValueTask OnEntryAsync(MethodContext context)
+    public override async ValueTask OnEntryAsync(MethodContext context)
     {
+        IUnitOfWorkScope? scope = null;
+        GetScopeStack().Push(null);
+
         try
         {
             var uowManager = context.GetService<IUnitOfWorkManager>();
@@ -31,31 +35,50 @@ public class UnitOfWorkMoAttribute : AsyncMoAttribute
             {
                 var logger = context.GetService<ILogger<UnitOfWorkMoAttribute>>();
                 logger?.LogWarning("IUnitOfWorkManager 未注册，跳过工作单元");
-                return ValueTask.CompletedTask;
+                return;
             }
 
-            _unitOfWork = uowManager.Begin();
-            return ValueTask.CompletedTask;
+            scope = uowManager.BeginScope(isTransactional: _requiresTransaction);
+            ReplaceTopScope(scope);
+
+            try
+            {
+                if (scope.IsOwner && scope.IsTransactional)
+                {
+                    await scope.UnitOfWork.BeginTransactionAsync();
+                }
+            }
+            catch
+            {
+                PopScope()?.Dispose();
+                throw;
+            }
         }
-        catch (Exception exception)
+        catch
         {
-            return ValueTask.FromException(exception);
+            if (scope == null)
+            {
+                PopScope();
+            }
+
+            throw;
         }
     }
 
     public override async ValueTask OnSuccessAsync(MethodContext context)
     {
-        if (_unitOfWork != null)
+        var scope = PopScope();
+        if (scope != null)
         {
             try
             {
-                if (_requiresTransaction)
+                if (scope.IsOwner && scope.IsTransactional)
                 {
-                    await _unitOfWork.CommitTransactionAsync();
+                    await scope.UnitOfWork.CommitTransactionAsync();
                 }
-                else
+                else if (scope.IsOwner)
                 {
-                    await _unitOfWork.SaveChangesAsync();
+                    await scope.UnitOfWork.SaveChangesAsync();
                 }
             }
             catch (Exception exception)
@@ -64,22 +87,68 @@ public class UnitOfWorkMoAttribute : AsyncMoAttribute
                 logger?.LogError(exception, "工作单元提交失败");
                 throw;
             }
+            finally
+            {
+                scope.Dispose();
+            }
         }
     }
 
     public override async ValueTask OnExceptionAsync(MethodContext context)
     {
-        if (_unitOfWork != null)
+        var scope = PopScope();
+        if (scope != null)
         {
             try
             {
-                await _unitOfWork.RollbackTransactionAsync();
+                if (scope.IsOwner)
+                {
+                    await scope.UnitOfWork.RollbackTransactionAsync();
+                }
             }
             catch (Exception exception)
             {
                 var logger = context.GetService<ILogger<UnitOfWorkMoAttribute>>();
                 logger?.LogError(exception, "工作单元回滚失败");
             }
+            finally
+            {
+                scope.Dispose();
+            }
         }
+    }
+
+    private static Stack<IUnitOfWorkScope?> GetScopeStack()
+    {
+        return CurrentScopes.Value ??= new Stack<IUnitOfWorkScope?>();
+    }
+
+    private static void ReplaceTopScope(IUnitOfWorkScope? scope)
+    {
+        var scopes = GetScopeStack();
+        if (scopes.Count == 0)
+        {
+            throw new InvalidOperationException("工作单元拦截器作用域栈状态异常");
+        }
+
+        scopes.Pop();
+        scopes.Push(scope);
+    }
+
+    private static IUnitOfWorkScope? PopScope()
+    {
+        var scopes = CurrentScopes.Value;
+        if (scopes == null || scopes.Count == 0)
+        {
+            return null;
+        }
+
+        var scope = scopes.Pop();
+        if (scopes.Count == 0)
+        {
+            CurrentScopes.Value = null;
+        }
+
+        return scope;
     }
 }

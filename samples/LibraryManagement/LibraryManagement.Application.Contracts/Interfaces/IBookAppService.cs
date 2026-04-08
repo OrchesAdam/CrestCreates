@@ -2,14 +2,14 @@ using LibraryManagement.Application.Contracts.DTOs;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Application.Contracts.Attributes;
+using CrestCreates.Application.Contracts.DTOs.Common;
+using CrestCreates.Application.Contracts.Interfaces;
 
 namespace LibraryManagement.Application.Contracts.Interfaces;
 
-public interface IBookAppService
+[CrestCrudApiController("BookCrudDemo", "api/demo/books")]
+public interface IBookAppService : ICrudAppService<Guid, BookDto, CreateBookDto, UpdateBookDto, PagedRequestDto>
 {
-    Task<BookDto> CreateAsync(CreateBookDto input, CancellationToken cancellationToken = default);
-    Task<BookDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<BookDto> UpdateAsync(Guid id, UpdateBookDto input, CancellationToken cancellationToken = default);
-    Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
     Task<BookDto?> GetByIsbnAsync(string isbn, CancellationToken cancellationToken = default);
 }

@@ -11,14 +11,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Common;
 using CrestCreates.Application.Services;
+using CrestCreates.Aop.Interceptors;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.DataFilter;
 using CrestCreates.Domain.Shared.DTOs;
-using CrestCreates.Domain.UnitOfWork;
-using CrestCreates.Infrastructure.Authorization;
 
 namespace LibraryManagement.Application.Services;
 
@@ -31,7 +30,7 @@ public class LoanAppService : CrestAppServiceBase<Loan, Guid, LoanDto, CreateLoa
     private readonly IMapper _mapper;
 
 
-    public LoanAppService(ICrestRepositoryBase<Loan, Guid> repository, IMapper mapper, IUnitOfWork unitOfWork, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, ILoanRepository loanRepository, IBookRepository bookRepository, IMemberRepository memberRepository) : base(repository, mapper, unitOfWork, currentUser, dataPermissionFilter, permissionChecker)
+    public LoanAppService(ICrestRepositoryBase<Loan, Guid> repository, IMapper mapper, IServiceProvider serviceProvider, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, ILoanRepository loanRepository, IBookRepository bookRepository, IMemberRepository memberRepository) : base(repository, mapper, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
     {
         _loanRepository = loanRepository;
         _bookRepository = bookRepository;
@@ -39,6 +38,7 @@ public class LoanAppService : CrestAppServiceBase<Loan, Guid, LoanDto, CreateLoa
         _mapper = mapper;
     }
 
+    [UnitOfWorkMo]
     public override async Task<LoanDto> CreateAsync(CreateLoanDto input, CancellationToken cancellationToken = default)
     {
         // Validate member
@@ -130,6 +130,7 @@ public class LoanAppService : CrestAppServiceBase<Loan, Guid, LoanDto, CreateLoa
         return dtos;
     }
 
+    [UnitOfWorkMo]
     public async Task<LoanDto> ReturnBookAsync(ReturnBookDto input, CancellationToken cancellationToken = default)
     {
         var loan = await _loanRepository.GetAsync(input.LoanId);
@@ -162,6 +163,7 @@ public class LoanAppService : CrestAppServiceBase<Loan, Guid, LoanDto, CreateLoa
         return await MapToDtoAsync(loan);
     }
 
+    [UnitOfWorkMo]
     public async Task<LoanDto> ExtendLoanAsync(ExtendLoanDto input, CancellationToken cancellationToken = default)
     {
         var loan = await _loanRepository.GetAsync(input.LoanId);
@@ -174,6 +176,7 @@ public class LoanAppService : CrestAppServiceBase<Loan, Guid, LoanDto, CreateLoa
         return await MapToDtoAsync(loan);
     }
 
+    [UnitOfWorkMo]
     public async Task ProcessOverdueLoansAsync(CancellationToken cancellationToken = default)
     {
         var activeLoans = await _loanRepository.GetActiveLoansAsync(cancellationToken);

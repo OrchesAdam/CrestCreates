@@ -70,12 +70,6 @@ namespace CrestCreates.Web
             services.AddScoped<ILocalizationProvider, JsonResourceLocalizationProvider>(sp =>
                 new JsonResourceLocalizationProvider("Localization/Resources"));
 
-            services.AddCaching(config =>
-            {
-                config.Provider = "memory";
-                config.DefaultExpiration = TimeSpan.FromMinutes(30);
-            });
-
 
             Console.WriteLine("=== Module Auto Registration Demo ===");
             Console.WriteLine("Modules discovered and registered:");

@@ -64,35 +64,35 @@ namespace CrestCreates.OrmProviders.EFCore.Repositories
         public override async Task<TEntity> InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
             await _dbContext.Set<TEntity>().AddAsync(entity, cancellationToken);
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
             return entity;
         }
 
         public override async Task<IEnumerable<TEntity>> InsertRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
             await _dbContext.Set<TEntity>().AddRangeAsync(entities, cancellationToken);
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
             return entities;
         }
 
         public override async Task<TEntity> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
             _dbContext.Set<TEntity>().Update(entity);
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
             return entity;
         }
 
         public override async Task<IEnumerable<TEntity>> UpdateRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
             _dbContext.Set<TEntity>().UpdateRange(entities);
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
             return entities;
         }
 
         public override async Task DeleteAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
             _dbContext.Set<TEntity>().Remove(entity);
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
         }
 
         public override async Task DeleteAsync(TId id, CancellationToken cancellationToken = default)
@@ -101,21 +101,21 @@ namespace CrestCreates.OrmProviders.EFCore.Repositories
             if (entity != null)
             {
                 _dbContext.Set<TEntity>().Remove(entity);
-                await _dbContext.SaveChangesAsync(cancellationToken);
+                await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
             }
         }
 
         public override async Task DeleteRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
             _dbContext.Set<TEntity>().RemoveRange(entities);
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
         }
 
         public override async Task DeleteRangeAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
             var entities = await _dbContext.Queryable<TEntity>().Where(predicate).ToListAsync(cancellationToken);
             _dbContext.Set<TEntity>().RemoveRange(entities);
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
         }
 
         public override async Task<Domain.Shared.DTOs.PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, CancellationToken cancellationToken = default)
@@ -169,6 +169,14 @@ namespace CrestCreates.OrmProviders.EFCore.Repositories
         public override async Task<bool> ExistsAsync(TId id, CancellationToken cancellationToken = default)
         {
             return await _dbContext.Queryable<TEntity>().AnyAsync(e => e.Id.Equals(id), cancellationToken);
+        }
+
+        private async Task SaveChangesIfNoActiveTransactionAsync(CancellationToken cancellationToken)
+        {
+            if (_dbContext.CurrentTransaction == null)
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
         }
     }
 }

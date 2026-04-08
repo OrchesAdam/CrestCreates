@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
+using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.OrmProviders.Abstract.Modules;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
@@ -38,6 +39,8 @@ namespace CrestCreates.OrmProviders.EFCore.Modules
             // 注册数据库上下文
             services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
                 sp.GetRequiredService<CrestCreatesDbContextFactory>().CreateDbContext(new string[] {}));
+            services.AddScoped<IDataBaseContext>(sp =>
+                sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
         }
 
         /// <summary>
