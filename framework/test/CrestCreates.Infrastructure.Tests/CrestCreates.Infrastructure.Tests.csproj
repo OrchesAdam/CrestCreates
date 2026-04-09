@@ -30,4 +30,8 @@
     <ProjectReference Include="..\CrestCreates.TestBase\CrestCreates.TestBase.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="Logging\**\*.cs" />
+  </ItemGroup>
+
 </Project>

@@ -10,6 +10,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\framework\src\CrestCreates.AspNetCore\CrestCreates.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\..\framework\src\CrestCreates.Web\CrestCreates.Web.csproj" />
+    <ProjectReference Include="..\..\..\framework\src\CrestCreates.Logging\CrestCreates.Logging.csproj" />
+    <ProjectReference Include="..\..\..\framework\src\CrestCreates.AuditLogging\CrestCreates.AuditLogging.csproj" />
     <ProjectReference Include="..\..\..\framework\src\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\LibraryManagement.Domain\LibraryManagement.Domain.csproj" />
     <ProjectReference Include="..\LibraryManagement.Application.Contracts\LibraryManagement.Application.Contracts.csproj" />

@@ -28,6 +28,7 @@
     <Project Path="framework/src/CrestCreates.Identity/CrestCreates.Identity.csproj" />
     <Project Path="framework/src/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
     <Project Path="framework/src/CrestCreates.Localization/CrestCreates.Localization.csproj" />
+    <Project Path="framework/src/CrestCreates.Logging/CrestCreates.Logging.csproj" />
     <Project Path="framework/src/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
     <Project Path="framework/src/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
     <Project Path="framework/src/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
@@ -82,14 +83,17 @@
   </Folder>
   <Folder Name="/src/test/">
     <Project Path="framework/test/CrestCreates.Application.Tests/CrestCreates.Application.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.AuditLogging.Tests/CrestCreates.AuditLogging.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.CodeGenerator.Tests/CrestCreates.CodeGenerator.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Database.Migrations.Tests/CrestCreates.Database.Migrations.Tests.csproj" />      
     <Project Path="framework/test/CrestCreates.DistributedTransaction.Tests/CrestCreates.DistributedTransaction.Tests.csproj" />       
     <Project Path="framework/test/CrestCreates.Domain.Tests/CrestCreates.Domain.Tests.csproj" />         
     <Project Path="framework/test/CrestCreates.EventBus.Tests/CrestCreates.EventBus.Tests.csproj" />       
     <Project Path="framework/test/CrestCreates.Infrastructure.Tests/CrestCreates.Infrastructure.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.Logging.Tests/CrestCreates.Logging.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.OrmProviders.Tests/CrestCreates.OrmProviders.Tests.csproj" />      
     <Project Path="framework/test/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
+    <Project Path="framework/test/CrestCreates.Web.Tests/CrestCreates.Web.Tests.csproj" />
   </Folder>
   <Folder Name="/src/tools/">
     <Project Path="framework/tools/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj" />

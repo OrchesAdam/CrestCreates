@@ -9,16 +9,16 @@ namespace CrestCreates.AuditLogging.Services
     {
         Task CreateAsync(AuditLog auditLog);
         Task<IEnumerable<AuditLog>> GetListAsync(
-            string userId = null,
-            string action = null,
+            string? userId = null,
+            string? action = null,
             DateTime? startTime = null,
             DateTime? endTime = null,
             int skip = 0,
             int take = 100
         );
         Task<long> GetCountAsync(
-            string userId = null,
-            string action = null,
+            string? userId = null,
+            string? action = null,
             DateTime? startTime = null,
             DateTime? endTime = null
         );

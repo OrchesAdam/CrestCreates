@@ -22,14 +22,6 @@
     <PackageReference Include="FreeSql" />
     <PackageReference Include="AutoMapper" />
     <PackageReference Include="MediatR" />
-    <PackageReference Include="Serilog" />
-    <PackageReference Include="Serilog.Extensions.Logging" />
-    <PackageReference Include="Serilog.Sinks.Console" />
-    <PackageReference Include="Serilog.Sinks.File" />
-    <PackageReference Include="Serilog.Sinks.MSSqlServer" />
-    <PackageReference Include="Serilog.Sinks.Seq" />
-    <PackageReference Include="Serilog.Enrichers.Environment" />
-    <PackageReference Include="Serilog.Enrichers.Thread" />
   </ItemGroup>
 
   <ItemGroup>
@@ -39,6 +31,10 @@
     <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\CrestCreates.Authorization.Abstractions\CrestCreates.Authorization.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Logging\**\*.cs" />
   </ItemGroup>
 
 </Project>

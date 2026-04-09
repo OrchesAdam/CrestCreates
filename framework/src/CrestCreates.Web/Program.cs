@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Hosting;
+using CrestCreates.Logging.Extensions;
 using CrestCreates.Modularity;
 
 namespace CrestCreates.Web
@@ -13,6 +14,7 @@ namespace CrestCreates.Web
 
         public static IHostBuilder CreateHostBuilder(string[] args) =>
             Host.CreateDefaultBuilder(args)
+                .UseCrestSerilog()
                 .UsePinnedScopeServiceProvider()
                 .ConfigureWebHostDefaults(webBuilder =>
                 {

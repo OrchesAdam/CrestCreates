@@ -46,7 +46,7 @@ namespace CrestCreates.AuditLogging.Entities
         /// <summary>
         /// 操作类型
         /// </summary>
-        public string Action { get; set; }
+        public string Action { get; set; } = string.Empty;
 
         /// <summary>
         /// 操作描述

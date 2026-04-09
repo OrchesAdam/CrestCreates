@@ -9,18 +9,21 @@ using MediatR;
 using CrestCreates.Domain.MultiTenancy;
 using CrestCreates.Infrastructure.Localization;
 using CrestCreates.Domain.UnitOfWork;
+using CrestCreates.Logging.Extensions;
 using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.EventBus.Local;
 using CrestCreates.Infrastructure.UnitOfWork;
-using CrestCreates.Infrastructure.Logging;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
 using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.Web.Middlewares;
 using CrestCreates.Domain.Shared;
 using CrestCreates.Modularity;
 using CrestCreates.Aop.Extensions;
+using CrestCreates.AuditLogging.Middlewares;
+using CrestCreates.AuditLogging.Options;
+using Microsoft.Extensions.Options;
 
 namespace CrestCreates.Web
 {
@@ -35,13 +38,8 @@ namespace CrestCreates.Web
 
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddSerilogLogging(config =>
-            {
-                config.MinimumLevel = Microsoft.Extensions.Logging.LogLevel.Information;
-                config.EnableConsole = true;
-                config.EnableFile = true;
-                config.FilePath = "logs/log-.txt";
-            });
+            services.AddCrestLogging(Configuration);
+            services.Configure<AuditLoggingOptions>(Configuration.GetSection(AuditLoggingOptions.SectionName));
 
             services.AddControllers()
                 .AddJsonOptions(options =>
@@ -89,7 +87,9 @@ namespace CrestCreates.Web
                 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "CrestCreates API v1"));
             }
 
+            app.UseCrestRequestLogging();
             app.UseExceptionHandling();
+            app.UseAuditLogging();
 
             app.UseRouting();
 

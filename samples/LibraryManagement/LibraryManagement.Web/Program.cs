@@ -1,9 +1,17 @@
 using LibraryManagement.Web.Modules;
+using CrestCreates.AuditLogging.Middlewares;
+using CrestCreates.AuditLogging.Options;
+using CrestCreates.Logging.Extensions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using CrestCreates.Web.Middlewares;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseCrestSerilog();
+builder.Services.AddCrestLogging(builder.Configuration);
+builder.Services.Configure<AuditLoggingOptions>(
+    builder.Configuration.GetSection(AuditLoggingOptions.SectionName));
 
 // Add services to the container
 builder.Services.AddControllers();
@@ -22,6 +30,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseCrestRequestLogging();
+app.UseExceptionHandling();
+app.UseAuditLogging();
 app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();

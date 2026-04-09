@@ -22,80 +22,46 @@ namespace CrestCreates.AuditLogging.Services
         }
 
         public async Task<IEnumerable<AuditLog>> GetListAsync(
-            string userId = null,
-            string action = null,
+            string? userId = null,
+            string? action = null,
             DateTime? startTime = null,
             DateTime? endTime = null,
             int skip = 0,
             int take = 100
         )
         {
-            var allLogs = await _auditLogRepository.GetAllAsync();
-            var filteredLogs = allLogs.AsQueryable();
+            var filteredLogs = await _auditLogRepository.FindAsync(log =>
+                (string.IsNullOrEmpty(userId) || log.UserId == userId) &&
+                (string.IsNullOrEmpty(action) || log.Action == action) &&
+                (!startTime.HasValue || log.CreationTime >= startTime.Value) &&
+                (!endTime.HasValue || log.CreationTime <= endTime.Value));
 
-            if (!string.IsNullOrEmpty(userId))
-            {
-                filteredLogs = filteredLogs.Where(log => log.UserId == userId);
-            }
-
-            if (!string.IsNullOrEmpty(action))
-            {
-                filteredLogs = filteredLogs.Where(log => log.Action == action);
-            }
-
-            if (startTime.HasValue)
-            {
-                filteredLogs = filteredLogs.Where(log => log.CreationTime >= startTime.Value);
-            }
-
-            if (endTime.HasValue)
-            {
-                filteredLogs = filteredLogs.Where(log => log.CreationTime <= endTime.Value);
-            }
-
-            return filteredLogs.OrderByDescending(log => log.CreationTime)
+            return filteredLogs
+                .OrderByDescending(log => log.CreationTime)
                 .Skip(skip)
                 .Take(take)
                 .ToList();
         }
 
         public async Task<long> GetCountAsync(
-            string userId = null,
-            string action = null,
+            string? userId = null,
+            string? action = null,
             DateTime? startTime = null,
             DateTime? endTime = null
         )
         {
-            var allLogs = await _auditLogRepository.GetAllAsync();
-            var filteredLogs = allLogs.AsQueryable();
+            var filteredLogs = await _auditLogRepository.FindAsync(log =>
+                (string.IsNullOrEmpty(userId) || log.UserId == userId) &&
+                (string.IsNullOrEmpty(action) || log.Action == action) &&
+                (!startTime.HasValue || log.CreationTime >= startTime.Value) &&
+                (!endTime.HasValue || log.CreationTime <= endTime.Value));
 
-            if (!string.IsNullOrEmpty(userId))
-            {
-                filteredLogs = filteredLogs.Where(log => log.UserId == userId);
-            }
-
-            if (!string.IsNullOrEmpty(action))
-            {
-                filteredLogs = filteredLogs.Where(log => log.Action == action);
-            }
-
-            if (startTime.HasValue)
-            {
-                filteredLogs = filteredLogs.Where(log => log.CreationTime >= startTime.Value);
-            }
-
-            if (endTime.HasValue)
-            {
-                filteredLogs = filteredLogs.Where(log => log.CreationTime <= endTime.Value);
-            }
-
-            return filteredLogs.Count();
+            return filteredLogs.Count;
         }
 
         public async Task DeleteAsync(DateTime olderThan)
         {
-            var allLogs = await _auditLogRepository.GetAllAsync();
-            var logsToDelete = allLogs.Where(log => log.CreationTime < olderThan).ToList();
+            var logsToDelete = await _auditLogRepository.FindAsync(log => log.CreationTime < olderThan);
 
             foreach (var log in logsToDelete)
             {

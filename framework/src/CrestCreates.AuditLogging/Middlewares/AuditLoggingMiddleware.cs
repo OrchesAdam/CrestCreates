@@ -1,11 +1,19 @@
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-using System;
-using System.IO;
-using System.Threading.Tasks;
 using CrestCreates.AuditLogging.Entities;
+using CrestCreates.AuditLogging.Options;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.MultiTenancy.Abstract;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http.Extensions;
 
 namespace CrestCreates.AuditLogging.Middlewares
 {
@@ -14,49 +22,62 @@ namespace CrestCreates.AuditLogging.Middlewares
         private readonly RequestDelegate _next;
         private readonly IAuditLogService _auditLogService;
         private readonly ICurrentTenant _currentTenant;
+        private readonly AuditLoggingOptions _options;
+        private readonly ILogger<AuditLoggingMiddleware> _logger;
 
         public AuditLoggingMiddleware(
             RequestDelegate next,
             IAuditLogService auditLogService,
-            ICurrentTenant currentTenant)
+            ICurrentTenant currentTenant,
+            IOptions<AuditLoggingOptions> options,
+            ILogger<AuditLoggingMiddleware> logger)
         {
             _next = next;
             _auditLogService = auditLogService;
             _currentTenant = currentTenant;
+            _options = options.Value;
+            _logger = logger;
         }
 
         public async Task InvokeAsync(HttpContext context)
         {
+            if (!_options.IsEnabled)
+            {
+                await _next(context);
+                return;
+            }
+
+            var requestPath = context.Request.Path.ToString();
+            var shouldAuditRequest = ShouldAuditRequest(context.Request.Method, requestPath);
+            var shouldPersistAuditLog = shouldAuditRequest;
+            Exception? capturedException = null;
             var auditLog = new AuditLog(Guid.NewGuid())
             {
                 CreationTime = DateTime.UtcNow,
                 ClientIpAddress = context.Connection.RemoteIpAddress?.ToString(),
                 ClientName = context.Request.Headers["User-Agent"].ToString(),
-                Path = context.Request.Path.ToString(),
+                Path = requestPath,
                 HttpMethod = context.Request.Method,
-                TenantId = _currentTenant.Id
+                TenantId = _currentTenant.Id,
+                Action = $"{context.Request.Method} {requestPath}",
+                Description = context.Request.GetDisplayUrl(),
+                ExtraProperties = new Dictionary<string, object>
+                {
+                    ["TraceIdentifier"] = context.TraceIdentifier
+                }
             };
 
-            // 获取用户信息
             if (context.User?.Identity?.IsAuthenticated == true)
             {
                 auditLog.UserId = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
                 auditLog.UserName = context.User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
             }
 
-            // 记录请求体
-            if (context.Request.Method != "GET" && context.Request.ContentLength > 0)
+            if (shouldAuditRequest && _options.IncludeRequestBody)
             {
-                // 简化处理，直接读取请求体
-                using (var reader = new StreamReader(context.Request.Body, leaveOpen: true))
-                {
-                    var requestBody = await reader.ReadToEndAsync();
-                    auditLog.Request = requestBody;
-                    context.Request.Body.Position = 0;
-                }
+                auditLog.Request = await TryReadRequestBodyAsync(context.Request);
             }
 
-            // 记录响应体
             var originalResponseStream = context.Response.Body;
             using (var responseBody = new MemoryStream())
             {
@@ -69,37 +90,140 @@ namespace CrestCreates.AuditLogging.Middlewares
                 }
                 catch (Exception ex)
                 {
+                    capturedException = ex;
                     auditLog.Exception = ex.ToString();
                     throw;
                 }
                 finally
                 {
+                    context.Response.Body = originalResponseStream;
                     var endTime = DateTime.UtcNow;
                     auditLog.ExecutionTime = (long)(endTime - startTime).TotalMilliseconds;
                     auditLog.StatusCode = context.Response.StatusCode;
 
-                    // 读取响应体
-                    context.Response.Body.Seek(0, SeekOrigin.Begin);
-                    var responseBodyText = await new StreamReader(context.Response.Body).ReadToEndAsync();
-                    context.Response.Body.Seek(0, SeekOrigin.Begin);
-
-                    // 限制响应体大小，避免日志过大
-                    if (responseBodyText.Length > 1024)
+                    responseBody.Seek(0, SeekOrigin.Begin);
+                    if (_options.IncludeResponseBody && shouldAuditRequest)
                     {
-                        auditLog.Response = responseBodyText.Substring(0, 1024) + "...";
+                        auditLog.Response = await ReadAndTrimResponseBodyAsync(responseBody);
                     }
-                    else
-                    {
-                        auditLog.Response = responseBodyText;
-                    }
-
-                    // 复制回原始响应流
+                    responseBody.Seek(0, SeekOrigin.Begin);
                     await responseBody.CopyToAsync(originalResponseStream);
 
-                    // 异步记录审计日志，不阻塞请求
-                    _ = _auditLogService.CreateAsync(auditLog);
+                    shouldPersistAuditLog = shouldAuditRequest ||
+                        (capturedException != null && _options.AlwaysLogOnException);
                 }
             }
+
+            if (!shouldPersistAuditLog)
+            {
+                return;
+            }
+
+            try
+            {
+                await _auditLogService.CreateAsync(auditLog);
+            }
+            catch (Exception saveException)
+            {
+                _logger.LogWarning(saveException, "Failed to persist audit log for {RequestPath}", requestPath);
+                if (!_options.HideErrors)
+                {
+                    throw;
+                }
+            }
+        }
+
+        private bool ShouldAuditRequest(string method, string path)
+        {
+            if (!_options.IsEnabledForGetRequests &&
+                HttpMethods.IsGet(method))
+            {
+                return false;
+            }
+
+            return !_options.IgnoredUrls.Any(ignored =>
+                !string.IsNullOrWhiteSpace(ignored) &&
+                path.StartsWith(ignored, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private async Task<string?> TryReadRequestBodyAsync(HttpRequest request)
+        {
+            if (request.ContentLength is null or 0)
+            {
+                return null;
+            }
+
+            request.EnableBuffering();
+            request.Body.Seek(0, SeekOrigin.Begin);
+            using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
+            var raw = await reader.ReadToEndAsync();
+            request.Body.Seek(0, SeekOrigin.Begin);
+            return TrimAndSanitize(raw, _options.MaxRequestBodyLength);
+        }
+
+        private async Task<string?> ReadAndTrimResponseBodyAsync(Stream responseBody)
+        {
+            using var reader = new StreamReader(responseBody, Encoding.UTF8, leaveOpen: true);
+            var raw = await reader.ReadToEndAsync();
+            return TrimAndSanitize(raw, _options.MaxResponseBodyLength);
+        }
+
+        private string? TrimAndSanitize(string? raw, int maxLength)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return raw;
+            }
+
+            var sanitized = SanitizeJson(raw);
+            if (sanitized.Length <= maxLength)
+            {
+                return sanitized;
+            }
+
+            return sanitized[..maxLength] + "...";
+        }
+
+        private string SanitizeJson(string raw)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(raw);
+                var sanitized = SanitizeElement(document.RootElement);
+                return JsonSerializer.Serialize(sanitized);
+            }
+            catch (JsonException)
+            {
+                return raw;
+            }
+        }
+
+        private object? SanitizeElement(JsonElement element)
+        {
+            return element.ValueKind switch
+            {
+                JsonValueKind.Object => element.EnumerateObject()
+                    .ToDictionary(
+                        property => property.Name,
+                        property => IsSensitive(property.Name)
+                            ? "***"
+                            : SanitizeElement(property.Value)),
+                JsonValueKind.Array => element.EnumerateArray()
+                    .Select(SanitizeElement)
+                    .ToList(),
+                JsonValueKind.String => element.GetString(),
+                JsonValueKind.Number => element.TryGetInt64(out var value) ? value : element.GetDecimal(),
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.Null => null,
+                _ => element.ToString()
+            };
+        }
+
+        private bool IsSensitive(string propertyName)
+        {
+            return _options.SensitivePropertyNames.Any(sensitive =>
+                string.Equals(sensitive, propertyName, StringComparison.OrdinalIgnoreCase));
         }
     }
 
