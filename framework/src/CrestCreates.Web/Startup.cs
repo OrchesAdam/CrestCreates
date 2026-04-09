@@ -6,24 +6,35 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.EntityFrameworkCore;
 using MediatR;
-using CrestCreates.Domain.MultiTenancy;
+using CrestCreates.Application.Identity;
+using CrestCreates.Application.Permissions;
+using CrestCreates.Application.Tenants;
+using CrestCreates.Authorization;
+using CrestCreates.AspNetCore.Authentication.JwtBearer;
+using CrestCreates.Infrastructure.Authorization;
 using CrestCreates.Infrastructure.Localization;
+using CrestCreates.Infrastructure.Permission;
 using CrestCreates.Domain.UnitOfWork;
 using CrestCreates.Logging.Extensions;
 using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.EventBus.Local;
+using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Infrastructure.UnitOfWork;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
+using CrestCreates.OrmProviders.EFCore.Repositories;
 using CrestCreates.OrmProviders.Abstract;
-using CrestCreates.Web.Middlewares;
+using CrestCreates.AspNetCore.Middlewares;
 using CrestCreates.Domain.Shared;
+using CrestCreates.Domain.Repositories;
+using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Modularity;
 using CrestCreates.Aop.Extensions;
 using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Options;
-using Microsoft.Extensions.Options;
+using CrestCreates.AuditLogging.Services;
+using CrestCreates.MultiTenancy.Providers;
 
 namespace CrestCreates.Web
 {
@@ -40,6 +51,8 @@ namespace CrestCreates.Web
         {
             services.AddCrestLogging(Configuration);
             services.Configure<AuditLoggingOptions>(Configuration.GetSection(AuditLoggingOptions.SectionName));
+            services.AddScoped<AuditLoggingMiddleware>();
+            services.AddScoped<IAuditLogService, AuditLogService>();
 
             services.AddControllers()
                 .AddJsonOptions(options =>
@@ -52,18 +65,57 @@ namespace CrestCreates.Web
             {
                 c.SwaggerDoc("v1", new Microsoft.OpenApi.OpenApiInfo { Title = "CrestCreates API", Version = "v1" });
             });
+            services.AddJwtBearerAuthentication(Configuration);
 
-            services.AddDbContext<CrestCreatesDbContext>(options =>
-                options.UseSqlServer(Configuration.GetConnectionString("Default")));
+            services.AddDbContext<CrestCreatesDbContext>((serviceProvider, options) =>
+            {
+                var currentTenant = serviceProvider.GetService<ICurrentTenant>();
+                var connectionString = currentTenant?.Tenant?.ConnectionString
+                                       ?? Configuration.GetConnectionString("Default");
+                options.UseSqlServer(connectionString);
+            });
+
+            services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
+                new EfCoreDbContextAdapter(sp.GetRequiredService<CrestCreatesDbContext>()));
+            services.AddScoped<IDataBaseContext>(sp =>
+                sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
+            services.AddScoped(typeof(IRepository<,>), typeof(DomainRepositoryAdapter<,>));
+            services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
             services.AddUnitOfWork(OrmProvider.EfCore);
+            services.AddScoped(sp => new CrestCreates.OrmProviders.EFCore.UnitOfWork.EfCoreUnitOfWork(
+                sp.GetRequiredService<IDataBaseContext>(),
+                sp.GetRequiredService<IDomainEventPublisher>()));
+            services.AddDataFilterServices();
+            services.AddCrestAuthorization();
+            services.AddCrestIdentityAuthentication(Configuration);
+            services.AddIdentityManagement();
+            services.AddPermissionManagement();
+            services.AddTenantManagement();
+            services.AddTenantManagementCore();
+            services.AddScoped<IPermissionGrantRepository, PermissionGrantRepository>();
+            services.AddScoped<IPermissionRepository, PermissionRepository>();
+            services.AddScoped<IRoleRepository, RoleRepository>();
+            services.AddScoped<ITenantRepository, TenantRepository>();
+            services.AddScoped<IUserRepository, UserRepository>();
+            services.AddScoped<IUserRoleRepository, UserRoleRepository>();
+            services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+            services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
 
-            services.AddMediatR(typeof(Startup).Assembly);
+            services.AddMediatR(configuration =>
+            {
+                configuration.RegisterServicesFromAssembly(typeof(Startup).Assembly);
+            });
 
             services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, CrestCreates.EventBus.Local.LocalEventBus>();
             services.AddScoped<CrestCreates.Domain.DomainEvents.IDomainEventPublisher, CrestCreates.EventBus.Local.DomainEventPublisher>();
 
-            services.AddSingleton<ICurrentTenant, CurrentTenant>();
+            services.AddMultiTenancy(options =>
+            {
+                options.ResolutionStrategy = TenantResolutionStrategy.Header;
+            });
+            services.AddTenantResolvers(TenantResolutionStrategy.Header);
+            services.AddRepositoryTenantProvider();
 
             services.AddScoped<ILocalizationProvider, JsonResourceLocalizationProvider>(sp =>
                 new JsonResourceLocalizationProvider("Localization/Resources"));
@@ -93,7 +145,9 @@ namespace CrestCreates.Web
 
             app.UseRouting();
 
+            app.UseMultiTenancy();
             app.UseAuthentication();
+            app.UseTenantBoundary();
             app.UseAuthorization();
 
             app.UseEndpoints(endpoints =>

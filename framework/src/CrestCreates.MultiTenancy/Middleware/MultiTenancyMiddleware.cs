@@ -1,6 +1,8 @@
 using System;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -37,6 +39,20 @@ namespace CrestCreates.MultiTenancy.Middleware
                 
                 using (currentTenant.Change(tenantId))
                 {
+                    if (currentTenant.Tenant == null)
+                    {
+                        _logger.LogWarning("Tenant is unavailable: {TenantId}", tenantId);
+                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        context.Response.ContentType = "application/json";
+                        await context.Response.WriteAsync(JsonSerializer.Serialize(new
+                        {
+                            Code = StatusCodes.Status403Forbidden,
+                            Message = "租户不存在或已停用",
+                            TraceId = context.TraceIdentifier
+                        }));
+                        return;
+                    }
+
                     await _next(context);
                 }
             }
@@ -79,6 +95,59 @@ namespace CrestCreates.MultiTenancy.Middleware
             }
 
             return null;
+        }
+    }
+
+    public class TenantBoundaryMiddleware
+    {
+        private readonly RequestDelegate _next;
+        private readonly ILogger<TenantBoundaryMiddleware> _logger;
+
+        public TenantBoundaryMiddleware(
+            RequestDelegate next,
+            ILogger<TenantBoundaryMiddleware> logger)
+        {
+            _next = next;
+            _logger = logger;
+        }
+
+        public async Task InvokeAsync(
+            HttpContext context,
+            ICurrentTenant currentTenant,
+            ICurrentUser currentUser)
+        {
+            if (!currentUser.IsAuthenticated || string.IsNullOrWhiteSpace(currentTenant.Id))
+            {
+                await _next(context);
+                return;
+            }
+
+            if (currentUser.IsSuperAdmin)
+            {
+                await _next(context);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(currentUser.TenantId) ||
+                !string.Equals(currentUser.TenantId, currentTenant.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "Tenant boundary violation. User tenant: {UserTenantId}, current tenant: {CurrentTenantId}",
+                    currentUser.TenantId,
+                    currentTenant.Id);
+
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(new
+                {
+                    Code = StatusCodes.Status403Forbidden,
+                    Message = "当前用户无权访问该租户上下文",
+                    TraceId = context.TraceIdentifier
+                }));
+                return;
+            }
+
+            await _next(context);
         }
     }
 }

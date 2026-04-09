@@ -1,6 +1,5 @@
 using System;
 using System.Text;
-using CrestCreates.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,10 +13,10 @@ public static class JwtBearerServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        var jwtOptions = new JwtOptions();
+        var jwtOptions = new CrestCreates.Authorization.Abstractions.JwtOptions();
         configuration.GetSection("Jwt").Bind(jwtOptions);
 
-        services.Configure<JwtOptions>(configuration.GetSection("Jwt"));
+        services.Configure<CrestCreates.Authorization.Abstractions.JwtOptions>(configuration.GetSection("Jwt"));
 
         services.AddAuthentication(options =>
         {
@@ -46,12 +45,12 @@ public static class JwtBearerServiceCollectionExtensions
 
     public static IServiceCollection AddJwtBearerAuthentication(
         this IServiceCollection services,
-        Action<JwtOptions> configure)
+        Action<CrestCreates.Authorization.Abstractions.JwtOptions> configure)
     {
-        var jwtOptions = new JwtOptions();
+        var jwtOptions = new CrestCreates.Authorization.Abstractions.JwtOptions();
         configure(jwtOptions);
 
-        services.Configure<JwtOptions>(opt =>
+        services.Configure<CrestCreates.Authorization.Abstractions.JwtOptions>(opt =>
         {
             opt.SecretKey = jwtOptions.SecretKey;
             opt.Issuer = jwtOptions.Issuer;

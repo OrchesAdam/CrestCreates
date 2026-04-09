@@ -11,6 +11,21 @@ public class User : MustHaveTenantOrganizationEntity<Guid>
     public string? Phone { get; set; }
     public bool IsActive { get; set; } = true;
     public bool IsSuperAdmin { get; set; } = false;
-    public string? RefreshToken { get; set; }
-    public DateTime? RefreshTokenExpiryTime { get; set; }
+    public int AccessFailedCount { get; set; }
+    public bool LockoutEnabled { get; set; } = true;
+    public DateTime? LockoutEndTime { get; set; }
+    public DateTime? LastLoginTime { get; set; }
+    public DateTime? LastPasswordChangeTime { get; set; }
+
+    public User()
+    {
+    }
+
+    public User(Guid id, string userName, string email, string tenantId)
+    {
+        Id = id;
+        UserName = userName;
+        Email = email;
+        TenantId = tenantId;
+    }
 }

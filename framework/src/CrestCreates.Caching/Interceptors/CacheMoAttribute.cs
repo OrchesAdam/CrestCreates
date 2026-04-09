@@ -1,5 +1,6 @@
 using CrestCreates.Aop.Abstractions;
 using CrestCreates.Caching.Abstractions;
+using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Rougamo;
@@ -46,7 +47,10 @@ public class CacheMoAttribute : AsyncMoAttribute
                 return;
             }
 
-            var cachedValue = await cache.GetAsync<object>(_prefix, context.Arguments);
+            var tenantId = context.GetService<ICurrentTenant>()?.Id;
+            var cachedValue = string.IsNullOrWhiteSpace(tenantId)
+                ? await cache.GetAsync<object>(_prefix, context.Arguments)
+                : await cache.GetAsync<object>(_prefix, tenantId, context.Arguments);
             if (cachedValue != null)
             {
                 context.ReturnValue = cachedValue;
@@ -80,8 +84,16 @@ public class CacheMoAttribute : AsyncMoAttribute
                 var expiration = _expirationMinutes > 0 
                     ? TimeSpan.FromMinutes(_expirationMinutes) 
                     : cacheOptions.DefaultExpiration;
+                var tenantId = context.GetService<ICurrentTenant>()?.Id;
 
-                await cache.SetAsync(_prefix, context.ReturnValue, expiration, context.Arguments);
+                if (string.IsNullOrWhiteSpace(tenantId))
+                {
+                    await cache.SetAsync(_prefix, context.ReturnValue, expiration, context.Arguments);
+                }
+                else
+                {
+                    await cache.SetAsync(_prefix, tenantId, context.ReturnValue, context.Arguments);
+                }
             }
         }
         catch (Exception exception)

@@ -4,6 +4,7 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <LangVersion>latest</LangVersion>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**\obj_codex\**;**\obj\codex\**</DefaultItemExcludes>
     
     <!-- 启用中央包管理 -->
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>

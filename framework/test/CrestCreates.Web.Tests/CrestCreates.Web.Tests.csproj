@@ -24,6 +24,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\CrestCreates.DynamicApi\CrestCreates.DynamicApi.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.AspNetCore\CrestCreates.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.MultiTenancy\CrestCreates.MultiTenancy.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Web\CrestCreates.Web.csproj" />
   </ItemGroup>
 

@@ -8,74 +8,145 @@ using System.Text;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Auth;
 using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Authorization;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 namespace CrestCreates.Infrastructure.Authorization
 {
-    public class JwtOptions
-    {
-        public string SecretKey { get; set; } = string.Empty;
-        public string Issuer { get; set; } = string.Empty;
-        public string Audience { get; set; } = string.Empty;
-        public int AccessTokenExpirationMinutes { get; set; } = 60;
-        public int RefreshTokenExpirationDays { get; set; } = 7;
-    }
-
     public class AuthService : IAuthService
     {
         private readonly IUserRepository _userRepository;
+        private readonly IRoleRepository _roleRepository;
+        private readonly IRefreshTokenRepository _refreshTokenRepository;
+        private readonly IIdentitySecurityLogRepository _identitySecurityLogRepository;
+        private readonly IPermissionGrantManager _permissionGrantManager;
         private readonly IPasswordHasher _passwordHasher;
+        private readonly IIdentityClaimsBuilder _identityClaimsBuilder;
+        private readonly ICurrentUser _currentUser;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IdentityAuthenticationOptions _identityOptions;
         private readonly JwtOptions _jwtOptions;
+        private readonly ILogger<AuthService> _logger;
 
         public AuthService(
             IUserRepository userRepository,
+            IRoleRepository roleRepository,
+            IRefreshTokenRepository refreshTokenRepository,
+            IIdentitySecurityLogRepository identitySecurityLogRepository,
+            IPermissionGrantManager permissionGrantManager,
             IPasswordHasher passwordHasher,
-            IOptions<JwtOptions> jwtOptions)
+            IIdentityClaimsBuilder identityClaimsBuilder,
+            ICurrentUser currentUser,
+            IHttpContextAccessor httpContextAccessor,
+            IOptions<JwtOptions> jwtOptions,
+            IOptions<IdentityAuthenticationOptions> identityOptions,
+            ILogger<AuthService> logger)
         {
             _userRepository = userRepository;
+            _roleRepository = roleRepository;
+            _refreshTokenRepository = refreshTokenRepository;
+            _identitySecurityLogRepository = identitySecurityLogRepository;
+            _permissionGrantManager = permissionGrantManager;
             _passwordHasher = passwordHasher;
+            _identityClaimsBuilder = identityClaimsBuilder;
+            _currentUser = currentUser;
+            _httpContextAccessor = httpContextAccessor;
             _jwtOptions = jwtOptions.Value;
+            _identityOptions = identityOptions.Value;
+            _logger = logger;
         }
 
         public async Task<LoginResultDto> LoginAsync(LoginDto input)
         {
-            var userWithRoles = await _userRepository.GetUserWithRolesAsync(input.UserName);
-            if (userWithRoles == null)
+            var normalizedUserName = NormalizeRequired(input.UserName, nameof(input.UserName));
+            var normalizedPassword = NormalizeRequired(input.Password, nameof(input.Password));
+            var normalizedTenantId = NormalizeOptional(input.TenantId);
+
+            var user = await _userRepository.FindByUserNameAsync(normalizedUserName);
+            if (user == null)
             {
+                await WriteSecurityLogAsync(
+                    userId: null,
+                    userName: normalizedUserName,
+                    tenantId: normalizedTenantId,
+                    action: "Login",
+                    isSucceeded: false,
+                    detail: "用户名或密码错误");
                 throw new UnauthorizedAccessException("用户名或密码错误");
             }
 
-            var user = userWithRoles.User;
-
-            if (!user.IsActive)
+            if (!string.IsNullOrWhiteSpace(normalizedTenantId) &&
+                !string.Equals(user.TenantId, normalizedTenantId, StringComparison.Ordinal))
             {
-                throw new UnauthorizedAccessException("用户已被禁用");
-            }
-
-            if (!string.IsNullOrEmpty(input.TenantId) && user.TenantId != input.TenantId)
-            {
+                await WriteSecurityLogAsync(
+                    user.Id,
+                    user.UserName,
+                    user.TenantId,
+                    "Login",
+                    false,
+                    "租户不匹配");
                 throw new UnauthorizedAccessException("租户不匹配");
             }
 
-            if (string.IsNullOrEmpty(user.PasswordHash) || 
-                !_passwordHasher.VerifyPassword(user.PasswordHash, input.Password))
+            if (!user.IsActive)
             {
+                await WriteSecurityLogAsync(
+                    user.Id,
+                    user.UserName,
+                    user.TenantId,
+                    "Login",
+                    false,
+                    "用户已被禁用");
+                throw new UnauthorizedAccessException("用户已被禁用");
+            }
+
+            if (IsLockedOut(user))
+            {
+                await WriteSecurityLogAsync(
+                    user.Id,
+                    user.UserName,
+                    user.TenantId,
+                    "Login",
+                    false,
+                    "用户已被锁定");
+                throw new UnauthorizedAccessException("用户已被锁定");
+            }
+
+            if (string.IsNullOrWhiteSpace(user.PasswordHash) ||
+                !_passwordHasher.VerifyPassword(user.PasswordHash, normalizedPassword))
+            {
+                await HandleFailedLoginAsync(user);
                 throw new UnauthorizedAccessException("用户名或密码错误");
             }
 
-            var permissions = await _userRepository.GetUserPermissionsAsync(user.Id);
-            var roles = userWithRoles.Roles.Select(r => r.Name).ToArray();
+            var roles = await GetRoleNamesAsync(user.Id);
+            var permissions = await _permissionGrantManager.GetEffectivePermissionsAsync(
+                user.Id.ToString(),
+                roles,
+                user.TenantId);
 
-            var accessToken = GenerateAccessToken(user, roles, permissions);
-            var refreshToken = GenerateRefreshToken();
+            var accessToken = GenerateAccessToken(_identityClaimsBuilder.Build(user, roles, permissions));
+            var refreshToken = await RotateRefreshTokenAsync(user);
 
-            user.RefreshToken = refreshToken;
-            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(_jwtOptions.RefreshTokenExpirationDays);
+            user.AccessFailedCount = 0;
+            user.LockoutEndTime = null;
+            user.LastLoginTime = DateTime.UtcNow;
+            user.LastModificationTime = DateTime.UtcNow;
             await _userRepository.UpdateAsync(user);
+
+            await WriteSecurityLogAsync(
+                user.Id,
+                user.UserName,
+                user.TenantId,
+                "Login",
+                true,
+                null);
 
             return new LoginResultDto
             {
@@ -102,27 +173,61 @@ namespace CrestCreates.Infrastructure.Authorization
 
         public async Task<TokenDto> RefreshTokenAsync(RefreshTokenDto input)
         {
-            var user = await _userRepository.GetUserByRefreshTokenAsync(input.RefreshToken);
-            if (user == null)
+            var refreshTokenValue = NormalizeRequired(input.RefreshToken, nameof(input.RefreshToken));
+            var currentToken = await _refreshTokenRepository.FindByTokenAsync(refreshTokenValue);
+            if (currentToken == null || currentToken.RevokedTime.HasValue || currentToken.ExpirationTime <= DateTime.UtcNow)
             {
+                await WriteSecurityLogAsync(
+                    userId: null,
+                    userName: null,
+                    tenantId: null,
+                    action: "RefreshToken",
+                    isSucceeded: false,
+                    detail: "无效的刷新令牌");
                 throw new UnauthorizedAccessException("无效的刷新令牌");
             }
 
-            if (user.RefreshTokenExpiryTime < DateTime.UtcNow)
+            var user = await _userRepository.GetAsync(currentToken.UserId);
+            if (user == null || !user.IsActive)
             {
-                throw new UnauthorizedAccessException("刷新令牌已过期");
+                await WriteSecurityLogAsync(
+                    currentToken.UserId,
+                    null,
+                    currentToken.TenantId,
+                    "RefreshToken",
+                    false,
+                    "用户不存在或已禁用");
+                throw new UnauthorizedAccessException("用户不存在或已禁用");
             }
 
-            var userWithRoles = await _userRepository.GetUserWithRolesAsync(user.UserName);
-            var permissions = await _userRepository.GetUserPermissionsAsync(user.Id);
-            var roles = userWithRoles?.Roles.Select(r => r.Name).ToArray() ?? Array.Empty<string>();
+            if (IsLockedOut(user))
+            {
+                await WriteSecurityLogAsync(
+                    user.Id,
+                    user.UserName,
+                    user.TenantId,
+                    "RefreshToken",
+                    false,
+                    "用户已被锁定");
+                throw new UnauthorizedAccessException("用户已被锁定");
+            }
 
-            var accessToken = GenerateAccessToken(user, roles, permissions);
-            var refreshToken = GenerateRefreshToken();
+            var roles = await GetRoleNamesAsync(user.Id);
+            var permissions = await _permissionGrantManager.GetEffectivePermissionsAsync(
+                user.Id.ToString(),
+                roles,
+                user.TenantId);
 
-            user.RefreshToken = refreshToken;
-            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(_jwtOptions.RefreshTokenExpirationDays);
-            await _userRepository.UpdateAsync(user);
+            var accessToken = GenerateAccessToken(_identityClaimsBuilder.Build(user, roles, permissions));
+            var refreshToken = await RotateRefreshTokenAsync(user);
+
+            await WriteSecurityLogAsync(
+                user.Id,
+                user.UserName,
+                user.TenantId,
+                "RefreshToken",
+                true,
+                null);
 
             return new TokenDto
             {
@@ -131,6 +236,28 @@ namespace CrestCreates.Infrastructure.Authorization
                 ExpiresIn = _jwtOptions.AccessTokenExpirationMinutes * 60,
                 TokenType = "Bearer"
             };
+        }
+
+        public Task<UserInfoDto> GetCurrentUserAsync()
+        {
+            if (!_currentUser.IsAuthenticated)
+            {
+                throw new UnauthorizedAccessException("当前用户未认证");
+            }
+
+            var currentUser = new UserInfoDto
+            {
+                Id = Guid.TryParse(_currentUser.Id, out var userId) ? userId : Guid.Empty,
+                UserName = _currentUser.UserName,
+                Email = _currentUser.FindClaimValue(ClaimTypes.Email),
+                Phone = _currentUser.FindClaimValue(ClaimTypes.MobilePhone),
+                TenantId = NormalizeOptional(_currentUser.TenantId),
+                OrganizationId = _currentUser.OrganizationId,
+                IsSuperAdmin = _currentUser.IsSuperAdmin,
+                Roles = _currentUser.Roles
+            };
+
+            return Task.FromResult(currentUser);
         }
 
         public Task<bool> ValidateTokenAsync(string token)
@@ -170,41 +297,96 @@ namespace CrestCreates.Infrastructure.Authorization
             var user = await _userRepository.GetAsync(id);
             if (user != null)
             {
-                user.RefreshToken = null;
-                user.RefreshTokenExpiryTime = null;
-                await _userRepository.UpdateAsync(user);
+                await _refreshTokenRepository.RevokeAllByUserIdAsync(user.Id);
+                await WriteSecurityLogAsync(
+                    user.Id,
+                    user.UserName,
+                    user.TenantId,
+                    "Logout",
+                    true,
+                    null);
             }
         }
 
-        private string GenerateAccessToken(User user, string[] roles, List<string> permissions)
+        private async Task HandleFailedLoginAsync(User user)
         {
-            var claims = new List<Claim>
-            {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-                new Claim(ClaimTypes.Name, user.UserName),
-                new Claim("preferred_username", user.UserName),
-                new Claim(ClaimTypes.Email, user.Email ?? string.Empty),
-                new Claim("tenantid", user.TenantId ?? string.Empty),
-                new Claim("is_super_admin", user.IsSuperAdmin.ToString().ToLower())
-            };
+            user.AccessFailedCount += 1;
+            user.LastModificationTime = DateTime.UtcNow;
 
-            if (user.OrganizationId.HasValue)
+            if (user.LockoutEnabled && user.AccessFailedCount >= _identityOptions.MaxAccessFailedCount)
             {
-                claims.Add(new Claim("org_id", user.OrganizationId.Value.ToString()));
+                user.LockoutEndTime = DateTime.UtcNow.AddMinutes(_identityOptions.LockoutMinutes);
             }
 
-            foreach (var role in roles)
-            {
-                claims.Add(new Claim(ClaimTypes.Role, role));
-            }
+            await _userRepository.UpdateAsync(user);
+            await WriteSecurityLogAsync(
+                user.Id,
+                user.UserName,
+                user.TenantId,
+                "Login",
+                false,
+                user.LockoutEndTime.HasValue && user.LockoutEndTime > DateTime.UtcNow
+                    ? "密码错误次数过多，用户已锁定"
+                    : "用户名或密码错误");
+        }
 
-            foreach (var permission in permissions)
-            {
-                claims.Add(new Claim("permission", permission));
-            }
+        private async Task<string[]> GetRoleNamesAsync(Guid userId)
+        {
+            var roles = await _roleRepository.GetByUserIdAsync(userId);
+            return roles
+                .Where(role => !string.IsNullOrWhiteSpace(role.Name))
+                .Select(role => role.Name)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
 
+        private async Task<string> RotateRefreshTokenAsync(User user)
+        {
+            var refreshTokenValue = GenerateRefreshToken();
+
+            await _refreshTokenRepository.RevokeAllByUserIdAsync(user.Id);
+            await _refreshTokenRepository.InsertAsync(
+                new RefreshToken(
+                    Guid.NewGuid(),
+                    user.Id,
+                    refreshTokenValue,
+                    DateTime.UtcNow,
+                    DateTime.UtcNow.AddDays(_jwtOptions.RefreshTokenExpirationDays),
+                    user.TenantId));
+
+            return refreshTokenValue;
+        }
+
+        private async Task WriteSecurityLogAsync(
+            Guid? userId,
+            string? userName,
+            string? tenantId,
+            string action,
+            bool isSucceeded,
+            string? detail)
+        {
+            await _identitySecurityLogRepository.InsertAsync(new IdentitySecurityLog(
+                Guid.NewGuid(),
+                action,
+                isSucceeded,
+                DateTime.UtcNow)
+            {
+                UserId = userId,
+                UserName = userName,
+                TenantId = tenantId,
+                Detail = detail,
+                ClientIpAddress = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString()
+            });
+
+            _logger.LogInformation(
+                "Identity action {Action} for user {UserId} succeeded: {IsSucceeded}",
+                action,
+                userId,
+                isSucceeded);
+        }
+
+        private string GenerateAccessToken(IEnumerable<Claim> claims)
+        {
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtOptions.SecretKey));
             var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
@@ -217,6 +399,26 @@ namespace CrestCreates.Infrastructure.Authorization
             );
 
             return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        private static bool IsLockedOut(User user)
+        {
+            return user.LockoutEndTime.HasValue && user.LockoutEndTime.Value > DateTime.UtcNow;
+        }
+
+        private static string NormalizeRequired(string? value, string parameterName)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new ArgumentException("参数不能为空", parameterName);
+            }
+
+            return value.Trim();
+        }
+
+        private static string? NormalizeOptional(string? value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
         }
 
         private string GenerateRefreshToken()

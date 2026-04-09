@@ -9,16 +9,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\CrestCreates.Application\CrestCreates.Application.csproj" />
-    <ProjectReference Include="..\..\src\Domain\CrestCreates.Domain\CrestCreates.Domain.csproj" />
-    <ProjectReference Include="..\..\src\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\src\Domain\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
-    <ProjectReference Include="..\..\src\CrestCreates.Application.Contracts\CrestCreates.Application.Contracts.csproj" />
-    <ProjectReference Include="..\..\src\CrestCreates.Web\CrestCreates.Web.csproj" />
-    <ProjectReference Include="..\..\tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" />
+    <ProjectReference Include="..\..\..\samples\LibraryManagement\LibraryManagement.EntityFrameworkCore\LibraryManagement.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="..\..\..\samples\LibraryManagement\LibraryManagement.Web\LibraryManagement.Web.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="xunit" />

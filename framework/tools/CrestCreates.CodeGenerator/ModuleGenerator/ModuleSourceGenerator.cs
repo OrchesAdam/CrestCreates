@@ -24,27 +24,6 @@ public class ModuleSourceGenerator : IIncrementalGenerator
             .Where(static m => m is not null);
 
         context.RegisterSourceOutput(modulesProvider.Collect(), GenerateModuleCode);
-
-        context.RegisterPostInitializationOutput(static context =>
-        {
-            context.AddSource("ModuleDescriptor.g.cs", SourceText.From(@"
-namespace CrestCreates.Modularity
-{
-    public readonly struct ModuleDescriptor
-    {
-        public ModuleDescriptor(System.Type moduleType, int order, bool autoRegisterServices)
-        {
-            ModuleType = moduleType;
-            Order = order;
-            AutoRegisterServices = autoRegisterServices;
-        }
-
-        public System.Type ModuleType { get; }
-        public int Order { get; }
-        public bool AutoRegisterServices { get; }
-    }
-}", Encoding.UTF8));
-        });
     }
 
     private static ModuleInfo? GetModuleInfo(GeneratorSyntaxContext context)
@@ -156,7 +135,7 @@ namespace CrestCreates.Modularity
         sb.AppendLine();
         sb.AppendLine("namespace CrestCreates.Modularity {");
         sb.AppendLine();
-        sb.AppendLine("    public class ModuleInfo {");
+        sb.AppendLine("    internal class ModuleInfo {");
         sb.AppendLine("        public string FullName { get; set; } = string.Empty;");
         sb.AppendLine("        public string Name { get; set; } = string.Empty;");
         sb.AppendLine("        public string Namespace { get; set; } = string.Empty;");
@@ -165,7 +144,7 @@ namespace CrestCreates.Modularity
         sb.AppendLine("        public bool AutoRegisterServices { get; set; }");
         sb.AppendLine("    }");
         sb.AppendLine();
-        sb.AppendLine("    public static class ModuleDescriptorRegistry {");
+        sb.AppendLine("    internal static class ModuleDescriptorRegistry {");
         sb.AppendLine("        private static readonly List<ModuleDescriptor> _descriptors = new();");
         sb.AppendLine("        private static readonly object _lock = new();");
         sb.AppendLine("        private static bool _initialized = false;");
@@ -198,7 +177,7 @@ namespace CrestCreates.Modularity
         sb.AppendLine($"        private static readonly string ModuleListJson = @\"{moduleListJson.Replace("\"", "\"\"")}\";");
         sb.AppendLine("    }");
         sb.AppendLine();
-        sb.AppendLine("    public static class ModuleAutoInitializer {");
+        sb.AppendLine("    internal static class ModuleAutoInitializer {");
         sb.Append("        public static readonly IReadOnlyList<string> RegisteredModules = new[] { ");
         sb.Append(string.Join(", ", sortedModules.Select(m => $"\"{m.FullName}\"")));
         sb.AppendLine(" };");

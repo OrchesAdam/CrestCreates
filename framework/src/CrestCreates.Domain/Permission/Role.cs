@@ -10,4 +10,15 @@ public class Role : MustHaveTenantOrganizationEntity<Guid>
     public string? DisplayName { get; set; }
     public DataScope DataScope { get; set; } = DataScope.Self;
     public bool IsActive { get; set; } = true;
+
+    public Role()
+    {
+    }
+
+    public Role(Guid id, string name, string tenantId)
+    {
+        Id = id;
+        Name = name;
+        TenantId = tenantId;
+    }
 }

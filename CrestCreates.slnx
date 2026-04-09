@@ -25,7 +25,6 @@
     <Project Path="framework/src/CrestCreates.EventBus.Abstract/CrestCreates.EventBus.Abstract.csproj" />
     <Project Path="framework/src/CrestCreates.FileManagement/CrestCreates.FileManagement.csproj" />
     <Project Path="framework/src/CrestCreates.HealthCheck/CrestCreates.HealthCheck.csproj" />
-    <Project Path="framework/src/CrestCreates.Identity/CrestCreates.Identity.csproj" />
     <Project Path="framework/src/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
     <Project Path="framework/src/CrestCreates.Localization/CrestCreates.Localization.csproj" />
     <Project Path="framework/src/CrestCreates.Logging/CrestCreates.Logging.csproj" />

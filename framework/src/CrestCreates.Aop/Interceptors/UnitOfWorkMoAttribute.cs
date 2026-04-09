@@ -17,6 +17,7 @@ public class UnitOfWorkMoAttribute : AsyncMoAttribute
     private static readonly AsyncLocal<Stack<IUnitOfWorkScope?>?> CurrentScopes = new();
     private readonly bool _requiresTransaction;
     public int Order => InterceptorOrders.UnitOfWork;
+    public bool RequiresTransaction => _requiresTransaction;
 
     public UnitOfWorkMoAttribute(bool requiresTransaction = true)
     {

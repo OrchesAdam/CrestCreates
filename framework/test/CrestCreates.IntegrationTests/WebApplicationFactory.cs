@@ -1,68 +1,112 @@
 using System;
-using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading;
+using CrestCreates.AuditLogging.Middlewares;
+using CrestCreates.AuditLogging.Services;
+using LibraryManagement.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Xunit;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace CrestCreates.IntegrationTests
+namespace CrestCreates.IntegrationTests;
+
+public sealed class LibraryManagementWebApplicationFactory : WebApplicationFactory<Program>
 {
-    public class WebApplicationFactory<TStartup> : WebApplicationFactory<TStartup>, IAsyncLifetime where TStartup : class
+    private readonly string _databasePath = Path.Combine(
+        Path.GetTempPath(),
+        $"librarymanagement-integration-{Guid.NewGuid():N}.db");
+
+    public string ConnectionString => $"Data Source={_databasePath}";
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        protected override IHostBuilder CreateHostBuilder()
+        builder.UseEnvironment("Development");
+        builder.ConfigureAppConfiguration((_, configurationBuilder) =>
         {
-            var builder = Host.CreateDefaultBuilder()
-                .ConfigureWebHostDefaults(webBuilder =>
-                {
-                    webBuilder.UseStartup<TStartup>();
-                });
-
-            return builder;
-        }
-        
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-        {
-            builder.ConfigureServices(services =>
+            configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                // 替换数据库上下文为SQLite内存数据库
-                var descriptor = services.SingleOrDefault(
-                    d => d.ServiceType == 
-                        typeof(DbContextOptions<CrestCreatesDbContext>));
-
-                if (descriptor != null)
-                {
-                    services.Remove(descriptor);
-                }
-
-                services.AddDbContext<CrestCreatesDbContext>(options =>
-                {
-                    options.UseSqlite("Data Source=:memory:");
-                });
-                
-                // 确保数据库创建和迁移
-                var sp = services.BuildServiceProvider();
-                using (var scope = sp.CreateScope())
-                {
-                    var scopedServices = scope.ServiceProvider;
-                    var db = scopedServices.GetRequiredService<CrestCreatesDbContext>();
-                    
-                    db.Database.OpenConnection();
-                    db.Database.EnsureCreated();
-                }
+                ["ConnectionStrings:Default"] = ConnectionString,
+                ["SeedIdentity:TenantId"] = "host",
+                ["SeedIdentity:RoleName"] = "Administrators",
+                ["SeedIdentity:UserName"] = "admin",
+                ["SeedIdentity:Email"] = "admin@library.local",
+                ["SeedIdentity:Password"] = "Admin123!",
+                ["CrestLogging:EnableFile"] = "false"
             });
-        }
-        
-        public Task InitializeAsync()
+        });
+
+        builder.ConfigureServices(services =>
         {
-            return Task.CompletedTask;
+            services.RemoveAll<DbContextOptions<LibraryDbContext>>();
+            services.RemoveAll<IDbContextOptionsConfiguration<LibraryDbContext>>();
+            services.RemoveAll<LibraryDbContext>();
+            services.RemoveAll<AuditLoggingMiddleware>();
+            services.RemoveAll<IAuditLogService>();
+
+            services.AddDbContext<LibraryDbContext>(options =>
+            {
+                options.UseSqlite(ConnectionString);
+            });
+
+            services.AddScoped<AuditLoggingMiddleware>();
+            services.AddScoped<IAuditLogService, AuditLogService>();
+        });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+
+        if (!disposing)
+        {
+            return;
         }
 
-        public Task DisposeAsync()
+        if (File.Exists(_databasePath))
         {
-            return Task.CompletedTask;
+            DeleteDatabaseFile();
         }
+    }
+
+    private void DeleteDatabaseFile()
+    {
+        const int MaxAttempts = 5;
+
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
+        {
+            try
+            {
+                SqliteConnection.ClearAllPools();
+
+                if (!File.Exists(_databasePath))
+                {
+                    return;
+                }
+
+                File.Delete(_databasePath);
+                return;
+            }
+            catch (IOException) when (attempt < MaxAttempts)
+            {
+                WaitForFileRelease();
+            }
+            catch (UnauthorizedAccessException) when (attempt < MaxAttempts)
+            {
+                WaitForFileRelease();
+            }
+        }
+    }
+
+    private static void WaitForFileRelease()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        Thread.Sleep(200);
     }
 }

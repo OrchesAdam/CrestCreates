@@ -8,12 +8,6 @@ using System.Threading;
 
 namespace CrestCreates.Authorization;
 
-public interface ICurrentPrincipalAccessor
-{
-    ClaimsPrincipal Principal { get; }
-    IDisposable Change(ClaimsPrincipal principal);
-}
-
 public class CurrentPrincipalAccessor : ICurrentPrincipalAccessor
 {
     private readonly IHttpContextAccessor _httpContextAccessor;

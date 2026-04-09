@@ -1,0 +1,44 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using CrestCreates.Domain.DataFilter;
+using CrestCreates.DbContextProvider.Abstract;
+using CrestCreates.Domain.Permission;
+using CrestCreates.Domain.Repositories.Permission;
+using CrestCreates.MultiTenancy.Abstract;
+using Microsoft.EntityFrameworkCore;
+
+namespace CrestCreates.OrmProviders.EFCore.Repositories;
+
+public class UserRepository : EfCoreRepositoryBase<User, Guid>, IUserRepository
+{
+    public UserRepository(
+        IDataBaseContext dbContext,
+        ICurrentTenant currentTenant,
+        DataFilterState dataFilterState)
+        : base(dbContext, currentTenant, dataFilterState)
+    {
+    }
+
+    public Task<User?> FindByUserNameAsync(string userName, CancellationToken cancellationToken = default)
+    {
+        return GetQueryable()
+            .FirstOrDefaultAsync(user => user.UserName == userName, cancellationToken);
+    }
+
+    public Task<User?> FindByEmailAsync(string email, CancellationToken cancellationToken = default)
+    {
+        return GetQueryable()
+            .FirstOrDefaultAsync(user => user.Email == email, cancellationToken);
+    }
+
+    public Task<List<User>> GetByOrganizationIdAsync(Guid organizationId, CancellationToken cancellationToken = default)
+    {
+        return GetQueryable()
+            .Where(user => user.OrganizationId == organizationId)
+            .OrderBy(user => user.UserName)
+            .ToListAsync(cancellationToken);
+    }
+}

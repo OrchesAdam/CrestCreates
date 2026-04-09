@@ -68,6 +68,16 @@ namespace CrestCreates.MultiTenancy
         }
 
         /// <summary>
+        /// 使用基于仓储的租户提供者
+        /// </summary>
+        public static IServiceCollection AddRepositoryTenantProvider(
+            this IServiceCollection services)
+        {
+            services.TryAddSingleton<ITenantProvider, RepositoryTenantProvider>();
+            return services;
+        }
+
+        /// <summary>
         /// 使用自定义租户提供者
         /// </summary>
         public static IServiceCollection AddTenantProvider<TProvider>(
@@ -200,6 +210,16 @@ namespace CrestCreates.MultiTenancy
             if (app == null) throw new ArgumentNullException(nameof(app));
 
             return app.UseMiddleware<MultiTenancyMiddleware>();
+        }
+
+        /// <summary>
+        /// 使用租户边界校验中间件
+        /// </summary>
+        public static IApplicationBuilder UseTenantBoundary(this IApplicationBuilder app)
+        {
+            if (app == null) throw new ArgumentNullException(nameof(app));
+
+            return app.UseMiddleware<TenantBoundaryMiddleware>();
         }
     }
 }

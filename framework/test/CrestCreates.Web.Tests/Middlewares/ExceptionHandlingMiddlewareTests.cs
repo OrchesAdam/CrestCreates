@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using CrestCreates.Authorization.Abstractions;
-using CrestCreates.Web.Middlewares;
+using CrestCreates.AspNetCore.Middlewares;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;

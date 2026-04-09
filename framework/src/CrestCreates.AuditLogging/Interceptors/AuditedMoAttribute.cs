@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using CrestCreates.AuditLogging.Entities;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.Authorization.Abstractions;
+using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Rougamo;
@@ -79,6 +80,7 @@ public class AuditedMoAttribute : AsyncMoAttribute
         try
         {
             var currentUser = context.GetService<ICurrentUser>();
+            var currentTenant = context.GetService<ICurrentTenant>();
             var httpContext = context.GetService<IHttpContextAccessor>()?.HttpContext;
             
             var auditLog = new AuditLog
@@ -97,7 +99,7 @@ public class AuditedMoAttribute : AsyncMoAttribute
                 Request = parameters != null ? System.Text.Json.JsonSerializer.Serialize(parameters) : null,
                 Response = result != null ? System.Text.Json.JsonSerializer.Serialize(result) : null,
                 Exception = null,
-                TenantId = currentUser?.TenantId,
+                TenantId = currentTenant?.Id ?? currentUser?.TenantId,
                 ExtraProperties = new System.Collections.Generic.Dictionary<string, object>
                 {
                     { "Method", $"{context.Method.DeclaringType?.FullName}.{context.Method.Name}" },
@@ -121,6 +123,7 @@ public class AuditedMoAttribute : AsyncMoAttribute
         if (auditLogger == null) return;
 
         var currentUser = context.GetService<ICurrentUser>();
+        var currentTenant = context.GetService<ICurrentTenant>();
         var httpContext = context.GetService<IHttpContextAccessor>()?.HttpContext;
         var actionName = _actionName ?? $"{context.Method.DeclaringType?.Name}.{context.Method.Name}";
         var duration = DateTime.UtcNow - _startTime;
@@ -143,7 +146,7 @@ public class AuditedMoAttribute : AsyncMoAttribute
                 Request = null,
                 Response = null,
                 Exception = context.Exception?.ToString(),
-                TenantId = currentUser?.TenantId,
+                TenantId = currentTenant?.Id ?? currentUser?.TenantId,
                 ExtraProperties = new System.Collections.Generic.Dictionary<string, object>
                 {
                     { "Method", $"{context.Method.DeclaringType?.FullName}.{context.Method.Name}" },
@@ -160,4 +163,3 @@ public class AuditedMoAttribute : AsyncMoAttribute
         }
     }
 }
-

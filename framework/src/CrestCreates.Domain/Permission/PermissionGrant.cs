@@ -1,31 +1,34 @@
 using System;
 using CrestCreates.Domain.Entities;
+using CrestCreates.Domain.Shared.Permissions;
 
 namespace CrestCreates.Domain.Permission;
 
 public class PermissionGrant : Entity<Guid>
 {
-    public string Name { get; set; } = string.Empty;
-    public string ProviderName { get; set; } = string.Empty;
+    public string PermissionName { get; set; } = string.Empty;
+    public PermissionGrantProviderType ProviderType { get; set; }
     public string ProviderKey { get; set; } = string.Empty;
+    public PermissionGrantScope Scope { get; set; } = PermissionGrantScope.Global;
     public string? TenantId { get; set; }
 
     public PermissionGrant()
     {
     }
 
-    public PermissionGrant(Guid id, string name, string providerName, string providerKey, string? tenantId = null)
+    public PermissionGrant(
+        Guid id,
+        string permissionName,
+        PermissionGrantProviderType providerType,
+        string providerKey,
+        PermissionGrantScope scope = PermissionGrantScope.Global,
+        string? tenantId = null)
     {
         Id = id;
-        Name = name;
-        ProviderName = providerName;
+        PermissionName = permissionName;
+        ProviderType = providerType;
         ProviderKey = providerKey;
-        TenantId = tenantId;
-    }
-
-    public static class ProviderNames
-    {
-        public const string Role = "R";
-        public const string User = "U";
+        Scope = scope;
+        TenantId = scope == PermissionGrantScope.Global ? null : tenantId;
     }
 }

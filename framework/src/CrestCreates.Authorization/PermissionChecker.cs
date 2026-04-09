@@ -4,26 +4,31 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using CrestCreates.Authorization.Abstractions;
+using CrestCreates.Domain.Shared.Permissions;
+using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.Authorization;
 
 public class PermissionChecker : IPermissionChecker
 {
-    private readonly IPermissionStore _permissionStore;
+    private readonly IPermissionGrantManager _permissionGrantManager;
     private readonly ICurrentPrincipalAccessor _principalAccessor;
     private readonly ICurrentUser _currentUser;
+    private readonly ICurrentTenant _currentTenant;
     private readonly ILogger<PermissionChecker> _logger;
 
     public PermissionChecker(
-        IPermissionStore permissionStore,
+        IPermissionGrantManager permissionGrantManager,
         ICurrentPrincipalAccessor principalAccessor,
         ICurrentUser currentUser,
+        ICurrentTenant currentTenant,
         ILogger<PermissionChecker> logger)
     {
-        _permissionStore = permissionStore;
+        _permissionGrantManager = permissionGrantManager;
         _principalAccessor = principalAccessor;
         _currentUser = currentUser;
+        _currentTenant = currentTenant;
         _logger = logger;
     }
 
@@ -45,7 +50,8 @@ public class PermissionChecker : IPermissionChecker
             return true;
         }
 
-        var result = await _permissionStore.IsGrantedAsync(principal, permissionName);
+        var permissions = await GetEffectivePermissionsAsync(principal);
+        var result = permissions.Contains(permissionName, StringComparer.OrdinalIgnoreCase);
 
         _logger.LogDebug("Permission '{Permission}' check result: {Result}", permissionName, result);
 
@@ -80,9 +86,11 @@ public class PermissionChecker : IPermissionChecker
             return new MultiplePermissionGrantResult(result);
         }
 
+        var permissions = await GetEffectivePermissionsAsync(principal);
+
         foreach (var permissionName in permissionNames)
         {
-            result[permissionName] = await _permissionStore.IsGrantedAsync(principal, permissionName);
+            result[permissionName] = permissions.Contains(permissionName, StringComparer.OrdinalIgnoreCase);
         }
 
         return new MultiplePermissionGrantResult(result);
@@ -105,5 +113,27 @@ public class PermissionChecker : IPermissionChecker
             return bool.TryParse(isSuperAdminClaim.Value, out var isSuperAdmin) && isSuperAdmin;
         }
         return false;
+    }
+
+    private Task<IReadOnlyList<string>> GetEffectivePermissionsAsync(ClaimsPrincipal principal)
+    {
+        var userId = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                     ?? principal.FindFirst("sub")?.Value
+                     ?? string.Empty;
+
+        var roleNames = principal.FindAll(ClaimTypes.Role)
+            .Concat(principal.FindAll("role"))
+            .Select(claim => claim.Value)
+            .Where(roleName => !string.IsNullOrWhiteSpace(roleName))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var tenantId = !string.IsNullOrWhiteSpace(_currentTenant.Id)
+            ? _currentTenant.Id
+            : principal.FindFirst("tenantid")?.Value
+              ?? principal.FindFirst("tenant_id")?.Value
+              ?? principal.FindFirst("TenantId")?.Value;
+
+        return _permissionGrantManager.GetEffectivePermissionsAsync(userId, roleNames, tenantId);
     }
 }

@@ -1,9 +1,12 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using CrestCreates.DbContextProvider.Abstract;
+using CrestCreates.Domain.Repositories;
+using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.OrmProviders.Abstract.Modules;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
+using CrestCreates.OrmProviders.EFCore.Repositories;
 using CrestCreates.OrmProviders.EFCore.UnitOfWork;
 
 namespace CrestCreates.OrmProviders.EFCore.Modules
@@ -34,13 +37,26 @@ namespace CrestCreates.OrmProviders.EFCore.Modules
             services.AddScoped<CrestCreatesDbContextFactory>();
             
             // 注册 EF Core 工作单元
-            services.AddScoped<EfCoreUnitOfWork>();
+            services.AddScoped(sp => new EfCoreUnitOfWork(
+                sp.GetRequiredService<IDataBaseContext>(),
+                sp.GetRequiredService<CrestCreates.Domain.DomainEvents.IDomainEventPublisher>()));
             
             // 注册数据库上下文
             services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
                 sp.GetRequiredService<CrestCreatesDbContextFactory>().CreateDbContext(new string[] {}));
             services.AddScoped<IDataBaseContext>(sp =>
                 sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
+            services.AddScoped(typeof(IRepository<,>), typeof(DomainRepositoryAdapter<,>));
+            services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
+
+            services.AddScoped<IPermissionGrantRepository, PermissionGrantRepository>();
+            services.AddScoped<IPermissionRepository, PermissionRepository>();
+            services.AddScoped<IRoleRepository, RoleRepository>();
+            services.AddScoped<ITenantRepository, TenantRepository>();
+            services.AddScoped<IUserRepository, UserRepository>();
+            services.AddScoped<IUserRoleRepository, UserRoleRepository>();
+            services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+            services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
         }
 
         /// <summary>

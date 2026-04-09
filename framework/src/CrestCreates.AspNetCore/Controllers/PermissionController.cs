@@ -1,8 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
-using CrestCreates.Domain.Permission;
-using CrestCreates.Domain.Repositories.Permission;
+using CrestCreates.Application.Contracts.DTOs.Permissions;
+using CrestCreates.Application.Contracts.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,88 +10,82 @@ namespace CrestCreates.AspNetCore.Controllers
     [Authorize]
     public class PermissionController : ControllerBase
     {
-        private readonly IPermissionGrantRepository _permissionGrantRepository;
+        private readonly IPermissionGrantAppService _permissionGrantAppService;
 
-        public PermissionController(IPermissionGrantRepository permissionGrantRepository)
+        public PermissionController(IPermissionGrantAppService permissionGrantAppService)
         {
-            _permissionGrantRepository = permissionGrantRepository;
+            _permissionGrantAppService = permissionGrantAppService;
         }
 
-        [HttpPost("grant/role")]
-        public async Task<ActionResult> GrantToRole([FromBody] GrantPermissionRequest request)
+        [HttpPost("users/{userId}/grants")]
+        public async Task<ActionResult> GrantToUser(
+            string userId,
+            [FromBody] PermissionGrantChangeDto input,
+            CancellationToken cancellationToken = default)
         {
-            var grant = new PermissionGrant(
-                Guid.NewGuid(),
-                request.PermissionName,
-                PermissionGrant.ProviderNames.Role,
-                request.ProviderKey,
-                request.TenantId);
-
-            await _permissionGrantRepository.InsertAsync(grant);
+            await _permissionGrantAppService.GrantToUserAsync(userId, input, cancellationToken);
             return Ok(new { message = "权限授予成功" });
         }
 
-        [HttpPost("grant/user")]
-        public async Task<ActionResult> GrantToUser([FromBody] GrantPermissionRequest request)
+        [HttpDelete("users/{userId}/grants")]
+        public async Task<ActionResult> RevokeFromUser(
+            string userId,
+            [FromBody] PermissionGrantChangeDto input,
+            CancellationToken cancellationToken = default)
         {
-            var grant = new PermissionGrant(
-                Guid.NewGuid(),
-                request.PermissionName,
-                PermissionGrant.ProviderNames.User,
-                request.ProviderKey,
-                request.TenantId);
-
-            await _permissionGrantRepository.InsertAsync(grant);
-            return Ok(new { message = "权限授予成功" });
-        }
-
-        [HttpDelete("revoke")]
-        public async Task<ActionResult> RevokePermission([FromBody] RevokePermissionRequest request)
-        {
-            var grant = await _permissionGrantRepository.FindAsync(
-                request.PermissionName,
-                request.ProviderName,
-                request.ProviderKey);
-
-            if (grant != null)
-            {
-                await _permissionGrantRepository.DeleteAsync(grant);
-            }
-
+            await _permissionGrantAppService.RevokeFromUserAsync(userId, input, cancellationToken);
             return Ok(new { message = "权限撤销成功" });
         }
 
-        [HttpGet("role/{roleId}")]
-        public async Task<ActionResult<List<PermissionGrant>>> GetRolePermissions(string roleId)
+        [HttpGet("users/{userId}/grants")]
+        public async Task<ActionResult<IReadOnlyList<PermissionGrantDto>>> GetUserGrants(
+            string userId,
+            CancellationToken cancellationToken = default)
         {
-            var grants = await _permissionGrantRepository.GetListByProviderAsync(
-                PermissionGrant.ProviderNames.Role,
-                roleId);
-            return Ok(grants);
+            var result = await _permissionGrantAppService.GetUserGrantsAsync(userId, cancellationToken);
+            return Ok(result);
         }
 
-        [HttpGet("user/{userId}")]
-        public async Task<ActionResult<List<PermissionGrant>>> GetUserPermissions(string userId)
+        [HttpGet("users/{userId}/effective")]
+        public async Task<ActionResult<UserEffectivePermissionsDto>> GetUserEffectivePermissions(
+            string userId,
+            [FromQuery] string? tenantId = null,
+            CancellationToken cancellationToken = default)
         {
-            var grants = await _permissionGrantRepository.GetListByProviderAsync(
-                PermissionGrant.ProviderNames.User,
-                userId);
-            return Ok(grants);
+            var result = await _permissionGrantAppService.GetUserEffectivePermissionsAsync(
+                userId,
+                tenantId,
+                cancellationToken);
+            return Ok(result);
         }
-    }
 
-    public class GrantPermissionRequest
-    {
-        public string PermissionName { get; set; } = string.Empty;
-        public string ProviderName { get; set; } = string.Empty;
-        public string ProviderKey { get; set; } = string.Empty;
-        public string? TenantId { get; set; }
-    }
+        [HttpPost("roles/{roleName}/grants")]
+        public async Task<ActionResult> GrantToRole(
+            string roleName,
+            [FromBody] PermissionGrantChangeDto input,
+            CancellationToken cancellationToken = default)
+        {
+            await _permissionGrantAppService.GrantToRoleAsync(roleName, input, cancellationToken);
+            return Ok(new { message = "权限授予成功" });
+        }
 
-    public class RevokePermissionRequest
-    {
-        public string PermissionName { get; set; } = string.Empty;
-        public string ProviderName { get; set; } = string.Empty;
-        public string ProviderKey { get; set; } = string.Empty;
+        [HttpDelete("roles/{roleName}/grants")]
+        public async Task<ActionResult> RevokeFromRole(
+            string roleName,
+            [FromBody] PermissionGrantChangeDto input,
+            CancellationToken cancellationToken = default)
+        {
+            await _permissionGrantAppService.RevokeFromRoleAsync(roleName, input, cancellationToken);
+            return Ok(new { message = "权限撤销成功" });
+        }
+
+        [HttpGet("roles/{roleName}/grants")]
+        public async Task<ActionResult<IReadOnlyList<PermissionGrantDto>>> GetRoleGrants(
+            string roleName,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _permissionGrantAppService.GetRoleGrantsAsync(roleName, cancellationToken);
+            return Ok(result);
+        }
     }
 }

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using CrestCreates.Modularity;
+using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.Domain.Shared.Attributes;
@@ -14,6 +15,7 @@ namespace CrestCreates.AuditLogging.Modules
             base.OnConfigureServices(services);
 
             services.AddOptions<AuditLoggingOptions>();
+            services.AddScoped<AuditLoggingMiddleware>();
             services.AddScoped<IAuditLogService, AuditLogService>();
         }
     }

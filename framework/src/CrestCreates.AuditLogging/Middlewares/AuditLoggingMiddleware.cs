@@ -17,33 +17,30 @@ using Microsoft.AspNetCore.Http.Extensions;
 
 namespace CrestCreates.AuditLogging.Middlewares
 {
-    public class AuditLoggingMiddleware
+    public class AuditLoggingMiddleware : IMiddleware
     {
-        private readonly RequestDelegate _next;
         private readonly IAuditLogService _auditLogService;
         private readonly ICurrentTenant _currentTenant;
         private readonly AuditLoggingOptions _options;
         private readonly ILogger<AuditLoggingMiddleware> _logger;
 
         public AuditLoggingMiddleware(
-            RequestDelegate next,
             IAuditLogService auditLogService,
             ICurrentTenant currentTenant,
             IOptions<AuditLoggingOptions> options,
             ILogger<AuditLoggingMiddleware> logger)
         {
-            _next = next;
             _auditLogService = auditLogService;
             _currentTenant = currentTenant;
             _options = options.Value;
             _logger = logger;
         }
 
-        public async Task InvokeAsync(HttpContext context)
+        public async Task InvokeAsync(HttpContext context, RequestDelegate next)
         {
             if (!_options.IsEnabled)
             {
-                await _next(context);
+                await next(context);
                 return;
             }
 
@@ -86,7 +83,7 @@ namespace CrestCreates.AuditLogging.Middlewares
                 var startTime = DateTime.UtcNow;
                 try
                 {
-                    await _next(context);
+                    await next(context);
                 }
                 catch (Exception ex)
                 {
