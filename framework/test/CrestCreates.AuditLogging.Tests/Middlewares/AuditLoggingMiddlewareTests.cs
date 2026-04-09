@@ -138,10 +138,10 @@ public class AuditLoggingMiddlewareTests
             return Task.CompletedTask;
         }
 
-        public Task<IEnumerable<AuditLog>> GetListAsync(string userId = null!, string action = null!, DateTime? startTime = null, DateTime? endTime = null, int skip = 0, int take = 100)
+        public Task<IEnumerable<AuditLog>> GetListAsync(string? userId = null, string? action = null, DateTime? startTime = null, DateTime? endTime = null, int skip = 0, int take = 100)
             => Task.FromResult<IEnumerable<AuditLog>>(Logs);
 
-        public Task<long> GetCountAsync(string userId = null!, string action = null!, DateTime? startTime = null, DateTime? endTime = null)
+        public Task<long> GetCountAsync(string? userId = null, string? action = null, DateTime? startTime = null, DateTime? endTime = null)
             => Task.FromResult((long)Logs.Count);
 
         public Task DeleteAsync(DateTime olderThan) => Task.CompletedTask;
@@ -150,8 +150,8 @@ public class AuditLoggingMiddlewareTests
     private sealed class ThrowingAuditLogService : IAuditLogService
     {
         public Task CreateAsync(AuditLog auditLog) => throw new InvalidOperationException("persist failed");
-        public Task<IEnumerable<AuditLog>> GetListAsync(string userId = null!, string action = null!, DateTime? startTime = null, DateTime? endTime = null, int skip = 0, int take = 100) => Task.FromResult<IEnumerable<AuditLog>>(Array.Empty<AuditLog>());
-        public Task<long> GetCountAsync(string userId = null!, string action = null!, DateTime? startTime = null, DateTime? endTime = null) => Task.FromResult(0L);
+        public Task<IEnumerable<AuditLog>> GetListAsync(string? userId = null, string? action = null, DateTime? startTime = null, DateTime? endTime = null, int skip = 0, int take = 100) => Task.FromResult<IEnumerable<AuditLog>>(Array.Empty<AuditLog>());
+        public Task<long> GetCountAsync(string? userId = null, string? action = null, DateTime? startTime = null, DateTime? endTime = null) => Task.FromResult(0L);
         public Task DeleteAsync(DateTime olderThan) => Task.CompletedTask;
     }
 

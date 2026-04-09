@@ -92,7 +92,6 @@ namespace CrestCreates.AuditLogging.Middlewares
                 {
                     capturedException = ex;
                     auditLog.Exception = ex.ToString();
-                    throw;
                 }
                 finally
                 {
@@ -130,6 +129,11 @@ namespace CrestCreates.AuditLogging.Middlewares
                 {
                     throw;
                 }
+            }
+
+            if (capturedException is not null)
+            {
+                throw capturedException;
             }
         }
 
