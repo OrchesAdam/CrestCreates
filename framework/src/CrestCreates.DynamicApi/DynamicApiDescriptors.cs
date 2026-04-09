@@ -28,13 +28,17 @@ public sealed class DynamicApiActionDescriptor
 {
     public string ActionName { get; init; } = string.Empty;
 
+    public string DeclaringTypeName { get; init; } = string.Empty;
+
+    public string OperationId { get; init; } = string.Empty;
+
     public string RelativeRoute { get; init; } = string.Empty;
 
     public string HttpMethod { get; init; } = HttpMethods.Get;
 
-    public MethodInfo ServiceMethod { get; init; } = null!;
+    public MethodInfo? ServiceMethod { get; init; }
 
-    public MethodInfo ImplementationMethod { get; init; } = null!;
+    public MethodInfo? ImplementationMethod { get; init; }
 
     public DynamicApiReturnDescriptor ReturnDescriptor { get; init; } = null!;
 
@@ -53,13 +57,13 @@ public sealed class DynamicApiParameterDescriptor
 {
     public string Name { get; init; } = string.Empty;
 
-    public ParameterInfo ParameterInfo { get; init; } = null!;
+    public ParameterInfo? ParameterInfo { get; init; }
 
     public Type ParameterType { get; init; } = null!;
 
     public DynamicApiParameterSource Source { get; init; }
 
-    public bool IsOptional => ParameterInfo.IsOptional;
+    public bool IsOptional { get; init; }
 }
 
 public sealed class DynamicApiReturnDescriptor

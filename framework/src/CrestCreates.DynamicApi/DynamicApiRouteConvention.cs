@@ -96,7 +96,8 @@ public sealed class DynamicApiRouteConvention
                 Name = parameter.Name ?? "value",
                 ParameterInfo = parameter,
                 ParameterType = parameter.ParameterType,
-                Source = source
+                Source = source,
+                IsOptional = parameter.IsOptional
             });
         }
 

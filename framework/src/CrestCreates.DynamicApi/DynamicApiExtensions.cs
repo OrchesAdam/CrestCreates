@@ -22,7 +22,12 @@ public static class DynamicApiExtensions
         services.AddSingleton(options);
         services.AddSingleton<DynamicApiRouteConvention>();
         services.AddSingleton<IDynamicApiScanner, DynamicApiScanner>();
-        services.AddSingleton(sp => sp.GetRequiredService<IDynamicApiScanner>().Scan(sp.GetRequiredService<DynamicApiOptions>()));
+        services.AddSingleton(sp =>
+        {
+            var dynamicApiOptions = sp.GetRequiredService<DynamicApiOptions>();
+            return DynamicApiGeneratedRegistryStore.BuildRegistry(dynamicApiOptions)
+                   ?? sp.GetRequiredService<IDynamicApiScanner>().Scan(dynamicApiOptions);
+        });
         services.AddScoped<DynamicApiEndpointExecutor>();
         services.TryAddEnumerable(ServiceDescriptor.Transient<IConfigureOptions<SwaggerGenOptions>, DynamicApiSwaggerGenOptionsSetup>());
 
@@ -32,6 +37,12 @@ public static class DynamicApiExtensions
     public static IEndpointRouteBuilder MapCrestDynamicApi(this IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
+
+        var options = endpoints.ServiceProvider.GetRequiredService<DynamicApiOptions>();
+        if (DynamicApiGeneratedRegistryStore.MapGeneratedEndpoints(endpoints, options))
+        {
+            return endpoints;
+        }
 
         var registry = endpoints.ServiceProvider.GetRequiredService<DynamicApiRegistry>();
         foreach (var service in registry.Services)

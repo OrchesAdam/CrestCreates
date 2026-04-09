@@ -4,7 +4,7 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <LangVersion>latest</LangVersion>
-    <DefaultItemExcludes>$(DefaultItemExcludes);**\obj_codex\**;**\obj\codex\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**\obj_codex\**;**\obj\codex\**;**\obj\**\generated\**;**\obj\**\CrestCreates.CodeGenerator\**</DefaultItemExcludes>
     
     <!-- 启用中央包管理 -->
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>

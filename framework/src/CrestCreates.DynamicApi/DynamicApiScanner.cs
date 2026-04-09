@@ -90,6 +90,8 @@ public sealed class DynamicApiScanner : IDynamicApiScanner
             yield return new DynamicApiActionDescriptor
             {
                 ActionName = actionName,
+                DeclaringTypeName = serviceType.Name,
+                OperationId = $"{serviceType.Name}_{actionName}",
                 RelativeRoute = routePattern,
                 HttpMethod = httpMethod,
                 ServiceMethod = mapping.ServiceMethod,

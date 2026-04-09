@@ -51,7 +51,9 @@ public sealed class DynamicApiSwaggerDocumentFilter : IDocumentFilter
         OpenApiDocument swaggerDoc,
         DocumentFilterContext context)
     {
-        var serviceTagName = action.ServiceMethod.DeclaringType?.Name ?? "DynamicApi";
+        var serviceTagName = string.IsNullOrWhiteSpace(action.DeclaringTypeName)
+            ? action.ServiceMethod?.DeclaringType?.Name ?? "DynamicApi"
+            : action.DeclaringTypeName;
         swaggerDoc.Tags ??= new HashSet<OpenApiTag>();
         if (!swaggerDoc.Tags.Any(tag => string.Equals(tag.Name, serviceTagName, StringComparison.Ordinal)))
         {
@@ -60,7 +62,9 @@ public sealed class DynamicApiSwaggerDocumentFilter : IDocumentFilter
 
         var operation = new OpenApiOperation
         {
-            OperationId = $"{action.ServiceMethod.DeclaringType?.Name}_{action.ActionName}",
+            OperationId = string.IsNullOrWhiteSpace(action.OperationId)
+                ? $"{serviceTagName}_{action.ActionName}"
+                : action.OperationId,
             Summary = action.ActionName,
             Parameters = new List<IOpenApiParameter>(),
             Tags = new HashSet<OpenApiTagReference>
