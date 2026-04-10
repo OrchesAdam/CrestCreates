@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/assests/">
+    <File Path="AGENTS.md" />
     <File Path="Directory.Build.Aot.props" />
     <File Path="Directory.Build.props" />
     <File Path="Directory.Packages.props" />

@@ -11,5 +11,7 @@ namespace CrestCreates.Domain.Repositories.Permission
     {
         Task<List<Role>> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default);
         Task<Role?> FindByNameAsync(string name, string tenantId, CancellationToken cancellationToken = default);
+        Task<List<Role>> GetListByTenantIdAsync(string tenantId, CancellationToken cancellationToken = default);
+        Task<int> GetCountByTenantIdAsync(string tenantId, CancellationToken cancellationToken = default);
     }
 }

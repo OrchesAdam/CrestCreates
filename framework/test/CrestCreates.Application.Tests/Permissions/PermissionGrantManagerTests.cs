@@ -9,7 +9,9 @@ using CrestCreates.Caching;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared.Permissions;
+using CrestCreates.MultiTenancy.Abstract;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -35,10 +37,29 @@ public class PermissionGrantManagerTests
                 Expiration = TimeSpan.FromMinutes(1)
             });
 
+        var currentTenantMock = new Mock<ICurrentTenant>();
+        currentTenantMock.Setup(t => t.Id).Returns("test-tenant");
+
+        var currentUserMock = new Mock<ICurrentUser>();
+        currentUserMock.Setup(u => u.IsSuperAdmin).Returns(true);
+
+        var tenantProviderMock = new Mock<ITenantProvider>();
+
+        var scopeValidator = new TenantPermissionScopeValidator(
+            currentTenantMock.Object,
+            currentUserMock.Object,
+            tenantProviderMock.Object,
+            Mock.Of<ILogger<TenantPermissionScopeValidator>>());
+
+        var cacheKeyContributor = new TenantCacheKeyContributor();
+
         _permissionGrantManager = new PermissionGrantManager(
             _permissionGrantRepositoryMock.Object,
             _permissionGrantStoreMock.Object,
-            cacheService);
+            cacheService,
+            scopeValidator,
+            cacheKeyContributor,
+            currentTenantMock.Object);
     }
 
     [Fact]

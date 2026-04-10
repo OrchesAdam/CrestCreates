@@ -32,7 +32,18 @@ public class RepositoryTenantProvider : ITenantProvider
 
         using var scope = _serviceScopeFactory.CreateScope();
         var tenantRepository = scope.ServiceProvider.GetRequiredService<ITenantRepository>();
-        var tenant = await tenantRepository.FindByNameAsync(tenantId.Trim(), cancellationToken);
+        
+        Domain.Permission.Tenant? tenant = null;
+
+        if (Guid.TryParse(tenantId, out var guid))
+        {
+            tenant = await tenantRepository.FindByIdAsync(guid, cancellationToken);
+        }
+
+        if (tenant == null)
+        {
+            tenant = await tenantRepository.FindByNameAsync(tenantId.Trim(), cancellationToken);
+        }
 
         if (tenant == null)
         {
@@ -40,15 +51,15 @@ public class RepositoryTenantProvider : ITenantProvider
             return null!;
         }
 
-        if (!tenant.IsActive)
+        if (!tenant.IsActive || tenant.LifecycleState != Domain.Permission.TenantLifecycleState.Active)
         {
             _logger.LogWarning("Tenant is inactive and will not be resolved: {TenantId}", tenantId);
             return null!;
         }
 
         return new TenantInfo(
+            tenant.Id.ToString(),
             tenant.Name,
-            tenant.DisplayName ?? tenant.Name,
             tenant.GetDefaultConnectionString());
     }
 }

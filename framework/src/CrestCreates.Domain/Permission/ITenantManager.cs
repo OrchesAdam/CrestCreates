@@ -21,4 +21,8 @@ public interface ITenantManager
         string name,
         bool isActive,
         CancellationToken cancellationToken = default);
+
+    Task DeleteTenantOnlyAsync(
+        Tenant tenant,
+        CancellationToken cancellationToken = default);
 }

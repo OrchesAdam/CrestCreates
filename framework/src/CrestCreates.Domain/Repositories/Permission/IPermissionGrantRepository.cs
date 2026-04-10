@@ -22,5 +22,9 @@ namespace CrestCreates.Domain.Repositories.Permission
             PermissionGrantScope scope,
             string? tenantId,
             CancellationToken cancellationToken = default);
+
+        Task<List<PermissionGrant>> GetListByTenantIdAsync(
+            string tenantId,
+            CancellationToken cancellationToken = default);
     }
 }

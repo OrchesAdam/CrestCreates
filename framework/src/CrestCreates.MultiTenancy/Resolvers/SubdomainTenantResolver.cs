@@ -1,7 +1,7 @@
 using System;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -9,88 +9,81 @@ using Microsoft.Extensions.Options;
 
 namespace CrestCreates.MultiTenancy.Resolvers
 {
-    /// <summary>
-    /// 从子域名中解析租户ID
-    /// 例如: tenant1.example.com -> tenant1
-    /// </summary>
     public class SubdomainTenantResolver : ITenantResolver
     {
         private readonly MultiTenancyOptions _options;
+        private readonly ITenantRepository _tenantRepository;
+        private readonly ITenantDomainMappingRepository _domainMappingRepository;
+        private readonly TenantIdentifierNormalizer _normalizer;
         private readonly ILogger<SubdomainTenantResolver> _logger;
 
         public SubdomainTenantResolver(
             IOptions<MultiTenancyOptions> options,
+            ITenantRepository tenantRepository,
+            ITenantDomainMappingRepository domainMappingRepository,
+            TenantIdentifierNormalizer normalizer,
             ILogger<SubdomainTenantResolver> logger)
         {
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+            _tenantRepository = tenantRepository;
+            _domainMappingRepository = domainMappingRepository;
+            _normalizer = normalizer;
             _logger = logger;
         }
 
-        public Task<string> ResolveAsync(HttpContext httpContext)
+        public async Task<TenantResolutionResult> ResolveAsync(HttpContext httpContext)
         {
             if (httpContext?.Request?.Host == null)
             {
-                return Task.FromResult<string>(null);
+                return TenantResolutionResult.NotResolved("Subdomain");
             }
 
             var host = httpContext.Request.Host.Host;
-            
             if (string.IsNullOrEmpty(host))
             {
-                return Task.FromResult<string>(null);
+                return TenantResolutionResult.NotResolved("Subdomain");
             }
 
-            // 如果配置了根域名，从主机名中提取子域名
-            if (!string.IsNullOrEmpty(_options.RootDomain))
+            var normalizedDomain = _normalizer.NormalizeDomain(host);
+            if (normalizedDomain == null)
             {
-                var tenantId = ExtractSubdomain(host, _options.RootDomain);
-                
-                if (!string.IsNullOrEmpty(tenantId))
+                return TenantResolutionResult.NotResolved("Subdomain");
+            }
+
+            var domainMapping = await _domainMappingRepository.FindByDomainAsync(normalizedDomain, httpContext.RequestAborted);
+            if (domainMapping != null && domainMapping.IsActive)
+            {
+                var tenant = await _tenantRepository.GetAsync(domainMapping.TenantId, httpContext.RequestAborted);
+                if (tenant != null && tenant.IsActive && tenant.LifecycleState == Domain.Permission.TenantLifecycleState.Active)
                 {
-                    _logger.LogDebug("Tenant resolved from subdomain: {TenantId} (Host: {Host})", 
-                        tenantId, host);
-                    return Task.FromResult(tenantId);
+                    return TenantResolutionResult.Success(tenant.Id.ToString(), tenant.Name, tenant.GetDefaultConnectionString(), "Subdomain");
+                }
+
+                return tenant == null ? TenantResolutionResult.NotFound("Subdomain") : TenantResolutionResult.Inactive("Subdomain");
+            }
+
+            var subdomain = _normalizer.ExtractSubdomain(host);
+            if (!string.IsNullOrEmpty(subdomain) && !IsReservedSubdomain(subdomain))
+            {
+                var normalizedName = _normalizer.NormalizeName(subdomain);
+                var tenant = await _tenantRepository.FindByNameAsync(normalizedName, httpContext.RequestAborted);
+
+                if (tenant != null)
+                {
+                    if (!tenant.IsActive || tenant.LifecycleState != Domain.Permission.TenantLifecycleState.Active)
+                    {
+                        return TenantResolutionResult.Inactive("Subdomain");
+                    }
+
+                    return TenantResolutionResult.Success(tenant.Id.ToString(), tenant.Name, tenant.GetDefaultConnectionString(), "Subdomain");
                 }
             }
 
-            // 如果没有配置根域名，尝试提取第一个子域名部分
-            var parts = host.Split('.');
-            if (parts.Length >= 3) // 例如: tenant.example.com
-            {
-                var subdomain = parts[0];
-                
-                // 排除常见的非租户子域名
-                if (!IsReservedSubdomain(subdomain))
-                {
-                    _logger.LogDebug("Tenant resolved from first subdomain part: {TenantId} (Host: {Host})", 
-                        subdomain, host);
-                    return Task.FromResult(subdomain);
-                }
-            }
-
-            return Task.FromResult<string>(null);
-        }
-
-        private string ExtractSubdomain(string host, string rootDomain)
-        {
-            if (host.EndsWith(rootDomain, StringComparison.OrdinalIgnoreCase))
-            {
-                var subdomain = host.Substring(0, host.Length - rootDomain.Length).TrimEnd('.');
-                
-                // 如果子域名为空或包含多个部分，返回第一个部分
-                if (!string.IsNullOrEmpty(subdomain))
-                {
-                    var parts = subdomain.Split('.');
-                    return parts[0];
-                }
-            }
-
-            return null;
+            return TenantResolutionResult.NotResolved("Subdomain");
         }
 
         private bool IsReservedSubdomain(string subdomain)
         {
-            // 保留的子域名列表（不作为租户ID）
             var reserved = new[]
             {
                 "www", "api", "admin", "app", "cdn", "static",

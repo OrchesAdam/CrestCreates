@@ -49,4 +49,18 @@ public class RoleRepository : EfCoreRepositoryBase<Role, Guid>, IRoleRepository
     {
         return (DbContext)GetDbContext().GetNativeContext();
     }
+
+    public Task<List<Role>> GetListByTenantIdAsync(string tenantId, CancellationToken cancellationToken = default)
+    {
+        return GetQueryable()
+            .Where(role => role.TenantId == tenantId)
+            .OrderBy(role => role.Name)
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<int> GetCountByTenantIdAsync(string tenantId, CancellationToken cancellationToken = default)
+    {
+        return GetQueryable()
+            .CountAsync(role => role.TenantId == tenantId, cancellationToken);
+    }
 }

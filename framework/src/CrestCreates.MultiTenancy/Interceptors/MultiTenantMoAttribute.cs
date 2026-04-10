@@ -27,7 +27,7 @@ public class MultiTenantMoAttribute : AsyncMoAttribute
 
             if (currentTenant != null)
             {
-                string tenantId = null;
+                string? tenantId = null;
 
                 if (!string.IsNullOrEmpty(currentUser?.TenantId))
                 {
@@ -35,7 +35,11 @@ public class MultiTenantMoAttribute : AsyncMoAttribute
                 }
                 else if (httpContext != null && tenantResolver != null)
                 {
-                    tenantId = await tenantResolver.ResolveAsync(httpContext);
+                    var result = await tenantResolver.ResolveAsync(httpContext);
+                    if (result.IsResolved)
+                    {
+                        tenantId = result.TenantId;
+                    }
                 }
 
                 if (!string.IsNullOrEmpty(tenantId))

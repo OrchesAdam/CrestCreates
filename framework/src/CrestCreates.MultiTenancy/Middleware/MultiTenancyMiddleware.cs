@@ -9,10 +9,6 @@ using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.MultiTenancy.Middleware
 {
-    /// <summary>
-    /// 多租户识别中间件
-    /// 从 HTTP 请求中提取租户标识并设置当前租户上下文
-    /// </summary>
     public class MultiTenancyMiddleware
     {
         private readonly RequestDelegate _next;
@@ -31,17 +27,17 @@ namespace CrestCreates.MultiTenancy.Middleware
             ICurrentTenant currentTenant,
             ITenantResolver tenantResolver)
         {
-            var tenantId = await tenantResolver.ResolveAsync(context);
+            var resolutionResult = await tenantResolver.ResolveAsync(context);
 
-            if (!string.IsNullOrEmpty(tenantId))
+            if (resolutionResult.IsResolved && !string.IsNullOrEmpty(resolutionResult.TenantId))
             {
-                _logger.LogDebug("Tenant resolved: {TenantId}", tenantId);
-                
-                using (currentTenant.Change(tenantId))
+                _logger.LogDebug("Tenant resolved: {TenantId} by {ResolvedBy}", resolutionResult.TenantId, resolutionResult.ResolvedBy);
+
+                using (currentTenant.Change(resolutionResult.TenantId))
                 {
                     if (currentTenant.Tenant == null)
                     {
-                        _logger.LogWarning("Tenant is unavailable: {TenantId}", tenantId);
+                        _logger.LogWarning("Tenant is unavailable: {TenantId}", resolutionResult.TenantId);
                         context.Response.StatusCode = StatusCodes.Status403Forbidden;
                         context.Response.ContentType = "application/json";
                         await context.Response.WriteAsync(JsonSerializer.Serialize(new
@@ -56,6 +52,25 @@ namespace CrestCreates.MultiTenancy.Middleware
                     await _next(context);
                 }
             }
+            else if (resolutionResult.Error != null)
+            {
+                _logger.LogWarning("Tenant resolution failed: {ErrorCode} - {ErrorMessage}", resolutionResult.Error.Code, resolutionResult.Error.Message);
+
+                if (resolutionResult.Error.Code == "TENANT_INACTIVE")
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync(JsonSerializer.Serialize(new
+                    {
+                        Code = StatusCodes.Status403Forbidden,
+                        Message = "租户已停用",
+                        TraceId = context.TraceIdentifier
+                    }));
+                    return;
+                }
+
+                await _next(context);
+            }
             else
             {
                 _logger.LogDebug("No tenant resolved, continuing without tenant context");
@@ -64,10 +79,6 @@ namespace CrestCreates.MultiTenancy.Middleware
         }
     }
 
-    /// <summary>
-    /// 复合租户解析器
-    /// 支持多种解析策略,按优先级依次尝试
-    /// </summary>
     public class CompositeTenantResolver : ITenantResolver
     {
         private readonly ITenantResolver[] _resolvers;
@@ -81,20 +92,20 @@ namespace CrestCreates.MultiTenancy.Middleware
             _logger = logger;
         }
 
-        public async Task<string> ResolveAsync(HttpContext httpContext)
+        public async Task<TenantResolutionResult> ResolveAsync(HttpContext httpContext)
         {
             foreach (var resolver in _resolvers)
             {
-                var tenantId = await resolver.ResolveAsync(httpContext);
-                if (!string.IsNullOrEmpty(tenantId))
+                var result = await resolver.ResolveAsync(httpContext);
+                if (result.IsResolved)
                 {
-                    _logger.LogDebug("Tenant resolved by {ResolverType}: {TenantId}", 
-                        resolver.GetType().Name, tenantId);
-                    return tenantId;
+                    _logger.LogDebug("Tenant resolved by {ResolverType}: {TenantId}",
+                        resolver.GetType().Name, result.TenantId);
+                    return result;
                 }
             }
 
-            return null;
+            return TenantResolutionResult.NotResolved("Composite");
         }
     }
 

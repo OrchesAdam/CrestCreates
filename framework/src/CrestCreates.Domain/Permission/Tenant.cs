@@ -11,6 +11,8 @@ public class Tenant : AuditedAggregateRoot<Guid>
     public string NormalizedName { get; private set; } = string.Empty;
     public string? DisplayName { get; set; }
     public bool IsActive { get; set; } = true;
+    public TenantLifecycleState LifecycleState { get; set; } = TenantLifecycleState.Active;
+    public DateTime? ArchivedTime { get; set; }
     public List<TenantConnectionString> ConnectionStrings { get; set; } = new();
 
     public Tenant()
@@ -32,6 +34,33 @@ public class Tenant : AuditedAggregateRoot<Guid>
 
         Name = name.Trim();
         NormalizedName = Name.ToUpperInvariant();
+    }
+
+    public void SetLifecycleState(TenantLifecycleState state)
+    {
+        if (state == TenantLifecycleState.Archived && LifecycleState != TenantLifecycleState.Archived)
+        {
+            ArchivedTime = DateTime.UtcNow;
+        }
+        LifecycleState = state;
+    }
+
+    public void Archive()
+    {
+        SetLifecycleState(TenantLifecycleState.Archived);
+    }
+
+    public void Restore()
+    {
+        SetLifecycleState(TenantLifecycleState.Active);
+        ArchivedTime = null;
+        IsActive = true;
+    }
+
+    public void SoftDelete()
+    {
+        SetLifecycleState(TenantLifecycleState.Deleted);
+        IsActive = false;
     }
 
     public string? GetDefaultConnectionString()
@@ -72,5 +101,38 @@ public class Tenant : AuditedAggregateRoot<Guid>
         }
 
         existingConnectionString.SetValue(normalizedValue);
+    }
+
+    public void AddConnectionString(string name, string value)
+    {
+        var existingConnectionString = ConnectionStrings.FirstOrDefault(cs => cs.Name == name);
+        if (existingConnectionString is not null)
+        {
+            existingConnectionString.SetValue(value);
+            return;
+        }
+
+        ConnectionStrings.Add(new TenantConnectionString(Guid.NewGuid(), Id, name, value));
+    }
+
+    public bool RemoveConnectionString(string name)
+    {
+        if (name == TenantConnectionString.DefaultName)
+        {
+            throw new InvalidOperationException("默认连接串不能被删除");
+        }
+
+        var existingConnectionString = ConnectionStrings.FirstOrDefault(cs => cs.Name == name);
+        if (existingConnectionString == null)
+        {
+            return false;
+        }
+
+        return ConnectionStrings.Remove(existingConnectionString);
+    }
+
+    public string? GetConnectionString(string name)
+    {
+        return ConnectionStrings.FirstOrDefault(cs => cs.Name == name)?.Value;
     }
 }

@@ -41,4 +41,18 @@ public class UserRepository : EfCoreRepositoryBase<User, Guid>, IUserRepository
             .OrderBy(user => user.UserName)
             .ToListAsync(cancellationToken);
     }
+
+    public Task<List<User>> GetListByTenantIdAsync(string tenantId, CancellationToken cancellationToken = default)
+    {
+        return GetQueryable()
+            .Where(user => user.TenantId == tenantId)
+            .OrderBy(user => user.UserName)
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<int> GetCountByTenantIdAsync(string tenantId, CancellationToken cancellationToken = default)
+    {
+        return GetQueryable()
+            .CountAsync(user => user.TenantId == tenantId, cancellationToken);
+    }
 }

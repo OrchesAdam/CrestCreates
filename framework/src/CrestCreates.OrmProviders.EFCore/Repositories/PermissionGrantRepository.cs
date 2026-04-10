@@ -55,4 +55,14 @@ public class PermissionGrantRepository : EfCoreRepositoryBase<PermissionGrant, G
 
         return query.FirstOrDefaultAsync(cancellationToken);
     }
+
+    public Task<List<PermissionGrant>> GetListByTenantIdAsync(
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        return GetQueryable()
+            .Where(grant => grant.TenantId == tenantId)
+            .OrderBy(grant => grant.PermissionName)
+            .ToListAsync(cancellationToken);
+    }
 }

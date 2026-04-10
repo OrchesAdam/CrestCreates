@@ -9,11 +9,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Aop\CrestCreates.Aop.csproj" />
+    <ProjectReference Include="..\CrestCreates.Caching.Abstractions\CrestCreates.Caching.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Caching\CrestCreates.Caching.csproj" />
     <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
     <ProjectReference Include="..\CrestCreates.Application.Contracts\CrestCreates.Application.Contracts.csproj" />
     <ProjectReference Include="..\CrestCreates.Authorization.Abstractions\CrestCreates.Authorization.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="..\CrestCreates.MultiTenancy\CrestCreates.MultiTenancy.csproj" />
   </ItemGroup>
 
   <ItemGroup>

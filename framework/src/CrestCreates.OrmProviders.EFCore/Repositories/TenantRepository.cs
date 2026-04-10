@@ -31,11 +31,32 @@ public class TenantRepository : EfCoreRepositoryBase<Tenant, Guid>, ITenantRepos
             .FirstOrDefaultAsync(tenant => tenant.NormalizedName == normalizedName, cancellationToken);
     }
 
+    public Task<Tenant?> FindByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return GetQueryable()
+            .Include(tenant => tenant.ConnectionStrings)
+            .FirstOrDefaultAsync(tenant => tenant.Id == id, cancellationToken);
+    }
+
     public Task<List<Tenant>> GetListWithDetailsAsync(CancellationToken cancellationToken = default)
     {
         return GetQueryable()
             .Include(tenant => tenant.ConnectionStrings)
             .OrderBy(tenant => tenant.Name)
             .ToListAsync(cancellationToken);
+    }
+
+    public Task<List<Tenant>> GetListByLifecycleStateAsync(TenantLifecycleState state, CancellationToken cancellationToken = default)
+    {
+        return GetQueryable()
+            .Include(tenant => tenant.ConnectionStrings)
+            .Where(tenant => tenant.LifecycleState == state)
+            .OrderBy(tenant => tenant.Name)
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<List<Tenant>> GetArchivedTenantsAsync(CancellationToken cancellationToken = default)
+    {
+        return GetListByLifecycleStateAsync(TenantLifecycleState.Archived, cancellationToken);
     }
 }

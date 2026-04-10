@@ -1,134 +1,158 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace CrestCreates.MultiTenancy.Resolvers
 {
-    /// <summary>
-    /// 从查询字符串中解析租户ID
-    /// 例如: https://example.com/api/products?tenantId=tenant1
-    /// </summary>
     public class QueryStringTenantResolver : ITenantResolver
     {
         private readonly MultiTenancyOptions _options;
+        private readonly ITenantRepository _tenantRepository;
+        private readonly TenantIdentifierNormalizer _normalizer;
         private readonly ILogger<QueryStringTenantResolver> _logger;
 
         public QueryStringTenantResolver(
             IOptions<MultiTenancyOptions> options,
+            ITenantRepository tenantRepository,
+            TenantIdentifierNormalizer normalizer,
             ILogger<QueryStringTenantResolver> logger)
         {
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+            _tenantRepository = tenantRepository;
+            _normalizer = normalizer;
             _logger = logger;
         }
 
-        public Task<string> ResolveAsync(HttpContext httpContext)
+        public async Task<TenantResolutionResult> ResolveAsync(HttpContext httpContext)
         {
             if (httpContext?.Request?.Query == null)
             {
-                return Task.FromResult<string>(null);
+                return TenantResolutionResult.NotResolved("QueryString");
             }
 
-            // 从配置的查询参数名称中读取
             var queryParamName = _options.TenantQueryStringKey ?? "tenantId";
-            
+
             if (httpContext.Request.Query.TryGetValue(queryParamName, out var tenantId))
             {
                 var value = tenantId.FirstOrDefault();
                 if (!string.IsNullOrWhiteSpace(value))
                 {
-                    _logger.LogDebug("Tenant resolved from query string '{ParamName}': {TenantId}", 
-                        queryParamName, value);
-                    return Task.FromResult(value);
+                    return await ResolveTenantAsync(value, "QueryString", httpContext.RequestAborted);
                 }
             }
 
-            return Task.FromResult<string>(null);
+            return TenantResolutionResult.NotResolved("QueryString");
+        }
+
+        private async Task<TenantResolutionResult> ResolveTenantAsync(string rawValue, string resolvedBy, CancellationToken cancellationToken)
+        {
+            var normalizedName = _normalizer.NormalizeName(rawValue);
+            var tenant = await _tenantRepository.FindByNameAsync(normalizedName, cancellationToken);
+
+            if (tenant == null) return TenantResolutionResult.NotFound(resolvedBy);
+            if (!tenant.IsActive || tenant.LifecycleState != Domain.Permission.TenantLifecycleState.Active) return TenantResolutionResult.Inactive(resolvedBy);
+
+            return TenantResolutionResult.Success(tenant.Id.ToString(), tenant.Name, tenant.GetDefaultConnectionString(), resolvedBy);
         }
     }
 
-    /// <summary>
-    /// 从 Cookie 中解析租户ID
-    /// </summary>
     public class CookieTenantResolver : ITenantResolver
     {
         private readonly MultiTenancyOptions _options;
+        private readonly ITenantRepository _tenantRepository;
+        private readonly TenantIdentifierNormalizer _normalizer;
         private readonly ILogger<CookieTenantResolver> _logger;
 
         public CookieTenantResolver(
             IOptions<MultiTenancyOptions> options,
+            ITenantRepository tenantRepository,
+            TenantIdentifierNormalizer normalizer,
             ILogger<CookieTenantResolver> logger)
         {
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+            _tenantRepository = tenantRepository;
+            _normalizer = normalizer;
             _logger = logger;
         }
 
-        public Task<string> ResolveAsync(HttpContext httpContext)
+        public async Task<TenantResolutionResult> ResolveAsync(HttpContext httpContext)
         {
             if (httpContext?.Request?.Cookies == null)
             {
-                return Task.FromResult<string>(null);
+                return TenantResolutionResult.NotResolved("Cookie");
             }
 
-            // 从配置的 cookie 名称中读取
             var cookieName = _options.TenantCookieName ?? "TenantId";
-            
+
             if (httpContext.Request.Cookies.TryGetValue(cookieName, out var tenantId))
             {
                 if (!string.IsNullOrWhiteSpace(tenantId))
                 {
-                    _logger.LogDebug("Tenant resolved from cookie '{CookieName}': {TenantId}", 
-                        cookieName, tenantId);
-                    return Task.FromResult(tenantId);
+                    var normalizedName = _normalizer.NormalizeName(tenantId);
+                    var tenant = await _tenantRepository.FindByNameAsync(normalizedName, httpContext.RequestAborted);
+
+                    if (tenant == null) return TenantResolutionResult.NotFound("Cookie");
+                    if (!tenant.IsActive || tenant.LifecycleState != Domain.Permission.TenantLifecycleState.Active) return TenantResolutionResult.Inactive("Cookie");
+
+                    return TenantResolutionResult.Success(tenant.Id.ToString(), tenant.Name, tenant.GetDefaultConnectionString(), "Cookie");
                 }
             }
 
-            return Task.FromResult<string>(null);
+            return TenantResolutionResult.NotResolved("Cookie");
         }
     }
 
-    /// <summary>
-    /// 从路由数据中解析租户ID
-    /// 例如: /api/{tenantId}/products
-    /// </summary>
     public class RouteTenantResolver : ITenantResolver
     {
         private readonly MultiTenancyOptions _options;
+        private readonly ITenantRepository _tenantRepository;
+        private readonly TenantIdentifierNormalizer _normalizer;
         private readonly ILogger<RouteTenantResolver> _logger;
 
         public RouteTenantResolver(
             IOptions<MultiTenancyOptions> options,
+            ITenantRepository tenantRepository,
+            TenantIdentifierNormalizer normalizer,
             ILogger<RouteTenantResolver> logger)
         {
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+            _tenantRepository = tenantRepository;
+            _normalizer = normalizer;
             _logger = logger;
         }
 
-        public Task<string> ResolveAsync(HttpContext httpContext)
+        public async Task<TenantResolutionResult> ResolveAsync(HttpContext httpContext)
         {
-            if (httpContext?.Request?.Path == null)
+            if (httpContext?.GetRouteData() == null)
             {
-                return Task.FromResult<string>(null);
+                return TenantResolutionResult.NotResolved("Route");
             }
 
-            // 从路由值中读取租户ID
             var routeKey = _options.TenantRouteKey ?? "tenantId";
-            
-            if (httpContext.Request.Query.TryGetValue(routeKey, out var tenantId))
+            var routeData = httpContext.GetRouteData();
+
+            if (routeData.Values.TryGetValue(routeKey, out var routeValue))
             {
-                var value = tenantId.ToString();
+                var value = routeValue?.ToString();
                 if (!string.IsNullOrWhiteSpace(value))
                 {
-                    _logger.LogDebug("Tenant resolved from route data '{RouteKey}': {TenantId}", 
-                        routeKey, value);
-                    return Task.FromResult(value);
+                    var normalizedName = _normalizer.NormalizeName(value);
+                    var tenant = await _tenantRepository.FindByNameAsync(normalizedName, httpContext.RequestAborted);
+
+                    if (tenant == null) return TenantResolutionResult.NotFound("Route");
+                    if (!tenant.IsActive || tenant.LifecycleState != Domain.Permission.TenantLifecycleState.Active) return TenantResolutionResult.Inactive("Route");
+
+                    return TenantResolutionResult.Success(tenant.Id.ToString(), tenant.Name, tenant.GetDefaultConnectionString(), "Route");
                 }
             }
 
-            return Task.FromResult<string>(null);
+            return TenantResolutionResult.NotResolved("Route");
         }
     }
 }
