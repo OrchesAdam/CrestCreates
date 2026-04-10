@@ -97,9 +97,14 @@ public class MultiTenancyMiddlewareTests
             _tenantId = tenantId;
         }
 
-        public Task<string> ResolveAsync(HttpContext httpContext)
+
+        public async Task<TenantResolutionResult> ResolveAsync(HttpContext httpContext)
         {
-            return Task.FromResult(_tenantId!);
+            return TenantResolutionResult.Success(
+                _tenantId,
+                "tenantId",
+                null,
+                "StaticTenantResolver");
         }
     }
 
