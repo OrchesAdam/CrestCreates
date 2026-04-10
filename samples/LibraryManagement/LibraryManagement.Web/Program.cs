@@ -11,6 +11,7 @@ using CrestCreates.AspNetCore;
 using CrestCreates.AspNetCore.Authentication.JwtBearer;
 using CrestCreates.Authorization;
 using CrestCreates.Infrastructure.Authorization;
+using CrestCreates.Infrastructure.Settings;
 using CrestCreates.Infrastructure.Permission;
 using CrestCreates.Logging.Extensions;
 using CrestCreates.MultiTenancy;
@@ -21,6 +22,8 @@ using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using CrestCreates.Application.Settings;
+using CrestCreates.OrmProviders.EFCore.Settings;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseCrestSerilog();
@@ -40,6 +43,9 @@ builder.Services.AddCrestAuthorization();
 builder.Services.AddCrestIdentityAuthentication(builder.Configuration);
 builder.Services.AddIdentityManagement();
 builder.Services.AddPermissionManagement();
+builder.Services.AddSettingManagement();
+builder.Services.AddSettingManagementInfrastructure();
+builder.Services.AddSettingManagementEfCore();
 builder.Services.AddTenantManagement();
 builder.Services.AddTenantManagementCore();
 builder.Services.AddMediatR(configuration =>
@@ -58,6 +64,7 @@ builder.Services.AddRepositoryTenantProvider();
 builder.Services.AddCrestAspNetCoreDynamicApi(options =>
 {
     options.AddApplicationServiceAssembly<BookAppService>();
+    options.AddApplicationServiceAssembly<SettingAppService>();
 });
 
 // Register all modules using the module discovery system

@@ -35,6 +35,9 @@ using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.MultiTenancy.Providers;
+using CrestCreates.Application.Settings;
+using CrestCreates.Infrastructure.Settings;
+using CrestCreates.OrmProviders.EFCore.Settings;
 
 namespace CrestCreates.Web
 {
@@ -91,8 +94,11 @@ namespace CrestCreates.Web
             services.AddCrestIdentityAuthentication(Configuration);
             services.AddIdentityManagement();
             services.AddPermissionManagement();
+            services.AddSettingManagement();
+            services.AddSettingManagementInfrastructure();
             services.AddTenantManagement();
             services.AddTenantManagementCore();
+            services.AddSettingManagementEfCore();
             services.AddScoped<IPermissionGrantRepository, PermissionGrantRepository>();
             services.AddScoped<IPermissionRepository, PermissionRepository>();
             services.AddScoped<IRoleRepository, RoleRepository>();

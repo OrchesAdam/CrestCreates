@@ -7,6 +7,7 @@ using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
 using CrestCreates.OrmProviders.EFCore.Repositories;
 using CrestCreates.OrmProviders.EFCore.UnitOfWork;
+using CrestCreates.OrmProviders.EFCore.Settings;
 using LibraryManagement.Application.Modules;
 using LibraryManagement.Domain.Repositories;
 using LibraryManagement.EntityFrameworkCore.Repositories;
@@ -58,5 +59,6 @@ public class EntityFrameworkCoreModule : ModuleBase
         services.AddScoped<IUserRoleRepository, UserRoleRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
+        services.AddSettingManagementEfCore();
     }
 }

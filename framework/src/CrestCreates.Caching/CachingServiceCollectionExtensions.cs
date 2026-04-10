@@ -12,6 +12,8 @@ public static class CachingServiceCollectionExtensions
         services.TryAddSingleton<ICrestCache, CrestMemoryCache>();
         services.TryAddSingleton<ICrestCacheKeyGenerator, CrestCacheKeyGenerator>();
         services.TryAddSingleton<ICrestCacheService, CrestCacheService>();
+        services.TryAddSingleton<SettingCacheKeyContributor>();
+        services.TryAddScoped<SettingCacheInvalidator>();
 
         return services;
     }

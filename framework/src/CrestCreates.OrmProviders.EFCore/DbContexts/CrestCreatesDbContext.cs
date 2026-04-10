@@ -8,6 +8,7 @@ using CrestCreates.Domain.Permission;
 using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.OrmProviders.Abstract.Abstractions;
 using CrestCreates.Domain.Examples;
+using CrestCreates.Domain.Settings;
 
 namespace CrestCreates.OrmProviders.EFCore.DbContexts
 {
@@ -30,6 +31,7 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
         public DbSet<IdentitySecurityLog> IdentitySecurityLogs { get; set; }
         public DbSet<Tenant> Tenants { get; set; }
         public DbSet<TenantConnectionString> TenantConnectionStrings { get; set; }
+        public DbSet<SettingValue> SettingValues { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -222,6 +224,25 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
                 entity.Property(e => e.Value).IsRequired().HasMaxLength(2048);
 
                 entity.HasIndex(e => new { e.TenantId, e.Name }).IsUnique();
+            });
+
+            modelBuilder.Entity<SettingValue>(entity =>
+            {
+                entity.ToTable("SettingValues");
+
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).ValueGeneratedNever();
+                entity.Property(e => e.Name).IsRequired().HasMaxLength(256);
+                entity.Property(e => e.Value).HasMaxLength(4000);
+                entity.Property(e => e.ProviderType).IsRequired().HasMaxLength(32);
+                entity.Property(e => e.Scope).HasConversion<int>().IsRequired();
+                entity.Property(e => e.ProviderKey).IsRequired().HasMaxLength(128);
+                entity.Property(e => e.TenantId).HasMaxLength(64);
+                entity.Property(e => e.IsEncrypted).IsRequired();
+                entity.Property(e => e.CreationTime).IsRequired();
+                entity.Property(e => e.LastModificationTime);
+
+                entity.HasIndex(e => new { e.Name, e.Scope, e.ProviderKey, e.TenantId }).IsUnique();
             });
         }
 
