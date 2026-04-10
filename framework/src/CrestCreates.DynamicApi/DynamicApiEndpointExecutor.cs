@@ -15,7 +15,8 @@ using Microsoft.Extensions.Options;
 namespace CrestCreates.DynamicApi;
 
 [Obsolete("Runtime reflection execution is no longer the Dynamic API default path. Use compile-time generated endpoints instead.")]
-public sealed class DynamicApiEndpointExecutor
+[EditorBrowsable(EditorBrowsableState.Never)]
+internal sealed class DynamicApiEndpointExecutor
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly JsonSerializerOptions _jsonSerializerOptions;

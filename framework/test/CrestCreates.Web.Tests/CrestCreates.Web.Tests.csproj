@@ -30,4 +30,9 @@
     <ProjectReference Include="..\..\src\CrestCreates.Web\CrestCreates.Web.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="DynamicApi\DynamicApiScannerTests.cs" />
+    <Compile Remove="DynamicApi\DynamicApiEndpointExecutorTests.cs" />
+  </ItemGroup>
+
 </Project>

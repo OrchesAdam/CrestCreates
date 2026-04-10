@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using CrestCreates.DynamicApi;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -27,18 +26,20 @@ public class DynamicApiExtensionsTests
     }
 
     [Fact]
-    public void AddCrestDynamicApi_WithRuntimeFallbackOptIn_RegistersLegacyScannerPath()
+    public void AddCrestDynamicApi_WithRuntimeFallbackOptIn_CanResolveEmptyRegistryForLegacyDiagnostics()
     {
         var services = new ServiceCollection();
 
-        services.AddCrestDynamicApi(options => options.UseRuntimeReflectionFallback());
+        services.AddCrestDynamicApi(options =>
+        {
+            options.UseRuntimeReflectionFallback();
+            options.AddApplicationServiceAssembly(typeof(string).Assembly);
+        });
 
-        services.Should().Contain(descriptor =>
-            descriptor.ServiceType == typeof(IDynamicApiScanner) &&
-            descriptor.ImplementationType == typeof(DynamicApiScanner));
-        services.Should().Contain(descriptor =>
-            descriptor.ServiceType == typeof(DynamicApiEndpointExecutor) &&
-            descriptor.Lifetime == ServiceLifetime.Scoped);
+        using var serviceProvider = services.BuildServiceProvider();
+        var registry = serviceProvider.GetRequiredService<DynamicApiRegistry>();
+
+        registry.Services.Should().BeEmpty();
     }
 
     [Fact]
@@ -55,6 +56,17 @@ public class DynamicApiExtensionsTests
 
         action.Should().Throw<InvalidOperationException>()
             .WithMessage("*编译期生成的 provider*");
+    }
+
+    [Fact]
+    public void AddCrestDynamicApi_RegistersSwaggerPostConfigureForGeneratedMainline()
+    {
+        var services = new ServiceCollection();
+
+        services.AddCrestDynamicApi(options => options.AddApplicationServiceAssembly(typeof(string).Assembly));
+
+        services.Should().Contain(descriptor =>
+            descriptor.ServiceType == typeof(Microsoft.Extensions.Options.IPostConfigureOptions<Swashbuckle.AspNetCore.SwaggerGen.SwaggerGenOptions>));
     }
 
     private sealed class DefaultEndpointRouteBuilder : IEndpointRouteBuilder

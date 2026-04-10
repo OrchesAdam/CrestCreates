@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Reflection;
 
 namespace CrestCreates.DynamicApi;
@@ -24,6 +25,7 @@ public sealed class DynamicApiOptions
     }
 
     [Obsolete("Dynamic API runtime reflection fallback is no longer the default execution path. Only use this for temporary diagnostics.")]
+    [EditorBrowsable(EditorBrowsableState.Never)]
     public void UseRuntimeReflectionFallback()
     {
         EnableRuntimeReflectionFallback = true;

@@ -31,10 +31,14 @@ public class DynamicApiAotSourceGeneratorTests
         var endpointSource = result.GetSourceByFileName("GeneratedDynamicApiEndpoints.g.cs");
         endpointSource.Should().NotBeNull();
         endpointSource!.SourceText.Should().Contain("BuildRoute(routePrefix_0, \"{id}\")");
+        endpointSource.SourceText.Should().Contain("await DynamicApiGeneratedRuntime.EnsurePermissionAsync");
         endpointSource.SourceText.Should().Contain("await DynamicApiGeneratedRuntime.ReadBodyAsync<global::TestContracts.CreateTestBookDto>(context, false)");
+        endpointSource.SourceText.Should().Contain("await DynamicApiGeneratedRuntime.ValidateAsync");
         endpointSource.SourceText.Should().Contain("var input = new global::TestContracts.TestBookListRequestDto();");
         endpointSource.SourceText.Should().Contain("input.Keyword = string.IsNullOrWhiteSpace(context.Request.Query[\"Keyword\"].ToString()) ? null : context.Request.Query[\"Keyword\"].ToString()");
         endpointSource.SourceText.Should().Contain("await DynamicApiGeneratedRuntime.ExecuteAsync(context, false, () => service.UpdateAsync(id, input, context.RequestAborted))");
+        endpointSource.SourceText.Should().Contain("return DynamicApiGeneratedRuntime.WrapGetResult(result);");
+        endpointSource.SourceText.Should().Contain("return DynamicApiGeneratedRuntime.WrapResult(result);");
     }
 
     [Fact]
