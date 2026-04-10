@@ -24,14 +24,14 @@ public class UserRepository : EfCoreRepositoryBase<User, Guid>, IUserRepository
 
     public Task<User?> FindByUserNameAsync(string userName, CancellationToken cancellationToken = default)
     {
-        return GetQueryable()
-            .FirstOrDefaultAsync(user => user.UserName == userName, cancellationToken);
+        var queryable = GetQueryable();
+        return queryable.FirstOrDefaultAsync(user => user.UserName == userName, cancellationToken);
     }
 
     public Task<User?> FindByEmailAsync(string email, CancellationToken cancellationToken = default)
     {
-        return GetQueryable()
-            .FirstOrDefaultAsync(user => user.Email == email, cancellationToken);
+        var queryable = GetQueryable();
+        return queryable.FirstOrDefaultAsync(user => user.Email == email, cancellationToken);
     }
 
     public Task<List<User>> GetByOrganizationIdAsync(Guid organizationId, CancellationToken cancellationToken = default)

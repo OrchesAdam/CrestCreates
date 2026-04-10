@@ -9,6 +9,7 @@ public interface IDynamicApiScanner
     DynamicApiRegistry Scan(DynamicApiOptions options);
 }
 
+[Obsolete("Runtime reflection scanning is no longer the Dynamic API default path. Use compile-time generated providers instead.")]
 public sealed class DynamicApiScanner : IDynamicApiScanner
 {
     private readonly DynamicApiRouteConvention _routeConvention;

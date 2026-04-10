@@ -6,6 +6,7 @@ using CrestCreates.AuditLogging.Services;
 using CrestCreates.MultiTenancy.Abstract;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -26,7 +27,7 @@ public class AuditLoggingMiddlewareTests
         context.Request.Method = HttpMethods.Get;
         context.Request.Path = "/api/books";
 
-        await middleware.InvokeAsync(context);
+        await middleware.InvokeAsync(context, task => Task.CompletedTask);
 
         auditService.Logs.Should().BeEmpty();
     }
@@ -54,7 +55,7 @@ public class AuditLoggingMiddlewareTests
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(requestJson));
         context.Request.ContentLength = Encoding.UTF8.GetByteCount(requestJson);
 
-        await middleware.InvokeAsync(context);
+        await middleware.InvokeAsync(context,task => Task.CompletedTask);
 
         auditService.Logs.Should().ContainSingle();
         var log = auditService.Logs.Single();
@@ -80,7 +81,7 @@ public class AuditLoggingMiddlewareTests
         context.Request.Method = HttpMethods.Get;
         context.Request.Path = "/api/books/1";
 
-        var action = () => middleware.InvokeAsync(context);
+        var action = () => middleware.InvokeAsync(context, task => Task.CompletedTask);
 
         await action.Should().ThrowAsync<InvalidOperationException>();
         auditService.Logs.Should().ContainSingle();
@@ -109,7 +110,7 @@ public class AuditLoggingMiddlewareTests
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("{\"title\":\"book\"}"));
         context.Request.ContentLength = 16;
 
-        var action = () => middleware.InvokeAsync(context);
+        var action = () => middleware.InvokeAsync(context, task => Task.CompletedTask);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("persist failed");
@@ -121,11 +122,10 @@ public class AuditLoggingMiddlewareTests
         RequestDelegate next)
     {
         return new AuditLoggingMiddleware(
-            next,
             auditLogService,
             new FakeCurrentTenant("tenant-1"),
-            Microsoft.Extensions.Options.Options.Create(options),
-            new TestLogger<AuditLoggingMiddleware>());
+            new OptionsWrapper<AuditLoggingOptions>(options),
+            new NullLogger<AuditLoggingMiddleware>());
     }
 
     private sealed class RecordingAuditLogService : IAuditLogService

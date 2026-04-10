@@ -37,6 +37,7 @@ namespace CrestCreates.MultiTenancy
 
             // 注册核心服务
             services.TryAddSingleton<ICurrentTenant, CurrentTenant>();
+            services.TryAddSingleton<TenantIdentifierNormalizer>();
 
             return services;
         }

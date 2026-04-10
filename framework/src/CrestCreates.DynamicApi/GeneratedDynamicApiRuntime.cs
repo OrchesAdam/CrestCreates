@@ -55,6 +55,11 @@ public static class DynamicApiGeneratedRegistryStore
         return new DynamicApiRegistry(registries.SelectMany(registry => registry.Services).ToArray());
     }
 
+    public static DynamicApiRegistry BuildRequiredRegistry(DynamicApiOptions options)
+    {
+        return BuildRegistry(options) ?? throw CreateMissingGeneratedProviderException(options);
+    }
+
     public static bool MapGeneratedEndpoints(IEndpointRouteBuilder endpoints, DynamicApiOptions options)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -75,6 +80,18 @@ public static class DynamicApiGeneratedRegistryStore
 
         return mapped;
     }
+
+    public static InvalidOperationException CreateMissingGeneratedProviderException(DynamicApiOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var assemblies = options.ServiceAssemblies.Count == 0
+            ? "未配置 ServiceAssemblies"
+            : string.Join(", ", options.ServiceAssemblies.Select(assembly => assembly.GetName().Name));
+
+        return new InvalidOperationException(
+            $"Dynamic API 未找到编译期生成的 provider，当前主链只支持生成链。ServiceAssemblies: {assemblies}。如需临时诊断，可显式启用 {nameof(DynamicApiOptions.UseRuntimeReflectionFallback)}。");
+    }
 }
 
 public static class DynamicApiGeneratedRuntime
@@ -86,6 +103,49 @@ public static class DynamicApiGeneratedRuntime
         {
             PropertyNameCaseInsensitive = true
         };
+    }
+
+    public static async Task<T?> ReadBodyAsync<T>(HttpContext context, bool optional)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (context.Request.ContentLength == 0)
+        {
+            return optional ? default : Activator.CreateInstance<T>();
+        }
+
+        context.Request.EnableBuffering();
+        if (context.Request.Body.CanSeek)
+        {
+            context.Request.Body.Seek(0, SeekOrigin.Begin);
+        }
+
+        try
+        {
+            if (context.Request.Body.CanSeek && context.Request.Body.Length == 0)
+            {
+                return optional ? default : Activator.CreateInstance<T>();
+            }
+
+            var result = await context.Request.ReadFromJsonAsync<T>(ResolveJsonSerializerOptions(context.RequestServices), context.RequestAborted);
+            if (result is not null)
+            {
+                return result;
+            }
+
+            return optional ? default : Activator.CreateInstance<T>();
+        }
+        catch (JsonException) when (optional)
+        {
+            return default;
+        }
+        finally
+        {
+            if (context.Request.Body.CanSeek)
+            {
+                context.Request.Body.Seek(0, SeekOrigin.Begin);
+            }
+        }
     }
 
     public static async Task EnsurePermissionAsync(

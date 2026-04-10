@@ -30,4 +30,22 @@ public class BookAppService : CrestAppServiceBase<Book,Guid, BookDto, CreateBook
         var book = await _repository.GetByIsbnAsync(isbn, cancellationToken);
         return book == null ? null : _mapper.Map<BookDto>(book);
     }
+
+    protected override void MapToEntity(UpdateBookDto dto, Book entity)
+    {
+        entity.SetTitle(dto.Title);
+        entity.SetAuthor(dto.Author);
+        entity.SetISBN(dto.ISBN);
+        entity.SetParent(dto.CategoryId);
+        entity.SetStatus((LibraryManagement.Domain.Shared.Enums.BookStatus)dto.Status);
+        entity.SetDescription(dto.Description);
+        
+        // 注意：TotalCopies 和 AvailableCopies 是只读属性，需要通过其他方法修改
+        // 这里我们只更新可以直接设置的属性
+        // entity.TotalCopies = dto.TotalCopies; // 只读
+        // entity.AvailableCopies = dto.AvailableCopies; // 只读
+        // entity.Location = dto.Location; // 只读
+        // entity.Publisher = dto.Publisher; // 只读
+        // entity.PublishDate = dto.PublishDate; // 只读
+    }
 }

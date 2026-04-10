@@ -66,7 +66,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
 
         return new GenerationContext(
             compilation.AssemblyName ?? "DynamicApiHost",
-            services.OrderBy(service => service.RoutePrefix, StringComparer.Ordinal).ToImmutableArray());
+            services.OrderBy(service => service.RouteTemplate, StringComparer.Ordinal).ToImmutableArray());
     }
 
     private static IEnumerable<INamedTypeSymbol> EnumerateNamedTypes(IAssemblySymbol assembly)
@@ -144,8 +144,8 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         foreach (var serviceType in serviceInterfaces)
         {
             var serviceName = TrimServiceName(serviceType.Name);
-            var routePrefix = ResolveServiceRoute(serviceType, serviceName, dynamicApiRouteAttribute);
-            var actions = BuildActionModels(serviceType, implementationType, serviceName, routePrefix, dynamicApiIgnoreAttribute, unitOfWorkAttribute).ToImmutableArray();
+            var route = ResolveServiceRoute(serviceType, serviceName, dynamicApiRouteAttribute);
+            var actions = BuildActionModels(serviceType, implementationType, serviceName, dynamicApiIgnoreAttribute, unitOfWorkAttribute).ToImmutableArray();
             if (actions.Length == 0)
             {
                 continue;
@@ -153,7 +153,8 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
 
             yield return new ServiceModel(
                 serviceName,
-                routePrefix,
+                route.Template,
+                route.IsCustom,
                 serviceType.ToDisplayString(FullyQualifiedFormat),
                 implementationType.ToDisplayString(FullyQualifiedFormat),
                 actions);
@@ -164,7 +165,6 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         INamedTypeSymbol serviceType,
         INamedTypeSymbol implementationType,
         string serviceName,
-        string routePrefix,
         INamedTypeSymbol? dynamicApiIgnoreAttribute,
         INamedTypeSymbol? unitOfWorkAttribute)
     {
@@ -202,7 +202,6 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                     $"{serviceType.Name}_{actionName}",
                     relativeRoute,
                     httpMethod,
-                    string.IsNullOrWhiteSpace(relativeRoute) ? routePrefix : $"{routePrefix}/{relativeRoute}",
                     ResolvePermission(serviceName, method.Name),
                     returnModel,
                     parameters,
@@ -333,7 +332,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
     }
 
 
-    private static string ResolveServiceRoute(INamedTypeSymbol serviceType, string serviceName, INamedTypeSymbol? dynamicApiRouteAttribute)
+    private static ServiceRouteModel ResolveServiceRoute(INamedTypeSymbol serviceType, string serviceName, INamedTypeSymbol? dynamicApiRouteAttribute)
     {
         if (dynamicApiRouteAttribute is not null)
         {
@@ -344,11 +343,11 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 routeAttribute.ConstructorArguments[0].Value is string template &&
                 !string.IsNullOrWhiteSpace(template))
             {
-                return template.Trim('/');
+                return new ServiceRouteModel(template.Trim('/'), true);
             }
         }
 
-        return $"api/{ToKebabCase(serviceName)}";
+        return new ServiceRouteModel(ToKebabCase(serviceName), false);
     }
 
     private static string ResolveActionRoute(IMethodSymbol methodSymbol)
@@ -567,12 +566,12 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         builder.AppendLine();
         builder.AppendLine($"internal sealed class {providerTypeName} : IDynamicApiGeneratedProvider");
         builder.AppendLine("{");
-        builder.AppendLine("    private static readonly (Assembly Assembly, DynamicApiServiceDescriptor Descriptor)[] Entries = new[]");
+        builder.AppendLine("    private static readonly (Assembly Assembly, Func<DynamicApiOptions, DynamicApiServiceDescriptor> DescriptorFactory)[] Entries = new (Assembly Assembly, Func<DynamicApiOptions, DynamicApiServiceDescriptor> DescriptorFactory)[]");
         builder.AppendLine("    {");
         for (var index = 0; index < context.Services.Length; index++)
         {
             var service = context.Services[index];
-            builder.AppendLine($"        (typeof({service.ServiceAssemblyTypeName}).Assembly, CreateService{index}()),");
+            builder.AppendLine($"        (typeof({service.ServiceAssemblyTypeName}).Assembly, CreateService{index}),");
         }
         builder.AppendLine("    };");
         builder.AppendLine();
@@ -580,7 +579,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         builder.AppendLine();
         builder.AppendLine("    public DynamicApiRegistry CreateRegistry(DynamicApiOptions options)");
         builder.AppendLine("    {");
-        builder.AppendLine("        var services = Entries.Where(entry => MatchesAssembly(options, entry.Assembly)).Select(entry => entry.Descriptor).ToArray();");
+        builder.AppendLine("        var services = Entries.Where(entry => MatchesAssembly(options, entry.Assembly)).Select(entry => entry.DescriptorFactory(options)).ToArray();");
         builder.AppendLine("        return new DynamicApiRegistry(services);");
         builder.AppendLine("    }");
         builder.AppendLine();
@@ -594,16 +593,27 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         builder.AppendLine("        return options.ServiceAssemblies.Count == 0 || options.ServiceAssemblies.Contains(assembly);");
         builder.AppendLine("    }");
         builder.AppendLine();
+        builder.AppendLine("    private static string ResolveRoutePrefix(DynamicApiOptions options, string routeTemplate, bool hasCustomRoute)");
+        builder.AppendLine("    {");
+        builder.AppendLine("        if (hasCustomRoute)");
+        builder.AppendLine("        {");
+        builder.AppendLine("            return routeTemplate;");
+        builder.AppendLine("        }");
+        builder.AppendLine();
+        builder.AppendLine("        return $\"{options.DefaultRoutePrefix.TrimEnd('/')}/{routeTemplate}\";");
+        builder.AppendLine("    }");
+        builder.AppendLine();
 
         for (var serviceIndex = 0; serviceIndex < context.Services.Length; serviceIndex++)
         {
             var service = context.Services[serviceIndex];
-            builder.AppendLine($"    private static DynamicApiServiceDescriptor CreateService{serviceIndex}()");
+            builder.AppendLine($"    private static DynamicApiServiceDescriptor CreateService{serviceIndex}(DynamicApiOptions options)");
             builder.AppendLine("    {");
+            builder.AppendLine($"        var routePrefix = ResolveRoutePrefix(options, \"{Escape(service.RouteTemplate)}\", {ToBooleanLiteral(service.HasCustomRoute)});");
             builder.AppendLine("        return new DynamicApiServiceDescriptor");
             builder.AppendLine("        {");
             builder.AppendLine($"            ServiceName = \"{Escape(service.ServiceName)}\",");
-            builder.AppendLine($"            RoutePrefix = \"{Escape(service.RoutePrefix)}\",");
+            builder.AppendLine("            RoutePrefix = routePrefix,");
             builder.AppendLine($"            ServiceType = typeof({service.ServiceTypeName}),");
             builder.AppendLine($"            ImplementationType = typeof({service.ServiceAssemblyTypeName}),");
             builder.AppendLine("            Actions = new DynamicApiActionDescriptor[]");
@@ -618,7 +628,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 builder.AppendLine($"                    OperationId = \"{Escape(action.OperationId)}\",");
                 builder.AppendLine($"                    RelativeRoute = \"{Escape(action.RelativeRoute)}\",");
                 builder.AppendLine($"                    HttpMethod = \"{action.HttpMethod}\",");
-                builder.AppendLine($"                    RoutePrefix = \"{Escape(service.RoutePrefix)}\",");
+                builder.AppendLine("                    RoutePrefix = routePrefix,");
                 builder.AppendLine($"                    ReturnDescriptor = new DynamicApiReturnDescriptor {{ DeclaredType = typeof({GetTypeOfTypeName(action.ReturnModel.PayloadTypeName ?? "void")}), PayloadType = {(action.ReturnModel.PayloadTypeName is null ? "null" : $"typeof({GetTypeOfTypeName(action.ReturnModel.PayloadTypeName)})")}, IsVoid = {(action.ReturnModel.IsVoid ? "true" : "false")} }},");
                 builder.AppendLine($"                    Permission = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{Escape(action.PermissionName)}\" }}, RequireAll = false }},");
                 builder.AppendLine("                    Parameters = new DynamicApiParameterDescriptor[]");
@@ -684,6 +694,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         for (var serviceIndex = 0; serviceIndex < context.Services.Length; serviceIndex++)
         {
             var service = context.Services[serviceIndex];
+            builder.AppendLine($"        var routePrefix_{serviceIndex} = ResolveRoutePrefix(options, \"{Escape(service.RouteTemplate)}\", {ToBooleanLiteral(service.HasCustomRoute)});");
             builder.AppendLine($"        if (MatchesAssembly(options, typeof({service.ServiceAssemblyTypeName}).Assembly))");
             builder.AppendLine("        {");
             for (var actionIndex = 0; actionIndex < service.Actions.Length; actionIndex++)
@@ -693,7 +704,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 var permissionName = $"permission_{serviceIndex}_{actionIndex}";
                 builder.AppendLine($"            var {permissionName} = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{Escape(action.PermissionName)}\" }}, RequireAll = false }};");
                 builder.AppendLine($"            var {routeBuilderName} = endpoints.MapMethods(");
-                builder.AppendLine($"                \"{Escape(action.FullRoute)}\",");
+                builder.AppendLine($"                BuildRoute(routePrefix_{serviceIndex}, \"{Escape(action.RelativeRoute)}\"),");
                 builder.AppendLine($"                new[] {{ \"{action.HttpMethod}\" }},");
                 builder.AppendLine($"                async (HttpContext context, [FromServices] {action.ServiceTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
                 builder.AppendLine("                {");
@@ -752,6 +763,23 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         builder.AppendLine("    {");
         builder.AppendLine("        return options.ServiceAssemblies.Count == 0 || options.ServiceAssemblies.Contains(assembly);");
         builder.AppendLine("    }");
+        builder.AppendLine();
+        builder.AppendLine("    private static string ResolveRoutePrefix(DynamicApiOptions options, string routeTemplate, bool hasCustomRoute)");
+        builder.AppendLine("    {");
+        builder.AppendLine("        if (hasCustomRoute)");
+        builder.AppendLine("        {");
+        builder.AppendLine("            return routeTemplate;");
+        builder.AppendLine("        }");
+        builder.AppendLine();
+        builder.AppendLine("        return $\"{options.DefaultRoutePrefix.TrimEnd('/')}/{routeTemplate}\";");
+        builder.AppendLine("    }");
+        builder.AppendLine();
+        builder.AppendLine("    private static string BuildRoute(string routePrefix, string relativeRoute)");
+        builder.AppendLine("    {");
+        builder.AppendLine("        return string.IsNullOrWhiteSpace(relativeRoute)");
+        builder.AppendLine("            ? routePrefix");
+        builder.AppendLine("            : $\"{routePrefix}/{relativeRoute}\";");
+        builder.AppendLine("    }");
         builder.AppendLine("}");
         return builder.ToString();
     }
@@ -787,10 +815,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
     private static string GenerateBodyBinding(ParameterModel parameter)
     {
         var builder = new StringBuilder();
-        builder.AppendLine($"                    {parameter.TypeName}? {parameter.Name}Body = await context.Request.ReadFromJsonAsync<{parameter.TypeName}>(DynamicApiGeneratedRuntime.ResolveJsonSerializerOptions(context.RequestServices), context.RequestAborted);");
-        builder.AppendLine(parameter.IsOptional
-            ? $"                    var {parameter.Name} = {parameter.Name}Body;"
-            : $"                    var {parameter.Name} = {parameter.Name}Body ?? new {parameter.TypeName}();");
+        builder.AppendLine($"                    var {parameter.Name} = await DynamicApiGeneratedRuntime.ReadBodyAsync<{parameter.TypeName}>(context, {ToBooleanLiteral(parameter.IsOptional)});");
         return builder.ToString().TrimEnd();
     }
 
@@ -856,7 +881,8 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
 
     private sealed record ServiceModel(
         string ServiceName,
-        string RoutePrefix,
+        string RouteTemplate,
+        bool HasCustomRoute,
         string ServiceTypeName,
         string ServiceAssemblyTypeName,
         ImmutableArray<ActionModel> Actions);
@@ -867,7 +893,6 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         string OperationId,
         string RelativeRoute,
         string HttpMethod,
-        string FullRoute,
         string PermissionName,
         ReturnModel ReturnModel,
         ImmutableArray<ParameterModel> Parameters,
@@ -889,6 +914,8 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         string TypeName,
         bool IsScalar,
         bool IsOptional);
+
+    private sealed record ServiceRouteModel(string Template, bool IsCustom);
 
     private sealed record ReturnModel(bool IsVoid, string? PayloadTypeName);
 

@@ -21,15 +21,29 @@ public static class DynamicApiExtensions
 
         services.AddSingleton(options);
         services.AddSingleton<DynamicApiRouteConvention>();
-        services.AddSingleton<IDynamicApiScanner, DynamicApiScanner>();
+        if (options.EnableRuntimeReflectionFallback)
+        {
+            services.AddSingleton<IDynamicApiScanner, DynamicApiScanner>();
+            services.AddScoped<DynamicApiEndpointExecutor>();
+        }
+
         services.AddSingleton(sp =>
         {
             var dynamicApiOptions = sp.GetRequiredService<DynamicApiOptions>();
-            return DynamicApiGeneratedRegistryStore.BuildRegistry(dynamicApiOptions)
-                   ?? sp.GetRequiredService<IDynamicApiScanner>().Scan(dynamicApiOptions);
+            var generatedRegistry = DynamicApiGeneratedRegistryStore.BuildRegistry(dynamicApiOptions);
+            if (generatedRegistry is not null)
+            {
+                return generatedRegistry;
+            }
+
+            if (dynamicApiOptions.EnableRuntimeReflectionFallback)
+            {
+                return sp.GetRequiredService<IDynamicApiScanner>().Scan(dynamicApiOptions);
+            }
+
+            throw DynamicApiGeneratedRegistryStore.CreateMissingGeneratedProviderException(dynamicApiOptions);
         });
-        services.AddScoped<DynamicApiEndpointExecutor>();
-        services.TryAddEnumerable(ServiceDescriptor.Transient<IConfigureOptions<SwaggerGenOptions>, DynamicApiSwaggerGenOptionsSetup>());
+        services.TryAddEnumerable(ServiceDescriptor.Transient<IPostConfigureOptions<SwaggerGenOptions>, DynamicApiSwaggerGenOptionsSetup>());
 
         return services;
     }
@@ -44,7 +58,12 @@ public static class DynamicApiExtensions
             return endpoints;
         }
 
-        var registry = endpoints.ServiceProvider.GetRequiredService<DynamicApiRegistry>();
+        if (!options.EnableRuntimeReflectionFallback)
+        {
+            throw DynamicApiGeneratedRegistryStore.CreateMissingGeneratedProviderException(options);
+        }
+
+        var registry = endpoints.ServiceProvider.GetRequiredService<IDynamicApiScanner>().Scan(options);
         foreach (var service in registry.Services)
         {
             foreach (var action in service.Actions)

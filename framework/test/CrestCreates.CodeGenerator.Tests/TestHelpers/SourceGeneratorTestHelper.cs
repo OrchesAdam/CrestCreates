@@ -246,6 +246,10 @@ namespace CrestCreates.CodeGenerator.Tests.TestHelpers
                 }
             }
 
+            TryAddReference(references, "CrestCreates.DynamicApi");
+            TryAddReference(references, "CrestCreates.Aop");
+            TryAddReference(references, "Microsoft.AspNetCore.Routing");
+
             // 创建语法树
             var syntaxTrees = new List<SyntaxTree>();
 
@@ -279,6 +283,19 @@ namespace CrestCreates.CodeGenerator.Tests.TestHelpers
         {
             return filePath.StartsWith("/", StringComparison.Ordinal) ||
                    filePath.Contains("Microsoft.NET");
+        }
+
+        private static void TryAddReference(List<MetadataReference> references, string assemblyName)
+        {
+            try
+            {
+                var assembly = System.Reflection.Assembly.Load(assemblyName);
+                references.Add(MetadataReference.CreateFromFile(assembly.Location));
+            }
+            catch
+            {
+                // 忽略加载失败的程序集
+            }
         }
 
         /// <summary>

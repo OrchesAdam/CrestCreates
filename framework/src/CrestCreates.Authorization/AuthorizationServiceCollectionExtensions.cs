@@ -19,6 +19,7 @@ public static class AuthorizationServiceCollectionExtensions
         services.TryAddScoped<PermissionGrantCacheService>();
         services.TryAddScoped<ICurrentPrincipalAccessor, CurrentPrincipalAccessor>();
         services.TryAddScoped<ICurrentUser, CurrentUser>();
+        services.TryAddScoped<TenantPermissionScopeValidator>();
         services.TryAddScoped<IPermissionChecker, PermissionChecker>();
         services.TryAddScoped<IPermissionGrantStore, PermissionGrantStore>();
         services.TryAddScoped<IPermissionGrantManager, PermissionGrantManager>();

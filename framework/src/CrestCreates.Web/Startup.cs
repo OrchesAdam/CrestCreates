@@ -67,6 +67,7 @@ namespace CrestCreates.Web
             services.AddSwaggerGen(c =>
             {
                 c.SwaggerDoc("v1", new Microsoft.OpenApi.OpenApiInfo { Title = "CrestCreates API", Version = "v1" });
+                c.CustomSchemaIds(CrestCreates.DynamicApi.DynamicApiSwaggerSchemaIdHelper.GetSchemaId);
             });
             services.AddJwtBearerAuthentication(Configuration);
 
@@ -97,6 +98,7 @@ namespace CrestCreates.Web
             services.AddSettingManagement();
             services.AddSettingManagementInfrastructure();
             services.AddTenantManagement();
+            services.AddTenantBootstrapper();
             services.AddTenantManagementCore();
             services.AddSettingManagementEfCore();
             services.AddScoped<IPermissionGrantRepository, PermissionGrantRepository>();

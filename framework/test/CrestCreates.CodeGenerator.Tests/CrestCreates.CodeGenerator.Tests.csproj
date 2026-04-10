@@ -6,6 +6,7 @@
     <OutputType>Library</OutputType>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
+    <NoWarn>$(NoWarn);NU1510</NoWarn>
     <!-- 禁用自动生成程序集信息以避免冲突 -->
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
@@ -37,6 +38,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Moq" />
+    <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <PackageReference Include="FreeSql" />
     <PackageReference Include="SqlSugarCore" />

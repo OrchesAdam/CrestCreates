@@ -69,10 +69,10 @@ public class WebModule : ModuleBase
             defaultTenantConnectionString.SetValue(defaultConnectionString);
         }
 
-        var role = dbContext.Roles.FirstOrDefault(role => role.Name == roleName && role.TenantId == tenantId);
+        var role = dbContext.Roles.FirstOrDefault(role => role.Name == roleName && role.TenantId == tenant.Id.ToString());
         if (role == null)
         {
-            role = new Role(Guid.NewGuid(), roleName, tenantId)
+            role = new Role(Guid.NewGuid(), roleName, tenant.Id.ToString())
             {
                 DisplayName = roleName,
                 IsActive = true,
@@ -82,10 +82,10 @@ public class WebModule : ModuleBase
             dbContext.Roles.Add(role);
         }
 
-        var user = dbContext.Users.FirstOrDefault(user => user.UserName == userName && user.TenantId == tenantId);
+        var user = dbContext.Users.FirstOrDefault(user => user.UserName == userName && user.TenantId == tenant.Id.ToString());
         if (user == null)
         {
-            user = new User(Guid.NewGuid(), userName, email, tenantId)
+            user = new User(Guid.NewGuid(), userName, email, tenant.Id.ToString())
             {
                 PasswordHash = passwordHasher.HashPassword(password),
                 IsActive = true,
@@ -101,7 +101,7 @@ public class WebModule : ModuleBase
         var userRole = dbContext.UserRoles.FirstOrDefault(link => link.UserId == user.Id && link.RoleId == role.Id);
         if (userRole == null)
         {
-            dbContext.UserRoles.Add(new UserRole(Guid.NewGuid(), user.Id, role.Id, tenantId));
+            dbContext.UserRoles.Add(new UserRole(Guid.NewGuid(), user.Id, role.Id, tenant.Id.ToString()));
         }
 
         dbContext.SaveChanges();

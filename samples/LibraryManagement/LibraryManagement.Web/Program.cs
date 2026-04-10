@@ -36,7 +36,10 @@ builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 // Add services to the container
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.CustomSchemaIds(CrestCreates.DynamicApi.DynamicApiSwaggerSchemaIdHelper.GetSchemaId);
+});
 builder.Services.AddJwtBearerAuthentication(builder.Configuration);
 builder.Services.AddDataFilterServices();
 builder.Services.AddCrestAuthorization();
@@ -47,6 +50,7 @@ builder.Services.AddSettingManagement();
 builder.Services.AddSettingManagementInfrastructure();
 builder.Services.AddSettingManagementEfCore();
 builder.Services.AddTenantManagement();
+builder.Services.AddTenantBootstrapper();
 builder.Services.AddTenantManagementCore();
 builder.Services.AddMediatR(configuration =>
 {

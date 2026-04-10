@@ -9,6 +9,7 @@ using CrestCreates.Domain.Authorization;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Infrastructure.Authorization;
+using CrestCreates.MultiTenancy.Abstract;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -64,18 +65,10 @@ public class AuthServiceTests
             _passwordHasher,
             new IdentityClaimsBuilder(),
             _currentUserMock.Object,
+            new Mock<ICurrentTenant>().Object,
             httpContextAccessor,
-            Options.Create(new JwtOptions
-            {
-                SecretKey = "0123456789ABCDEF0123456789ABCDEF",
-                Issuer = "CrestCreates.Tests",
-                Audience = "CrestCreates.Tests"
-            }),
-            Options.Create(new IdentityAuthenticationOptions
-            {
-                MaxAccessFailedCount = 3,
-                LockoutMinutes = 30
-            }),
+            Options.Create(new JwtOptions()),
+            Options.Create(new IdentityAuthenticationOptions()),
             NullLogger<AuthService>.Instance);
     }
 

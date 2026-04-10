@@ -12,6 +12,7 @@ using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Authorization;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
+using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -29,6 +30,7 @@ namespace CrestCreates.Infrastructure.Authorization
         private readonly IPasswordHasher _passwordHasher;
         private readonly IIdentityClaimsBuilder _identityClaimsBuilder;
         private readonly ICurrentUser _currentUser;
+        private readonly ICurrentTenant _currentTenant;
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IdentityAuthenticationOptions _identityOptions;
         private readonly JwtOptions _jwtOptions;
@@ -43,6 +45,7 @@ namespace CrestCreates.Infrastructure.Authorization
             IPasswordHasher passwordHasher,
             IIdentityClaimsBuilder identityClaimsBuilder,
             ICurrentUser currentUser,
+            ICurrentTenant currentTenant,
             IHttpContextAccessor httpContextAccessor,
             IOptions<JwtOptions> jwtOptions,
             IOptions<IdentityAuthenticationOptions> identityOptions,
@@ -56,6 +59,7 @@ namespace CrestCreates.Infrastructure.Authorization
             _passwordHasher = passwordHasher;
             _identityClaimsBuilder = identityClaimsBuilder;
             _currentUser = currentUser;
+            _currentTenant = currentTenant;
             _httpContextAccessor = httpContextAccessor;
             _jwtOptions = jwtOptions.Value;
             _identityOptions = identityOptions.Value;
@@ -81,8 +85,8 @@ namespace CrestCreates.Infrastructure.Authorization
                 throw new UnauthorizedAccessException("用户名或密码错误");
             }
 
-            if (!string.IsNullOrWhiteSpace(normalizedTenantId) &&
-                !string.Equals(user.TenantId, normalizedTenantId, StringComparison.Ordinal))
+            if (!string.IsNullOrWhiteSpace(_currentTenant.Id) &&
+                !string.Equals(user.TenantId, _currentTenant.Id, StringComparison.Ordinal))
             {
                 await WriteSecurityLogAsync(
                     user.Id,

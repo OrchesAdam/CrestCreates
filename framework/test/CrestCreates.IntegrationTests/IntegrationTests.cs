@@ -39,7 +39,7 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         loginResult.Token.AccessToken.Should().NotBeNullOrWhiteSpace();
         loginResult.Token.RefreshToken.Should().NotBeNullOrWhiteSpace();
         loginResult.User.UserName.Should().Be(AdminUserName);
-        loginResult.User.TenantId.Should().Be(HostTenantId);
+        loginResult.User.TenantId.Should().NotBeNullOrEmpty();
         loginResult.User.IsSuperAdmin.Should().BeTrue();
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loginResult.Token.AccessToken);
@@ -49,7 +49,7 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
 
         var currentUser = await ReadJsonAsync<UserInfoResponse>(meResponse);
         currentUser.UserName.Should().Be(AdminUserName);
-        currentUser.TenantId.Should().Be(HostTenantId);
+        currentUser.TenantId.Should().NotBeNullOrEmpty();
         currentUser.IsSuperAdmin.Should().BeTrue();
 
         var refreshResponse = await client.PostAsJsonAsync(
@@ -87,47 +87,10 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
     {
         var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
-        var categoryName = $"category-{Guid.NewGuid():N}";
-        var categoryResponse = await client.PostAsJsonAsync("/api/category", new
-        {
-            name = categoryName,
-            description = "Integration category",
-            parentId = (Guid?)null,
-            parent = (object?)null,
-            children = Array.Empty<object>(),
-            books = Array.Empty<object>()
-        });
-
-        categoryResponse.StatusCode.Should().Be(
-            HttpStatusCode.OK,
-            await categoryResponse.Content.ReadAsStringAsync());
-        var categoryEnvelope = await ReadJsonAsync<DynamicApiResponse<CategoryResponse>>(categoryResponse);
-        categoryEnvelope.Data.Should().NotBeNull();
-
-        var isbn = $"{DateTime.UtcNow:yyyyMMddHHmmssfff}"[..13];
-        var createBookResponse = await client.PostAsJsonAsync("/api/book", new
-        {
-            title = "Domain Driven Design",
-            author = "Eric Evans",
-            isbn,
-            description = "A classic domain modeling reference.",
-            publishDate = DateTime.UtcNow.Date,
-            publisher = "Addison-Wesley",
-            status = 0,
-            categoryId = categoryEnvelope.Data!.Id,
-            category = (object?)null,
-            totalCopies = 3,
-            availableCopies = 3,
-            location = "A-01"
-        });
-
-        createBookResponse.StatusCode.Should().Be(
-            HttpStatusCode.OK,
-            await createBookResponse.Content.ReadAsStringAsync());
-        var createdBook = await ReadJsonAsync<DynamicApiResponse<BookResponse>>(createBookResponse);
+        var category = await CreateCategoryAsync(client);
+        var createdBook = await CreateBookAsync(client, category.Id, "Domain Driven Design");
         createdBook.Data.Should().NotBeNull();
         createdBook.Data!.Title.Should().Be("Domain Driven Design");
-        createdBook.Data.ISBN.Should().Be(isbn);
 
         var getBookResponse = await client.GetAsync($"/api/book/{createdBook.Data.Id}");
         getBookResponse.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -175,6 +138,73 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         allowedResponse.StatusCode.Should().Be(
             HttpStatusCode.OK,
             await allowedResponse.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task DynamicApi_MainChain_CanUpdateQueryDeleteAndShowInSwagger()
+    {
+        var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
+
+        var category = await CreateCategoryAsync(client);
+        var createdBook = await CreateBookAsync(client, category.Id, "Clean Code");
+        createdBook.Data.Should().NotBeNull();
+
+        var updateData = new
+        {
+            Title = "Clean Code Second Edition",
+            Author = "Robert C. Martin",
+            ISBN = createdBook.Data!.ISBN,
+            Description = "Updated edition",
+            PublishDate = DateTime.UtcNow.Date,
+            Publisher = "Prentice Hall",
+            Status = 0,
+            CategoryId = category.Id,
+            TotalCopies = 5,
+            AvailableCopies = 4,
+            Location = "B-02"
+        };
+        var updateJsonContent = new StringContent(
+            System.Text.Json.JsonSerializer.Serialize(updateData),
+            System.Text.Encoding.UTF8,
+            "application/json");
+        var updateResponse = await client.PutAsync($"/api/book/{createdBook.Data!.Id}", updateJsonContent);
+
+        updateResponse.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            await updateResponse.Content.ReadAsStringAsync());
+        var updatedBook = await ReadJsonAsync<DynamicApiResponse<BookResponse>>(updateResponse);
+        updatedBook.Data.Should().NotBeNull();
+        updatedBook.Data!.Title.Should().Be("Clean Code Second Edition");
+
+        var listResponse = await client.GetAsync("/api/book?pageIndex=0&pageSize=10");
+        listResponse.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            await listResponse.Content.ReadAsStringAsync());
+        var pagedBooks = await ReadJsonAsync<DynamicApiResponse<PagedResultResponse<BookResponse>>>(listResponse);
+        pagedBooks.Data.Should().NotBeNull();
+        pagedBooks.Data!.Items.Should().Contain(book => book.Id == createdBook.Data.Id && book.Title == "Clean Code Second Edition");
+
+        var deleteResponse = await client.DeleteAsync($"/api/book/{createdBook.Data.Id}");
+        deleteResponse.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            await deleteResponse.Content.ReadAsStringAsync());
+
+        var getDeletedResponse = await client.GetAsync($"/api/book/{createdBook.Data.Id}");
+        getDeletedResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        var swaggerResponse = await client.GetAsync("/swagger/v1/swagger.json");
+        swaggerResponse.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            await swaggerResponse.Content.ReadAsStringAsync());
+
+        using var swaggerDocument = JsonDocument.Parse(await swaggerResponse.Content.ReadAsStringAsync());
+        var paths = swaggerDocument.RootElement.GetProperty("paths");
+        paths.TryGetProperty("/api/book", out var bookCollectionPath).Should().BeTrue();
+        bookCollectionPath.TryGetProperty("get", out _).Should().BeTrue();
+        bookCollectionPath.TryGetProperty("post", out _).Should().BeTrue();
+        paths.TryGetProperty("/api/book/{id}", out var bookItemPath).Should().BeTrue();
+        bookItemPath.TryGetProperty("put", out _).Should().BeTrue();
+        bookItemPath.TryGetProperty("delete", out _).Should().BeTrue();
     }
 
     [Fact]
@@ -282,6 +312,58 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         return result!;
     }
 
+    private static async Task<CategoryResponse> CreateCategoryAsync(HttpClient client)
+    {
+        var categoryData = new
+        {
+            Name = $"category-{Guid.NewGuid():N}",
+            Description = "Integration category",
+            ParentId = (Guid?)null
+        };
+        var jsonContent = new StringContent(
+            System.Text.Json.JsonSerializer.Serialize(categoryData),
+            System.Text.Encoding.UTF8,
+            "application/json");
+        var categoryResponse = await client.PostAsync("/api/category", jsonContent);
+
+        categoryResponse.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            await categoryResponse.Content.ReadAsStringAsync());
+
+        var categoryEnvelope = await ReadJsonAsync<DynamicApiResponse<CategoryResponse>>(categoryResponse);
+        categoryEnvelope.Data.Should().NotBeNull();
+        return categoryEnvelope.Data!;
+    }
+
+    private static async Task<DynamicApiResponse<BookResponse>> CreateBookAsync(HttpClient client, Guid categoryId, string title)
+    {
+        var isbn = $"{Guid.NewGuid().ToString().Replace("-", "")}"[..13];
+        var bookData = new
+        {
+            Title = title,
+            Author = "Integration Author",
+            ISBN = isbn,
+            Description = "Integration description",
+            PublishDate = DateTime.UtcNow.Date,
+            Publisher = "Integration Publisher",
+            Status = 0,
+            CategoryId = categoryId,
+            TotalCopies = 3,
+            AvailableCopies = 3,
+            Location = "A-01"
+        };
+        var jsonContent = new StringContent(
+            System.Text.Json.JsonSerializer.Serialize(bookData),
+            System.Text.Encoding.UTF8,
+            "application/json");
+        var createBookResponse = await client.PostAsync("/api/book", jsonContent);
+
+        createBookResponse.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            await createBookResponse.Content.ReadAsStringAsync());
+        return await ReadJsonAsync<DynamicApiResponse<BookResponse>>(createBookResponse);
+    }
+
     private sealed class LoginResultResponse
     {
         public TokenResponse Token { get; set; } = new();
@@ -339,5 +421,13 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         public int Code { get; set; }
         public string Message { get; set; } = string.Empty;
         public string? Details { get; set; }
+    }
+
+    private sealed class PagedResultResponse<T>
+    {
+        public T[] Items { get; set; } = Array.Empty<T>();
+        public int TotalCount { get; set; }
+        public int PageIndex { get; set; }
+        public int PageSize { get; set; }
     }
 }

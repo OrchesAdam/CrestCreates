@@ -23,6 +23,24 @@ public class LibraryManagementAutoMapperProfile : Profile
                 dto.PublishDate,
                 dto.Publisher,
                 dto.Location));
+        
+        // UpdateBookDto to Book mapping
+        CreateMap<LibraryManagement.Application.Contracts.DTOs.UpdateBookDto, LibraryManagement.Domain.Entities.Book>()
+            .ForMember(dest => dest.Title, opt => opt.Ignore())
+            .ForMember(dest => dest.Author, opt => opt.Ignore())
+            .ForMember(dest => dest.ISBN, opt => opt.Ignore())
+            .ForMember(dest => dest.Description, opt => opt.Ignore())
+            .ForMember(dest => dest.Status, opt => opt.Ignore())
+            .ForMember(dest => dest.CategoryId, opt => opt.Ignore())
+            .AfterMap((src, dest) => {
+                dest.SetTitle(src.Title);
+                dest.SetAuthor(src.Author);
+                dest.SetISBN(src.ISBN);
+                dest.SetParent(src.CategoryId);
+                dest.SetStatus((LibraryManagement.Domain.Shared.Enums.BookStatus)src.Status);
+                dest.SetDescription(src.Description);
+            });
+
 
         // Category mappings
         CreateMap<Category, CategoryDto>();

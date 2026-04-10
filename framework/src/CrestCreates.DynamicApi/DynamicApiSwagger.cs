@@ -6,11 +6,37 @@ using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace CrestCreates.DynamicApi;
 
-public sealed class DynamicApiSwaggerGenOptionsSetup : IConfigureOptions<SwaggerGenOptions>
+public sealed class DynamicApiSwaggerGenOptionsSetup : IPostConfigureOptions<SwaggerGenOptions>
 {
-    public void Configure(SwaggerGenOptions options)
+    public void PostConfigure(string? name, SwaggerGenOptions options)
     {
+        options.CustomSchemaIds(DynamicApiSwaggerSchemaIdHelper.GetSchemaId);
         options.DocumentFilter<DynamicApiSwaggerDocumentFilter>();
+    }
+}
+
+public static class DynamicApiSwaggerSchemaIdHelper
+{
+    public static string GetSchemaId(Type type)
+    {
+        if (!type.IsGenericType)
+        {
+            return Normalize(type.FullName ?? type.Name);
+        }
+
+        var genericTypeName = type.GetGenericTypeDefinition().FullName ?? type.Name;
+        var genericTypeArguments = string.Join(
+            "_",
+            type.GetGenericArguments().Select(GetSchemaId));
+
+        return Normalize($"{genericTypeName}_{genericTypeArguments}");
+    }
+
+    private static string Normalize(string value)
+    {
+        return value
+            .Replace('.', '_')
+            .Replace('+', '_');
     }
 }
 
@@ -41,6 +67,7 @@ public sealed class DynamicApiSwaggerDocumentFilter : IDocumentFilter
                     pathItem = existingOpenApiPathItem;
                 }
 
+                pathItem.Operations ??= new Dictionary<HttpMethod, OpenApiOperation>();
                 pathItem.Operations[ToHttpMethod(action.HttpMethod)] = CreateOperation(action, swaggerDoc, context);
             }
         }
@@ -52,7 +79,7 @@ public sealed class DynamicApiSwaggerDocumentFilter : IDocumentFilter
         DocumentFilterContext context)
     {
         var serviceTagName = string.IsNullOrWhiteSpace(action.DeclaringTypeName)
-            ? action.ServiceMethod?.DeclaringType?.Name ?? "DynamicApi"
+            ? "DynamicApi"
             : action.DeclaringTypeName;
         swaggerDoc.Tags ??= new HashSet<OpenApiTag>();
         if (!swaggerDoc.Tags.Any(tag => string.Equals(tag.Name, serviceTagName, StringComparison.Ordinal)))
@@ -122,8 +149,9 @@ public sealed class DynamicApiSwaggerDocumentFilter : IDocumentFilter
         operation.Responses["403"] = new OpenApiResponse { Description = "Forbidden" };
         operation.Responses["404"] = new OpenApiResponse { Description = "Not Found" };
 
+        var permissions = action.Permission?.Permissions ?? Array.Empty<string>();
         operation.Extensions["x-permissions"] = new JsonNodeExtension(
-            new JsonArray(action.Permission.Permissions
+            new JsonArray(permissions
                 .Select(permission => (JsonNode?)JsonValue.Create(permission))
                 .ToArray()));
 
