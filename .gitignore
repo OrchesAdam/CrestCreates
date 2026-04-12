@@ -409,3 +409,5 @@ FodyWeavers.xsd
 
 .trae/
 
+# Recycle Bin
+99_RecycleBin/

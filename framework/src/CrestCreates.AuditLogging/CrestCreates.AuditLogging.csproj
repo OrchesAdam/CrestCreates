@@ -10,7 +10,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" />
     <PackageReference Include="Rougamo.Extensions.DependencyInjection.Microsoft" />
   </ItemGroup>
 

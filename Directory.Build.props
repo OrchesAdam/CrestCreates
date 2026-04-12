@@ -11,8 +11,4 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   
-  <!-- 全局包引用（不再指定版本，版本在 Directory.Packages.props 中管理） -->
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-  </ItemGroup>
 </Project>
