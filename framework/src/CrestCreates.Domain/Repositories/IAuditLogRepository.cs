@@ -25,4 +25,12 @@ public interface IAuditLogRepository
         int pageIndex,
         int pageSize,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 删除指定时间之前的审计日志（多租户边界：宿主可删全局，租户只能删自己）
+    /// </summary>
+    /// <param name="beforeTime">截止时间</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>删除的日志数量</returns>
+    Task<int> DeleteOlderThanAsync(DateTime beforeTime, CancellationToken cancellationToken = default);
 }

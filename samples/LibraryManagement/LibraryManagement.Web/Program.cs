@@ -51,6 +51,7 @@ builder.Services.AddCrestIdentityAuthentication(builder.Configuration);
 builder.Services.AddIdentityManagement();
 builder.Services.AddPermissionManagement();
 builder.Services.AddSettingManagement();
+builder.Services.AddSettingDefinitionProvider<CrestCreates.Domain.Settings.AuditLoggingSettingDefinitionProvider>();
 builder.Services.AddSettingManagementInfrastructure();
 builder.Services.AddSettingManagementEfCore();
 builder.Services.AddFeatureManagement();
@@ -77,6 +78,7 @@ builder.Services.AddCrestAspNetCoreDynamicApi(options =>
     options.AddApplicationServiceAssembly<SettingAppService>();
     options.AddApplicationServiceAssembly<FeatureAppService>();
     options.AddApplicationServiceAssembly<AuditLogAppService>();
+    options.AddApplicationServiceAssembly<AuditLogCleanupAppService>();
 });
 
 // Register all modules using the module discovery system

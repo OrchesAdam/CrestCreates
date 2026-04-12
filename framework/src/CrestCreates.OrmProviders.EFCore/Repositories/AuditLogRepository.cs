@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.AuditLog;
@@ -106,5 +107,45 @@ public class AuditLogRepository : EfCoreRepositoryBase<AuditLog, Guid>, IAuditLo
             .ToListAsync(cancellationToken);
 
         return new PagedResult<AuditLog>(items, (int)totalCount, pageIndex, pageSize);
+    }
+
+    public async Task<int> DeleteOlderThanAsync(DateTime beforeTime, CancellationToken cancellationToken = default)
+    {
+        // 多租户边界：宿主可删全局，租户只能删自己
+        // ICurrentTenant.Id 为 null 或 "host" 表示宿主上下文
+        var tenantId = CurrentTenant?.Id;
+        var isHostContext = string.IsNullOrEmpty(tenantId) || tenantId == "host";
+
+        Expression<Func<AuditLog, bool>> deletePredicate;
+
+        if (isHostContext)
+        {
+            // 宿主上下文：只按时间删除，允许跨租户
+            deletePredicate = a => a.ExecutionTime < beforeTime;
+        }
+        else
+        {
+            // 租户上下文：必须同时满足时间和租户条件
+            var parameter = Expression.Parameter(typeof(AuditLog), "a");
+            var executionTimeProperty = Expression.Property(parameter, nameof(AuditLog.ExecutionTime));
+            var tenantIdProperty = Expression.Property(parameter, nameof(AuditLog.TenantId));
+
+            var timeCondition = Expression.LessThan(executionTimeProperty, Expression.Constant(beforeTime));
+            var tenantCondition = Expression.Equal(tenantIdProperty, Expression.Constant(tenantId));
+
+            var combinedCondition = Expression.AndAlso(timeCondition, tenantCondition);
+            deletePredicate = Expression.Lambda<Func<AuditLog, bool>>(combinedCondition, parameter);
+        }
+
+        // Use EF Core ExecuteDeleteAsync for efficient database-side bulk deletion
+        var deleteQuery = GetQueryable().Where(deletePredicate);
+        var count = await deleteQuery.CountAsync(cancellationToken);
+
+        if (count > 0)
+        {
+            await deleteQuery.ExecuteDeleteAsync(cancellationToken);
+        }
+
+        return count;
     }
 }

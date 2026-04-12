@@ -9,11 +9,13 @@ using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.AuditLogging.Options;
+using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Authorization;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.OrmProviders.EFCore.DbContexts;
 using CrestCreates.OrmProviders.EFCore.Repositories;
 using LibraryManagement.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
@@ -33,8 +35,15 @@ public sealed class LibraryManagementWebApplicationFactory : WebApplicationFacto
     private readonly string _databasePath = Path.Combine(
         Path.GetTempPath(),
         $"librarymanagement-integration-{Guid.NewGuid():N}.db");
+    private readonly SqliteConnection _sharedConnection;
 
     public string ConnectionString => $"Data Source={_databasePath}";
+
+    public LibraryManagementWebApplicationFactory()
+    {
+        _sharedConnection = new SqliteConnection(ConnectionString);
+        _sharedConnection.Open();
+    }
 
     public async Task EnsureSeedCompleteAsync()
     {
@@ -97,11 +106,8 @@ public sealed class LibraryManagementWebApplicationFactory : WebApplicationFacto
         }
 
         // Use raw SQL to insert audit logs directly - bypasses EF Core tracking issues
-        await using var connection = new SqliteConnection(ConnectionString);
-        await connection.OpenAsync();
-
         var now = DateTime.UtcNow;
-        await using var insertCmd = connection.CreateCommand();
+        using var insertCmd = _sharedConnection.CreateCommand();
         insertCmd.CommandText = @"
             INSERT INTO AuditLogs (Id, Duration, UserId, UserName, TenantId, ClientIpAddress, HttpMethod, Url, ServiceName, MethodName, Parameters, ReturnValue, ExceptionMessage, ExceptionStackTrace, Status, ExecutionTime, CreationTime, TraceId, ExtraProperties)
             VALUES
@@ -145,20 +151,40 @@ public sealed class LibraryManagementWebApplicationFactory : WebApplicationFacto
             services.RemoveAll<DbContextOptions<LibraryDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<LibraryDbContext>>();
             services.RemoveAll<LibraryDbContext>();
+            services.RemoveAll<DbContextOptions<CrestCreatesDbContext>>();
+            services.RemoveAll<IDbContextOptionsConfiguration<CrestCreatesDbContext>>();
+            services.RemoveAll<CrestCreatesDbContext>();
+            services.RemoveAll<CrestCreatesDbContextFactory>();
+            services.RemoveAll<DbContext>();
             services.RemoveAll<AuditLoggingMiddleware>();
             services.RemoveAll<IAuditLogService>();
 
             services.AddDbContext<LibraryDbContext>(options =>
             {
-                options.UseSqlite(ConnectionString);
+                options.UseSqlite(_sharedConnection);
             });
+
+            services.AddScoped<DbContext>(sp => sp.GetRequiredService<LibraryDbContext>());
+
+            services.RemoveAll<IEntityFrameworkCoreDbContext>();
+            services.RemoveAll<IDataBaseContext>();
+            services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
+                new EfCoreDbContextAdapter(sp.GetRequiredService<LibraryDbContext>()));
+            services.AddScoped<IDataBaseContext>(sp =>
+                sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
+
+            services.RemoveAll<IAuditLogRepository>();
+            services.AddScoped<IAuditLogRepository>(sp =>
+                new AuditLogRepository(
+                    sp.GetRequiredService<IEntityFrameworkCoreDbContext>(),
+                    sp.GetRequiredService<ICurrentTenant>()));
 
             services.AddScoped<AuditLoggingMiddleware>();
             services.AddScoped<IAuditLogRedactor, AuditLogRedactor>();
             services.AddScoped<IAuditLogWriter, AuditLogWriter>();
             services.AddScoped<IAuditLogService, AuditLogService>();
-            services.AddScoped<IAuditLogRepository, AuditLogRepository>();
             services.AddScoped<IAuditLogAppService, AuditLogAppService>();
+            services.AddScoped<IAuditLogCleanupAppService, AuditLogCleanupAppService>();
         });
     }
 
@@ -170,6 +196,8 @@ public sealed class LibraryManagementWebApplicationFactory : WebApplicationFacto
         {
             return;
         }
+
+        _sharedConnection.Dispose();
 
         if (File.Exists(_databasePath))
         {

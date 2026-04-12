@@ -1,13 +1,20 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
+using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Application.Contracts.DTOs.AuditLog;
+using AuditLogEntity = CrestCreates.Domain.AuditLog.AuditLog;
 using FluentAssertions;
+using CrestCreates.MultiTenancy.Abstract;
+using LibraryManagement.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace CrestCreates.IntegrationTests;
@@ -248,6 +255,12 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         var client = CreateTenantClient(tenantId);
         var loginResult = await LoginAsync(client, userName, password, tenantId);
         client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginResult.Token.AccessToken);
+
+        if (tenantId == HostTenantId)
+        {
+            client.DefaultRequestHeaders.Remove("X-Tenant-Id");
+        }
+
         return (client, loginResult);
     }
 
@@ -314,5 +327,319 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         public string? MethodName { get; set; }
         public int Status { get; set; }
         public string? ClientIpAddress { get; set; }
+    }
+
+    private sealed class CleanupAuditLogsRequest
+    {
+        public int? RetentionDays { get; set; }
+        public DateTime? BeforeTime { get; set; }
+    }
+
+    private sealed class CleanupAuditLogsResult
+    {
+        public int DeletedCount { get; set; }
+    }
+
+    [Fact]
+    public async Task AuditLog_Cleanup_ShouldDeleteLogs_OlderThanBeforeTime()
+    {
+        await _factory.EnsureSeedCompleteAsync();
+
+        // Given - host context
+        var marker = $"cleanup-beforetime-{Guid.NewGuid():N}";
+        var beforeTime = DateTime.UtcNow.AddMinutes(-2);
+
+        await SeedAuditLogAsync("host", 0, beforeTime.AddMinutes(-10), $"/seed/{marker}/old-host");
+        await SeedAuditLogAsync("tenant-a", 0, beforeTime.AddMinutes(-8), $"/seed/{marker}/old-tenant");
+        await SeedAuditLogAsync("host", 0, beforeTime.AddMinutes(1), $"/seed/{marker}/recent-host");
+
+        var targetCountBefore = await CountAuditLogsAsync(query =>
+            query.Where(a => a.Url != null && a.Url.Contains(marker) && a.ExecutionTime < beforeTime));
+        targetCountBefore.Should().Be(2, "the host cleanup test should seed two target rows in the deletion window");
+
+        var countBefore = await CountAuditLogsAsync(query => query.Where(a => a.ExecutionTime < beforeTime));
+        countBefore.Should().BeGreaterThan(0, "there should be deletable audit logs before cleanup");
+
+        // When
+        var cleanupResult = await ExecuteCleanupAsync(
+            tenantId: null,
+            new CleanupAuditLogsRequestDto { BeforeTime = beforeTime });
+
+        var targetCountAfter = await CountAuditLogsAsync(query =>
+            query.Where(a => a.Url != null && a.Url.Contains(marker) && a.ExecutionTime < beforeTime));
+        var countAfter = await CountAuditLogsAsync(query => query.Where(a => a.ExecutionTime < beforeTime));
+        targetCountAfter.Should().Be(0, "cleanup should delete the seeded target rows from the shared database");
+        countAfter.Should().Be(0, "cleanup should remove every log older than the specified cutoff");
+        cleanupResult.DeletedCount.Should().Be(countBefore,
+            "deleted count should match the number of rows that satisfied the cleanup predicate before deletion");
+        (await CountAuditLogsAsync(query => query.Where(a => a.Url != null && a.Url.Contains($"{marker}/recent-host"))))
+            .Should().Be(1, "logs newer than the cutoff should remain");
+    }
+
+    [Fact]
+    public async Task AuditLog_Cleanup_ShouldDeleteLogs_ByRetentionDays()
+    {
+        await _factory.EnsureSeedCompleteAsync();
+
+        // Given - host context, get count before cleanup
+        var marker = $"cleanup-retention-{Guid.NewGuid():N}";
+        await SeedAuditLogAsync("host", 0, DateTime.UtcNow.AddMinutes(-5), $"/seed/{marker}/old-host");
+        await SeedAuditLogAsync("host", 0, DateTime.UtcNow.AddMinutes(5), $"/seed/{marker}/future-host");
+
+        var oldCountBefore = await CountAuditLogsAsync(query =>
+            query.Where(a => a.Url != null && a.Url.Contains(marker) && a.ExecutionTime < DateTime.UtcNow));
+        oldCountBefore.Should().Be(1, "the seeded old host log should exist before cleanup");
+
+        // When - cleanup with RetentionDays=0 (deletes everything older than now, effectively all old logs)
+        var cleanupResult = await ExecuteCleanupAsync(
+            tenantId: null,
+            new CleanupAuditLogsRequestDto { RetentionDays = 0 });
+        cleanupResult.DeletedCount.Should().BeGreaterThan(0, "cleanup should delete at least the seeded old log");
+
+        (await CountAuditLogsAsync(query =>
+            query.Where(a => a.Url != null && a.Url.Contains($"{marker}/old-host"))))
+            .Should().Be(0, "retention cleanup should remove logs older than now");
+        (await CountAuditLogsAsync(query =>
+            query.Where(a => a.Url != null && a.Url.Contains($"{marker}/future-host"))))
+            .Should().Be(1, "logs newer than now should not be removed");
+    }
+
+    [Fact]
+    public async Task AuditLog_Cleanup_ShouldReturnDeletedCount()
+    {
+        await _factory.EnsureSeedCompleteAsync();
+
+        // Given - host context
+        var marker = $"cleanup-deleted-count-{Guid.NewGuid():N}";
+        var beforeTime = DateTime.UtcNow.AddMinutes(-2);
+
+        await SeedAuditLogAsync("host", 0, beforeTime.AddMinutes(-10), $"/seed/{marker}/old-host");
+        await SeedAuditLogAsync("tenant-a", 0, beforeTime.AddMinutes(-9), $"/seed/{marker}/old-tenant");
+        await SeedAuditLogAsync("host", 0, beforeTime.AddMinutes(1), $"/seed/{marker}/recent-host");
+
+        var countBefore = await CountAuditLogsAsync(query => query.Where(a => a.ExecutionTime < beforeTime));
+        countBefore.Should().BeGreaterThan(0);
+
+        // When - cleanup with very old beforeTime
+        var cleanupResult = await ExecuteCleanupAsync(
+            tenantId: null,
+            new CleanupAuditLogsRequestDto { BeforeTime = beforeTime });
+
+        var countAfter = await CountAuditLogsAsync(query => query.Where(a => a.ExecutionTime < beforeTime));
+        var actualDeleted = countBefore - countAfter;
+
+        actualDeleted.Should().Be(cleanupResult.DeletedCount,
+            "returned DeletedCount should match actual records removed");
+    }
+
+    [Fact]
+    public async Task AuditLog_Cleanup_TenantContext_ShouldNotDeleteOtherTenantLogs()
+    {
+        await _factory.EnsureSeedCompleteAsync();
+        var marker = $"cleanup-tenant-boundary-{Guid.NewGuid():N}";
+        var beforeTime = DateTime.UtcNow.AddMinutes(-2);
+        await SeedAuditLogAsync("host", 0, beforeTime.AddMinutes(-10), $"/seed/{marker}/host-old");
+        await SeedAuditLogAsync("tenant-a", 0, beforeTime.AddMinutes(-9), $"/seed/{marker}/tenant-old");
+
+        var hostCountBefore = await CountAuditLogsAsync(query =>
+            query.Where(a => a.Url != null && a.Url.Contains($"{marker}/host-old")));
+        hostCountBefore.Should().Be(1);
+        var tenantCountBefore = await CountAuditLogsAsync(query =>
+            query.Where(a => a.Url != null && a.Url.Contains($"{marker}/tenant-old")));
+        tenantCountBefore.Should().Be(1);
+        var targetCountBefore = hostCountBefore + tenantCountBefore;
+        targetCountBefore.Should().Be(2);
+
+        // When
+        var cleanupResult = await ExecuteCleanupAsync(
+            tenantId: "tenant-a",
+            new CleanupAuditLogsRequestDto { BeforeTime = beforeTime });
+
+        var tenantCountAfter = await CountAuditLogsAsync(query =>
+            query.Where(a => a.Url != null && a.Url.Contains($"{marker}/tenant-old")));
+        tenantCountAfter.Should().Be(0, "tenant-a cleanup should delete tenant-a target rows from the shared database");
+        tenantCountAfter.Should().BeLessThan(tenantCountBefore, "tenant-a old logs should be deleted");
+
+        var hostCountAfter = await CountAuditLogsAsync(query =>
+            query.Where(a => a.Url != null && a.Url.Contains($"{marker}/host-old")));
+        hostCountAfter.Should().Be(hostCountBefore, "host logs should NOT be affected by tenant-a cleanup");
+        cleanupResult.DeletedCount.Should().BeGreaterThanOrEqualTo(tenantCountBefore);
+    }
+
+    [Fact]
+    public async Task AuditLog_Cleanup_HostContext_ShouldBeAbleToCleanupAcrossTenants()
+    {
+        await _factory.EnsureSeedCompleteAsync();
+        var marker = $"cleanup-host-boundary-{Guid.NewGuid():N}";
+        var beforeTime = DateTime.UtcNow.AddMinutes(-2);
+        await SeedAuditLogAsync("host", 0, beforeTime.AddMinutes(-10), $"/seed/{marker}/host-old");
+        await SeedAuditLogAsync("tenant-a", 0, beforeTime.AddMinutes(-9), $"/seed/{marker}/tenant-old");
+
+        // Given - host context
+        var hostCountBefore = await CountAuditLogsAsync(query =>
+            query.Where(a => a.Url != null && a.Url.Contains($"{marker}/host-old")));
+        var tenantCountBefore = await CountAuditLogsAsync(query =>
+            query.Where(a => a.Url != null && a.Url.Contains($"{marker}/tenant-old")));
+
+        var totalCountBefore = hostCountBefore + tenantCountBefore;
+        totalCountBefore.Should().Be(2);
+
+        // When
+        var cleanupResult = await ExecuteCleanupAsync(
+            tenantId: null,
+            new CleanupAuditLogsRequestDto { BeforeTime = beforeTime });
+
+        var hostCountAfter = await CountAuditLogsAsync(query =>
+            query.Where(a => a.Url != null && a.Url.Contains($"{marker}/host-old")));
+        var tenantCountAfter = await CountAuditLogsAsync(query =>
+            query.Where(a => a.Url != null && a.Url.Contains($"{marker}/tenant-old")));
+        var totalCountAfter = hostCountAfter + tenantCountAfter;
+
+        hostCountAfter.Should().Be(0, "host cleanup should delete host target rows from the shared database");
+        tenantCountAfter.Should().Be(0, "host cleanup should delete tenant-a target rows from the shared database");
+        totalCountAfter.Should().Be(0, "host cleanup should delete matching logs from all tenants");
+        cleanupResult.DeletedCount.Should().BeGreaterThanOrEqualTo(totalCountBefore);
+    }
+
+    [Fact]
+    public async Task AuditLog_EndToEnd_NormalRequest_Query_Cleanup_Flow()
+    {
+        await _factory.EnsureSeedCompleteAsync();
+
+        // Given - authenticated host client
+        var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
+        var marker = $"normal-e2e-{Guid.NewGuid():N}";
+
+        // Use a fixed beforeTime in the past (same pattern as passing tests)
+        var beforeTime = DateTime.UtcNow.AddMinutes(-2);
+
+        // Seed TWO records: one OLDER than beforeTime (should be deleted), one NEWER (should remain)
+        // This ensures the test is robust even if one seed fails
+        var oldSeedTime = beforeTime.AddMinutes(-10); // 10 minutes before now, 8 minutes older than beforeTime
+        var newSeedTime = beforeTime.AddMinutes(1);  // 1 minute after beforeTime (newer, should NOT be deleted)
+        await SeedAuditLogAsync(HostTenantId, 0, oldSeedTime, $"http://local/{marker}/old");
+        await SeedAuditLogAsync(HostTenantId, 0, newSeedTime, $"http://local/{marker}/new");
+
+        // Verify OLD record exists and is in the deletion window (ExecutionTime < beforeTime)
+        var oldCountBefore = await CountAuditLogsAsync(query => query.Where(a => a.Url != null && a.Url.Contains($"{marker}/old") && a.ExecutionTime < beforeTime));
+        oldCountBefore.Should().Be(1, "seeded OLD audit should exist and be older than beforeTime");
+
+        // Verify NEW record exists and is NOT in the deletion window (ExecutionTime >= beforeTime)
+        var newCountBefore = await CountAuditLogsAsync(query => query.Where(a => a.Url != null && a.Url.Contains($"{marker}/new") && a.ExecutionTime >= beforeTime));
+        newCountBefore.Should().Be(1, "seeded NEW audit should exist and be newer than beforeTime");
+
+        // Cleanup with beforeTime (deletes records where ExecutionTime < beforeTime)
+        var cleanupRequest = new CleanupAuditLogsRequest { BeforeTime = beforeTime };
+        var cleanupResponse = await client.PostAsJsonAsync("/api/audit-log-cleanup/process-cleanup", cleanupRequest);
+        cleanupResponse.StatusCode.Should().Be(HttpStatusCode.OK, await cleanupResponse.Content.ReadAsStringAsync());
+        var cleanupResult = await ReadJsonAsync<DynamicApiResponse<CleanupAuditLogsResult>>(cleanupResponse);
+        cleanupResult.Code.Should().Be(200);
+        cleanupResult.Data!.DeletedCount.Should().Be(oldCountBefore, "deleted count should match the OLD records in the deletion window");
+
+        // Verify OLD record is gone
+        var oldCountAfter = await CountAuditLogsAsync(query => query.Where(a => a.Url != null && a.Url.Contains($"{marker}/old")));
+        oldCountAfter.Should().Be(0, "seeded OLD audit record should be deleted");
+
+        // Verify NEW record still exists
+        var newCountAfter = await CountAuditLogsAsync(query => query.Where(a => a.Url != null && a.Url.Contains($"{marker}/new")));
+        newCountAfter.Should().Be(1, "seeded NEW audit record should NOT be deleted");
+    }
+
+    [Fact]
+    public async Task AuditLog_EndToEnd_ExceptionRequest_Query_Cleanup_Flow()
+    {
+        await _factory.EnsureSeedCompleteAsync();
+
+        // Given - authenticated host client
+        var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
+        var marker = $"fail-e2e-{Guid.NewGuid():N}";
+
+        // Use a fixed beforeTime in the past (same pattern as passing tests)
+        var beforeTime = DateTime.UtcNow.AddMinutes(-2);
+
+        // Seed TWO failed (status=1) records: one OLDER than beforeTime (should be deleted), one NEWER (should remain)
+        var oldSeedTime = beforeTime.AddMinutes(-10); // 10 minutes before now, 8 minutes older than beforeTime
+        var newSeedTime = beforeTime.AddMinutes(1);  // 1 minute after beforeTime (newer, should NOT be deleted)
+        await SeedAuditLogAsync(HostTenantId, 1, oldSeedTime, $"http://local/{marker}/old");
+        await SeedAuditLogAsync(HostTenantId, 1, newSeedTime, $"http://local/{marker}/new");
+
+        // Verify OLD failed record exists and is in the deletion window
+        var oldCountBefore = await CountAuditLogsAsync(query => query.Where(a => a.Url != null && a.Url.Contains($"{marker}/old") && a.Status == 1 && a.ExecutionTime < beforeTime));
+        oldCountBefore.Should().Be(1, "seeded OLD failed audit should exist and be older than beforeTime");
+
+        // Verify NEW failed record exists and is NOT in the deletion window
+        var newCountBefore = await CountAuditLogsAsync(query => query.Where(a => a.Url != null && a.Url.Contains($"{marker}/new") && a.Status == 1 && a.ExecutionTime >= beforeTime));
+        newCountBefore.Should().Be(1, "seeded NEW failed audit should exist and be newer than beforeTime");
+
+        // Cleanup with beforeTime (deletes records where ExecutionTime < beforeTime)
+        var cleanupRequest = new CleanupAuditLogsRequest { BeforeTime = beforeTime };
+        var cleanupResponse = await client.PostAsJsonAsync("/api/audit-log-cleanup/process-cleanup", cleanupRequest);
+        cleanupResponse.StatusCode.Should().Be(HttpStatusCode.OK, await cleanupResponse.Content.ReadAsStringAsync());
+        var cleanupResult = await ReadJsonAsync<DynamicApiResponse<CleanupAuditLogsResult>>(cleanupResponse);
+        cleanupResult.Code.Should().Be(200);
+        cleanupResult.Data!.DeletedCount.Should().Be(oldCountBefore, "deleted count should match the OLD failed records in the deletion window");
+
+        // Verify OLD failed record is gone
+        var oldCountAfter = await CountAuditLogsAsync(query => query.Where(a => a.Url != null && a.Url.Contains($"{marker}/old")));
+        oldCountAfter.Should().Be(0, "seeded OLD failed audit record should be deleted");
+
+        // Verify NEW failed record still exists
+        var newCountAfter = await CountAuditLogsAsync(query => query.Where(a => a.Url != null && a.Url.Contains($"{marker}/new")));
+        newCountAfter.Should().Be(1, "seeded NEW failed audit record should NOT be deleted");
+    }
+
+    private async Task SeedAuditLogAsync(string tenantId, int status, DateTime executionTime, string url)
+    {
+        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<LibraryDbContext>();
+        var persistedTenantId = await NormalizeAuditTenantIdAsync(dbContext, tenantId);
+        dbContext.AuditLogs.Add(new AuditLogEntity(Guid.NewGuid())
+        {
+            Duration = 42,
+            UserId = $"{tenantId}-seed-user",
+            UserName = $"{tenantId}-seed-user",
+            TenantId = persistedTenantId,
+            ClientIpAddress = "127.0.0.1",
+            HttpMethod = "GET",
+            Url = url,
+            ServiceName = "SeedAuditService",
+            MethodName = "SeedAsync",
+            Status = status,
+            ExecutionTime = executionTime,
+            CreationTime = DateTime.UtcNow,
+            TraceId = Guid.NewGuid().ToString("N"),
+            ExtraProperties = new Dictionary<string, object>()
+        });
+
+        await dbContext.SaveChangesAsync();
+    }
+
+    private async Task<CleanupAuditLogsResultDto> ExecuteCleanupAsync(
+        string? tenantId,
+        CleanupAuditLogsRequestDto request)
+    {
+        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        var currentTenant = scope.ServiceProvider.GetRequiredService<ICurrentTenant>();
+        using var tenantScope = string.IsNullOrWhiteSpace(tenantId) ? null : currentTenant.Change(tenantId);
+        var cleanupAppService = scope.ServiceProvider.GetRequiredService<IAuditLogCleanupAppService>();
+        return await cleanupAppService.ProcessCleanupAsync(request);
+    }
+
+    private static async Task<string> NormalizeAuditTenantIdAsync(LibraryDbContext dbContext, string tenantId)
+    {
+        if (tenantId == HostTenantId)
+        {
+            return tenantId;
+        }
+
+        var tenant = await dbContext.Tenants.FirstOrDefaultAsync(item => item.Name == tenantId);
+        return tenant?.Id.ToString() ?? tenantId;
+    }
+
+    private async Task<int> CountAuditLogsAsync(Func<IQueryable<AuditLogEntity>, IQueryable<AuditLogEntity>> filter)
+    {
+        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<LibraryDbContext>();
+        return await filter(dbContext.AuditLogs.AsQueryable()).CountAsync();
     }
 }
