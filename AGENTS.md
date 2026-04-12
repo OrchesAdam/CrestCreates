@@ -236,20 +236,6 @@ dotnet test
 dotnet run --project samples/LibraryManagement/LibraryManagement.Web
 ```
 
-如果在执行 `dotnet restore` / `dotnet build` 时出现类似：
-
-- `MSB3491`
-- `obj/...cache` 写入被拒绝
-
-先执行：
-
-```powershell
-dotnet build-server shutdown
-taskkill /F /IM dotnet.exe
-```
-
-再重试。
-
 ---
 
 ## 变更前自检
