@@ -114,6 +114,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine();
         sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
+        sb.AppendLine("using System.Linq;");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
         sb.AppendLine("using Microsoft.Extensions.Hosting;");
         sb.AppendLine("using CrestCreates.Modularity;");
@@ -147,12 +148,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
 
         foreach (var module in modules)
         {
-            sb.AppendLine($"        _registeredModules.Add(new ModuleDescriptor");
-            sb.AppendLine($"            {{");
-            sb.AppendLine($"                Type = typeof({module.FullName}),");
-            sb.AppendLine($"                Order = {module.Order},");
-            sb.AppendLine($"                AutoRegisterServices = {(module.AutoRegisterServices ? "true" : "false")}");
-            sb.AppendLine($"            }});");
+            sb.AppendLine($"        _registeredModules.Add(new ModuleDescriptor(typeof({module.FullName}), {module.Order}, {(module.AutoRegisterServices ? "true" : "false")}));");
         }
 
         sb.AppendLine();
@@ -165,25 +161,28 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("    public static void InitializeAllModules(IServiceProvider serviceProvider)");
         sb.AppendLine("    {");
 
-        foreach (var module in modules)
+        for (var i = 0; i < modules.Count; i++)
         {
-            sb.AppendLine($"        var {module.Name.ToLower()} = serviceProvider.GetService<{module.FullName}>();");
-            sb.AppendLine($"        {module.Name.ToLower()}?.OnPreInitialize();");
+            var module = modules[i];
+            sb.AppendLine($"        var module{i} = serviceProvider.GetService<{module.FullName}>();");
+            sb.AppendLine($"        module{i}?.OnPreInitialize();");
         }
 
         sb.AppendLine();
         sb.AppendLine("        var sortedModules = _registeredModules.OrderBy(m => m.Order).ToList();");
 
-        foreach (var module in modules)
+        for (var i = 0; i < modules.Count; i++)
         {
-            sb.AppendLine($"        {module.Name.ToLower()}?.OnInitialize();");
+            sb.AppendLine($"        module{i}?.OnInitialize();");
         }
 
         sb.AppendLine();
         sb.AppendLine("        foreach (var module in sortedModules)");
         sb.AppendLine("        {");
-        sb.AppendLine("            var moduleInstance = serviceProvider.GetService(module.Type);");
-        sb.AppendLine("            moduleInstance?.OnPostInitialize();");
+        sb.AppendLine("            if (serviceProvider.GetService(module.ModuleType) is IModule moduleInstance)");
+        sb.AppendLine("            {");
+        sb.AppendLine("                moduleInstance.OnPostInitialize();");
+        sb.AppendLine("            }");
         sb.AppendLine("        }");
         sb.AppendLine("    }");
         sb.AppendLine("}");

@@ -7,7 +7,6 @@ using CrestCreates.Application.Services;
 using CrestCreates.Aop.Interceptors;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.CodeGenerator.Tests.Entities;
-using CrestCreates.CodeGenerator.Tests.Entities.Domain.Permissions;
 using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
@@ -27,7 +26,6 @@ public class TestOrderAppService : CrestAppServiceBase<TestOrder, long, TestOrde
         IPermissionChecker permissionChecker)
         : base(repository, mapper, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
     {
-        EntityPermissions = TestOrderPermissions.Instance;
     }
 
     [UnitOfWorkMo]
