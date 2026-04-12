@@ -24,6 +24,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using CrestCreates.Application.Settings;
 using CrestCreates.Application.Features;
+using CrestCreates.Application.AuditLog;
 using CrestCreates.OrmProviders.EFCore.Settings;
 using CrestCreates.OrmProviders.EFCore.Features;
 
@@ -34,6 +35,7 @@ builder.Services.Configure<AuditLoggingOptions>(
     builder.Configuration.GetSection(AuditLoggingOptions.SectionName));
 builder.Services.AddScoped<AuditLoggingMiddleware>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
+builder.Services.AddAuditLogging();
 
 // Add services to the container
 builder.Services.AddControllers();
@@ -74,6 +76,7 @@ builder.Services.AddCrestAspNetCoreDynamicApi(options =>
     options.AddApplicationServiceAssembly<BookAppService>();
     options.AddApplicationServiceAssembly<SettingAppService>();
     options.AddApplicationServiceAssembly<FeatureAppService>();
+    options.AddApplicationServiceAssembly<AuditLogAppService>();
 });
 
 // Register all modules using the module discovery system

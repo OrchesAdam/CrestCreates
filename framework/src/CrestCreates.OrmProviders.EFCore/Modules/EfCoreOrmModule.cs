@@ -57,6 +57,7 @@ namespace CrestCreates.OrmProviders.EFCore.Modules
             services.AddScoped<IUserRoleRepository, UserRoleRepository>();
             services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
             services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
+            services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         }
 
         /// <summary>
