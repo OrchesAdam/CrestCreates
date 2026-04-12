@@ -1,23 +1,23 @@
 using System;
+using System.Text.Json;
 using System.Threading.Tasks;
-using CrestCreates.AuditLogging.Entities;
-using CrestCreates.AuditLogging.Services;
-using CrestCreates.Authorization.Abstractions;
-using CrestCreates.MultiTenancy.Abstract;
-using Microsoft.AspNetCore.Http;
+using CrestCreates.AuditLogging.Context;
 using Microsoft.Extensions.Logging;
 using Rougamo;
 using Rougamo.Context;
 
 namespace CrestCreates.AuditLogging.Interceptors;
 
+/// <summary>
+/// 方法级审计拦截器 - 补充方法级别的审计数据到统一的AuditContext
+/// 注意：此拦截器不再直接写入审计日志，而是丰富AuditContext后由中间件统一写入
+/// </summary>
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class, AllowMultiple = false)]
 public class AuditedMoAttribute : AsyncMoAttribute
 {
     private readonly string? _actionName;
     private readonly bool _includeParameters;
     private readonly bool _includeResult;
-    private DateTime _startTime;
 
     public AuditedMoAttribute(string? actionName = null, bool includeParameters = true, bool includeResult = false)
     {
@@ -28,138 +28,107 @@ public class AuditedMoAttribute : AsyncMoAttribute
 
     public override ValueTask OnEntryAsync(MethodContext context)
     {
-        try
+        // Middleware already initializes AuditContext with HTTP-level data
+        // Nothing to do here unless we need to track method entry time
+        return ValueTask.CompletedTask;
+    }
+
+    public override ValueTask OnSuccessAsync(MethodContext context)
+    {
+        var auditContext = AuditContext.Current;
+        if (auditContext == null)
         {
-            _startTime = DateTime.UtcNow;
+            // No HTTP-level audit context, skip method-level enrichment
             return ValueTask.CompletedTask;
         }
-        catch (Exception exception)
-        {
-            return ValueTask.FromException(exception);
-        }
-    }
 
-    public override async ValueTask OnSuccessAsync(MethodContext context)
-    {
-        var auditLogger = context.GetService<IAuditLogService>();
-        if (auditLogger == null)
-        {
-            return;
-        }
-
-        var actionName = _actionName ?? $"{context.Method.DeclaringType?.Name}.{context.Method.Name}";
-
-        object? parameters = null;
-        if (_includeParameters && context.Arguments.Length > 0)
-        {
-            try
-            {
-                parameters = context.Arguments.Length == 1 ? context.Arguments[0] : context.Arguments;
-            }
-            catch
-            {
-                parameters = "无法序列化参数";
-            }
-        }
-
-        object? result = null;
-        if (_includeResult && context.ReturnValue != null)
-        {
-            try
-            {
-                result = context.ReturnValue;
-            }
-            catch
-            {
-                result = "无法序列化结果";
-            }
-        }
-
-        var duration = DateTime.UtcNow - _startTime;
-        
         try
         {
-            var currentUser = context.GetService<ICurrentUser>();
-            var currentTenant = context.GetService<ICurrentTenant>();
-            var httpContext = context.GetService<IHttpContextAccessor>()?.HttpContext;
-            
-            var auditLog = new AuditLog
-            {
-                CreationTime = _startTime,
-                UserId = currentUser?.Id,
-                UserName = currentUser?.UserName,
-                Action = actionName,
-                Description = _actionName ?? $"执行方法: {context.Method.Name}",
-                ClientIpAddress = httpContext?.Connection.RemoteIpAddress?.ToString(),
-                ClientName = httpContext?.Request.Headers["User-Agent"],
-                Path = httpContext?.Request.Path.ToString(),
-                HttpMethod = httpContext?.Request.Method,
-                StatusCode = 200,
-                ExecutionTime = (long)duration.TotalMilliseconds,
-                Request = parameters != null ? System.Text.Json.JsonSerializer.Serialize(parameters) : null,
-                Response = result != null ? System.Text.Json.JsonSerializer.Serialize(result) : null,
-                Exception = null,
-                TenantId = currentTenant?.Id ?? currentUser?.TenantId,
-                ExtraProperties = new System.Collections.Generic.Dictionary<string, object>
-                {
-                    { "Method", $"{context.Method.DeclaringType?.FullName}.{context.Method.Name}" },
-                    { "ParametersCount", context.Arguments.Length },
-                    { "HasReturnValue", context.ReturnValue != null }
-                }
-            };
-            await auditLogger.CreateAsync(auditLog);
+            // Enrich with method-level data
+            auditContext.IsIntercepted = true;
+            auditContext.ServiceName = context.Method.DeclaringType?.Name;
+            auditContext.MethodName = context.Method.Name;
 
+            if (_includeParameters && context.Arguments.Length > 0)
+            {
+                try
+                {
+                    auditContext.Parameters = context.Arguments.Length == 1
+                        ? JsonSerializer.Serialize(context.Arguments[0])
+                        : JsonSerializer.Serialize(context.Arguments);
+                }
+                catch
+                {
+                    auditContext.Parameters = "[无法序列化参数]";
+                }
+            }
+
+            if (_includeResult && context.ReturnValue != null)
+            {
+                try
+                {
+                    auditContext.ReturnValue = JsonSerializer.Serialize(context.ReturnValue);
+                }
+                catch
+                {
+                    auditContext.ReturnValue = "[无法序列化返回值]";
+                }
+            }
+
+            // If no exception occurred, mark as success
+            if (!auditContext.IsException)
+            {
+                auditContext.HttpStatusCode = 200;
+            }
         }
         catch (Exception ex)
         {
             var logger = context.GetService<ILogger<AuditedMoAttribute>>();
-            logger?.LogWarning(ex, "审计日志记录失败");
+            logger?.LogWarning(ex, "审计拦截器 enrichment 失败");
         }
+
+        return ValueTask.CompletedTask;
     }
 
-    public override async ValueTask OnExceptionAsync(MethodContext context)
+    public override ValueTask OnExceptionAsync(MethodContext context)
     {
-        var auditLogger = context.GetService<IAuditLogService>();
-        if (auditLogger == null) return;
-
-        var currentUser = context.GetService<ICurrentUser>();
-        var currentTenant = context.GetService<ICurrentTenant>();
-        var httpContext = context.GetService<IHttpContextAccessor>()?.HttpContext;
-        var actionName = _actionName ?? $"{context.Method.DeclaringType?.Name}.{context.Method.Name}";
-        var duration = DateTime.UtcNow - _startTime;
+        var auditContext = AuditContext.Current;
+        if (auditContext == null)
+        {
+            return ValueTask.CompletedTask;
+        }
 
         try
         {
-            var auditLog = new AuditLog
+            auditContext.IsIntercepted = true;
+            auditContext.IsException = true;
+            auditContext.ServiceName = context.Method.DeclaringType?.Name;
+            auditContext.MethodName = context.Method.Name;
+            auditContext.ExceptionMessage = context.Exception?.Message;
+            auditContext.ExceptionStackTrace = context.Exception?.StackTrace;
+            auditContext.HttpStatusCode = 500;
+
+            // Parameters may still be useful even on exception
+            if (_includeParameters && context.Arguments.Length > 0)
             {
-                CreationTime = _startTime,
-                UserId = currentUser?.Id,
-                UserName = currentUser?.UserName,
-                Action = actionName,
-                Description = _actionName ?? $"执行方法: {context.Method.Name}",
-                ClientIpAddress = httpContext?.Connection.RemoteIpAddress?.ToString(),
-                ClientName = httpContext?.Request.Headers["User-Agent"],
-                Path = httpContext?.Request.Path.ToString(),
-                HttpMethod = httpContext?.Request.Method,
-                StatusCode = 500,
-                ExecutionTime = (long)duration.TotalMilliseconds,
-                Request = null,
-                Response = null,
-                Exception = context.Exception?.ToString(),
-                TenantId = currentTenant?.Id ?? currentUser?.TenantId,
-                ExtraProperties = new System.Collections.Generic.Dictionary<string, object>
+                try
                 {
-                    { "Method", $"{context.Method.DeclaringType?.FullName}.{context.Method.Name}" },
-                    { "ExceptionType", context.Exception?.GetType().Name ?? "" },
-                    { "ExceptionMessage", context.Exception?.Message ??  ""}
+                    auditContext.Parameters = context.Arguments.Length == 1
+                        ? JsonSerializer.Serialize(context.Arguments[0])
+                        : JsonSerializer.Serialize(context.Arguments);
                 }
-            };
-            await auditLogger.CreateAsync(auditLog);
+                catch
+                {
+                    // Ignore serialization errors on exception path
+                }
+            }
         }
         catch (Exception ex)
         {
             var logger = context.GetService<ILogger<AuditedMoAttribute>>();
-            logger?.LogWarning(ex, "审计日志记录失败");
+            logger?.LogWarning(ex, "审计拦截器异常处理失败");
         }
+
+        return ValueTask.CompletedTask;
     }
 }

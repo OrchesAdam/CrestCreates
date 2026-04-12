@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using CrestCreates.AuditLogging.Entities;
+using CrestCreates.Domain.AuditLog;
 
 namespace CrestCreates.AuditLogging.Services
 {
@@ -10,7 +10,6 @@ namespace CrestCreates.AuditLogging.Services
         Task CreateAsync(AuditLog auditLog);
         Task<IEnumerable<AuditLog>> GetListAsync(
             string? userId = null,
-            string? action = null,
             DateTime? startTime = null,
             DateTime? endTime = null,
             int skip = 0,
@@ -18,7 +17,6 @@ namespace CrestCreates.AuditLogging.Services
         );
         Task<long> GetCountAsync(
             string? userId = null,
-            string? action = null,
             DateTime? startTime = null,
             DateTime? endTime = null
         );

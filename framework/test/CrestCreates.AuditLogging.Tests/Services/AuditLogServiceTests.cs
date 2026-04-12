@@ -1,5 +1,5 @@
-using CrestCreates.AuditLogging.Entities;
 using CrestCreates.AuditLogging.Services;
+using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Repositories;
 using FluentAssertions;
 using Moq;
@@ -16,12 +16,12 @@ public class AuditLogServiceTests
         repository.Setup(x => x.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<AuditLog, bool>>>(), default))
             .ReturnsAsync(new List<AuditLog>
             {
-                new() { Action = "Create", UserId = "u1", CreationTime = DateTime.UtcNow.AddMinutes(-1) },
-                new() { Action = "Create", UserId = "u1", CreationTime = DateTime.UtcNow }
+                new(Guid.NewGuid()) { UserId = "u1", CreationTime = DateTime.UtcNow.AddMinutes(-1) },
+                new(Guid.NewGuid()) { UserId = "u1", CreationTime = DateTime.UtcNow }
             });
         var service = new AuditLogService(repository.Object);
 
-        var result = await service.GetListAsync(userId: "u1", action: "Create", skip: 0, take: 1);
+        var result = await service.GetListAsync(userId: "u1", skip: 0, take: 1);
 
         result.Should().HaveCount(1);
         repository.Verify(x => x.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<AuditLog, bool>>>(), default), Times.Once);
@@ -33,7 +33,7 @@ public class AuditLogServiceTests
     {
         var repository = new Mock<IRepository<AuditLog, Guid>>();
         repository.Setup(x => x.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<AuditLog, bool>>>(), default))
-            .ReturnsAsync(new List<AuditLog> { new(), new(), new() });
+            .ReturnsAsync(new List<AuditLog> { new(Guid.NewGuid()), new(Guid.NewGuid()), new(Guid.NewGuid()) });
         var service = new AuditLogService(repository.Object);
 
         var count = await service.GetCountAsync(userId: "u1");
@@ -44,7 +44,7 @@ public class AuditLogServiceTests
     [Fact]
     public async Task DeleteAsync_ShouldDeleteEachMatchedLog()
     {
-        var oldLogs = new List<AuditLog> { new(), new() };
+        var oldLogs = new List<AuditLog> { new(Guid.NewGuid()), new(Guid.NewGuid()) };
         var repository = new Mock<IRepository<AuditLog, Guid>>();
         repository.Setup(x => x.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<AuditLog, bool>>>(), default))
             .ReturnsAsync(oldLogs);

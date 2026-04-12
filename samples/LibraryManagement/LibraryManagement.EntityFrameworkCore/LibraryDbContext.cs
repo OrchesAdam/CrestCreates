@@ -1,5 +1,5 @@
 using LibraryManagement.Domain.Entities;
-using CrestCreates.AuditLogging.Entities;
+using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Permission;
 using Microsoft.EntityFrameworkCore;
 using CrestCreates.Domain.Shared.Permissions;
@@ -199,19 +199,23 @@ public class LibraryDbContext : DbContext
             entity.ToTable("AuditLogs");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever();
-            entity.Property(e => e.CreationTime).IsRequired();
+            entity.Property(e => e.Duration).IsRequired();
+            entity.Property(e => e.ExecutionTime).IsRequired();
+            entity.Property(e => e.TraceId).HasMaxLength(128);
             entity.Property(e => e.UserId).HasMaxLength(64);
             entity.Property(e => e.UserName).HasMaxLength(128);
-            entity.Property(e => e.Action).IsRequired().HasMaxLength(256);
-            entity.Property(e => e.Description).HasMaxLength(2048);
-            entity.Property(e => e.ClientIpAddress).HasMaxLength(64);
-            entity.Property(e => e.ClientName).HasMaxLength(256);
-            entity.Property(e => e.Path).HasMaxLength(1024);
-            entity.Property(e => e.HttpMethod).HasMaxLength(16);
-            entity.Property(e => e.Request).HasMaxLength(4000);
-            entity.Property(e => e.Response).HasMaxLength(4000);
-            entity.Property(e => e.Exception).HasMaxLength(4000);
             entity.Property(e => e.TenantId).HasMaxLength(64);
+            entity.Property(e => e.ClientIpAddress).HasMaxLength(64);
+            entity.Property(e => e.HttpMethod).HasMaxLength(16);
+            entity.Property(e => e.Url).HasMaxLength(2048);
+            entity.Property(e => e.ServiceName).HasMaxLength(256);
+            entity.Property(e => e.MethodName).HasMaxLength(256);
+            entity.Property(e => e.Parameters).HasMaxLength(-1);
+            entity.Property(e => e.ReturnValue).HasMaxLength(-1);
+            entity.Property(e => e.ExceptionMessage).HasMaxLength(4096);
+            entity.Property(e => e.ExceptionStackTrace).HasMaxLength(-1);
+            entity.Property(e => e.Status).IsRequired();
+            entity.Property(e => e.CreationTime).IsRequired();
             entity.Property(e => e.ExtraProperties)
                 .HasConversion(
                     value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null),
@@ -219,7 +223,10 @@ public class LibraryDbContext : DbContext
                         ? new Dictionary<string, object>()
                         : JsonSerializer.Deserialize<Dictionary<string, object>>(value, (JsonSerializerOptions?)null)
                             ?? new Dictionary<string, object>());
-            entity.HasIndex(e => new { e.TenantId, e.CreationTime });
+            entity.HasIndex(e => e.TenantId);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.CreationTime);
+            entity.HasIndex(e => e.TraceId);
         });
 
         modelBuilder.Entity<Tenant>(entity =>

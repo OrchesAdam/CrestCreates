@@ -8,6 +8,7 @@ using CrestCreates.Domain.Permission;
 using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.OrmProviders.Abstract.Abstractions;
 using CrestCreates.Domain.Examples;
+using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Settings;
 
@@ -34,6 +35,7 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
         public DbSet<TenantConnectionString> TenantConnectionStrings { get; set; }
         public DbSet<SettingValue> SettingValues { get; set; }
         public DbSet<FeatureValue> FeatureValues { get; set; }
+        public DbSet<AuditLog> AuditLogs { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -262,6 +264,36 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
                 entity.Property(e => e.LastModificationTime);
 
                 entity.HasIndex(e => new { e.Name, e.Scope, e.ProviderKey, e.TenantId }).IsUnique();
+            });
+
+            modelBuilder.Entity<AuditLog>(entity =>
+            {
+                entity.ToTable("AuditLogs");
+
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).ValueGeneratedNever();
+                entity.Property(e => e.Duration).IsRequired();
+                entity.Property(e => e.ExecutionTime).IsRequired();
+                entity.Property(e => e.TraceId).HasMaxLength(128);
+                entity.Property(e => e.UserId).HasMaxLength(64);
+                entity.Property(e => e.UserName).HasMaxLength(128);
+                entity.Property(e => e.TenantId).HasMaxLength(64);
+                entity.Property(e => e.ClientIpAddress).HasMaxLength(64);
+                entity.Property(e => e.HttpMethod).HasMaxLength(16);
+                entity.Property(e => e.Url).HasMaxLength(2048);
+                entity.Property(e => e.ServiceName).HasMaxLength(256);
+                entity.Property(e => e.MethodName).HasMaxLength(256);
+                entity.Property(e => e.Parameters).HasMaxLength(-1); // MAX
+                entity.Property(e => e.ReturnValue).HasMaxLength(-1); // MAX
+                entity.Property(e => e.ExceptionMessage).HasMaxLength(4096);
+                entity.Property(e => e.ExceptionStackTrace).HasMaxLength(-1); // MAX
+                entity.Property(e => e.Status).IsRequired();
+                entity.Property(e => e.CreationTime).IsRequired();
+
+                entity.HasIndex(e => e.TenantId);
+                entity.HasIndex(e => e.UserId);
+                entity.HasIndex(e => e.CreationTime);
+                entity.HasIndex(e => e.TraceId);
             });
         }
 

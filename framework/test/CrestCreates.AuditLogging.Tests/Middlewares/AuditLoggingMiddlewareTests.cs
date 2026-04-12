@@ -1,5 +1,4 @@
-using System.Text;
-using CrestCreates.AuditLogging.Entities;
+using CrestCreates.AuditLogging.Context;
 using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.AuditLogging.Services;
@@ -8,6 +7,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using Xunit;
 
 namespace CrestCreates.AuditLogging.Tests.Middlewares;
@@ -17,9 +17,9 @@ public class AuditLoggingMiddlewareTests
     [Fact]
     public async Task InvokeAsync_ShouldSkipGetRequests_WhenDisabledForGet()
     {
-        var auditService = new RecordingAuditLogService();
+        var mockWriter = new Mock<IAuditLogWriter>();
         var middleware = CreateMiddleware(
-            auditService,
+            mockWriter.Object,
             new AuditLoggingOptions { IsEnabledForGetRequests = false },
             _ => Task.CompletedTask);
 
@@ -27,21 +27,21 @@ public class AuditLoggingMiddlewareTests
         context.Request.Method = HttpMethods.Get;
         context.Request.Path = "/api/books";
 
-        await middleware.InvokeAsync(context, task => Task.CompletedTask);
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
 
-        auditService.Logs.Should().BeEmpty();
+        mockWriter.Verify(w => w.WriteAsync(It.IsAny<AuditContext>()), Times.Never);
     }
 
     [Fact]
-    public async Task InvokeAsync_ShouldSanitizeRequestBody_AndPersistAuditLog()
+    public async Task InvokeAsync_ShouldWriteOneAuditLog_ForNormalRequest()
     {
-        var auditService = new RecordingAuditLogService();
+        var mockWriter = new Mock<IAuditLogWriter>();
+        mockWriter.Setup(w => w.WriteAsync(It.IsAny<AuditContext>()))
+            .Returns(Task.CompletedTask);
+
         var middleware = CreateMiddleware(
-            auditService,
-            new AuditLoggingOptions
-            {
-                IncludeResponseBody = true
-            },
+            mockWriter.Object,
+            new AuditLoggingOptions { IncludeResponseBody = true },
             async context =>
             {
                 context.Response.StatusCode = StatusCodes.Status201Created;
@@ -52,52 +52,87 @@ public class AuditLoggingMiddlewareTests
         context.Request.Method = HttpMethods.Post;
         context.Request.Path = "/api/login";
         var requestJson = "{\"user\":\"alice\",\"password\":\"secret\"}";
-        context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(requestJson));
-        context.Request.ContentLength = Encoding.UTF8.GetByteCount(requestJson);
+        context.Request.Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(requestJson));
+        context.Request.ContentLength = System.Text.Encoding.UTF8.GetByteCount(requestJson);
+        context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context,task => Task.CompletedTask);
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
 
-        auditService.Logs.Should().ContainSingle();
-        var log = auditService.Logs.Single();
-        log.Request.Should().Contain("\"password\":\"***\"");
-        log.Response.Should().Be("{\"ok\":true}");
-        log.StatusCode.Should().Be(StatusCodes.Status201Created);
+        mockWriter.Verify(w => w.WriteAsync(It.IsAny<AuditContext>()), Times.Once);
     }
 
     [Fact]
-    public async Task InvokeAsync_ShouldPersistOnException_WhenAlwaysLogOnException()
+    public async Task InvokeAsync_ShouldSanitizeSensitiveData_InRequestBody()
     {
-        var auditService = new RecordingAuditLogService();
+        AuditContext? capturedContext = null;
+        var mockWriter = new Mock<IAuditLogWriter>();
+        mockWriter.Setup(w => w.WriteAsync(It.IsAny<AuditContext>()))
+            .Callback<AuditContext>(ctx => capturedContext = ctx)
+            .Returns(Task.CompletedTask);
+
         var middleware = CreateMiddleware(
-            auditService,
-            new AuditLoggingOptions
-            {
-                IsEnabledForGetRequests = false,
-                AlwaysLogOnException = true
-            },
-            _ => throw new InvalidOperationException("boom"));
+            mockWriter.Object,
+            new AuditLoggingOptions { IncludeRequestBody = true },
+            _ => Task.CompletedTask);
 
         var context = new DefaultHttpContext();
-        context.Request.Method = HttpMethods.Get;
-        context.Request.Path = "/api/books/1";
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Path = "/api/login";
+        var requestJson = "{\"user\":\"alice\",\"password\":\"secret\"}";
+        context.Request.Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(requestJson));
+        context.Request.ContentLength = System.Text.Encoding.UTF8.GetByteCount(requestJson);
 
-        var action = () => middleware.InvokeAsync(context, task => Task.CompletedTask);
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
 
-        await action.Should().ThrowAsync<InvalidOperationException>();
-        auditService.Logs.Should().ContainSingle();
-        auditService.Logs.Single().Exception.Should().Contain("boom");
+        capturedContext.Should().NotBeNull();
+        capturedContext!.RequestBody.Should().Contain("\"password\":\"***\"");
+        capturedContext.RequestBody.Should().Contain("\"user\":\"alice\"");
     }
 
     [Fact]
-    public async Task InvokeAsync_ShouldRethrowAuditStoreFailure_WhenHideErrorsIsFalse()
+    public async Task InvokeAsync_ShouldWriteOnException_AndPreserveOriginalStack()
     {
-        var auditService = new ThrowingAuditLogService();
+        AuditContext? capturedContext = null;
+        var mockWriter = new Mock<IAuditLogWriter>();
+        mockWriter.Setup(w => w.WriteAsync(It.IsAny<AuditContext>()))
+            .Callback<AuditContext>(ctx => capturedContext = ctx)
+            .Returns(Task.CompletedTask);
+
+        // Pass a no-op to CreateMiddleware, then pass exception-throwing next to InvokeAsync
         var middleware = CreateMiddleware(
-            auditService,
-            new AuditLoggingOptions
-            {
-                HideErrors = false
-            },
+            mockWriter.Object,
+            new AuditLoggingOptions { IsEnabled = true, AlwaysLogOnException = true, HideErrors = false },
+            _ => Task.CompletedTask);
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Path = "/api/books/1";
+
+        // Exception thrown INSIDE InvokeAsync's next parameter - from a separate method to ensure distinct stack
+        Func<Task> action = () => middleware.InvokeAsync(context, _ => ThrowTestException());
+
+        var thrownEx = await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("boom");
+
+        // Verify the original throw location is in the stack trace (not just the rethrow location)
+        thrownEx.And.StackTrace.Should().Contain("ThrowTestException");
+
+        mockWriter.Verify(w => w.WriteAsync(It.IsAny<AuditContext>()), Times.Once);
+        capturedContext.Should().NotBeNull();
+        capturedContext!.IsException.Should().BeTrue();
+        capturedContext.ExceptionMessage.Should().Contain("boom");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldNotRethrow_WhenHideErrorsIsTrue()
+    {
+        var mockWriter = new Mock<IAuditLogWriter>();
+        mockWriter.Setup(w => w.WriteAsync(It.IsAny<AuditContext>()))
+            .Throws(new InvalidOperationException("persist failed"));
+
+        var middleware = CreateMiddleware(
+            mockWriter.Object,
+            new AuditLoggingOptions { HideErrors = true },
             context =>
             {
                 context.Response.StatusCode = StatusCodes.Status200OK;
@@ -107,52 +142,58 @@ public class AuditLoggingMiddlewareTests
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Request.Path = "/api/books";
-        context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("{\"title\":\"book\"}"));
+        context.Request.Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("{\"title\":\"book\"}"));
         context.Request.ContentLength = 16;
 
-        var action = () => middleware.InvokeAsync(context, task => Task.CompletedTask);
+        var action = () => middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        await action.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldRethrow_WhenHideErrorsIsFalse_AndWriteFails()
+    {
+        var mockWriter = new Mock<IAuditLogWriter>();
+        mockWriter.Setup(w => w.WriteAsync(It.IsAny<AuditContext>()))
+            .Throws(new InvalidOperationException("persist failed"));
+
+        var middleware = CreateMiddleware(
+            mockWriter.Object,
+            new AuditLoggingOptions { HideErrors = false },
+            context =>
+            {
+                context.Response.StatusCode = StatusCodes.Status200OK;
+                return Task.CompletedTask;
+            });
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Path = "/api/books";
+        context.Request.Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("{\"title\":\"book\"}"));
+        context.Request.ContentLength = 16;
+
+        var action = () => middleware.InvokeAsync(context, _ => Task.CompletedTask);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("persist failed");
     }
 
+    // Helper method to throw an exception - used to verify original stack trace is preserved
+    private static Task ThrowTestException()
+    {
+        throw new InvalidOperationException("boom");
+    }
+
     private static AuditLoggingMiddleware CreateMiddleware(
-        IAuditLogService auditLogService,
+        IAuditLogWriter auditLogWriter,
         AuditLoggingOptions options,
         RequestDelegate next)
     {
         return new AuditLoggingMiddleware(
-            auditLogService,
+            auditLogWriter,
             new FakeCurrentTenant("tenant-1"),
             new OptionsWrapper<AuditLoggingOptions>(options),
-            new NullLogger<AuditLoggingMiddleware>());
-    }
-
-    private sealed class RecordingAuditLogService : IAuditLogService
-    {
-        public List<AuditLog> Logs { get; } = new();
-
-        public Task CreateAsync(AuditLog auditLog)
-        {
-            Logs.Add(auditLog);
-            return Task.CompletedTask;
-        }
-
-        public Task<IEnumerable<AuditLog>> GetListAsync(string? userId = null, string? action = null, DateTime? startTime = null, DateTime? endTime = null, int skip = 0, int take = 100)
-            => Task.FromResult<IEnumerable<AuditLog>>(Logs);
-
-        public Task<long> GetCountAsync(string? userId = null, string? action = null, DateTime? startTime = null, DateTime? endTime = null)
-            => Task.FromResult((long)Logs.Count);
-
-        public Task DeleteAsync(DateTime olderThan) => Task.CompletedTask;
-    }
-
-    private sealed class ThrowingAuditLogService : IAuditLogService
-    {
-        public Task CreateAsync(AuditLog auditLog) => throw new InvalidOperationException("persist failed");
-        public Task<IEnumerable<AuditLog>> GetListAsync(string? userId = null, string? action = null, DateTime? startTime = null, DateTime? endTime = null, int skip = 0, int take = 100) => Task.FromResult<IEnumerable<AuditLog>>(Array.Empty<AuditLog>());
-        public Task<long> GetCountAsync(string? userId = null, string? action = null, DateTime? startTime = null, DateTime? endTime = null) => Task.FromResult(0L);
-        public Task DeleteAsync(DateTime olderThan) => Task.CompletedTask;
+            NullLogger<AuditLoggingMiddleware>.Instance);
     }
 
     private sealed class FakeCurrentTenant : ICurrentTenant

@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using CrestCreates.AuditLogging.Entities;
+using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Repositories;
 
 namespace CrestCreates.AuditLogging.Services
@@ -23,7 +23,6 @@ namespace CrestCreates.AuditLogging.Services
 
         public async Task<IEnumerable<AuditLog>> GetListAsync(
             string? userId = null,
-            string? action = null,
             DateTime? startTime = null,
             DateTime? endTime = null,
             int skip = 0,
@@ -32,7 +31,6 @@ namespace CrestCreates.AuditLogging.Services
         {
             var filteredLogs = await _auditLogRepository.FindAsync(log =>
                 (string.IsNullOrEmpty(userId) || log.UserId == userId) &&
-                (string.IsNullOrEmpty(action) || log.Action == action) &&
                 (!startTime.HasValue || log.CreationTime >= startTime.Value) &&
                 (!endTime.HasValue || log.CreationTime <= endTime.Value));
 
@@ -45,14 +43,12 @@ namespace CrestCreates.AuditLogging.Services
 
         public async Task<long> GetCountAsync(
             string? userId = null,
-            string? action = null,
             DateTime? startTime = null,
             DateTime? endTime = null
         )
         {
             var filteredLogs = await _auditLogRepository.FindAsync(log =>
                 (string.IsNullOrEmpty(userId) || log.UserId == userId) &&
-                (string.IsNullOrEmpty(action) || log.Action == action) &&
                 (!startTime.HasValue || log.CreationTime >= startTime.Value) &&
                 (!endTime.HasValue || log.CreationTime <= endTime.Value));
 

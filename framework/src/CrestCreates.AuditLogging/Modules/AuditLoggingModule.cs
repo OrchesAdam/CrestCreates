@@ -17,6 +17,7 @@ namespace CrestCreates.AuditLogging.Modules
             services.AddOptions<AuditLoggingOptions>();
             services.AddScoped<AuditLoggingMiddleware>();
             services.AddScoped<IAuditLogService, AuditLogService>();
+            services.AddScoped<IAuditLogWriter, AuditLogWriter>();
         }
     }
 }

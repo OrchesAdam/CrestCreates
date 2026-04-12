@@ -1,4 +1,4 @@
-using CrestCreates.AuditLogging.Entities;
+using CrestCreates.AuditLogging.Context;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.MultiTenancy.Abstract;
@@ -10,6 +10,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -19,18 +20,18 @@ namespace CrestCreates.AuditLogging.Middlewares
 {
     public class AuditLoggingMiddleware : IMiddleware
     {
-        private readonly IAuditLogService _auditLogService;
+        private readonly IAuditLogWriter _auditLogWriter;
         private readonly ICurrentTenant _currentTenant;
         private readonly AuditLoggingOptions _options;
         private readonly ILogger<AuditLoggingMiddleware> _logger;
 
         public AuditLoggingMiddleware(
-            IAuditLogService auditLogService,
+            IAuditLogWriter auditLogWriter,
             ICurrentTenant currentTenant,
             IOptions<AuditLoggingOptions> options,
             ILogger<AuditLoggingMiddleware> logger)
         {
-            _auditLogService = auditLogService;
+            _auditLogWriter = auditLogWriter;
             _currentTenant = currentTenant;
             _options = options.Value;
             _logger = logger;
@@ -45,93 +46,100 @@ namespace CrestCreates.AuditLogging.Middlewares
             }
 
             var requestPath = context.Request.Path.ToString();
-            var shouldAuditRequest = ShouldAuditRequest(context.Request.Method, requestPath);
-            var shouldPersistAuditLog = shouldAuditRequest;
-            Exception? capturedException = null;
-            var auditLog = new AuditLog(Guid.NewGuid())
+            if (!ShouldAuditRequest(context.Request.Method, requestPath))
             {
-                CreationTime = DateTime.UtcNow,
-                ClientIpAddress = context.Connection.RemoteIpAddress?.ToString(),
-                ClientName = context.Request.Headers["User-Agent"].ToString(),
-                Path = requestPath,
+                await next(context);
+                return;
+            }
+
+            // Capture exception for later rethrow while preserving stack trace
+            ExceptionDispatchInfo? exceptionInfo = null;
+
+            // Initialize AuditContext and store in AsyncLocal
+            var auditContext = new AuditContext
+            {
+                TraceId = context.TraceIdentifier,
                 HttpMethod = context.Request.Method,
+                Url = context.Request.GetDisplayUrl(),
+                ClientIpAddress = context.Connection.RemoteIpAddress?.ToString(),
+                UserAgent = context.Request.Headers["User-Agent"].ToString(),
+                StartTime = DateTime.UtcNow,
+                ExecutionTime = DateTime.UtcNow,
                 TenantId = _currentTenant.Id,
-                Action = $"{context.Request.Method} {requestPath}",
-                Description = context.Request.GetDisplayUrl(),
-                ExtraProperties = new Dictionary<string, object>
-                {
-                    ["TraceIdentifier"] = context.TraceIdentifier
-                }
+                HttpStatusCode = 200,
+                ExtraProperties = new Dictionary<string, object>()
             };
 
             if (context.User?.Identity?.IsAuthenticated == true)
             {
-                auditLog.UserId = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-                auditLog.UserName = context.User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+                auditContext.UserId = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                auditContext.UserName = context.User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
             }
 
-            if (shouldAuditRequest && _options.IncludeRequestBody)
+            AuditContext.SetCurrent(auditContext);
+
+            if (_options.IncludeRequestBody)
             {
-                auditLog.Request = await TryReadRequestBodyAsync(context.Request);
+                auditContext.RequestBody = await TryReadRequestBodyAsync(context.Request);
             }
 
             var originalResponseStream = context.Response.Body;
-            using (var responseBody = new MemoryStream())
-            {
-                context.Response.Body = responseBody;
-
-                var startTime = DateTime.UtcNow;
-                try
-                {
-                    await next(context);
-                }
-                catch (Exception ex)
-                {
-                    capturedException = ex;
-                    auditLog.Exception = ex.ToString();
-                }
-                finally
-                {
-                    context.Response.Body = originalResponseStream;
-                    var endTime = DateTime.UtcNow;
-                    auditLog.ExecutionTime = (long)(endTime - startTime).TotalMilliseconds;
-                    auditLog.StatusCode = context.Response.StatusCode;
-
-                    responseBody.Seek(0, SeekOrigin.Begin);
-                    if (_options.IncludeResponseBody && shouldAuditRequest)
-                    {
-                        auditLog.Response = await ReadAndTrimResponseBodyAsync(responseBody);
-                    }
-                    responseBody.Seek(0, SeekOrigin.Begin);
-                    await responseBody.CopyToAsync(originalResponseStream);
-
-                    shouldPersistAuditLog = shouldAuditRequest ||
-                        (capturedException != null && _options.AlwaysLogOnException);
-                }
-            }
-
-            if (!shouldPersistAuditLog)
-            {
-                return;
-            }
+            using var responseBody = new MemoryStream();
+            context.Response.Body = responseBody;
 
             try
             {
-                await _auditLogService.CreateAsync(auditLog);
+                await next(context);
             }
-            catch (Exception saveException)
+            catch (Exception ex)
             {
-                _logger.LogWarning(saveException, "Failed to persist audit log for {RequestPath}", requestPath);
-                if (!_options.HideErrors)
+                // Capture exception with full stack trace preservation
+                exceptionInfo = ExceptionDispatchInfo.Capture(ex);
+
+                // Enrich audit context with exception details
+                auditContext.IsException = true;
+                auditContext.ExceptionMessage = ex.Message;
+                auditContext.ExceptionStackTrace = ex.StackTrace;
+                auditContext.HttpStatusCode = 500;
+            }
+            finally
+            {
+                // Always restore response body first
+                context.Response.Body = originalResponseStream;
+
+                // Capture response body if needed
+                if (_options.IncludeResponseBody)
                 {
-                    throw;
+                    responseBody.Seek(0, SeekOrigin.Begin);
+                    auditContext.ResponseBody = await ReadAndTrimResponseBodyAsync(responseBody);
                 }
+
+                // Copy response body to original stream
+                responseBody.Seek(0, SeekOrigin.Begin);
+                await responseBody.CopyToAsync(originalResponseStream);
+
+                // Get actual HTTP status code from response
+                auditContext.HttpStatusCode = context.Response.StatusCode;
+
+                // Write the unified audit log
+                try
+                {
+                    await _auditLogWriter.WriteAsync(auditContext);
+                }
+                catch (Exception writeEx)
+                {
+                    _logger.LogWarning(writeEx, "Failed to persist audit log for {RequestPath}", requestPath);
+                    if (!_options.HideErrors)
+                    {
+                        throw;
+                    }
+                }
+
+                AuditContext.ClearCurrent();
             }
 
-            if (capturedException is not null)
-            {
-                throw capturedException;
-            }
+            // Rethrow the captured exception AFTER finally cleanup, preserving original stack trace
+            exceptionInfo?.Throw();
         }
 
         private bool ShouldAuditRequest(string method, string path)
