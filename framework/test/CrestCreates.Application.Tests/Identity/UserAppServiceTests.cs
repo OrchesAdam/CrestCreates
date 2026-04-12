@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Identity;
 using CrestCreates.Application.Identity;
 using CrestCreates.Domain.Authorization;
+using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.MultiTenancy.Abstract;
@@ -22,6 +23,7 @@ public class UserAppServiceTests
     private readonly Mock<IPasswordHasher> _passwordHasherMock;
     private readonly Mock<IPasswordPolicyValidator> _passwordPolicyValidatorMock;
     private readonly Mock<ICurrentTenant> _currentTenantMock;
+    private readonly Mock<IFeatureChecker> _featureCheckerMock;
     private readonly UserAppService _userAppService;
 
     public UserAppServiceTests()
@@ -33,6 +35,10 @@ public class UserAppServiceTests
         _passwordPolicyValidatorMock = new Mock<IPasswordPolicyValidator>();
         _currentTenantMock = new Mock<ICurrentTenant>();
         _currentTenantMock.SetupGet(currentTenant => currentTenant.Id).Returns(string.Empty);
+        _featureCheckerMock = new Mock<IFeatureChecker>();
+        _featureCheckerMock
+            .Setup(checker => checker.IsEnabledAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         _userAppService = new UserAppService(
             _userRepositoryMock.Object,
@@ -40,7 +46,8 @@ public class UserAppServiceTests
             _userRoleRepositoryMock.Object,
             _passwordHasherMock.Object,
             _passwordPolicyValidatorMock.Object,
-            _currentTenantMock.Object);
+            _currentTenantMock.Object,
+            _featureCheckerMock.Object);
     }
 
     [Fact]

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Identity;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Domain.Authorization;
+using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared.Attributes;
@@ -22,6 +23,7 @@ public class UserAppService : IUserAppService
     private readonly IPasswordHasher _passwordHasher;
     private readonly IPasswordPolicyValidator _passwordPolicyValidator;
     private readonly ICurrentTenant _currentTenant;
+    private readonly IFeatureChecker _featureChecker;
 
     public UserAppService(
         IUserRepository userRepository,
@@ -29,7 +31,8 @@ public class UserAppService : IUserAppService
         IUserRoleRepository userRoleRepository,
         IPasswordHasher passwordHasher,
         IPasswordPolicyValidator passwordPolicyValidator,
-        ICurrentTenant currentTenant)
+        ICurrentTenant currentTenant,
+        IFeatureChecker featureChecker)
     {
         _userRepository = userRepository;
         _roleRepository = roleRepository;
@@ -37,12 +40,18 @@ public class UserAppService : IUserAppService
         _passwordHasher = passwordHasher;
         _passwordPolicyValidator = passwordPolicyValidator;
         _currentTenant = currentTenant;
+        _featureChecker = featureChecker;
     }
 
     public async Task<IdentityUserDto> CreateAsync(
         CreateIdentityUserDto input,
         CancellationToken cancellationToken = default)
     {
+        if (!await _featureChecker.IsEnabledAsync("Identity.UserCreationEnabled", cancellationToken))
+        {
+            throw new InvalidOperationException("用户创建功能已禁用");
+        }
+
         var userName = NormalizeRequired(input.UserName, nameof(input.UserName));
         var email = NormalizeRequired(input.Email, nameof(input.Email));
         var tenantId = NormalizeRequired(input.TenantId, nameof(input.TenantId));

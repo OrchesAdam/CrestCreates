@@ -23,7 +23,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using CrestCreates.Application.Settings;
+using CrestCreates.Application.Features;
 using CrestCreates.OrmProviders.EFCore.Settings;
+using CrestCreates.OrmProviders.EFCore.Features;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseCrestSerilog();
@@ -49,6 +51,8 @@ builder.Services.AddPermissionManagement();
 builder.Services.AddSettingManagement();
 builder.Services.AddSettingManagementInfrastructure();
 builder.Services.AddSettingManagementEfCore();
+builder.Services.AddFeatureManagement();
+builder.Services.AddFeatureManagementEfCore();
 builder.Services.AddTenantManagement();
 builder.Services.AddTenantBootstrapper();
 builder.Services.AddTenantManagementCore();
@@ -69,6 +73,7 @@ builder.Services.AddCrestAspNetCoreDynamicApi(options =>
 {
     options.AddApplicationServiceAssembly<BookAppService>();
     options.AddApplicationServiceAssembly<SettingAppService>();
+    options.AddApplicationServiceAssembly<FeatureAppService>();
 });
 
 // Register all modules using the module discovery system
