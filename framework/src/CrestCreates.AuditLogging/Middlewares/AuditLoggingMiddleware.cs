@@ -12,7 +12,6 @@ using System.IO;
 using System.Linq;
 using System.Runtime.ExceptionServices;
 using System.Text;
-using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http.Extensions;
 
@@ -167,72 +166,31 @@ namespace CrestCreates.AuditLogging.Middlewares
             using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
             var raw = await reader.ReadToEndAsync();
             request.Body.Seek(0, SeekOrigin.Begin);
-            return TrimAndSanitize(raw, _options.MaxRequestBodyLength);
+            // Memory protection: cap at MaxRequestBodyLength; actual sanitization happens in IAuditLogRedactor
+            return Trim(raw, _options.MaxRequestBodyLength);
         }
 
         private async Task<string?> ReadAndTrimResponseBodyAsync(Stream responseBody)
         {
             using var reader = new StreamReader(responseBody, Encoding.UTF8, leaveOpen: true);
             var raw = await reader.ReadToEndAsync();
-            return TrimAndSanitize(raw, _options.MaxResponseBodyLength);
+            // Memory protection: cap at MaxResponseBodyLength; actual sanitization happens in IAuditLogRedactor
+            return Trim(raw, _options.MaxResponseBodyLength);
         }
 
-        private string? TrimAndSanitize(string? raw, int maxLength)
+        private string? Trim(string? raw, int maxLength)
         {
             if (string.IsNullOrWhiteSpace(raw))
             {
                 return raw;
             }
 
-            var sanitized = SanitizeJson(raw);
-            if (sanitized.Length <= maxLength)
-            {
-                return sanitized;
-            }
-
-            return sanitized[..maxLength] + "...";
-        }
-
-        private string SanitizeJson(string raw)
-        {
-            try
-            {
-                using var document = JsonDocument.Parse(raw);
-                var sanitized = SanitizeElement(document.RootElement);
-                return JsonSerializer.Serialize(sanitized);
-            }
-            catch (JsonException)
+            if (raw.Length <= maxLength)
             {
                 return raw;
             }
-        }
 
-        private object? SanitizeElement(JsonElement element)
-        {
-            return element.ValueKind switch
-            {
-                JsonValueKind.Object => element.EnumerateObject()
-                    .ToDictionary(
-                        property => property.Name,
-                        property => IsSensitive(property.Name)
-                            ? "***"
-                            : SanitizeElement(property.Value)),
-                JsonValueKind.Array => element.EnumerateArray()
-                    .Select(SanitizeElement)
-                    .ToList(),
-                JsonValueKind.String => element.GetString(),
-                JsonValueKind.Number => element.TryGetInt64(out var value) ? value : element.GetDecimal(),
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-                JsonValueKind.Null => null,
-                _ => element.ToString()
-            };
-        }
-
-        private bool IsSensitive(string propertyName)
-        {
-            return _options.SensitivePropertyNames.Any(sensitive =>
-                string.Equals(sensitive, propertyName, StringComparison.OrdinalIgnoreCase));
+            return raw[..maxLength] + "...";
         }
     }
 

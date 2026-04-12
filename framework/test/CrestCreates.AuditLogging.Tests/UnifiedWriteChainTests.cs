@@ -194,7 +194,10 @@ public class UnifiedWriteChainTests
             .ReturnsAsync((AuditLog a, CancellationToken _) => a);
 
         var auditLogService = new AuditLogService(mockRepository.Object);
-        var auditLogWriter = new AuditLogWriter(auditLogService, NullLogger<AuditLogWriter>.Instance);
+        var mockRedactor = new Mock<IAuditLogRedactor>();
+        mockRedactor.Setup(r => r.RedactAsync(It.IsAny<AuditContext>()))
+            .Returns(Task.CompletedTask);
+        var auditLogWriter = new AuditLogWriter(auditLogService, mockRedactor.Object, NullLogger<AuditLogWriter>.Instance);
 
         var context = new AuditContext
         {
@@ -290,6 +293,306 @@ public class UnifiedWriteChainTests
         auditLog.Status.Should().Be((int)AuditLogStatus.Failure);
         auditLog.ExceptionMessage.Should().Be("Something went wrong");
         auditLog.ExceptionStackTrace.Should().Contain("Test.cs");
+    }
+
+    [Fact]
+    public async Task Redactor_ShouldRedactPassword_InRequestBody()
+    {
+        // Given
+        var redactor = CreateRedactor();
+        var context = new AuditContext
+        {
+            ExecutionTime = DateTime.UtcNow,
+            StartTime = DateTime.UtcNow,
+            RequestBody = "{\"user\":\"alice\",\"password\":\"secret123\"}",
+            ExtraProperties = new Dictionary<string, object>()
+        };
+
+        // When
+        await redactor.RedactAsync(context);
+
+        // Then
+        context.RequestBody.Should().Contain("\"password\":\"***\"");
+        context.RequestBody.Should().Contain("\"user\":\"alice\"");
+        context.RequestBody.Should().NotContain("secret123");
+    }
+
+    [Fact]
+    public async Task Redactor_ShouldRedactToken_InParameters()
+    {
+        // Given
+        var redactor = CreateRedactor();
+        var context = new AuditContext
+        {
+            ExecutionTime = DateTime.UtcNow,
+            StartTime = DateTime.UtcNow,
+            Parameters = "{\"username\":\"bob\",\"token\":\"jwt-token-value\",\"data\":\"ok\"}",
+            ExtraProperties = new Dictionary<string, object>()
+        };
+
+        // When
+        await redactor.RedactAsync(context);
+
+        // Then
+        context.Parameters.Should().Contain("\"token\":\"***\"");
+        context.Parameters.Should().Contain("\"username\":\"bob\"");
+        context.Parameters.Should().Contain("\"data\":\"ok\"");
+        context.Parameters.Should().NotContain("jwt-token-value");
+    }
+
+    [Fact]
+    public async Task Redactor_ShouldRedactSecretAndConnectionString_InReturnValue()
+    {
+        // Given
+        var redactor = CreateRedactor();
+        var context = new AuditContext
+        {
+            ExecutionTime = DateTime.UtcNow,
+            StartTime = DateTime.UtcNow,
+            ReturnValue = "{\"result\":\"ok\",\"secret\":\"my-secret\",\"connectionString\":\"Server=db;\"}",
+            ExtraProperties = new Dictionary<string, object>()
+        };
+
+        // When
+        await redactor.RedactAsync(context);
+
+        // Then
+        context.ReturnValue.Should().Contain("\"secret\":\"***\"");
+        context.ReturnValue.Should().Contain("\"connectionString\":\"***\"");
+        context.ReturnValue.Should().Contain("\"result\":\"ok\"");
+        context.ReturnValue.Should().NotContain("my-secret");
+        context.ReturnValue.Should().NotContain("Server=db");
+    }
+
+    [Fact]
+    public async Task Redactor_ShouldRedactSensitiveKeys_InExtraProperties()
+    {
+        // Given
+        var redactor = CreateRedactor();
+        var context = new AuditContext
+        {
+            ExecutionTime = DateTime.UtcNow,
+            StartTime = DateTime.UtcNow,
+            ExtraProperties = new Dictionary<string, object>
+            {
+                { "userId", "123" },
+                { "password", "hashed-pwd" },
+                { "refreshToken", "rt-abc" },
+                { "secretKey", "sk-xyz" }
+            }
+        };
+
+        // When
+        await redactor.RedactAsync(context);
+
+        // Then
+        context.ExtraProperties["userId"].Should().Be("123");
+        context.ExtraProperties["password"].Should().Be("***");
+        context.ExtraProperties["refreshToken"].Should().Be("***");
+        context.ExtraProperties["secretKey"].Should().Be("***");
+    }
+
+    [Fact]
+    public async Task Redactor_ShouldNotModifyNonSensitiveFields()
+    {
+        // Given
+        var redactor = CreateRedactor();
+        var context = new AuditContext
+        {
+            ExecutionTime = DateTime.UtcNow,
+            StartTime = DateTime.UtcNow,
+            RequestBody = "{\"name\":\"book\",\"author\":\"author-name\"}",
+            ResponseBody = "{\"id\":1,\"title\":\"book-title\"}",
+            Parameters = "{\"title\":\"book\",\"author\":\"author\"}",
+            ReturnValue = "{\"id\":1,\"title\":\"returned\"}",
+            ExtraProperties = new Dictionary<string, object>
+            {
+                { "tenantId", "tenant-1" },
+                { "userId", "user-1" }
+            }
+        };
+
+        // When
+        await redactor.RedactAsync(context);
+
+        // Then
+        context.RequestBody.Should().Contain("\"name\":\"book\"");
+        context.RequestBody.Should().Contain("\"author\":\"author-name\"");
+        context.ResponseBody.Should().Contain("\"id\":1");
+        context.ResponseBody.Should().Contain("\"title\":\"book-title\"");
+        context.Parameters.Should().Contain("\"title\":\"book\"");
+        context.ReturnValue.Should().Contain("\"id\":1");
+        context.ExtraProperties["tenantId"].Should().Be("tenant-1");
+        context.ExtraProperties["userId"].Should().Be("user-1");
+    }
+
+    [Fact]
+    public async Task WriteChain_ShouldPersistRedactedAuditLog_NotRawData()
+    {
+        // Given
+        AuditLog? capturedAuditLog = null;
+        var mockRepository = new Mock<IRepository<AuditLog, Guid>>();
+        mockRepository.Setup(r => r.AddAsync(It.IsAny<AuditLog>(), It.IsAny<CancellationToken>()))
+            .Callback<AuditLog, CancellationToken>((a, _) => capturedAuditLog = a)
+            .ReturnsAsync((AuditLog a, CancellationToken _) => a);
+
+        var auditLogService = new AuditLogService(mockRepository.Object);
+        var redactor = new AuditLogRedactor(new OptionsWrapper<AuditLoggingOptions>(new AuditLoggingOptions()));
+        var auditLogWriter = new AuditLogWriter(auditLogService, redactor, NullLogger<AuditLogWriter>.Instance);
+
+        var context = new AuditContext
+        {
+            TraceId = "trace-789",
+            HttpMethod = HttpMethods.Post,
+            Url = "http://localhost/api/login",
+            ExecutionTime = DateTime.UtcNow,
+            StartTime = DateTime.UtcNow,
+            TenantId = "tenant-1",
+            HttpStatusCode = 200,
+            IsException = false,
+            // RequestBody/ResponseBody are captured in AuditContext but not mapped to AuditLog entity
+            // They are covered by redactor tests separately
+            Parameters = "{\"input\":\"data\",\"accessToken\":\"tok-123\"}",
+            ReturnValue = "{\"result\":\"ok\",\"secretKey\":\"sk-456\"}",
+            ExtraProperties = new Dictionary<string, object>
+            {
+                { "connectionString", "Server=localhost" },
+                { "normalField", "visible" }
+            }
+        };
+
+        // When
+        await auditLogWriter.WriteAsync(context);
+
+        // Then: Verify the AuditLog passed to repository is already redacted
+        capturedAuditLog.Should().NotBeNull();
+        capturedAuditLog!.Parameters.Should().Contain("\"accessToken\":\"***\"");
+        capturedAuditLog.Parameters.Should().NotContain("tok-123");
+        capturedAuditLog.ReturnValue.Should().Contain("\"secretKey\":\"***\"");
+        capturedAuditLog.ReturnValue.Should().NotContain("sk-456");
+        capturedAuditLog.ExtraProperties.Should().ContainKey("connectionString");
+        // ExtraProperties is Dictionary<string, object>; string values deserialize as JsonElement in EF Core
+        var connValue = capturedAuditLog.ExtraProperties["connectionString"];
+        connValue.ToString().Should().Be("***");
+        var normalValue = capturedAuditLog.ExtraProperties["normalField"];
+        normalValue.ToString().Should().Be("visible");
+    }
+
+    [Fact]
+    public async Task Redactor_ShouldRedactNewPassword_AndCurrentPassword()
+    {
+        // Given
+        var redactor = CreateRedactor();
+        var context = new AuditContext
+        {
+            ExecutionTime = DateTime.UtcNow,
+            StartTime = DateTime.UtcNow,
+            RequestBody = "{\"currentPassword\":\"old\",\"newPassword\":\"new-secret\"}",
+            ExtraProperties = new Dictionary<string, object>()
+        };
+
+        // When
+        await redactor.RedactAsync(context);
+
+        // Then
+        context.RequestBody.Should().Contain("\"currentPassword\":\"***\"");
+        context.RequestBody.Should().Contain("\"newPassword\":\"***\"");
+        context.RequestBody.Should().NotContain("old");
+        context.RequestBody.Should().NotContain("new-secret");
+    }
+
+    [Fact]
+    public async Task Redactor_ShouldRedactSensitiveKeys_InExceptionMessage()
+    {
+        // Given
+        var redactor = CreateRedactor();
+        var context = new AuditContext
+        {
+            ExecutionTime = DateTime.UtcNow,
+            StartTime = DateTime.UtcNow,
+            IsException = true,
+            ExceptionMessage = "Login failed for user \"alice\" with password=\"Secret123\" and token=\"tok-abc\"",
+            ExtraProperties = new Dictionary<string, object>()
+        };
+
+        // When
+        await redactor.RedactAsync(context);
+
+        // Then
+        context.ExceptionMessage.Should().Contain("***");
+        context.ExceptionMessage.Should().NotContain("Secret123");
+        context.ExceptionMessage.Should().NotContain("tok-abc");
+        context.ExceptionMessage.Should().Contain("alice");
+    }
+
+    [Fact]
+    public async Task Redactor_ShouldRedactSensitiveKeys_InExceptionStackTrace()
+    {
+        // Given
+        var redactor = CreateRedactor();
+        var context = new AuditContext
+        {
+            ExecutionTime = DateTime.UtcNow,
+            StartTime = DateTime.UtcNow,
+            IsException = true,
+            ExceptionStackTrace = @"at LoginService.Authenticate(String username, String password, String token) in /src/Service.cs:line 42
+caused by: password=""supersecret\"", token=""tok-xyz""",
+            ExtraProperties = new Dictionary<string, object>()
+        };
+
+        // When
+        await redactor.RedactAsync(context);
+
+        // Then
+        context.ExceptionStackTrace.Should().Contain("***");
+        context.ExceptionStackTrace.Should().NotContain("supersecret");
+        context.ExceptionStackTrace.Should().NotContain("tok-xyz");
+    }
+
+    [Fact]
+    public async Task WriteChain_ShouldPersistRedactedExceptionContext()
+    {
+        // Given
+        AuditLog? capturedAuditLog = null;
+        var mockRepository = new Mock<IRepository<AuditLog, Guid>>();
+        mockRepository.Setup(r => r.AddAsync(It.IsAny<AuditLog>(), It.IsAny<CancellationToken>()))
+            .Callback<AuditLog, CancellationToken>((a, _) => capturedAuditLog = a)
+            .ReturnsAsync((AuditLog a, CancellationToken _) => a);
+
+        var auditLogService = new AuditLogService(mockRepository.Object);
+        var redactor = new AuditLogRedactor(new OptionsWrapper<AuditLoggingOptions>(new AuditLoggingOptions()));
+        var auditLogWriter = new AuditLogWriter(auditLogService, redactor, NullLogger<AuditLogWriter>.Instance);
+
+        var context = new AuditContext
+        {
+            TraceId = "trace-exc-001",
+            HttpMethod = HttpMethods.Post,
+            Url = "http://localhost/api/login",
+            ExecutionTime = DateTime.UtcNow,
+            StartTime = DateTime.UtcNow,
+            TenantId = "tenant-1",
+            HttpStatusCode = 500,
+            IsException = true,
+            ExceptionMessage = "Auth failed for password=\"P@ssw0rd\" and refreshToken=\"rt-999\"",
+            ExceptionStackTrace = "at Login(password=\"P@ssw0rd\") in /src/Service.cs:line 10",
+            ExtraProperties = new Dictionary<string, object>()
+        };
+
+        // When
+        await auditLogWriter.WriteAsync(context);
+
+        // Then: Verify the AuditLog passed to repository has redacted exception context
+        capturedAuditLog.Should().NotBeNull();
+        capturedAuditLog!.ExceptionMessage.Should().Contain("***");
+        capturedAuditLog.ExceptionMessage.Should().NotContain("P@ssw0rd");
+        capturedAuditLog.ExceptionMessage.Should().NotContain("rt-999");
+        capturedAuditLog.ExceptionStackTrace.Should().Contain("***");
+        capturedAuditLog.ExceptionStackTrace.Should().NotContain("P@ssw0rd");
+    }
+
+    private static AuditLogRedactor CreateRedactor()
+    {
+        return new AuditLogRedactor(new OptionsWrapper<AuditLoggingOptions>(new AuditLoggingOptions()));
     }
 
     // Helper to throw exception from a named method - verifies stack trace preservation

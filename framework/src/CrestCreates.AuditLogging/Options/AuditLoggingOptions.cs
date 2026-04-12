@@ -24,14 +24,21 @@ public class AuditLoggingOptions
 
     public List<string> IgnoredUrls { get; set; } = new();
 
+    /// <summary>
+    /// 敏感属性名列表（不区分大小写匹配）
+    /// </summary>
     public List<string> SensitivePropertyNames { get; set; } = new()
     {
         "password",
+        "newPassword",
+        "currentPassword",
         "pwd",
         "token",
-        "access_token",
-        "refresh_token",
+        "refreshToken",
+        "accessToken",
         "secret",
+        "secretKey",
+        "connectionString",
         "client_secret"
     };
 }

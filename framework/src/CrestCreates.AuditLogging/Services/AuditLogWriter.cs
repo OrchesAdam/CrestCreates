@@ -11,18 +11,24 @@ namespace CrestCreates.AuditLogging.Services
     public class AuditLogWriter : IAuditLogWriter
     {
         private readonly IAuditLogService _auditLogService;
+        private readonly IAuditLogRedactor _redactor;
         private readonly ILogger<AuditLogWriter> _logger;
 
         public AuditLogWriter(
             IAuditLogService auditLogService,
+            IAuditLogRedactor redactor,
             ILogger<AuditLogWriter> logger)
         {
             _auditLogService = auditLogService;
+            _redactor = redactor;
             _logger = logger;
         }
 
         public async Task WriteAsync(AuditContext context)
         {
+            // 统一脱敏：在落库前对所有敏感字段进行脱敏处理
+            await _redactor.RedactAsync(context);
+
             try
             {
                 var auditLog = context.ToAuditLog();

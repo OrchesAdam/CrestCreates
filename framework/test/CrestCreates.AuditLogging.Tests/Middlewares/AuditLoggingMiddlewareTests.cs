@@ -62,8 +62,9 @@ public class AuditLoggingMiddlewareTests
     }
 
     [Fact]
-    public async Task InvokeAsync_ShouldSanitizeSensitiveData_InRequestBody()
+    public async Task InvokeAsync_ShouldCaptureRawRequestBody_ThenWriterRedacts()
     {
+        // Middleware should capture raw (unredacted) body; redaction is the writer's responsibility
         AuditContext? capturedContext = null;
         var mockWriter = new Mock<IAuditLogWriter>();
         mockWriter.Setup(w => w.WriteAsync(It.IsAny<AuditContext>()))
@@ -84,9 +85,12 @@ public class AuditLoggingMiddlewareTests
 
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
 
+        // Middleware captures raw body (no redaction at middleware level)
         capturedContext.Should().NotBeNull();
-        capturedContext!.RequestBody.Should().Contain("\"password\":\"***\"");
+        capturedContext!.RequestBody.Should().Contain("\"password\":\"secret\"");
         capturedContext.RequestBody.Should().Contain("\"user\":\"alice\"");
+        // Verify writer received the context (redaction happens inside writer)
+        mockWriter.Verify(w => w.WriteAsync(It.IsAny<AuditContext>()), Times.Once);
     }
 
     [Fact]
