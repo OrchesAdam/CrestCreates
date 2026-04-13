@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\framework\src\CrestCreates.AspNetCore\CrestCreates.AspNetCore.csproj" />
-    <ProjectReference Include="..\..\..\framework\src\CrestCreates.AspNetCore.Authentication.JwtBearer\CrestCreates.AspNetCore.Authentication.JwtBearer.csproj" />
+    <ProjectReference Include="..\..\..\framework\src\CrestCreates.AspNetCore.Authentication.OpenIddict\CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
     <ProjectReference Include="..\..\..\framework\src\CrestCreates.Application\CrestCreates.Application.csproj" />
     <ProjectReference Include="..\..\..\framework\src\CrestCreates.Authorization\CrestCreates.Authorization.csproj" />
     <ProjectReference Include="..\..\..\framework\src\CrestCreates.Logging\CrestCreates.Logging.csproj" />

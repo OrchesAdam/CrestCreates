@@ -8,7 +8,7 @@ using CrestCreates.Domain.DomainEvents;
 using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.AspNetCore;
-using CrestCreates.AspNetCore.Authentication.JwtBearer;
+using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.Authorization;
 using CrestCreates.Infrastructure.Authorization;
 using CrestCreates.Infrastructure.Settings;
@@ -44,7 +44,15 @@ builder.Services.AddSwaggerGen(options =>
 {
     options.CustomSchemaIds(CrestCreates.DynamicApi.DynamicApiSwaggerSchemaIdHelper.GetSchemaId);
 });
-builder.Services.AddJwtBearerAuthentication(builder.Configuration);
+builder.Services.AddOpenIddictServer(options =>
+{
+    options.EnablePasswordFlow = true;
+    options.EnableClientCredentialsFlow = true;
+    options.EnableRefreshTokenFlow = true;
+    options.AccessTokenLifetimeMinutes = 60;
+    options.RefreshTokenLifetimeDays = 14;
+});
+builder.Services.AddOpenIddictAuthentication();
 builder.Services.AddDataFilterServices();
 builder.Services.AddCrestAuthorization();
 builder.Services.AddCrestIdentityAuthentication(builder.Configuration);
