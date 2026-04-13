@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -56,23 +57,20 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         var adminEmail = $"admin@{tenantName.ToLowerInvariant()}.local";
 
         var tenantClient = CreateTenantClient(tenantId);
-        var loginResult = await LoginAsync(tenantClient, defaultAdminUserName, defaultAdminPassword, tenantId);
+        var loginResult = await LoginAsync(tenantClient, defaultAdminUserName, defaultAdminPassword);
 
-        loginResult.Token.AccessToken.Should().NotBeNullOrWhiteSpace();
-        loginResult.Token.RefreshToken.Should().NotBeNullOrWhiteSpace();
-        loginResult.User.UserName.Should().Be(defaultAdminUserName);
-        loginResult.User.Email.Should().Be(adminEmail);
-        loginResult.User.TenantId.Should().Be(tenantId);
-        loginResult.User.IsSuperAdmin.Should().BeTrue();
+        loginResult.AccessToken.Should().NotBeNullOrWhiteSpace();
+        loginResult.RefreshToken.Should().NotBeNullOrWhiteSpace();
 
         tenantClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
-            "Bearer", loginResult.Token.AccessToken);
+            "Bearer", loginResult.AccessToken);
 
-        var meResponse = await tenantClient.GetAsync("/api/auth/me");
+        var meResponse = await tenantClient.GetAsync("/connect/userinfo");
         meResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var currentUser = await ReadJsonAsync<UserInfoResponse>(meResponse);
         currentUser.UserName.Should().Be(defaultAdminUserName);
+        currentUser.Email.Should().Be(adminEmail);
         currentUser.TenantId.Should().Be(tenantId);
         currentUser.IsSuperAdmin.Should().BeTrue();
     }
@@ -103,9 +101,9 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         tenantClient.DefaultRequestHeaders.Add("X-Tenant-Id", tenantId);
 
         tenantClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
-            "Bearer", loginResult.Token.AccessToken);
+            "Bearer", loginResult.AccessToken);
 
-        var meResponse = await tenantClient.GetAsync("/api/auth/me");
+        var meResponse = await tenantClient.GetAsync("/connect/userinfo");
         meResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var currentUser = await ReadJsonAsync<UserInfoResponse>(meResponse);
@@ -147,9 +145,9 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         tenant1Client.DefaultRequestHeaders.Remove("X-Tenant-Id");
         tenant1Client.DefaultRequestHeaders.Add("X-Tenant-Id", tenant2Id);
         tenant1Client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
-            "Bearer", loginResult.Token.AccessToken);
+            "Bearer", loginResult.AccessToken);
 
-        var meResponse = await tenant1Client.GetAsync("/api/auth/me");
+        var meResponse = await tenant1Client.GetAsync("/connect/userinfo");
         meResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
@@ -166,35 +164,36 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         return client;
     }
 
-    private async Task<(HttpClient Client, LoginResultResponse LoginResult)> CreateAuthenticatedClientAsync(
+    private async Task<(HttpClient Client, TokenResponse LoginResult)> CreateAuthenticatedClientAsync(
         string userName,
         string password,
         string tenantId)
     {
         var client = CreateTenantClient(tenantId);
-        var loginResult = await LoginAsync(client, userName, password, tenantId);
+        var loginResult = await LoginAsync(client, userName, password);
         client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
-            "Bearer", loginResult.Token.AccessToken);
+            "Bearer", loginResult.AccessToken);
         return (client, loginResult);
     }
 
-    private async Task<LoginResultResponse> LoginAsync(
+    private async Task<TokenResponse> LoginAsync(
         HttpClient client,
         string userName,
-        string password,
-        string tenantId)
+        string password)
     {
-        var response = await client.PostAsJsonAsync("/api/auth/login", new
+        var formContent = new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            userName,
-            password,
-            tenantId
+            ["grant_type"] = "password",
+            ["username"] = userName,
+            ["password"] = password,
+            ["scope"] = "openid profile email"
         });
+        var response = await client.PostAsync("/connect/token", formContent);
 
         response.StatusCode.Should().Be(
             HttpStatusCode.OK,
             await response.Content.ReadAsStringAsync());
-        return await ReadJsonAsync<LoginResultResponse>(response);
+        return await ReadJsonAsync<TokenResponse>(response);
     }
 
     private static async Task<T> ReadJsonAsync<T>(HttpResponseMessage response)
@@ -202,12 +201,6 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         var result = await response.Content.ReadFromJsonAsync<T>(JsonSerializerOptions);
         result.Should().NotBeNull();
         return result!;
-    }
-
-    private sealed class LoginResultResponse
-    {
-        public TokenResponse Token { get; set; } = new();
-        public UserInfoResponse User { get; set; } = new();
     }
 
     private sealed class TokenResponse

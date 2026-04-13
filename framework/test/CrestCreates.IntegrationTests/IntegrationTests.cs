@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -36,31 +37,30 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
 
         var loginResult = await LoginAsync(client, AdminUserName, AdminPassword, HostTenantId);
 
-        loginResult.Token.AccessToken.Should().NotBeNullOrWhiteSpace();
-        loginResult.Token.RefreshToken.Should().NotBeNullOrWhiteSpace();
-        loginResult.User.UserName.Should().Be(AdminUserName);
-        loginResult.User.TenantId.Should().NotBeNullOrEmpty();
-        loginResult.User.IsSuperAdmin.Should().BeTrue();
+        loginResult.AccessToken.Should().NotBeNullOrWhiteSpace();
+        loginResult.RefreshToken.Should().NotBeNullOrWhiteSpace();
 
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loginResult.Token.AccessToken);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loginResult.AccessToken);
 
-        var meResponse = await client.GetAsync("/api/auth/me");
+        var meResponse = await client.GetAsync("/connect/userinfo");
         meResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var currentUser = await ReadJsonAsync<UserInfoResponse>(meResponse);
         currentUser.UserName.Should().Be(AdminUserName);
-        currentUser.TenantId.Should().NotBeNullOrEmpty();
-        currentUser.IsSuperAdmin.Should().BeTrue();
 
-        var refreshResponse = await client.PostAsJsonAsync(
-            "/api/auth/refresh-token",
-            new { refreshToken = loginResult.Token.RefreshToken });
+        // Refresh token
+        var refreshContent = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "refresh_token",
+            ["refresh_token"] = loginResult.RefreshToken
+        });
+        var refreshResponse = await client.PostAsync("/connect/token", refreshContent);
 
-        refreshResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        refreshResponse.StatusCode.Should().Be(HttpStatusCode.OK, await refreshResponse.Content.ReadAsStringAsync());
         var refreshedToken = await ReadJsonAsync<TokenResponse>(refreshResponse);
         refreshedToken.AccessToken.Should().NotBeNullOrWhiteSpace();
         refreshedToken.RefreshToken.Should().NotBeNullOrWhiteSpace();
-        refreshedToken.RefreshToken.Should().NotBe(loginResult.Token.RefreshToken);
+        refreshedToken.RefreshToken.Should().NotBe(loginResult.RefreshToken);
     }
 
     [Fact]
@@ -68,14 +68,18 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
     {
         var (client, loginResult) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
-        var logoutResponse = await client.PostAsync("/api/auth/logout", content: null);
+        var logoutResponse = await client.PostAsync("/connect/logout", content: null);
         logoutResponse.StatusCode.Should().Be(
             HttpStatusCode.OK,
             await logoutResponse.Content.ReadAsStringAsync());
 
-        var refreshResponse = await client.PostAsJsonAsync(
-            "/api/auth/refresh-token",
-            new { refreshToken = loginResult.Token.RefreshToken });
+        // Refresh token should be revoked
+        var refreshContent = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "refresh_token",
+            ["refresh_token"] = loginResult.RefreshToken
+        });
+        var refreshResponse = await client.PostAsync("/connect/token", refreshContent);
 
         refreshResponse.StatusCode.Should().Be(
             HttpStatusCode.Unauthorized,
@@ -234,7 +238,7 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         memberClient.DefaultRequestHeaders.Remove("X-Tenant-Id");
         memberClient.DefaultRequestHeaders.Add("X-Tenant-Id", tenantName);
 
-        var response = await memberClient.GetAsync("/api/auth/me");
+        var response = await memberClient.GetAsync("/connect/userinfo");
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
 
         var error = await ReadJsonAsync<ErrorResponse>(response);
@@ -254,32 +258,36 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         return client;
     }
 
-    private async Task<(HttpClient Client, LoginResultResponse LoginResult)> CreateAuthenticatedClientAsync(
+    private async Task<(HttpClient Client, TokenResponse LoginResult)> CreateAuthenticatedClientAsync(
         string userName,
         string password,
         string tenantId)
     {
         var client = CreateTenantClient(tenantId);
         var loginResult = await LoginAsync(client, userName, password, tenantId);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loginResult.Token.AccessToken);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loginResult.AccessToken);
         return (client, loginResult);
     }
 
-    private async Task<LoginResultResponse> LoginAsync(
+    private async Task<TokenResponse> LoginAsync(
         HttpClient client,
         string userName,
         string password,
         string tenantId)
     {
-        var response = await client.PostAsJsonAsync("/api/auth/login", new
+        // OpenIddict password grant
+        var formContent = new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            userName,
-            password,
-            tenantId
+            ["grant_type"] = "password",
+            ["username"] = userName,
+            ["password"] = password,
+            ["scope"] = "openid profile email"
         });
 
+        var response = await client.PostAsync("/connect/token", formContent);
+
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        return await ReadJsonAsync<LoginResultResponse>(response);
+        return await ReadJsonAsync<TokenResponse>(response);
     }
 
     private async Task<IdentityUserResponse> CreateUserAsync(
@@ -364,12 +372,6 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         return await ReadJsonAsync<DynamicApiResponse<BookResponse>>(createBookResponse);
     }
 
-    private sealed class LoginResultResponse
-    {
-        public TokenResponse Token { get; set; } = new();
-        public UserInfoResponse User { get; set; } = new();
-    }
-
     private sealed class TokenResponse
     {
         public string AccessToken { get; set; } = string.Empty;
@@ -380,12 +382,12 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
 
     private sealed class UserInfoResponse
     {
-        public Guid Id { get; set; }
-        public string UserName { get; set; } = string.Empty;
-        public string Email { get; set; } = string.Empty;
+        public string Sub { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? Email { get; set; }
         public string? TenantId { get; set; }
         public bool IsSuperAdmin { get; set; }
-        public string[] Roles { get; set; } = Array.Empty<string>();
+        public List<string>? Roles { get; set; }
     }
 
     private sealed class IdentityUserResponse

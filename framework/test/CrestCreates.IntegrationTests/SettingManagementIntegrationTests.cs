@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -146,32 +147,33 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
         return client;
     }
 
-    private async Task<(HttpClient Client, LoginResultResponse LoginResult)> CreateAuthenticatedClientAsync(
+    private async Task<(HttpClient Client, TokenResponse LoginResult)> CreateAuthenticatedClientAsync(
         string userName,
         string password,
         string tenantId)
     {
         var client = CreateTenantClient(tenantId);
-        var loginResult = await LoginAsync(client, userName, password, tenantId);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loginResult.Token.AccessToken);
+        var loginResult = await LoginAsync(client, userName, password);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loginResult.AccessToken);
         return (client, loginResult);
     }
 
-    private async Task<LoginResultResponse> LoginAsync(
+    private async Task<TokenResponse> LoginAsync(
         HttpClient client,
         string userName,
-        string password,
-        string tenantId)
+        string password)
     {
-        var response = await client.PostAsJsonAsync("/api/auth/login", new
+        var formContent = new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            userName,
-            password,
-            tenantId
+            ["grant_type"] = "password",
+            ["username"] = userName,
+            ["password"] = password,
+            ["scope"] = "openid profile email"
         });
+        var response = await client.PostAsync("/connect/token", formContent);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        return await ReadJsonAsync<LoginResultResponse>(response);
+        return await ReadJsonAsync<TokenResponse>(response);
     }
 
     private static async Task<T> ReadJsonAsync<T>(HttpResponseMessage response)
@@ -179,12 +181,6 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
         var result = await response.Content.ReadFromJsonAsync<T>(JsonSerializerOptions);
         result.Should().NotBeNull();
         return result!;
-    }
-
-    private sealed class LoginResultResponse
-    {
-        public TokenResponse Token { get; set; } = new();
-        public UserInfoResponse User { get; set; } = new();
     }
 
     private sealed class TokenResponse
