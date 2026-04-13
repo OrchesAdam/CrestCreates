@@ -68,6 +68,7 @@ public static class OpenIddictServiceCollectionExtensions
         services.AddHttpContextAccessor();
         services.TryAddScoped<IIdentitySecurityLogService, IdentitySecurityLogService>();
         services.TryAddScoped<IPasswordGrantHandler, PasswordGrantHandler>();
+        services.TryAddScoped<IRefreshTokenGrantHandler, RefreshTokenGrantHandler>();
 
         return services;
     }

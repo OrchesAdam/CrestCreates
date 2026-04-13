@@ -23,17 +23,20 @@ public class OpenIddictController : ControllerBase
     private readonly IOpenIddictAuthorizationManager _authorizationManager;
     private readonly IOpenIddictScopeManager _scopeManager;
     private readonly IPasswordGrantHandler _passwordGrantHandler;
+    private readonly IRefreshTokenGrantHandler _refreshTokenGrantHandler;
 
     public OpenIddictController(
         IOpenIddictApplicationManager applicationManager,
         IOpenIddictAuthorizationManager authorizationManager,
         IOpenIddictScopeManager scopeManager,
-        IPasswordGrantHandler passwordGrantHandler)
+        IPasswordGrantHandler passwordGrantHandler,
+        IRefreshTokenGrantHandler refreshTokenGrantHandler)
     {
         _applicationManager = applicationManager;
         _authorizationManager = authorizationManager;
         _scopeManager = scopeManager;
         _passwordGrantHandler = passwordGrantHandler;
+        _refreshTokenGrantHandler = refreshTokenGrantHandler;
     }
 
     [HttpGet("authorize")]
@@ -215,7 +218,21 @@ public class OpenIddictController : ControllerBase
     {
         var info = await HttpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 
-        return SignIn(info.Principal!, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+        var result = await _refreshTokenGrantHandler.HandleAsync(
+            info.Principal!,
+            HttpContext.RequestAborted);
+
+        if (!result.IsSuccess)
+        {
+            var properties = new AuthenticationProperties(new Dictionary<string, string?>
+            {
+                [OpenIddictServerAspNetCoreConstants.Properties.Error] = Errors.InvalidGrant,
+                [OpenIddictServerAspNetCoreConstants.Properties.ErrorDescription] = result.ErrorDescription
+            });
+            return Forbid(properties, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+        }
+
+        return SignIn(result.Principal!, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }
 
     private async Task<IActionResult> HandleAuthorizationCodeGrantAsync()
