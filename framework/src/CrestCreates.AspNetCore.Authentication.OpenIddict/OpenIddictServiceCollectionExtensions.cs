@@ -1,6 +1,9 @@
 using System;
+using CrestCreates.AspNetCore.Authentication.OpenIddict.Handlers;
+using CrestCreates.AspNetCore.Authentication.OpenIddict.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using OpenIddict.Validation.AspNetCore;
 
 namespace CrestCreates.AspNetCore.Authentication.OpenIddict;
@@ -61,6 +64,10 @@ public static class OpenIddictServiceCollectionExtensions
                 validationOptions.UseAspNetCore();
                 validationOptions.UseLocalServer();
             });
+
+        services.AddHttpContextAccessor();
+        services.TryAddScoped<IIdentitySecurityLogService, IdentitySecurityLogService>();
+        services.TryAddScoped<IPasswordGrantHandler, PasswordGrantHandler>();
 
         return services;
     }

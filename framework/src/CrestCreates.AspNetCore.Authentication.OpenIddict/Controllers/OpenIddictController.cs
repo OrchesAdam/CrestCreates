@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using CrestCreates.AspNetCore.Authentication.OpenIddict.Handlers;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
@@ -21,15 +22,18 @@ public class OpenIddictController : ControllerBase
     private readonly IOpenIddictApplicationManager _applicationManager;
     private readonly IOpenIddictAuthorizationManager _authorizationManager;
     private readonly IOpenIddictScopeManager _scopeManager;
+    private readonly IPasswordGrantHandler _passwordGrantHandler;
 
     public OpenIddictController(
         IOpenIddictApplicationManager applicationManager,
         IOpenIddictAuthorizationManager authorizationManager,
-        IOpenIddictScopeManager scopeManager)
+        IOpenIddictScopeManager scopeManager,
+        IPasswordGrantHandler passwordGrantHandler)
     {
         _applicationManager = applicationManager;
         _authorizationManager = authorizationManager;
         _scopeManager = scopeManager;
+        _passwordGrantHandler = passwordGrantHandler;
     }
 
     [HttpGet("authorize")]
@@ -141,14 +145,44 @@ public class OpenIddictController : ControllerBase
 
     private async Task<IActionResult> HandlePasswordGrantAsync(OpenIddictRequest request)
     {
-        var application = await _applicationManager.FindByClientIdAsync(request.ClientId!) ??
-            throw new InvalidOperationException("The client application cannot be found.");
+        var result = await _passwordGrantHandler.HandleAsync(
+            request.Username!,
+            request.Password!,
+            HttpContext.RequestAborted);
 
+        if (!result.IsSuccess)
+        {
+            var properties = new AuthenticationProperties(new Dictionary<string, string?>
+            {
+                [OpenIddictServerAspNetCoreConstants.Properties.Error] = Errors.InvalidGrant,
+                [OpenIddictServerAspNetCoreConstants.Properties.ErrorDescription] = result.ErrorDescription
+            });
+            return Forbid(properties, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+        }
+
+        // 构建 Token 内嵌 claims：tenant_id、is_super_admin、roles（不含 permission）
         var claims = new List<Claim>
         {
-            new Claim(Claims.Subject, request.Username!),
-            new Claim(Claims.Name, request.Username!)
+            new Claim(Claims.Subject, result.UserId.ToString()),
+            new Claim(Claims.Name, result.UserName)
         };
+
+        if (!string.IsNullOrEmpty(result.TenantId))
+        {
+            claims.Add(new Claim("tenant_id", result.TenantId));
+        }
+
+        if (!string.IsNullOrEmpty(result.OrganizationId))
+        {
+            claims.Add(new Claim("org_id", result.OrganizationId));
+        }
+
+        claims.Add(new Claim("is_super_admin", result.IsSuperAdmin ? "true" : "false"));
+
+        foreach (var role in result.Roles)
+        {
+            claims.Add(new Claim(Claims.Role, role));
+        }
 
         var identity = new ClaimsIdentity(claims, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         var principal = new ClaimsPrincipal(identity);
