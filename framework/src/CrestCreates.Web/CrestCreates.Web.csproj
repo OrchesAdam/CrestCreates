@@ -13,7 +13,7 @@
     <ProjectReference Include="..\CrestCreates.Application\CrestCreates.Application.csproj" />
     <ProjectReference Include="..\CrestCreates.Application.Contracts\CrestCreates.Application.Contracts.csproj" />
     <ProjectReference Include="..\CrestCreates.AspNetCore\CrestCreates.AspNetCore.csproj" />
-    <ProjectReference Include="..\CrestCreates.AspNetCore.Authentication.JwtBearer\CrestCreates.AspNetCore.Authentication.JwtBearer.csproj" />
+    <ProjectReference Include="..\CrestCreates.AspNetCore.Authentication.OpenIddict\CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
     <ProjectReference Include="..\CrestCreates.Authorization\CrestCreates.Authorization.csproj" />
     <ProjectReference Include="..\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
     <ProjectReference Include="..\CrestCreates.Logging\CrestCreates.Logging.csproj" />
@@ -40,7 +40,6 @@
   <ItemGroup>
     <PackageReference Include="DependencyInjection.StaticAccessor.Hosting" />
     <PackageReference Include="Swashbuckle.AspNetCore" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
-  </ItemGroup>
+      </ItemGroup>
 
 </Project>

@@ -10,7 +10,7 @@ using CrestCreates.Application.Identity;
 using CrestCreates.Application.Permissions;
 using CrestCreates.Application.Tenants;
 using CrestCreates.Authorization;
-using CrestCreates.AspNetCore.Authentication.JwtBearer;
+using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.Infrastructure.Authorization;
 using CrestCreates.Infrastructure.Localization;
 using CrestCreates.Infrastructure.Permission;
@@ -69,7 +69,16 @@ namespace CrestCreates.Web
                 c.SwaggerDoc("v1", new Microsoft.OpenApi.OpenApiInfo { Title = "CrestCreates API", Version = "v1" });
                 c.CustomSchemaIds(CrestCreates.DynamicApi.DynamicApiSwaggerSchemaIdHelper.GetSchemaId);
             });
-            services.AddJwtBearerAuthentication(Configuration);
+
+            services.AddOpenIddictServer(options =>
+            {
+                options.EnablePasswordFlow = true;
+                options.EnableClientCredentialsFlow = true;
+                options.EnableRefreshTokenFlow = true;
+                options.AccessTokenLifetimeMinutes = 60;
+                options.RefreshTokenLifetimeDays = 14;
+            });
+            services.AddOpenIddictAuthentication();
 
             services.AddDbContext<CrestCreatesDbContext>((serviceProvider, options) =>
             {
