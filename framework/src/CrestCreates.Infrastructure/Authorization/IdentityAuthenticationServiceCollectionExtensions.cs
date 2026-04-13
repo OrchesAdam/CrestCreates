@@ -20,8 +20,7 @@ public static class IdentityAuthenticationServiceCollectionExtensions
         services.TryAddScoped<IPasswordHasher, PasswordHasher>();
         services.TryAddScoped<IPasswordPolicyValidator, PasswordPolicyValidator>();
         services.TryAddScoped<IIdentityClaimsBuilder, IdentityClaimsBuilder>();
-        services.TryAddScoped<IAuthService, AuthService>();
-
+        
         return services;
     }
 }
