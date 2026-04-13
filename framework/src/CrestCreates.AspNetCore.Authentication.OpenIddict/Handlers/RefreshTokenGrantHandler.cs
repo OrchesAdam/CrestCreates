@@ -31,16 +31,16 @@ public sealed class RefreshTokenGrantResult
         new() { IsSuccess = true, Principal = principal };
 }
 
-internal sealed class RefreshTokenGrantHandler : IRefreshTokenGrantHandler
+public sealed class RefreshTokenGrantHandlerImpl : IRefreshTokenGrantHandler
 {
     private readonly IUserRepository _userRepository;
     private readonly IIdentitySecurityLogService _securityLogService;
-    private readonly ILogger<RefreshTokenGrantHandler> _logger;
+    private readonly ILogger<RefreshTokenGrantHandlerImpl> _logger;
 
-    public RefreshTokenGrantHandler(
+    public RefreshTokenGrantHandlerImpl(
         IUserRepository userRepository,
         IIdentitySecurityLogService securityLogService,
-        ILogger<RefreshTokenGrantHandler> logger)
+        ILogger<RefreshTokenGrantHandlerImpl> logger)
     {
         _userRepository = userRepository;
         _securityLogService = securityLogService;

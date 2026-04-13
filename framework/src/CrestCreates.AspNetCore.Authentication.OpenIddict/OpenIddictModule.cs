@@ -1,3 +1,4 @@
+using CrestCreates.Domain.OpenIddict;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,7 +14,13 @@ public class OpenIddictModule : ModuleBase
             .AddCore(options =>
             {
                 options.UseEntityFrameworkCore()
-                    .UseDbContext<ApplicationDbContext>();
+                    .UseDbContext<OpenIddictDbContext>()
+                    .ReplaceDefaultEntities<
+                        OpenIddictApplication,
+                        OpenIddictAuthorization,
+                        OpenIddictScope,
+                        OpenIddictToken,
+                        long>();
             })
             .AddServer(options =>
             {
@@ -29,20 +36,5 @@ public class OpenIddictModule : ModuleBase
                 options.UseLocalServer();
                 options.UseAspNetCore();
             });
-    }
-
-    public class ApplicationDbContext : Microsoft.EntityFrameworkCore.DbContext
-    {
-        public ApplicationDbContext(Microsoft.EntityFrameworkCore.DbContextOptions options) : base(options)
-        {}
-
-        protected override void OnModelCreating(Microsoft.EntityFrameworkCore.ModelBuilder builder)
-        {
-            base.OnModelCreating(builder);
-            builder.Entity<CrestCreates.Domain.OpenIddict.OpenIddictApplication>();
-            builder.Entity<CrestCreates.Domain.OpenIddict.OpenIddictAuthorization>();
-            builder.Entity<CrestCreates.Domain.OpenIddict.OpenIddictScope>();
-            builder.Entity<CrestCreates.Domain.OpenIddict.OpenIddictToken>();
-        }
     }
 }

@@ -46,7 +46,7 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         meResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var currentUser = await ReadJsonAsync<UserInfoResponse>(meResponse);
-        currentUser.UserName.Should().Be(AdminUserName);
+        currentUser.Name.Should().Be(AdminUserName);
 
         // Refresh token
         var refreshContent = new FormUrlEncodedContent(new Dictionary<string, string>

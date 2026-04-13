@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -281,10 +282,6 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
         var result = await response.Content.ReadFromJsonAsync<T>(JsonSerializerOptions);
         result.Should().NotBeNull();
         return result!;
-    }
-
-    private sealed class TokenResponse Token { get; set; } = new();
-        public UserInfoResponse User { get; set; } = new();
     }
 
     private sealed class TokenResponse

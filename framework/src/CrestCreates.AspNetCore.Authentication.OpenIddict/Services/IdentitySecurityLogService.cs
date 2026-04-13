@@ -20,16 +20,16 @@ public interface IIdentitySecurityLogService
         CancellationToken cancellationToken = default);
 }
 
-internal sealed class IdentitySecurityLogService : IIdentitySecurityLogService
+public sealed class IdentitySecurityLogServiceImpl : IIdentitySecurityLogService
 {
     private readonly IIdentitySecurityLogRepository _repository;
     private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly ILogger<IdentitySecurityLogService> _logger;
+    private readonly ILogger<IdentitySecurityLogServiceImpl> _logger;
 
-    public IdentitySecurityLogService(
+    public IdentitySecurityLogServiceImpl(
         IIdentitySecurityLogRepository repository,
         IHttpContextAccessor httpContextAccessor,
-        ILogger<IdentitySecurityLogService> logger)
+        ILogger<IdentitySecurityLogServiceImpl> logger)
     {
         _repository = repository;
         _httpContextAccessor = httpContextAccessor;

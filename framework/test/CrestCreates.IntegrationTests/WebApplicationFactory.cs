@@ -16,13 +16,15 @@ using CrestCreates.Domain.Authorization;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
+using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.OrmProviders.EFCore.Repositories;
+using Microsoft.EntityFrameworkCore;
 using LibraryManagement.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -50,9 +52,11 @@ public sealed class LibraryManagementWebApplicationFactory : WebApplicationFacto
         var scopeFactory = Services.GetRequiredService<IServiceScopeFactory>();
         using var scope = scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<LibraryDbContext>();
+        var openIddictDbContext = scope.ServiceProvider.GetRequiredService<OpenIddictDbContext>();
         var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
 
         await dbContext.Database.EnsureCreatedAsync();
+        await EnsureOpenIddictSchemaAsync(openIddictDbContext);
 
         // Seed tenant-a user for integration tests
         var tenantA = dbContext.Tenants.FirstOrDefault(t => t.Name == "tenant-a");
@@ -155,6 +159,9 @@ public sealed class LibraryManagementWebApplicationFactory : WebApplicationFacto
             services.RemoveAll<IDbContextOptionsConfiguration<CrestCreatesDbContext>>();
             services.RemoveAll<CrestCreatesDbContext>();
             services.RemoveAll<CrestCreatesDbContextFactory>();
+            services.RemoveAll<DbContextOptions<OpenIddictDbContext>>();
+            services.RemoveAll<IDbContextOptionsConfiguration<OpenIddictDbContext>>();
+            services.RemoveAll<OpenIddictDbContext>();
             services.RemoveAll<DbContext>();
             services.RemoveAll<AuditLoggingMiddleware>();
             services.RemoveAll<IAuditLogService>();
@@ -185,6 +192,13 @@ public sealed class LibraryManagementWebApplicationFactory : WebApplicationFacto
             services.AddScoped<IAuditLogService, AuditLogService>();
             services.AddScoped<IAuditLogAppService, AuditLogAppService>();
             services.AddScoped<IAuditLogCleanupAppService, AuditLogCleanupAppService>();
+
+// Configure OpenIddict to use EntityFrameworkCore for testing
+            // Register a dedicated OpenIddict test DbContext
+            services.AddDbContext<OpenIddictDbContext>(options =>
+            {
+                options.UseSqlite(_sharedConnection);
+            });
         });
     }
 
@@ -239,5 +253,31 @@ public sealed class LibraryManagementWebApplicationFactory : WebApplicationFacto
         GC.Collect();
         GC.WaitForPendingFinalizers();
         Thread.Sleep(200);
+    }
+
+    private static async Task EnsureOpenIddictSchemaAsync(OpenIddictDbContext dbContext)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync();
+        }
+
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'OpenIddictScopes'
+            LIMIT 1;
+            """;
+
+        var tableExists = await command.ExecuteScalarAsync() is not null;
+        if (tableExists)
+        {
+            return;
+        }
+
+        var databaseCreator = dbContext.Database.GetService<IRelationalDatabaseCreator>();
+        await databaseCreator.CreateTablesAsync();
     }
 }

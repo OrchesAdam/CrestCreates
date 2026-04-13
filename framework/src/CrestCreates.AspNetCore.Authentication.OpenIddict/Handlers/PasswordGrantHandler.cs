@@ -54,7 +54,7 @@ public sealed class PasswordGrantResult
         };
 }
 
-internal sealed class PasswordGrantHandler : IPasswordGrantHandler
+public sealed class PasswordGrantHandlerImpl : IPasswordGrantHandler
 {
     // Default lockout thresholds; can be overridden by registering
     // OpenIddict-specific options once a dedicated options class is introduced.
@@ -66,15 +66,15 @@ internal sealed class PasswordGrantHandler : IPasswordGrantHandler
     private readonly IPasswordHasher _passwordHasher;
     private readonly ICurrentTenant _currentTenant;
     private readonly IIdentitySecurityLogService _securityLogService;
-    private readonly ILogger<PasswordGrantHandler> _logger;
+    private readonly ILogger<PasswordGrantHandlerImpl> _logger;
 
-    public PasswordGrantHandler(
+    public PasswordGrantHandlerImpl(
         IUserRepository userRepository,
         IRoleRepository roleRepository,
         IPasswordHasher passwordHasher,
         ICurrentTenant currentTenant,
         IIdentitySecurityLogService securityLogService,
-        ILogger<PasswordGrantHandler> logger)
+        ILogger<PasswordGrantHandlerImpl> logger)
     {
         _userRepository = userRepository;
         _roleRepository = roleRepository;

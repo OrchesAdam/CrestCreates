@@ -75,6 +75,7 @@
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.17.0" />
     <PackageVersion Include="OpenIddict.AspNetCore" Version="7.4.0" />
     <PackageVersion Include="OpenIddict.EntityFrameworkCore" Version="7.4.0" />
+    <PackageVersion Include="OpenIddict.EntityFrameworkCore.Models" Version="7.4.0" />
     <PackageVersion Include="OpenIddict.Quartz" Version="7.4.0" />
     <PackageVersion Include="Quartz" Version="3.17.1" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.5" />

@@ -1,7 +1,9 @@
 using System;
 using CrestCreates.AspNetCore.Authentication.OpenIddict.Handlers;
 using CrestCreates.AspNetCore.Authentication.OpenIddict.Services;
+using CrestCreates.Domain.OpenIddict;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using OpenIddict.Validation.AspNetCore;
@@ -20,7 +22,14 @@ public static class OpenIddictServiceCollectionExtensions
         services.AddOpenIddict()
             .AddCore(coreOptions =>
             {
-                coreOptions.UseQuartz();
+                coreOptions.UseEntityFrameworkCore()
+                    .UseDbContext<OpenIddictDbContext>()
+                    .ReplaceDefaultEntities<
+                        OpenIddictApplication,
+                        OpenIddictAuthorization,
+                        OpenIddictScope,
+                        OpenIddictToken,
+                        long>();
             })
             .AddServer(serverOptions =>
             {
@@ -28,7 +37,6 @@ public static class OpenIddictServiceCollectionExtensions
                     .SetAuthorizationEndpointUris("/connect/authorize")
                     .SetTokenEndpointUris("/connect/token")
                     .SetUserInfoEndpointUris("/connect/userinfo");
-                    // .SetLogoutEndpointUris("/connect/logout");
 
                 if (options.EnableAuthorizationCodeFlow)
                 {
@@ -58,6 +66,9 @@ public static class OpenIddictServiceCollectionExtensions
                 serverOptions.SetRefreshTokenLifetime(TimeSpan.FromDays(options.RefreshTokenLifetimeDays));
 
                 serverOptions.DisableAccessTokenEncryption();
+
+                serverOptions.UseAspNetCore()
+                    .EnableTokenEndpointPassthrough();
             })
             .AddValidation(validationOptions =>
             {
@@ -66,9 +77,9 @@ public static class OpenIddictServiceCollectionExtensions
             });
 
         services.AddHttpContextAccessor();
-        services.TryAddScoped<IIdentitySecurityLogService, IdentitySecurityLogService>();
-        services.TryAddScoped<IPasswordGrantHandler, PasswordGrantHandler>();
-        services.TryAddScoped<IRefreshTokenGrantHandler, RefreshTokenGrantHandler>();
+        services.TryAddScoped<IIdentitySecurityLogService, IdentitySecurityLogServiceImpl>();
+        services.TryAddScoped<IPasswordGrantHandler, PasswordGrantHandlerImpl>();
+        services.TryAddScoped<IRefreshTokenGrantHandler, RefreshTokenGrantHandlerImpl>();
 
         return services;
     }
@@ -80,5 +91,12 @@ public static class OpenIddictServiceCollectionExtensions
         {
             options.DefaultScheme = OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme;
         });
+    }
+
+    public class ApplicationDbContext : Microsoft.EntityFrameworkCore.DbContext
+    {
+        public ApplicationDbContext(DbContextOptions options) : base(options)
+        {
+        }
     }
 }

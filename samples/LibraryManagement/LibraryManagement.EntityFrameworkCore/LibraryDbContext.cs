@@ -28,11 +28,10 @@ public class LibraryDbContext : DbContext
     public DbSet<AuditLog> AuditLogs { get; set; } = null!;
     public DbSet<Tenant> Tenants { get; set; } = null!;
     public DbSet<TenantConnectionString> TenantConnectionStrings { get; set; } = null!;
-    public DbSet<SettingValue> SettingValues { get; set; } = null!;
+public DbSet<SettingValue> SettingValues { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        base.OnModelCreating(modelBuilder);
 
         // Book Configuration
         modelBuilder.Entity<Book>(entity =>
@@ -271,7 +270,7 @@ public class LibraryDbContext : DbContext
             entity.Property(e => e.IsEncrypted).IsRequired();
             entity.Property(e => e.CreationTime).IsRequired();
             entity.Property(e => e.LastModificationTime);
-            entity.HasIndex(e => new { e.Name, e.Scope, e.ProviderKey, e.TenantId }).IsUnique();
+entity.HasIndex(e => new { e.Name, e.Scope, e.ProviderKey, e.TenantId }).IsUnique();
         });
     }
 }

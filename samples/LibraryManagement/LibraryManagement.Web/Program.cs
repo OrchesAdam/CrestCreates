@@ -9,6 +9,7 @@ using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.AspNetCore;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
+using OpenIddict.Server.AspNetCore;
 using CrestCreates.Authorization;
 using CrestCreates.Infrastructure.Authorization;
 using CrestCreates.Infrastructure.Settings;
@@ -38,7 +39,8 @@ builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddAuditLogging();
 
 // Add services to the container
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddApplicationPart(typeof(CrestCreates.AspNetCore.Authentication.OpenIddict.Controllers.OpenIddictController).Assembly);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
