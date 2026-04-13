@@ -275,6 +275,18 @@ public class OpenIddictController : ControllerBase
             claims["tenantid"] = tenantId;
         }
 
+        var isSuperAdmin = result.Principal.GetClaim("is_super_admin");
+        if (!string.IsNullOrEmpty(isSuperAdmin))
+        {
+            claims["is_super_admin"] = isSuperAdmin == "true";
+        }
+
+        var roles = result.Principal.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList();
+        if (roles.Count > 0)
+        {
+            claims["roles"] = roles;
+        }
+
         return Ok(claims);
     }
 
