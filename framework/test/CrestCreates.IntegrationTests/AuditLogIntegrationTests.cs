@@ -524,9 +524,13 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         var targetQueryBefore = await QueryAuditLogsAsync(client, targetMarker, status: 0);
         targetQueryBefore.TotalCount.Should().BeGreaterThan(0, "the successful target audit record should be queryable before cleanup");
         targetQueryBefore.Items.Should().Contain(item => item.Url != null && item.Url.Contains(targetMarker));
+        targetQueryBefore.Items.Count(item => item.Url != null && item.Url.Contains(targetMarker) && item.Status == 0)
+            .Should().Be(1, "the successful target request should produce exactly one matching audit record");
 
         var keepQueryBefore = await QueryAuditLogsAsync(client, keepMarker, status: 0);
         keepQueryBefore.TotalCount.Should().BeGreaterThan(0, "the successful keep audit record should be queryable before cleanup");
+        keepQueryBefore.Items.Count(item => item.Url != null && item.Url.Contains(keepMarker) && item.Status == 0)
+            .Should().Be(1, "the successful keep request should produce exactly one matching audit record");
 
         var cleanupResult = await ExecuteCleanupAsync(
             tenantId: null,
@@ -538,6 +542,12 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
 
         var keepQueryAfter = await QueryAuditLogsAsync(client, keepMarker, status: 0);
         keepQueryAfter.TotalCount.Should().BeGreaterThan(0, "cleanup should not remove the newer successful audit record");
+        keepQueryAfter.Items.Should().Contain(item => item.Url != null && item.Url.Contains(keepMarker) && item.Status == 0);
+
+        (await CountPersistedAuditLogsAsync(targetMarker, status: 0))
+            .Should().Be(0, "cleanup should remove the persisted successful target audit record");
+        (await CountPersistedAuditLogsAsync(keepMarker, status: 0))
+            .Should().Be(1, "cleanup should keep the persisted successful keep audit record");
     }
 
     [Fact]
@@ -571,9 +581,13 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         var targetQueryBefore = await QueryAuditLogsAsync(client, targetMarker, status: 1);
         targetQueryBefore.TotalCount.Should().BeGreaterThan(0, "the failed target audit record should be queryable before cleanup");
         targetQueryBefore.Items.Should().Contain(item => item.Url != null && item.Url.Contains(targetMarker));
+        targetQueryBefore.Items.Count(item => item.Url != null && item.Url.Contains(targetMarker) && item.Status == 1)
+            .Should().Be(1, "the failed target request should produce exactly one matching audit record");
 
         var keepQueryBefore = await QueryAuditLogsAsync(client, keepMarker, status: 1);
         keepQueryBefore.TotalCount.Should().BeGreaterThan(0, "the failed keep audit record should be queryable before cleanup");
+        keepQueryBefore.Items.Count(item => item.Url != null && item.Url.Contains(keepMarker) && item.Status == 1)
+            .Should().Be(1, "the failed keep request should produce exactly one matching audit record");
 
         var cleanupResult = await ExecuteCleanupAsync(
             tenantId: null,
@@ -585,6 +599,12 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
 
         var keepQueryAfter = await QueryAuditLogsAsync(client, keepMarker, status: 1);
         keepQueryAfter.TotalCount.Should().BeGreaterThan(0, "cleanup should not remove the newer failed audit record");
+        keepQueryAfter.Items.Should().Contain(item => item.Url != null && item.Url.Contains(keepMarker) && item.Status == 1);
+
+        (await CountPersistedAuditLogsAsync(targetMarker, status: 1))
+            .Should().Be(0, "cleanup should remove the persisted failed target audit record");
+        (await CountPersistedAuditLogsAsync(keepMarker, status: 1))
+            .Should().Be(1, "cleanup should keep the persisted failed keep audit record");
     }
 
     private async Task SeedAuditLogAsync(string tenantId, int status, DateTime executionTime, string url)
@@ -697,6 +717,16 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         }
 
         throw new InvalidOperationException($"Persisted audit log with keyword '{keyword}' and status '{status}' was not found.");
+    }
+
+    private async Task<int> CountPersistedAuditLogsAsync(string keyword, int status)
+    {
+        using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<LibraryDbContext>();
+        return await dbContext.AuditLogs.CountAsync(item =>
+            item.Status == status &&
+            item.Url != null &&
+            item.Url.Contains(keyword));
     }
 
     private static DateTime CalculateExclusiveCutoff(DateTime targetExecutionTime, DateTime keepExecutionTime)
