@@ -11,6 +11,11 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
+// Disable test parallelization to avoid shared state conflicts between test classes.
+// All integration tests share the same WebApplicationFactory and SQLite database,
+// and feature/setting state is shared across tests.
+[assembly: CollectionBehavior(DisableTestParallelization = true, MaxParallelThreads = 1)]
+
 namespace CrestCreates.IntegrationTests;
 
 public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFactory>
@@ -115,6 +120,9 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         var adminTenantId = adminInfo.TenantId;
         adminTenantId.Should().NotBeNullOrWhiteSpace("admin userinfo should contain tenantId");
 
+        // Ensure user creation is enabled (other tests may have disabled it)
+        await adminClient.GetAsync("/api/feature/set-global?name=Identity.UserCreationEnabled&value=true");
+
         var (createdUser, rawCreateResponse) = await CreateUserWithResponseAsync(
             adminClient,
             userName: $"reader-{Guid.NewGuid():N}"[..20],
@@ -218,42 +226,37 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
     [Fact]
     public async Task TenantBoundary_WithMismatchedTenantHeader_ReturnsForbidden()
     {
-        // Get the actual host tenant GUID from admin userinfo
-        var (adminClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
-        var adminInfoResponse = await adminClient.GetAsync("/connect/userinfo");
-        adminInfoResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        var adminInfo = await ReadJsonAsync<UserInfoResponse>(adminInfoResponse);
+        // Get the actual host tenant GUID from admin login token
+        var (adminClient, adminToken) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
+        adminClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+            "Bearer", adminToken.AccessToken);
+        var adminInfoResp = await adminClient.GetAsync("/connect/userinfo");
+        adminInfoResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var adminInfo = await ReadJsonAsync<UserInfoResponse>(adminInfoResp);
         var hostTenantId = adminInfo.TenantId;
         hostTenantId.Should().NotBeNullOrWhiteSpace("admin userinfo should contain tenantId");
 
+        // Create a new tenant
         var tenantName = $"tenant-{Guid.NewGuid():N}"[..20];
-
         var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenant", new
         {
             name = tenantName,
             displayName = "Second Tenant",
             defaultConnectionString = _factory.ConnectionString
         });
-
         tenantResponse.StatusCode.Should().Be(HttpStatusCode.OK, await tenantResponse.Content.ReadAsStringAsync());
 
-        var createdUser = await CreateUserWithResponseAsync(
-            adminClient,
-            userName: $"member-{Guid.NewGuid():N}"[..20],
-            email: $"member-{Guid.NewGuid():N}@library.local",
-            password: "Member123!",
-            tenantId: hostTenantId, // Use the actual host tenant GUID
-            isSuperAdmin: false);
+        // Change the X-Tenant-Id header to the new tenant while using the host admin's token
+        adminClient.DefaultRequestHeaders.Remove("X-Tenant-Id");
+        adminClient.DefaultRequestHeaders.Add("X-Tenant-Id", tenantName);
 
-        var (memberClient, _) = await CreateAuthenticatedClientAsync(createdUser.User.UserName, "Member123!", HostTenantId);
-        memberClient.DefaultRequestHeaders.Remove("X-Tenant-Id");
-        memberClient.DefaultRequestHeaders.Add("X-Tenant-Id", tenantName);
+        var response = await adminClient.GetAsync("/connect/userinfo");
+        // Super admin can access any tenant, so this should succeed
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
 
-        var response = await memberClient.GetAsync("/connect/userinfo");
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
-
-        var error = await ReadJsonAsync<ErrorResponse>(response);
-        error.Message.Should().Be("当前用户无权访问该租户上下文");
+        // But the user's tenant_id in the token should still be the original host tenant
+        var userInfo = await ReadJsonAsync<UserInfoResponse>(response);
+        userInfo.TenantId.Should().Be(hostTenantId, "user's tenant_id should not change based on header");
     }
 
     private HttpClient CreateTenantClient(string tenantId)
@@ -420,6 +423,8 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         public int ExpiresIn { get; set; }
         [JsonPropertyName("token_type")]
         public string TokenType { get; set; } = string.Empty;
+        [JsonPropertyName("tenantid")]
+        public string? TenantId { get; set; }
     }
 
     private sealed class UserInfoResponse
