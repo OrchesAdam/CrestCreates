@@ -18,18 +18,7 @@ using Xunit;
 
 namespace CrestCreates.IntegrationTests;
 
-// Serial collection: all tests in this class share one factory/schema and
-// modify the same feature key (FileManagement.Enabled). Parallel execution
-// within this class causes feature value collisions.
-// Other test classes each have their own factory/schema and run in parallel.
-[CollectionDefinition(CollectionName, DisableParallelization = true)]
-public class FeatureManagementCollection : ICollectionFixture<LibraryManagementWebApplicationFactory>
-{
-    public const string CollectionName = "FeatureManagementSerial";
-}
-
-[Collection(FeatureManagementCollection.CollectionName)]
-public class FeatureManagementIntegrationTests
+public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagementWebApplicationFactory>
 {
     private const string HostTenantId = "host";
     private const string AdminUserName = "admin";
