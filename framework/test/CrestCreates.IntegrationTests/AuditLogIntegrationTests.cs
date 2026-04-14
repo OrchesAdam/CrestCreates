@@ -364,7 +364,7 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         var targetCountAfter = await CountAuditLogsAsync(query =>
             query.Where(a => a.Url != null && a.Url.Contains(marker) && a.ExecutionTime < beforeTime));
         var countAfter = await CountAuditLogsAsync(query => query.Where(a => a.ExecutionTime < beforeTime));
-        targetCountAfter.Should().Be(0, "cleanup should delete the seeded target rows from the shared database");
+        targetCountAfter.Should().Be(0, "cleanup should delete the seeded target rows from the test schema");
         countAfter.Should().Be(0, "cleanup should remove every log older than the specified cutoff");
         cleanupResult.DeletedCount.Should().Be(countBefore,
             "deleted count should match the number of rows that satisfied the cleanup predicate before deletion");
@@ -453,7 +453,7 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
 
         var tenantCountAfter = await CountAuditLogsAsync(query =>
             query.Where(a => a.Url != null && a.Url.Contains($"{marker}/tenant-old")));
-        tenantCountAfter.Should().Be(0, "tenant-a cleanup should delete tenant-a target rows from the shared database");
+        tenantCountAfter.Should().Be(0, "tenant-a cleanup should delete tenant-a target rows from the test schema");
         tenantCountAfter.Should().BeLessThan(tenantCountBefore, "tenant-a old logs should be deleted");
 
         var hostCountAfter = await CountAuditLogsAsync(query =>
@@ -491,8 +491,8 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
             query.Where(a => a.Url != null && a.Url.Contains($"{marker}/tenant-old")));
         var totalCountAfter = hostCountAfter + tenantCountAfter;
 
-        hostCountAfter.Should().Be(0, "host cleanup should delete host target rows from the shared database");
-        tenantCountAfter.Should().Be(0, "host cleanup should delete tenant-a target rows from the shared database");
+        hostCountAfter.Should().Be(0, "host cleanup should delete host target rows from the test schema");
+        tenantCountAfter.Should().Be(0, "host cleanup should delete tenant-a target rows from the test schema");
         totalCountAfter.Should().Be(0, "host cleanup should delete matching logs from all tenants");
         cleanupResult.DeletedCount.Should().BeGreaterThanOrEqualTo(totalCountBefore);
     }
