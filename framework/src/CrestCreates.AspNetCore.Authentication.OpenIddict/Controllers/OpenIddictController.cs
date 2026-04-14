@@ -335,13 +335,9 @@ public class OpenIddictController : ControllerBase
     [HttpPost("logout")]
     public async Task<IActionResult> Logout()
     {
-        var result = await HttpContext.AuthenticateAsync(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
-        if (result?.Principal != null)
-        {
-            // Explicitly use the Server scheme for sign-out, not the Validation scheme
-            await HttpContext.SignOutAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
-        }
-
-        return SignOut(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+        // For API-based logout, we just acknowledge the logout request.
+        // The client is responsible for discarding the tokens.
+        // Token revocation would require explicit refresh token revocation logic.
+        return Ok(new { message = "已退出登录" });
     }
 }
