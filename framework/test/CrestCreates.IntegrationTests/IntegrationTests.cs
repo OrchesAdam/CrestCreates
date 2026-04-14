@@ -11,11 +11,6 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
-// Disable test parallelization to avoid shared state conflicts between test classes.
-// All integration tests share the same WebApplicationFactory and SQLite database,
-// and feature/setting state is shared across tests.
-[assembly: CollectionBehavior(DisableTestParallelization = true, MaxParallelThreads = 1)]
-
 namespace CrestCreates.IntegrationTests;
 
 public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFactory>

@@ -14,12 +14,22 @@ using CrestCreates.Domain.Shared.Features;
 using CrestCreates.MultiTenancy.Abstract;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Moq;
 using Xunit;
 
 namespace CrestCreates.IntegrationTests;
 
-public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagementWebApplicationFactory>
+// Serial collection: all tests in this class share one factory/schema and
+// modify the same feature key (FileManagement.Enabled). Parallel execution
+// within this class causes feature value collisions.
+// Other test classes each have their own factory/schema and run in parallel.
+[CollectionDefinition(CollectionName, DisableParallelization = true)]
+public class FeatureManagementCollection : ICollectionFixture<LibraryManagementWebApplicationFactory>
+{
+    public const string CollectionName = "FeatureManagementSerial";
+}
+
+[Collection(FeatureManagementCollection.CollectionName)]
+public class FeatureManagementIntegrationTests
 {
     private const string HostTenantId = "host";
     private const string AdminUserName = "admin";
