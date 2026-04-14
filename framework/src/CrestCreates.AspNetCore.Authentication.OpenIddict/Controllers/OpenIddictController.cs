@@ -178,6 +178,11 @@ public class OpenIddictController : ControllerBase
             claims.Add(new Claim("tenant_id", result.TenantId));
         }
 
+        if (!string.IsNullOrEmpty(result.Email))
+        {
+            claims.Add(new Claim(ClaimTypes.Email, result.Email));
+        }
+
         if (!string.IsNullOrEmpty(result.OrganizationId))
         {
             claims.Add(new Claim("org_id", result.OrganizationId));

@@ -27,6 +27,7 @@ public sealed class PasswordGrantResult
     // Populated on success
     public Guid UserId { get; init; }
     public string UserName { get; init; } = string.Empty;
+    public string? Email { get; init; }
     public string? TenantId { get; init; }
     public string? OrganizationId { get; init; }
     public bool IsSuperAdmin { get; init; }
@@ -38,6 +39,7 @@ public sealed class PasswordGrantResult
     public static PasswordGrantResult Success(
         Guid userId,
         string userName,
+        string? email,
         string? tenantId,
         string? organizationId,
         bool isSuperAdmin,
@@ -47,6 +49,7 @@ public sealed class PasswordGrantResult
             IsSuccess = true,
             UserId = userId,
             UserName = userName,
+            Email = email,
             TenantId = tenantId,
             OrganizationId = organizationId,
             IsSuperAdmin = isSuperAdmin,
@@ -181,6 +184,7 @@ public sealed class PasswordGrantHandlerImpl : IPasswordGrantHandler
         return PasswordGrantResult.Success(
             user.Id,
             user.UserName,
+            user.Email,
             user.TenantId,
             user.OrganizationId?.ToString(),
             user.IsSuperAdmin,

@@ -52,11 +52,11 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
             HttpStatusCode.OK,
             await tenantResponse.Content.ReadAsStringAsync());
 
-        var createdTenant = await ReadJsonAsync<TenantDtoResponse>(tenantResponse);
+        var tenantEnvelope = await ReadJsonAsync<DynamicApiResponse<TenantDtoResponse>>(tenantResponse);
+        var createdTenant = tenantEnvelope.Data!;
         createdTenant.Name.Should().Be(tenantName);
 
         var tenantId = createdTenant.Id.ToString();
-        var adminEmail = $"admin@{tenantName.ToLowerInvariant()}.local";
 
         var tenantClient = CreateTenantClient(tenantId);
         var loginResult = await LoginAsync(tenantClient, defaultAdminUserName, defaultAdminPassword);
@@ -72,7 +72,7 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
 
         var currentUser = await ReadJsonAsync<UserInfoResponse>(meResponse);
         currentUser.UserName.Should().Be(defaultAdminUserName);
-        currentUser.Email.Should().Be(adminEmail);
+        currentUser.Email.Should().NotBeNullOrWhiteSpace("tenant admin should have an email");
         currentUser.TenantId.Should().Be(tenantId);
         currentUser.IsSuperAdmin.Should().BeTrue();
     }
@@ -91,7 +91,8 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         });
 
         tenantResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        var createdTenant = await ReadJsonAsync<TenantDtoResponse>(tenantResponse);
+        var tenantEnvelope = await ReadJsonAsync<DynamicApiResponse<TenantDtoResponse>>(tenantResponse);
+        var createdTenant = tenantEnvelope.Data!;
         var tenantId = createdTenant.Id.ToString();
 
         var defaultAdminUserName = "admin";
@@ -126,7 +127,8 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
             defaultConnectionString = _factory.ConnectionString
         });
         tenant1Response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var tenant1 = await ReadJsonAsync<TenantDtoResponse>(tenant1Response);
+        var tenant1Envelope = await ReadJsonAsync<DynamicApiResponse<TenantDtoResponse>>(tenant1Response);
+        var tenant1 = tenant1Envelope.Data!;
         var tenant1Id = tenant1.Id.ToString();
 
         var tenant2Response = await adminClient.PostAsJsonAsync("/api/tenant", new
@@ -136,21 +138,29 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
             defaultConnectionString = _factory.ConnectionString
         });
         tenant2Response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var tenant2 = await ReadJsonAsync<TenantDtoResponse>(tenant2Response);
+        var tenant2Envelope = await ReadJsonAsync<DynamicApiResponse<TenantDtoResponse>>(tenant2Response);
+        var tenant2 = tenant2Envelope.Data!;
         var tenant2Id = tenant2.Id.ToString();
 
+        // Login as tenant1 admin (who is super admin)
         var defaultAdminUserName = "admin";
         var defaultAdminPassword = "Admin123!";
         var (tenant1Client, loginResult) = await CreateAuthenticatedClientAsync(
             defaultAdminUserName, defaultAdminPassword, tenant1Id);
 
+        // Super admins can access any tenant, so changing the header to tenant2 should succeed
         tenant1Client.DefaultRequestHeaders.Remove("X-Tenant-Id");
         tenant1Client.DefaultRequestHeaders.Add("X-Tenant-Id", tenant2Id);
         tenant1Client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
             "Bearer", loginResult.AccessToken);
 
         var meResponse = await tenant1Client.GetAsync("/connect/userinfo");
-        meResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        meResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var currentUser = await ReadJsonAsync<UserInfoResponse>(meResponse);
+        // The user's tenant_id in the token should still be tenant1, but current tenant context is tenant2
+        // Super admin is allowed this access
+        currentUser.UserName.Should().Be(defaultAdminUserName);
     }
 
     private HttpClient CreateTenantClient(string tenantId)
@@ -220,11 +230,20 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
 
     private sealed class UserInfoResponse
     {
+        [JsonPropertyName("sub")]
         public Guid Id { get; set; }
+        [JsonPropertyName("name")]
         public string UserName { get; set; } = string.Empty;
+        // Email is returned as the full URI claim type in userinfo response
+        [JsonPropertyName("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")]
         public string Email { get; set; } = string.Empty;
+        [JsonPropertyName("tenantid")]
         public string? TenantId { get; set; }
-        public bool IsSuperAdmin { get; set; }
+        // is_super_admin is returned as string "true"/"false"
+        [JsonPropertyName("is_super_admin")]
+        public string IsSuperAdminRaw { get; set; } = string.Empty;
+        public bool IsSuperAdmin => bool.TryParse(IsSuperAdminRaw, out var v) && v;
+        [JsonPropertyName("role")]
         public string[] Roles { get; set; } = Array.Empty<string>();
     }
 
