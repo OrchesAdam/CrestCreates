@@ -168,7 +168,8 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
             ["grant_type"] = "password",
             ["username"] = userName,
             ["password"] = password,
-            ["scope"] = "openid profile email"
+            ["client_id"] = "test-client",
+            ["scope"] = "openid profile email offline_access"
         });
         var response = await client.PostAsync("/connect/token", formContent);
 

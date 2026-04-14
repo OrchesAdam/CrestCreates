@@ -361,7 +361,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         {
             "Create" => string.Empty,
             "GetById" => "{id}",
-            "Get" when parameters.Length == 1 && IsScalar(parameters[0].Type) => $"{{{parameters[0].Name}}}",
+            "Get" when HasRequiredScalarRouteParameter(parameters) => $"{{{parameters[0].Name}}}",
             "GetList" => string.Empty,
             "Update" => "{id}",
             "Delete" => "{id}",
@@ -372,12 +372,46 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 => $"by-{ToKebabCase(methodName.Substring("GetBy".Length))}/{{{parameters[0].Name}}}",
             _ when methodName.StartsWith("Get", StringComparison.Ordinal) && parameters.Length == 0
                 => ToKebabCase(methodName.Substring("Get".Length)),
-            _ when methodName.StartsWith("Get", StringComparison.Ordinal) && parameters.Length == 1 && IsScalar(parameters[0].Type)
+            _ when methodName.StartsWith("Get", StringComparison.Ordinal) && parameters.Length == 1 && !HasRequiredScalarRouteParameter(parameters)
+                => ToKebabCase(methodName.Substring("Get".Length)),
+            _ when methodName.StartsWith("Get", StringComparison.Ordinal) && HasRequiredScalarRouteParameter(parameters)
                 => $"{ToKebabCase(methodName.Substring("Get".Length))}/{{{parameters[0].Name}}}",
             _ when methodName.StartsWith("Exists", StringComparison.Ordinal) && parameters.Length == 1
                 => $"{ToKebabCase(methodName)}/{{{parameters[0].Name}}}",
             _ => ToKebabCase(methodName)
         };
+    }
+
+    private static bool HasRequiredScalarRouteParameter(IReadOnlyList<IParameterSymbol> parameters)
+    {
+        if (parameters.Count != 1 || !IsScalar(parameters[0].Type))
+        {
+            return false;
+        }
+
+        var param = parameters[0];
+
+        // If parameter has any explicit default value (including null), it's not required
+        if (param.HasExplicitDefaultValue)
+        {
+            return false;
+        }
+
+        // Check if parameter is optional (has Optional attribute in IL)
+        if (param.IsOptional)
+        {
+            return false;
+        }
+
+        // For string type, also check if the nullable annotation is present
+        // In C# 8+, string? might not set HasExplicitDefaultValue but is still optional
+        if (param.Type.SpecialType == SpecialType.System_String &&
+            param.NullableAnnotation == NullableAnnotation.Annotated)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static string ResolveHttpMethod(string methodName)

@@ -60,7 +60,7 @@ public sealed class DynamicApiRouteConvention
         {
             "Create" => string.Empty,
             "GetById" => "{id}",
-            "Get" when parameters.Length == 1 && IsScalar(parameters[0].ParameterType) => $"{{{parameters[0].Name}}}",
+            "Get" when HasRequiredScalarRouteParameter(parameters) => $"{{{parameters[0].Name}}}",
             "GetList" => string.Empty,
             "Update" => "{id}",
             "Delete" => "{id}",
@@ -71,7 +71,9 @@ public sealed class DynamicApiRouteConvention
                 => $"by-{ToKebabCase(methodName["GetBy".Length..])}/{{{parameters[0].Name}}}",
             _ when methodName.StartsWith("Get", StringComparison.Ordinal) && parameters.Length == 0
                 => ToKebabCase(methodName["Get".Length..]),
-            _ when methodName.StartsWith("Get", StringComparison.Ordinal) && parameters.Length == 1 && IsScalar(parameters[0].ParameterType)
+            _ when methodName.StartsWith("Get", StringComparison.Ordinal) && parameters.Length == 1 && !HasRequiredScalarRouteParameter(parameters)
+                => ToKebabCase(methodName["Get".Length..]),
+            _ when methodName.StartsWith("Get", StringComparison.Ordinal) && HasRequiredScalarRouteParameter(parameters)
                 => $"{ToKebabCase(methodName["Get".Length..])}/{{{parameters[0].Name}}}",
             _ when methodName.StartsWith("Exists", StringComparison.Ordinal) && parameters.Length == 1
                 => $"{ToKebabCase(methodName)}/{{{parameters[0].Name}}}",
@@ -194,6 +196,38 @@ public sealed class DynamicApiRouteConvention
             || targetType == typeof(DateTimeOffset)
             || targetType == typeof(decimal)
             || targetType == typeof(TimeSpan);
+    }
+
+    private static bool HasRequiredScalarRouteParameter(ParameterInfo[] parameters)
+    {
+        if (parameters.Length != 1 || !IsScalar(parameters[0].ParameterType))
+        {
+            return false;
+        }
+
+        var param = parameters[0];
+
+        // If parameter has any explicit default value (including null), it's not required
+        if (param.HasDefaultValue)
+        {
+            return false;
+        }
+
+        // Check if parameter is optional (has Optional attribute in IL)
+        if (param.IsOptional)
+        {
+            return false;
+        }
+
+        // For string type, also check if the parameter type is nullable
+        // In C# 8+, string? is represented as string with nullable annotation
+        if (param.ParameterType == typeof(string) &&
+            param.IsDefined(typeof(System.Runtime.CompilerServices.NullableAttribute), false))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     internal static string TrimAsyncSuffix(string methodName)
