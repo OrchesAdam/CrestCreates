@@ -60,8 +60,7 @@ namespace CrestCreates.MultiTenancy.Resolvers
                 return TenantResolutionResult.NotResolved("Header");
             }
 
-            var normalizedName = _normalizer.NormalizeName(rawValue);
-            var tenant = await _tenantRepository.FindByNameAsync(normalizedName, httpContext.RequestAborted);
+            var tenant = await ResolveTenantAsync(rawValue, httpContext.RequestAborted);
 
             if (tenant == null)
             {
@@ -74,6 +73,19 @@ namespace CrestCreates.MultiTenancy.Resolvers
             }
 
             return TenantResolutionResult.Success(tenant.Id.ToString(), tenant.Name, tenant.GetDefaultConnectionString(), "Header");
+        }
+
+        private async Task<Domain.Permission.Tenant?> ResolveTenantAsync(string rawValue, CancellationToken cancellationToken)
+        {
+            var normalizedValue = rawValue.Trim();
+
+            if (Guid.TryParse(normalizedValue, out var tenantId))
+            {
+                return await _tenantRepository.FindByIdAsync(tenantId, cancellationToken);
+            }
+
+            var normalizedName = _normalizer.NormalizeName(normalizedValue);
+            return await _tenantRepository.FindByNameAsync(normalizedName, cancellationToken);
         }
     }
 }

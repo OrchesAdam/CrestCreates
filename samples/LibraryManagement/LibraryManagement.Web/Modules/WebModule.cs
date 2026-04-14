@@ -5,6 +5,8 @@ using CrestCreates.Modularity;
 using LibraryManagement.EntityFrameworkCore;
 using LibraryManagement.EntityFrameworkCore.Modules;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -17,10 +19,9 @@ public class WebModule : ModuleBase
 
     public override void OnApplicationInitialization(IHost host)
     {
-        // 确保数据库已创建
         using var scope = host.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<LibraryDbContext>();
-        dbContext.Database.EnsureCreated();
+        EnsureSchemaTablesCreated(dbContext);
 
         var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
         var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
@@ -105,5 +106,42 @@ public class WebModule : ModuleBase
         }
 
         dbContext.SaveChanges();
+    }
+
+    private static void EnsureSchemaTablesCreated(LibraryDbContext dbContext)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        var shouldCloseConnection = connection.State != System.Data.ConnectionState.Open;
+        if (shouldCloseConnection)
+        {
+            connection.Open();
+        }
+
+        try
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT COUNT(*)
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                  AND table_name = 'Tenants';
+                """;
+
+            var tenantsTableExists = Convert.ToInt32(command.ExecuteScalar() ?? 0) > 0;
+            if (tenantsTableExists)
+            {
+                return;
+            }
+
+            var databaseCreator = dbContext.Database.GetService<IRelationalDatabaseCreator>();
+            databaseCreator.CreateTables();
+        }
+        finally
+        {
+            if (shouldCloseConnection)
+            {
+                connection.Close();
+            }
+        }
     }
 }

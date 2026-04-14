@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.AuditLog;
@@ -20,7 +20,7 @@ using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.OrmProviders.EFCore.Repositories;
 using Microsoft.EntityFrameworkCore;
 using LibraryManagement.EntityFrameworkCore;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -29,108 +29,209 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using OpenIddict.Abstractions;
+using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace CrestCreates.IntegrationTests;
 
 public sealed class LibraryManagementWebApplicationFactory : WebApplicationFactory<Program>
 {
-    private readonly string _databasePath = Path.Combine(
-        Path.GetTempPath(),
-        $"librarymanagement-integration-{Guid.NewGuid():N}.db");
-    private readonly SqliteConnection _sharedConnection;
+    private readonly string _baseConnectionString = "Host=localhost;Database=librarymanagement_test;Username=crest;Password=crest123";
+    private readonly string _schemaName = $"itest_{Guid.NewGuid():N}";
+    private readonly string _connectionString;
+    private readonly NpgsqlConnection _sharedConnection;
+    private readonly SemaphoreSlim _seedLock = new(1, 1);
+    private bool _seedCompleted;
 
-    public string ConnectionString => $"Data Source={_databasePath}";
+    public string ConnectionString => _connectionString;
 
     public LibraryManagementWebApplicationFactory()
     {
-        _sharedConnection = new SqliteConnection(ConnectionString);
+        _connectionString = $"{_baseConnectionString};Search Path={_schemaName}";
+        EnsureSchemaCreated();
+        _sharedConnection = new NpgsqlConnection(_connectionString);
         _sharedConnection.Open();
+    }
+
+    private void EnsureSchemaCreated()
+    {
+        using var connection = new NpgsqlConnection(_baseConnectionString);
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""CREATE SCHEMA IF NOT EXISTS "{_schemaName}";""";
+        command.ExecuteNonQuery();
+    }
+
+    private static async Task EnsureOpenIddictSchemaAsync(OpenIddictDbContext dbContext)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync();
+        }
+
+        using var command = connection.CreateCommand();
+        // Recreate the OpenIddict schema on every seed run so stale/manual schemas
+        // from previous test runs cannot survive package/model upgrades.
+        command.CommandText = """
+            DROP TABLE IF EXISTS "OpenIddictTokens" CASCADE;
+            DROP TABLE IF EXISTS "OpenIddictAuthorizations" CASCADE;
+            DROP TABLE IF EXISTS "OpenIddictScopes" CASCADE;
+            DROP TABLE IF EXISTS "OpenIddictApplications" CASCADE;
+            """;
+        await command.ExecuteNonQueryAsync();
+
+        var databaseCreator = dbContext.Database.GetService<IRelationalDatabaseCreator>();
+        await databaseCreator.CreateTablesAsync();
     }
 
     public async Task EnsureSeedCompleteAsync()
     {
-        var scopeFactory = Services.GetRequiredService<IServiceScopeFactory>();
-        using var scope = scopeFactory.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<LibraryDbContext>();
-        var openIddictDbContext = scope.ServiceProvider.GetRequiredService<OpenIddictDbContext>();
-        var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
-
-        await dbContext.Database.EnsureCreatedAsync();
-        await EnsureOpenIddictSchemaAsync(openIddictDbContext);
-
-        // Seed tenant-a user for integration tests
-        var tenantA = dbContext.Tenants.FirstOrDefault(t => t.Name == "tenant-a");
-        if (tenantA == null)
-        {
-            tenantA = new Tenant(Guid.NewGuid(), "tenant-a")
-            {
-                DisplayName = "Tenant A",
-                IsActive = true,
-                LifecycleState = TenantLifecycleState.Active,
-                CreationTime = DateTime.UtcNow
-            };
-            dbContext.Tenants.Add(tenantA);
-            await dbContext.SaveChangesAsync();
-        }
-
-        var tenantARole = dbContext.Roles.FirstOrDefault(r => r.Name == "Administrators" && r.TenantId == tenantA.Id.ToString());
-        if (tenantARole == null)
-        {
-            tenantARole = new Role(Guid.NewGuid(), "Administrators", tenantA.Id.ToString())
-            {
-                DisplayName = "Administrators",
-                IsActive = true,
-                CreationTime = DateTime.UtcNow
-            };
-            dbContext.Roles.Add(tenantARole);
-            await dbContext.SaveChangesAsync();
-        }
-
-        var tenantAUser = dbContext.Users.FirstOrDefault(u => u.UserName == "admin" && u.TenantId == tenantA.Id.ToString());
-        if (tenantAUser == null)
-        {
-            tenantAUser = new User(Guid.NewGuid(), "admin", "admin@tenant-a.local", tenantA.Id.ToString())
-            {
-                PasswordHash = passwordHasher.HashPassword("Admin123!"),
-                IsActive = true,
-                IsSuperAdmin = true,
-                LockoutEnabled = true,
-                CreationTime = DateTime.UtcNow,
-                LastPasswordChangeTime = DateTime.UtcNow
-            };
-            dbContext.Users.Add(tenantAUser);
-            await dbContext.SaveChangesAsync();
-        }
-
-        await dbContext.SaveChangesAsync();
-
-        if (await dbContext.AuditLogs.AnyAsync())
+        if (_seedCompleted)
         {
             return;
         }
 
-        // Use raw SQL to insert audit logs directly - bypasses EF Core tracking issues
-        var now = DateTime.UtcNow;
-        using var insertCmd = _sharedConnection.CreateCommand();
-        insertCmd.CommandText = @"
-            INSERT INTO AuditLogs (Id, Duration, UserId, UserName, TenantId, ClientIpAddress, HttpMethod, Url, ServiceName, MethodName, Parameters, ReturnValue, ExceptionMessage, ExceptionStackTrace, Status, ExecutionTime, CreationTime, TraceId, ExtraProperties)
-            VALUES
-            (@id1, 150, 'host-user-1', 'host-alice', 'host', '192.168.1.1', 'POST', 'https://localhost/api/books', 'BookAppService', 'CreateAsync', NULL, NULL, NULL, NULL, 0, @time1, @now, NULL, '{}'),
-            (@id2, 80, 'host-user-2', 'host-bob', 'host', '192.168.1.2', 'GET', 'https://localhost/api/books', 'BookAppService', 'GetListAsync', NULL, NULL, NULL, NULL, 0, @time2, @now, NULL, '{}'),
-            (@id3, 200, 'tenant-a-user-1', 'tenant-a-charlie', 'tenant-a', '10.0.0.1', 'POST', 'https://localhost/api/authors', 'AuthorAppService', 'CreateAsync', NULL, NULL, NULL, NULL, 0, @time3, @now, NULL, '{}'),
-            (@id4, 60, 'tenant-a-user-2', 'tenant-a-david', 'tenant-a', '10.0.0.2', 'GET', 'https://localhost/api/authors', 'AuthorAppService', 'GetListAsync', NULL, NULL, NULL, NULL, 1, @time4, @now, NULL, '{}')";
+        await _seedLock.WaitAsync();
+        try
+        {
+            if (_seedCompleted)
+            {
+                return;
+            }
 
-        insertCmd.Parameters.AddWithValue("@id1", Guid.NewGuid().ToString());
-        insertCmd.Parameters.AddWithValue("@id2", Guid.NewGuid().ToString());
-        insertCmd.Parameters.AddWithValue("@id3", Guid.NewGuid().ToString());
-        insertCmd.Parameters.AddWithValue("@id4", Guid.NewGuid().ToString());
-        insertCmd.Parameters.AddWithValue("@time1", now.AddMinutes(-30));
-        insertCmd.Parameters.AddWithValue("@time2", now.AddMinutes(-20));
-        insertCmd.Parameters.AddWithValue("@time3", now.AddMinutes(-25));
-        insertCmd.Parameters.AddWithValue("@time4", now.AddMinutes(-15));
-        insertCmd.Parameters.AddWithValue("@now", now);
+            var scopeFactory = Services.GetRequiredService<IServiceScopeFactory>();
+            using var scope = scopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<LibraryDbContext>();
+            var openIddictDbContext = scope.ServiceProvider.GetRequiredService<OpenIddictDbContext>();
+            var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+            var applicationManager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
 
-        await insertCmd.ExecuteNonQueryAsync();
+            await dbContext.Database.EnsureCreatedAsync();
+            await EnsureOpenIddictSchemaAsync(openIddictDbContext);
+
+            await EnsureOpenIddictClientAsync(applicationManager);
+
+            // Seed tenant-a user for integration tests
+            var tenantA = dbContext.Tenants.FirstOrDefault(t => t.Name == "tenant-a");
+            if (tenantA == null)
+            {
+                tenantA = new Tenant(Guid.NewGuid(), "tenant-a")
+                {
+                    DisplayName = "Tenant A",
+                    IsActive = true,
+                    LifecycleState = TenantLifecycleState.Active,
+                    CreationTime = DateTime.UtcNow
+                };
+                dbContext.Tenants.Add(tenantA);
+                await dbContext.SaveChangesAsync();
+            }
+
+            var tenantARole = dbContext.Roles.FirstOrDefault(r => r.Name == "Administrators" && r.TenantId == tenantA.Id.ToString());
+            if (tenantARole == null)
+            {
+                tenantARole = new Role(Guid.NewGuid(), "Administrators", tenantA.Id.ToString())
+                {
+                    DisplayName = "Administrators",
+                    IsActive = true,
+                    CreationTime = DateTime.UtcNow
+                };
+                dbContext.Roles.Add(tenantARole);
+                await dbContext.SaveChangesAsync();
+            }
+
+            var tenantAUser = dbContext.Users.FirstOrDefault(u => u.UserName == "admin" && u.TenantId == tenantA.Id.ToString());
+            if (tenantAUser == null)
+            {
+                tenantAUser = new User(Guid.NewGuid(), "admin", "admin@tenant-a.local", tenantA.Id.ToString())
+                {
+                    PasswordHash = passwordHasher.HashPassword("Admin123!"),
+                    IsActive = true,
+                    IsSuperAdmin = true,
+                    LockoutEnabled = true,
+                    CreationTime = DateTime.UtcNow,
+                    LastPasswordChangeTime = DateTime.UtcNow
+                };
+                dbContext.Users.Add(tenantAUser);
+                await dbContext.SaveChangesAsync();
+            }
+
+            await dbContext.SaveChangesAsync();
+
+            if (!await dbContext.AuditLogs.AnyAsync())
+            {
+                // Use raw SQL to insert audit logs directly - bypasses EF Core tracking issues
+                var now = DateTime.UtcNow;
+                using var insertCmd = _sharedConnection.CreateCommand();
+                insertCmd.CommandText = @"
+                    INSERT INTO ""AuditLogs"" (""Id"", ""Duration"", ""UserId"", ""UserName"", ""TenantId"", ""ClientIpAddress"", ""HttpMethod"", ""Url"", ""ServiceName"", ""MethodName"", ""Parameters"", ""ReturnValue"", ""ExceptionMessage"", ""ExceptionStackTrace"", ""Status"", ""ExecutionTime"", ""CreationTime"", ""TraceId"", ""ExtraProperties"")
+                    VALUES
+                    (@id1, 150, 'host-user-1', 'host-alice', 'host', '192.168.1.1', 'POST', 'https://localhost/api/books', 'BookAppService', 'CreateAsync', NULL, NULL, NULL, NULL, 0, @time1, @now, NULL, '{}'),
+                    (@id2, 80, 'host-user-2', 'host-bob', 'host', '192.168.1.2', 'GET', 'https://localhost/api/books', 'BookAppService', 'GetListAsync', NULL, NULL, NULL, NULL, 0, @time2, @now, NULL, '{}'),
+                    (@id3, 200, 'tenant-a-user-1', 'tenant-a-charlie', 'tenant-a', '10.0.0.1', 'POST', 'https://localhost/api/authors', 'AuthorAppService', 'CreateAsync', NULL, NULL, NULL, NULL, 0, @time3, @now, NULL, '{}'),
+                    (@id4, 60, 'tenant-a-user-2', 'tenant-a-david', 'tenant-a', '10.0.0.2', 'GET', 'https://localhost/api/authors', 'AuthorAppService', 'GetListAsync', NULL, NULL, NULL, NULL, 1, @time4, @now, NULL, '{}')";
+
+                insertCmd.Parameters.AddWithValue("@id1", Guid.NewGuid());
+                insertCmd.Parameters.AddWithValue("@id2", Guid.NewGuid());
+                insertCmd.Parameters.AddWithValue("@id3", Guid.NewGuid());
+                insertCmd.Parameters.AddWithValue("@id4", Guid.NewGuid());
+                insertCmd.Parameters.AddWithValue("@time1", now.AddMinutes(-30));
+                insertCmd.Parameters.AddWithValue("@time2", now.AddMinutes(-20));
+                insertCmd.Parameters.AddWithValue("@time3", now.AddMinutes(-25));
+                insertCmd.Parameters.AddWithValue("@time4", now.AddMinutes(-15));
+                insertCmd.Parameters.AddWithValue("@now", now);
+
+                await insertCmd.ExecuteNonQueryAsync();
+            }
+
+            _seedCompleted = true;
+        }
+        finally
+        {
+            _seedLock.Release();
+        }
+    }
+
+    private static async Task EnsureOpenIddictClientAsync(IOpenIddictApplicationManager applicationManager)
+    {
+        if (await applicationManager.FindByClientIdAsync("test-client") is not null)
+        {
+            return;
+        }
+
+        var descriptor = new OpenIddictApplicationDescriptor
+        {
+            ClientId = "test-client",
+            ClientType = ClientTypes.Public,
+            ConsentType = ConsentTypes.Implicit,
+            DisplayName = "Test Client"
+        };
+
+        descriptor.Permissions.UnionWith(new[]
+        {
+            Permissions.Endpoints.Token,
+            Permissions.GrantTypes.Password,
+            Permissions.GrantTypes.RefreshToken,
+            Permissions.Prefixes.Scope + Scopes.OpenId,
+            Permissions.Prefixes.Scope + Scopes.Profile,
+            Permissions.Prefixes.Scope + Scopes.Email,
+            Permissions.Prefixes.Scope + Scopes.OfflineAccess
+        });
+
+        await applicationManager.CreateAsync(descriptor);
+    }
+
+    public new HttpClient CreateClient()
+    {
+        EnsureSeedCompleteAsync().GetAwaiter().GetResult();
+        return base.CreateClient();
+    }
+
+    public new HttpClient CreateClient(WebApplicationFactoryClientOptions options)
+    {
+        EnsureSeedCompleteAsync().GetAwaiter().GetResult();
+        return base.CreateClient(options);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -168,7 +269,7 @@ public sealed class LibraryManagementWebApplicationFactory : WebApplicationFacto
 
             services.AddDbContext<LibraryDbContext>(options =>
             {
-                options.UseSqlite(_sharedConnection);
+                options.UseNpgsql(_sharedConnection);
             });
 
             services.AddScoped<DbContext>(sp => sp.GetRequiredService<LibraryDbContext>());
@@ -193,11 +294,11 @@ public sealed class LibraryManagementWebApplicationFactory : WebApplicationFacto
             services.AddScoped<IAuditLogAppService, AuditLogAppService>();
             services.AddScoped<IAuditLogCleanupAppService, AuditLogCleanupAppService>();
 
-// Configure OpenIddict to use EntityFrameworkCore for testing
+            // Configure OpenIddict to use EntityFrameworkCore for testing
             // Register a dedicated OpenIddict test DbContext
             services.AddDbContext<OpenIddictDbContext>(options =>
             {
-                options.UseSqlite(_sharedConnection);
+                options.UseNpgsql(_sharedConnection);
             });
         });
     }
@@ -212,72 +313,13 @@ public sealed class LibraryManagementWebApplicationFactory : WebApplicationFacto
         }
 
         _sharedConnection.Dispose();
+        _seedLock.Dispose();
 
-        if (File.Exists(_databasePath))
-        {
-            DeleteDatabaseFile();
-        }
-    }
-
-    private void DeleteDatabaseFile()
-    {
-        const int MaxAttempts = 5;
-
-        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
-        {
-            try
-            {
-                SqliteConnection.ClearAllPools();
-
-                if (!File.Exists(_databasePath))
-                {
-                    return;
-                }
-
-                File.Delete(_databasePath);
-                return;
-            }
-            catch (IOException) when (attempt < MaxAttempts)
-            {
-                WaitForFileRelease();
-            }
-            catch (UnauthorizedAccessException) when (attempt < MaxAttempts)
-            {
-                WaitForFileRelease();
-            }
-        }
-    }
-
-    private static void WaitForFileRelease()
-    {
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        Thread.Sleep(200);
-    }
-
-    private static async Task EnsureOpenIddictSchemaAsync(OpenIddictDbContext dbContext)
-    {
-        var connection = dbContext.Database.GetDbConnection();
-        if (connection.State != System.Data.ConnectionState.Open)
-        {
-            await connection.OpenAsync();
-        }
+        using var connection = new NpgsqlConnection(_baseConnectionString);
+        connection.Open();
 
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT 1
-            FROM sqlite_master
-            WHERE type = 'table' AND name = 'OpenIddictScopes'
-            LIMIT 1;
-            """;
-
-        var tableExists = await command.ExecuteScalarAsync() is not null;
-        if (tableExists)
-        {
-            return;
-        }
-
-        var databaseCreator = dbContext.Database.GetService<IRelationalDatabaseCreator>();
-        await databaseCreator.CreateTablesAsync();
+        command.CommandText = $"""DROP SCHEMA IF EXISTS "{_schemaName}" CASCADE;""";
+        command.ExecuteNonQuery();
     }
 }

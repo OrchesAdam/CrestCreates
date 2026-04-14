@@ -2,6 +2,7 @@ using CrestCreates.Domain.OpenIddict;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
+using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace CrestCreates.AspNetCore.Authentication.OpenIddict;
 
@@ -27,6 +28,12 @@ public class OpenIddictModule : ModuleBase
                 options.AllowAuthorizationCodeFlow()
                        .AllowClientCredentialsFlow()
                        .AllowRefreshTokenFlow();
+
+                options.RegisterScopes(
+                    Scopes.OpenId,
+                    Scopes.Profile,
+                    Scopes.Email,
+                    Scopes.OfflineAccess);
 
                 options.UseAspNetCore()
                        .EnableTokenEndpointPassthrough();

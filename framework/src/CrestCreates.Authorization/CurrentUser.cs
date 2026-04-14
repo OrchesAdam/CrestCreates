@@ -15,22 +15,22 @@ public class CurrentUser : ICurrentUser
         _principalAccessor = principalAccessor;
     }
 
-    public string Id => FindClaimValue(ClaimTypes.NameIdentifier)
-        ?? FindClaimValue("sub")
-        ?? FindClaimValue("uid")
-        ?? string.Empty;
+    public string Id => FirstNonEmptyClaimValue(
+        ClaimTypes.NameIdentifier,
+        "sub",
+        "uid");
 
-    public string UserName => FindClaimValue(ClaimTypes.Name)
-        ?? FindClaimValue("preferred_username")
-        ?? FindClaimValue("name")
-        ?? string.Empty;
+    public string UserName => FirstNonEmptyClaimValue(
+        ClaimTypes.Name,
+        "preferred_username",
+        "name");
 
     public bool IsAuthenticated => _principalAccessor.Principal?.Identity?.IsAuthenticated ?? false;
 
-    public string TenantId => FindClaimValue("tenantid")
-        ?? FindClaimValue("tenant_id")
-        ?? FindClaimValue("TenantId")
-        ?? string.Empty;
+    public string TenantId => FirstNonEmptyClaimValue(
+        "tenantid",
+        "tenant_id",
+        "TenantId");
 
     public string[] Roles
     {
@@ -48,7 +48,7 @@ public class CurrentUser : ICurrentUser
     {
         get
         {
-            var orgIdStr = FindClaimValue("org_id") ?? FindClaimValue("organizationid");
+            var orgIdStr = FirstNonEmptyClaimValue("org_id", "organizationid");
             if (Guid.TryParse(orgIdStr, out var orgId))
             {
                 return orgId;
@@ -93,7 +93,7 @@ public class CurrentUser : ICurrentUser
     {
         get
         {
-            var dataScopeStr = FindClaimValue("data_scope");
+            var dataScopeStr = FirstNonEmptyClaimValue("data_scope");
             if (int.TryParse(dataScopeStr, out var dataScopeValue))
             {
                 return dataScopeValue;
@@ -142,5 +142,19 @@ public class CurrentUser : ICurrentUser
     public bool IsInOrganization(Guid orgId)
     {
         return OrganizationIds.Contains(orgId);
+    }
+
+    private string FirstNonEmptyClaimValue(params string[] claimTypes)
+    {
+        foreach (var claimType in claimTypes)
+        {
+            var value = FindClaimValue(claimType);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
     }
 }

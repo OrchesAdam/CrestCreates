@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.OrmProviders.Abstract;
@@ -122,12 +123,14 @@ public static class DynamicApiGeneratedRuntime
 
         try
         {
-            if (context.Request.Body.CanSeek && context.Request.Body.Length == 0)
+            using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
+            var payload = await reader.ReadToEndAsync();
+            if (string.IsNullOrWhiteSpace(payload))
             {
                 return optional ? default : Activator.CreateInstance<T>();
             }
 
-            var result = await context.Request.ReadFromJsonAsync<T>(ResolveJsonSerializerOptions(context.RequestServices), context.RequestAborted);
+            var result = JsonSerializer.Deserialize<T>(payload, ResolveJsonSerializerOptions(context.RequestServices));
             if (result is not null)
             {
                 return result;

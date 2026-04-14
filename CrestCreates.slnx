@@ -43,7 +43,6 @@
   </Folder>
   <Folder Name="/src/modules/" />
   <Folder Name="/src/modules/Authentication/">
-    <Project Path="framework/src/CrestCreates.AspNetCore.Authentication.JwtBearer/CrestCreates.AspNetCore.Authentication.JwtBearer.csproj" />
     <Project Path="framework/src/CrestCreates.AspNetCore.Authentication.OAuth/CrestCreates.AspNetCore.Authentication.OAuth.csproj" />
     <Project Path="framework/src/CrestCreates.AspNetCore.Authentication.OpenIddict/CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
   </Folder>
