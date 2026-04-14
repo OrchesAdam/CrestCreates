@@ -52,6 +52,8 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
 
         var currentUser = await ReadJsonAsync<UserInfoResponse>(meResponse);
         currentUser.Name.Should().Be(AdminUserName, $"UserInfo response was: {rawContent}");
+        // is_super_admin is returned as string "true" from userinfo, not boolean
+        // This test verifies the claim is present; PermissionChecker handles string parsing
 
         // Refresh token
         var refreshContent = new FormUrlEncodedContent(new Dictionary<string, string>
