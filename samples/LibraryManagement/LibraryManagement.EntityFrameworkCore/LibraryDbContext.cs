@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using CrestCreates.Domain.Shared.Permissions;
 using System.Text.Json;
 using CrestCreates.Domain.Settings;
+using CrestCreates.Domain.Features;
 
 namespace LibraryManagement.EntityFrameworkCore;
 
@@ -28,7 +29,8 @@ public class LibraryDbContext : DbContext
     public DbSet<AuditLog> AuditLogs { get; set; } = null!;
     public DbSet<Tenant> Tenants { get; set; } = null!;
     public DbSet<TenantConnectionString> TenantConnectionStrings { get; set; } = null!;
-public DbSet<SettingValue> SettingValues { get; set; } = null!;
+    public DbSet<SettingValue> SettingValues { get; set; } = null!;
+    public DbSet<FeatureValue> FeatureValues { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -271,6 +273,23 @@ public DbSet<SettingValue> SettingValues { get; set; } = null!;
             entity.Property(e => e.CreationTime).IsRequired();
             entity.Property(e => e.LastModificationTime);
 entity.HasIndex(e => new { e.Name, e.Scope, e.ProviderKey, e.TenantId }).IsUnique();
+        });
+
+        modelBuilder.Entity<FeatureValue>(entity =>
+        {
+            entity.ToTable("FeatureValues");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(256);
+            entity.Property(e => e.Value).HasMaxLength(4000);
+            entity.Property(e => e.Scope).HasConversion<int>().IsRequired();
+            entity.Property(e => e.ProviderKey).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.TenantId).HasMaxLength(64);
+            entity.Property(e => e.CreationTime).IsRequired();
+            entity.Property(e => e.LastModificationTime);
+
+            entity.HasIndex(e => new { e.Name, e.Scope, e.ProviderKey, e.TenantId }).IsUnique();
         });
     }
 }

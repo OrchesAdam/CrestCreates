@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -167,11 +168,13 @@ public class OpenIddictController : ControllerBase
         var claims = new List<Claim>
         {
             new Claim(Claims.Subject, result.UserId.ToString()),
-            new Claim(Claims.Name, result.UserName)
+            new Claim(Claims.Name, result.UserName),
+            new Claim(ClaimTypes.NameIdentifier, result.UserId.ToString())
         };
 
         if (!string.IsNullOrEmpty(result.TenantId))
         {
+            claims.Add(new Claim("tenantid", result.TenantId));
             claims.Add(new Claim("tenant_id", result.TenantId));
         }
 
@@ -191,6 +194,13 @@ public class OpenIddictController : ControllerBase
         var principal = new ClaimsPrincipal(identity);
 
         principal.SetScopes(request.GetScopes());
+
+        // Set destinations using the principal extension method with a lambda
+        principal.SetDestinations(claim =>
+        {
+            // All claims go to access token
+            return [Destinations.AccessToken];
+        });
 
         return SignIn(principal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }
@@ -252,39 +262,65 @@ public class OpenIddictController : ControllerBase
             return Challenge(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         }
 
-        var claims = new Dictionary<string, object>(StringComparer.Ordinal)
+        // OpenIddict validation doesn't preserve all claims from the access token.
+        // We need to read the raw token and decode it to get all claims.
+        var authHeader = Request.Headers.Authorization.ToString();
+        if (!authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
-            [Claims.Subject] = result.Principal.GetClaim(Claims.Subject)!
-        };
-
-        var name = result.Principal.GetClaim(Claims.Name);
-        if (!string.IsNullOrEmpty(name))
-        {
-            claims[Claims.Name] = name;
+            return Challenge(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         }
 
-        var email = result.Principal.GetClaim(ClaimTypes.Email);
-        if (!string.IsNullOrEmpty(email))
-        {
-            claims[Claims.Email] = email;
-        }
+        var token = authHeader.Substring("Bearer ".Length);
+        var claims = new Dictionary<string, object>(StringComparer.Ordinal);
 
-        var tenantId = result.Principal.GetClaim("tenantid");
-        if (!string.IsNullOrEmpty(tenantId))
+        try
         {
-            claims["tenantid"] = tenantId;
-        }
+            // Decode JWT payload (second part)
+            var parts = token.Split('.');
+            if (parts.Length == 3)
+            {
+                var payloadBase64 = parts[1];
+                // Add padding if needed
+                var padding = 4 - payloadBase64.Length % 4;
+                if (padding < 4) payloadBase64 = payloadBase64.PadRight(payloadBase64.Length + padding, '=');
 
-        var isSuperAdmin = result.Principal.GetClaim("is_super_admin");
-        if (!string.IsNullOrEmpty(isSuperAdmin))
-        {
-            claims["is_super_admin"] = isSuperAdmin == "true";
-        }
+                var payloadBytes = System.Convert.FromBase64String(payloadBase64);
+                var payloadJson = System.Text.Encoding.UTF8.GetString(payloadBytes);
 
-        var roles = result.Principal.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList();
-        if (roles.Count > 0)
+                using var doc = System.Text.Json.JsonDocument.Parse(payloadJson);
+                foreach (var property in doc.RootElement.EnumerateObject())
+                {
+                    // Skip standard JWT infrastructure claims
+                    if (property.Name is "iss" or "aud" or "exp" or "nbf" or "iat" or "jti" or "scope" or "client_id")
+                    {
+                        continue;
+                    }
+
+                    if (property.Name == "sub")
+                    {
+                        claims[property.Name] = property.Value.GetString() ?? string.Empty;
+                        continue;
+                    }
+
+                    if (property.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        claims[property.Name] = property.Value.GetString()!;
+                    }
+                    else if (property.Value.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        var arr = property.Value.EnumerateArray().Select(e => e.GetString()!).ToArray();
+                        claims[property.Name] = arr;
+                    }
+                }
+            }
+        }
+        catch
         {
-            claims["roles"] = roles;
+            // If decoding fails, fall back to the validated principal
+            foreach (var claim in result.Principal.Claims)
+            {
+                claims[claim.Type] = claim.Value;
+            }
         }
 
         return Ok(claims);
@@ -297,7 +333,8 @@ public class OpenIddictController : ControllerBase
         var result = await HttpContext.AuthenticateAsync(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         if (result?.Principal != null)
         {
-            await HttpContext.SignOutAsync();
+            // Explicitly use the Server scheme for sign-out, not the Validation scheme
+            await HttpContext.SignOutAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         }
 
         return SignOut(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);

@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Application.Contracts.DTOs.AuditLog;
@@ -70,8 +71,8 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         // Given
         var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
-        // When
-        var response = await client.GetAsync("/api/audit-log?pageIndex=100&pageSize=10");
+        // When - query with a URL filter that matches no records
+        var response = await client.GetAsync("/api/audit-log?url=__nonexistent_url_for_test__&pageIndex=0&pageSize=10");
 
         // Then
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -275,7 +276,8 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
             ["grant_type"] = "password",
             ["username"] = userName,
             ["password"] = password,
-            ["scope"] = "openid profile email"
+            ["client_id"] = "test-client",
+            ["scope"] = "openid profile email offline_access"
         });
         var response = await client.PostAsync("/connect/token", formContent);
 
@@ -292,9 +294,13 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
 
     private sealed class TokenResponse
     {
+        [JsonPropertyName("access_token")]
         public string AccessToken { get; set; } = string.Empty;
+        [JsonPropertyName("refresh_token")]
         public string RefreshToken { get; set; } = string.Empty;
+        [JsonPropertyName("expires_in")]
         public int ExpiresIn { get; set; }
+        [JsonPropertyName("token_type")]
         public string TokenType { get; set; } = string.Empty;
     }
 

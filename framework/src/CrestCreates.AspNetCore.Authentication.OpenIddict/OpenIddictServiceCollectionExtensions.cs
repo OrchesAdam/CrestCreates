@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using OpenIddict.Validation.AspNetCore;
+using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace CrestCreates.AspNetCore.Authentication.OpenIddict;
 
@@ -38,6 +39,12 @@ public static class OpenIddictServiceCollectionExtensions
                     .SetTokenEndpointUris("/connect/token")
                     .SetUserInfoEndpointUris("/connect/userinfo");
 
+                serverOptions.RegisterScopes(
+                    Scopes.OpenId,
+                    Scopes.Profile,
+                    Scopes.Email,
+                    Scopes.OfflineAccess);
+
                 if (options.EnableAuthorizationCodeFlow)
                 {
                     serverOptions.AllowAuthorizationCodeFlow();
@@ -68,7 +75,8 @@ public static class OpenIddictServiceCollectionExtensions
                 serverOptions.DisableAccessTokenEncryption();
 
                 serverOptions.UseAspNetCore()
-                    .EnableTokenEndpointPassthrough();
+                    .EnableTokenEndpointPassthrough()
+                    .EnableUserInfoEndpointPassthrough();
             })
             .AddValidation(validationOptions =>
             {

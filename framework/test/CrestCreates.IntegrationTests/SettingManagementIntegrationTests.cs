@@ -29,6 +29,8 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
     public SettingManagementIntegrationTests(LibraryManagementWebApplicationFactory factory)
     {
         _factory = factory;
+        // Trigger host initialization and seed data before any tests run
+        _factory.EnsureSeedCompleteAsync().GetAwaiter().GetResult();
     }
 
     [Fact]
@@ -113,7 +115,7 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
         var (adminClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
         var tenantName = $"setting-tenant-{Guid.NewGuid():N}"[..20];
 
-        var response = await adminClient.PostAsJsonAsync("/api/tenants", new
+        var response = await adminClient.PostAsJsonAsync("/api/tenant", new
         {
             name = tenantName,
             displayName = $"Tenant {tenantName}",

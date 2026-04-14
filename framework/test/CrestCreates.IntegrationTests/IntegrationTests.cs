@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -28,11 +29,14 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
     public IntegrationTests(LibraryManagementWebApplicationFactory factory)
     {
         _factory = factory;
+        // Trigger host initialization and seed data before any tests run
+        _factory.EnsureSeedCompleteAsync().GetAwaiter().GetResult();
     }
 
     [Fact]
     public async Task LoginAndRefresh_WithSeededAdmin_ReturnsTokensAndCurrentUser()
     {
+        await _factory.EnsureSeedCompleteAsync();
         var client = CreateTenantClient(HostTenantId);
 
         var loginResult = await LoginAsync(client, AdminUserName, AdminPassword, HostTenantId);
@@ -44,15 +48,17 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
 
         var meResponse = await client.GetAsync("/connect/userinfo");
         meResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var rawContent = await meResponse.Content.ReadAsStringAsync();
 
         var currentUser = await ReadJsonAsync<UserInfoResponse>(meResponse);
-        currentUser.Name.Should().Be(AdminUserName);
+        currentUser.Name.Should().Be(AdminUserName, $"UserInfo response was: {rawContent}");
 
         // Refresh token
         var refreshContent = new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["grant_type"] = "refresh_token",
-            ["refresh_token"] = loginResult.RefreshToken
+            ["refresh_token"] = loginResult.RefreshToken,
+            ["client_id"] = "test-client"
         });
         var refreshResponse = await client.PostAsync("/connect/token", refreshContent);
 
@@ -77,7 +83,8 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         var refreshContent = new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["grant_type"] = "refresh_token",
-            ["refresh_token"] = loginResult.RefreshToken
+            ["refresh_token"] = loginResult.RefreshToken,
+            ["client_id"] = "test-client"
         });
         var refreshResponse = await client.PostAsync("/connect/token", refreshContent);
 
@@ -128,9 +135,10 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         deniedError.Message.Should().Be("没有权限执行当前操作");
 
         var grantResponse = await adminClient.PostAsJsonAsync(
-            $"/api/permissions/users/{createdUser.Id}/grants",
+            "/api/permission-grant/grant-to-user",
             new
             {
+                userId = createdUser.Id.ToString(),
                 permissionName = "Book.Search",
                 scope = 0,
                 tenantId = (string?)null
@@ -217,7 +225,7 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         var (adminClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
         var tenantName = $"tenant-{Guid.NewGuid():N}"[..20];
 
-        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenants", new
+        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenant", new
         {
             name = tenantName,
             displayName = "Second Tenant",
@@ -281,7 +289,8 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
             ["grant_type"] = "password",
             ["username"] = userName,
             ["password"] = password,
-            ["scope"] = "openid profile email"
+            ["client_id"] = "test-client",
+            ["scope"] = "openid profile offline_access"
         });
 
         var response = await client.PostAsync("/connect/token", formContent);
@@ -298,7 +307,7 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         string tenantId,
         bool isSuperAdmin)
     {
-        var response = await adminClient.PostAsJsonAsync("/api/users", new
+        var response = await adminClient.PostAsJsonAsync("/api/user", new
         {
             userName,
             email,
@@ -374,9 +383,13 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
 
     private sealed class TokenResponse
     {
+        [JsonPropertyName("access_token")]
         public string AccessToken { get; set; } = string.Empty;
+        [JsonPropertyName("refresh_token")]
         public string RefreshToken { get; set; } = string.Empty;
+        [JsonPropertyName("expires_in")]
         public int ExpiresIn { get; set; }
+        [JsonPropertyName("token_type")]
         public string TokenType { get; set; } = string.Empty;
     }
 

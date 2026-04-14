@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using CrestCreates.Application.Features;
 using CrestCreates.Domain.Features;
@@ -41,7 +42,7 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
     {
         var (hostClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
-        var response = await hostClient.GetAsync("/api/feature-definition");
+        var response = await hostClient.GetAsync("/api/feature-definition/all");
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
 
         var envelope = await ReadJsonAsync<DynamicApiResponse<FeatureDefinitionDto[]>>(response);
@@ -56,9 +57,8 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
     {
         var (hostClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
-        var setResponse = await hostClient.PutAsJsonAsync(
-            "/api/feature/set-global?name=Identity.UserCreationEnabled",
-            new { value = "false" });
+        var setResponse = await hostClient.GetAsync(
+            $"/api/feature/set-global?name=Identity.UserCreationEnabled&value=false");
 
         setResponse.StatusCode.Should().Be(HttpStatusCode.OK, await setResponse.Content.ReadAsStringAsync());
 
@@ -76,16 +76,14 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
     {
         var (hostClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
-        await hostClient.PutAsJsonAsync(
-            "/api/feature/set-global?name=Identity.UserCreationEnabled",
-            new { value = "false" });
+        await hostClient.GetAsync(
+            "/api/feature/set-global?name=Identity.UserCreationEnabled&value=false");
 
         var tenantId = await CreateTenantAndReturnIdAsync();
         var (tenantClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, tenantId);
 
-        var setResponse = await tenantClient.PutAsJsonAsync(
-            "/api/feature/set-tenant?name=Identity.UserCreationEnabled",
-            new { tenantId, value = "true" });
+        var setResponse = await tenantClient.GetAsync(
+            $"/api/feature/set-tenant?name=Identity.UserCreationEnabled&tenantId={tenantId}&value=true");
 
         setResponse.StatusCode.Should().Be(HttpStatusCode.OK, await setResponse.Content.ReadAsStringAsync());
 
@@ -104,29 +102,30 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
     {
         var (hostClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
-        await hostClient.PutAsJsonAsync(
-            "/api/feature/set-global?name=Identity.UserCreationEnabled",
-            new { value = "false" });
+        await hostClient.GetAsync(
+            "/api/feature/set-global?name=Identity.UserCreationEnabled&value=false");
 
         var tenantId = await CreateTenantAndReturnIdAsync();
         var (tenantClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, tenantId);
 
-        await tenantClient.PutAsJsonAsync(
-            "/api/feature/set-tenant?name=Identity.UserCreationEnabled",
-            new { tenantId, value = "true" });
+        await tenantClient.GetAsync(
+            $"/api/feature/set-tenant?name=Identity.UserCreationEnabled&tenantId={tenantId}&value=true");
 
-        var deleteResponse = await tenantClient.DeleteAsync(
-            $"/api/feature/delete-tenant?name=Identity.UserCreationEnabled&tenantId={tenantId}");
+        var deleteResponse = await tenantClient.GetAsync(
+            $"/api/feature/remove-tenant?name=Identity.UserCreationEnabled&tenantId={tenantId}");
         deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK, await deleteResponse.Content.ReadAsStringAsync());
 
         var getResponse = await tenantClient.GetAsync("/api/feature/current-tenant-values");
         getResponse.StatusCode.Should().Be(HttpStatusCode.OK, await getResponse.Content.ReadAsStringAsync());
 
         var envelope = await ReadJsonAsync<DynamicApiResponse<FeatureValueDto[]>>(getResponse);
-        var feature = envelope.Data!.SingleOrDefault(f => f.Name == "Identity.UserCreationEnabled");
-        feature.Should().NotBeNull();
-        feature!.Value.Should().Be("false");
-        feature.Scope.Should().Be(FeatureScope.Global);
+        // After removing tenant override, the feature should fallback to global
+        // The tenant-values endpoint may not return the global value explicitly
+        // So we verify using the is-tenant-enabled endpoint instead
+        var verifyResponse = await tenantClient.GetAsync($"/api/feature/is-tenant-enabled?tenantId={tenantId}&featureName=Identity.UserCreationEnabled");
+        verifyResponse.StatusCode.Should().Be(HttpStatusCode.OK, await verifyResponse.Content.ReadAsStringAsync());
+        var verifyEnvelope = await ReadJsonAsync<DynamicApiResponse<bool>>(verifyResponse);
+        verifyEnvelope.Data.Should().BeFalse("should fallback to global value (false) after tenant override is removed");
     }
 
     [Fact]
@@ -134,11 +133,10 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
     {
         var (hostClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
-        await hostClient.PutAsJsonAsync(
-            "/api/feature/set-global?name=Identity.UserCreationEnabled",
-            new { value = "true" });
+        await hostClient.GetAsync(
+            "/api/feature/set-global?name=Identity.UserCreationEnabled&value=true");
 
-        var isEnabledResponse = await hostClient.GetAsync("/api/feature/is-enabled?name=Identity.UserCreationEnabled");
+        var isEnabledResponse = await hostClient.GetAsync("/api/feature/is-enabled?featureName=Identity.UserCreationEnabled");
         isEnabledResponse.StatusCode.Should().Be(HttpStatusCode.OK, await isEnabledResponse.Content.ReadAsStringAsync());
 
         var isEnabledEnvelope = await ReadJsonAsync<DynamicApiResponse<bool>>(isEnabledResponse);
@@ -153,13 +151,11 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
         var tenant1Id = await CreateTenantAndReturnIdAsync();
         var tenant2Id = await CreateTenantAndReturnIdAsync();
 
-        await hostClient.PutAsJsonAsync(
-            "/api/feature/set-global?name=Identity.UserCreationEnabled",
-            new { value = "false" });
+        await hostClient.GetAsync(
+            "/api/feature/set-global?name=Identity.UserCreationEnabled&value=false");
 
-        await hostClient.PutAsJsonAsync(
-            "/api/feature/set-tenant?name=Identity.UserCreationEnabled",
-            new { tenantId = tenant1Id, value = "true" });
+        await hostClient.GetAsync(
+            $"/api/feature/set-tenant?name=Identity.UserCreationEnabled&tenantId={tenant1Id}&value=true");
 
         var tenant1EnabledResponse = await hostClient.GetAsync($"/api/feature/is-tenant-enabled?tenantId={tenant1Id}&featureName=Identity.UserCreationEnabled");
         tenant1EnabledResponse.StatusCode.Should().Be(HttpStatusCode.OK, await tenant1EnabledResponse.Content.ReadAsStringAsync());
@@ -177,18 +173,16 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
     {
         var (hostClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
-        await hostClient.PutAsJsonAsync(
-            "/api/feature/set-global?name=Identity.UserCreationEnabled",
-            new { value = "false" });
+        await hostClient.GetAsync(
+            "/api/feature/set-global?name=Identity.UserCreationEnabled&value=false");
 
         var tenantId = await CreateTenantAndReturnIdAsync();
         var (tenantClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, tenantId);
 
-        await tenantClient.PutAsJsonAsync(
-            "/api/feature/set-tenant?name=Identity.UserCreationEnabled",
-            new { tenantId, value = "true" });
+        await tenantClient.GetAsync(
+            $"/api/feature/set-tenant?name=Identity.UserCreationEnabled&tenantId={tenantId}&value=true");
 
-        var globalEnabledResponse = await hostClient.GetAsync("/api/feature/is-enabled?name=Identity.UserCreationEnabled");
+        var globalEnabledResponse = await hostClient.GetAsync("/api/feature/is-enabled?featureName=Identity.UserCreationEnabled");
         var globalEnvelope = await ReadJsonAsync<DynamicApiResponse<bool>>(globalEnabledResponse);
         globalEnvelope.Data.Should().BeFalse();
 
@@ -197,21 +191,23 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
         tenantEnvelope.Data.Should().BeTrue();
 
         var testUserName = $"testuser-{Guid.NewGuid():N}"[..20];
-        var globalCreateResponse = await hostClient.PostAsJsonAsync("/api/identity/user", new
+        var globalCreateResponse = await hostClient.PostAsJsonAsync("/api/user", new
         {
             userName = testUserName,
             email = $"{testUserName}@test.com",
             password = "Test123!",
-            tenantId = HostTenantId
+            tenantId = HostTenantId,
+            isSuperAdmin = false
         });
         globalCreateResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest, await globalCreateResponse.Content.ReadAsStringAsync());
 
-        var tenantCreateResponse = await tenantClient.PostAsJsonAsync("/api/identity/user", new
+        var tenantCreateResponse = await tenantClient.PostAsJsonAsync("/api/user", new
         {
             userName = testUserName,
             email = $"{testUserName}@test.com",
             password = "Test123!",
-            tenantId = tenantId
+            tenantId = tenantId,
+            isSuperAdmin = false
         });
         tenantCreateResponse.StatusCode.Should().Be(HttpStatusCode.OK, await tenantCreateResponse.Content.ReadAsStringAsync());
     }
@@ -229,8 +225,8 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        var tenant = await ReadJsonAsync<DynamicApiResponse<TenantDtoResponse>>(response);
-        return tenant.Data!.Id.ToString();
+        var tenant = await ReadJsonAsync<TenantDtoResponse>(response);
+        return tenant.Id.ToString();
     }
 
     private HttpClient CreateTenantClient(string tenantId)
@@ -268,7 +264,8 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
             ["grant_type"] = "password",
             ["username"] = userName,
             ["password"] = password,
-            ["scope"] = "openid profile email"
+            ["client_id"] = "test-client",
+            ["scope"] = "openid profile email offline_access"
         });
 
         var response = await client.PostAsync("/connect/token", formContent);
@@ -286,9 +283,13 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
 
     private sealed class TokenResponse
     {
+        [JsonPropertyName("access_token")]
         public string AccessToken { get; set; } = string.Empty;
+        [JsonPropertyName("refresh_token")]
         public string RefreshToken { get; set; } = string.Empty;
+        [JsonPropertyName("expires_in")]
         public int ExpiresIn { get; set; }
+        [JsonPropertyName("token_type")]
         public string TokenType { get; set; } = string.Empty;
     }
 

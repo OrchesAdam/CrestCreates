@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -27,6 +28,8 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
     public TenantManagementFullChainIntegrationTests(LibraryManagementWebApplicationFactory factory)
     {
         _factory = factory;
+        // Trigger host initialization and seed data before any tests run
+        _factory.EnsureSeedCompleteAsync().GetAwaiter().GetResult();
     }
 
     [Fact]
@@ -38,7 +41,7 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         var defaultAdminUserName = "admin";
         var defaultAdminPassword = "Admin123!";
 
-        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenants", new
+        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenant", new
         {
             name = tenantName,
             displayName = tenantDisplayName,
@@ -49,11 +52,10 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
             HttpStatusCode.OK,
             await tenantResponse.Content.ReadAsStringAsync());
 
-        var createdTenant = await ReadJsonAsync<DynamicApiResponse<TenantDtoResponse>>(tenantResponse);
-        createdTenant.Data.Should().NotBeNull();
-        createdTenant.Data!.Name.Should().Be(tenantName);
+        var createdTenant = await ReadJsonAsync<TenantDtoResponse>(tenantResponse);
+        createdTenant.Name.Should().Be(tenantName);
 
-        var tenantId = createdTenant.Data.Id.ToString();
+        var tenantId = createdTenant.Id.ToString();
         var adminEmail = $"admin@{tenantName.ToLowerInvariant()}.local";
 
         var tenantClient = CreateTenantClient(tenantId);
@@ -81,7 +83,7 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         var (adminClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
         var tenantName = $"resolution-test-tenant-{Guid.NewGuid():N}";
 
-        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenants", new
+        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenant", new
         {
             name = tenantName,
             displayName = "租户解析测试",
@@ -89,8 +91,8 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         });
 
         tenantResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        var createdTenant = await ReadJsonAsync<DynamicApiResponse<TenantDtoResponse>>(tenantResponse);
-        var tenantId = createdTenant.Data!.Id.ToString();
+        var createdTenant = await ReadJsonAsync<TenantDtoResponse>(tenantResponse);
+        var tenantId = createdTenant.Id.ToString();
 
         var defaultAdminUserName = "admin";
         var defaultAdminPassword = "Admin123!";
@@ -117,25 +119,25 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         var tenantName1 = $"cross-tenant1-{Guid.NewGuid():N}";
         var tenantName2 = $"cross-tenant2-{Guid.NewGuid():N}";
 
-        var tenant1Response = await adminClient.PostAsJsonAsync("/api/tenants", new
+        var tenant1Response = await adminClient.PostAsJsonAsync("/api/tenant", new
         {
             name = tenantName1,
             displayName = "跨租户1",
             defaultConnectionString = _factory.ConnectionString
         });
         tenant1Response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var tenant1 = await ReadJsonAsync<DynamicApiResponse<TenantDtoResponse>>(tenant1Response);
-        var tenant1Id = tenant1.Data!.Id.ToString();
+        var tenant1 = await ReadJsonAsync<TenantDtoResponse>(tenant1Response);
+        var tenant1Id = tenant1.Id.ToString();
 
-        var tenant2Response = await adminClient.PostAsJsonAsync("/api/tenants", new
+        var tenant2Response = await adminClient.PostAsJsonAsync("/api/tenant", new
         {
             name = tenantName2,
             displayName = "跨租户2",
             defaultConnectionString = _factory.ConnectionString
         });
         tenant2Response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var tenant2 = await ReadJsonAsync<DynamicApiResponse<TenantDtoResponse>>(tenant2Response);
-        var tenant2Id = tenant2.Data!.Id.ToString();
+        var tenant2 = await ReadJsonAsync<TenantDtoResponse>(tenant2Response);
+        var tenant2Id = tenant2.Id.ToString();
 
         var defaultAdminUserName = "admin";
         var defaultAdminPassword = "Admin123!";
@@ -186,7 +188,8 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
             ["grant_type"] = "password",
             ["username"] = userName,
             ["password"] = password,
-            ["scope"] = "openid profile email"
+            ["client_id"] = "test-client",
+            ["scope"] = "openid profile email offline_access"
         });
         var response = await client.PostAsync("/connect/token", formContent);
 
@@ -205,9 +208,13 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
 
     private sealed class TokenResponse
     {
+        [JsonPropertyName("access_token")]
         public string AccessToken { get; set; } = string.Empty;
+        [JsonPropertyName("refresh_token")]
         public string RefreshToken { get; set; } = string.Empty;
+        [JsonPropertyName("expires_in")]
         public int ExpiresIn { get; set; }
+        [JsonPropertyName("token_type")]
         public string TokenType { get; set; } = string.Empty;
     }
 
