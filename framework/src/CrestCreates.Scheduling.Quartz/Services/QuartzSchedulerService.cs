@@ -244,19 +244,68 @@ public class QuartzSchedulerService : ISchedulerService
                 var triggers = await _scheduler.GetTriggersOfJob(key);
                 var trigger = triggers.FirstOrDefault();
 
+                var jobStatus = await ToJobStatusAsync(triggers, _scheduler);
+
+                if (status != JobStatus.All && jobStatus != status)
+                    continue;
+
                 result.Add(new SchedulingServices.JobInfo(
                     Id: new SchedulingJobs.JobId(key.Name, key.Group, Guid.Empty),
                     JobType: detail!.JobType,
                     ArgType: detail!.JobType.IsGenericType ? detail.JobType.GetGenericArguments()[0] : null,
                     CronExpression: trigger is ICronTrigger cronTrigger ? cronTrigger.CronExpressionString : null,
                     NextFireTime: trigger?.GetNextFireTimeUtc()?.LocalDateTime,
-                    Status: JobStatus.Running,
+                    Status: jobStatus,
                     ExecutionCount: null
                 ));
             }
         }
 
         return result;
+    }
+
+    private async Task<SchedulingServices.JobStatus> ToJobStatusAsync(IEnumerable<ITrigger> triggers, IScheduler scheduler)
+    {
+        var triggerList = triggers.ToList();
+        if (triggerList.Count == 0)
+            return SchedulingServices.JobStatus.Completed;
+
+        // Error state has highest priority - job execution failed
+        foreach (var trigger in triggerList)
+        {
+            if (await scheduler.GetTriggerState(trigger.Key) == TriggerState.Error)
+                return SchedulingServices.JobStatus.Failed;
+        }
+
+        // Blocked means job is executing
+        foreach (var trigger in triggerList)
+        {
+            if (await scheduler.GetTriggerState(trigger.Key) == TriggerState.Blocked)
+                return SchedulingServices.JobStatus.Running;
+        }
+
+        // All triggers paused = job paused
+        var allPaused = true;
+        foreach (var trigger in triggerList)
+        {
+            if (await scheduler.GetTriggerState(trigger.Key) != TriggerState.Paused)
+            {
+                allPaused = false;
+                break;
+            }
+        }
+        if (allPaused)
+            return SchedulingServices.JobStatus.Paused;
+
+        // Check if any trigger is scheduled with a future fire time
+        foreach (var trigger in triggerList)
+        {
+            if (await scheduler.GetTriggerState(trigger.Key) == TriggerState.Normal && trigger.GetNextFireTimeUtc().HasValue)
+                return SchedulingServices.JobStatus.Scheduled;
+        }
+
+        // Complete state or no future fire time = completed
+        return SchedulingServices.JobStatus.Completed;
     }
 
     private JobKey ToQuartzKey(SchedulingJobs.JobId jobId)
