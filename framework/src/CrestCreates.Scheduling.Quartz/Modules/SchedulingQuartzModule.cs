@@ -1,26 +1,25 @@
-using Microsoft.Extensions.DependencyInjection;
 using CrestCreates.Modularity;
 using CrestCreates.Scheduling.Services;
+using CrestCreates.Scheduling.Quartz.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
-namespace CrestCreates.Scheduling.Quartz.Modules
+namespace CrestCreates.Scheduling.Quartz.Modules;
+
+public class SchedulingQuartzModule : ModuleBase
 {
-    public class SchedulingQuartzModule : ModuleBase
+    public override void OnConfigureServices(IServiceCollection services)
     {
-        public override void OnConfigureServices(IServiceCollection services)
-        {
-            base.OnConfigureServices(services);
+        base.OnConfigureServices(services);
 
-            // 注册调度服务
-            services.AddSingleton<ISchedulerService, CrestCreates.Scheduling.Quartz.Services.SchedulerService>();
-        }
+        services.AddSingleton<ISchedulerService, QuartzSchedulerService>();
+    }
 
-        public override void OnApplicationInitialization(Microsoft.Extensions.Hosting.IHost host)
-        {
-            base.OnApplicationInitialization(host);
+    public override void OnApplicationInitialization(IHost host)
+    {
+        base.OnApplicationInitialization(host);
 
-            // 启动调度器
-            var schedulerService = host.Services.GetRequiredService<ISchedulerService>();
-            schedulerService.StartAsync().Wait();
-        }
+        var schedulerService = host.Services.GetRequiredService<ISchedulerService>();
+        schedulerService.StartAsync().GetAwaiter().GetResult();
     }
 }

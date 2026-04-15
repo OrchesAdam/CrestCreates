@@ -34,7 +34,7 @@
     <Project Path="framework/src/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
     <Project Path="framework/src/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
     <Project Path="framework/src/CrestCreates.OrmProviders.Abstract/CrestCreates.OrmProviders.Abstract.csproj" />
-    <Project Path="framework/src/CrestCreates.Scheduling/CrestCreates.Scheduling.csproj" />
+    <Project Path="framework/src/CrestCreates.Scheduling/CrestCreates.Scheduling.Abstractions.csproj" />
     <Project Path="framework/src/CrestCreates.Security/CrestCreates.Security.csproj" />
       
     <Project Path="framework/src/CrestCreates.Testing/CrestCreates.Testing.csproj" />

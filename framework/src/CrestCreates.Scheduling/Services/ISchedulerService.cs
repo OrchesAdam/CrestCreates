@@ -1,120 +1,60 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Scheduling.Jobs;
 
-namespace CrestCreates.Scheduling.Services
+namespace CrestCreates.Scheduling.Services;
+
+public interface ISchedulerService
 {
-    public interface ISchedulerService
-    {
-        /// <summary>
-        /// 启动调度器
-        /// </summary>
-        /// <returns>任务</returns>
-        Task StartAsync();
+    Task StartAsync(CancellationToken ct = default);
+    Task StopAsync(CancellationToken ct = default);
 
-        /// <summary>
-        /// 停止调度器
-        /// </summary>
-        /// <returns>任务</returns>
-        Task StopAsync();
+    // Recurring jobs (Cron)
+    Task<JobId> RegisterAsync<TJob>(JobMetadata metadata) where TJob : IJob;
+    Task<JobId> RegisterAsync<TJob, TArg>(JobMetadata metadata) where TJob : IJob<TArg> where TArg : IJobArgs;
 
-        /// <summary>
-        /// 注册任务
-        /// </summary>
-        /// <typeparam name="TJob">任务类型</typeparam>
-        /// <param name="metadata">任务元数据</param>
-        /// <returns>任务</returns>
-        Task RegisterJobAsync<TJob>(JobMetadata metadata) where TJob : IJob;
+    // Delayed / scheduled jobs
+    Task<JobId> ScheduleAsync<TJob>(TimeSpan delay, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null) where TJob : IJob;
+    Task<JobId> ScheduleAsync<TJob, TArg>(TimeSpan delay, TArg args, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null) where TJob : IJob<TArg> where TArg : IJobArgs;
+    Task<JobId> ScheduleAsync<TJob>(DateTimeOffset scheduledTime, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null) where TJob : IJob;
+    Task<JobId> ScheduleAsync<TJob, TArg>(DateTimeOffset scheduledTime, TArg args, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null) where TJob : IJob<TArg> where TArg : IJobArgs;
 
-        /// <summary>
-        /// 延迟调度任务
-        /// </summary>
-        /// <typeparam name="TJob">任务类型</typeparam>
-        /// <param name="delay">延迟时间</param>
-        /// <returns>任务ID</returns>
-        Task<string> ScheduleJobAsync<TJob>(TimeSpan delay) where TJob : IJob;
+    // Immediate execution
+    Task ExecuteNowAsync<TJob>(Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null) where TJob : IJob;
+    Task ExecuteNowAsync<TJob, TArg>(TArg args, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null) where TJob : IJob<TArg> where TArg : IJobArgs;
 
-        /// <summary>
-        /// 指定时间调度任务
-        /// </summary>
-        /// <typeparam name="TJob">任务类型</typeparam>
-        /// <param name="scheduledTime">调度时间</param>
-        /// <returns>任务ID</returns>
-        Task<string> ScheduleJobAsync<TJob>(DateTimeOffset scheduledTime) where TJob : IJob;
+    // Lifecycle
+    Task DeleteAsync(JobId jobId);
+    Task CancelAsync(JobId jobId);
+    Task PauseAsync(JobId jobId);
+    Task ResumeAsync(JobId jobId);
 
-        /// <summary>
-        /// Cron表达式调度任务
-        /// </summary>
-        /// <typeparam name="TJob">任务类型</typeparam>
-        /// <param name="cronExpression">Cron表达式</param>
-        /// <param name="group">任务组</param>
-        /// <returns>任务ID</returns>
-        Task<string> ScheduleJobAsync<TJob>(string cronExpression, string? group = null) where TJob : IJob;
+    // Query
+    Task<bool> ExistsAsync(JobId jobId);
+    Task<IEnumerable<JobInfo>> GetAllAsync(JobStatus status = JobStatus.All);
+}
 
-        /// <summary>
-        /// 立即执行任务
-        /// </summary>
-        /// <typeparam name="TJob">任务类型</typeparam>
-        /// <returns>任务</returns>
-        Task ExecuteJobAsync<TJob>() where TJob : IJob;
+public enum JobStatus { All, Running, Paused, Scheduled, Completed, Failed }
 
-        /// <summary>
-        /// 暂停任务
-        /// </summary>
-        /// <param name="jobName">任务名称</param>
-        /// <param name="jobGroup">任务组</param>
-        /// <returns>任务</returns>
-        Task PauseJobAsync(string jobName, string jobGroup = "Default");
+public record JobInfo(
+    JobId Id,
+    Type JobType,
+    Type? ArgType,
+    string? CronExpression,
+    DateTimeOffset? NextFireTime,
+    JobStatus Status,
+    int? ExecutionCount
+);
 
-        /// <summary>
-        /// 恢复任务
-        /// </summary>
-        /// <param name="jobName">任务名称</param>
-        /// <param name="jobGroup">任务组</param>
-        /// <returns>任务</returns>
-        Task ResumeJobAsync(string jobName, string jobGroup = "Default");
-
-        /// <summary>
-        /// 删除任务
-        /// </summary>
-        /// <param name="jobName">任务名称</param>
-        /// <param name="jobGroup">任务组</param>
-        /// <returns>任务</returns>
-        Task DeleteJobAsync(string jobName, string jobGroup = "Default");
-
-        /// <summary>
-        /// 取消任务
-        /// </summary>
-        /// <param name="jobId">任务ID</param>
-        /// <returns>任务</returns>
-        Task CancelJobAsync(string jobId);
-
-        /// <summary>
-        /// 暂停任务
-        /// </summary>
-        /// <param name="jobId">任务ID</param>
-        /// <returns>任务</returns>
-        Task PauseJobAsync(string jobId);
-
-        /// <summary>
-        /// 恢复任务
-        /// </summary>
-        /// <param name="jobId">任务ID</param>
-        /// <returns>任务</returns>
-        Task ResumeJobAsync(string jobId);
-
-        /// <summary>
-        /// 检查任务是否存在
-        /// </summary>
-        /// <param name="jobId">任务ID</param>
-        /// <returns>是否存在</returns>
-        Task<bool> JobExistsAsync(string jobId);
-
-        /// <summary>
-        /// 获取所有任务
-        /// </summary>
-        /// <returns>任务列表</returns>
-        Task<IEnumerable<JobMetadata>> GetAllJobsAsync();
-    }
+public class JobMetadata
+{
+    public required string Name { get; init; }
+    public string Group { get; init; } = "Default";
+    public string? CronExpression { get; init; }
+    public TimeSpan? Timeout { get; init; }
+    public JobRetryOptions? Retry { get; init; }
+    public string? Description { get; init; }
+    public bool Enabled { get; init; } = true;
 }

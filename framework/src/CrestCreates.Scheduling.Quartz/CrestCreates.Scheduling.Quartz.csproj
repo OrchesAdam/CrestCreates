@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Quartz" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
   </ItemGroup>
 
   <ItemGroup>
