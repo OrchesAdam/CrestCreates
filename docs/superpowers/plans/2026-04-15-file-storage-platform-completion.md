@@ -579,7 +579,7 @@ public class AzureBlobStorageProvider : ICloudStorageProvider
 
     private string GetContainerName(Guid tenantId) => $"{_options.ContainerPrefix}-{tenantId:D}";
 
-    private static string GetBlobName(FileKey key) => $"{key.Year}/{key.Guid}{key.Extension}";
+    private static string GetBlobName(FileKey key) => $"{key.Year}/{key.FileGuid}{key.Extension}";
 }
 ```
 
@@ -865,7 +865,7 @@ public class FileKeyTests
         key.TenantId.Should().Be(tenantId);
         key.Year.Should().Be(DateTimeOffset.UtcNow.Year);
         key.Extension.Should().Be(".pdf");
-        key.Guid.Should().NotBeEmpty();
+        key.FileGuid.Should().NotBeEmpty();
     }
 
     [Fact]
