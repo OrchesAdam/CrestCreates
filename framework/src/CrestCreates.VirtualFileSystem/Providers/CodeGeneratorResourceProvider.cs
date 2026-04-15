@@ -24,8 +24,12 @@ public class CodeGeneratorResourceProvider : IVirtualFileProvider
 
     public CodeGeneratorResourceProvider()
     {
+        // Infrastructure: This provider will load templates from embedded resources
+        // in CrestCreates.CodeGenerator assembly when they are added as actual embedded resources.
+        // Currently templates are hardcoded strings in TemplateManager, so the assembly reference
+        // is informational only.
         _embeddedProvider = new EmbeddedResourceProvider(
-            "CodeGenerator",
+            "codegenerator",
             typeof(CodeGeneratorResourceProvider).Assembly,
             "CrestCreates.CodeGenerator.Templates"
         );
