@@ -39,7 +39,7 @@ public class LocalizationService : ILocalizationService
     public async Task<string?> GetStringAsync(string key, params object[] arguments)
     {
         var result = await GetStringAsync(key);
-        return result != null ? string.Format(result, arguments) : null;
+        return result != null ? FormatString(result, arguments) : null;
     }
 
     public async Task<string?> GetStringAsync(string key, string cultureName)
@@ -68,7 +68,7 @@ public class LocalizationService : ILocalizationService
     public async Task<string?> GetStringAsync(string key, string cultureName, params object[] arguments)
     {
         var result = await GetStringAsync(key, cultureName);
-        return result != null ? string.Format(result, arguments) : null;
+        return result != null ? FormatString(result, arguments) : null;
     }
 
     public string GetString(string key)
@@ -107,6 +107,16 @@ public class LocalizationService : ILocalizationService
         if (culture.Parent != null && !culture.IsNeutralCulture)
             return culture.Parent.Name;
         return cultureName;
+    }
+
+    private static string FormatString(string format, object?[] arguments)
+    {
+        return arguments.Length switch
+        {
+            0 => format,
+            1 => string.Format(format, arguments[0]),
+            _ => string.Format(format, arguments)
+        };
     }
 
     private class CultureScope : IDisposable
