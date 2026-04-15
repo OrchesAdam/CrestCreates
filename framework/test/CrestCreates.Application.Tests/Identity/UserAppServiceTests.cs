@@ -24,6 +24,7 @@ public class UserAppServiceTests
     private readonly Mock<IPasswordPolicyValidator> _passwordPolicyValidatorMock;
     private readonly Mock<ICurrentTenant> _currentTenantMock;
     private readonly Mock<IFeatureChecker> _featureCheckerMock;
+    private readonly Mock<IIdentitySecurityLogWriter> _securityLogWriterMock;
     private readonly UserAppService _userAppService;
 
     public UserAppServiceTests()
@@ -34,6 +35,7 @@ public class UserAppServiceTests
         _passwordHasherMock = new Mock<IPasswordHasher>();
         _passwordPolicyValidatorMock = new Mock<IPasswordPolicyValidator>();
         _currentTenantMock = new Mock<ICurrentTenant>();
+        _securityLogWriterMock = new Mock<IIdentitySecurityLogWriter>();
         _currentTenantMock.SetupGet(currentTenant => currentTenant.Id).Returns(string.Empty);
         _featureCheckerMock = new Mock<IFeatureChecker>();
         _featureCheckerMock
@@ -47,7 +49,8 @@ public class UserAppServiceTests
             _passwordHasherMock.Object,
             _passwordPolicyValidatorMock.Object,
             _currentTenantMock.Object,
-            _featureCheckerMock.Object);
+            _featureCheckerMock.Object,
+            _securityLogWriterMock.Object);
     }
 
     [Fact]

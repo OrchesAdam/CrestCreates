@@ -16,14 +16,16 @@ public class RoleAppServiceTests
 {
     private readonly Mock<IRoleRepository> _roleRepositoryMock;
     private readonly Mock<ICurrentTenant> _currentTenantMock;
+    private readonly Mock<IIdentitySecurityLogWriter> _securityLogWriterMock;
     private readonly RoleAppService _roleAppService;
 
     public RoleAppServiceTests()
     {
         _roleRepositoryMock = new Mock<IRoleRepository>();
         _currentTenantMock = new Mock<ICurrentTenant>();
+        _securityLogWriterMock = new Mock<IIdentitySecurityLogWriter>();
         _currentTenantMock.SetupGet(currentTenant => currentTenant.Id).Returns(string.Empty);
-        _roleAppService = new RoleAppService(_roleRepositoryMock.Object, _currentTenantMock.Object);
+        _roleAppService = new RoleAppService(_roleRepositoryMock.Object, _currentTenantMock.Object, _securityLogWriterMock.Object);
     }
 
     [Fact]
