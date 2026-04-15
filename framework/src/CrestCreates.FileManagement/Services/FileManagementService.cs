@@ -89,7 +89,11 @@ public class FileManagementService : IFileManagementService
 
     public Task<IEnumerable<FileEntity>> ListAsync(Guid tenantId, int? year = null, CancellationToken ct = default)
     {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("TenantId is required", nameof(tenantId));
+
         // Would query repository if implemented
+        _ = year; // Suppress unused warning until repository is implemented
         return Task.FromResult<IEnumerable<FileEntity>>(Array.Empty<FileEntity>());
     }
 
