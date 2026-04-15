@@ -76,7 +76,7 @@ internal class QuartzJobAdapter<TJob, TArg> : QuartzJob
                     .StartAt(DateTimeOffset.UtcNow.Add(delay ?? TimeSpan.Zero))
                     .Build();
 
-                await context.Scheduler.RescheduleJob(new TriggerKey(context.Trigger.Key.Name), trigger);
+                await context.Scheduler.RescheduleJob(context.Trigger.Key, trigger);
             }
 
             throw;
