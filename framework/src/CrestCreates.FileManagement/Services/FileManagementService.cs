@@ -1,179 +1,147 @@
 using Microsoft.AspNetCore.Http;
+using System;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.FileManagement.Providers;
 using CrestCreates.FileManagement.Configuration;
 using CrestCreates.FileManagement.Models;
 
-namespace CrestCreates.FileManagement.Services
+namespace CrestCreates.FileManagement.Services;
+
+public class FileManagementService : IFileManagementService
 {
-    /// <summary>
-    /// 文件管理服务
-    /// </summary>
-    public class FileManagementService : IFileManagementService
+    private readonly IFileStorageProvider _storageProvider;
+    private readonly FileValidationOptions _validationOptions;
+    private readonly FileUrlOptions _urlOptions;
+
+    public FileManagementService(
+        IFileStorageProvider storageProvider,
+        FileValidationOptions validationOptions,
+        FileUrlOptions urlOptions)
     {
-        private readonly IFileStorageProvider _storageProvider;
-        private readonly FileValidationOptions _validationOptions;
-        private readonly FileUrlOptions _urlOptions;
-        
-        /// <summary>
-        /// 构造函数
-        /// </summary>
-        /// <param name="storageProvider">存储提供者</param>
-        /// <param name="validationOptions">验证配置</param>
-        /// <param name="urlOptions">URL配置</param>
-        public FileManagementService(
-            IFileStorageProvider storageProvider,
-            FileValidationOptions validationOptions,
-            FileUrlOptions urlOptions)
+        _storageProvider = storageProvider;
+        _validationOptions = validationOptions;
+        _urlOptions = urlOptions;
+    }
+
+    public async Task<string> UploadFileAsync(IFormFile file, string directory = "")
+    {
+        if (!ValidateFile(file))
+            throw new InvalidOperationException("File validation failed");
+
+        var extension = Path.GetExtension(file.FileName);
+        var fileKey = FileKey.Create(Guid.Empty, extension); // TenantId should be resolved from context
+        var entity = new FileEntity
         {
-            _storageProvider = storageProvider;
-            _validationOptions = validationOptions;
-            _urlOptions = urlOptions;
+            Key = fileKey,
+            TenantId = Guid.Empty,
+            FileName = file.FileName,
+            ContentType = file.ContentType,
+            Size = file.Length,
+            Extension = extension,
+            UploadedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+
+        await using var stream = file.OpenReadStream();
+        return await _storageProvider.UploadAsync(stream, entity);
+    }
+
+    public async Task<string> UploadStreamAsync(Stream stream, string fileName, string directory = "")
+    {
+        if (!ValidateFileName(fileName))
+            throw new InvalidOperationException("File name validation failed");
+
+        var extension = Path.GetExtension(fileName);
+        var fileKey = FileKey.Create(Guid.Empty, extension);
+        var entity = new FileEntity
+        {
+            Key = fileKey,
+            TenantId = Guid.Empty,
+            FileName = fileName,
+            ContentType = "application/octet-stream",
+            Size = 0,
+            Extension = extension,
+            UploadedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+
+        return await _storageProvider.UploadAsync(stream, entity);
+    }
+
+    public async Task<byte[]> DownloadFileAsync(string filePath)
+    {
+        var stream = await _storageProvider.DownloadAsync(filePath);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        return ms.ToArray();
+    }
+
+    public async Task DownloadToStreamAsync(string filePath, Stream stream)
+    {
+        var fileStream = await _storageProvider.DownloadAsync(filePath);
+        await fileStream.CopyToAsync(stream);
+    }
+
+    public Task DeleteFileAsync(string filePath)
+    {
+        return _storageProvider.DeleteAsync(filePath);
+    }
+
+    public Task<bool> FileExistsAsync(string filePath)
+    {
+        return _storageProvider.ExistsAsync(filePath);
+    }
+
+    public async Task<FileInformation> GetFileInfoAsync(string filePath)
+    {
+        var metadata = await _storageProvider.GetMetadataAsync(filePath);
+        var fileKey = FileKey.Parse(filePath);
+
+        return new FileInformation
+        {
+            Path = filePath,
+            Name = fileKey?.FileGuid.ToString() ?? Path.GetFileName(filePath),
+            Size = metadata.Size,
+            CreatedAt = metadata.LastModified.UtcDateTime,
+            LastModified = metadata.LastModified.UtcDateTime,
+            ContentType = metadata.ContentType
+        };
+    }
+
+    public Task<string> GetFileUrlAsync(string filePath)
+    {
+        if (_urlOptions.UseAbsoluteUrl && !string.IsNullOrEmpty(_urlOptions.AbsoluteUrlPrefix))
+        {
+            return Task.FromResult($"{_urlOptions.AbsoluteUrlPrefix}{_urlOptions.BaseUrl}/{filePath}".Replace("//", "/"));
         }
-        
-        /// <summary>
-        /// 上传文件
-        /// </summary>
-        /// <param name="file">文件</param>
-        /// <param name="directory">目录</param>
-        /// <returns>文件路径</returns>
-        public async Task<string> UploadFileAsync(IFormFile file, string directory = "")
+
+        return Task.FromResult($"{_urlOptions.BaseUrl}/{filePath}".Replace("//", "/"));
+    }
+
+    public bool ValidateFile(IFormFile file)
+    {
+        if (file.Length > _validationOptions.MaxFileSize)
+            return false;
+
+        if (_validationOptions.AllowedExtensions.Length > 0)
         {
-            // 验证文件
-            if (!ValidateFile(file))
-            {
-                throw new System.InvalidOperationException("File validation failed");
-            }
-            
-            return await _storageProvider.UploadFileAsync(file, directory);
-        }
-        
-        /// <summary>
-        /// 上传文件流
-        /// </summary>
-        /// <param name="stream">文件流</param>
-        /// <param name="fileName">文件名</param>
-        /// <param name="directory">目录</param>
-        /// <returns>文件路径</returns>
-        public async Task<string> UploadStreamAsync(Stream stream, string fileName, string directory = "")
-        {
-            // 验证文件名
-            if (!ValidateFileName(fileName))
-            {
-                throw new System.InvalidOperationException("File name validation failed");
-            }
-            
-            return await _storageProvider.UploadStreamAsync(stream, fileName, directory);
-        }
-        
-        /// <summary>
-        /// 下载文件
-        /// </summary>
-        /// <param name="filePath">文件路径</param>
-        /// <returns>文件字节数组</returns>
-        public Task<byte[]> DownloadFileAsync(string filePath)
-        {
-            return _storageProvider.DownloadFileAsync(filePath);
-        }
-        
-        /// <summary>
-        /// 下载文件到流
-        /// </summary>
-        /// <param name="filePath">文件路径</param>
-        /// <param name="stream">目标流</param>
-        public Task DownloadToStreamAsync(string filePath, Stream stream)
-        {
-            return _storageProvider.DownloadToStreamAsync(filePath, stream);
-        }
-        
-        /// <summary>
-        /// 删除文件
-        /// </summary>
-        /// <param name="filePath">文件路径</param>
-        public Task DeleteFileAsync(string filePath)
-        {
-            return _storageProvider.DeleteFileAsync(filePath);
-        }
-        
-        /// <summary>
-        /// 检查文件是否存在
-        /// </summary>
-        /// <param name="filePath">文件路径</param>
-        /// <returns>是否存在</returns>
-        public Task<bool> FileExistsAsync(string filePath)
-        {
-            return _storageProvider.FileExistsAsync(filePath);
-        }
-        
-        /// <summary>
-        /// 获取文件信息
-        /// </summary>
-        /// <param name="filePath">文件路径</param>
-        /// <returns>文件信息</returns>
-        public Task<FileInformation> GetFileInfoAsync(string filePath)
-        {
-            return _storageProvider.GetFileInfoAsync(filePath);
-        }
-        
-        /// <summary>
-        /// 获取文件URL
-        /// </summary>
-        /// <param name="filePath">文件路径</param>
-        /// <returns>文件URL</returns>
-        public Task<string> GetFileUrlAsync(string filePath)
-        {
-            if (_urlOptions.UseAbsoluteUrl && !string.IsNullOrEmpty(_urlOptions.AbsoluteUrlPrefix))
-            {
-                return Task.FromResult($"{_urlOptions.AbsoluteUrlPrefix}{_urlOptions.BaseUrl}/{filePath}".Replace("//", "/"));
-            }
-            
-            return Task.FromResult($"{_urlOptions.BaseUrl}/{filePath}".Replace("//", "/"));
-        }
-        
-        /// <summary>
-        /// 验证文件
-        /// </summary>
-        /// <param name="file">文件</param>
-        /// <returns>验证结果</returns>
-        public bool ValidateFile(IFormFile file)
-        {
-            // 检查文件大小
-            if (file.Length > _validationOptions.MaxFileSize)
-            {
+            var extension = Path.GetExtension(file.FileName).ToLower();
+            if (!Array.Exists(_validationOptions.AllowedExtensions, ext => ext.Equals(extension)))
                 return false;
-            }
-            
-            // 检查文件扩展名
-            if (_validationOptions.AllowedExtensions.Length > 0)
-            {
-                var extension = Path.GetExtension(file.FileName).ToLower();
-                if (!System.Array.Exists(_validationOptions.AllowedExtensions, ext => ext.Equals(extension)))
-                {
-                    return false;
-                }
-            }
-            
-            return true;
         }
-        
-        /// <summary>
-        /// 验证文件名
-        /// </summary>
-        /// <param name="fileName">文件名</param>
-        /// <returns>验证结果</returns>
-        private bool ValidateFileName(string fileName)
+
+        return true;
+    }
+
+    private bool ValidateFileName(string fileName)
+    {
+        if (_validationOptions.AllowedExtensions.Length > 0)
         {
-            if (_validationOptions.AllowedExtensions.Length > 0)
-            {
-                var extension = Path.GetExtension(fileName).ToLower();
-                if (!System.Array.Exists(_validationOptions.AllowedExtensions, ext => ext.Equals(extension)))
-                {
-                    return false;
-                }
-            }
-            
-            return true;
+            var extension = Path.GetExtension(fileName).ToLower();
+            if (!Array.Exists(_validationOptions.AllowedExtensions, ext => ext.Equals(extension)))
+                return false;
         }
+
+        return true;
     }
 }
