@@ -102,7 +102,7 @@ public class QuartzSchedulerService : ISchedulerService
     }
 
     public async Task<SchedulingJobs.JobId> ScheduleAsync<TJob>(TimeSpan delay, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null) where TJob : SchedulingJobs.IJob
-        => await ScheduleAsync<TJob, SchedulingJobs.NoArgs>(delay, default, tenantId, organizationId, userId);
+        => await ScheduleAsync<TJob, SchedulingJobs.NoArgs>(delay, new SchedulingJobs.NoArgs(), tenantId, organizationId, userId);
 
     public async Task<SchedulingJobs.JobId> ScheduleAsync<TJob, TArg>(TimeSpan delay, TArg args, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null)
         where TJob : SchedulingJobs.IJob<TArg>
@@ -110,7 +110,7 @@ public class QuartzSchedulerService : ISchedulerService
         => await ScheduleInternalAsync<TJob, TArg>(DateTimeOffset.UtcNow.Add(delay), args, tenantId, organizationId, userId);
 
     public async Task<SchedulingJobs.JobId> ScheduleAsync<TJob>(DateTimeOffset scheduledTime, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null) where TJob : SchedulingJobs.IJob
-        => await ScheduleAsync<TJob, SchedulingJobs.NoArgs>(scheduledTime, default, tenantId, organizationId, userId);
+        => await ScheduleAsync<TJob, SchedulingJobs.NoArgs>(scheduledTime, new SchedulingJobs.NoArgs(), tenantId, organizationId, userId);
 
     public async Task<SchedulingJobs.JobId> ScheduleAsync<TJob, TArg>(DateTimeOffset scheduledTime, TArg args, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null)
         where TJob : SchedulingJobs.IJob<TArg>
@@ -155,7 +155,7 @@ public class QuartzSchedulerService : ISchedulerService
     }
 
     public async Task ExecuteNowAsync<TJob>(Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null) where TJob : SchedulingJobs.IJob
-        => await ExecuteNowAsync<TJob, SchedulingJobs.NoArgs>(default, tenantId, organizationId, userId);
+        => await ExecuteNowAsync<TJob, SchedulingJobs.NoArgs>(new SchedulingJobs.NoArgs(), tenantId, organizationId, userId);
 
     public async Task ExecuteNowAsync<TJob, TArg>(TArg args, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null)
         where TJob : SchedulingJobs.IJob<TArg>
@@ -246,8 +246,8 @@ public class QuartzSchedulerService : ISchedulerService
 
                 result.Add(new SchedulingServices.JobInfo(
                     Id: new SchedulingJobs.JobId(key.Name, key.Group, Guid.Empty),
-                    JobType: detail.JobType,
-                    ArgType: detail.JobType.IsGenericType ? detail.JobType.GetGenericArguments()[0] : null,
+                    JobType: detail!.JobType,
+                    ArgType: detail!.JobType.IsGenericType ? detail.JobType.GetGenericArguments()[0] : null,
                     CronExpression: trigger is ICronTrigger cronTrigger ? cronTrigger.CronExpressionString : null,
                     NextFireTime: trigger?.GetNextFireTimeUtc()?.LocalDateTime,
                     Status: JobStatus.Running,
