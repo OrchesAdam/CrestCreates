@@ -2,6 +2,7 @@ using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Localization;
+using Microsoft.Extensions.Hosting;
 using System.Globalization;
 using CrestCreates.Localization.Services;
 
@@ -9,14 +10,18 @@ namespace CrestCreates.Localization.Modules;
 
 public class LocalizationModule : ModuleBase
 {
-    public void ConfigureServices(IServiceCollection services)
+    public override void OnConfigureServices(IServiceCollection services)
     {
         services.AddLocalization(options => options.ResourcesPath = "Resources");
         services.AddSingleton<ILocalizationService, LocalizationService>();
     }
 
-    public void Configure(IApplicationBuilder app)
+    public override void OnApplicationInitialization(IHost host)
     {
+        base.OnApplicationInitialization(host);
+
+        var app = host.Services.GetRequiredService<IApplicationBuilder>();
+
         var supportedCultures = new[]
         {
             new CultureInfo("en"),

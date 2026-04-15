@@ -1,4 +1,6 @@
+using CrestCreates.Localization.Abstractions;
 using Microsoft.Extensions.Localization;
+using System.Collections.Concurrent;
 using System.Globalization;
 
 namespace CrestCreates.Localization.Services;
@@ -6,56 +8,137 @@ namespace CrestCreates.Localization.Services;
 public class LocalizationService : ILocalizationService
 {
     private readonly IStringLocalizer _localizer;
+    private readonly string _defaultCulture;
+    private readonly ConcurrentDictionary<string, ILocalizationResourceContributor> _contributors = new();
+    private readonly ConcurrentBag<LocalizationResource> _resources = new();
 
-    public LocalizationService(IStringLocalizerFactory factory)
+    // Thread-safe culture context using AsyncLocal
+    private static readonly AsyncLocal<CultureContext?> _cultureContext = new();
+
+    public LocalizationService(
+        IStringLocalizerFactory factory,
+        string defaultCulture = "en")
     {
         _localizer = factory.Create(typeof(LocalizationService));
-        CurrentCulture = CultureInfo.CurrentUICulture.Name;
+        _defaultCulture = defaultCulture;
+    }
+
+    public string CurrentCulture => _cultureContext.Value?.Culture ?? _defaultCulture;
+
+    public void RegisterResource(LocalizationResource resource)
+    {
+        _resources.Add(resource);
+        _contributors[resource.Name] = resource.Contributor;
+    }
+
+    public async Task<string?> GetStringAsync(string key)
+    {
+        return await GetStringAsync(key, CurrentCulture);
+    }
+
+    public async Task<string?> GetStringAsync(string key, params object[] arguments)
+    {
+        var result = await GetStringAsync(key);
+        return result != null ? string.Format(result, arguments) : null;
+    }
+
+    public async Task<string?> GetStringAsync(string key, string cultureName)
+    {
+        // Try each resource contributor in priority order
+        foreach (var resource in _resources.OrderBy(r => r.Priority))
+        {
+            var value = await resource.Contributor.GetStringAsync(cultureName, key);
+            if (value != null)
+                return value;
+
+            // Try fallback culture
+            var fallbackCulture = GetFallbackCulture(cultureName);
+            if (fallbackCulture != cultureName)
+            {
+                value = await resource.Contributor.GetStringAsync(fallbackCulture, key);
+                if (value != null)
+                    return value;
+            }
+        }
+
+        // Fallback to IStringLocalizer
+        return _localizer[key];
+    }
+
+    public async Task<string?> GetStringAsync(string key, string cultureName, params object[] arguments)
+    {
+        var result = await GetStringAsync(key, cultureName);
+        return result != null ? string.Format(result, arguments) : null;
     }
 
     public string GetString(string key)
     {
-        return _localizer[key];
+        return GetStringAsync(key).GetAwaiter().GetResult() ?? key;
     }
 
     public string GetString(string key, params object[] arguments)
     {
-        return _localizer[key, arguments];
+        return GetStringAsync(key, arguments).GetAwaiter().GetResult() ?? key;
     }
 
     public string GetString(string key, string cultureName)
     {
-        var originalCulture = CultureInfo.CurrentUICulture;
-        try
-        {
-            CultureInfo.CurrentUICulture = new CultureInfo(cultureName);
-            return _localizer[key];
-        }
-        finally
-        {
-            CultureInfo.CurrentUICulture = originalCulture;
-        }
+        return GetStringAsync(key, cultureName).GetAwaiter().GetResult() ?? key;
     }
 
     public string GetString(string key, string cultureName, params object[] arguments)
     {
-        var originalCulture = CultureInfo.CurrentUICulture;
-        try
-        {
-            CultureInfo.CurrentUICulture = new CultureInfo(cultureName);
-            return _localizer[key, arguments];
-        }
-        finally
-        {
-            CultureInfo.CurrentUICulture = originalCulture;
-        }
+        return GetStringAsync(key, cultureName, arguments).GetAwaiter().GetResult() ?? key;
     }
 
-    public void ChangeCulture(string cultureName)
+    public IDisposable ChangeCulture(string cultureName)
     {
-        CultureInfo.CurrentUICulture = new CultureInfo(cultureName);
-        CurrentCulture = cultureName;
+        return new CultureScope(cultureName);
     }
 
-    public string CurrentCulture { get; private set; }
+    public Task<IDisposable> ChangeCultureAsync(string cultureName)
+    {
+        return Task.FromResult(ChangeCulture(cultureName));
+    }
+
+    private static string GetFallbackCulture(string cultureName)
+    {
+        var culture = new CultureInfo(cultureName);
+        if (culture.Parent != null && !culture.IsNeutralCulture)
+            return culture.Parent.Name;
+        return cultureName;
+    }
+
+    private class CultureScope : IDisposable
+    {
+        private readonly string? _parentCulture;
+
+        public CultureScope(string cultureName)
+        {
+            _parentCulture = _cultureContext.Value?.Culture;
+            _cultureContext.Value = new CultureContext(cultureName);
+        }
+
+        public void Dispose()
+        {
+            if (_parentCulture != null)
+            {
+                _cultureContext.Value = new CultureContext(_parentCulture);
+            }
+            else
+            {
+                _cultureContext.Value = null;
+            }
+        }
+    }
+
+    private class CultureContext
+    {
+        public string Culture { get; }
+
+        public CultureContext(string culture)
+        {
+            Culture = culture;
+        }
+    }
 }
