@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using System.IO;
 using System.Threading.Tasks;
-using CrestCreates.FileManagement.Providers;
+using CrestCreates.FileManagement.Models;
 
 namespace CrestCreates.FileManagement.Services
 {

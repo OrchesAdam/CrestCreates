@@ -3,6 +3,7 @@ using System.IO;
 using System;
 using System.Threading.Tasks;
 using CrestCreates.FileManagement.Configuration;
+using CrestCreates.FileManagement.Models;
 using System.Collections.Generic;
 
 namespace CrestCreates.FileManagement.Providers
