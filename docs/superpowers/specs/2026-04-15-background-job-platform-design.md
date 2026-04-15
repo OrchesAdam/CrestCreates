@@ -129,18 +129,21 @@ public class JobMetadata
     public string Group { get; init; } = "Default";
     public string? CronExpression { get; init; }
     public TimeSpan? Timeout { get; init; }
+    public JobRetryOptions? Retry { get; init; }
     public string? Description { get; init; }
     public bool Enabled { get; init; } = true;
 }
 ```
 
-## 5. Failure Handling
+## 5. Failure Handling & Retry
 
 ```csharp
 // Services/IJobFailureHandler.cs
 public interface IJobFailureHandler
 {
     Task HandleAsync(JobFailureContext context, CancellationToken ct = default);
+    bool ShouldRetry(JobFailureContext context);
+    TimeSpan? GetNextRetryDelay(JobFailureContext context, int attemptNumber);
 }
 
 public record JobFailureContext(
@@ -152,26 +155,65 @@ public record JobFailureContext(
     Guid? OrganizationId,
     Guid? UserId,
     DateTimeOffset FailedAt,
-    object? Args
+    object? Args,
+    int AttemptNumber
 );
+
+public class JobRetryOptions
+{
+    public int MaxRetries { get; init; } = 0;
+    public TimeSpan? InitialDelay { get; init; }
+    public TimeSpan? MaxDelay { get; init; }
+    public double BackoffMultiplier { get; init; } = 2.0;
+}
 
 public class DefaultJobFailureHandler : IJobFailureHandler
 {
     private readonly ILogger<DefaultJobFailureHandler> _logger;
-    public DefaultJobFailureHandler(ILogger<DefaultJobFailureHandler> logger) => _logger = logger;
+    private readonly JobRetryOptions? _retryOptions;
+
+    public DefaultJobFailureHandler(
+        ILogger<DefaultJobFailureHandler> logger,
+        IOptions<JobRetryOptions>? retryOptions = null)
+    {
+        _logger = logger;
+        _retryOptions = retryOptions?.Value;
+    }
 
     public Task HandleAsync(JobFailureContext context, CancellationToken ct = default)
     {
         _logger.LogError(context.Exception,
-            "Job {JobId} ({JobType}) failed. Tenant={TenantId}, Org={OrgId}, User={UserId}",
-            context.JobId, context.JobType.Name, context.TenantId, context.OrganizationId, context.UserId);
+            "Job {JobId} ({JobType}) failed. Tenant={TenantId}, Org={OrgId}, User={UserId}, Attempt={Attempt}",
+            context.JobId, context.JobType.Name, context.TenantId, context.OrganizationId, context.UserId,
+            context.AttemptNumber);
         return Task.CompletedTask;
+    }
+
+    public bool ShouldRetry(JobFailureContext context)
+        => _retryOptions?.MaxRetries > 0 && context.AttemptNumber < _retryOptions.MaxRetries;
+
+    public TimeSpan? GetNextRetryDelay(JobFailureContext context, int attemptNumber)
+    {
+        if (_retryOptions?.InitialDelay == null) return null;
+        var delay = _retryOptions.InitialDelay.Value * Math.Pow(_retryOptions.BackoffMultiplier, attemptNumber - 1);
+        return _retryOptions.MaxDelay.HasValue
+            ? TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds, _retryOptions.MaxDelay.TotalMilliseconds))
+            : delay;
     }
 }
 ```
 
+**Retry flow (inside Quartz adapter):**
+1. Execute `job.ExecuteAsync()`
+2. Catch exception → create `JobFailureContext(attemptNumber=1)`
+3. Call `failureHandler.HandleAsync()`
+4. Check `ShouldRetry()`:
+   - Yes → calculate delay → reschedule same job (attemptNumber+1)
+   - No → log and re-throw
+
 - Triggered only on unhandled exceptions (not cancellation or timeout)
-- Quartz adapter internally catches exceptions and invokes the handler before re-throwing
+- `AttemptNumber` starts at 1
+- `HandleAsync` is called on every failure including final attempt before giving up
 
 ## 6. File Structure
 
@@ -217,4 +259,5 @@ Scans for all types implementing `IJob` or `IJob<TArg>` and generates:
 - [ ] Jobs receive explicit `JobExecutionContext` with tenant/org/user/args
 - [ ] One-time, delayed, and recurring jobs share unified interfaces
 - [ ] Failure handling is pluggable via `IJobFailureHandler`
+- [ ] Retry behavior is configurable per-job via `JobRetryOptions`
 - [ ] All scheduling is type-driven (no string keys in business code)
