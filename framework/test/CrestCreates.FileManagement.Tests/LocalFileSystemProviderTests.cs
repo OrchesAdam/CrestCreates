@@ -153,7 +153,7 @@ public class LocalFileSystemProviderTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadAsync_PathTraversalAttempt_Throws()
+    public async Task UploadAsync_VirtualPathMapping_PreventsPathTraversal()
     {
         // Arrange
         var tenantId = Guid.NewGuid();
@@ -171,9 +171,12 @@ public class LocalFileSystemProviderTests : IDisposable
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("malicious"));
 
         // Act - virtual path mapping should prevent path traversal
-        var exception = await Record.ExceptionAsync(() => _provider.UploadAsync(stream, entity));
+        // The physical path is SHA256 hash, not the storage key
+        var storageKey = await _provider.UploadAsync(stream, entity);
 
-        // Assert - should not throw (path traversal is prevented by virtual path mapping)
-        exception.Should().BeNull();
+        // Assert - file should be stored at virtual path, not actual traversal path
+        storageKey.Should().NotContain("..");
+        storageKey.Should().Contain(tenantId.ToString());
+        (await _provider.ExistsAsync(storageKey)).Should().BeTrue();
     }
 }
