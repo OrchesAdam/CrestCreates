@@ -658,7 +658,7 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
             DefaultConnectionString = (string?)null
         };
 
-        var response = await client.PutAsJsonAsync($"/api/tenants/{marker}?marker={marker}", requestBody);
+        var response = await client.PutAsJsonAsync($"/api/tenant/{Uri.EscapeDataString(marker)}?marker={marker}", requestBody);
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
     }
 
@@ -669,7 +669,7 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
             DisplayName = $"missing-{marker}"
         };
 
-        var response = await client.PutAsJsonAsync($"/api/tenants/{marker}?marker={marker}", requestBody);
+        var response = await client.PutAsJsonAsync($"/api/tenant/{Uri.EscapeDataString(marker)}?marker={marker}", requestBody);
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
     }
 
