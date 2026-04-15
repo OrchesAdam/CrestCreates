@@ -72,14 +72,14 @@ public class VirtualFileSystem : IVirtualFileSystem
         return await ExistsAsync(virtualPath.Value, ct);
     }
 
-    public async Task<bool> ExistsAsync(VirtualPath path, CancellationToken ct = default)
+    public Task<bool> ExistsAsync(VirtualPath path, CancellationToken ct = default)
     {
         if (_moduleProviders.TryGetValue(path.ModuleName, out var provider))
         {
-            return await provider.ExistsAsync(path, ct);
+            return provider.ExistsAsync(path, ct);
         }
 
-        return false;
+        return Task.FromResult(false);
     }
 
     public IEnumerable<string> GetRegisteredModules()

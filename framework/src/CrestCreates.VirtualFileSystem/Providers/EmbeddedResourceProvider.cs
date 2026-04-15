@@ -65,7 +65,7 @@ public class EmbeddedResourceProvider : IVirtualFileProvider, IEmbeddedResourceP
             if (!recursive && remainingPath.Contains('/'))
                 continue;
 
-            var virtualPath = VirtualPath.Create(_moduleName, directory.RelativePath + "/" + relativePath.Replace('/', '+'));
+            var virtualPath = VirtualPath.Create(_moduleName, directory.RelativePath + "/" + relativePath);
             var file = await GetFileByResourceNameAsync(virtualPath, name);
             if (file != null)
                 results.Add(file);
