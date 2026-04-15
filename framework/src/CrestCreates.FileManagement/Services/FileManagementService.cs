@@ -1,147 +1,130 @@
-using Microsoft.AspNetCore.Http;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using CrestCreates.FileManagement.Providers;
 using CrestCreates.FileManagement.Configuration;
 using CrestCreates.FileManagement.Models;
+using CrestCreates.FileManagement.Providers;
+using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.FileManagement.Services;
 
 public class FileManagementService : IFileManagementService
 {
     private readonly IFileStorageProvider _storageProvider;
+    private readonly IFileUrlService _urlService;
     private readonly FileValidationOptions _validationOptions;
     private readonly FileUrlOptions _urlOptions;
+    private readonly ILogger<FileManagementService> _logger;
 
     public FileManagementService(
         IFileStorageProvider storageProvider,
+        IFileUrlService urlService,
         FileValidationOptions validationOptions,
-        FileUrlOptions urlOptions)
+        FileUrlOptions urlOptions,
+        ILogger<FileManagementService> logger)
     {
         _storageProvider = storageProvider;
+        _urlService = urlService;
         _validationOptions = validationOptions;
         _urlOptions = urlOptions;
+        _logger = logger;
     }
 
-    public async Task<string> UploadFileAsync(IFormFile file, string directory = "")
+    public async Task<FileEntity> UploadAsync(
+        Stream stream,
+        string fileName,
+        string contentType,
+        FileAccessMode accessMode = FileAccessMode.Private,
+        FileMetadata? metadata = null,
+        Guid? tenantId = null,
+        CancellationToken ct = default)
     {
-        if (!ValidateFile(file))
-            throw new InvalidOperationException("File validation failed");
+        var effectiveTenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
 
-        var extension = Path.GetExtension(file.FileName);
-        var fileKey = FileKey.Create(Guid.Empty, extension); // TenantId should be resolved from context
-        var entity = new FileEntity
-        {
-            Key = fileKey,
-            TenantId = Guid.Empty,
-            FileName = file.FileName,
-            ContentType = file.ContentType,
-            Size = file.Length,
-            Extension = extension,
-            UploadedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-        };
-
-        await using var stream = file.OpenReadStream();
-        return await _storageProvider.UploadAsync(stream, entity);
-    }
-
-    public async Task<string> UploadStreamAsync(Stream stream, string fileName, string directory = "")
-    {
-        if (!ValidateFileName(fileName))
-            throw new InvalidOperationException("File name validation failed");
+        // Validate
+        ValidateFileName(fileName);
 
         var extension = Path.GetExtension(fileName);
-        var fileKey = FileKey.Create(Guid.Empty, extension);
+        var fileKey = FileKey.Create(effectiveTenantId, extension);
+
         var entity = new FileEntity
         {
             Key = fileKey,
-            TenantId = Guid.Empty,
-            FileName = fileName,
-            ContentType = "application/octet-stream",
-            Size = 0,
+            TenantId = effectiveTenantId,
+            FileName = SanitizeFileName(fileName),
+            ContentType = contentType,
+            Size = stream.CanSeek ? stream.Length : 0,
             Extension = extension,
-            UploadedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            UploadedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            AccessMode = accessMode
         };
 
-        return await _storageProvider.UploadAsync(stream, entity);
+        await _storageProvider.UploadAsync(stream, entity, ct);
+        _logger.LogInformation("Uploaded file {FileName} for tenant {TenantId}", fileName, effectiveTenantId);
+
+        return entity;
     }
 
-    public async Task<byte[]> DownloadFileAsync(string filePath)
+    public async Task<Stream> DownloadAsync(FileKey key, Guid tenantId, CancellationToken ct = default)
     {
-        var stream = await _storageProvider.DownloadAsync(filePath);
-        using var ms = new MemoryStream();
-        await stream.CopyToAsync(ms);
-        return ms.ToArray();
+        ValidateTenantAccess(key.TenantId, tenantId);
+        return await _storageProvider.DownloadAsync(key.ToStorageKey(), ct);
     }
 
-    public async Task DownloadToStreamAsync(string filePath, Stream stream)
+    public async Task DeleteAsync(FileKey key, Guid tenantId, CancellationToken ct = default)
     {
-        var fileStream = await _storageProvider.DownloadAsync(filePath);
-        await fileStream.CopyToAsync(stream);
+        ValidateTenantAccess(key.TenantId, tenantId);
+        await _storageProvider.DeleteAsync(key.ToStorageKey(), ct);
+        _logger.LogInformation("Deleted file {StorageKey} for tenant {TenantId}", key.ToStorageKey(), tenantId);
     }
 
-    public Task DeleteFileAsync(string filePath)
+    public Task<FileEntity?> GetAsync(FileKey key, Guid tenantId, CancellationToken ct = default)
     {
-        return _storageProvider.DeleteAsync(filePath);
+        ValidateTenantAccess(key.TenantId, tenantId);
+        // Would query repository if implemented
+        return Task.FromResult<FileEntity?>(null);
     }
 
-    public Task<bool> FileExistsAsync(string filePath)
+    public Task<IEnumerable<FileEntity>> ListAsync(Guid tenantId, int? year = null, CancellationToken ct = default)
     {
-        return _storageProvider.ExistsAsync(filePath);
+        // Would query repository if implemented
+        return Task.FromResult<IEnumerable<FileEntity>>(Array.Empty<FileEntity>());
     }
 
-    public async Task<FileInformation> GetFileInfoAsync(string filePath)
+    public string GetUrl(FileEntity entity, TimeSpan? presignedExpiry = null)
     {
-        var metadata = await _storageProvider.GetMetadataAsync(filePath);
-        var fileKey = FileKey.Parse(filePath);
-
-        return new FileInformation
+        if (entity.AccessMode == FileAccessMode.Private && presignedExpiry.HasValue)
         {
-            Path = filePath,
-            Name = fileKey?.FileGuid.ToString() ?? Path.GetFileName(filePath),
-            Size = metadata.Size,
-            CreatedAt = metadata.LastModified.UtcDateTime,
-            LastModified = metadata.LastModified.UtcDateTime,
-            ContentType = metadata.ContentType
-        };
-    }
-
-    public Task<string> GetFileUrlAsync(string filePath)
-    {
-        if (_urlOptions.UseAbsoluteUrl && !string.IsNullOrEmpty(_urlOptions.AbsoluteUrlPrefix))
-        {
-            return Task.FromResult($"{_urlOptions.AbsoluteUrlPrefix}{_urlOptions.BaseUrl}/{filePath}".Replace("//", "/"));
+            if (_storageProvider is ICloudStorageProvider cloudProvider)
+            {
+                return cloudProvider.GeneratePresignedUrl(entity.Key.ToStorageKey(), presignedExpiry.Value);
+            }
+            throw new NotSupportedException("Presigned URLs not supported for local storage provider");
         }
 
-        return Task.FromResult($"{_urlOptions.BaseUrl}/{filePath}".Replace("//", "/"));
+        return _urlService.GetPublicUrl(entity);
     }
 
-    public bool ValidateFile(IFormFile file)
+    private void ValidateTenantAccess(Guid fileTenantId, Guid requestTenantId)
     {
-        if (file.Length > _validationOptions.MaxFileSize)
-            return false;
-
-        if (_validationOptions.AllowedExtensions.Length > 0)
-        {
-            var extension = Path.GetExtension(file.FileName).ToLower();
-            if (!Array.Exists(_validationOptions.AllowedExtensions, ext => ext.Equals(extension)))
-                return false;
-        }
-
-        return true;
+        if (fileTenantId != requestTenantId)
+            throw new UnauthorizedAccessException("Tenant access denied");
     }
 
-    private bool ValidateFileName(string fileName)
+    private void ValidateFileName(string fileName)
     {
-        if (_validationOptions.AllowedExtensions.Length > 0)
-        {
-            var extension = Path.GetExtension(fileName).ToLower();
-            if (!Array.Exists(_validationOptions.AllowedExtensions, ext => ext.Equals(extension)))
-                return false;
-        }
+        if (string.IsNullOrWhiteSpace(fileName))
+            throw new ArgumentException("File name is required", nameof(fileName));
 
-        return true;
+        if (fileName.Contains("..") || fileName.Contains('/') || fileName.Contains('\\'))
+            throw new ArgumentException("Invalid file name", nameof(fileName));
+    }
+
+    private static string SanitizeFileName(string fileName)
+    {
+        var name = Path.GetFileName(fileName);
+        return string.IsNullOrEmpty(name) ? fileName : name;
     }
 }
