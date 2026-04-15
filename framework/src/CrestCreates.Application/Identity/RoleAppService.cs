@@ -17,11 +17,16 @@ public class RoleAppService : IRoleAppService
 {
     private readonly IRoleRepository _roleRepository;
     private readonly ICurrentTenant _currentTenant;
+    private readonly IIdentitySecurityLogWriter _securityLogWriter;
 
-    public RoleAppService(IRoleRepository roleRepository, ICurrentTenant currentTenant)
+    public RoleAppService(
+        IRoleRepository roleRepository,
+        ICurrentTenant currentTenant,
+        IIdentitySecurityLogWriter securityLogWriter)
     {
         _roleRepository = roleRepository;
         _currentTenant = currentTenant;
+        _securityLogWriter = securityLogWriter;
     }
 
     public async Task<IdentityRoleDto> CreateAsync(
@@ -47,6 +52,9 @@ public class RoleAppService : IRoleAppService
         };
 
         await _roleRepository.InsertAsync(role, cancellationToken);
+        await _securityLogWriter.WriteAsync(
+            null, null, tenantId, "CreateRole", true,
+            $"Role '{roleName}' created", cancellationToken);
         return MapToDto(role);
     }
 
@@ -96,6 +104,10 @@ public class RoleAppService : IRoleAppService
         role.IsActive = isActive;
         role.LastModificationTime = DateTime.UtcNow;
         await _roleRepository.UpdateAsync(role, cancellationToken);
+
+        await _securityLogWriter.WriteAsync(
+            null, null, role.TenantId, "SetActiveRole", true,
+            $"Role '{role.Name}' {(isActive ? "enabled" : "disabled")}", cancellationToken);
     }
 
     private static IdentityRoleDto MapToDto(Role role)

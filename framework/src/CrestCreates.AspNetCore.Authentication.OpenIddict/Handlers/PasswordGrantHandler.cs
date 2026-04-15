@@ -68,7 +68,7 @@ public sealed class PasswordGrantHandlerImpl : IPasswordGrantHandler
     private readonly IRoleRepository _roleRepository;
     private readonly IPasswordHasher _passwordHasher;
     private readonly ICurrentTenant _currentTenant;
-    private readonly IIdentitySecurityLogService _securityLogService;
+    private readonly IIdentitySecurityLogWriter _securityLogService;
     private readonly ILogger<PasswordGrantHandlerImpl> _logger;
 
     public PasswordGrantHandlerImpl(
@@ -76,7 +76,7 @@ public sealed class PasswordGrantHandlerImpl : IPasswordGrantHandler
         IRoleRepository roleRepository,
         IPasswordHasher passwordHasher,
         ICurrentTenant currentTenant,
-        IIdentitySecurityLogService securityLogService,
+        IIdentitySecurityLogWriter securityLogService,
         ILogger<PasswordGrantHandlerImpl> logger)
     {
         _userRepository = userRepository;

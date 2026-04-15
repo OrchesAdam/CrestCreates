@@ -24,6 +24,7 @@ public class UserAppService : IUserAppService
     private readonly IPasswordPolicyValidator _passwordPolicyValidator;
     private readonly ICurrentTenant _currentTenant;
     private readonly IFeatureChecker _featureChecker;
+    private readonly IIdentitySecurityLogWriter _securityLogWriter;
 
     public UserAppService(
         IUserRepository userRepository,
@@ -32,7 +33,8 @@ public class UserAppService : IUserAppService
         IPasswordHasher passwordHasher,
         IPasswordPolicyValidator passwordPolicyValidator,
         ICurrentTenant currentTenant,
-        IFeatureChecker featureChecker)
+        IFeatureChecker featureChecker,
+        IIdentitySecurityLogWriter securityLogWriter)
     {
         _userRepository = userRepository;
         _roleRepository = roleRepository;
@@ -41,6 +43,7 @@ public class UserAppService : IUserAppService
         _passwordPolicyValidator = passwordPolicyValidator;
         _currentTenant = currentTenant;
         _featureChecker = featureChecker;
+        _securityLogWriter = securityLogWriter;
     }
 
     public async Task<IdentityUserDto> CreateAsync(
@@ -72,6 +75,9 @@ public class UserAppService : IUserAppService
         };
 
         await _userRepository.InsertAsync(user, cancellationToken);
+        await _securityLogWriter.WriteAsync(
+            user.Id, user.UserName, user.TenantId, "CreateUser", true,
+            cancellationToken: cancellationToken);
         return MapToDto(user);
     }
 
@@ -125,6 +131,10 @@ public class UserAppService : IUserAppService
         user.IsActive = isActive;
         user.LastModificationTime = DateTime.UtcNow;
         await _userRepository.UpdateAsync(user, cancellationToken);
+
+        await _securityLogWriter.WriteAsync(
+            userId, user.UserName, user.TenantId, "SetActiveUser", true,
+            $"User {(isActive ? "enabled" : "disabled")}", cancellationToken);
     }
 
     public async Task ChangePasswordAsync(
@@ -149,6 +159,9 @@ public class UserAppService : IUserAppService
         user.LastModificationTime = DateTime.UtcNow;
 
         await _userRepository.UpdateAsync(user, cancellationToken);
+        await _securityLogWriter.WriteAsync(
+            userId, user.UserName, user.TenantId, "ChangePassword", true,
+            cancellationToken: cancellationToken);
     }
 
     public async Task AssignRoleAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default)

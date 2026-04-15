@@ -34,12 +34,12 @@ public sealed class RefreshTokenGrantResult
 public sealed class RefreshTokenGrantHandlerImpl : IRefreshTokenGrantHandler
 {
     private readonly IUserRepository _userRepository;
-    private readonly IIdentitySecurityLogService _securityLogService;
+    private readonly IIdentitySecurityLogWriter _securityLogService;
     private readonly ILogger<RefreshTokenGrantHandlerImpl> _logger;
 
     public RefreshTokenGrantHandlerImpl(
         IUserRepository userRepository,
-        IIdentitySecurityLogService securityLogService,
+        IIdentitySecurityLogWriter securityLogService,
         ILogger<RefreshTokenGrantHandlerImpl> logger)
     {
         _userRepository = userRepository;

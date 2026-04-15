@@ -2,6 +2,7 @@ using System;
 using CrestCreates.AspNetCore.Authentication.OpenIddict.Handlers;
 using CrestCreates.AspNetCore.Authentication.OpenIddict.Services;
 using CrestCreates.Domain.OpenIddict;
+using CrestCreates.Domain.Permission;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -85,7 +86,7 @@ public static class OpenIddictServiceCollectionExtensions
             });
 
         services.AddHttpContextAccessor();
-        services.TryAddScoped<IIdentitySecurityLogService, IdentitySecurityLogServiceImpl>();
+        services.TryAddScoped<IIdentitySecurityLogWriter, IdentitySecurityLogServiceImpl>();
         services.TryAddScoped<IPasswordGrantHandler, PasswordGrantHandlerImpl>();
         services.TryAddScoped<IRefreshTokenGrantHandler, RefreshTokenGrantHandlerImpl>();
 

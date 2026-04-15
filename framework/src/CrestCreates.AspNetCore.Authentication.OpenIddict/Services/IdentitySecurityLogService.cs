@@ -8,19 +8,7 @@ using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.AspNetCore.Authentication.OpenIddict.Services;
 
-public interface IIdentitySecurityLogService
-{
-    Task WriteAsync(
-        Guid? userId,
-        string? userName,
-        string? tenantId,
-        string action,
-        bool isSucceeded,
-        string? detail = null,
-        CancellationToken cancellationToken = default);
-}
-
-public sealed class IdentitySecurityLogServiceImpl : IIdentitySecurityLogService
+public sealed class IdentitySecurityLogServiceImpl : IIdentitySecurityLogWriter
 {
     private readonly IIdentitySecurityLogRepository _repository;
     private readonly IHttpContextAccessor _httpContextAccessor;

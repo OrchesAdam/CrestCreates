@@ -1,4 +1,6 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 using CrestCreates.Domain.Entities;
 
 namespace CrestCreates.Domain.Permission;
@@ -25,4 +27,20 @@ public class IdentitySecurityLog : Entity<Guid>
         IsSucceeded = isSucceeded;
         CreationTime = creationTime;
     }
+}
+
+/// <summary>
+/// 统一身份安全日志写入接口，定义在 Domain 层供 Application 层使用。
+/// 实现由认证基础设施提供，统一写入 IdentitySecurityLog 表。
+/// </summary>
+public interface IIdentitySecurityLogWriter
+{
+    Task WriteAsync(
+        Guid? userId,
+        string? userName,
+        string? tenantId,
+        string action,
+        bool isSucceeded,
+        string? detail = null,
+        CancellationToken cancellationToken = default);
 }
