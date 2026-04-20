@@ -103,6 +103,7 @@ public interface IJobExecutionHandler : IJobFailureHandler
     Task OnJobScheduledAsync(JobScheduledContext context, CancellationToken ct = default);
     Task OnJobStartedAsync(JobStartedContext context, CancellationToken ct = default);
     Task OnJobSucceededAsync(JobSucceededContext context, CancellationToken ct = default);
+    Task OnJobCancelledAsync(JobCancelledContext context, CancellationToken ct = default);
 }
 
 public record JobScheduledContext(
@@ -140,6 +141,18 @@ public record JobSucceededContext(
     DateTimeOffset StartedAt,
     DateTimeOffset FinishedAt,
     TimeSpan Duration
+);
+
+public record JobCancelledContext(
+    Guid JobId,
+    Type JobType,
+    Type? ArgType,
+    Guid? TenantId,
+    Guid? OrganizationId,
+    Guid? UserId,
+    string? ArgsJson,
+    int AttemptNumber,
+    DateTimeOffset CancelledAt
 );
 ```
 
@@ -219,6 +232,22 @@ public class DefaultJobExecutionHandler : IJobExecutionHandler
             StartedAt = context.StartedAt,
             FinishedAt = context.FinishedAt,
             Duration = context.Duration
+        };
+        return _historyRepository.CreateAsync(record, ct);
+    }
+
+    public Task OnJobCancelledAsync(JobCancelledContext context, CancellationToken ct = default)
+    {
+        var record = new JobRecord
+        {
+            JobName = context.JobType.Name,
+            JobUuid = context.JobId,
+            TenantId = context.TenantId,
+            OrganizationId = context.OrganizationId,
+            UserId = context.UserId,
+            ArgsJson = context.ArgsJson,
+            Result = JobExecutionResult.Cancelled,
+            AttemptNumber = context.AttemptNumber
         };
         return _historyRepository.CreateAsync(record, ct);
     }
@@ -360,7 +389,7 @@ public class InMemoryJobHistoryRepository : IJobHistoryRepository
 
 - [ ] JobRecord entity stores complete execution history
 - [ ] IJobHistoryRepository provides CRUD and query operations
-- [ ] DefaultJobExecutionHandler records success and failure
+- [ ] DefaultJobExecutionHandler records scheduled, started, succeeded, cancelled, and failed states
 - [ ] Retry produces multiple records with correct AttemptNumber
 - [ ] Integration tests cover all job types: one-time, delayed, cron
 - [ ] Integration tests cover lifecycle: cancel, pause, resume
