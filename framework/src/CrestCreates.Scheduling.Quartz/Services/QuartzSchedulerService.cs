@@ -14,17 +14,14 @@ namespace CrestCreates.Scheduling.Quartz.Services;
 public class QuartzSchedulerService : ISchedulerService
 {
     private readonly IServiceProvider _serviceProvider;
-    private readonly IJobFailureHandler _failureHandler;
     private readonly ILogger<QuartzSchedulerService> _logger;
     private IScheduler? _scheduler;
 
     public QuartzSchedulerService(
         IServiceProvider serviceProvider,
-        IJobFailureHandler failureHandler,
         ILogger<QuartzSchedulerService> logger)
     {
         _serviceProvider = serviceProvider;
-        _failureHandler = failureHandler;
         _logger = logger;
     }
 
@@ -127,9 +124,10 @@ public class QuartzSchedulerService : ISchedulerService
         var jobKey = new JobKey(jobId.Uuid.ToString());
         var triggerKey = new TriggerKey($"{jobId.Uuid}Trigger");
 
+        var argsJson = JsonSerializer.Serialize(args);
         var jobData = new JobDataMap
         {
-            { "Args", JsonSerializer.Serialize(args) },
+            { "Args", argsJson },
             { "TenantId", tenantId?.ToString() ?? string.Empty },
             { "OrganizationId", organizationId?.ToString() ?? string.Empty },
             { "UserId", userId?.ToString() ?? string.Empty },
@@ -147,6 +145,22 @@ public class QuartzSchedulerService : ISchedulerService
             .StartAt(scheduledTime)
             .ForJob(jobKey)
             .Build();
+
+        // Call OnJobScheduledAsync if IJobExecutionHandler is registered
+        var executionHandler = _serviceProvider.GetService<IJobExecutionHandler>();
+        if (executionHandler != null)
+        {
+            await executionHandler.OnJobScheduledAsync(new JobScheduledContext(
+                jobId.Uuid,
+                typeof(TJob),
+                typeof(TArg),
+                tenantId,
+                organizationId,
+                userId,
+                argsJson,
+                scheduledTime
+            ));
+        }
 
         await _scheduler!.ScheduleJob(job, trigger);
         _logger.LogInformation("Scheduled job {JobId} for {ScheduledTime}", jobId, scheduledTime);
@@ -166,9 +180,10 @@ public class QuartzSchedulerService : ISchedulerService
         var jobId = SchedulingJobs.JobId.New();
         var jobKey = new JobKey(jobId.Uuid.ToString());
 
+        var argsJson = JsonSerializer.Serialize(args);
         var jobData = new JobDataMap
         {
-            { "Args", JsonSerializer.Serialize(args) },
+            { "Args", argsJson },
             { "TenantId", tenantId?.ToString() ?? string.Empty },
             { "OrganizationId", organizationId?.ToString() ?? string.Empty },
             { "UserId", userId?.ToString() ?? string.Empty },
@@ -186,6 +201,22 @@ public class QuartzSchedulerService : ISchedulerService
             .StartNow()
             .ForJob(jobKey)
             .Build();
+
+        // Call OnJobScheduledAsync if IJobExecutionHandler is registered
+        var executionHandler = _serviceProvider.GetService<IJobExecutionHandler>();
+        if (executionHandler != null)
+        {
+            await executionHandler.OnJobScheduledAsync(new JobScheduledContext(
+                jobId.Uuid,
+                typeof(TJob),
+                typeof(TArg),
+                tenantId,
+                organizationId,
+                userId,
+                argsJson,
+                DateTimeOffset.UtcNow
+            ));
+        }
 
         await _scheduler!.ScheduleJob(job, trigger);
     }
