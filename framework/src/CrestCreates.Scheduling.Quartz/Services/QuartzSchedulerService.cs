@@ -168,10 +168,10 @@ public class QuartzSchedulerService : ISchedulerService
         return jobId;
     }
 
-    public async Task ExecuteNowAsync<TJob>(Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null) where TJob : SchedulingJobs.IJob
+    public async Task<SchedulingJobs.JobId> ExecuteNowAsync<TJob>(Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null) where TJob : SchedulingJobs.IJob
         => await ExecuteNowAsync<TJob, SchedulingJobs.NoArgs>(new SchedulingJobs.NoArgs(), tenantId, organizationId, userId);
 
-    public async Task ExecuteNowAsync<TJob, TArg>(TArg args, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null)
+    public async Task<SchedulingJobs.JobId> ExecuteNowAsync<TJob, TArg>(TArg args, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null)
         where TJob : SchedulingJobs.IJob<TArg>
         where TArg : SchedulingJobs.IJobArgs
     {
@@ -219,6 +219,8 @@ public class QuartzSchedulerService : ISchedulerService
         }
 
         await _scheduler!.ScheduleJob(job, trigger);
+
+        return jobId;
     }
 
     public async Task DeleteAsync(SchedulingJobs.JobId jobId)
