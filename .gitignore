@@ -412,3 +412,4 @@ FodyWeavers.xsd
 # Recycle Bin
 99_RecycleBin/
 99_RecycleBin/*
+.worktrees/
