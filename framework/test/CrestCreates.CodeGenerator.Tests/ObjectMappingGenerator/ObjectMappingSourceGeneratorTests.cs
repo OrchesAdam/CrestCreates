@@ -316,5 +316,145 @@ namespace TestNamespace
             Assert.NotNull(generatedSource);
             Assert.Contains("Name = source.Title", generatedSource.SourceText);
         }
+
+        [Fact]
+        public void Should_Generate_AfterApply_Hook()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source { public string Value { get; set; } = string.Empty; }
+    public class Target { public string Value { get; set; } = string.Empty; }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.Contains("partial void AfterApply(TestNamespace.Source source, TestNamespace.Target destination)", generatedSource.SourceText);
+            Assert.Contains("AfterApply(source, destination)", generatedSource.SourceText);
+        }
+
+        [Fact]
+        public void Should_Generate_NullSafe_Code_For_Nullable_To_NonNullable()
+        {
+            // Arrange
+            var source = @"
+#nullable enable
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public int? Count { get; set; }
+    }
+
+    public class Target
+    {
+        public int Count { get; set; }
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+
+            // Print the generated source for debugging
+            var sourceText = generatedSource.SourceText;
+
+            // Should generate null-coalescing for nullable-to-non-nullable value types
+            Assert.Contains("Count = source.Count ?? 0", sourceText);
+        }
+
+        [Fact]
+        public void Should_Map_Collection_Properties()
+        {
+            // Arrange
+            var source = @"
+using System.Collections.Generic;
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public List<string> Tags { get; set; } = new();
+        public int[] Numbers { get; set; } = System.Array.Empty<int>();
+    }
+
+    public class Target
+    {
+        public List<string> Tags { get; set; } = new();
+        public int[] Numbers { get; set; } = System.Array.Empty<int>();
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.Contains("Tags = source.Tags", generatedSource.SourceText);
+            Assert.Contains("Numbers = source.Numbers", generatedSource.SourceText);
+        }
+
+        [Fact]
+        public void Should_Generate_Direct_Assignment_For_NonNullable_To_Nullable()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public int Count { get; set; }
+        public string Name { get; set; } = string.Empty;
+    }
+
+    public class Target
+    {
+        public int? Count { get; set; }
+        public string? Name { get; set; }
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            // Non-nullable to nullable should be direct assignment
+            Assert.Contains("Count = source.Count", generatedSource.SourceText);
+            Assert.Contains("Name = source.Name", generatedSource.SourceText);
+        }
     }
 }

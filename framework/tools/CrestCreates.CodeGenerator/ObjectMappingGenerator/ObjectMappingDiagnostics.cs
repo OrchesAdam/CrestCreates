@@ -73,9 +73,9 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
         public static readonly DiagnosticDescriptor NullabilityMismatch = new(
             id: "OM009",
             title: "Nullability mismatch",
-            messageFormat: "Source property '{0}' is nullable but target is non-nullable without null check",
+            messageFormat: "Source property '{0}' is nullable but target is non-nullable. Using default value fallback.",
             category: Category,
-            defaultSeverity: DiagnosticSeverity.Error,
+            defaultSeverity: DiagnosticSeverity.Warning,
             isEnabledByDefault: true);
 
         public static Diagnostic Create(DiagnosticDescriptor descriptor, Location? location, params object[] args)

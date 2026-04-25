@@ -27,6 +27,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
         public bool IsIgnored { get; set; }
         public bool IsReadOnly { get; set; }
         public string? CustomSourceName { get; set; }
+        public bool NeedsNullCheck { get; set; }
     }
 
     /// <summary>

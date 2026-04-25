@@ -94,7 +94,8 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             {
                 var mapping = mappings[i];
                 var comma = i < mappings.Count - 1 ? "," : "";
-                sb.AppendLine($"                {mapping.TargetProperty.Name} = source.{mapping.SourceProperty.Name}{comma}");
+                var valueExpression = GetPropertyAssignmentExpression(mapping);
+                sb.AppendLine($"                {mapping.TargetProperty.Name} = {valueExpression}{comma}");
             }
 
             sb.AppendLine("            };");
@@ -102,6 +103,51 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             sb.AppendLine("            AfterToTarget(source, result);");
             sb.AppendLine("            return result;");
             sb.AppendLine("        }");
+        }
+
+        private string GetPropertyAssignmentExpression(PropertyMapping mapping)
+        {
+            if (mapping.NeedsNullCheck)
+            {
+                var targetTypeName = mapping.TargetProperty.Type.ToDisplayString();
+                var defaultValue = GetDefaultValue(targetTypeName);
+                return $"source.{mapping.SourceProperty.Name} ?? {defaultValue}";
+            }
+            return $"source.{mapping.SourceProperty.Name}";
+        }
+
+        private string GetDefaultValue(string typeName)
+        {
+            // Remove nullable suffix if present
+            if (typeName.EndsWith("?"))
+            {
+                typeName = typeName.Substring(0, typeName.Length - 1);
+            }
+
+            // Handle common types
+            if (typeName == "string")
+                return "string.Empty";
+            if (typeName == "int" || typeName == "Int32")
+                return "0";
+            if (typeName == "long" || typeName == "Int64")
+                return "0L";
+            if (typeName == "double")
+                return "0.0";
+            if (typeName == "float")
+                return "0.0f";
+            if (typeName == "decimal")
+                return "0m";
+            if (typeName == "bool" || typeName == "Boolean")
+                return "false";
+            if (typeName == "Guid")
+                return "Guid.Empty";
+            if (typeName == "DateTime")
+                return "DateTime.MinValue";
+            if (typeName == "DateTimeOffset")
+                return "DateTimeOffset.MinValue";
+
+            // For reference types and other types, use default()
+            return $"default({typeName})";
         }
 
         private void WriteApplyMethod(
@@ -124,9 +170,11 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
 
             foreach (var mapping in model.PropertyMappings.Where(m => !m.IsIgnored && !m.IsReadOnly))
             {
-                sb.AppendLine($"            destination.{mapping.TargetProperty.Name} = source.{mapping.SourceProperty.Name};");
+                var valueExpression = GetPropertyAssignmentExpression(mapping);
+                sb.AppendLine($"            destination.{mapping.TargetProperty.Name} = {valueExpression};");
             }
 
+            sb.AppendLine("            AfterApply(source, destination);");
             sb.AppendLine("        }");
         }
 
@@ -171,6 +219,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             if (model.Declaration.Direction is MapDirection.Apply or MapDirection.Both)
             {
                 sb.AppendLine($"        partial void BeforeApply({sourceType} source, {targetType} destination);");
+                sb.AppendLine($"        partial void AfterApply({sourceType} source, {targetType} destination);");
             }
         }
     }

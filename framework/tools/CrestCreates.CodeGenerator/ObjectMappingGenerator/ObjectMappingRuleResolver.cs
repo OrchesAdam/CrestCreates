@@ -20,7 +20,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             // Resolve each target property
             foreach (var targetProp in targetProperties)
             {
-                var mapping = ResolvePropertyMapping(targetProp, sourceProperties, declaration);
+                var mapping = ResolvePropertyMapping(targetProp, sourceProperties, declaration, model);
                 if (mapping != null)
                 {
                     model.PropertyMappings.Add(mapping);
@@ -51,7 +51,8 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
         private PropertyMapping? ResolvePropertyMapping(
             IPropertySymbol targetProp,
             List<IPropertySymbol> sourceProperties,
-            MappingDeclaration declaration)
+            MappingDeclaration declaration,
+            ObjectMappingModel model)
         {
             // Check for MapIgnore
             if (HasMapIgnoreAttribute(targetProp))
@@ -75,7 +76,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                         ObjectMappingDiagnostics.SourcePropertyNotFound,
                         mapFromName, declaration.SourceType.Name);
                 }
-                return CreateValidMapping(sourceProp, targetProp, declaration);
+                return CreateValidMapping(sourceProp, targetProp, declaration, model);
             }
 
             // Check for MapName
@@ -89,14 +90,14 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                         ObjectMappingDiagnostics.SourcePropertyNotFound,
                         mapName, declaration.SourceType.Name);
                 }
-                return CreateValidMapping(sourceProp, targetProp, declaration);
+                return CreateValidMapping(sourceProp, targetProp, declaration, model);
             }
 
             // Default: same-name matching
             var matchedSource = sourceProperties.FirstOrDefault(p => p.Name == targetProp.Name);
             if (matchedSource != null)
             {
-                return CreateValidMapping(matchedSource, targetProp, declaration);
+                return CreateValidMapping(matchedSource, targetProp, declaration, model);
             }
 
             return null;
@@ -105,7 +106,8 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
         private PropertyMapping CreateValidMapping(
             IPropertySymbol sourceProp,
             IPropertySymbol targetProp,
-            MappingDeclaration declaration)
+            MappingDeclaration declaration,
+            ObjectMappingModel model)
         {
             var mapping = new PropertyMapping
             {
@@ -114,10 +116,33 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 IsReadOnly = targetProp.IsReadOnly
             };
 
+            // Check for read-only target in Apply direction
+            if (targetProp.IsReadOnly && declaration.Direction is MapDirection.Apply or MapDirection.Both)
+            {
+                model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
+                    ObjectMappingDiagnostics.ReadOnlyTarget,
+                    declaration.Location,
+                    targetProp.Name));
+            }
+
             // Check type compatibility
             if (!IsTypeCompatible(sourceProp.Type, targetProp.Type, out var needsNullCheck))
             {
+                model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
+                    ObjectMappingDiagnostics.TypeIncompatibility,
+                    declaration.Location,
+                    targetProp.Name,
+                    sourceProp.Type.ToDisplayString(),
+                    targetProp.Type.ToDisplayString()));
                 mapping.IsIgnored = true;
+            }
+            else if (needsNullCheck)
+            {
+                mapping.NeedsNullCheck = true;
+                model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
+                    ObjectMappingDiagnostics.NullabilityMismatch,
+                    declaration.Location,
+                    sourceProp.Name));
             }
 
             return mapping;
@@ -147,10 +172,10 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 return true;
             }
 
-            // Handle nullable value types
+            // Handle nullable value types (T? to T)
             if (sourceType is INamedTypeSymbol sourceNamed && targetType is INamedTypeSymbol targetNamed)
             {
-                // T? to T
+                // T? to T for value types
                 if (sourceNamed.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
                     SymbolEqualityComparer.Default.Equals(sourceNamed.TypeArguments[0], targetType))
                 {
@@ -158,12 +183,30 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                     return true;
                 }
 
-                // T to T?
+                // T to T? for value types
                 if (targetNamed.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
                     SymbolEqualityComparer.Default.Equals(sourceType, targetNamed.TypeArguments[0]))
                 {
                     return true;
                 }
+            }
+
+            // Handle nullable reference types (string? to string)
+            // When source is nullable and target is not, we need a null check
+            if (sourceType.NullableAnnotation == NullableAnnotation.Annotated &&
+                targetType.NullableAnnotation == NullableAnnotation.NotAnnotated &&
+                SymbolEqualityComparer.Default.Equals(sourceType.WithNullableAnnotation(NullableAnnotation.None), targetType))
+            {
+                needsNullCheck = true;
+                return true;
+            }
+
+            // Handle non-nullable to nullable reference types (string to string?)
+            if (sourceType.NullableAnnotation == NullableAnnotation.NotAnnotated &&
+                targetType.NullableAnnotation == NullableAnnotation.Annotated &&
+                SymbolEqualityComparer.Default.Equals(sourceType, targetType.WithNullableAnnotation(NullableAnnotation.None)))
+            {
+                return true;
             }
 
             // Check implicit conversion
