@@ -6,7 +6,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
 {
     internal sealed class ObjectMappingRuleResolver
     {
-        public ObjectMappingModel Resolve(MappingDeclaration declaration, Compilation compilation)
+        public ObjectMappingModel Resolve(MappingDeclaration declaration)
         {
             var model = new ObjectMappingModel
             {
