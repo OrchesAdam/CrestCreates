@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Xunit;
 using CrestCreates.CodeGenerator.ObjectMappingGenerator;
 using CrestCreates.CodeGenerator.Tests.TestHelpers;
@@ -205,6 +206,115 @@ namespace TestNamespace
             Assert.NotNull(generatedSource);
             Assert.Contains("if (source is null)", generatedSource.SourceText);
             Assert.Contains("throw new ArgumentNullException(nameof(source))", generatedSource.SourceText);
+        }
+
+        [Fact]
+        public void Should_Respect_MapIgnore_Attribute()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Secret { get; set; } = string.Empty;
+    }
+
+    public class Target
+    {
+        public string Name { get; set; } = string.Empty;
+
+        [MapIgnore]
+        public string Secret { get; set; } = string.Empty;
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.Contains("Name = source.Name", generatedSource.SourceText);
+            // Secret should not be mapped
+            var lines = generatedSource.SourceText.Split('\n');
+            var mappingLines = lines.Where(l => l.Contains("= source.")).ToList();
+            Assert.DoesNotContain(mappingLines, l => l.Contains("Secret"));
+        }
+
+        [Fact]
+        public void Should_Respect_MapName_Attribute()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public string FullName { get; set; } = string.Empty;
+    }
+
+    public class Target
+    {
+        [MapName(""FullName"")]
+        public string Name { get; set; } = string.Empty;
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.Contains("Name = source.FullName", generatedSource.SourceText);
+        }
+
+        [Fact]
+        public void Should_Respect_MapFrom_Attribute()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public string Title { get; set; } = string.Empty;
+    }
+
+    public class Target
+    {
+        [MapFrom(nameof(Source.Title))]
+        public string Name { get; set; } = string.Empty;
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.Contains("Name = source.Title", generatedSource.SourceText);
         }
     }
 }
