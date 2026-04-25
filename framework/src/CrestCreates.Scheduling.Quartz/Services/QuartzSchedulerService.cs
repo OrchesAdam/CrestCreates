@@ -31,6 +31,7 @@ public class QuartzSchedulerService : ISchedulerService
 
         var factory = new StdSchedulerFactory();
         _scheduler = await factory.GetScheduler(ct);
+        _scheduler.JobFactory = new Jobs.DependencyInjectionJobFactory(_serviceProvider);
         await _scheduler.Start(ct);
         _logger.LogInformation("Quartz scheduler started");
     }

@@ -16,8 +16,8 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddQuartzJobs(this IServiceCollection services)
     {
-        // This method is used by tests to register job types
-        // Jobs should be registered with AddScoped<TJob>()
+        // Register the open generic job adapter so Quartz can resolve it
+        services.AddTransient(typeof(QuartzJobAdapter<,>));
         return services;
     }
 }

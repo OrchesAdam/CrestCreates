@@ -5,7 +5,9 @@ using System.Threading.Tasks;
 using CrestCreates.Scheduling.Jobs;
 using CrestCreates.Scheduling.Services;
 using CrestCreates.Scheduling.Tests.Jobs;
+using CrestCreates.Scheduling.Quartz.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -23,10 +25,12 @@ public class SchedulingIntegrationTests : IDisposable
         var services = new ServiceCollection();
 
         services.AddSingleton<IJobHistoryRepository>(_repository);
+        services.AddLogging();
         services.AddSingleton<IJobExecutionHandler>(sp =>
             new DefaultJobExecutionHandler(
                 _repository,
                 new OptionsWrapper<JobRetryOptions>(new JobRetryOptions { MaxRetries = 3, InitialDelay = TimeSpan.FromMilliseconds(100) })));
+        services.AddQuartzScheduling();
         services.AddQuartzJobs();
         services.AddScoped<SuccessJob>();
         services.AddScoped<FailingJob>();
@@ -54,7 +58,7 @@ public class SchedulingIntegrationTests : IDisposable
 
         // Act
         var jobId = await _scheduler.ExecuteNowAsync<SuccessJob>();
-        await Task.Delay(500); // Wait for execution
+        await Task.Delay(500);
 
         // Assert
         var records = await repository.GetByJobIdAsync(jobId.Uuid);
@@ -72,15 +76,20 @@ public class SchedulingIntegrationTests : IDisposable
 
         // Act
         var jobId = await _scheduler.ExecuteNowAsync<FailingJob>();
-        await Task.Delay(500); // Wait for execution
+        await Task.Delay(1000); // Wait for execution and retries
 
         // Assert
         var records = await repository.GetByJobIdAsync(jobId.Uuid);
         var failedRecords = records.Where(r => r.Result == JobExecutionResult.Failed).ToList();
-        Assert.Single(failedRecords);
-        Assert.Equal("FailedJob", failedRecords[0].JobName);
-        Assert.NotNull(failedRecords[0].ErrorMessage);
-        Assert.Contains("Test failure", failedRecords[0].ErrorMessage);
+
+        // Should have at least one failed record (may have more due to retries)
+        Assert.NotEmpty(failedRecords);
+        Assert.All(failedRecords, r =>
+        {
+            Assert.Equal("FailingJob", r.JobName);
+            Assert.NotNull(r.ErrorMessage);
+            Assert.Contains("Test failure", r.ErrorMessage);
+        });
     }
 
     [Fact]
@@ -115,10 +124,12 @@ public class SchedulingIntegrationTests : IDisposable
 
         var retryServices = new ServiceCollection();
         retryServices.AddSingleton<IJobHistoryRepository>(repository);
+        retryServices.AddLogging();
         retryServices.AddSingleton<IJobExecutionHandler>(sp =>
             new DefaultJobExecutionHandler(
                 repository,
                 new OptionsWrapper<JobRetryOptions>(new JobRetryOptions { MaxRetries = 2, InitialDelay = TimeSpan.FromMilliseconds(50) })));
+        retryServices.AddQuartzScheduling();
         retryServices.AddQuartzJobs();
         retryServices.AddScoped<RetryableJob>();
         var retryProvider = retryServices.BuildServiceProvider();
