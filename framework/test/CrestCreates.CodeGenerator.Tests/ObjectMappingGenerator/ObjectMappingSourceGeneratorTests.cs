@@ -1,0 +1,210 @@
+using System;
+using Xunit;
+using CrestCreates.CodeGenerator.ObjectMappingGenerator;
+using CrestCreates.CodeGenerator.Tests.TestHelpers;
+
+namespace CrestCreates.CodeGenerator.Tests.ObjectMappingGenerator
+{
+    public class ObjectMappingSourceGeneratorTests
+    {
+        [Fact]
+        public void Should_Generate_ToTarget_Method()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Book
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string Author { get; set; } = string.Empty;
+    }
+
+    public class BookDto
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string Author { get; set; } = string.Empty;
+    }
+
+    [GenerateObjectMapping(typeof(Book), typeof(BookDto))]
+    public static partial class BookToBookDtoMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            Assert.True(result.ContainsFile("BookToBookDtoMapper.g.cs"));
+            var generatedSource = result.GetSourceByFileName("BookToBookDtoMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.Contains("ToTarget(TestNamespace.Book source)", generatedSource.SourceText);
+            Assert.Contains("Apply(TestNamespace.Book source, TestNamespace.BookDto destination)", generatedSource.SourceText);
+            Assert.Contains("Expression<Func<TestNamespace.Book, TestNamespace.BookDto>>", generatedSource.SourceText);
+        }
+
+        [Fact]
+        public void Should_Generate_Only_Create_Method_When_Direction_Is_Create()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class CreateBookDto
+    {
+        public string Title { get; set; } = string.Empty;
+    }
+
+    public class Book
+    {
+        public string Title { get; set; } = string.Empty;
+    }
+
+    [GenerateObjectMapping(typeof(CreateBookDto), typeof(Book), Direction = MapDirection.Create)]
+    public static partial class CreateBookDtoToBookMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("CreateBookDtoToBookMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.Contains("ToTarget(TestNamespace.CreateBookDto source)", generatedSource.SourceText);
+            Assert.DoesNotContain("public static void Apply", generatedSource.SourceText);
+        }
+
+        [Fact]
+        public void Should_Generate_Only_Apply_Method_When_Direction_Is_Apply()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class UpdateBookDto
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+    }
+
+    public class Book
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+    }
+
+    [GenerateObjectMapping(typeof(UpdateBookDto), typeof(Book), Direction = MapDirection.Apply)]
+    public static partial class UpdateBookDtoToBookMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("UpdateBookDtoToBookMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.DoesNotContain("ToTarget(TestNamespace.UpdateBookDto source)", generatedSource.SourceText);
+            Assert.Contains("Apply(TestNamespace.UpdateBookDto source, TestNamespace.Book destination)", generatedSource.SourceText);
+        }
+
+        [Fact]
+        public void Should_Map_Properties_With_Same_Name()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public string Name { get; set; } = string.Empty;
+        public int Age { get; set; }
+    }
+
+    public class Target
+    {
+        public string Name { get; set; } = string.Empty;
+        public int Age { get; set; }
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class SourceToTargetMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("SourceToTargetMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.Contains("Name = source.Name", generatedSource.SourceText);
+            Assert.Contains("Age = source.Age", generatedSource.SourceText);
+        }
+
+        [Fact]
+        public void Should_Generate_Partial_Hooks()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source { public string Value { get; set; } = string.Empty; }
+    public class Target { public string Value { get; set; } = string.Empty; }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.Contains("partial void AfterToTarget(TestNamespace.Source source, TestNamespace.Target destination)", generatedSource.SourceText);
+            Assert.Contains("partial void BeforeApply(TestNamespace.Source source, TestNamespace.Target destination)", generatedSource.SourceText);
+        }
+
+        [Fact]
+        public void Should_Generate_Null_Checks()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source { public string Value { get; set; } = string.Empty; }
+    public class Target { public string Value { get; set; } = string.Empty; }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.Contains("if (source is null)", generatedSource.SourceText);
+            Assert.Contains("throw new ArgumentNullException(nameof(source))", generatedSource.SourceText);
+        }
+    }
+}
