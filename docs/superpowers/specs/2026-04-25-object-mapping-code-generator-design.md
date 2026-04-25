@@ -1,14 +1,23 @@
 # Object Mapping Code Generator Design
 
 **Date:** 2026-04-25  
-**Status:** Draft  
+**Status:** Approved  
 **Parent:** AOT-friendly object mapping platform capability
 
 ## 1. Overview
 
-Introduce a compile-time object mapping generator for CrestCreates that supports arbitrary POCO-to-POCO mappings without runtime reflection, mapper profiles, or runtime fallback paths. The generator produces static mapping code and optional projection expressions so the framework can replace `AutoMapper`-based paths with AOT-friendly generated code.
+Introduce a compile-time object mapping generator using Roslyn `IIncrementalGenerator`. The generator produces static mapping code for POCO-to-POCO mappings declared via `[GenerateObjectMapping]` attribute. The generated code is AOT-friendly with no runtime reflection, no `Activator`, no profile scanning.
 
-This capability is intentionally separated from runtime mapping frameworks. The long-term main path is generated code, not reflection-based mapping.
+This capability is intentionally separated from entity generation. The long-term main path is generated code, not reflection-based mapping.
+
+### Key Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Integration | Independent attribute | Clean separation, not tied to entity generation |
+| Output shape | Minimal (ToTarget, Apply, ToTargetExpression) | Simple, focused, easy to understand |
+| Customization | Attributes + partial methods | Attributes for simple cases, hooks for complex logic |
+| Migration | Parallel coexistence | No forced migration, gradual adoption |
 
 ## 2. Goals
 
@@ -16,7 +25,7 @@ This capability is intentionally separated from runtime mapping frameworks. The 
 - Generate static mapping APIs at compile time
 - Avoid runtime reflection, `Activator`, profile scanning, and runtime fallback
 - Provide deterministic diagnostics for unsupported or ambiguous mappings
-- Support simple projection expressions for query pipelines
+- Support projection expressions for query pipelines
 - Make migration away from `AutoMapper` incremental and measurable
 
 ## 3. Non-Goals
@@ -26,125 +35,305 @@ This capability is intentionally separated from runtime mapping frameworks. The 
 - Do not support complex object graphs as a primary feature
 - Do not attempt deep polymorphic mapping, cyclic graph resolution, or dynamic source/target resolution
 - Do not introduce a second runtime mapping path as a compatibility layer
+- Do not tie mapping generation to entity generation
 
 ## 4. Architecture
 
-```text
+```
 framework/tools/CrestCreates.CodeGenerator/
-├── ObjectMappingGenerator/                    # NEW: compile-time mapping generator
-│   ├── ObjectMappingSourceGenerator.cs
-│   ├── ObjectMappingModel.cs
-│   ├── ObjectMappingRuleResolver.cs
-│   ├── ObjectMappingCodeWriter.cs
-│   └── ObjectMappingDiagnostics.cs
+├── ObjectMappingGenerator/                    # NEW
+│   ├── ObjectMappingSourceGenerator.cs        # IIncrementalGenerator entry
+│   ├── ObjectMappingModel.cs                  # Mapping model (source/target types, properties)
+│   ├── ObjectMappingRuleResolver.cs           # Property matching and type compatibility
+│   ├── ObjectMappingCodeWriter.cs             # C# code generation
+│   └── ObjectMappingDiagnostics.cs            # Compile-time diagnostics
 └── ...
 
 framework/src/CrestCreates.Domain.Shared/
-└── Attributes/
-    ├── GenerateObjectMappingAttribute.cs      # NEW: explicit mapping declaration
-    ├── MapIgnoreAttribute.cs                  # NEW: optional opt-out
-    ├── MapNameAttribute.cs                   # NEW: optional name override
-    └── MapFromAttribute.cs                   # NEW: optional source override
+└── ObjectMapping/
+    ├── GenerateObjectMappingAttribute.cs      # Entry point attribute
+    ├── MapDirection.cs                        # MapDirection enum (Create, Apply, Both)
+    ├── MapIgnoreAttribute.cs                  # Skip property
+    ├── MapNameAttribute.cs                    # Rename property
+    └── MapFromAttribute.cs                    # Source property override
 ```
 
-The generator is independent from entity generation, but it can be referenced by entity-driven workflows where that reduces friction.
+The generator is independent from entity generation. It can be referenced by entity-driven workflows where that reduces friction, but it is not coupled to them.
 
 ## 5. Entry Model
 
-The primary entry point is an explicit mapping declaration:
+### 5.1 GenerateObjectMappingAttribute
 
 ```csharp
-[GenerateObjectMapping(typeof(Book), typeof(BookDto))]
-public partial class BookToBookDtoMapping { }
+namespace CrestCreates.Domain.Shared.ObjectMapping;
 
-[GenerateObjectMapping(typeof(CreateBookDto), typeof(Book))]
-public partial class CreateBookDtoToBookMapping { }
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+public sealed class GenerateObjectMappingAttribute : Attribute
+{
+    public Type SourceType { get; }
+    public Type TargetType { get; }
+    
+    /// <summary>
+    /// Mapping direction. Default is Both (ToTarget + Apply).
+    /// </summary>
+    public MapDirection Direction { get; set; } = MapDirection.Both;
+    
+    public GenerateObjectMappingAttribute(Type sourceType, Type targetType)
+    {
+        SourceType = sourceType;
+        TargetType = targetType;
+    }
+}
 
-[GenerateObjectMapping(typeof(UpdateBookDto), typeof(Book), Direction = MapDirection.Apply)]
-public partial class UpdateBookDtoToBookMapping { }
+public enum MapDirection
+{
+    Create = 1,    // Only ToTarget method
+    Apply = 2,     // Only Apply method  
+    Both = 3       // Both methods (default)
+}
 ```
 
-Why a dedicated attribute:
+### 5.2 Usage Examples
+
+```csharp
+// Single mapping declaration - generates ToTarget, Apply, ToTargetExpression
+[GenerateObjectMapping(typeof(Book), typeof(BookDto))]
+public static partial class BookMappers { }
+
+// For multiple mappings, use separate partial classes with descriptive names
+[GenerateObjectMapping(typeof(CreateBookDto), typeof(Book), Direction = MapDirection.Create)]
+public static partial class CreateBookDtoToBookMapper { }
+
+[GenerateObjectMapping(typeof(UpdateBookDto), typeof(Book), Direction = MapDirection.Apply)]
+public static partial class UpdateBookDtoToBookMapper { }
+```
+
+**Naming Convention:** Each mapping declaration should use a dedicated partial class with a descriptive name (e.g., `CreateBookDtoToBookMapper`). This ensures clear method names and avoids conflicts.
+
+### 5.3 Why a Dedicated Attribute
 
 - Mapping is broader than CRUD and should not be tied to entity generation
 - Explicit mapping declaration keeps the generator predictable
 - A dedicated entry point makes it easier to reason about diagnostics and generated outputs
+- Supports arbitrary POCO-to-POCO mappings, not just entity-DTO pairs
 
 ## 6. Generated Output
 
-For each mapping declaration, generate one static partial mapper class:
+### 6.1 Output Structure
+
+Each `[GenerateObjectMapping]` declaration generates methods in the declaring partial class. One partial class per mapping declaration.
+
+```csharp
+// Declaration: [GenerateObjectMapping(typeof(Book), typeof(BookDto))]
+// File: BookToBookDtoMapper.g.cs
+public static partial class BookToBookDtoMapper
+{
+    /// <summary>
+    /// Maps Book to BookDto (creates new instance).
+    /// </summary>
+    public static BookDto ToTarget(Book source)
+    {
+        if (source is null) 
+            throw new ArgumentNullException(nameof(source));
+        
+        var result = new BookDto
+        {
+            Id = source.Id,
+            Title = source.Title,
+            Author = source.Author,
+        };
+        
+        AfterToTarget(source, result);
+        return result;
+    }
+    
+    /// <summary>
+    /// Applies Book values to existing BookDto.
+    /// </summary>
+    public static void Apply(Book source, BookDto destination)
+    {
+        if (source is null)
+            throw new ArgumentNullException(nameof(source));
+        if (destination is null)
+            throw new ArgumentNullException(nameof(destination));
+        
+        BeforeApply(source, destination);
+        destination.Title = source.Title;
+        destination.Author = source.Author;
+    }
+    
+    /// <summary>
+    /// Projection expression for query pipelines.
+    /// </summary>
+    public static System.Linq.Expressions.Expression<Func<Book, BookDto>> ToTargetExpression =>
+        source => new BookDto
+        {
+            Id = source.Id,
+            Title = source.Title,
+            Author = source.Author,
+        };
+    
+    // Partial hooks
+    partial void AfterToTarget(Book source, BookDto destination);
+    partial void BeforeApply(Book source, BookDto destination);
+}
+```
+
+### 6.2 Method Generation by Direction
+
+| Direction | ToTarget | Apply | ToTargetExpression |
+|-----------|----------|-------|-------------------|
+| Create | ✓ | ✗ | ✓ |
+| Apply | ✗ | ✓ | ✗ |
+| Both | ✓ | ✓ | ✓ |
+
+### 6.3 Partial Method Hooks
+
+Generated partial methods for custom post-processing:
+
+```csharp
+partial void AfterToTarget(TSource source, TTarget destination);
+partial void BeforeApply(TSource source, TTarget destination);
+```
+
+Users implement these in their partial class:
 
 ```csharp
 public static partial class BookToBookDtoMapper
 {
-    public static BookDto ToTarget(Book source);
-    public static void Apply(BookDto source, Book destination);
-    public static System.Linq.Expressions.Expression<Func<Book, BookDto>> ToTargetExpression { get; }
+    partial void AfterToTarget(Book source, BookDto destination)
+    {
+        destination.DisplayName = $"{source.Title} by {source.Author}";
+    }
 }
 ```
 
-Generated helpers may also include:
-
-- Collection mapping helpers
-- Nullable-safe variants
-- Partial hooks for custom post-processing
-
 ## 7. Mapping Rules
 
-Mapping resolution is intentionally conservative.
+### 7.1 Property Matching Priority
 
-### 7.1 Default Rules
+1. **Explicit override**: `[MapFrom("PropertyName")]` on target property
+2. **Name override**: `[MapName("SourceName")]` on target property
+3. **Same-name matching**: Default behavior
 
-1. Explicit configuration has the highest priority
-2. Same-name property mapping is allowed when types are compatible
-3. Nullable-compatible conversions are allowed when safe
-4. Collection mapping is allowed when element mapping exists
-5. Simple enum and primitive conversions may be allowed when unambiguous
-6. Anything else must produce a diagnostic
+### 7.2 Type Compatibility Rules
 
-### 7.2 Supported Cases
+| Source Type | Target Type | Allowed | Notes |
+|-------------|-------------|---------|-------|
+| T | T | ✓ | Direct assignment |
+| T | T? | ✓ | Implicit nullable conversion |
+| T? | T | ✓ | With null check (throws if null) |
+| T? | T? | ✓ | Direct assignment |
+| Enum A | Enum B | ✓ | If same underlying type |
+| IEnumerable<T> | List<T> | ✓ | If element mapping exists |
+| IEnumerable<T> | T[] | ✓ | If element mapping exists |
+
+### 7.3 Unsupported Cases (Produce Diagnostics)
+
+- Missing source member (error)
+- Missing target member (warning)
+- Type incompatibility (error)
+- Read-only destination member (error for Apply, skipped for ToTarget)
+- Ambiguous mapping candidates (error)
+- Missing collection element mapping (error)
+
+### 7.4 Supported Mapping Scenarios
 
 - Entity to DTO
 - DTO to entity
-- Update DTO applied to an existing entity
+- Update DTO applied to existing entity
 - List-item or summary DTOs
 - Collection-to-collection mapping
 - Expression projection for query pipelines
 
-### 7.3 Unsupported Cases
-
-- Implicit deep graph reconstruction
-- Runtime type discovery
-- Hidden member access
-- Reflection-based custom resolvers
-- String-based dynamic mapping rules
-
 ## 8. Customization Model
 
-Support a small set of compile-time attributes:
+### 8.1 Customization Attributes
 
 ```csharp
-[MapIgnore]
-[MapName("OtherName")]
-[MapFrom(nameof(SourceProperty))]
+namespace CrestCreates.Domain.Shared.ObjectMapping;
+
+/// <summary>
+/// Skip mapping for this property.
+/// </summary>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+public sealed class MapIgnoreAttribute : Attribute { }
+
+/// <summary>
+/// Map to/from a differently-named property.
+/// </summary>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+public sealed class MapNameAttribute : Attribute
+{
+    public string SourceName { get; }
+    public MapNameAttribute(string sourceName) => SourceName = sourceName;
+}
+
+/// <summary>
+/// Explicit source property for this target property.
+/// </summary>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+public sealed class MapFromAttribute : Attribute
+{
+    public string SourceProperty { get; }
+    public MapFromAttribute(string sourceProperty) => SourceProperty = sourceProperty;
+}
 ```
 
-If additional customization is required, prefer a small explicit mapping method over a more complex DSL.
-
-Partial hooks are allowed for generated classes:
+### 8.2 Usage Examples
 
 ```csharp
-partial void AfterMap(Book source, BookDto destination);
-partial void BeforeApply(UpdateBookDto source, Book destination);
+public class BookDto
+{
+    public Guid Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    
+    [MapIgnore]
+    public string? InternalNotes { get; set; }  // Not mapped
+    
+    [MapName("AuthorName")]
+    public string? Author { get; set; }  // Maps from source.AuthorName
+    
+    [MapFrom(nameof(Book.ISBN))]
+    public string? Isbn { get; set; }  // Maps from source.ISBN
+}
 ```
 
-Hooks are for narrow, predictable adjustments only.
+### 8.3 Partial Method Hooks
+
+For complex customization that cannot be expressed with attributes:
+
+```csharp
+public static partial class BookToBookDtoMapper
+{
+    partial void AfterToTarget(Book source, BookDto destination)
+    {
+        // Computed property
+        destination.DisplayName = $"{source.Title} by {source.AuthorName}";
+        
+        // Conditional mapping
+        if (source.IsSpecialEdition)
+        {
+            destination.Tags = new[] { "Special Edition" };
+        }
+    }
+}
+
+public static partial class UpdateBookDtoToBookMapper
+{
+    partial void BeforeApply(UpdateBookDto source, Book destination)
+    {
+        // Audit logic before applying
+        destination.LastModified = DateTime.UtcNow;
+    }
+}
+```
 
 ## 9. AOT Constraints
 
 The generator must produce normal C# code that is safe for NativeAOT-oriented builds.
 
-Required constraints:
+### 9.1 Required Constraints
 
 - No reflection-based member access
 - No `Activator.CreateInstance`
@@ -153,66 +342,128 @@ Required constraints:
 - No runtime fallback path
 - No hidden dependency on `AutoMapper`
 
-The generated projection expression may be exposed as `Expression<Func<...>>`, but it must remain a static expression tree and must not be compiled at runtime.
+### 9.2 Expression Tree Handling
+
+The generated projection expression is exposed as `Expression<Func<...>>`, but it must remain a static expression tree and must not be compiled at runtime.
+
+```csharp
+// This is safe - static expression tree
+public static Expression<Func<Book, BookDto>> ToTargetExpression =>
+    source => new BookDto { ... };
+
+// This is NOT allowed - runtime compilation
+var compiled = ToTargetExpression.Compile(); // Must not be generated
+```
 
 ## 10. Diagnostics
 
-The generator must report deterministic compile-time diagnostics for:
+### 10.1 Diagnostic Codes
 
-- Missing target members
-- Missing source members
-- Type incompatibility
-- Read-only destination members
-- Ambiguous mapping candidates
-- Missing collection element mappings
-- Unsupported complex shapes
+| Code | Severity | Title | Message |
+|------|----------|-------|---------|
+| OM001 | Error | Source type not found | Source type '{0}' could not be found |
+| OM002 | Error | Target type not found | Target type '{0}' could not be found |
+| OM003 | Error | Source property not found | Source property '{0}' not found on type '{1}' |
+| OM004 | Warning | Target property not mapped | Target property '{0}' on type '{1}' has no matching source |
+| OM005 | Error | Type incompatibility | Cannot map property '{0}': type '{1}' is not compatible with '{2}' |
+| OM006 | Error | Read-only target | Target property '{0}' is read-only and cannot be mapped in Apply direction |
+| OM007 | Error | Ambiguous mapping | Multiple source properties match target '{0}': {1} |
+| OM008 | Error | Missing element mapping | Cannot map collection '{0}': no mapping exists for element type '{1}' to '{2}' |
+| OM009 | Error | Nullability mismatch | Source property '{0}' is nullable but target is non-nullable without null check |
 
-The preferred failure mode is compile-time error, not silent runtime skipping.
+### 10.2 Failure Mode
+
+The preferred failure mode is compile-time error, not silent runtime skipping. All diagnostics must be deterministic and reproducible.
 
 ## 11. Integration With Existing Code
 
-Current code generation and application services still use `AutoMapper` in several places. This generator should become the generated-code replacement path.
+### 11.1 Current State
 
-Relevant existing locations:
+Current code generation and application services use `AutoMapper`:
+- `CrudServiceSourceGenerator` generates `{Entity}MappingProfile` classes
+- `CrudServiceBase` depends on `IMapper`
+- Generated CRUD services inject `IMapper`
 
-- `framework/tools/CrestCreates.CodeGenerator/CrudServiceGenerator/CrudServiceSourceGenerator.cs`
-- `framework/src/CrestCreates.Application/Services/CrudServiceBase.cs`
-- `samples/LibraryManagement/LibraryManagement.Application/LibraryManagementAutoMapperProfile.cs`
+### 11.2 Migration Path
 
-The migration target is:
+Generated mappers coexist with AutoMapper profiles:
 
-- CRUD services call generated static mapper methods
-- Samples no longer need AutoMapper profiles for standard mappings
-- Generated projection expressions can be used in query pipelines where applicable
+1. **Phase 1 - Parallel**: Both generated mappers and AutoMapper profiles exist
+2. **Phase 2 - Opt-in**: Services can switch to generated mappers by calling static methods directly
+3. **Phase 3 - Remove AutoMapper**: Once all services migrated, remove AutoMapper dependency
+
+### 11.3 Example Migration
+
+Before (AutoMapper):
+```csharp
+public class BookCrudService : IBookCrudService
+{
+    private readonly IMapper _mapper;
+    
+    public async Task<BookDto> CreateAsync(CreateBookDto input)
+    {
+        var entity = _mapper.Map<Book>(input);
+        // ...
+        return _mapper.Map<BookDto>(entity);
+    }
+}
+```
+
+After (Generated Mapper):
+```csharp
+public class BookCrudService : IBookCrudService
+{
+    public async Task<BookDto> CreateAsync(CreateBookDto input)
+    {
+        var entity = CreateBookDtoToBookMapper.ToTarget(input);  // Generated
+        // ...
+        return BookToBookDtoMapper.ToTarget(entity);  // Generated
+    }
+}
+```
 
 ## 12. Testing Strategy
 
 ### 12.1 Generator Snapshot Tests
 
-Verify generated `.g.cs` output matches expected shape and naming.
+Verify generated `.g.cs` output matches expected shape and naming:
+- Basic entity-to-DTO mapping
+- DTO-to-entity mapping with Apply direction
+- Properties with customization attributes
+- Collection properties
+- Nullable properties
 
 ### 12.2 Compilation Tests
 
-Compile generated code in a real test project to catch syntax or reference issues.
+Compile generated code in a real test project to catch:
+- Syntax errors
+- Missing references
+- Type mismatches
 
 ### 12.3 Behavior Tests
 
-Cover:
-
-- source to target mapping
-- target application mapping
-- nullable handling
-- collection mapping
-- projection expression usage in query pipelines
+Cover runtime behavior:
+- `ToTarget` creates correct instance with all mapped properties
+- `Apply` updates existing instance correctly
+- Nullable handling (null throws, nullable-to-non-nullable)
+- Collection mapping (List, Array, IEnumerable)
+- Projection expression usage in LINQ queries
+- Partial method hooks are called
 
 ### 12.4 AOT-Oriented Checks
 
-Where feasible, verify generated code does not introduce reflection-based dependencies.
+Where feasible, verify generated code:
+- Contains no `System.Reflection` usage
+- Contains no `Activator.CreateInstance`
+- Contains no runtime expression compilation
+- Expression trees are static only
 
 ## 13. Acceptance Criteria
 
-- The framework can generate static object mapping code for arbitrary POCO pairs
-- Generated mapping does not require runtime reflection or profile scanning
-- Diagnostics catch unsupported mappings during compilation
-- At least one sample path can migrate away from AutoMapper
-- The generator remains aligned with the framework's AOT-first main path
+- [ ] The framework can generate static object mapping code for arbitrary POCO pairs
+- [ ] Generated mapping does not require runtime reflection or profile scanning
+- [ ] Diagnostics catch unsupported mappings during compilation
+- [ ] At least one sample path can migrate away from AutoMapper
+- [ ] The generator remains aligned with the framework's AOT-first main path
+- [ ] Generated code compiles without errors in test projects
+- [ ] Behavior tests pass for all supported mapping scenarios
