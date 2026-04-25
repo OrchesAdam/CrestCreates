@@ -167,9 +167,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 var entityFullName = entityClass.ToDisplayString();
                 if (processedEntities.Contains(entityFullName)) continue;
 
-                // 只在使用新特性时才生成内容
-                if (!isUsingNewAttribute) continue;
-
+                // 注意：现在同时支持 GenerateCrudServiceAttribute 和 GenerateEntityAttribute
                 processedEntities.Add(entityFullName);
 
                 try

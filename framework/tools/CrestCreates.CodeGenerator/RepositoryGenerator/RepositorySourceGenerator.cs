@@ -216,9 +216,7 @@ namespace CrestCreates.CodeGenerator.RepositoryGenerator
 
                     foreach (var (entityClass, generateAsBaseClass, isUsingNewAttribute) in uniqueEntities)
                     {
-                        // 只在使用新特性时才生成内容，且不生成基类（基类由EntitySourceGenerator负责）
-                        if (!isUsingNewAttribute) continue;
-
+                        // 注意：现在同时支持 GenerateRepositoryAttribute 和 GenerateEntityAttribute
                         GenerateRepositoryInterface(context, entityClass);
                         // 不生成Repository实现类，由用户手动创建并继承EntitySourceGenerator生成的基类
                         // GenerateRepositoryImplementation(context, entityClass, generateAsBaseClass);
