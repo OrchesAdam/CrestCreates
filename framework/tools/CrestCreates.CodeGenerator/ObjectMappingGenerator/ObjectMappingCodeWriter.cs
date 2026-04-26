@@ -209,7 +209,8 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             {
                 var mapping = mappings[i];
                 var comma = i < mappings.Count - 1 ? "," : "";
-                sb.AppendLine($"                {mapping.TargetProperty.Name} = source.{mapping.SourceProperty.Name}{comma}");
+                var valueExpression = GetPropertyAssignmentExpression(mapping);
+                sb.AppendLine($"                {mapping.TargetProperty.Name} = {valueExpression}{comma}");
             }
 
             sb.AppendLine("            };");
