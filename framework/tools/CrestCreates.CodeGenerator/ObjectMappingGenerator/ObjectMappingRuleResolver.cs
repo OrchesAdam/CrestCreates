@@ -125,15 +125,28 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                     targetProp.Name));
             }
 
-            // Check type compatibility
-            if (!IsTypeCompatible(sourceProp.Type, targetProp.Type, out var needsNullCheck))
+            // Check type compatibility (including collection element types)
+            if (!IsTypeCompatible(sourceProp.Type, targetProp.Type, out var needsNullCheck, out var collectionConversion, out var incompatibleElementTypes))
             {
-                model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
-                    ObjectMappingDiagnostics.TypeIncompatibility,
-                    declaration.Location,
-                    targetProp.Name,
-                    sourceProp.Type.ToDisplayString(),
-                    targetProp.Type.ToDisplayString()));
+                if (incompatibleElementTypes)
+                {
+                    // Report OM008 for collection element type incompatibility
+                    model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
+                        ObjectMappingDiagnostics.MissingElementMapping,
+                        declaration.Location,
+                        targetProp.Name,
+                        GetElementTypeName(sourceProp.Type),
+                        GetElementTypeName(targetProp.Type)));
+                }
+                else
+                {
+                    model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
+                        ObjectMappingDiagnostics.TypeIncompatibility,
+                        declaration.Location,
+                        targetProp.Name,
+                        sourceProp.Type.ToDisplayString(),
+                        targetProp.Type.ToDisplayString()));
+                }
                 mapping.IsIgnored = true;
             }
             else if (needsNullCheck)
@@ -143,6 +156,11 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                     ObjectMappingDiagnostics.NullabilityMismatch,
                     declaration.Location,
                     sourceProp.Name));
+            }
+            else if (collectionConversion != null)
+            {
+                mapping.NeedsCollectionConversion = true;
+                mapping.CollectionConversionMethod = collectionConversion;
             }
 
             return mapping;
@@ -162,13 +180,41 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             };
         }
 
-        private bool IsTypeCompatible(ITypeSymbol sourceType, ITypeSymbol targetType, out bool needsNullCheck)
+        private bool IsTypeCompatible(ITypeSymbol sourceType, ITypeSymbol targetType, out bool needsNullCheck, out string? collectionConversion, out bool incompatibleElementTypes)
         {
             needsNullCheck = false;
+            collectionConversion = null;
+            incompatibleElementTypes = false;
 
             // Same type
             if (SymbolEqualityComparer.Default.Equals(sourceType, targetType))
             {
+                return true;
+            }
+
+            // Handle collection types - check element type compatibility
+            if (TryGetCollectionConversion(sourceType, targetType, out collectionConversion, out var sourceElement, out var targetElement))
+            {
+                // Recursively check element type compatibility (without collection conversion tracking)
+                if (!IsElementTypeCompatible(sourceElement!, targetElement!, out needsNullCheck))
+                {
+                    collectionConversion = null; // Reset since mapping failed
+                    incompatibleElementTypes = true;
+                    return false;
+                }
+                return true;
+            }
+
+            // Check if both are collections but with incompatible element types
+            if (IsCollectionType(sourceType, out var srcElem) && IsCollectionType(targetType, out var tgtElem))
+            {
+                // Different collection types but we couldn't determine conversion - check element type
+                if (!IsElementTypeCompatible(srcElem!, tgtElem!, out needsNullCheck))
+                {
+                    incompatibleElementTypes = true;
+                    return false;
+                }
+                // Same element types - we can still convert between collection types
                 return true;
             }
 
@@ -209,12 +255,166 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 return true;
             }
 
+            // Handle enum types - compare underlying types
+            if (sourceType.TypeKind == TypeKind.Enum && targetType.TypeKind == TypeKind.Enum)
+            {
+                // Both are enums - check if underlying types match
+                var sourceUnderlying = ((INamedTypeSymbol)sourceType).EnumUnderlyingType;
+                var targetUnderlying = ((INamedTypeSymbol)targetType).EnumUnderlyingType;
+                return SymbolEqualityComparer.Default.Equals(sourceUnderlying, targetUnderlying);
+            }
+
             // Check implicit conversion
+            return HasImplicitConversion(sourceType, targetType);
+        }
+
+        private bool IsElementTypeCompatible(ITypeSymbol sourceElementType, ITypeSymbol targetElementType, out bool needsNullCheck)
+        {
+            needsNullCheck = false;
+
+            // Same type
+            if (SymbolEqualityComparer.Default.Equals(sourceElementType, targetElementType))
+            {
+                return true;
+            }
+
+            // Handle nullable value types for elements
+            if (sourceElementType is INamedTypeSymbol sourceNamed && targetElementType is INamedTypeSymbol targetNamed)
+            {
+                // T? to T for value types
+                if (sourceNamed.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
+                    SymbolEqualityComparer.Default.Equals(sourceNamed.TypeArguments[0], targetElementType))
+                {
+                    needsNullCheck = true;
+                    return true;
+                }
+
+                // T to T? for value types
+                if (targetNamed.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
+                    SymbolEqualityComparer.Default.Equals(sourceElementType, targetNamed.TypeArguments[0]))
+                {
+                    return true;
+                }
+            }
+
+            // Handle nullable reference types for elements
+            if (sourceElementType.NullableAnnotation == NullableAnnotation.Annotated &&
+                targetElementType.NullableAnnotation == NullableAnnotation.NotAnnotated &&
+                SymbolEqualityComparer.Default.Equals(sourceElementType.WithNullableAnnotation(NullableAnnotation.None), targetElementType))
+            {
+                needsNullCheck = true;
+                return true;
+            }
+
+            if (sourceElementType.NullableAnnotation == NullableAnnotation.NotAnnotated &&
+                targetElementType.NullableAnnotation == NullableAnnotation.Annotated &&
+                SymbolEqualityComparer.Default.Equals(sourceElementType, targetElementType.WithNullableAnnotation(NullableAnnotation.None)))
+            {
+                return true;
+            }
+
+            // Handle enum types - compare underlying types
+            if (sourceElementType.TypeKind == TypeKind.Enum && targetElementType.TypeKind == TypeKind.Enum)
+            {
+                var sourceUnderlying = ((INamedTypeSymbol)sourceElementType).EnumUnderlyingType;
+                var targetUnderlying = ((INamedTypeSymbol)targetElementType).EnumUnderlyingType;
+                return SymbolEqualityComparer.Default.Equals(sourceUnderlying, targetUnderlying);
+            }
+
+            // Check implicit conversion
+            return HasImplicitConversion(sourceElementType, targetElementType);
+        }
+
+        private static bool HasImplicitConversion(ITypeSymbol sourceType, ITypeSymbol targetType)
+        {
             var conversion = Microsoft.CodeAnalysis.CSharp.CSharpCompilation
                 .Create("Temp")
                 .ClassifyConversion(sourceType, targetType);
 
             return conversion.IsImplicit;
+        }
+
+        private static bool IsCollectionType(ITypeSymbol type, out ITypeSymbol? elementType)
+        {
+            elementType = null;
+
+            if (type is not INamedTypeSymbol namedType)
+            {
+                // Check for array
+                if (type.TypeKind == TypeKind.Array && type is IArrayTypeSymbol arrayType)
+                {
+                    elementType = arrayType.ElementType;
+                    return true;
+                }
+                return false;
+            }
+
+            // Check for IEnumerable<T>, List<T>, etc.
+            if (namedType.TypeArguments.Length == 1)
+            {
+                var typeDef = namedType.OriginalDefinition;
+                var name = typeDef.Name;
+
+                if (name is "IEnumerable" or "List" or "IList" or "ICollection" or "IReadOnlyList" or "IReadOnlyCollection")
+                {
+                    elementType = namedType.TypeArguments[0];
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryGetCollectionConversion(
+            ITypeSymbol sourceType,
+            ITypeSymbol targetType,
+            out string? conversionMethod,
+            out ITypeSymbol? sourceElementType,
+            out ITypeSymbol? targetElementType)
+        {
+            conversionMethod = null;
+            sourceElementType = null;
+            targetElementType = null;
+
+            if (!IsCollectionType(sourceType, out sourceElementType) || sourceElementType == null)
+                return false;
+
+            if (!IsCollectionType(targetType, out targetElementType) || targetElementType == null)
+                return false;
+
+            // Same collection type - no conversion needed
+            if (SymbolEqualityComparer.Default.Equals(sourceType, targetType))
+                return false;
+
+            // Determine if conversion is needed based on target type
+            if (targetType is INamedTypeSymbol targetNamed)
+            {
+                if (targetNamed.Name == "List" || targetNamed.Name == "IList" || targetNamed.Name == "ICollection")
+                {
+                    conversionMethod = "ToList()";
+                    return true;
+                }
+            }
+
+            // Target is array
+            if (targetType.TypeKind == TypeKind.Array)
+            {
+                conversionMethod = "ToArray()";
+                return true;
+            }
+
+            // For other target types (IEnumerable, IReadOnlyList, etc.) - no conversion needed
+            // as they can be assigned directly
+            return false;
+        }
+
+        private static string GetElementTypeName(ITypeSymbol type)
+        {
+            if (IsCollectionType(type, out var elementType) && elementType != null)
+            {
+                return elementType.ToDisplayString();
+            }
+            return type.ToDisplayString();
         }
 
         private List<IPropertySymbol> GetProperties(INamedTypeSymbol type)

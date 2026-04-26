@@ -28,6 +28,8 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
         public bool IsReadOnly { get; set; }
         public string? CustomSourceName { get; set; }
         public bool NeedsNullCheck { get; set; }
+        public bool NeedsCollectionConversion { get; set; }
+        public string? CollectionConversionMethod { get; set; } // "ToList()", "ToArray()"
     }
 
     /// <summary>
