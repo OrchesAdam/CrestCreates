@@ -65,39 +65,47 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 };
             }
 
-            // Check for explicit MapFrom
+            // Find all matching source properties
+            var matches = FindAllMatchingSourceProperties(targetProp, sourceProperties);
+
+            // Check for ambiguous mapping (multiple matches)
+            if (matches.Count > 1)
+            {
+                model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
+                    ObjectMappingDiagnostics.AmbiguousMapping,
+                    declaration.Location,
+                    targetProp.Name,
+                    string.Join(", ", matches.Select(p => p.Name))));
+
+                return new PropertyMapping
+                {
+                    TargetProperty = targetProp,
+                    SourceProperty = null!,
+                    IsIgnored = true
+                };
+            }
+
+            // Single match found
+            if (matches.Count == 1)
+            {
+                return CreateValidMapping(matches[0], targetProp, declaration, model);
+            }
+
+            // No match found - report error for explicit mappings, return null for implicit
             var mapFromName = GetMapFromAttributeName(targetProp);
             if (mapFromName != null)
             {
-                var sourceProp = sourceProperties.FirstOrDefault(p => p.Name == mapFromName);
-                if (sourceProp == null)
-                {
-                    return CreateErrorMapping(targetProp, declaration.Location,
-                        ObjectMappingDiagnostics.SourcePropertyNotFound,
-                        mapFromName, declaration.SourceType.Name);
-                }
-                return CreateValidMapping(sourceProp, targetProp, declaration, model);
+                return CreateErrorMapping(targetProp, declaration.Location,
+                    ObjectMappingDiagnostics.SourcePropertyNotFound,
+                    mapFromName, declaration.SourceType.Name);
             }
 
-            // Check for MapName
             var mapName = GetMapNameAttribute(targetProp);
             if (mapName != null)
             {
-                var sourceProp = sourceProperties.FirstOrDefault(p => p.Name == mapName);
-                if (sourceProp == null)
-                {
-                    return CreateErrorMapping(targetProp, declaration.Location,
-                        ObjectMappingDiagnostics.SourcePropertyNotFound,
-                        mapName, declaration.SourceType.Name);
-                }
-                return CreateValidMapping(sourceProp, targetProp, declaration, model);
-            }
-
-            // Default: same-name matching
-            var matchedSource = sourceProperties.FirstOrDefault(p => p.Name == targetProp.Name);
-            if (matchedSource != null)
-            {
-                return CreateValidMapping(matchedSource, targetProp, declaration, model);
+                return CreateErrorMapping(targetProp, declaration.Location,
+                    ObjectMappingDiagnostics.SourcePropertyNotFound,
+                    mapName, declaration.SourceType.Name);
             }
 
             return null;
@@ -500,6 +508,51 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             }
 
             return null;
+        }
+
+        private List<IPropertySymbol> FindAllMatchingSourceProperties(
+            IPropertySymbol targetProp,
+            List<IPropertySymbol> sourceProperties)
+        {
+            var matches = new List<IPropertySymbol>();
+            var matchNames = new HashSet<string>();
+
+            // Check MapFrom
+            var mapFromName = GetMapFromAttributeName(targetProp);
+            if (mapFromName != null)
+            {
+                var sourceProp = sourceProperties.FirstOrDefault(p => p.Name == mapFromName);
+                if (sourceProp != null)
+                {
+                    matches.Add(sourceProp);
+                    matchNames.Add(sourceProp.Name);
+                }
+                // When MapFrom is specified, only use that - no ambiguity check
+                return matches;
+            }
+
+            // Check MapName
+            var mapName = GetMapNameAttribute(targetProp);
+            if (mapName != null)
+            {
+                var sourceProp = sourceProperties.FirstOrDefault(p => p.Name == mapName);
+                if (sourceProp != null)
+                {
+                    matches.Add(sourceProp);
+                    matchNames.Add(sourceProp.Name);
+                }
+                // When MapName is specified, only use that - no ambiguity check
+                return matches;
+            }
+
+            // Default: same-name matching
+            var sameNameMatch = sourceProperties.FirstOrDefault(p => p.Name == targetProp.Name);
+            if (sameNameMatch != null)
+            {
+                matches.Add(sameNameMatch);
+            }
+
+            return matches;
         }
     }
 }
