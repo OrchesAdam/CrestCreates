@@ -97,7 +97,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             {
                 return CreateErrorMapping(targetProp, declaration.Location,
                     ObjectMappingDiagnostics.SourcePropertyNotFound,
-                    mapFromName, declaration.SourceType.Name);
+                    model, mapFromName, declaration.SourceType.Name);
             }
 
             var mapName = GetMapNameAttribute(targetProp);
@@ -105,7 +105,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             {
                 return CreateErrorMapping(targetProp, declaration.Location,
                     ObjectMappingDiagnostics.SourcePropertyNotFound,
-                    mapName, declaration.SourceType.Name);
+                    model, mapName, declaration.SourceType.Name);
             }
 
             return null;
@@ -178,8 +178,11 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             IPropertySymbol targetProp,
             Location? location,
             DiagnosticDescriptor descriptor,
+            ObjectMappingModel model,
             params object[] args)
         {
+            model.Diagnostics.Add(ObjectMappingDiagnostics.Create(descriptor, location, args));
+
             return new PropertyMapping
             {
                 TargetProperty = targetProp,

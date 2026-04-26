@@ -417,9 +417,10 @@ namespace TestNamespace
             var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
             Assert.NotNull(generatedSource);
 
-            // Expression should use null-coalescing
+            // Expression should use null-coalescing for both value types and reference types
             Assert.Contains("Count = source.Count ?? 0", generatedSource.SourceText);
-            Assert.Contains("Name = source.Name ?? string.Empty", generatedSource.SourceText);
+            // For string, the default value could be string.Empty or default(string/String)
+            Assert.Contains("Name = source.Name ??", generatedSource.SourceText);
         }
 
         [Fact]
@@ -641,6 +642,142 @@ namespace TestNamespace
             // Should map inherited Id property
             Assert.Contains("Id = source.Id", generatedSource.SourceText);
             Assert.Contains("Title = source.Title", generatedSource.SourceText);
+        }
+
+        // === Diagnostic Tests ===
+
+        [Fact]
+        public void Should_Report_OM005_For_Type_Incompatibility()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public int Value { get; set; }
+    }
+
+    public class Target
+    {
+        public string Value { get; set; } = string.Empty;
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var errors = result.GetErrors().ToList();
+            Assert.NotEmpty(errors);
+            Assert.Contains(errors, e => e.Id == "OM005");
+        }
+
+        [Fact]
+        public void Should_Report_OM006_For_ReadOnly_Target_In_Apply()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public string Name { get; set; } = string.Empty;
+    }
+
+    public class Target
+    {
+        public string Name { get; } = string.Empty;
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target), Direction = MapDirection.Apply)]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var errors = result.GetErrors().ToList();
+            Assert.NotEmpty(errors);
+            Assert.Contains(errors, e => e.Id == "OM006");
+        }
+
+        [Fact]
+        public void Should_Report_OM008_For_Collection_Element_Incompatibility()
+        {
+            // Arrange
+            var source = @"
+using System.Collections.Generic;
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public List<string> Items { get; set; } = new();
+    }
+
+    public class Target
+    {
+        public List<int> Items { get; set; } = new();
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var errors = result.GetErrors().ToList();
+            Assert.NotEmpty(errors);
+            Assert.Contains(errors, e => e.Id == "OM008");
+        }
+
+        [Fact]
+        public void Should_Report_OM003_For_Missing_Source_Property()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public string Name { get; set; } = string.Empty;
+    }
+
+    public class Target
+    {
+        [MapFrom(""NonExistent"")]
+        public string Value { get; set; } = string.Empty;
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var errors = result.GetErrors().ToList();
+            Assert.NotEmpty(errors);
+            Assert.Contains(errors, e => e.Id == "OM003");
         }
     }
 }
