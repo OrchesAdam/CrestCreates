@@ -16,12 +16,11 @@ namespace CrestCreates.EventBus.RabbitMQ
 
         public override void OnConfigureServices(IServiceCollection services)
         {
+            // TODO: Will be implemented in Task 11
             var connectionString = _configuration.GetConnectionString("RabbitMQ") ?? throw new InvalidOperationException("RabbitMQ connection string not configured");
-            
-            services.AddSingleton<CrestCreates.EventBus.Abstract.IEventBus>(sp => 
+
+            services.AddSingleton<CrestCreates.EventBus.Abstract.IEventBus>(sp =>
                 new RabbitMqEventBus(connectionString));
-            
-            services.AddScoped<CrestCreates.Domain.DomainEvents.IDomainEventPublisher, CrestCreates.EventBus.Local.DomainEventPublisher>();
         }
     }
 }
