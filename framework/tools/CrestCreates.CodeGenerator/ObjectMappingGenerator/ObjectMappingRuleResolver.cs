@@ -256,16 +256,34 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             }
 
             // Handle enum types - compare underlying types
-            if (sourceType.TypeKind == TypeKind.Enum && targetType.TypeKind == TypeKind.Enum)
+            if (IsEnumCompatible(sourceType, targetType))
             {
-                // Both are enums - check if underlying types match
-                var sourceUnderlying = ((INamedTypeSymbol)sourceType).EnumUnderlyingType;
-                var targetUnderlying = ((INamedTypeSymbol)targetType).EnumUnderlyingType;
-                return SymbolEqualityComparer.Default.Equals(sourceUnderlying, targetUnderlying);
+                return true;
             }
 
             // Check implicit conversion
             return HasImplicitConversion(sourceType, targetType);
+        }
+
+        private static bool IsEnumCompatible(ITypeSymbol sourceType, ITypeSymbol targetType)
+        {
+            if (sourceType is not INamedTypeSymbol sourceEnum ||
+                targetType is not INamedTypeSymbol targetEnum)
+            {
+                return false;
+            }
+
+            // Both must be enums
+            if (sourceEnum.TypeKind != TypeKind.Enum || targetEnum.TypeKind != TypeKind.Enum)
+            {
+                return false;
+            }
+
+            // Compare underlying types
+            var sourceUnderlying = sourceEnum.EnumUnderlyingType;
+            var targetUnderlying = targetEnum.EnumUnderlyingType;
+
+            return SymbolEqualityComparer.Default.Equals(sourceUnderlying, targetUnderlying);
         }
 
         private bool IsElementTypeCompatible(ITypeSymbol sourceElementType, ITypeSymbol targetElementType, out bool needsNullCheck)
@@ -314,11 +332,9 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             }
 
             // Handle enum types - compare underlying types
-            if (sourceElementType.TypeKind == TypeKind.Enum && targetElementType.TypeKind == TypeKind.Enum)
+            if (IsEnumCompatible(sourceElementType, targetElementType))
             {
-                var sourceUnderlying = ((INamedTypeSymbol)sourceElementType).EnumUnderlyingType;
-                var targetUnderlying = ((INamedTypeSymbol)targetElementType).EnumUnderlyingType;
-                return SymbolEqualityComparer.Default.Equals(sourceUnderlying, targetUnderlying);
+                return true;
             }
 
             // Check implicit conversion
