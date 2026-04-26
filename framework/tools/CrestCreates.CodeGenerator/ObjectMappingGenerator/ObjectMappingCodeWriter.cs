@@ -107,13 +107,23 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
 
         private string GetPropertyAssignmentExpression(PropertyMapping mapping)
         {
+            var baseExpression = $"source.{mapping.SourceProperty.Name}";
+
+            // Handle collection conversion
+            if (mapping.NeedsCollectionConversion && mapping.CollectionConversionMethod != null)
+            {
+                baseExpression = $"{baseExpression}.{mapping.CollectionConversionMethod}";
+            }
+
+            // Handle null check
             if (mapping.NeedsNullCheck)
             {
                 var targetTypeName = mapping.TargetProperty.Type.ToDisplayString();
                 var defaultValue = GetDefaultValue(targetTypeName);
-                return $"source.{mapping.SourceProperty.Name} ?? {defaultValue}";
+                return $"{baseExpression} ?? {defaultValue}";
             }
-            return $"source.{mapping.SourceProperty.Name}";
+
+            return baseExpression;
         }
 
         private string GetDefaultValue(string typeName)
