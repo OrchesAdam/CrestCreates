@@ -6,8 +6,12 @@ namespace CrestCreates.DistributedTransaction.Abstractions
 {
     public interface ITransactionLogger
     {
-        Task LogTransactionAsync(Guid transactionId, TransactionStatus status, string message = null);
+        Task LogTransactionAsync(Guid transactionId, TransactionStatus status, string? message = null);
         Task LogTransactionErrorAsync(Guid transactionId, Exception exception);
         Task<TransactionStatus?> GetTransactionStatusAsync(Guid transactionId);
+
+        // Extended methods for persistent logging
+        Task<TransactionLog?> GetTransactionAsync(Guid transactionId);
+        Task LogParticipantCountAsync(Guid transactionId, int count);
     }
 }
