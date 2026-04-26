@@ -16,7 +16,7 @@ namespace CrestCreates.EventBus.RabbitMQ.Connection;
 /// Manages a pool of RabbitMQ channels for concurrent message processing.
 /// Uses RabbitMQ.Client 7.x async API where IModel is renamed to IChannel.
 /// </summary>
-public sealed class RabbitMqConnectionPool : IDisposable
+public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
 {
     private readonly RabbitMqOptions _options;
     private readonly ILogger<RabbitMqConnectionPool> _logger;
@@ -34,6 +34,14 @@ public sealed class RabbitMqConnectionPool : IDisposable
     {
         _options = options.Value;
         _logger = logger;
+
+        if (_options.MaxChannels <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(RabbitMqOptions.MaxChannels),
+                "MaxChannels must be greater than 0.");
+        }
+
         _channelSemaphore = new SemaphoreSlim(_options.MaxChannels, _options.MaxChannels);
 
         _factory = new ConnectionFactory
@@ -59,28 +67,39 @@ public sealed class RabbitMqConnectionPool : IDisposable
         try
         {
             await EnsureConnectionAsync(cancellationToken);
+
+            if (_channelPool.TryDequeue(out var channel))
+            {
+                if (channel.IsOpen)
+                {
+                    return channel;
+                }
+                // Channel is closed, dispose and decrement counter
+                Interlocked.Decrement(ref _activeChannels);
+                channel.Dispose();
+            }
+
+            try
+            {
+                return await CreateChannelAsync();
+            }
+            catch
+            {
+                _channelSemaphore.Release();
+                throw;
+            }
         }
         finally
         {
             _connectionLock.Release();
         }
-
-        if (_channelPool.TryDequeue(out var channel))
-        {
-            if (channel.IsOpen)
-            {
-                return channel;
-            }
-            channel.Dispose();
-        }
-
-        return await CreateChannelAsync();
     }
 
     public void ReturnChannel(IChannel channel)
     {
         if (_disposed || !channel.IsOpen)
         {
+            Interlocked.Decrement(ref _activeChannels);
             channel.Dispose();
             _channelSemaphore.Release();
             return;
@@ -150,6 +169,28 @@ public sealed class RabbitMqConnectionPool : IDisposable
         return Task.CompletedTask;
     }
 
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        while (_channelPool.TryDequeue(out var channel))
+        {
+            Interlocked.Decrement(ref _activeChannels);
+            channel.Dispose();
+        }
+
+        if (_connection is not null)
+        {
+            await _connection.DisposeAsync();
+        }
+
+        _channelSemaphore.Dispose();
+        _connectionLock.Dispose();
+
+        _logger.LogInformation("RabbitMQ connection pool disposed");
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -157,6 +198,7 @@ public sealed class RabbitMqConnectionPool : IDisposable
 
         while (_channelPool.TryDequeue(out var channel))
         {
+            Interlocked.Decrement(ref _activeChannels);
             channel.Dispose();
         }
 
