@@ -14,6 +14,7 @@ namespace CrestCreates.DistributedTransaction.Models
         public int MaxRetries { get; set; }
         public string? ErrorMessage { get; set; }
         public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
         public DateTime? ExecutedAt { get; set; }
     }
 }
