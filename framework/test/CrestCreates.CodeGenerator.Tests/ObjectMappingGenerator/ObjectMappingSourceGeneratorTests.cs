@@ -599,5 +599,48 @@ namespace TestNamespace
             Assert.NotNull(generatedSource);
             Assert.Contains("Status = source.Status", generatedSource.SourceText);
         }
+
+        [Fact]
+        public void Should_Map_Inherited_Properties()
+        {
+            // Arrange
+            var source = @"
+using System;
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class BaseEntity
+    {
+        public Guid Id { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    public class Book : BaseEntity
+    {
+        public string Title { get; set; } = string.Empty;
+    }
+
+    public class BookDto
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = string.Empty;
+    }
+
+    [GenerateObjectMapping(typeof(Book), typeof(BookDto))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            // Should map inherited Id property
+            Assert.Contains("Id = source.Id", generatedSource.SourceText);
+            Assert.Contains("Title = source.Title", generatedSource.SourceText);
+        }
     }
 }
