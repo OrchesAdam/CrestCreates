@@ -1,6 +1,7 @@
 using System;
 using CrestCreates.DistributedTransaction.Abstractions;
 using CrestCreates.DistributedTransaction.CAP.Abstractions;
+using CrestCreates.DistributedTransaction.CAP.BackgroundServices;
 using CrestCreates.DistributedTransaction.CAP.Implementations;
 using CrestCreates.DistributedTransaction.CAP.Options;
 using CrestCreates.EventBus.Abstract;
@@ -32,11 +33,17 @@ public static class DistributedTransactionCapServiceCollectionExtensions
         }
 
         services.AddScoped<IDistributedTransactionManager, DistributedTransactionManager>();
-        services.AddScoped<ITransactionLogger, TransactionLogger>();
-        services.AddScoped<ITransactionCompensator, DefaultTransactionCompensator>();
+        services.AddScoped<ITransactionLogger, PersistentTransactionLogger>();
+        services.AddScoped<ITransactionCompensator, PersistentTransactionCompensator>();
         services.AddSingleton<ICapTopicNameProvider, DefaultCapTopicNameProvider>();
         services.AddScoped<IDistributedEventPublisher, CapDistributedEventPublisher>();
         services.AddScoped<IEventBus, CapEventBus>();
+
+        // Background retry service (optional)
+        if (options.EnableCompensationBackgroundWorker)
+        {
+            services.AddHostedService<CompensationRetryBackgroundService>();
+        }
 
         services.AddCap(capOptions =>
         {
