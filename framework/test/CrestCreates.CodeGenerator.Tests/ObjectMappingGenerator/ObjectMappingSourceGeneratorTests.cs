@@ -384,6 +384,45 @@ namespace TestNamespace
         }
 
         [Fact]
+        public void Should_Handle_Nullable_In_ToTargetExpression()
+        {
+            // Arrange
+            var source = @"
+#nullable enable
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public int? Count { get; set; }
+        public string? Name { get; set; }
+    }
+
+    public class Target
+    {
+        public int Count { get; set; }
+        public string Name { get; set; } = string.Empty;
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+
+            // Expression should use null-coalescing
+            Assert.Contains("Count = source.Count ?? 0", generatedSource.SourceText);
+            Assert.Contains("Name = source.Name ?? string.Empty", generatedSource.SourceText);
+        }
+
+        [Fact]
         public void Should_Map_Collection_Properties()
         {
             // Arrange
@@ -421,6 +460,74 @@ namespace TestNamespace
         }
 
         [Fact]
+        public void Should_Generate_ToList_For_IEnumerable_To_List()
+        {
+            // Arrange
+            var source = @"
+using System.Collections.Generic;
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public IEnumerable<int> Numbers { get; set; } = System.Array.Empty<int>();
+    }
+
+    public class Target
+    {
+        public List<int> Numbers { get; set; } = new();
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.Contains("Numbers = source.Numbers.ToList()", generatedSource.SourceText);
+        }
+
+        [Fact]
+        public void Should_Generate_ToArray_For_IEnumerable_To_Array()
+        {
+            // Arrange
+            var source = @"
+using System.Collections.Generic;
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public class Source
+    {
+        public IEnumerable<int> Numbers { get; set; } = System.Array.Empty<int>();
+    }
+
+    public class Target
+    {
+        public int[] Numbers { get; set; } = System.Array.Empty<int>();
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.Contains("Numbers = source.Numbers.ToArray()", generatedSource.SourceText);
+        }
+
+        [Fact]
         public void Should_Generate_Direct_Assignment_For_NonNullable_To_Nullable()
         {
             // Arrange
@@ -455,6 +562,42 @@ namespace TestNamespace
             // Non-nullable to nullable should be direct assignment
             Assert.Contains("Count = source.Count", generatedSource.SourceText);
             Assert.Contains("Name = source.Name", generatedSource.SourceText);
+        }
+
+        [Fact]
+        public void Should_Map_Enums_With_Same_Underlying_Type()
+        {
+            // Arrange
+            var source = @"
+using CrestCreates.Domain.Shared.ObjectMapping;
+
+namespace TestNamespace
+{
+    public enum Status { Active, Inactive }
+    public enum StatusDto { Active, Inactive }
+
+    public class Source
+    {
+        public Status Status { get; set; }
+    }
+
+    public class Target
+    {
+        public StatusDto Status { get; set; }
+    }
+
+    [GenerateObjectMapping(typeof(Source), typeof(Target))]
+    public static partial class TestMapper { }
+}
+";
+
+            // Act
+            var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
+
+            // Assert
+            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
+            Assert.NotNull(generatedSource);
+            Assert.Contains("Status = source.Status", generatedSource.SourceText);
         }
     }
 }
