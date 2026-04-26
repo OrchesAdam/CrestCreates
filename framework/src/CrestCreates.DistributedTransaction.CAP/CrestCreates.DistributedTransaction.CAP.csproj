@@ -22,6 +22,7 @@
     <PackageReference Include="DotNetCore.CAP.SqlServer" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Options" />
   </ItemGroup>
 
