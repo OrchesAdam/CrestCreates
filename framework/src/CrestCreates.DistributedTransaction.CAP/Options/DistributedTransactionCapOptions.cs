@@ -19,4 +19,11 @@ public class DistributedTransactionCapOptions
     public int FailedRetryIntervalSeconds { get; set; } = 60;
 
     public bool UseDashboard { get; set; }
+
+    // Compensation retry options
+    public int CompensationMaxRetries { get; set; } = 3;
+
+    public int CompensationRetryIntervalSeconds { get; set; } = 30;
+
+    public bool EnableCompensationBackgroundWorker { get; set; } = true;
 }
