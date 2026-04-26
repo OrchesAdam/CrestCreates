@@ -436,16 +436,23 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
         private List<IPropertySymbol> GetProperties(INamedTypeSymbol type)
         {
             var properties = new List<IPropertySymbol>();
-            var members = type.GetMembers();
+            var currentType = type;
+            var propertyNames = new HashSet<string>();
 
-            foreach (var member in members.OfType<IPropertySymbol>())
+            // Traverse inheritance hierarchy
+            while (currentType != null && currentType.SpecialType != SpecialType.System_Object)
             {
-                if (member.DeclaredAccessibility == Accessibility.Public &&
-                    !member.IsStatic &&
-                    member.CanBeReferencedByName)
+                foreach (var member in currentType.GetMembers().OfType<IPropertySymbol>())
                 {
-                    properties.Add(member);
+                    if (member.DeclaredAccessibility == Accessibility.Public &&
+                        !member.IsStatic &&
+                        member.CanBeReferencedByName &&
+                        propertyNames.Add(member.Name)) // Avoid duplicates (derived wins)
+                    {
+                        properties.Add(member);
+                    }
                 }
+                currentType = currentType.BaseType;
             }
 
             return properties;
