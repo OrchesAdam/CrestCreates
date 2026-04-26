@@ -108,6 +108,7 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
             // Get the publish sequence number before publishing
             var sequenceNumber = await channel.GetNextPublishSequenceNumberAsync(cancellationToken);
             confirmationTracker.ExpectSequence(sequenceNumber);
+            confirmationTracker.RegisterMessageId(properties.MessageId, sequenceNumber);
 
             // Publish the message
             await channel.BasicPublishAsync(
@@ -236,6 +237,7 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
 
             var sequenceNumber = await channel.GetNextPublishSequenceNumberAsync(cancellationToken);
             confirmationTracker.ExpectSequence(sequenceNumber);
+            confirmationTracker.RegisterMessageId(properties.MessageId, sequenceNumber);
 
             await channel.BasicPublishAsync(
                 exchange: actualExchange,
@@ -326,12 +328,18 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
     private sealed class PublishConfirmationTracker
     {
         private readonly ConcurrentDictionary<ulong, PublishResult> _results = new();
-        private readonly ConcurrentQueue<ulong> _expectedSequences = new();
+        private readonly ConcurrentDictionary<ulong, bool> _expectedSequences = new();
+        private readonly ConcurrentDictionary<string, ulong> _messageIdToSequence = new();
         private readonly SemaphoreSlim _signal = new(0);
 
         public void ExpectSequence(ulong sequenceNumber)
         {
-            _expectedSequences.Enqueue(sequenceNumber);
+            _expectedSequences[sequenceNumber] = true;
+        }
+
+        public void RegisterMessageId(string messageId, ulong sequenceNumber)
+        {
+            _messageIdToSequence[messageId] = sequenceNumber;
         }
 
         public Task OnAckAsync(object? sender, BasicAckEventArgs e)
@@ -339,11 +347,14 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
             // Multiple flag indicates batch acknowledgment
             if (e.Multiple)
             {
-                // Acknowledge all messages up to this delivery tag
-                while (_expectedSequences.TryDequeue(out var seq) && seq <= e.DeliveryTag)
+                // Iterate through all expected sequences and confirm those <= delivery tag
+                foreach (var seq in _expectedSequences.Keys)
                 {
-                    _results[seq] = new PublishResult { Confirmed = true, Returned = false };
-                    _signal.Release();
+                    if (seq <= e.DeliveryTag)
+                    {
+                        _results[seq] = new PublishResult { Confirmed = true, Returned = false };
+                        _signal.Release();
+                    }
                 }
             }
             else
@@ -359,10 +370,14 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
         {
             if (e.Multiple)
             {
-                while (_expectedSequences.TryDequeue(out var seq) && seq <= e.DeliveryTag)
+                // Iterate through all expected sequences and nack those <= delivery tag
+                foreach (var seq in _expectedSequences.Keys)
                 {
-                    _results[seq] = new PublishResult { Confirmed = false, Returned = false };
-                    _signal.Release();
+                    if (seq <= e.DeliveryTag)
+                    {
+                        _results[seq] = new PublishResult { Confirmed = false, Returned = false };
+                        _signal.Release();
+                    }
                 }
             }
             else
@@ -376,8 +391,13 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
         public Task OnReturnAsync(object? sender, BasicReturnEventArgs e)
         {
             // Message was returned because it couldn't be routed (mandatory flag)
-            // The sequence number isn't directly available here, but the message should be nack'd
-            // This is logged for informational purposes
+            // Extract message ID from basic properties and map to sequence number
+            var messageId = e.BasicProperties?.MessageId;
+            if (!string.IsNullOrEmpty(messageId) && _messageIdToSequence.TryGetValue(messageId, out var sequenceNumber))
+            {
+                _results[sequenceNumber] = new PublishResult { Confirmed = false, Returned = true };
+                _signal.Release();
+            }
             return Task.CompletedTask;
         }
 
@@ -394,16 +414,22 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
                 // Wait for signal that confirmation arrived
                 await _signal.WaitAsync(linkedCts.Token);
 
-                if (_results.TryGetValue(sequenceNumber, out var result))
+                // Use TryRemove to prevent memory leak
+                if (_results.TryRemove(sequenceNumber, out var result))
                 {
+                    // Cleanup tracking dictionaries
+                    _expectedSequences.TryRemove(sequenceNumber, out _);
                     return result;
                 }
 
                 // If not found, wait a bit more in case it was batched
                 await _signal.WaitAsync(linkedCts.Token);
-                return _results.TryGetValue(sequenceNumber, out result)
-                    ? result
-                    : new PublishResult { Confirmed = false };
+                if (_results.TryRemove(sequenceNumber, out result))
+                {
+                    _expectedSequences.TryRemove(sequenceNumber, out _);
+                    return result;
+                }
+                return new PublishResult { Confirmed = false };
             }
             catch (OperationCanceledException)
             {
