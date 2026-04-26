@@ -138,10 +138,10 @@ public class RabbitMqMessageEnvelope
 // Generated code
 public static class RabbitMqSubscriptionRegistry
 {
-    public static IReadOnlyList<SubscriptionInfo> GetSubscriptions() => new[]
+    public static IReadOnlyList<RabbitMqSubscriptionInfo> GetSubscriptions() => new[]
     {
-        new SubscriptionInfo("OrderCreatedEvent", typeof(OrderCreatedHandler), "HandleAsync"),
-        new SubscriptionInfo("OrderShippedEvent", typeof(OrderShippedHandler), "HandleAsync"),
+        new RabbitMqSubscriptionInfo("OrderCreatedEvent", typeof(OrderCreatedHandler), "HandleAsync"),
+        new RabbitMqSubscriptionInfo("OrderShippedEvent", typeof(OrderShippedHandler), "HandleAsync"),
     };
 }
 ```
@@ -158,8 +158,9 @@ public static class RabbitMqSubscriptionRegistry
 
 **Retry mechanism:**
 - Retry count stored in message headers (`x-retry-count`)
-- If retry count < max: requeue with delay (using `x-delay` header or delayed exchange plugin)
-- If retry count >= max: reject and route to DLX
+- If retry count < max: reject with `requeue: true` (message will be redelivered after broker delay)
+- If retry count >= max: reject with `requeue: false` to route to DLX
+- Note: For delayed retry, user can install `rabbitmq_delayed_message_exchange` plugin or implement delay in consumer
 
 **Queue naming:**
 - Default: `crestcreates.{EventType}`
