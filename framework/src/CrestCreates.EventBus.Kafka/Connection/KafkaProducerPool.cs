@@ -9,7 +9,12 @@ using CrestCreates.EventBus.Kafka.Options;
 
 namespace CrestCreates.EventBus.Kafka.Connection;
 
-public sealed class KafkaProducerPool : IAsyncDisposable
+/// <summary>
+/// A thread-safe pool of Kafka producers that manages producer lifecycle and reuse.
+/// Producers are created on-demand and returned to the pool for reuse, improving
+/// performance by avoiding frequent producer creation and disposal.
+/// </summary>
+public sealed class KafkaProducerPool : IAsyncDisposable, IDisposable
 {
     private readonly KafkaOptions _options;
     private readonly ILogger<KafkaProducerPool> _logger;
@@ -25,6 +30,14 @@ public sealed class KafkaProducerPool : IAsyncDisposable
     {
         _options = options.Value;
         _logger = logger;
+
+        if (_options.ProducerPoolSize <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                "ProducerPoolSize must be greater than 0.");
+        }
+
         _producerSemaphore = new SemaphoreSlim(_options.ProducerPoolSize, _options.ProducerPoolSize);
 
         _producerConfig = new ProducerConfig
@@ -72,6 +85,7 @@ public sealed class KafkaProducerPool : IAsyncDisposable
         if (_disposed)
         {
             producer.Dispose();
+            Interlocked.Decrement(ref _activeProducers);
             _producerSemaphore.Release();
             return;
         }
@@ -83,11 +97,11 @@ public sealed class KafkaProducerPool : IAsyncDisposable
     private IProducer<string, byte[]> CreateProducer()
     {
         var producer = new ProducerBuilder<string, byte[]>(_producerConfig)
-            .SetErrorHandler((p, e) =>
+            .SetErrorHandler((_, e) =>
             {
                 _logger.LogError("Kafka producer error: {Reason} (code: {Code})", e.Reason, e.Code);
             })
-            .SetStatisticsHandler((p, json) =>
+            .SetStatisticsHandler((_, json) =>
             {
                 _logger.LogDebug("Kafka producer statistics: {Stats}", json);
             })
@@ -108,6 +122,7 @@ public sealed class KafkaProducerPool : IAsyncDisposable
         while (_producerPool.TryDequeue(out var producer))
         {
             producer.Dispose();
+            Interlocked.Decrement(ref _activeProducers);
         }
 
         _producerSemaphore.Dispose();
@@ -115,5 +130,21 @@ public sealed class KafkaProducerPool : IAsyncDisposable
         _logger.LogInformation("Kafka producer pool disposed");
 
         await ValueTask.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        while (_producerPool.TryDequeue(out var producer))
+        {
+            producer.Dispose();
+            Interlocked.Decrement(ref _activeProducers);
+        }
+
+        _producerSemaphore.Dispose();
+
+        _logger.LogInformation("Kafka producer pool disposed");
     }
 }
