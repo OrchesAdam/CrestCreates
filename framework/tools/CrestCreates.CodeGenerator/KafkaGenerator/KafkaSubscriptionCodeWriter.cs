@@ -31,7 +31,7 @@ namespace CrestCreates.CodeGenerator.KafkaGenerator
 
         private void WriteRegistryClass(StringBuilder sb, KafkaSubscriptionModel model)
         {
-            sb.AppendLine("    public static class KafkaSubscriptionRegistry");
+            sb.AppendLine("    public static partial class KafkaSubscriptionRegistry");
             sb.AppendLine("    {");
             sb.AppendLine("        public static IReadOnlyList<KafkaSubscriptionInfo> GetSubscriptions() => _subscriptions;");
             sb.AppendLine();
@@ -48,6 +48,7 @@ namespace CrestCreates.CodeGenerator.KafkaGenerator
                 sb.AppendLine($"                HandlerType: typeof(global::{subscription.HandlerTypeFullName}),");
                 sb.AppendLine($"                HandlerMethod: \"{EscapeString(subscription.HandlerMethodName)}\",");
                 WriteInvokerLambda(sb, subscription);
+                sb.AppendLine($"                ConsumerGroup: {(subscription.ConsumerGroup == null ? "null" : $"\"{EscapeString(subscription.ConsumerGroup)}\"")},");
                 sb.AppendLine($"            ),");
             }
 

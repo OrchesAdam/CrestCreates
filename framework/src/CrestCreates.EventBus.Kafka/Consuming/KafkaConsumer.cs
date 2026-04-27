@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -12,6 +11,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using CrestCreates.EventBus.Kafka.Connection;
+using CrestCreates.EventBus.Kafka.Generated;
 using CrestCreates.EventBus.Kafka.Options;
 using CrestCreates.EventBus.Kafka.Serialization;
 
@@ -55,25 +55,7 @@ public sealed class KafkaConsumer : BackgroundService
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        _subscriptions = GetSubscriptions();
-    }
-
-    private static List<KafkaSubscriptionInfo> GetSubscriptions()
-    {
-        var registryType = Type.GetType("CrestCreates.EventBus.Kafka.Generated.KafkaSubscriptionRegistry, CrestCreates.EventBus.Kafka");
-        if (registryType == null)
-        {
-            return new List<KafkaSubscriptionInfo>();
-        }
-
-        var method = registryType.GetMethod("GetSubscriptions", BindingFlags.Public | BindingFlags.Static);
-        if (method == null)
-        {
-            return new List<KafkaSubscriptionInfo>();
-        }
-
-        var result = method.Invoke(null, null);
-        return result as List<KafkaSubscriptionInfo> ?? new List<KafkaSubscriptionInfo>();
+        _subscriptions = KafkaSubscriptionRegistry.GetSubscriptions().ToList();
     }
 
     /// <inheritdoc/>
@@ -234,6 +216,9 @@ public sealed class KafkaConsumer : BackgroundService
                 {
                     await Task.Delay(TimeSpan.FromSeconds(_options.RetryDelaySeconds), cancellationToken);
                 }
+
+                // Check if cancellation was requested during the delay
+                cancellationToken.ThrowIfCancellationRequested();
 
                 // Increment retry count and republish
                 var updatedEnvelope = UpdateRetryCount(consumeResult.Message.Value, retryCount + 1);

@@ -13,10 +13,12 @@ namespace CrestCreates.EventBus.Kafka.Options;
 /// <param name="HandlerType">The handler type that processes the event.</param>
 /// <param name="HandlerMethod">The method name on the handler that processes the event.</param>
 /// <param name="InvokeHandler">A delegate that invokes the handler method without reflection.</param>
+/// <param name="ConsumerGroup">Optional consumer group override for this subscription. If null, uses the default from KafkaOptions.</param>
 public sealed record KafkaSubscriptionInfo(
     string Topic,
     Type EventType,
     Type HandlerType,
     string HandlerMethod,
-    Func<IServiceProvider, object, CancellationToken, Task> InvokeHandler
+    Func<IServiceProvider, object, CancellationToken, Task> InvokeHandler,
+    string? ConsumerGroup = null
 );
