@@ -345,19 +345,43 @@ public sealed class RabbitMqConsumer : BackgroundService
 
             if (retryCount < _options.RetryCount)
             {
-                // Retry with requeue
+                // Retry by republishing with incremented retry count
+                var newRetryCount = retryCount + 1;
                 _logger.LogInformation(
-                    "Requeuing message for retry {RetryCount}/{MaxRetry} for queue {Queue}",
-                    retryCount + 1, _options.RetryCount, subscription.Queue);
+                    "Republishing message for retry {RetryCount}/{MaxRetry} for queue {Queue}",
+                    newRetryCount, _options.RetryCount, subscription.Queue);
 
-                await channel.BasicNackAsync(
-                    deliveryTag: args.DeliveryTag,
-                    multiple: false,
-                    requeue: true,
+                // Create new headers with incremented retry count
+                var newHeaders = new Dictionary<string, object?>();
+                if (args.BasicProperties?.Headers != null)
+                {
+                    foreach (var header in args.BasicProperties.Headers)
+                    {
+                        newHeaders[header.Key] = header.Value;
+                    }
+                }
+                newHeaders["x-retry-count"] = newRetryCount.ToString();
+
+                var newProperties = new BasicProperties
+                {
+                    Persistent = true,
+                    Headers = newHeaders
+                };
+
+                // Republish to the same queue with updated headers
+                await channel.BasicPublishAsync(
+                    exchange: string.Empty,
+                    routingKey: subscription.Queue,
+                    mandatory: false,
+                    basicProperties: newProperties,
+                    body: args.Body,
                     cancellationToken: cancellationToken);
 
-                // Add delay before reprocessing (the message will be redelivered)
-                await Task.Delay(TimeSpan.FromSeconds(_options.RetryDelaySeconds), cancellationToken);
+                // Ack the original message since we've republished it
+                await channel.BasicAckAsync(
+                    deliveryTag: args.DeliveryTag,
+                    multiple: false,
+                    cancellationToken: cancellationToken);
             }
             else
             {
