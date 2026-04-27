@@ -14,6 +14,9 @@ using CrestCreates.EventBus.Kafka.Serialization;
 
 namespace CrestCreates.EventBus.Kafka.Publishing;
 
+/// <summary>
+/// Provides functionality for publishing events to Kafka topics.
+/// </summary>
 public class KafkaPublisher
 {
     private readonly KafkaProducerPool _producerPool;
@@ -21,6 +24,14 @@ public class KafkaPublisher
     private readonly KafkaOptions _options;
     private readonly ILogger<KafkaPublisher> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="KafkaPublisher"/> class.
+    /// </summary>
+    /// <param name="producerPool">The Kafka producer pool.</param>
+    /// <param name="jsonContext">The JSON serializer context for serialization.</param>
+    /// <param name="options">The Kafka options.</param>
+    /// <param name="logger">The logger instance.</param>
+    /// <exception cref="ArgumentNullException">Thrown when any required parameter is null.</exception>
     public KafkaPublisher(
         KafkaProducerPool producerPool,
         JsonSerializerContext jsonContext,
@@ -33,6 +44,19 @@ public class KafkaPublisher
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Publishes an event to the specified Kafka topic.
+    /// </summary>
+    /// <typeparam name="TEvent">The type of the event to publish.</typeparam>
+    /// <param name="topic">The topic to publish to.</param>
+    /// <param name="event">The event to publish.</param>
+    /// <param name="key">Optional message key. If not provided, a GUID will be used.</param>
+    /// <param name="headers">Optional headers to include in the message.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when event is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when topic is null or whitespace.</exception>
+    /// <exception cref="KafkaPublishException">Thrown when publishing fails.</exception>
     public async Task PublishAsync<TEvent>(
         string topic,
         TEvent @event,
@@ -50,7 +74,12 @@ public class KafkaPublisher
 
             // Serialize event
             var eventType = typeof(TEvent).AssemblyQualifiedName ?? typeof(TEvent).FullName ?? typeof(TEvent).Name;
-            var payload = JsonSerializer.Serialize(@event, _jsonContext.GetTypeInfo(typeof(TEvent)));
+            var typeInfo = _jsonContext.GetTypeInfo(typeof(TEvent));
+            if (typeInfo == null)
+            {
+                throw new InvalidOperationException($"Type {typeof(TEvent).Name} is not registered in JsonSerializerContext.");
+            }
+            var payload = JsonSerializer.Serialize(@event, typeInfo);
 
             var envelope = new KafkaMessageEnvelope(eventType, payload ?? string.Empty, headers);
 
@@ -115,6 +144,16 @@ public class KafkaPublisher
         }
     }
 
+    /// <summary>
+    /// Publishes a failed message to the dead letter topic for the specified original topic.
+    /// </summary>
+    /// <param name="originalTopic">The original topic from which the message failed.</param>
+    /// <param name="messageBody">The raw message body to publish.</param>
+    /// <param name="key">The message key.</param>
+    /// <param name="retryCount">The number of retry attempts made.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    /// <exception cref="KafkaPublishException">Thrown when publishing to the dead letter topic fails.</exception>
     public async Task PublishToDeadLetterTopicAsync(
         string originalTopic,
         byte[] messageBody,
@@ -145,6 +184,24 @@ public class KafkaPublisher
             _logger.LogWarning(
                 "Published message to dead letter topic {DlqTopic} from original topic {OriginalTopic}",
                 dlqTopic, originalTopic);
+        }
+        catch (ProduceException<string, byte[]> ex)
+        {
+            _logger.LogError(ex, "Failed to publish to dead letter topic {DlqTopic}", dlqTopic);
+            throw new KafkaPublishException(
+                $"Failed to publish to DLQ: {ex.Message}",
+                dlqTopic,
+                ex.DeliveryResult?.Partition.Value,
+                ex.DeliveryResult?.Offset.Value,
+                ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to publish to dead letter topic {DlqTopic}", dlqTopic);
+            throw new KafkaPublishException(
+                $"Failed to publish to DLQ: {ex.Message}",
+                dlqTopic,
+                innerException: ex);
         }
         finally
         {
