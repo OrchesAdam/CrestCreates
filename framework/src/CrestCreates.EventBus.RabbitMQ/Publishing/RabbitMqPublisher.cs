@@ -70,6 +70,7 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
 
         IChannel? channel = null;
         var confirmationTracker = new PublishConfirmationTracker();
+        var publishSucceeded = false;
 
         try
         {
@@ -132,6 +133,8 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
                 throw new RabbitMqPublishException(message, eventType, correlationId);
             }
 
+            publishSucceeded = true;
+
             _logger.LogDebug(
                 "Published event {EventType} to exchange {Exchange} with routing key {RoutingKey}",
                 eventType, actualExchange, actualRoutingKey);
@@ -170,13 +173,22 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
         }
         finally
         {
-            // Remove event handlers before returning channel
+            // Remove event handlers before returning/disposing channel
             if (channel != null)
             {
                 channel.BasicAcksAsync -= confirmationTracker.OnAckAsync;
                 channel.BasicNacksAsync -= confirmationTracker.OnNackAsync;
                 channel.BasicReturnAsync -= confirmationTracker.OnReturnAsync;
-                _connectionPool.ReturnChannel(channel);
+
+                if (publishSucceeded)
+                {
+                    _connectionPool.ReturnChannel(channel);
+                }
+                else
+                {
+                    // Channel is disposed on error (not returned to pool)
+                    channel.Dispose();
+                }
             }
         }
     }
@@ -205,6 +217,7 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
 
         IChannel? channel = null;
         var confirmationTracker = new PublishConfirmationTracker();
+        var publishSucceeded = false;
 
         try
         {
@@ -259,6 +272,8 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
                 throw new RabbitMqPublishException(message, eventType, correlationId);
             }
 
+            publishSucceeded = true;
+
             _logger.LogDebug(
                 "Published event {EventType} with headers to exchange {Exchange}",
                 eventType, actualExchange);
@@ -283,7 +298,16 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
                 channel.BasicAcksAsync -= confirmationTracker.OnAckAsync;
                 channel.BasicNacksAsync -= confirmationTracker.OnNackAsync;
                 channel.BasicReturnAsync -= confirmationTracker.OnReturnAsync;
-                _connectionPool.ReturnChannel(channel);
+
+                if (publishSucceeded)
+                {
+                    _connectionPool.ReturnChannel(channel);
+                }
+                else
+                {
+                    // Channel is disposed on error (not returned to pool)
+                    channel.Dispose();
+                }
             }
         }
     }
