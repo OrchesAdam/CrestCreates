@@ -42,15 +42,11 @@ namespace CrestCreates.CodeGenerator.KafkaGenerator
 
             foreach (var subscription in model.Subscriptions)
             {
-                var consumerGroup = subscription.ConsumerGroup ?? "crestcreates-consumers";
-
                 sb.AppendLine($"            new KafkaSubscriptionInfo(");
                 sb.AppendLine($"                Topic: \"{EscapeString(subscription.Topic)}\",");
                 sb.AppendLine($"                EventType: typeof(global::{subscription.EventTypeFullName}),");
                 sb.AppendLine($"                HandlerType: typeof(global::{subscription.HandlerTypeFullName}),");
                 sb.AppendLine($"                HandlerMethod: \"{EscapeString(subscription.HandlerMethodName)}\",");
-                sb.AppendLine($"                ConsumerGroup: \"{EscapeString(consumerGroup)}\",");
-                sb.AppendLine($"                MaxPollRecords: {subscription.MaxPollRecords},");
                 WriteInvokerLambda(sb, subscription);
                 sb.AppendLine($"            ),");
             }
