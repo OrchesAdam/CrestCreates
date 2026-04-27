@@ -68,20 +68,12 @@ namespace CrestCreates.CodeGenerator.KafkaGenerator
 
             // Extract optional named arguments
             string? consumerGroup = null;
-            var maxPollRecords = 500;
 
             foreach (var namedArg in attribute.NamedArguments)
             {
-                switch (namedArg.Key)
+                if (namedArg.Key == "ConsumerGroup" && namedArg.Value.Value is string consumerGroupValue)
                 {
-                    case "ConsumerGroup":
-                        if (namedArg.Value.Value is string consumerGroupValue)
-                            consumerGroup = consumerGroupValue;
-                        break;
-                    case "MaxPollRecords":
-                        if (namedArg.Value.Value is int maxPollValue)
-                            maxPollRecords = maxPollValue;
-                        break;
+                    consumerGroup = consumerGroupValue;
                 }
             }
 
@@ -91,8 +83,7 @@ namespace CrestCreates.CodeGenerator.KafkaGenerator
                 EventTypeFullName = eventType.ToDisplayString(),
                 HandlerTypeFullName = containingType.ToDisplayString(),
                 HandlerMethodName = methodSymbol.Name,
-                ConsumerGroup = consumerGroup,
-                MaxPollRecords = maxPollRecords
+                ConsumerGroup = consumerGroup
             };
         }
 

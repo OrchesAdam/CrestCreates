@@ -10,7 +10,6 @@ namespace CrestCreates.CodeGenerator.KafkaGenerator
         public string HandlerTypeFullName { get; set; } = string.Empty;
         public string HandlerMethodName { get; set; } = string.Empty;
         public string? ConsumerGroup { get; set; }
-        public int MaxPollRecords { get; set; } = 500;
     }
 
     internal sealed class KafkaSubscriptionModel

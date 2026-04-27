@@ -72,8 +72,8 @@ public class KafkaPublisher
         {
             producer = await _producerPool.GetProducerAsync(cancellationToken);
 
-            // Serialize event
-            var eventType = typeof(TEvent).AssemblyQualifiedName ?? typeof(TEvent).FullName ?? typeof(TEvent).Name;
+            // Serialize event - use stable type name (FullName) for version-independent identification
+            var eventType = typeof(TEvent).FullName ?? typeof(TEvent).Name;
             var typeInfo = _jsonContext.GetTypeInfo(typeof(TEvent));
             if (typeInfo == null)
             {

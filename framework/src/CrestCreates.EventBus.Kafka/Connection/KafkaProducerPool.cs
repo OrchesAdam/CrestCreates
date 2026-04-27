@@ -55,8 +55,22 @@ public sealed class KafkaProducerPool : IAsyncDisposable, IDisposable
 
         if (!string.IsNullOrEmpty(_options.SaslUsername) && !string.IsNullOrEmpty(_options.SaslPassword))
         {
-            _producerConfig.SecurityProtocol = Enum.Parse<SecurityProtocol>(_options.SecurityProtocol);
-            _producerConfig.SaslMechanism = Enum.Parse<SaslMechanism>(_options.SaslMechanism);
+            if (!Enum.TryParse<SecurityProtocol>(_options.SecurityProtocol, out var securityProtocol))
+            {
+                throw new ArgumentException(
+                    $"Invalid SecurityProtocol value: '{_options.SecurityProtocol}'. " +
+                    $"Valid values: {string.Join(", ", Enum.GetNames<SecurityProtocol>())}");
+            }
+
+            if (!Enum.TryParse<SaslMechanism>(_options.SaslMechanism, out var saslMechanism))
+            {
+                throw new ArgumentException(
+                    $"Invalid SaslMechanism value: '{_options.SaslMechanism}'. " +
+                    $"Valid values: {string.Join(", ", Enum.GetNames<SaslMechanism>())}");
+            }
+
+            _producerConfig.SecurityProtocol = securityProtocol;
+            _producerConfig.SaslMechanism = saslMechanism;
             _producerConfig.SaslUsername = _options.SaslUsername;
             _producerConfig.SaslPassword = _options.SaslPassword;
         }

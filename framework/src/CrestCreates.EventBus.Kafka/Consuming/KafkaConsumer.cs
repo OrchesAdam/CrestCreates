@@ -223,6 +223,10 @@ public sealed class KafkaConsumer : BackgroundService
                 // Increment retry count and republish
                 var updatedEnvelope = UpdateRetryCount(consumeResult.Message.Value, retryCount + 1);
 
+                // Preserve headers and add retry count header for traceability
+                var retryHeaders = consumeResult.Message.Headers ?? new Headers();
+                retryHeaders.Add("x-retry-count", System.Text.Encoding.UTF8.GetBytes((retryCount + 1).ToString()));
+
                 var producer = await _producerPool.GetProducerAsync(cancellationToken);
                 try
                 {
@@ -232,7 +236,7 @@ public sealed class KafkaConsumer : BackgroundService
                         {
                             Key = consumeResult.Message.Key,
                             Value = updatedEnvelope,
-                            Headers = consumeResult.Message.Headers
+                            Headers = retryHeaders
                         },
                         cancellationToken);
 
@@ -253,6 +257,11 @@ public sealed class KafkaConsumer : BackgroundService
                 // Max retries reached, send to DLQ
                 var dlqTopic = $"{consumeResult.Topic}{_options.DeadLetterTopicSuffix}";
 
+                // Add retry count header for traceability
+                var dlqHeaders = consumeResult.Message.Headers ?? new Headers();
+                dlqHeaders.Add("x-retry-count", System.Text.Encoding.UTF8.GetBytes(retryCount.ToString()));
+                dlqHeaders.Add("x-original-topic", System.Text.Encoding.UTF8.GetBytes(consumeResult.Topic));
+
                 var producer = await _producerPool.GetProducerAsync(cancellationToken);
                 try
                 {
@@ -262,7 +271,7 @@ public sealed class KafkaConsumer : BackgroundService
                         {
                             Key = consumeResult.Message.Key,
                             Value = consumeResult.Message.Value,
-                            Headers = consumeResult.Message.Headers ?? new Headers()
+                            Headers = dlqHeaders
                         },
                         cancellationToken);
 
