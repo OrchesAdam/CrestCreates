@@ -134,7 +134,8 @@ public class ConsumerTests
             HandlerMethod: "HandleAsync",
             Exchange: "test.exchange",
             Queue: "test.queue",
-            PrefetchCount: 20);
+            PrefetchCount: 20,
+            InvokeHandler: (sp, evt, ct) => Task.CompletedTask);
 
         // Assert
         Assert.Equal("TestEvent", subscription.EventType);
@@ -143,19 +144,22 @@ public class ConsumerTests
         Assert.Equal("test.exchange", subscription.Exchange);
         Assert.Equal("test.queue", subscription.Queue);
         Assert.Equal(20, subscription.PrefetchCount);
+        Assert.NotNull(subscription.InvokeHandler);
     }
 
     [Fact]
     public void RabbitMqSubscriptionInfo_IsImmutableRecord()
     {
         // Arrange
+        var invoker = (RabbitMqHandlerInvoker)((sp, evt, ct) => Task.CompletedTask);
         var subscription1 = new RabbitMqSubscriptionInfo(
             EventType: "TestEvent",
             HandlerType: typeof(TestEventHandler),
             HandlerMethod: "HandleAsync",
             Exchange: "test.exchange",
             Queue: "test.queue",
-            PrefetchCount: 10);
+            PrefetchCount: 10,
+            InvokeHandler: invoker);
 
         var subscription2 = new RabbitMqSubscriptionInfo(
             EventType: "TestEvent",
@@ -163,7 +167,8 @@ public class ConsumerTests
             HandlerMethod: "HandleAsync",
             Exchange: "test.exchange",
             Queue: "test.queue",
-            PrefetchCount: 10);
+            PrefetchCount: 10,
+            InvokeHandler: invoker);
 
         // Assert - records have value equality
         Assert.Equal(subscription1, subscription2);

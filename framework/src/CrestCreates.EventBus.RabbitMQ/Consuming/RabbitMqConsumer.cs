@@ -251,29 +251,6 @@ public sealed class RabbitMqConsumer : BackgroundService
                 "Processing message for event type {EventType} from queue {Queue}, retry count: {RetryCount}",
                 envelope.EventType, subscription.Queue, retryCount);
 
-            // Resolve handler from DI
-            using var scope = _serviceProvider.CreateScope();
-            var handler = scope.ServiceProvider.GetRequiredService(subscription.HandlerType);
-
-            // Get the handler method
-            var method = subscription.HandlerType.GetMethod(
-                subscription.HandlerMethod,
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.InvokeMethod);
-
-            if (method == null)
-            {
-                _logger.LogError(
-                    "Handler method {Method} not found on type {HandlerType}",
-                    subscription.HandlerMethod, subscription.HandlerType.Name);
-
-                await channel.BasicNackAsync(
-                    deliveryTag: args.DeliveryTag,
-                    multiple: false,
-                    requeue: false,
-                    cancellationToken: cancellationToken);
-                return;
-            }
-
             // Deserialize the payload
             var eventType = GetEventType(envelope.EventType);
             if (eventType == null)
@@ -292,39 +269,9 @@ public sealed class RabbitMqConsumer : BackgroundService
 
             var payload = JsonSerializer.Deserialize(envelope.Payload, eventType, _jsonSerializerContext ?? RabbitMqMessageEnvelopeContext.Default);
 
-            // Prepare parameters - detect method signature
-            var parameters = method.GetParameters();
-            object?[] invokeArgs;
-
-            if (parameters.Length == 2 && parameters[1].ParameterType == typeof(CancellationToken))
-            {
-                invokeArgs = new object?[] { payload, cancellationToken };
-            }
-            else if (parameters.Length == 1)
-            {
-                invokeArgs = new object?[] { payload };
-            }
-            else
-            {
-                _logger.LogError(
-                    "Handler method {Method} has unsupported signature on type {HandlerType}",
-                    subscription.HandlerMethod, subscription.HandlerType.Name);
-
-                await channel.BasicNackAsync(
-                    deliveryTag: args.DeliveryTag,
-                    multiple: false,
-                    requeue: false,
-                    cancellationToken: cancellationToken);
-                return;
-            }
-
-            // Invoke the handler
-            var result = method.Invoke(handler, invokeArgs);
-
-            if (result is Task task)
-            {
-                await task;
-            }
+            // Invoke the handler using the pre-compiled delegate (AOT-friendly)
+            using var scope = _serviceProvider.CreateScope();
+            await subscription.InvokeHandler(scope.ServiceProvider, payload, cancellationToken);
 
             // Acknowledge the message
             await channel.BasicAckAsync(

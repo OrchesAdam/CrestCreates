@@ -14,6 +14,9 @@ namespace CrestCreates.CodeGenerator.RabbitMqGenerator
             sb.AppendLine("#nullable enable");
             sb.AppendLine("using System;");
             sb.AppendLine("using System.Collections.Generic;");
+            sb.AppendLine("using System.Threading;");
+            sb.AppendLine("using System.Threading.Tasks;");
+            sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
             sb.AppendLine("using CrestCreates.EventBus.RabbitMQ.Options;");
             sb.AppendLine();
 
@@ -46,12 +49,26 @@ namespace CrestCreates.CodeGenerator.RabbitMqGenerator
                 sb.AppendLine($"                HandlerMethod: \"{EscapeString(subscription.HandlerMethod)}\",");
                 sb.AppendLine($"                Exchange: \"{EscapeString(subscription.Exchange)}\",");
                 sb.AppendLine($"                Queue: \"{EscapeString(subscription.Queue)}\",");
-                sb.AppendLine($"                PrefetchCount: {subscription.PrefetchCount}),");
+                sb.AppendLine($"                PrefetchCount: {subscription.PrefetchCount},");
+                WriteInvokerLambda(sb, subscription);
+                sb.AppendLine($"            ),");
             }
 
             sb.AppendLine("        };");
 
             sb.AppendLine("    }");
+        }
+
+        private void WriteInvokerLambda(StringBuilder sb, SubscriptionInfo subscription)
+        {
+            // Generate a lambda that:
+            // 1. Resolves the handler from DI
+            // 2. Calls the handler method with the event and cancellation token
+            sb.AppendLine($"                InvokeHandler: (sp, evt, ct) =>");
+            sb.AppendLine($"                {{");
+            sb.AppendLine($"                    var handler = (global::{subscription.HandlerType})sp.GetRequiredService(typeof(global::{subscription.HandlerType}));");
+            sb.AppendLine($"                    return handler.{subscription.HandlerMethod}(({subscription.EventType})evt!, ct);");
+            sb.AppendLine($"                }})");
         }
 
         private static string EscapeString(string value)
