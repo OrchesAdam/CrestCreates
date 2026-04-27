@@ -1,40 +1,66 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.EventBus.Abstract;
+using CrestCreates.EventBus.RabbitMQ.Publishing;
+using CrestCreates.EventBus.RabbitMQ.Options;
 
-namespace CrestCreates.EventBus.RabbitMQ
+namespace CrestCreates.EventBus.RabbitMQ;
+
+public class RabbitMqEventBus : DistributedEventBusBase
 {
-    public class RabbitMqEventBus : DistributedEventBusBase
+    private readonly RabbitMqPublisher _publisher;
+    private readonly RabbitMqOptions _options;
+
+    public RabbitMqEventBus(
+        RabbitMqPublisher publisher,
+        Microsoft.Extensions.Options.IOptions<RabbitMqOptions> options)
     {
-        private readonly string _connectionString;
+        _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
+        _options = options.Value;
+    }
 
-        public RabbitMqEventBus(string connectionString)
-        {
-            _connectionString = connectionString;
-        }
+    public override async Task PublishAsync(IDomainEvent @event, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(@event);
 
-        public override async Task PublishAsync(IDomainEvent @event, CancellationToken cancellationToken = default)
-        {
-            // 实现RabbitMQ事件发布逻辑
-            // 这里是示例实现，实际项目中需要使用RabbitMQ客户端库
-            await Task.CompletedTask;
-        }
+        var eventType = @event.GetType();
+        var routingKey = eventType.Name;
 
-        public override async Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
-        {
-            // 实现RabbitMQ事件发布逻辑
-            await Task.CompletedTask;
-        }
+        await _publisher.PublishAsync(
+            @event,
+            _options.DefaultExchange,
+            routingKey,
+            null,
+            cancellationToken);
+    }
 
-        public override void Subscribe<TEvent, THandler>()
-        {
-            // 实现RabbitMQ事件订阅逻辑
-        }
+    public override async Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(@event);
 
-        public override void Unsubscribe<TEvent, THandler>()
-        {
-            // 实现RabbitMQ事件取消订阅逻辑
-        }
+        var eventType = typeof(TEvent);
+        var routingKey = eventType.Name;
+
+        await _publisher.PublishAsync(
+            @event,
+            _options.DefaultExchange,
+            routingKey,
+            null,
+            cancellationToken);
+    }
+
+    public override void Subscribe<TEvent, THandler>()
+    {
+        throw new NotSupportedException(
+            "RabbitMQ subscriptions are discovered at compile-time via [RabbitMqSubscribe] attribute. " +
+            "Mark your handler method with [RabbitMqSubscribe(\"EventTypeName\")] to register a subscription.");
+    }
+
+    public override void Unsubscribe<TEvent, THandler>()
+    {
+        throw new NotSupportedException(
+            "RabbitMQ subscriptions are managed at compile-time and cannot be dynamically unsubscribed.");
     }
 }

@@ -2,25 +2,33 @@ using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using CrestCreates.Modularity;
+using CrestCreates.EventBus.RabbitMQ.Connection;
+using CrestCreates.EventBus.RabbitMQ.Options;
+using CrestCreates.EventBus.Abstract;
 
-namespace CrestCreates.EventBus.RabbitMQ
+namespace CrestCreates.EventBus.RabbitMQ;
+
+public class RabbitMqEventBusModule : ModuleBase
 {
-    public class RabbitMqEventBusModule : ModuleBase
+    private readonly IConfiguration _configuration;
+
+    public RabbitMqEventBusModule(IConfiguration configuration)
     {
-        private readonly IConfiguration _configuration;
+        _configuration = configuration;
+    }
 
-        public RabbitMqEventBusModule(IConfiguration configuration)
-        {
-            _configuration = configuration;
-        }
+    public override void OnConfigureServices(IServiceCollection services)
+    {
+        // Configure options
+        services.Configure<RabbitMqOptions>(_configuration.GetSection("RabbitMQ"));
 
-        public override void OnConfigureServices(IServiceCollection services)
-        {
-            // TODO: Will be implemented in Task 11
-            var connectionString = _configuration.GetConnectionString("RabbitMQ") ?? throw new InvalidOperationException("RabbitMQ connection string not configured");
+        // Register connection pool
+        services.AddSingleton<RabbitMqConnectionPool>();
 
-            services.AddSingleton<CrestCreates.EventBus.Abstract.IEventBus>(sp =>
-                new RabbitMqEventBus(connectionString));
-        }
+        // Register publisher
+        services.AddSingleton<Publishing.RabbitMqPublisher>();
+
+        // Register event bus
+        services.AddSingleton<IEventBus, RabbitMqEventBus>();
     }
 }
