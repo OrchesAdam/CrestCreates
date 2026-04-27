@@ -1,8 +1,10 @@
 using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using CrestCreates.Modularity;
 using CrestCreates.EventBus.RabbitMQ.Connection;
+using CrestCreates.EventBus.RabbitMQ.Consuming;
 using CrestCreates.EventBus.RabbitMQ.Options;
 using CrestCreates.EventBus.Abstract;
 
@@ -30,5 +32,8 @@ public class RabbitMqEventBusModule : ModuleBase
 
         // Register event bus
         services.AddSingleton<IEventBus, RabbitMqEventBus>();
+
+        // Register consumer as hosted service
+        services.AddHostedService<RabbitMqConsumer>();
     }
 }
