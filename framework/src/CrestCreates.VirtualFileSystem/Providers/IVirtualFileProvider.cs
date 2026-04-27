@@ -20,4 +20,10 @@ public interface IVirtualFileProvider
         CancellationToken ct = default);
 
     Task<bool> ExistsAsync(VirtualPath path, CancellationToken ct = default);
+
+    Task<IVirtualDirectory?> GetDirectoryAsync(VirtualPath path, CancellationToken ct = default);
+
+    Task<bool> DirectoryExistsAsync(VirtualPath path, CancellationToken ct = default);
+
+    IFileChangeToken Watch(VirtualPath path);
 }

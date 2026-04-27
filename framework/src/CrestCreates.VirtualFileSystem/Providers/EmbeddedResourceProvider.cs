@@ -83,6 +83,43 @@ public class EmbeddedResourceProvider : IVirtualFileProvider, IEmbeddedResourceP
         return Task.FromResult(_assembly.GetManifestResourceInfo(resourceName) != null);
     }
 
+    public Task<IVirtualDirectory?> GetDirectoryAsync(VirtualPath path, CancellationToken ct = default)
+    {
+        if (path.ModuleName != _moduleName)
+            return Task.FromResult<IVirtualDirectory?>(null);
+
+        var resourcePrefix = GetResourceName(path.RelativePath);
+        var hasResources = _assembly.GetManifestResourceNames()
+            .Any(name => name.StartsWith(resourcePrefix, StringComparison.OrdinalIgnoreCase));
+
+        if (!hasResources)
+            return Task.FromResult<IVirtualDirectory?>(null);
+
+        var directory = new VirtualDirectoryInfo(
+            path: path,
+            name: path.RelativePath.Split('/').Last(),
+            exists: true,
+            lastModified: DateTimeOffset.UtcNow,
+            getFiles: innerCt => GetFilesAsync(path, "*", false, innerCt),
+            getDirectories: innerCt => Task.FromResult<IEnumerable<IVirtualDirectory>>(Array.Empty<IVirtualDirectory>()));
+
+        return Task.FromResult<IVirtualDirectory?>(directory);
+    }
+
+    public Task<bool> DirectoryExistsAsync(VirtualPath path, CancellationToken ct = default)
+    {
+        if (path.ModuleName != _moduleName)
+            return Task.FromResult(false);
+
+        var resourcePrefix = GetResourceName(path.RelativePath);
+        var hasResources = _assembly.GetManifestResourceNames()
+            .Any(name => name.StartsWith(resourcePrefix, StringComparison.OrdinalIgnoreCase));
+
+        return Task.FromResult(hasResources);
+    }
+
+    public IFileChangeToken Watch(VirtualPath path) => new FileChangeToken();
+
     public Task<IEnumerable<string>> GetResourceNamesAsync(CancellationToken ct = default)
     {
         var names = _assembly.GetManifestResourceNames();

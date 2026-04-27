@@ -48,6 +48,14 @@ public class CodeGeneratorResourceProvider : IVirtualFileProvider
     public Task<bool> ExistsAsync(VirtualPath path, CancellationToken ct = default)
         => _embeddedProvider.ExistsAsync(path, ct);
 
+    public Task<IVirtualDirectory?> GetDirectoryAsync(VirtualPath path, CancellationToken ct = default)
+        => _embeddedProvider.GetDirectoryAsync(path, ct);
+
+    public Task<bool> DirectoryExistsAsync(VirtualPath path, CancellationToken ct = default)
+        => _embeddedProvider.DirectoryExistsAsync(path, ct);
+
+    public IFileChangeToken Watch(VirtualPath path) => _embeddedProvider.Watch(path);
+
     /// <summary>
     /// Gets all template resource names available in this provider.
     /// </summary>

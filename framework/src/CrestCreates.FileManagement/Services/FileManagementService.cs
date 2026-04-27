@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CrestCreates.FileManagement.Configuration;
 using CrestCreates.FileManagement.Models;
 using CrestCreates.FileManagement.Providers;
+using CrestCreates.FileManagement.Repositories;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.FileManagement.Services;
@@ -13,22 +14,22 @@ namespace CrestCreates.FileManagement.Services;
 public class FileManagementService : IFileManagementService
 {
     private readonly IFileStorageProvider _storageProvider;
+    private readonly IFileRepository _repository;
     private readonly IFileUrlService _urlService;
     private readonly FileValidationOptions _validationOptions;
-    private readonly FileUrlOptions _urlOptions;
     private readonly ILogger<FileManagementService> _logger;
 
     public FileManagementService(
         IFileStorageProvider storageProvider,
+        IFileRepository repository,
         IFileUrlService urlService,
         FileValidationOptions validationOptions,
-        FileUrlOptions urlOptions,
         ILogger<FileManagementService> logger)
     {
         _storageProvider = storageProvider;
+        _repository = repository;
         _urlService = urlService;
         _validationOptions = validationOptions;
-        _urlOptions = urlOptions;
         _logger = logger;
     }
 
@@ -43,8 +44,9 @@ public class FileManagementService : IFileManagementService
     {
         var effectiveTenantId = tenantId ?? throw new ArgumentNullException(nameof(tenantId));
 
-        // Validate
         ValidateFileName(fileName);
+        ValidateExtension(fileName);
+        ValidateFileSize(stream);
 
         var extension = Path.GetExtension(fileName);
         var fileKey = FileKey.Create(effectiveTenantId, extension);
@@ -62,6 +64,7 @@ public class FileManagementService : IFileManagementService
         };
 
         await _storageProvider.UploadAsync(stream, entity, ct);
+        await _repository.CreateAsync(entity, ct);
         _logger.LogInformation("Uploaded file {FileName} for tenant {TenantId}", fileName, effectiveTenantId);
 
         return entity;
@@ -77,24 +80,22 @@ public class FileManagementService : IFileManagementService
     {
         ValidateTenantAccess(key.TenantId, tenantId);
         await _storageProvider.DeleteAsync(key.ToStorageKey(), ct);
+        await _repository.DeleteAsync(key, ct);
         _logger.LogInformation("Deleted file {StorageKey} for tenant {TenantId}", key.ToStorageKey(), tenantId);
     }
 
-    public Task<FileEntity?> GetAsync(FileKey key, Guid tenantId, CancellationToken ct = default)
+    public async Task<FileEntity?> GetAsync(FileKey key, Guid tenantId, CancellationToken ct = default)
     {
         ValidateTenantAccess(key.TenantId, tenantId);
-        // Would query repository if implemented
-        return Task.FromResult<FileEntity?>(null);
+        return await _repository.GetByKeyAsync(key, ct);
     }
 
-    public Task<IEnumerable<FileEntity>> ListAsync(Guid tenantId, int? year = null, CancellationToken ct = default)
+    public async Task<IEnumerable<FileEntity>> ListAsync(Guid tenantId, int? year = null, CancellationToken ct = default)
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("TenantId is required", nameof(tenantId));
 
-        // Would query repository if implemented
-        _ = year; // Suppress unused warning until repository is implemented
-        return Task.FromResult<IEnumerable<FileEntity>>(Array.Empty<FileEntity>());
+        return await _repository.ListAsync(tenantId, year, ct);
     }
 
     public string GetUrl(FileEntity entity, TimeSpan? presignedExpiry = null)
@@ -124,6 +125,22 @@ public class FileManagementService : IFileManagementService
 
         if (fileName.Contains("..") || fileName.Contains('/') || fileName.Contains('\\'))
             throw new ArgumentException("Invalid file name", nameof(fileName));
+    }
+
+    private void ValidateExtension(string fileName)
+    {
+        if (_validationOptions.AllowedExtensions is { Length: > 0 })
+        {
+            var extension = Path.GetExtension(fileName).ToLowerInvariant();
+            if (Array.IndexOf(_validationOptions.AllowedExtensions, extension) < 0)
+                throw new ArgumentException($"File extension '{extension}' is not allowed", nameof(fileName));
+        }
+    }
+
+    private void ValidateFileSize(Stream stream)
+    {
+        if (stream.CanSeek && stream.Length > _validationOptions.MaxFileSize)
+            throw new ArgumentException($"File size exceeds the maximum allowed size of {_validationOptions.MaxFileSize} bytes", nameof(stream));
     }
 
     private static string SanitizeFileName(string fileName)

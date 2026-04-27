@@ -39,6 +39,7 @@
       
     <Project Path="framework/src/CrestCreates.Testing/CrestCreates.Testing.csproj" />
       
+    <Project Path="framework/src/CrestCreates.VirtualFileSystem/CrestCreates.VirtualFileSystem.csproj" />
     <Project Path="framework/src/CrestCreates.Validation/CrestCreates.Validation.csproj" />
   </Folder>
   <Folder Name="/src/modules/" />
@@ -96,6 +97,8 @@
     <Project Path="framework/test/CrestCreates.Scheduling.IntegrationTests/CrestCreates.Scheduling.IntegrationTests.csproj" />
     <Project Path="framework/test/CrestCreates.Scheduling.Tests/CrestCreates.Scheduling.Tests.csproj" />      
     <Project Path="framework/test/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
+    <Project Path="framework/test/CrestCreates.FileManagement.Tests/CrestCreates.FileManagement.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.VirtualFileSystem.Tests/CrestCreates.VirtualFileSystem.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Web.Tests/CrestCreates.Web.Tests.csproj" />
   </Folder>
   <Folder Name="/src/tools/">

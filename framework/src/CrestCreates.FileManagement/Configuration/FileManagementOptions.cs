@@ -18,6 +18,16 @@ namespace CrestCreates.FileManagement.Configuration
         public LocalFileSystemOptions LocalFileSystem { get; set; } = new LocalFileSystemOptions();
         
         /// <summary>
+        /// Azure Blob Storage配置
+        /// </summary>
+        public AzureBlobStorageOptions AzureBlobStorage { get; set; } = new AzureBlobStorageOptions();
+
+        /// <summary>
+        /// Amazon S3配置
+        /// </summary>
+        public S3StorageOptions AmazonS3 { get; set; } = new S3StorageOptions();
+
+        /// <summary>
         /// 文件验证配置
         /// </summary>
         public FileValidationOptions Validation { get; set; } = new FileValidationOptions();
