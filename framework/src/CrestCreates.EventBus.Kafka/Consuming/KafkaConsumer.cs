@@ -30,6 +30,8 @@ public sealed class KafkaConsumer : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<KafkaConsumer> _logger;
     private readonly List<KafkaSubscriptionInfo> _subscriptions;
+    private IConsumer<string, byte[]>? _consumer;
+    private readonly CancellationTokenSource _stopCts = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="KafkaConsumer"/> class.
@@ -85,32 +87,12 @@ public sealed class KafkaConsumer : BackgroundService
 
         _logger.LogInformation("Starting Kafka consumer with {Count} subscriptions", _subscriptions.Count);
 
-        // Group subscriptions by consumer group (using handler type as proxy)
-        var consumerGroups = _subscriptions
-            .GroupBy(s => s.HandlerType.AssemblyQualifiedName ?? "default-group");
-
-        var consumerTasks = new List<Task>();
-
-        foreach (var group in consumerGroups)
-        {
-            var consumerTask = ConsumeWithConsumerGroupAsync(group.ToList(), stoppingToken);
-            consumerTasks.Add(consumerTask);
-        }
-
-        await Task.WhenAll(consumerTasks);
-    }
-
-    private async Task ConsumeWithConsumerGroupAsync(
-        List<KafkaSubscriptionInfo> subscriptions,
-        CancellationToken stoppingToken)
-    {
-        var topics = subscriptions.Select(s => s.Topic).Distinct().ToList();
-        var consumerGroup = subscriptions.First().HandlerType.AssemblyQualifiedName ?? _options.ConsumerGroupId;
+        var topics = _subscriptions.Select(s => s.Topic).Distinct().ToList();
 
         var consumerConfig = new ConsumerConfig
         {
             BootstrapServers = _options.BootstrapServers,
-            GroupId = consumerGroup,
+            GroupId = _options.ConsumerGroupId,
             EnableAutoCommit = _options.EnableAutoCommit,
             AutoCommitIntervalMs = _options.AutoCommitIntervalMs,
             SessionTimeoutMs = _options.SessionTimeoutMs,
@@ -127,26 +109,17 @@ public sealed class KafkaConsumer : BackgroundService
             consumerConfig.SaslPassword = _options.SaslPassword;
         }
 
-        using var consumer = new ConsumerBuilder<string, byte[]>(consumerConfig)
-            .SetErrorHandler((c, e) =>
-            {
-                _logger.LogError("Kafka consumer error: {Reason} (code: {Code})", e.Reason, e.Code);
-            })
-            .SetPartitionsAssignedHandler((c, partitions) =>
-            {
-                _logger.LogInformation("Partitions assigned: {Partitions}", string.Join(", ", partitions));
-            })
-            .SetPartitionsRevokedHandler((c, partitions) =>
-            {
-                _logger.LogWarning("Partitions revoked: {Partitions}", string.Join(", ", partitions));
-            })
+        _consumer = new ConsumerBuilder<string, byte[]>(consumerConfig)
+            .SetErrorHandler((_, e) => _logger.LogError("Kafka consumer error: {Reason} (code: {Code})", e.Reason, e.Code))
+            .SetPartitionsAssignedHandler((_, partitions) => _logger.LogInformation("Partitions assigned: {Partitions}", string.Join(", ", partitions)))
+            .SetPartitionsRevokedHandler((_, partitions) => _logger.LogWarning("Partitions revoked: {Partitions}", string.Join(", ", partitions)))
             .Build();
 
-        consumer.Subscribe(topics);
+        _consumer.Subscribe(topics);
 
         _logger.LogInformation(
             "Kafka consumer subscribed to topics: {Topics} with group: {ConsumerGroup}",
-            string.Join(", ", topics), consumerGroup);
+            string.Join(", ", topics), _options.ConsumerGroupId);
 
         try
         {
@@ -154,12 +127,12 @@ public sealed class KafkaConsumer : BackgroundService
             {
                 try
                 {
-                    var consumeResult = consumer.Consume(stoppingToken);
+                    var consumeResult = _consumer.Consume(stoppingToken);
 
                     if (consumeResult == null)
                         continue;
 
-                    await ProcessMessageAsync(consumer, consumeResult, subscriptions, stoppingToken);
+                    await ProcessMessageAsync(consumeResult, stoppingToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -173,14 +146,32 @@ public sealed class KafkaConsumer : BackgroundService
         }
         finally
         {
-            consumer.Close();
+            _consumer.Close();
+            _consumer.Dispose();
+            _consumer = null;
         }
     }
 
+    /// <inheritdoc/>
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Stopping Kafka consumer");
+        _stopCts.Cancel();
+
+        try
+        {
+            _consumer?.Close();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error closing consumer during stop");
+        }
+
+        await base.StopAsync(cancellationToken);
+    }
+
     private async Task ProcessMessageAsync(
-        IConsumer<string, byte[]> consumer,
         ConsumeResult<string, byte[]> consumeResult,
-        List<KafkaSubscriptionInfo> subscriptions,
         CancellationToken cancellationToken)
     {
         KafkaMessageEnvelope? envelope = null;
@@ -197,7 +188,7 @@ public sealed class KafkaConsumer : BackgroundService
                 return;
             }
 
-            var subscription = subscriptions.FirstOrDefault(s => s.Topic == consumeResult.Topic);
+            var subscription = _subscriptions.FirstOrDefault(s => s.Topic == consumeResult.Topic);
             if (subscription == null)
             {
                 _logger.LogWarning("No subscription found for topic {Topic}", consumeResult.Topic);
@@ -224,7 +215,7 @@ public sealed class KafkaConsumer : BackgroundService
             await subscription.InvokeHandler(scope.ServiceProvider, eventPayload, cancellationToken);
 
             // Manual commit
-            consumer.Commit(consumeResult);
+            _consumer!.Commit(consumeResult);
 
             _logger.LogInformation(
                 "Successfully handled event {EventType} from topic {Topic} partition {Partition} offset {Offset}",
@@ -238,6 +229,12 @@ public sealed class KafkaConsumer : BackgroundService
 
             if (retryCount < _options.RetryCount)
             {
+                // Add delay before retry
+                if (_options.RetryDelaySeconds > 0)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(_options.RetryDelaySeconds), cancellationToken);
+                }
+
                 // Increment retry count and republish
                 var updatedEnvelope = UpdateRetryCount(consumeResult.Message.Value, retryCount + 1);
 
@@ -255,7 +252,7 @@ public sealed class KafkaConsumer : BackgroundService
                         cancellationToken);
 
                     // Commit the failed message to move past it
-                    consumer.Commit(consumeResult);
+                    _consumer!.Commit(consumeResult);
 
                     _logger.LogWarning(
                         "Retrying message, attempt {Attempt} of {MaxRetries}",
@@ -285,7 +282,7 @@ public sealed class KafkaConsumer : BackgroundService
                         cancellationToken);
 
                     // Commit to move past the failed message
-                    consumer.Commit(consumeResult);
+                    _consumer!.Commit(consumeResult);
 
                     _logger.LogError(
                         "Max retries ({MaxRetries}) reached, sent to DLQ topic {DlqTopic}",
