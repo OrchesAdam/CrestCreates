@@ -1,40 +1,36 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.EventBus.Abstract;
 
-namespace CrestCreates.EventBus.Kafka
+namespace CrestCreates.EventBus.Kafka;
+
+/// <summary>
+/// Kafka-based distributed event bus implementation.
+/// </summary>
+public class KafkaEventBus : DistributedEventBusBase
 {
-    public class KafkaEventBus : DistributedEventBusBase
+    public override Task PublishAsync(IDomainEvent @event, CancellationToken cancellationToken = default)
     {
-        private readonly string _connectionString;
+        throw new NotImplementedException("KafkaEventBus implementation pending.");
+    }
 
-        public KafkaEventBus(string connectionString)
-        {
-            _connectionString = connectionString;
-        }
+    public override Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+    {
+        throw new NotImplementedException("KafkaEventBus implementation pending.");
+    }
 
-        public override async Task PublishAsync(IDomainEvent @event, CancellationToken cancellationToken = default)
-        {
-            // 实现Kafka事件发布逻辑
-            // 这里是示例实现，实际项目中需要使用Kafka客户端库
-            await Task.CompletedTask;
-        }
+    public override void Subscribe<TEvent, THandler>()
+    {
+        throw new NotSupportedException(
+            "Kafka subscriptions are discovered at compile-time via [KafkaSubscribe] attribute. " +
+            "Mark your handler method with [KafkaSubscribe(\"topic\")] to register a subscription.");
+    }
 
-        public override async Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
-        {
-            // 实现Kafka事件发布逻辑
-            await Task.CompletedTask;
-        }
-
-        public override void Subscribe<TEvent, THandler>()
-        {
-            // 实现Kafka事件订阅逻辑
-        }
-
-        public override void Unsubscribe<TEvent, THandler>()
-        {
-            // 实现Kafka事件取消订阅逻辑
-        }
+    public override void Unsubscribe<TEvent, THandler>()
+    {
+        throw new NotSupportedException(
+            "Kafka subscriptions are managed at compile-time and cannot be dynamically unsubscribed.");
     }
 }

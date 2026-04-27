@@ -1,27 +1,29 @@
-using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using CrestCreates.Modularity;
+using CrestCreates.EventBus.Kafka.Options;
+using CrestCreates.EventBus.Abstract;
 
-namespace CrestCreates.EventBus.Kafka
+namespace CrestCreates.EventBus.Kafka;
+
+/// <summary>
+/// Module for configuring Kafka distributed event bus.
+/// </summary>
+public class KafkaEventBusModule : ModuleBase
 {
-    public class KafkaEventBusModule : ModuleBase
+    private readonly IConfiguration _configuration;
+
+    public KafkaEventBusModule(IConfiguration configuration)
     {
-        private readonly IConfiguration _configuration;
+        _configuration = configuration;
+    }
 
-        public KafkaEventBusModule(IConfiguration configuration)
-        {
-            _configuration = configuration;
-        }
+    public override void OnConfigureServices(IServiceCollection services)
+    {
+        // Configure options
+        services.Configure<KafkaOptions>(_configuration.GetSection("Kafka"));
 
-        public override void OnConfigureServices(IServiceCollection services)
-        {
-            var connectionString = _configuration.GetConnectionString("Kafka") ?? throw new InvalidOperationException("Kafka connection string not configured");
-            
-            services.AddSingleton<CrestCreates.EventBus.Abstract.IEventBus>(sp => 
-                new KafkaEventBus(connectionString));
-            
-            services.AddScoped<CrestCreates.Domain.DomainEvents.IDomainEventPublisher, CrestCreates.EventBus.Local.DomainEventPublisher>();
-        }
+        // Register event bus
+        services.AddSingleton<IEventBus, KafkaEventBus>();
     }
 }
