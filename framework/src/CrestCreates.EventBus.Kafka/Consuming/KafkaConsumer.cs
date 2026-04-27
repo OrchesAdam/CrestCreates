@@ -85,8 +85,22 @@ public sealed class KafkaConsumer : BackgroundService
 
         if (!string.IsNullOrEmpty(_options.SaslUsername) && !string.IsNullOrEmpty(_options.SaslPassword))
         {
-            consumerConfig.SecurityProtocol = Enum.Parse<SecurityProtocol>(_options.SecurityProtocol);
-            consumerConfig.SaslMechanism = Enum.Parse<SaslMechanism>(_options.SaslMechanism);
+            if (!Enum.TryParse<SecurityProtocol>(_options.SecurityProtocol, out var securityProtocol))
+            {
+                throw new ArgumentException(
+                    $"Invalid SecurityProtocol value: '{_options.SecurityProtocol}'. " +
+                    $"Valid values: {string.Join(", ", Enum.GetNames<SecurityProtocol>())}");
+            }
+
+            if (!Enum.TryParse<SaslMechanism>(_options.SaslMechanism, out var saslMechanism))
+            {
+                throw new ArgumentException(
+                    $"Invalid SaslMechanism value: '{_options.SaslMechanism}'. " +
+                    $"Valid values: {string.Join(", ", Enum.GetNames<SaslMechanism>())}");
+            }
+
+            consumerConfig.SecurityProtocol = securityProtocol;
+            consumerConfig.SaslMechanism = saslMechanism;
             consumerConfig.SaslUsername = _options.SaslUsername;
             consumerConfig.SaslPassword = _options.SaslPassword;
         }

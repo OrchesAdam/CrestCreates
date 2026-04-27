@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using CrestCreates.EventBus.Kafka.Options;
 
@@ -13,5 +14,5 @@ public static partial class KafkaSubscriptionRegistry
     /// Gets the list of Kafka subscriptions discovered at compile time.
     /// Returns an empty list if no subscriptions are found.
     /// </summary>
-    public static IReadOnlyList<KafkaSubscriptionInfo> GetSubscriptions() => new List<KafkaSubscriptionInfo>();
+    public static IReadOnlyList<KafkaSubscriptionInfo> GetSubscriptions() => Array.Empty<KafkaSubscriptionInfo>();
 }
