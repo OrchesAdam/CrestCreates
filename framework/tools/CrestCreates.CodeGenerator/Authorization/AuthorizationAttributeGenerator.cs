@@ -130,6 +130,7 @@ namespace CrestCreates.CodeGenerator.Authorization
         {
             var sb = new StringBuilder();
 
+            sb.AppendLine("#nullable enable");
             sb.AppendLine("using System;");
             sb.AppendLine("using System.Collections.Generic;");
             sb.AppendLine("using System.Threading.Tasks;");
