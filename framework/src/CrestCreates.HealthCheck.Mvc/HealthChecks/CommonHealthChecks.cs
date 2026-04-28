@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using CrestCreates.HealthCheck.Attributes;
+using CrestCreates.Domain.Shared.Attributes;
 
 namespace CrestCreates.HealthCheck.Mvc.HealthChecks;
 

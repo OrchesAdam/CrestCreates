@@ -1,6 +1,6 @@
 using System;
 
-namespace CrestCreates.Application.Contracts.Attributes
+namespace CrestCreates.Domain.Shared.Attributes
 {
     /// <summary>
     /// Marks a CRUD application service contract that should be exposed by a generated MVC controller.

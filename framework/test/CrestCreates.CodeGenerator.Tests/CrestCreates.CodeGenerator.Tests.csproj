@@ -15,7 +15,6 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- 引用CodeGenerator作为分析器 -->
-    <ProjectReference Include="..\..\tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     
     <!-- 同时引用CodeGenerator作为常规项目，以便测试代码可以访问生成器类型 -->
     <ProjectReference Include="..\..\tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" />

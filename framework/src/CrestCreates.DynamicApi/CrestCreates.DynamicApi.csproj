@@ -25,7 +25,6 @@
     <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\CrestCreates.OrmProviders.Abstract\CrestCreates.OrmProviders.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.Validation\CrestCreates.Validation.csproj" />
-    <ProjectReference Include="..\..\tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputItems="false" />
   </ItemGroup>
 
 </Project>

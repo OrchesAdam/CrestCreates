@@ -10,7 +10,7 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
     [Generator]
     public sealed class CrudControllerSourceGenerator : IIncrementalGenerator
     {
-        private const string CrudApiControllerAttributeName = "CrestCreates.Application.Contracts.Attributes.CrestCrudApiControllerAttribute";
+        private const string CrudApiControllerAttributeName = "CrestCreates.Domain.Shared.Attributes.CrestCrudApiControllerAttribute";
         private const string CrudAppServiceNamespace = "CrestCreates.Application.Contracts.Interfaces";
         private const string CrudAppServiceMetadataName = "ICrudAppService`5";
         private const string CrudControllerBaseMetadataName = "CrestCreates.AspNetCore.Controllers.CrudControllerBase`6";

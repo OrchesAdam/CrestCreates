@@ -8,7 +8,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" PrivateAssets="true" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
     <ProjectReference Include="..\CrestCreates.Authorization.Abstractions\CrestCreates.Authorization.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Aop.Abstractions\CrestCreates.Aop.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Caching\CrestCreates.Caching.csproj" />

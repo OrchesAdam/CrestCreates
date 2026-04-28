@@ -1,0 +1,9 @@
+<Project>
+  <!-- 工具项目覆盖: 恢复父级 Directory.Build.props 的设置，但排除 AoT 配置 -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)..\'))" />
+
+  <PropertyGroup>
+    <PublishAot>false</PublishAot>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+  </PropertyGroup>
+</Project>

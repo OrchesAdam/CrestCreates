@@ -14,7 +14,6 @@
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Scheduling\CrestCreates.Scheduling.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
-    <ProjectReference Include="..\..\tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputItems="false" />
   </ItemGroup>
 
 </Project>

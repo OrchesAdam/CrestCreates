@@ -22,7 +22,6 @@
     <ProjectReference Include="..\LibraryManagement.Application.Contracts\LibraryManagement.Application.Contracts.csproj" />
     <ProjectReference Include="..\LibraryManagement.Application\LibraryManagement.Application.csproj" />
     <ProjectReference Include="..\LibraryManagement.EntityFrameworkCore\LibraryManagement.EntityFrameworkCore.csproj" />
-    <ProjectReference Include="..\..\..\framework\tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" PrivateAssets="true" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

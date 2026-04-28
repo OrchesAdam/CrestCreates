@@ -13,7 +13,6 @@
     <ProjectReference Include="..\..\..\framework\src\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\..\..\framework\src\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\LibraryManagement.Domain.Shared\LibraryManagement.Domain.Shared.csproj" />
-    <ProjectReference Include="..\..\..\framework\tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" PrivateAssets="true" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
   </ItemGroup>
 
   <ItemGroup>

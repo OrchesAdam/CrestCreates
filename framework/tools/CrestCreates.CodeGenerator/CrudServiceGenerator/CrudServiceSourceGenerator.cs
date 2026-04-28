@@ -426,7 +426,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("using System.Threading.Tasks;");
             if (generateController)
             {
-                builder.AppendLine("using CrestCreates.Application.Contracts.Attributes;");
+                builder.AppendLine("using CrestCreates.Domain.Shared.Attributes;");
             }
             builder.AppendLine("using CrestCreates.Application.Contracts.Interfaces;");
             builder.AppendLine("using CrestCreates.Application.Contracts.DTOs.Common;");

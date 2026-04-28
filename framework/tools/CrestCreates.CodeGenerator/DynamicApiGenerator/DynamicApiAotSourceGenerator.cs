@@ -49,8 +49,8 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             return null;
         }
 
-        var dynamicApiIgnoreAttribute = compilation.GetTypeByMetadataName("CrestCreates.DynamicApi.DynamicApiIgnoreAttribute");
-        var dynamicApiRouteAttribute = compilation.GetTypeByMetadataName("CrestCreates.DynamicApi.DynamicApiRouteAttribute");
+        var dynamicApiIgnoreAttribute = compilation.GetTypeByMetadataName("CrestCreates.Domain.Shared.Attributes.DynamicApiIgnoreAttribute");
+        var dynamicApiRouteAttribute = compilation.GetTypeByMetadataName("CrestCreates.Domain.Shared.Attributes.DynamicApiRouteAttribute");
         var unitOfWorkAttribute = compilation.GetTypeByMetadataName("CrestCreates.Aop.Interceptors.UnitOfWorkMoAttribute");
         var services = new List<ServiceModel>();
 
