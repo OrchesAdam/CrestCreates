@@ -1,13 +1,7 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.Permission;
 using CrestCreates.OrmProviders.Abstract;
-using CrestCreates.OrmProviders.Abstract.Abstractions;
-using CrestCreates.Domain.Examples;
 using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Settings;
@@ -23,7 +17,6 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
         }
 
         // DbSet properties for your entities
-        public DbSet<Product> Products { get; set; }
         public DbSet<Permission> Permissions { get; set; }
         public DbSet<PermissionGrant> PermissionGrants { get; set; }
         public DbSet<User> Users { get; set; }
@@ -42,43 +35,6 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
             base.OnModelCreating(modelBuilder);
             
             // Configure Product entity
-            modelBuilder.Entity<Product>(entity =>
-            {
-                entity.ToTable("Products");
-                
-                entity.HasKey(e => e.Id);
-                entity.Property(e => e.Id).ValueGeneratedNever();
-                
-                entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
-                entity.Property(e => e.Description).HasMaxLength(1000);
-                
-                // Map Money value object as owned entity
-                entity.OwnsOne(e => e.Price, price =>
-                {
-                    price.Property(p => p.Amount).HasColumnType("decimal(18,2)");
-                    price.Property(p => p.Currency).HasMaxLength(3);
-                });
-                
-                // Map ProductType enum as int
-                entity.Property(e => e.Type).HasConversion<int>();
-                
-                entity.Property(e => e.StockCount).IsRequired();
-                
-                // Audit fields
-                entity.Property(e => e.CreationTime).IsRequired();
-                entity.Property(e => e.CreatorId);
-                entity.Property(e => e.LastModificationTime);
-                entity.Property(e => e.LastModifierId);
-                
-                // Soft delete
-                entity.Property(e => e.IsDeleted).IsRequired().HasDefaultValue(false);
-                entity.Property(e => e.DeletionTime);
-                entity.Property(e => e.DeleterId);
-                
-                // Global filter for soft delete
-                entity.HasQueryFilter(e => !e.IsDeleted);
-            });
-
             modelBuilder.Entity<Permission>(entity =>
             {
                 entity.ToTable("Permissions");

@@ -119,7 +119,7 @@ namespace CrestCreates.CodeGenerator.EventBusGenerator
             sourceCode += "using Microsoft.Extensions.DependencyInjection;\n";
             sourceCode += "using MediatR;\n";
             sourceCode += "using CrestCreates.Domain.DomainEvents;\n";
-            sourceCode += "using CrestCreates.Infrastructure.EventBus.Local;\n";
+            sourceCode += "using CrestCreates.EventBus.Local;\n";
             sourceCode += "\n";
             sourceCode += "namespace CrestCreates.Infrastructure.EventBus\n";
             sourceCode += "{\n";

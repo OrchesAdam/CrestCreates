@@ -15,15 +15,6 @@
     <RuntimeIdentifiers>win-x64;linux-x64;osx-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
-  <!-- 为 AoT 编译添加必要的包引用 -->
-  <ItemGroup Condition="$(TargetFramework) != 'netstandard2.0'">
-    <!-- 为 Web 项目添加 AoT 支持 -->
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Aot" Version="8.0.0" Condition="$(TargetFramework.Contains('wasm'))" />
-
-    <!-- 为控制台和服务器项目添加 AoT 支持 -->
-    <PackageReference Include="Microsoft.Extensions.Hosting.Aot" Version="8.0.0" Condition="!$(TargetFramework.Contains('wasm'))" />
-  </ItemGroup>
-
   <!-- 配置修剪行为 -->
   <ItemGroup Condition="$(TargetFramework) != 'netstandard2.0'">
     <!-- 保留必要的类型和成员 -->
