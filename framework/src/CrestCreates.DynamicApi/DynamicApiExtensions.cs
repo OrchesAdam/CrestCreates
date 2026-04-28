@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -21,11 +20,6 @@ public static class DynamicApiExtensions
 
         services.AddSingleton(options);
         services.AddSingleton<DynamicApiRouteConvention>();
-        if (options.EnableRuntimeReflectionFallback)
-        {
-            services.AddSingleton<IDynamicApiScanner, DynamicApiScanner>();
-            services.AddScoped<DynamicApiEndpointExecutor>();
-        }
 
         services.AddSingleton(sp =>
         {
@@ -34,11 +28,6 @@ public static class DynamicApiExtensions
             if (generatedRegistry is not null)
             {
                 return generatedRegistry;
-            }
-
-            if (dynamicApiOptions.EnableRuntimeReflectionFallback)
-            {
-                return sp.GetRequiredService<IDynamicApiScanner>().Scan(dynamicApiOptions);
             }
 
             throw DynamicApiGeneratedRegistryStore.CreateMissingGeneratedProviderException(dynamicApiOptions);
@@ -58,27 +47,6 @@ public static class DynamicApiExtensions
             return endpoints;
         }
 
-        if (!options.EnableRuntimeReflectionFallback)
-        {
-            throw DynamicApiGeneratedRegistryStore.CreateMissingGeneratedProviderException(options);
-        }
-
-        var registry = endpoints.ServiceProvider.GetRequiredService<IDynamicApiScanner>().Scan(options);
-        foreach (var service in registry.Services)
-        {
-            foreach (var action in service.Actions)
-            {
-                var routeBuilder = endpoints.MapMethods(
-                    action.FullRoute,
-                    new[] { action.HttpMethod },
-                    async (HttpContext context, DynamicApiEndpointExecutor executor) =>
-                        await executor.ExecuteAsync(context, service, action));
-
-                routeBuilder.WithDisplayName($"{service.ServiceName}.{action.ActionName}");
-                routeBuilder.ExcludeFromDescription();
-            }
-        }
-
-        return endpoints;
+        throw DynamicApiGeneratedRegistryStore.CreateMissingGeneratedProviderException(options);
     }
 }
