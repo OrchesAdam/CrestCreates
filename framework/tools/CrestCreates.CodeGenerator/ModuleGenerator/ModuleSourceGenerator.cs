@@ -157,28 +157,30 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         sb.AppendLine(" };");
         sb.AppendLine();
 
-        // RegisterModules: register module types and call OnConfigureServices during ConfigureServices phase
+        // RegisterModules: register module types as singletons
         sb.AppendLine("        public static IHostBuilder RegisterModules(this IHostBuilder hostBuilder) {");
         sb.AppendLine("            return hostBuilder.ConfigureServices((context, services) => {");
-        // Register all module types as singletons
         foreach (var module in sortedModules)
         {
             sb.AppendLine($"                services.AddSingleton<{module.FullName}>();");
-        }
-        // Call OnConfigureServices for each module with AutoRegisterServices=true
-        // We instantiate directly since we're in ConfigureServices and can't resolve from DI yet
-        foreach (var module in sortedModules.Where(m => m.AutoRegisterServices))
-        {
-            sb.AppendLine($"                new {module.FullName}().OnConfigureServices(services);");
         }
         sb.AppendLine("            });");
         sb.AppendLine("        }");
         sb.AppendLine();
 
-        // InitializeModules: resolve from the built host and execute lifecycle hooks
+        // InitializeModules: resolve from DI and execute all lifecycle hooks in order
         sb.AppendLine("        public static IHost InitializeModules(this IHost host) {");
         sb.AppendLine("            var logger = host.Services.GetService<ILogger<IModule>>();");
         sb.AppendLine("            var descriptors = ModuleDescriptorRegistry.GetDescriptors();");
+        sb.AppendLine();
+        // OnConfigureServices: resolve module from DI and call (IConfiguration etc. available)
+        sb.AppendLine("            foreach (var descriptor in descriptors.Where(d => d.AutoRegisterServices)) {");
+        sb.AppendLine("                try { logger?.LogInformation(\"[ConfigureServices] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
+        sb.AppendLine("                try {");
+        sb.AppendLine("                    var svc = host.Services.GetRequiredService<IServiceCollection>();");
+        sb.AppendLine("                    ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnConfigureServices(svc);");
+        sb.AppendLine("                } catch (Exception ex) { logger?.LogError(ex, \"Error during ConfigureServices phase\"); throw; }");
+        sb.AppendLine("            }");
         sb.AppendLine();
         sb.AppendLine("            foreach (var descriptor in descriptors) {");
         sb.AppendLine("                try { logger?.LogInformation(\"[PreInit] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");

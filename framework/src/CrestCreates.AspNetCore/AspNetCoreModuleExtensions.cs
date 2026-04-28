@@ -8,7 +8,7 @@ using System;
 
 namespace CrestCreates.AspNetCore
 {
-    public static class AspNetCoreModuleExtensions
+    public static class AspNetCoreServiceExtensions
     {
         public static IHostBuilder UseAspNetCore(this IHostBuilder hostBuilder)
         {

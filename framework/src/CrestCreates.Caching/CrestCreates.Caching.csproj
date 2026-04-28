@@ -10,7 +10,8 @@
     <ProjectReference Include="..\CrestCreates.Aop.Abstractions\CrestCreates.Aop.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Caching.Abstractions\CrestCreates.Caching.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
-    <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />    
+    <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="..\..\tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="StackExchange.Redis"/>
