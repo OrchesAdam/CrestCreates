@@ -15,6 +15,11 @@
     <RuntimeIdentifiers>win-x64;linux-x64;osx-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
+  <!-- EF Core Aot 拦截器 -->
+  <PropertyGroup>
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.EntityFrameworkCore.GeneratedInterceptors</InterceptorsNamespaces>
+  </PropertyGroup>
+
   <!-- 配置修剪行为 -->
   <ItemGroup Condition="$(TargetFramework) != 'netstandard2.0'">
     <!-- 保留必要的类型和成员 -->
