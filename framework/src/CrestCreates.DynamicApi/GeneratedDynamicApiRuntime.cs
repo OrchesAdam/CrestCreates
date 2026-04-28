@@ -25,12 +25,13 @@ public static class DynamicApiGeneratedRuntime
     }
 
     public static async Task<T?> ReadBodyAsync<T>(HttpContext context, bool optional)
+        where T : new()
     {
         ArgumentNullException.ThrowIfNull(context);
 
         if (context.Request.ContentLength == 0)
         {
-            return optional ? default : Activator.CreateInstance<T>();
+            return optional ? default : new T();
         }
 
         context.Request.EnableBuffering();
@@ -45,7 +46,7 @@ public static class DynamicApiGeneratedRuntime
             var payload = await reader.ReadToEndAsync();
             if (string.IsNullOrWhiteSpace(payload))
             {
-                return optional ? default : Activator.CreateInstance<T>();
+                return optional ? default : new T();
             }
 
             var result = JsonSerializer.Deserialize<T>(payload, ResolveJsonSerializerOptions(context.RequestServices));
@@ -54,7 +55,7 @@ public static class DynamicApiGeneratedRuntime
                 return result;
             }
 
-            return optional ? default : Activator.CreateInstance<T>();
+            return optional ? default : new T();
         }
         catch (JsonException) when (optional)
         {

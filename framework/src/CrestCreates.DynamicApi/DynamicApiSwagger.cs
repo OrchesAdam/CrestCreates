@@ -1,44 +1,9 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace CrestCreates.DynamicApi;
-
-public sealed class DynamicApiSwaggerGenOptionsSetup : IPostConfigureOptions<SwaggerGenOptions>
-{
-    public void PostConfigure(string? name, SwaggerGenOptions options)
-    {
-        options.CustomSchemaIds(DynamicApiSwaggerSchemaIdHelper.GetSchemaId);
-        options.DocumentFilter<DynamicApiSwaggerDocumentFilter>();
-    }
-}
-
-public static class DynamicApiSwaggerSchemaIdHelper
-{
-    public static string GetSchemaId(Type type)
-    {
-        if (!type.IsGenericType)
-        {
-            return Normalize(type.FullName ?? type.Name);
-        }
-
-        var genericTypeName = type.GetGenericTypeDefinition().FullName ?? type.Name;
-        var genericTypeArguments = string.Join(
-            "_",
-            type.GetGenericArguments().Select(GetSchemaId));
-
-        return Normalize($"{genericTypeName}_{genericTypeArguments}");
-    }
-
-    private static string Normalize(string value)
-    {
-        return value
-            .Replace('.', '_')
-            .Replace('+', '_');
-    }
-}
 
 public sealed class DynamicApiSwaggerDocumentFilter : IDocumentFilter
 {
@@ -73,6 +38,7 @@ public sealed class DynamicApiSwaggerDocumentFilter : IDocumentFilter
         }
     }
 
+    [SuppressMessage("AOT", "IL3050:Calling members annotated with \'RequiresDynamicCodeAttribute\' may break functionality when AOT compiling.")]
     private static OpenApiOperation CreateOperation(
         DynamicApiActionDescriptor action,
         OpenApiDocument swaggerDoc,
