@@ -102,7 +102,6 @@
     <Project Path="framework/test/CrestCreates.Web.Tests/CrestCreates.Web.Tests.csproj" />
   </Folder>
   <Folder Name="/src/tools/">
-    <Project Path="framework/tools/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj" />
     <Project Path="framework/tools/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj" />
   </Folder>
 </Solution>
