@@ -1,3 +1,4 @@
+using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.DistributedTransaction.Abstractions;
 using CrestCreates.DistributedTransaction.CAP.Abstractions;
 using CrestCreates.DistributedTransaction.CAP.Implementations;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.DistributedTransaction.CAP.Modules
 {
+    [CrestModule]
     public class DistributedTransactionCapModule : ModuleBase
     {
         public override void OnConfigureServices(IServiceCollection services)

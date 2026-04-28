@@ -1,4 +1,4 @@
-using LibraryManagement.Web.Modules;
+using CrestCreates.Modularity;
 using LibraryManagement.Application.Services;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.Application.Identity;
@@ -91,8 +91,8 @@ builder.Services.AddCrestAspNetCoreDynamicApi(options =>
     options.AddApplicationServiceAssembly<AuditLogCleanupAppService>();
 });
 
-// Register all modules using the module discovery system
-LibraryManagement.Web.Modules.ModuleAutoInitializer.RegisterAllModules(builder.Services);
+// Register all modules using the SourceGenerator-generated module discovery system
+builder.Host.RegisterModules();
 
 var app = builder.Build();
 
@@ -115,7 +115,7 @@ app.MapControllers();
 app.MapCrestAspNetCoreDynamicApi();
 
 // Initialize all modules
-LibraryManagement.Web.Modules.ModuleAutoInitializer.InitializeAllModules(app.Services);
+app.InitializeModules();
 
 app.Run();
 

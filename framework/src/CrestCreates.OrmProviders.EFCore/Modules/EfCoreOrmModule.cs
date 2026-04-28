@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Repositories.Permission;
+using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.OrmProviders.Abstract.Modules;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
@@ -14,6 +15,7 @@ namespace CrestCreates.OrmProviders.EFCore.Modules
     /// <summary>
     /// EF Core ORM 模块
     /// </summary>
+    [CrestModule]
     public class EfCoreOrmModule : OrmModuleBase
     {
         private readonly IConfiguration _configuration;

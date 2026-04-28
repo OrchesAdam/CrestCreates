@@ -25,7 +25,6 @@ public class ScanModulesFromSource : Task
             var files = SourceFiles.Split(';', StringSplitOptions.RemoveEmptyEntries);
             var modules = new List<object>();
 
-            var moduleRegex = new Regex(@"\[Module\s*\(\s*typeof\s*\(\s*(\w+)\s*\)\s*(?:,\s*typeof\s*\(\s*(\w+)\s*\)\s*)*\s*\)\s*\]", RegexOptions.Compiled);
             var classRegex = new Regex(@"class\s+(\w+)\s*:\s*ModuleBase", RegexOptions.Compiled);
             var orderRegex = new Regex(@"Order\s*=\s*(-?\d+)", RegexOptions.Compiled);
             var autoRegRegex = new Regex(@"AutoRegisterServices\s*=\s*(true|false)", RegexOptions.Compiled);
@@ -37,7 +36,9 @@ public class ScanModulesFromSource : Task
 
                 var content = File.ReadAllText(file);
 
-                var moduleMatch = moduleRegex.Match(content);
+                // Match [CrestModule(...)] attribute (various forms)
+                var crestModuleRegex = new Regex(@"\[CrestModule[^\]]*\]", RegexOptions.Compiled);
+                var moduleMatch = crestModuleRegex.Match(content);
                 if (!moduleMatch.Success) continue;
 
                 var classMatch = classRegex.Match(content);
@@ -46,10 +47,11 @@ public class ScanModulesFromSource : Task
                 var moduleName = classMatch.Groups[1].Value;
                 var dependsOn = new List<string>();
 
-                var depMatches = Regex.Matches(moduleRegex.Match(content).Value, @"typeof\s*\(\s*(\w+)\s*\)");
-                for (int i = 1; i < depMatches.Count; i++)
+                // Extract all typeof(T) from the attribute as dependencies
+                var depMatches = Regex.Matches(moduleMatch.Value, @"typeof\s*\(\s*(\w+)\s*\)");
+                foreach (Match match in depMatches)
                 {
-                    dependsOn.Add(depMatches[i].Groups[1].Value);
+                    dependsOn.Add(match.Groups[1].Value);
                 }
 
                 var order = 0;

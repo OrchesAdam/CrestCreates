@@ -1,3 +1,4 @@
+using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
@@ -11,6 +12,7 @@ namespace CrestCreates.FileManagement.Modules;
 /// <summary>
 /// 文件管理模块
 /// </summary>
+[CrestModule]
 public class FileManagementModule : ModuleBase
 {
     private readonly FileManagementOptions _options;

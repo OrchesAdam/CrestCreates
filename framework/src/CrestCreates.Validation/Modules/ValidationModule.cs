@@ -4,11 +4,13 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using FluentValidation;
+using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using CrestCreates.Validation.Validators;
 
 namespace CrestCreates.Validation.Modules
 {
+    [CrestModule]
     public class ValidationModule : ModuleBase
     {
         public override void OnConfigureServices(IServiceCollection services)

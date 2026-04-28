@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\CrestCreates.DbContextProvider.Abstract\CrestCreates.DbContextProvider.Abstract.csproj" />
+    <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
   </ItemGroup>
 
   <ItemGroup>

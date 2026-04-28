@@ -2,6 +2,7 @@ using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using FreeSql;
+using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.OrmProviders.Abstract.Modules;
 using CrestCreates.OrmProviders.FreeSqlProvider.UnitOfWork;
@@ -11,6 +12,7 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Modules
     /// <summary>
     /// FreeSql ORM 模块
     /// </summary>
+    [CrestModule]
     public class FreeSqlOrmModule : OrmModuleBase
     {
         private readonly IConfiguration _configuration;

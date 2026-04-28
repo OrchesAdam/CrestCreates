@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using CrestCreates.Modularity;
+using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.EventBus.RabbitMQ.Connection;
 using CrestCreates.EventBus.RabbitMQ.Consuming;
 using CrestCreates.EventBus.RabbitMQ.Options;
@@ -10,6 +11,7 @@ using CrestCreates.EventBus.Abstract;
 
 namespace CrestCreates.EventBus.RabbitMQ;
 
+[CrestModule]
 public class RabbitMqEventBusModule : ModuleBase
 {
     private readonly IConfiguration _configuration;

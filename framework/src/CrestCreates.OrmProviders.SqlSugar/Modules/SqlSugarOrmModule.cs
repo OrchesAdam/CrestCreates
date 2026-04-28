@@ -2,6 +2,7 @@ using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using SqlSugar;
+using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.OrmProviders.Abstract.Modules;
 using CrestCreates.OrmProviders.SqlSugar.UnitOfWork;
@@ -11,6 +12,7 @@ namespace CrestCreates.OrmProviders.SqlSugar.Modules
     /// <summary>
     /// SqlSugar ORM 模块
     /// </summary>
+    [CrestModule]
     public class SqlSugarOrmModule : OrmModuleBase
     {
         private readonly IConfiguration _configuration;

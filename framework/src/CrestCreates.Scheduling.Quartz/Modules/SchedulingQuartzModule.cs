@@ -1,3 +1,4 @@
+using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using CrestCreates.Scheduling.Services;
 using CrestCreates.Scheduling.Quartz.Services;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace CrestCreates.Scheduling.Quartz.Modules;
 
+[CrestModule]
 public class SchedulingQuartzModule : ModuleBase
 {
     public override void OnConfigureServices(IServiceCollection services)

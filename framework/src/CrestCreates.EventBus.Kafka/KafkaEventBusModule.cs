@@ -1,8 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
 using CrestCreates.Modularity;
+using CrestCreates.Domain.Shared.Attributes;
 
 namespace CrestCreates.EventBus.Kafka;
 
+[CrestModule]
 public class KafkaEventBusModule : ModuleBase
 {
     public override void OnConfigureServices(IServiceCollection services)

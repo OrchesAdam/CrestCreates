@@ -3,10 +3,12 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using CrestCreates.Modularity;
+using CrestCreates.Domain.Shared.Attributes;
 using System;
 
 namespace CrestCreates.AspNetCore
 {
+    [CrestModule]
     public class AspNetCoreModule : ModuleBase
     {
         public override string Name => "AspNetCoreModule";

@@ -1,3 +1,4 @@
+using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Builder;
@@ -8,6 +9,7 @@ using CrestCreates.Localization.Services;
 
 namespace CrestCreates.Localization.Modules;
 
+[CrestModule]
 public class LocalizationModule : ModuleBase
 {
     public override void OnConfigureServices(IServiceCollection services)

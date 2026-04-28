@@ -1,3 +1,4 @@
+using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
@@ -12,6 +13,7 @@ namespace CrestCreates.Security.Modules;
 /// <summary>
 /// 安全模块
 /// </summary>
+[CrestModule]
 public class SecurityModule : ModuleBase
 {
     private readonly SecurityOptions _options;
