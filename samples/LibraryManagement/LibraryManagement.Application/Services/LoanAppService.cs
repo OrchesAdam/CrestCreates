@@ -1,4 +1,3 @@
-using AutoMapper;
 using LibraryManagement.Application.Contracts.DTOs;
 using LibraryManagement.Application.Contracts.Interfaces;
 using LibraryManagement.Domain.Entities;
@@ -26,16 +25,25 @@ public class LoanAppService : CrestAppServiceBase<Loan, Guid, LoanDto, CreateLoa
     private readonly ILoanRepository _loanRepository;
     private readonly IBookRepository _bookRepository;
     private readonly IMemberRepository _memberRepository;
-    private readonly IMapper _mapper;
 
 
-    public LoanAppService(ICrestRepositoryBase<Loan, Guid> repository, IMapper mapper, IServiceProvider serviceProvider, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, ILoanRepository loanRepository, IBookRepository bookRepository, IMemberRepository memberRepository) : base(repository, mapper, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
+    public LoanAppService(ICrestRepositoryBase<Loan, Guid> repository, IServiceProvider serviceProvider, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, ILoanRepository loanRepository, IBookRepository bookRepository, IMemberRepository memberRepository) : base(repository, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
     {
         _loanRepository = loanRepository;
         _bookRepository = bookRepository;
         _memberRepository = memberRepository;
-        _mapper = mapper;
     }
+
+    protected override Loan MapToEntity(CreateLoanDto dto)
+        => new Loan(Guid.NewGuid(), dto.BookId, dto.MemberId, dto.LoanDays ?? 0, dto.Notes);
+
+    protected override void MapToEntity(LoanDto dto, Loan entity)
+    {
+        // LoanDto is used as TUpdateDto — no generated mapper for this direction
+    }
+
+    protected override LoanDto MapToDto(Loan entity)
+        => LoanToLoanDtoMapper.ToTarget(entity);
 
     [UnitOfWorkMo]
     public override async Task<LoanDto> CreateAsync(CreateLoanDto input, CancellationToken cancellationToken = default)
@@ -191,7 +199,7 @@ public class LoanAppService : CrestAppServiceBase<Loan, Guid, LoanDto, CreateLoa
 
     private async Task<LoanDto> MapToDtoAsync(Loan loan)
     {
-        var dto = _mapper.Map<LoanDto>(loan);
+        var dto = LoanToLoanDtoMapper.ToTarget(loan);
         
         var book = await _bookRepository.GetAsync(loan.BookId);
         if (book != null)
