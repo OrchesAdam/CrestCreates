@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using AutoMapper;
 using CrestCreates.Aop.Interceptors;
 using CrestCreates.Application.Contracts.DTOs.Common;
 using CrestCreates.Application.Contracts.Interfaces;
@@ -23,7 +22,6 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
 {
     private readonly ICrestRepositoryBase<TEntity, TKey> _repository;
     protected virtual ICrestRepositoryBase<TEntity, TKey> Repository => _repository;
-    protected readonly IMapper Mapper;
     protected readonly ICurrentUser CurrentUser;
     protected readonly IDataPermissionFilter DataPermissionFilter;
     protected readonly IPermissionChecker PermissionChecker;
@@ -34,14 +32,12 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
 
     protected CrestAppServiceBase(
         ICrestRepositoryBase<TEntity, TKey> repository,
-        IMapper mapper,
         IServiceProvider serviceProvider,
         ICurrentUser currentUser,
         IDataPermissionFilter dataPermissionFilter,
         IPermissionChecker permissionChecker)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-        Mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
         ServiceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         CurrentUser = currentUser ?? throw new ArgumentNullException(nameof(currentUser));
         DataPermissionFilter = dataPermissionFilter ?? throw new ArgumentNullException(nameof(dataPermissionFilter));
@@ -192,7 +188,7 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         var query = Repository.GetQueryable();
         query = await ApplyDataPermissionFilterAsync(query);
         var entities = query.ToList();
-        return Mapper.Map<List<TDto>>(entities);
+        return entities.Select(MapToDto).ToList();
     }
 
     public virtual async Task<PagedResultDto<TDto>> GetListAsync(PagedRequestDto request, CancellationToken cancellationToken = default)
@@ -208,7 +204,7 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         query = QueryExecutor<TEntity>.ApplyPaging(query, request.GetSkipCount(), request.PageSize);
 
         var entities = query.ToList();
-        var dtos = Mapper.Map<List<TDto>>(entities);
+        var dtos = entities.Select(MapToDto).ToList();
 
         return new PagedResultDto<TDto>(dtos, totalCount, request.PageIndex, request.PageSize);
     }
@@ -288,18 +284,9 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         return query.Count();
     }
 
-    protected virtual TEntity MapToEntity(TCreateDto dto)
-    {
-        return Mapper.Map<TEntity>(dto);
-    }
+    protected abstract TEntity MapToEntity(TCreateDto dto);
 
-    protected virtual void MapToEntity(TUpdateDto dto, TEntity entity)
-    {
-        Mapper.Map(dto, entity);
-    }
+    protected abstract void MapToEntity(TUpdateDto dto, TEntity entity);
 
-    protected virtual TDto MapToDto(TEntity entity)
-    {
-        return Mapper.Map<TDto>(entity);
-    }
+    protected abstract TDto MapToDto(TEntity entity);
 }
