@@ -16,6 +16,7 @@ using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.DataFilter;
+using LibraryManagement.Domain.Entities.Extensions;
 
 namespace LibraryManagement.Application.Services;
 
@@ -40,7 +41,7 @@ public class MemberAppService :CrestAppServiceBase<Member, Guid,MemberDto, Creat
     }
 
     protected override MemberDto MapToDto(Member entity)
-        => MemberToMemberDtoMapper.ToTarget(entity);
+        => entity.ToDto();
 
     public async Task<MemberDto?> GetByEmailAsync(string email, CancellationToken cancellationToken = default)
     {
@@ -84,7 +85,7 @@ public class MemberAppService :CrestAppServiceBase<Member, Guid,MemberDto, Creat
 
     private async Task<MemberDto> MapToDtoAsync(Member member)
     {
-        var dto = MemberToMemberDtoMapper.ToTarget(member);
+        var dto = member.ToDto();
         dto.CurrentLoanCount = await _loanRepository.GetActiveLoanCountByMemberAsync(member.Id, CancellationToken.None);
         return dto;
     }

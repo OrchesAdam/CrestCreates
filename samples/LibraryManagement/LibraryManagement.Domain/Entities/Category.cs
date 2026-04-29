@@ -12,12 +12,12 @@ namespace LibraryManagement.Domain.Entities;
 [Entity]
 public class Category : AuditedEntity<Guid>
 {
-    public string Name { get; private set; } = string.Empty;
-    public string? Description { get; private set; }
-    public Guid? ParentId { get; private set; }
-    public Category? Parent { get; private set; }
-    public ICollection<Category> Children { get; private set; } = new List<Category>();
-    public ICollection<Book> Books { get; private set; } = new List<Book>();
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public Guid? ParentId { get; set; }
+    public Category? Parent { get; set; }
+    public ICollection<Category> Children { get; set; } = new List<Category>();
+    public ICollection<Book> Books { get; set; } = new List<Book>();
 
     protected Category() { }
 

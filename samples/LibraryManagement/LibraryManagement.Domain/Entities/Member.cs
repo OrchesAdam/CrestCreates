@@ -13,17 +13,17 @@ namespace LibraryManagement.Domain.Entities;
 [Entity]
 public class Member : AuditedEntity<Guid>
 {
-    public string Name { get; private set; } = string.Empty;
-    public string Email { get; private set; } = string.Empty;
-    public string? Phone { get; private set; }
-    public string? Address { get; private set; }
-    public MemberType Type { get; private set; }
-    public DateTime RegistrationDate { get; private set; }
-    public DateTime? ExpiryDate { get; private set; }
-    public bool IsActive { get; private set; }
-    public int MaxBooksAllowed { get; private set; }
-    public decimal OutstandingBalance { get; private set; }
-    public ICollection<Loan> Loans { get; private set; } = new List<Loan>();
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string? Phone { get; set; }
+    public string? Address { get; set; }
+    public MemberType Type { get; set; }
+    public DateTime RegistrationDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public bool IsActive { get; set; }
+    public int MaxBooksAllowed { get; set; }
+    public decimal OutstandingBalance { get; set; }
+    public ICollection<Loan> Loans { get; set; } = new List<Loan>();
 
     protected Member() { }
 

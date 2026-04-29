@@ -9,6 +9,7 @@ using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Shared.DataFilter;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
+using LibraryManagement.Domain.Entities.Extensions;
 
 namespace LibraryManagement.Application.Services;
 
@@ -25,7 +26,7 @@ public class BookAppService : CrestAppServiceBase<Book,Guid, BookDto, CreateBook
     public async Task<BookDto?> GetByIsbnAsync(string isbn, CancellationToken cancellationToken = default)
     {
         var book = await _repository.GetByIsbnAsync(isbn, cancellationToken);
-        return book == null ? null : BookToBookDtoMapper.ToTarget(book);
+        return book == null ? null : book.ToDto();
     }
 
     /// <summary>
@@ -93,23 +94,10 @@ public class BookAppService : CrestAppServiceBase<Book,Guid, BookDto, CreateBook
     }
 
     protected override BookDto MapToDto(Book entity)
-        => BookToBookDtoMapper.ToTarget(entity);
+        => entity.ToDto();
 
     protected override void MapToEntity(UpdateBookDto dto, Book entity)
     {
-        entity.SetTitle(dto.Title);
-        entity.SetAuthor(dto.Author);
-        entity.SetISBN(dto.ISBN);
-        entity.SetParent(dto.CategoryId);
-        entity.SetStatus((LibraryManagement.Domain.Shared.Enums.BookStatus)dto.Status);
-        entity.SetDescription(dto.Description);
-
-        // 注意：TotalCopies 和 AvailableCopies 是只读属性，需要通过其他方法修改
-        // 这里我们只更新可以直接设置的属性
-        // entity.TotalCopies = dto.TotalCopies; // 只读
-        // entity.AvailableCopies = dto.AvailableCopies; // 只读
-        // entity.Location = dto.Location; // 只读
-        // entity.Publisher = dto.Publisher; // 只读
-        // entity.PublishDate = dto.PublishDate; // 只读
+        dto.ApplyTo(entity);
     }
 }

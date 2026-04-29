@@ -11,16 +11,16 @@ namespace LibraryManagement.Domain.Entities;
 [Entity]
 public class Loan : AuditedEntity<Guid>
 {
-    public Guid BookId { get; private set; }
-    public Book Book { get; private set; } = null!;
-    public Guid MemberId { get; private set; }
-    public Member Member { get; private set; } = null!;
-    public DateTime LoanDate { get; private set; }
-    public DateTime DueDate { get; private set; }
-    public DateTime? ReturnDate { get; private set; }
-    public LoanStatus Status { get; private set; }
-    public decimal? LateFee { get; private set; }
-    public string? Notes { get; private set; }
+    public Guid BookId { get; set; }
+    public Book Book { get; set; } = null!;
+    public Guid MemberId { get; set; }
+    public Member Member { get; set; } = null!;
+    public DateTime LoanDate { get; set; }
+    public DateTime DueDate { get; set; }
+    public DateTime? ReturnDate { get; set; }
+    public LoanStatus Status { get; set; }
+    public decimal? LateFee { get; set; }
+    public string? Notes { get; set; }
 
     protected Loan() { }
 

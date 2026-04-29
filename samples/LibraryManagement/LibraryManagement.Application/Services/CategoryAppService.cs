@@ -8,6 +8,7 @@ using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.DataFilter;
+using LibraryManagement.Domain.Entities.Extensions;
 
 namespace LibraryManagement.Application.Services;
 
@@ -25,10 +26,12 @@ public class CategoryAppService :CrestAppServiceBase<Category, Guid, CategoryDto
         => new Category(Guid.NewGuid(), dto.Name, dto.Description, dto.ParentId);
 
     protected override void MapToEntity(UpdateCategoryDto dto, Category entity)
-        => UpdateCategoryDtoToCategoryMapper.Apply(dto, entity);
+    {
+        dto.ApplyTo(entity);
+    }
 
     protected override CategoryDto MapToDto(Category entity)
-        => CategoryToCategoryDtoMapper.ToTarget(entity);
+        => entity.ToDto();
 
     public async Task<CategoryDto> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -64,7 +67,7 @@ public class CategoryAppService :CrestAppServiceBase<Category, Guid, CategoryDto
 
     private async Task<CategoryDto> MapToDtoAsync(Category category)
     {
-        var dto = CategoryToCategoryDtoMapper.ToTarget(category);
+        var dto = category.ToDto();
         dto.BookCount = category.Books?.Count ?? 0;
         
         if (category.ParentId.HasValue)

@@ -225,13 +225,13 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
         {
             if (model.Declaration.Direction is MapDirection.Create or MapDirection.Both)
             {
-                sb.AppendLine($"        partial void AfterToTarget({sourceType} source, {targetType} destination);");
+                sb.AppendLine($"        static partial void AfterToTarget({sourceType} source, {targetType} destination);");
             }
 
             if (model.Declaration.Direction is MapDirection.Apply or MapDirection.Both)
             {
-                sb.AppendLine($"        partial void BeforeApply({sourceType} source, {targetType} destination);");
-                sb.AppendLine($"        partial void AfterApply({sourceType} source, {targetType} destination);");
+                sb.AppendLine($"        static partial void BeforeApply({sourceType} source, {targetType} destination);");
+                sb.AppendLine($"        static partial void AfterApply({sourceType} source, {targetType} destination);");
             }
         }
     }

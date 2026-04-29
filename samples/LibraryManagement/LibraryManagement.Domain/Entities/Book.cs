@@ -4,26 +4,29 @@ using CrestCreates.Domain.Entities.Auditing;
 using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.Enums;
+using CrestCreates.Domain.Shared.ObjectMapping;
+using LibraryManagement.Application.Contracts.DTOs;
 using LibraryManagement.Domain.Shared.Constants;
 using LibraryManagement.Domain.Shared.Enums;
 
 namespace LibraryManagement.Domain.Entities;
 
 [Entity]
+[GenerateObjectMapping(typeof(Book),typeof(BookDto))]
 public class Book : AuditedEntity<Guid>
 {
-    public string Title { get; private set; } = string.Empty;
-    public string Author { get; private set; } = string.Empty;
-    public string ISBN { get; private set; } = string.Empty;
-    public string? Description { get; private set; }
-    public DateTime? PublishDate { get; private set; }
-    public string? Publisher { get; private set; }
-    public BookStatus Status { get; private set; }
-    public Guid CategoryId { get; private set; }
-    public Category Category { get; private set; } = null!;
-    public int TotalCopies { get; private set; }
-    public int AvailableCopies { get; private set; }
-    public string? Location { get; private set; }
+    public string Title { get; set; } = string.Empty;
+    public string Author { get; set; } = string.Empty;
+    public string ISBN { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public DateTime? PublishDate { get; set; }
+    public string? Publisher { get; set; }
+    public BookStatus Status { get; set; }
+    public Guid CategoryId { get; set; }
+    public Category Category { get; set; } = null!;
+    public int TotalCopies { get; set; }
+    public int AvailableCopies { get; set; }
+    public string? Location { get; set; }
 
     protected Book() { }
 

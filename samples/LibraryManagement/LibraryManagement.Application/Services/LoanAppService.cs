@@ -16,6 +16,7 @@ using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.DataFilter;
+using LibraryManagement.Domain.Entities.Extensions;
 
 namespace LibraryManagement.Application.Services;
 
@@ -43,7 +44,7 @@ public class LoanAppService : CrestAppServiceBase<Loan, Guid, LoanDto, CreateLoa
     }
 
     protected override LoanDto MapToDto(Loan entity)
-        => LoanToLoanDtoMapper.ToTarget(entity);
+        => entity.ToDto();
 
     [UnitOfWorkMo]
     public override async Task<LoanDto> CreateAsync(CreateLoanDto input, CancellationToken cancellationToken = default)
@@ -199,7 +200,7 @@ public class LoanAppService : CrestAppServiceBase<Loan, Guid, LoanDto, CreateLoa
 
     private async Task<LoanDto> MapToDtoAsync(Loan loan)
     {
-        var dto = LoanToLoanDtoMapper.ToTarget(loan);
+        var dto = loan.ToDto();
         
         var book = await _bookRepository.GetAsync(loan.BookId);
         if (book != null)
