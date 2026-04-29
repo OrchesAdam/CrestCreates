@@ -12,7 +12,6 @@ using LibraryManagement.Domain.Shared.Enums;
 namespace LibraryManagement.Domain.Entities;
 
 [Entity]
-[GenerateObjectMapping(typeof(Book),typeof(BookDto))]
 public class Book : AuditedEntity<Guid>
 {
     public string Title { get; set; } = string.Empty;
