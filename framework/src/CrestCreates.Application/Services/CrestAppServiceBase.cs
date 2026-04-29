@@ -9,14 +9,11 @@ using CrestCreates.Application.Contracts.DTOs.Common;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Application.Contracts.Query;
 using CrestCreates.Authorization.Abstractions;
-using CrestCreates.Domain.DataFilter;
-using CrestCreates.Domain.Entities.Auditing;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.DataFilter;
 using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.Domain.Shared.Permissions;
-using CrestCreates.Domain.UnitOfWork;
 
 namespace CrestCreates.Application.Services;
 
@@ -49,33 +46,6 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         CurrentUser = currentUser ?? throw new ArgumentNullException(nameof(currentUser));
         DataPermissionFilter = dataPermissionFilter ?? throw new ArgumentNullException(nameof(dataPermissionFilter));
         PermissionChecker = permissionChecker ?? throw new ArgumentNullException(nameof(permissionChecker));
-    }
-
-    [Obsolete("工作单元由 UnitOfWorkMoAttribute 统一管理。请注入 IServiceProvider 并使用包含 serviceProvider 参数的构造函数。")]
-    protected CrestAppServiceBase(
-        ICrestRepositoryBase<TEntity, TKey> repository,
-        IMapper mapper,
-        ICurrentUser currentUser,
-        IDataPermissionFilter dataPermissionFilter,
-        IPermissionChecker permissionChecker)
-    {
-        _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-        Mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
-        CurrentUser = currentUser ?? throw new ArgumentNullException(nameof(currentUser));
-        DataPermissionFilter = dataPermissionFilter ?? throw new ArgumentNullException(nameof(dataPermissionFilter));
-        PermissionChecker = permissionChecker ?? throw new ArgumentNullException(nameof(permissionChecker));
-    }
-
-    [Obsolete("工作单元由 UnitOfWorkMoAttribute 统一管理。请使用不包含 IUnitOfWork 参数的构造函数。")]
-    protected CrestAppServiceBase(
-        ICrestRepositoryBase<TEntity, TKey> repository,
-        IMapper mapper,
-        IUnitOfWork unitOfWork,
-        ICurrentUser currentUser,
-        IDataPermissionFilter dataPermissionFilter,
-        IPermissionChecker permissionChecker)
-        : this(repository, mapper, currentUser, dataPermissionFilter, permissionChecker)
-    {
     }
 
     protected virtual string CreatePermissionName => EntityPermissions != null
@@ -140,7 +110,7 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
             hasCreator.CreatorId = creatorId;
         }
 
-        if (entity is Domain.Shared.Entities.Auditing.IAuditedEntity auditedEntity)
+        if (entity is IAuditedEntity auditedEntity)
         {
             auditedEntity.CreationTime = DateTime.UtcNow;
             auditedEntity.CreatorId = creatorId;
@@ -151,7 +121,7 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
 
     protected virtual Task SetModificationAuditPropertiesAsync<TEntityAudit>(TEntityAudit entity) where TEntityAudit : class
     {
-        if (entity is Domain.Shared.Entities.Auditing.IAuditedEntity auditedEntity)
+        if (entity is IAuditedEntity auditedEntity)
         {
             auditedEntity.LastModificationTime = DateTime.UtcNow;
             auditedEntity.LastModifierId = Guid.TryParse(CurrentUser.Id, out var userId) ? userId : (Guid?)null;
@@ -243,7 +213,7 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         return new PagedResultDto<TDto>(dtos, totalCount, request.PageIndex, request.PageSize);
     }
 
-    public virtual async Task<Contracts.DTOs.Common.PagedResultDto<TDto>> QueryAsync(QueryRequest<TEntity> request, CancellationToken cancellationToken = default)
+    public virtual async Task<PagedResultDto<TDto>> QueryAsync(QueryRequest<TEntity> request, CancellationToken cancellationToken = default)
     {
         return await GetListAsync(request, cancellationToken);
     }
