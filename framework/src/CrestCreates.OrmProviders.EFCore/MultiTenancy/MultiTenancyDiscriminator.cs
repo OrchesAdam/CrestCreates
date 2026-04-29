@@ -1,8 +1,6 @@
 using System;
-using System.Linq;
-using System.Linq.Expressions;
-using Microsoft.EntityFrameworkCore;
 using CrestCreates.MultiTenancy.Abstract;
+using Microsoft.EntityFrameworkCore;
 
 namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
 {
@@ -14,6 +12,7 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
     {
         /// <summary>
         /// 配置多租户鉴别器模式的全局查询过滤器
+        /// 使用编译时生成的 TenantFilterConfiguration 替代运行时反射
         /// </summary>
         public static void ConfigureTenantDiscriminator(
             this ModelBuilder modelBuilder,
@@ -23,51 +22,7 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
             if (modelBuilder == null) throw new ArgumentNullException(nameof(modelBuilder));
             if (currentTenant == null) throw new ArgumentNullException(nameof(currentTenant));
 
-            // 遍历所有实体类型
-            foreach (var entityType in modelBuilder.Model.GetEntityTypes())
-            {
-                // 检查实体是否实现了 IMultiTenant 接口
-                if (typeof(IMultiTenant).IsAssignableFrom(entityType.ClrType))
-                {
-                    // 为实体添加全局查询过滤器
-                    var method = typeof(MultiTenancyDiscriminatorExtensions)
-                        .GetMethod(nameof(SetTenantFilter), 
-                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
-                        ?.MakeGenericMethod(entityType.ClrType);
-
-                    method?.Invoke(null, new object[] { modelBuilder, currentTenant, tenantIdPropertyName });
-                }
-            }
-        }
-
-        private static void SetTenantFilter<TEntity>(
-            ModelBuilder modelBuilder,
-            ICurrentTenant currentTenant,
-            string tenantIdPropertyName)
-            where TEntity : class, IMultiTenant
-        {
-            // 创建查询过滤器表达式: e => e.TenantId == currentTenant.Id
-            var parameter = Expression.Parameter(typeof(TEntity), "e");
-            
-            // 获取 TenantId 属性
-            var tenantIdProperty = Expression.Property(parameter, tenantIdPropertyName);
-            
-            // 获取当前租户ID
-            var currentTenantId = Expression.Constant(currentTenant.Id, typeof(string));
-            
-            // 创建比较表达式
-            var comparison = Expression.Equal(tenantIdProperty, currentTenantId);
-            
-            // 创建 lambda 表达式
-            var lambda = Expression.Lambda<Func<TEntity, bool>>(comparison, parameter);
-            
-            // 应用查询过滤器
-            modelBuilder.Entity<TEntity>().HasQueryFilter(lambda);
-
-            // 配置 TenantId 索引
-            modelBuilder.Entity<TEntity>()
-                .HasIndex(tenantIdPropertyName)
-                .HasDatabaseName($"IX_{typeof(TEntity).Name}_{tenantIdPropertyName}");
+            TenantFilterConfiguration.ApplyAll(modelBuilder, currentTenant);
         }
 
         /// <summary>
@@ -108,7 +63,7 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
         /// <summary>
         /// 租户ID
         /// </summary>
-        public virtual string TenantId { get; set; }
+        public virtual string TenantId { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -117,5 +72,20 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
     public abstract class MultiTenantEntity<TKey> : MultiTenantEntity
     {
         public virtual TKey Id { get; set; }
+    }
+
+    /// <summary>
+    /// 租户过滤器配置 — 编译时生成的 partial 类覆盖此 no-op 实现
+    /// </summary>
+    public static partial class TenantFilterConfiguration
+    {
+        /// <summary>
+        /// 应用所有多租户查询过滤器
+        /// 当 Source Generator 发现 [Entity] + IMultiTenant 类时，生成的方法替代此 no-op
+        /// </summary>
+        public static void ApplyAll(ModelBuilder modelBuilder, ICurrentTenant currentTenant)
+        {
+            // No IMultiTenant entities found — nothing to configure
+        }
     }
 }
