@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using CrestCreates.AuditLogging.Context;
 using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Options;
@@ -210,7 +211,7 @@ public class AuditLoggingMiddlewareTests
 
         public ITenantInfo Tenant { get; }
         public string Id { get; }
-        public IDisposable Change(string tenantId) => throw new NotSupportedException();
+        public Task<IDisposable> ChangeAsync(string tenantId) => throw new NotSupportedException();
         public void SetTenantId(string tenantId) => throw new NotSupportedException();
     }
 

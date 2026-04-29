@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -17,18 +18,18 @@ namespace CrestCreates.MultiTenancy
 
         public ITenantInfo Tenant => _currentTenant.Value?.Tenant;
         public string Id => Tenant?.Id;
-        
-        public IDisposable Change(string tenantId)
+
+        public async Task<IDisposable> ChangeAsync(string tenantId)
         {
             var oldTenant = Tenant;
             ITenantInfo newTenant = null;
-            
+
             if (!string.IsNullOrEmpty(tenantId))
             {
                 var tenantProvider = _serviceProvider.GetRequiredService<ITenantProvider>();
-                newTenant = tenantProvider.GetTenantAsync(tenantId).GetAwaiter().GetResult();
+                newTenant = await tenantProvider.GetTenantAsync(tenantId);
             }
-            
+
             _currentTenant.Value = new TenantContextHolder { Tenant = newTenant };
 
             return new DisposeAction(() =>

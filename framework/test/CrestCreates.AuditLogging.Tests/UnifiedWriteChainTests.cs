@@ -1,5 +1,6 @@
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using CrestCreates.AuditLogging.Context;
 using CrestCreates.AuditLogging.Interceptors;
 using CrestCreates.AuditLogging.Middlewares;
@@ -643,7 +644,7 @@ caused by: password=""supersecret\"", token=""tok-xyz""",
 
         public ITenantInfo Tenant { get; }
         public string Id { get; }
-        public IDisposable Change(string tenantId) => throw new NotSupportedException();
+        public Task<IDisposable> ChangeAsync(string tenantId) => throw new NotSupportedException();
         public void SetTenantId(string tenantId) => throw new NotSupportedException();
     }
 

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Threading.Tasks;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Logging.Middlewares;
 using CrestCreates.MultiTenancy.Abstract;
@@ -59,7 +60,7 @@ public class RequestLoggingMiddlewareTests
 
         public ITenantInfo Tenant { get; }
         public string Id { get; }
-        public IDisposable Change(string tenantId) => throw new NotSupportedException();
+        public Task<IDisposable> ChangeAsync(string tenantId) => throw new NotSupportedException();
         public void SetTenantId(string tenantId) => throw new NotSupportedException();
     }
 

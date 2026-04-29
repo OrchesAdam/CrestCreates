@@ -141,7 +141,7 @@ public class MultiTenancyMiddlewareTests
 
         public ITenantInfo Tenant { get; }
         public string Id { get; }
-        public IDisposable Change(string tenantId) => throw new NotSupportedException();
+        public Task<IDisposable> ChangeAsync(string tenantId) => throw new NotSupportedException();
         public void SetTenantId(string tenantId) => throw new NotSupportedException();
     }
 

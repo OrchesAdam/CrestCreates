@@ -645,7 +645,7 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
     {
         using var scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         var currentTenant = scope.ServiceProvider.GetRequiredService<ICurrentTenant>();
-        using var tenantScope = string.IsNullOrWhiteSpace(tenantId) ? null : currentTenant.Change(tenantId);
+        using var tenantScope = string.IsNullOrWhiteSpace(tenantId) ? null : await currentTenant.ChangeAsync(tenantId);
         var cleanupAppService = scope.ServiceProvider.GetRequiredService<IAuditLogCleanupAppService>();
         return await cleanupAppService.ProcessCleanupAsync(request);
     }

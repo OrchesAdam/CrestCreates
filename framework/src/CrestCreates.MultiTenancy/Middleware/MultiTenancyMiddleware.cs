@@ -33,7 +33,7 @@ namespace CrestCreates.MultiTenancy.Middleware
             {
                 _logger.LogDebug("Tenant resolved: {TenantId} by {ResolvedBy}", resolutionResult.TenantId, resolutionResult.ResolvedBy);
 
-                using (currentTenant.Change(resolutionResult.TenantId))
+                using (await currentTenant.ChangeAsync(resolutionResult.TenantId))
                 {
                     if (currentTenant.Tenant == null)
                     {
