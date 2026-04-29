@@ -33,8 +33,7 @@ namespace CrestCreates.OrmProviders.EFCore.Repositories
 
         public override IQueryable<TEntity> GetQueryableUnfiltered()
         {
-            return _dbContext.Queryable<TEntity>().GetNativeQuery() as IQueryable<TEntity>
-                ?? Enumerable.Empty<TEntity>().AsQueryable();
+            return GetNativeQueryable(_dbContext.Queryable<TEntity>().IgnoreQueryFilters().GetNativeQuery());
         }
 
         protected IDbContextProvider.IDataBaseContext GetDbContext() => _dbContext;
@@ -188,6 +187,13 @@ namespace CrestCreates.OrmProviders.EFCore.Repositories
             {
                 await _dbContext.SaveChangesAsync(cancellationToken);
             }
+        }
+
+        private static IQueryable<TEntity> GetNativeQueryable(object nativeQuery)
+        {
+            return nativeQuery as IQueryable<TEntity>
+                ?? throw new InvalidOperationException(
+                    $"EF Core native query for {typeof(TEntity).FullName} must be IQueryable<{typeof(TEntity).Name}>.");
         }
     }
 }

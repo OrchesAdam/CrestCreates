@@ -63,6 +63,23 @@ namespace CrestCreates.EventBus.Tests
         }
 
         [Fact]
+        public void Entity_Should_Implement_HasDomainEvents_Contract()
+        {
+            var entity = new TestEntity(Guid.NewGuid());
+
+            entity.Should().BeAssignableTo<IHasDomainEvents>();
+            entity.AddDomainEvent(new TestDomainEvent(Guid.NewGuid()));
+
+            var hasDomainEvents = (IHasDomainEvents)entity;
+
+            hasDomainEvents.DomainEvents.Should().HaveCount(1);
+
+            hasDomainEvents.ClearDomainEvents();
+
+            hasDomainEvents.DomainEvents.Should().BeEmpty();
+        }
+
+        [Fact]
         public async Task DomainEventPublisher_Should_Publish_Event()
         {
             // Arrange

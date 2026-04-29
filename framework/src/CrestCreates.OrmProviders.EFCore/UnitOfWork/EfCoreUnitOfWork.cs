@@ -6,7 +6,6 @@ using CrestCreates.DbContextProvider.Abstract;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using CrestCreates.Domain.DomainEvents;
-using CrestCreates.Domain.Entities;
 using CrestCreates.OrmProviders.Abstract.UnitOfWorkBase;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -96,49 +95,31 @@ namespace CrestCreates.OrmProviders.EFCore.UnitOfWork
             return result;
         }
 
-        private List<object> GetEntitiesWithDomainEvents()
+        private List<IHasDomainEvents> GetEntitiesWithDomainEvents()
         {
-            var entities = new List<object>();
-            
-            foreach (var entry in _dbContext.ChangeTracker.Entries())
+            var entities = new List<IHasDomainEvents>();
+
+            foreach (var entry in _dbContext.ChangeTracker.Entries<IHasDomainEvents>())
             {
-                var entityType = entry.Entity.GetType();
-                var domainEventsProperty = entityType.GetProperty("DomainEvents");
-                var clearDomainEventsMethod = entityType.GetMethod("ClearDomainEvents");
-                
-                if (domainEventsProperty != null && clearDomainEventsMethod != null)
+                if (entry.Entity.DomainEvents.Count > 0)
                 {
-                    var domainEvents = domainEventsProperty.GetValue(entry.Entity) as System.Collections.Generic.IReadOnlyCollection<IDomainEvent>;
-                    if (domainEvents != null && domainEvents.Count > 0)
-                    {
-                        entities.Add(entry.Entity);
-                    }
+                    entities.Add(entry.Entity);
                 }
             }
-            
+
             return entities;
         }
 
-        private async Task PublishDomainEventsAsync(List<object> entities, CancellationToken cancellationToken = default)
+        private async Task PublishDomainEventsAsync(List<IHasDomainEvents> entities, CancellationToken cancellationToken = default)
         {
             foreach (var entity in entities)
             {
-                var entityType = entity.GetType();
-                var domainEventsProperty = entityType.GetProperty("DomainEvents");
-                var clearDomainEventsMethod = entityType.GetMethod("ClearDomainEvents");
-                
-                if (domainEventsProperty != null && clearDomainEventsMethod != null)
+                foreach (var domainEvent in entity.DomainEvents)
                 {
-                    var domainEvents = domainEventsProperty.GetValue(entity) as System.Collections.Generic.IReadOnlyCollection<IDomainEvent>;
-                    if (domainEvents != null)
-                    {
-                        foreach (var domainEvent in domainEvents)
-                        {
-                            await PublishWithRetryAsync(domainEvent, cancellationToken);
-                        }
-                        clearDomainEventsMethod.Invoke(entity, null);
-                    }
+                    await PublishWithRetryAsync(domainEvent, cancellationToken);
                 }
+
+                entity.ClearDomainEvents();
             }
         }
 

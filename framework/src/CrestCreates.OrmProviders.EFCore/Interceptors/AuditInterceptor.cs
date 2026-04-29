@@ -1,11 +1,10 @@
+using CrestCreates.Domain.Shared.Entities.Auditing;
+using CrestCreates.Authorization.Abstractions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using System;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.ChangeTracking;
-using Microsoft.EntityFrameworkCore.Diagnostics;
-using CrestCreates.Domain.Shared.Entities.Auditing;
 
 namespace CrestCreates.OrmProviders.EFCore.Interceptors
 {
@@ -15,11 +14,11 @@ namespace CrestCreates.OrmProviders.EFCore.Interceptors
     /// </summary>
     public class AuditInterceptor : SaveChangesInterceptor
     {
-        private readonly ICurrentUserProvider _currentUserProvider;
+        private readonly ICurrentUser _currentUser;
 
-        public AuditInterceptor(ICurrentUserProvider currentUserProvider)
+        public AuditInterceptor(ICurrentUser currentUser)
         {
-            _currentUserProvider = currentUserProvider;
+            _currentUser = currentUser ?? throw new ArgumentNullException(nameof(currentUser));
         }
 
         public override InterceptionResult<int> SavingChanges(
@@ -44,7 +43,7 @@ namespace CrestCreates.OrmProviders.EFCore.Interceptors
             if (context == null)
                 return;
 
-            var currentUserId = _currentUserProvider?.GetCurrentUserId();
+            var currentUserId = Guid.TryParse(_currentUser.Id, out var parsedUserId) ? parsedUserId : (Guid?)null;
             var now = DateTime.UtcNow;
 
             foreach (var entry in context.ChangeTracker.Entries())
@@ -79,27 +78,6 @@ namespace CrestCreates.OrmProviders.EFCore.Interceptors
                         softDeleteEntity.DeleterId = currentUserId;
                 }
             }
-        }
-    }
-
-    /// <summary>
-    /// 当前用户提供者接口
-    /// </summary>
-    public interface ICurrentUserProvider
-    {
-        Guid? GetCurrentUserId();
-    }
-
-    /// <summary>
-    /// 默认当前用户提供者实现
-    /// </summary>
-    public class DefaultCurrentUserProvider : ICurrentUserProvider
-    {
-        public Guid? GetCurrentUserId()
-        {
-            // TODO: 从 HttpContext 或 ClaimsPrincipal 获取当前用户ID
-            // 这里返回 null，实际项目中需要实现
-            return null;
         }
     }
 }

@@ -97,11 +97,26 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
         }
 
         /// <summary>
+        /// 已注册的 ApplyAll 委托数量
+        /// </summary>
+        public static int Count => ApplyAllDelegates.Count;
+
+        /// <summary>
+        /// 是否存在已注册的编译期生成过滤器
+        /// </summary>
+        public static bool HasRegistrations => Count > 0;
+
+        /// <summary>
         /// 获取所有已注册的 ApplyAll 委托
         /// </summary>
         public static IReadOnlyCollection<ApplyAllDelegate> GetApplyAllDelegates()
         {
             return ApplyAllDelegates.Values.ToArray();
+        }
+
+        internal static void Clear()
+        {
+            ApplyAllDelegates.Clear();
         }
 
         public static InvalidOperationException CreateMissingGeneratedFiltersException()
@@ -123,13 +138,12 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
         /// </summary>
         public static void ApplyAll(ModelBuilder modelBuilder, ICurrentTenant currentTenant)
         {
-            var delegates = TenantFilterRegistryStore.GetApplyAllDelegates();
-            if (delegates.Count == 0)
+            if (!TenantFilterRegistryStore.HasRegistrations)
             {
                 throw TenantFilterRegistryStore.CreateMissingGeneratedFiltersException();
             }
 
-            foreach (var applyAll in delegates)
+            foreach (var applyAll in TenantFilterRegistryStore.GetApplyAllDelegates())
             {
                 applyAll(modelBuilder, currentTenant);
             }

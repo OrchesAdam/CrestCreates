@@ -7,7 +7,9 @@ using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.OrmProviders.Abstract.Modules;
+using CrestCreates.OrmProviders.EFCore.Configuration;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
+using CrestCreates.OrmProviders.EFCore.Interceptors;
 using CrestCreates.OrmProviders.EFCore.MultiTenancy;
 using CrestCreates.OrmProviders.EFCore.Repositories;
 using CrestCreates.OrmProviders.EFCore.UnitOfWork;
@@ -37,23 +39,14 @@ namespace CrestCreates.OrmProviders.EFCore.Modules
         /// <param name="services">服务集合</param>
         public override void RegisterOrmServices(IServiceCollection services)
         {
-            // 注册 EF Core 数据库上下文工厂
-            services.AddScoped<CrestCreatesDbContextFactory>();
-
-            // 注册租户 DbContext 工厂：只使用 Source Generator 生成的实现，避免 AoT 主链静默退回 Activator。
-            services.TryAddSingleton<ITenantDbContextFactory>(_ =>
-                TenantDbContextFactoryRegistryStore.BuildRequiredFactory());
+            services.TryAddScoped<AuditInterceptor>();
+            services.TryAddScoped<MultiTenancyInterceptor>();
+            services.TryAddSingleton<TenantAwareModelCacheKeyFactory>();
             
             // 注册 EF Core 工作单元
             services.AddScoped(sp => new EfCoreUnitOfWork(
                 sp.GetRequiredService<IDataBaseContext>(),
                 sp.GetRequiredService<CrestCreates.Domain.DomainEvents.IDomainEventPublisher>()));
-            
-            // 注册数据库上下文
-            services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
-                sp.GetRequiredService<CrestCreatesDbContextFactory>().CreateDbContext(new string[] {}));
-            services.AddScoped<IDataBaseContext>(sp =>
-                sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
             services.AddScoped(typeof(IRepository<,>), typeof(DomainRepositoryAdapter<,>));
             services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 

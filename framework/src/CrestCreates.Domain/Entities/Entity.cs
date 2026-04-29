@@ -5,7 +5,7 @@ using CrestCreates.Domain.Shared.Entities;
 
 namespace CrestCreates.Domain.Entities
 {
-    public abstract class Entity<TId> : IEntity<TId> where TId : IEquatable<TId>
+    public abstract class Entity<TId> : IEntity<TId>, IHasDomainEvents where TId : IEquatable<TId>
     {
         public TId Id { get; protected set; } = default!;
 

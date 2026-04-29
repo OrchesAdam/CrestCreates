@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.DbContextProvider.Abstract;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Query;
 using CrestCreates.OrmProviders.Abstract.Abstractions;
 
 namespace CrestCreates.OrmProviders.EFCore.DbContexts
@@ -16,7 +17,7 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
 
         public EfCoreQueryableBuilder(DbSet<TEntity> dbSet)
         {
-            _queryable = dbSet.AsQueryable();
+            _queryable = dbSet;
         }
 
         public EfCoreQueryableBuilder(IQueryable<TEntity> queryable)
@@ -89,27 +90,33 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
 
         public IQueryableBuilder<TEntity> Include<TProperty>(Expression<Func<TEntity, TProperty>> navigationPropertyPath)
         {
-            if (_queryable is DbSet<TEntity> dbSet)
-            {
-                _queryable = dbSet.Include(navigationPropertyPath);
-            }
+            _queryable = _queryable.Include(navigationPropertyPath);
             return this;
         }
 
         public IQueryableBuilder<TEntity> Include(string navigationPropertyPath)
         {
-            if (_queryable is DbSet<TEntity> dbSet)
-            {
-                _queryable = dbSet.Include(navigationPropertyPath);
-            }
+            _queryable = _queryable.Include(navigationPropertyPath);
             return this;
         }
 
         public IQueryableBuilder<TEntity> ThenInclude<TPreviousProperty, TProperty>(Expression<Func<TPreviousProperty, TProperty>> navigationPropertyPath)
         {
-            // This is a simplified implementation
-            // In practice, this would require more complex handling
-            return this;
+            if (_queryable is IIncludableQueryable<TEntity, TPreviousProperty> referenceIncludable)
+            {
+                _queryable = referenceIncludable.ThenInclude(navigationPropertyPath);
+                return this;
+            }
+
+            if (_queryable is IIncludableQueryable<TEntity, IEnumerable<TPreviousProperty>> collectionIncludable)
+            {
+                _queryable = collectionIncludable.ThenInclude(navigationPropertyPath);
+                return this;
+            }
+
+            throw new InvalidOperationException(
+                "ThenInclude requires a preceding Include expression-based navigation chain. " +
+                "Call Include(...), then ThenInclude(...), on the same query builder instance.");
         }
 
         public IQueryableBuilder<TResult> Select<TResult>(Expression<Func<TEntity, TResult>> selector) where TResult : class

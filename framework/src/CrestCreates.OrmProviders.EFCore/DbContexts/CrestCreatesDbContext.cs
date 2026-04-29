@@ -1,19 +1,32 @@
-using Microsoft.EntityFrameworkCore;
+using System.Collections.Generic;
+using System.Text.Json;
 using CrestCreates.DbContextProvider.Abstract;
-using CrestCreates.Domain.Permission;
-using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Features;
+using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Settings;
+using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.OrmProviders.Abstract;
+using CrestCreates.OrmProviders.EFCore.MultiTenancy;
+using Microsoft.EntityFrameworkCore;
 
 namespace CrestCreates.OrmProviders.EFCore.DbContexts
 {
-    public class CrestCreatesDbContext : DbContext, IEntityFrameworkCoreDbContext
+    public class CrestCreatesDbContext : DbContext, IEntityFrameworkCoreDbContext, ITenantAwareDbContext
     {
+        private readonly ICurrentTenant? _currentTenant;
+
         public CrestCreatesDbContext(DbContextOptions<CrestCreatesDbContext> options)
+            : this(options, null)
+        {
+        }
+
+        public CrestCreatesDbContext(
+            DbContextOptions<CrestCreatesDbContext> options,
+            ICurrentTenant? currentTenant)
             : base(options)
         {
-            
+            _currentTenant = currentTenant;
         }
 
         // DbSet properties for your entities
@@ -33,7 +46,7 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
-            
+
             // Configure Product entity
             modelBuilder.Entity<Permission>(entity =>
             {
@@ -245,12 +258,24 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
                 entity.Property(e => e.ExceptionStackTrace).HasMaxLength(-1); // MAX
                 entity.Property(e => e.Status).IsRequired();
                 entity.Property(e => e.CreationTime).IsRequired();
+                entity.Property(e => e.ExtraProperties)
+                    .HasConversion(
+                        value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null),
+                        value => string.IsNullOrWhiteSpace(value)
+                            ? new Dictionary<string, object>()
+                            : JsonSerializer.Deserialize<Dictionary<string, object>>(value, (JsonSerializerOptions?)null)
+                                ?? new Dictionary<string, object>());
 
                 entity.HasIndex(e => e.TenantId);
                 entity.HasIndex(e => e.UserId);
                 entity.HasIndex(e => e.CreationTime);
                 entity.HasIndex(e => e.TraceId);
             });
+
+            if (_currentTenant != null && TenantFilterRegistryStore.HasRegistrations)
+            {
+                modelBuilder.ConfigureTenantDiscriminator(_currentTenant);
+            }
         }
 
         // IEntityFrameworkCoreDbContext implementation
@@ -281,6 +306,8 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
         public string ConnectionString => Database.GetConnectionString();
 
         public object GetNativeContext() => this;
+
+        public string? CurrentTenantId => _currentTenant?.Id;
 
         public IQueryableBuilder<TEntity> Queryable<TEntity>() where TEntity : class
         {

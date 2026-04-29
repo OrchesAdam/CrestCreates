@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,14 +25,12 @@ namespace CrestCreates.OrmProviders.EFCore.Repositories
 
         public override IQueryable<TEntity> GetQueryable()
         {
-            var nativeQuery = _dbContext.Queryable<TEntity>().GetNativeQuery();
-            return nativeQuery as IQueryable<TEntity> ?? Enumerable.Empty<TEntity>().AsQueryable();
+            return GetNativeQueryable(_dbContext.Queryable<TEntity>().GetNativeQuery());
         }
 
         public override IQueryable<TEntity> GetQueryableUnfiltered()
         {
-            var nativeQuery = _dbContext.Queryable<TEntity>().GetNativeQuery();
-            return nativeQuery as IQueryable<TEntity> ?? Enumerable.Empty<TEntity>().AsQueryable();
+            return GetNativeQueryable(_dbContext.Queryable<TEntity>().IgnoreQueryFilters().GetNativeQuery());
         }
 
         public override async Task<List<TEntity>> GetListAsync(CancellationToken cancellationToken = default)
@@ -177,6 +176,13 @@ namespace CrestCreates.OrmProviders.EFCore.Repositories
             {
                 await _dbContext.SaveChangesAsync(cancellationToken);
             }
+        }
+
+        private static IQueryable<TEntity> GetNativeQueryable(object nativeQuery)
+        {
+            return nativeQuery as IQueryable<TEntity>
+                ?? throw new InvalidOperationException(
+                    $"EF Core native query for {typeof(TEntity).FullName} must be IQueryable<{typeof(TEntity).Name}>.");
         }
     }
 }

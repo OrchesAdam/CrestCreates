@@ -34,6 +34,7 @@ using CrestCreates.Aop.Extensions;
 using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.AuditLogging.Services;
+using CrestCreates.OrmProviders.EFCore.Configuration;
 using CrestCreates.MultiTenancy.Providers;
 using CrestCreates.Application.Settings;
 using CrestCreates.Infrastructure.Settings;
@@ -80,18 +81,16 @@ namespace CrestCreates.Web
             });
             services.AddOpenIddictAuthentication();
 
-            services.AddDbContext<CrestCreatesDbContext>((serviceProvider, options) =>
-            {
-                var currentTenant = serviceProvider.GetService<ICurrentTenant>();
-                var connectionString = currentTenant?.Tenant?.ConnectionString
-                                       ?? Configuration.GetConnectionString("Default");
-                options.UseSqlServer(connectionString);
-            });
+            services.AddSingleton<IEfCoreDbContextOptionsContributor>(_ =>
+                new DelegateEfCoreDbContextOptionsContributor((serviceProvider, options) =>
+                {
+                    var currentTenant = serviceProvider.GetService<ICurrentTenant>();
+                    var connectionString = currentTenant?.Tenant?.ConnectionString
+                                           ?? Configuration.GetConnectionString("Default");
+                    options.UseSqlServer(connectionString);
+                }));
 
-            services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
-                new EfCoreDbContextAdapter(sp.GetRequiredService<CrestCreatesDbContext>()));
-            services.AddScoped<IDataBaseContext>(sp =>
-                sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
+            services.AddCrestCreatesEfCoreDbContext();
             services.AddScoped(typeof(IRepository<,>), typeof(DomainRepositoryAdapter<,>));
             services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 

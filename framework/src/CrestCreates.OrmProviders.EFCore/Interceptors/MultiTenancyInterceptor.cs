@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Domain.Entities.Auditing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using CrestCreates.OrmProviders.EFCore.MultiTenancy;
@@ -45,28 +46,59 @@ namespace CrestCreates.OrmProviders.EFCore.Interceptors
                 return;
             }
 
-            var entries = context.ChangeTracker.Entries<IMultiTenant>();
-
-            foreach (var entry in entries)
+            foreach (var entry in context.ChangeTracker.Entries())
             {
-                if (entry.State == EntityState.Added)
+                if (entry.Entity is IMultiTenant multiTenant)
                 {
-                    // 为新增实体设置租户ID
-                    if (string.IsNullOrEmpty(entry.Entity.TenantId))
-                    {
-                        entry.Entity.TenantId = _currentTenant.Id;
-                    }
+                    ApplyTenantState(entry.State, multiTenant);
                 }
-                else if (entry.State == EntityState.Modified || entry.State == EntityState.Deleted)
+                else if (entry.Entity is IMustHaveTenant mustHaveTenant)
                 {
-                    // 验证租户ID是否匹配（防止跨租户操作）
-                    if (entry.Entity.TenantId != _currentTenant.Id)
-                    {
-                        throw new InvalidOperationException(
-                            $"Cannot modify entity from tenant '{entry.Entity.TenantId}' " +
-                            $"while current tenant is '{_currentTenant.Id}'");
-                    }
+                    ApplyTenantState(entry.State, mustHaveTenant);
                 }
+            }
+        }
+
+        private void ApplyTenantState(EntityState state, IMultiTenant entity)
+        {
+            switch (state)
+            {
+                case EntityState.Added:
+                    if (string.IsNullOrEmpty(entity.TenantId))
+                    {
+                        entity.TenantId = _currentTenant.Id;
+                    }
+                    break;
+                case EntityState.Modified:
+                case EntityState.Deleted:
+                    EnsureTenantMatch(entity.TenantId);
+                    break;
+            }
+        }
+
+        private void ApplyTenantState(EntityState state, IMustHaveTenant entity)
+        {
+            switch (state)
+            {
+                case EntityState.Added:
+                    if (string.IsNullOrEmpty(entity.TenantId))
+                    {
+                        entity.TenantId = _currentTenant.Id;
+                    }
+                    break;
+                case EntityState.Modified:
+                case EntityState.Deleted:
+                    EnsureTenantMatch(entity.TenantId);
+                    break;
+            }
+        }
+
+        private void EnsureTenantMatch(string entityTenantId)
+        {
+            if (!string.Equals(entityTenantId, _currentTenant.Id, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot modify entity from tenant '{entityTenantId}' while current tenant is '{_currentTenant.Id}'");
             }
         }
     }
