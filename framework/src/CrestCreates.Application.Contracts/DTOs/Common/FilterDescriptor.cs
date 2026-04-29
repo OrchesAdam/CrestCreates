@@ -62,7 +62,6 @@ public class FilterDescriptor
             || value is System.DateTimeOffset
             || value is System.TimeSpan
             || value is System.Guid
-            || value is System.Nullable
             || value is IEnumerable<string>
             || value is IEnumerable<System.Guid>
             || value is IEnumerable<int>

@@ -7,6 +7,7 @@
   </PropertyGroup>
   <!-- 全局包版本管理 -->
   <ItemGroup>
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="$(RuntimePackageVersion)" />
     <!-- Microsoft 核心包 -->
     <PackageVersion Include="DependencyInjection.StaticAccessor.Hosting" Version="10.0.0" />
     <PackageVersion Include="FreeSql.DbContext" Version="3.5.308" />

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Entities.Auditing;
+using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.Domain.Shared.Attributes;
 using LibraryManagement.Domain.Shared.Constants;
 using LibraryManagement.Domain.Shared.Enums;

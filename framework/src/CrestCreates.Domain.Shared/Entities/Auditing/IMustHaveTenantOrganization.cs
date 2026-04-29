@@ -1,7 +1,5 @@
 ﻿using System;
-using CrestCreates.Domain.Shared.Entities.Auditing;
-
-namespace CrestCreates.Domain.Entities.Auditing;
+namespace CrestCreates.Domain.Shared.Entities.Auditing;
 
 /// <summary>
 /// 带租户、组织、创建人、审计的实体接口

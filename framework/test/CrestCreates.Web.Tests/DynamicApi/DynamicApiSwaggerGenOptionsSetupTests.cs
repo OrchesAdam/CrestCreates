@@ -18,6 +18,6 @@ public class DynamicApiSwaggerGenOptionsSetupTests
         options.DocumentFilterDescriptors.Should().ContainSingle(descriptor =>
             descriptor.Type == typeof(DynamicApiSwaggerDocumentFilter));
         options.SchemaGeneratorOptions.SchemaIdSelector(typeof(CrestCreates.Application.Contracts.DTOs.Common.SortDescriptor))
-            .Should().NotBe(options.SchemaGeneratorOptions.SchemaIdSelector(typeof(CrestCreates.Domain.Shared.DTOs.SortDescriptor)));
+            .Should().Be("CrestCreates_Application_Contracts_DTOs_Common_SortDescriptor");
     }
 }

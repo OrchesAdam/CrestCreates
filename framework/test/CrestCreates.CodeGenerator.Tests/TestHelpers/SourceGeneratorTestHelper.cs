@@ -237,7 +237,7 @@ namespace CrestCreates.CodeGenerator.Tests.TestHelpers
                 // 如果加载失败，尝试从类型获取
                 try
                 {
-                    var domainSharedType = typeof(CrestCreates.Domain.Shared.Attributes.GenerateRepositoryAttribute);
+                    var domainSharedType = typeof(CrestCreates.Domain.Shared.Attributes.EntityAttribute);
                     references.Add(MetadataReference.CreateFromFile(domainSharedType.Assembly.Location));
                 }
                 catch

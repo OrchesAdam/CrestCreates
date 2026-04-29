@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Entities.Auditing;
+using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.Domain.Shared.DTOs;
 using CrestCreates.MultiTenancy.Abstract;
 

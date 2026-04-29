@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel.DataAnnotations;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Entities.Auditing;
+using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.Domain.Shared.Attributes;
 
 namespace CrestCreates.CodeGenerator.Tests.Entities

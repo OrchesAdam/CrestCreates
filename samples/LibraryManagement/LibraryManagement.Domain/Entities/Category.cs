@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Entities.Auditing;
+using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.Enums;
 using LibraryManagement.Domain.Shared.Constants;

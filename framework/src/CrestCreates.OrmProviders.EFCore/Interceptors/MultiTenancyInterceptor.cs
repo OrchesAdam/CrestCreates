@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.Entities.Auditing;
+using CrestCreates.Domain.Shared.Entities.Auditing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using CrestCreates.OrmProviders.EFCore.MultiTenancy;

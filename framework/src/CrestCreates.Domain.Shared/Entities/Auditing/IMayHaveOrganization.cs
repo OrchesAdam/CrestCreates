@@ -1,6 +1,6 @@
 using System;
 
-namespace CrestCreates.Domain.Entities.Auditing
+namespace CrestCreates.Domain.Shared.Entities.Auditing
 {
     public interface IMayHaveOrganization
     {

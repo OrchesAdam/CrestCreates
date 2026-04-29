@@ -6,8 +6,5 @@
     <AssemblyName>CrestCreates.Domain.Shared</AssemblyName>
     <OutputType>Library</OutputType>
   </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="Rougamo.Fody" PrivateAssets="contentfiles"/>
-  </ItemGroup>
 
 </Project>

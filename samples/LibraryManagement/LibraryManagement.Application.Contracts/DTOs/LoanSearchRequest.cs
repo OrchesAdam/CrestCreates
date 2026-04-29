@@ -1,4 +1,4 @@
-using CrestCreates.Domain.Shared.DTOs;
+using CrestCreates.Application.Contracts.DTOs.Common;
 using LibraryManagement.Domain.Shared.Enums;
 
 namespace LibraryManagement.Application.Contracts.DTOs;

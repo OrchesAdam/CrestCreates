@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Xunit;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Entities.Auditing;
+using CrestCreates.Domain.Shared.Entities.Auditing;
 using SqlSugar;
 
 namespace CrestCreates.OrmProviders.Tests

@@ -1,5 +1,6 @@
 using System;
 using CrestCreates.Domain.Entities.Auditing;
+using CrestCreates.Domain.Shared.Entities.Auditing;
 
 namespace CrestCreates.Domain.Entities;
 
