@@ -27,7 +27,7 @@ public class Book : AuditedEntity<Guid>
     public int AvailableCopies { get; set; }
     public string? Location { get; set; }
 
-    protected Book() { }
+    public Book() { }
 
     public Book(
         Guid id,

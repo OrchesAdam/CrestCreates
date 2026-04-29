@@ -79,18 +79,9 @@ public class BookAppService : CrestAppServiceBase<Book,Guid, BookDto, CreateBook
 
     protected override Book MapToEntity(CreateBookDto dto)
     {
-        return new Book(
-            Guid.NewGuid(),
-            dto.Title,
-            dto.Author,
-            dto.ISBN,
-            dto.CategoryId,
-            dto.TotalCopies,
-            dto.Description,
-            dto.PublishDate,
-            dto.Publisher,
-            dto.Location
-        );
+        var book = new Book();
+        dto.ApplyTo(book);
+        return book;
     }
 
     protected override BookDto MapToDto(Book entity)

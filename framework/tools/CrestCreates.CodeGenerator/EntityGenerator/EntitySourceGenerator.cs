@@ -1300,13 +1300,33 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             builder.AppendLine("        }");
             builder.AppendLine();
 
-            // ApplyTo() extension method — only map properties with public setter
+            // Properties with public setter, excluded audit properties (for ApplyTo)
             var writableProperties = properties
-                .Where(p => p.Name != "Id" && p.SetMethod != null && p.SetMethod.DeclaredAccessibility == Accessibility.Public)
+                .Where(p => p.SetMethod != null && p.SetMethod.DeclaredAccessibility == Accessibility.Public
+                    && p.Name != "Id" && p.Name != "CreationTime" && p.Name != "LastModificationTime"
+                    && p.Name != "CreatorId" && p.Name != "LastModifierId")
                 .ToList();
             var hasWritableId = entityClass.GetMembers().OfType<IPropertySymbol>()
                 .Any(p => p.Name == "Id" && p.SetMethod != null && p.SetMethod.DeclaredAccessibility == Accessibility.Public);
 
+            // CreateXxxDto.ApplyTo() extension method
+            builder.AppendLine($"        public static void ApplyTo(this Create{entityName}Dto source, {entityName} destination)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            if (source is null)");
+            builder.AppendLine("                throw new ArgumentNullException(nameof(source));");
+            builder.AppendLine("            if (destination is null)");
+            builder.AppendLine("                throw new ArgumentNullException(nameof(destination));");
+            builder.AppendLine();
+
+            foreach (var prop in writableProperties)
+            {
+                builder.AppendLine($"            destination.{prop.Name} = source.{prop.Name};");
+            }
+
+            builder.AppendLine("        }");
+            builder.AppendLine();
+
+            // UpdateXxxDto.ApplyTo() extension method
             builder.AppendLine($"        public static void ApplyTo(this Update{entityName}Dto source, {entityName} destination)");
             builder.AppendLine("        {");
             builder.AppendLine("            if (source is null)");
