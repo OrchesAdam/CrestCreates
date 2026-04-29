@@ -124,11 +124,6 @@ namespace CrestCreates.MultiTenancy
         /// <summary>
         /// 共享数据库，使用鉴别器字段（TenantId）隔离
         /// </summary>
-        Discriminator,
-
-        /// <summary>
-        /// 每个租户独立 Schema
-        /// </summary>
-        Schema
+        Discriminator
     }
 }

@@ -1,6 +1,3 @@
-using System;
-using System.Threading.Tasks;
-
 namespace CrestCreates.MultiTenancy.Abstract
 {
     public interface ICurrentTenant
