@@ -1,4 +1,3 @@
-using AutoMapper;
 using LibraryManagement.Application.Contracts.DTOs;
 using LibraryManagement.Application.Contracts.Interfaces;
 using LibraryManagement.Domain.Entities;
@@ -16,14 +15,20 @@ namespace LibraryManagement.Application.Services;
 public class CategoryAppService :CrestAppServiceBase<Category, Guid, CategoryDto, CreateCategoryDto, UpdateCategoryDto>, ICategoryAppService
 {
     private readonly ICategoryRepository _categoryRepository;
-    private readonly IMapper _mapper;
 
-
-    public CategoryAppService(ICrestRepositoryBase<Category, Guid> repository, IMapper mapper, IServiceProvider serviceProvider, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, ICategoryRepository categoryRepository) : base(repository, mapper, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
+    public CategoryAppService(ICrestRepositoryBase<Category, Guid> repository, IServiceProvider serviceProvider, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, ICategoryRepository categoryRepository) : base(repository, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
     {
         _categoryRepository = categoryRepository;
-        _mapper = mapper;
     }
+
+    protected override Category MapToEntity(CreateCategoryDto dto)
+        => new Category(Guid.NewGuid(), dto.Name, dto.Description, dto.ParentId);
+
+    protected override void MapToEntity(UpdateCategoryDto dto, Category entity)
+        => UpdateCategoryDtoToCategoryMapper.Apply(dto, entity);
+
+    protected override CategoryDto MapToDto(Category entity)
+        => CategoryToCategoryDtoMapper.ToTarget(entity);
 
     public async Task<CategoryDto> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -59,7 +64,7 @@ public class CategoryAppService :CrestAppServiceBase<Category, Guid, CategoryDto
 
     private async Task<CategoryDto> MapToDtoAsync(Category category)
     {
-        var dto = _mapper.Map<CategoryDto>(category);
+        var dto = CategoryToCategoryDtoMapper.ToTarget(category);
         dto.BookCount = category.Books?.Count ?? 0;
         
         if (category.ParentId.HasValue)
