@@ -53,14 +53,19 @@ public class TenantFilterSourceGeneratorTests
         {
             public class ModelBuilder
             {
-                public EntityTypeBuilder Entity<T>() => new EntityTypeBuilder();
+                public EntityTypeBuilder<T> Entity<T>() => new EntityTypeBuilder<T>();
             }
-            public class EntityTypeBuilder
+            public class DbContext { }
+            public class DbSet<T> { }
+            public class EntityTypeBuilder<T>
             {
-                public EntityTypeBuilder HasQueryFilter(System.Linq.Expressions.Expression<System.Func<object, bool>> filter) => this;
-                public IndexBuilder HasIndex(System.Linq.Expressions.Expression<System.Func<object, object>> indexExpression) => this;
+                public EntityTypeBuilder<T> HasQueryFilter(System.Linq.Expressions.Expression<System.Func<T, bool>> filter) => this;
+                public IndexBuilder HasIndex(System.Linq.Expressions.Expression<System.Func<T, object?>> indexExpression) => new IndexBuilder();
             }
-            public class IndexBuilder { }
+            public class IndexBuilder
+            {
+                public IndexBuilder HasDatabaseName(string name) => this;
+            }
         }
         """;
 
@@ -83,6 +88,7 @@ public class TenantFilterSourceGeneratorTests
         var result = SourceGeneratorTestHelper.RunGenerator<TenantFilterSourceGenerator>(source, additionalSources: AllStubs);
 
         Assert.True(result.ContainsFile("TenantFilter.g.cs"), "Expected TenantFilter.g.cs to be generated");
+        Assert.True(result.CompilationSuccess, string.Join(Environment.NewLine, result.GetErrors()));
 
         var generated = result.GetSourceByFileName("TenantFilter.g.cs");
         Assert.NotNull(generated);
@@ -121,6 +127,7 @@ public class TenantFilterSourceGeneratorTests
             new[] { source1, source2 }, additionalSources: AllStubs);
 
         Assert.True(result.ContainsFile("TenantFilter.g.cs"));
+        Assert.True(result.CompilationSuccess, string.Join(Environment.NewLine, result.GetErrors()));
 
         var generated = result.GetSourceByFileName("TenantFilter.g.cs");
         Assert.NotNull(generated);
@@ -169,6 +176,43 @@ public class TenantFilterSourceGeneratorTests
     }
 
     [Fact]
+    public void GeneratesTenantFilter_ForTenantEntityReferencedByDbContextDbSet()
+    {
+        var entitySource = """
+            using CrestCreates.OrmProviders.EFCore.MultiTenancy;
+
+            namespace External.Domain
+            {
+                public class Book : IMultiTenant
+                {
+                    public string? TenantId { get; set; }
+                }
+            }
+            """;
+
+        var dbContextSource = """
+            using External.Domain;
+            using Microsoft.EntityFrameworkCore;
+
+            public class AppDbContext : DbContext
+            {
+                public DbSet<Book> Books { get; set; } = null!;
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<TenantFilterSourceGenerator>(
+            new[] { dbContextSource }, additionalSources: AllStubs.Concat(new[] { entitySource }).ToArray());
+
+        Assert.True(result.ContainsFile("TenantFilter.g.cs"), "Expected TenantFilter.g.cs to be generated for DbSet<T> tenant entity");
+        Assert.True(result.CompilationSuccess, string.Join(Environment.NewLine, result.GetErrors()));
+
+        var generated = result.GetSourceByFileName("TenantFilter.g.cs");
+        Assert.NotNull(generated);
+        Assert.Contains("ConfigureBookFilter", generated.SourceText);
+        Assert.Contains("External.Domain.Book", generated.SourceText);
+    }
+
+    [Fact]
     public void GeneratedFilter_UsesCurrentTenantId()
     {
         var source = """
@@ -183,6 +227,8 @@ public class TenantFilterSourceGeneratorTests
             """;
 
         var result = SourceGeneratorTestHelper.RunGenerator<TenantFilterSourceGenerator>(source, additionalSources: AllStubs);
+
+        Assert.True(result.CompilationSuccess, string.Join(Environment.NewLine, result.GetErrors()));
 
         var generated = result.GetSourceByFileName("TenantFilter.g.cs");
         Assert.NotNull(generated);

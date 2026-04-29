@@ -159,7 +159,7 @@ namespace CrestCreates.CodeGenerator.Tests.TestHelpers
 
             return new SourceGeneratorResult(
                 generatedSources,
-                diagnostics.ToImmutableList(),
+                diagnostics.Concat(emitResult.Diagnostics).ToImmutableList(),
                 emitResult.Success,
                 compiledAssembly);
         }

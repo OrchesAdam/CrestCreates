@@ -47,12 +47,16 @@ public class TenantDbContextFactorySourceGeneratorTests
         var source = """
             using Microsoft.EntityFrameworkCore;
 
-            public class AppDbContext : DbContext { }
+            public class AppDbContext : DbContext
+            {
+                public AppDbContext(DbContextOptions<AppDbContext> options) { }
+            }
             """;
 
         var result = SourceGeneratorTestHelper.RunGenerator<TenantDbContextFactorySourceGenerator>(source, additionalSources: AllStubs);
 
         Assert.True(result.ContainsFile("TenantDbContextFactory.g.cs"), "Expected TenantDbContextFactory.g.cs to be generated");
+        Assert.True(result.CompilationSuccess, string.Join(System.Environment.NewLine, result.GetErrors()));
 
         var generated = result.GetSourceByFileName("TenantDbContextFactory.g.cs");
         Assert.NotNull(generated);
@@ -67,19 +71,26 @@ public class TenantDbContextFactorySourceGeneratorTests
         var source1 = """
             using Microsoft.EntityFrameworkCore;
 
-            public class AppDbContext : DbContext { }
+            public class AppDbContext : DbContext
+            {
+                public AppDbContext(DbContextOptions<AppDbContext> options) { }
+            }
             """;
 
         var source2 = """
             using Microsoft.EntityFrameworkCore;
 
-            public class TenantDbContext : DbContext { }
+            public class TenantDbContext : DbContext
+            {
+                public TenantDbContext(DbContextOptions<TenantDbContext> options) { }
+            }
             """;
 
         var result = SourceGeneratorTestHelper.RunGenerator<TenantDbContextFactorySourceGenerator>(
             new[] { source1, source2 }, additionalSources: AllStubs);
 
         Assert.True(result.ContainsFile("TenantDbContextFactory.g.cs"));
+        Assert.True(result.CompilationSuccess, string.Join(System.Environment.NewLine, result.GetErrors()));
 
         var generated = result.GetSourceByFileName("TenantDbContextFactory.g.cs");
         Assert.NotNull(generated);
@@ -95,13 +106,17 @@ public class TenantDbContextFactorySourceGeneratorTests
         var source = """
             using Microsoft.EntityFrameworkCore;
 
-            public class AppDbContext : DbContext { }
+            public class AppDbContext : DbContext
+            {
+                public AppDbContext(DbContextOptions<AppDbContext> options) { }
+            }
             """;
 
         var result = SourceGeneratorTestHelper.RunGenerator<TenantDbContextFactorySourceGenerator>(source, additionalSources: AllStubs);
 
         var generated = result.GetSourceByFileName("TenantDbContextFactory.g.cs");
         Assert.NotNull(generated);
+        Assert.True(result.CompilationSuccess, string.Join(System.Environment.NewLine, result.GetErrors()));
         Assert.Contains("GeneratedTenantDbContextFactoryRegistration", generated.SourceText);
         Assert.Contains("[System.Runtime.CompilerServices.ModuleInitializer]", generated.SourceText);
         Assert.Contains("TenantDbContextFactoryRegistryStore.Register(new GeneratedTenantDbContextFactory())", generated.SourceText);
@@ -113,7 +128,10 @@ public class TenantDbContextFactorySourceGeneratorTests
         var source = """
             using Microsoft.EntityFrameworkCore;
 
-            public class AppDbContext : DbContext { }
+            public class AppDbContext : DbContext
+            {
+                public AppDbContext(DbContextOptions<AppDbContext> options) { }
+            }
             """;
 
         // Don't include ITenantDbContextFactoryStub — simulate a project that doesn't reference EFCore
@@ -141,13 +159,17 @@ public class TenantDbContextFactorySourceGeneratorTests
         var source = """
             using Microsoft.EntityFrameworkCore;
 
-            public class AppDbContext : DbContext { }
+            public class AppDbContext : DbContext
+            {
+                public AppDbContext(DbContextOptions<AppDbContext> options) { }
+            }
             """;
 
         var result = SourceGeneratorTestHelper.RunGenerator<TenantDbContextFactorySourceGenerator>(source, additionalSources: AllStubs);
 
         var generated = result.GetSourceByFileName("TenantDbContextFactory.g.cs");
         Assert.NotNull(generated);
+        Assert.True(result.CompilationSuccess, string.Join(System.Environment.NewLine, result.GetErrors()));
         Assert.DoesNotContain("Activator.CreateInstance", generated.SourceText);
         Assert.Contains("new AppDbContext(options)", generated.SourceText);
     }

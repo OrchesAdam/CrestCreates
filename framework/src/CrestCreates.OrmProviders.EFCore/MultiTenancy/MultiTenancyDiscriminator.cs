@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.EntityFrameworkCore;
 
@@ -81,7 +83,7 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
     /// </summary>
     public static class TenantFilterRegistryStore
     {
-        private static volatile ApplyAllDelegate? _applyAll;
+        private static readonly ConcurrentDictionary<string, ApplyAllDelegate> ApplyAllDelegates = new(StringComparer.Ordinal);
 
         public delegate void ApplyAllDelegate(ModelBuilder modelBuilder, ICurrentTenant currentTenant);
 
@@ -91,19 +93,28 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
         public static void Register(ApplyAllDelegate applyAll)
         {
             ArgumentNullException.ThrowIfNull(applyAll);
-            _applyAll = applyAll;
+            ApplyAllDelegates.TryAdd(applyAll.Method.DeclaringType?.AssemblyQualifiedName ?? applyAll.Method.Name, applyAll);
         }
 
         /// <summary>
-        /// 获取已注册的 ApplyAll 委托，未注册时返回 null
+        /// 获取所有已注册的 ApplyAll 委托
         /// </summary>
-        public static ApplyAllDelegate? GetApplyAll() => _applyAll;
+        public static IReadOnlyCollection<ApplyAllDelegate> GetApplyAllDelegates()
+        {
+            return ApplyAllDelegates.Values.ToArray();
+        }
+
+        public static InvalidOperationException CreateMissingGeneratedFiltersException()
+        {
+            return new InvalidOperationException(
+                "Tenant discriminator 未找到编译期生成的过滤器注册，当前主链只支持生成链。请确认包含多租户实体的 DbContext 项目引用了 CrestCreates.OrmProviders.EFCore 且 Source Generator 已运行。");
+        }
     }
 
     /// <summary>
     /// 租户过滤器配置
     /// 优先使用 Source Generator 通过 TenantFilterRegistryStore 注册的编译时实现
-    /// 未注册时为 no-op（无 IMultiTenant 实体或生成器未运行）
+    /// 未注册时抛出异常，避免静默绕过租户隔离
     /// </summary>
     public static class TenantFilterConfiguration
     {
@@ -112,7 +123,16 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
         /// </summary>
         public static void ApplyAll(ModelBuilder modelBuilder, ICurrentTenant currentTenant)
         {
-            TenantFilterRegistryStore.GetApplyAll()?.Invoke(modelBuilder, currentTenant);
+            var delegates = TenantFilterRegistryStore.GetApplyAllDelegates();
+            if (delegates.Count == 0)
+            {
+                throw TenantFilterRegistryStore.CreateMissingGeneratedFiltersException();
+            }
+
+            foreach (var applyAll in delegates)
+            {
+                applyAll(modelBuilder, currentTenant);
+            }
         }
     }
 }
