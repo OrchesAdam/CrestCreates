@@ -1,4 +1,3 @@
-using AutoMapper;
 using LibraryManagement.Application.Contracts.DTOs;
 using LibraryManagement.Application.Contracts.Interfaces;
 using LibraryManagement.Domain.Entities;
@@ -17,19 +16,16 @@ namespace LibraryManagement.Application.Services;
 public class BookAppService : CrestAppServiceBase<Book,Guid, BookDto, CreateBookDto, UpdateBookDto>, IBookAppService
 {
     private readonly IBookRepository _repository;
-    private readonly IMapper _mapper;
 
-
-    public BookAppService(ICrestRepositoryBase<Book, Guid> repository, IMapper mapper, IServiceProvider serviceProvider, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, IBookRepository repository2) : base(repository, mapper, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
+    public BookAppService(ICrestRepositoryBase<Book, Guid> repository, IServiceProvider serviceProvider, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, IBookRepository repository2) : base(repository, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
     {
         _repository = repository2;
-        _mapper = mapper;
     }
 
     public async Task<BookDto?> GetByIsbnAsync(string isbn, CancellationToken cancellationToken = default)
     {
         var book = await _repository.GetByIsbnAsync(isbn, cancellationToken);
-        return book == null ? null : _mapper.Map<BookDto>(book);
+        return book == null ? null : BookToBookDtoMapper.ToTarget(book);
     }
 
     /// <summary>
@@ -79,6 +75,25 @@ public class BookAppService : CrestAppServiceBase<Book,Guid, BookDto, CreateBook
         // === 方式4: 基类 QueryAsync → GetListAsync — 自动执行权限检查 + 数据权限过滤 + QueryExecutor 统一执行 ===
         return await QueryAsync(request, cancellationToken);
     }
+
+    protected override Book MapToEntity(CreateBookDto dto)
+    {
+        return new Book(
+            Guid.NewGuid(),
+            dto.Title,
+            dto.Author,
+            dto.ISBN,
+            dto.CategoryId,
+            dto.TotalCopies,
+            dto.Description,
+            dto.PublishDate,
+            dto.Publisher,
+            dto.Location
+        );
+    }
+
+    protected override BookDto MapToDto(Book entity)
+        => BookToBookDtoMapper.ToTarget(entity);
 
     protected override void MapToEntity(UpdateBookDto dto, Book entity)
     {
