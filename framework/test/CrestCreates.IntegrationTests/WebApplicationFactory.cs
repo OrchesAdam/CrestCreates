@@ -30,27 +30,37 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using OpenIddict.Abstractions;
+using Testcontainers.PostgreSql;
+using Xunit;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace CrestCreates.IntegrationTests;
 
-public sealed class LibraryManagementWebApplicationFactory : WebApplicationFactory<Program>
+public sealed class LibraryManagementWebApplicationFactory
+    : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private readonly string _baseConnectionString = "Host=localhost;Database=librarymanagement_test;Username=crest;Password=crest123";
+    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
+        .WithImage("postgres:16-alpine")
+        .WithDatabase("crestcreates_test")
+        .WithUsername("test")
+        .WithPassword("test")
+        .Build();
+
     private readonly string _schemaName = $"itest_{Guid.NewGuid():N}";
-    private readonly string _connectionString;
-    private readonly NpgsqlConnection _sharedConnection;
+    private string _baseConnectionString = null!;
+    private NpgsqlConnection _sharedConnection = null!;
     private readonly SemaphoreSlim _seedLock = new(1, 1);
     private bool _seedCompleted;
 
-    public string ConnectionString => _connectionString;
+    public string ConnectionString => $"{_baseConnectionString};Search Path={_schemaName}";
 
-    public LibraryManagementWebApplicationFactory()
+    public async Task InitializeAsync()
     {
-        _connectionString = $"{_baseConnectionString};Search Path={_schemaName}";
+        await _postgres.StartAsync();
+        _baseConnectionString = _postgres.GetConnectionString();
         EnsureSchemaCreated();
-        _sharedConnection = new NpgsqlConnection(_connectionString);
-        _sharedConnection.Open();
+        _sharedConnection = new NpgsqlConnection(ConnectionString);
+        await _sharedConnection.OpenAsync();
     }
 
     private void EnsureSchemaCreated()
@@ -303,23 +313,11 @@ public sealed class LibraryManagementWebApplicationFactory : WebApplicationFacto
         });
     }
 
-    protected override void Dispose(bool disposing)
+    public new async Task DisposeAsync()
     {
-        base.Dispose(disposing);
-
-        if (!disposing)
-        {
-            return;
-        }
-
-        _sharedConnection.Dispose();
+        _sharedConnection?.Dispose();
         _seedLock.Dispose();
-
-        using var connection = new NpgsqlConnection(_baseConnectionString);
-        connection.Open();
-
-        using var command = connection.CreateCommand();
-        command.CommandText = $"""DROP SCHEMA IF EXISTS "{_schemaName}" CASCADE;""";
-        command.ExecuteNonQuery();
+        await _postgres.DisposeAsync();
+        await base.DisposeAsync();
     }
 }
