@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using AutoMapper;
 using CrestCreates.Application.Contracts.DTOs.Common;
 using CrestCreates.Domain.Repositories;
 
@@ -26,15 +25,9 @@ namespace CrestCreates.Application.Services
         /// </summary>
         protected virtual IRepository<TEntity, TKey> Repository { get; }
 
-        /// <summary>
-        /// 映射器
-        /// </summary>
-        protected readonly IMapper Mapper;
-
-        protected CrudServiceBase(IRepository<TEntity, TKey> repository, IMapper mapper)
+        protected CrudServiceBase(IRepository<TEntity, TKey> repository)
         {
             Repository = repository ?? throw new ArgumentNullException(nameof(repository));
-            Mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
         }
 
         /// <summary>
@@ -69,7 +62,7 @@ namespace CrestCreates.Application.Services
                 .Take(request.PageSize)
                 .ToList();
 
-            var dtos = Mapper.Map<List<TDto>>(pagedEntities);
+            var dtos = pagedEntities.Select(MapToDto).ToList();
 
             return new Contracts.DTOs.Common.PagedResultDto<TDto>(
                 dtos,
@@ -112,25 +105,16 @@ namespace CrestCreates.Application.Services
         /// <summary>
         /// 将创建 DTO 映射为实体
         /// </summary>
-        protected virtual TEntity MapToEntity(TCreateDto dto)
-        {
-            return Mapper.Map<TEntity>(dto);
-        }
+        protected abstract TEntity MapToEntity(TCreateDto dto);
 
         /// <summary>
         /// 将更新 DTO 映射到现有实体
         /// </summary>
-        protected virtual void MapToEntity(TUpdateDto dto, TEntity entity)
-        {
-            Mapper.Map(dto, entity);
-        }
+        protected abstract void MapToEntity(TUpdateDto dto, TEntity entity);
 
         /// <summary>
         /// 将实体映射为 DTO
         /// </summary>
-        protected virtual TDto MapToDto(TEntity entity)
-        {
-            return Mapper.Map<TDto>(entity);
-        }
+        protected abstract TDto MapToDto(TEntity entity);
     }
 }
