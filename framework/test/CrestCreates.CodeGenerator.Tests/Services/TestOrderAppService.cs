@@ -1,7 +1,6 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using AutoMapper;
 using CrestCreates.Application.Contracts.DTOs.Common;
 using CrestCreates.Application.Services;
 using CrestCreates.Aop.Interceptors;
@@ -19,13 +18,43 @@ public class TestOrderAppService : CrestAppServiceBase<TestOrder, long, TestOrde
 {
     public TestOrderAppService(
         ICrestRepositoryBase<TestOrder, long> repository,
-        IMapper mapper,
         IServiceProvider serviceProvider,
         ICurrentUser currentUser,
         IDataPermissionFilter dataPermissionFilter,
         IPermissionChecker permissionChecker)
-        : base(repository, mapper, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
+        : base(repository, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
     {
+    }
+
+    protected override TestOrder MapToEntity(CreateTestOrderDto dto)
+    {
+        return new TestOrder
+        {
+            OrderNumber = dto.OrderNumber,
+            CustomerId = dto.CustomerId,
+            TotalAmount = dto.TotalAmount,
+            Notes = dto.Notes ?? string.Empty
+        };
+    }
+
+    protected override void MapToEntity(UpdateTestOrderDto dto, TestOrder entity)
+    {
+        if (dto.Notes != null)
+            entity.Notes = dto.Notes;
+    }
+
+    protected override TestOrderDto MapToDto(TestOrder entity)
+    {
+        return new TestOrderDto
+        {
+            Id = entity.Id,
+            OrderNumber = entity.OrderNumber,
+            CustomerId = entity.CustomerId,
+            TotalAmount = entity.TotalAmount,
+            OrderDate = entity.OrderDate,
+            Status = entity.Status,
+            Notes = entity.Notes
+        };
     }
 
     [UnitOfWorkMo]
@@ -42,7 +71,7 @@ public class TestOrderAppService : CrestAppServiceBase<TestOrder, long, TestOrde
         order.ConfirmOrder();
         await Repository.UpdateAsync(order, cancellationToken);
 
-        return Mapper.Map<TestOrderDto>(order);
+        return MapToDto(order);
     }
 
     [UnitOfWorkMo]
@@ -59,7 +88,7 @@ public class TestOrderAppService : CrestAppServiceBase<TestOrder, long, TestOrde
         order.ShipOrder();
         await Repository.UpdateAsync(order, cancellationToken);
 
-        return Mapper.Map<TestOrderDto>(order);
+        return MapToDto(order);
     }
 
     [UnitOfWorkMo]
@@ -76,7 +105,7 @@ public class TestOrderAppService : CrestAppServiceBase<TestOrder, long, TestOrde
         order.CompleteOrder();
         await Repository.UpdateAsync(order, cancellationToken);
 
-        return Mapper.Map<TestOrderDto>(order);
+        return MapToDto(order);
     }
 
     [UnitOfWorkMo]
@@ -93,7 +122,7 @@ public class TestOrderAppService : CrestAppServiceBase<TestOrder, long, TestOrde
         order.CancelOrder();
         await Repository.UpdateAsync(order, cancellationToken);
 
-        return Mapper.Map<TestOrderDto>(order);
+        return MapToDto(order);
     }
 }
 
