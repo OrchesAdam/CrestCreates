@@ -2,12 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using CrestCreates.MultiTenancy.Abstract;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using CrestCreates.MultiTenancy.Middleware;
 using CrestCreates.MultiTenancy.Providers;
 using CrestCreates.MultiTenancy.Resolvers;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace CrestCreates.MultiTenancy
 {
@@ -49,12 +51,13 @@ namespace CrestCreates.MultiTenancy
             this IServiceCollection services,
             Action<InMemoryTenantProvider> configure = null)
         {
-            var provider = new InMemoryTenantProvider(
-                services.BuildServiceProvider().GetRequiredService<Microsoft.Extensions.Logging.ILogger<InMemoryTenantProvider>>());
-
-            configure?.Invoke(provider);
-
-            services.TryAddSingleton<ITenantProvider>(provider);
+            services.TryAddSingleton<ITenantProvider>(sp =>
+            {
+                var logger = sp.GetRequiredService<ILogger<InMemoryTenantProvider>>();
+                var provider = new InMemoryTenantProvider(logger);
+                configure?.Invoke(provider);
+                return provider;
+            });
             return services;
         }
 
@@ -96,41 +99,13 @@ namespace CrestCreates.MultiTenancy
             this IServiceCollection services,
             TenantResolutionStrategy strategy)
         {
-            var resolvers = new List<Type>();
+            var resolvers = BuildResolverList(strategy);
 
-            if (strategy.HasFlag(TenantResolutionStrategy.Header))
-            {
-                resolvers.Add(typeof(HeaderTenantResolver));
-            }
-
-            if (strategy.HasFlag(TenantResolutionStrategy.Subdomain))
-            {
-                resolvers.Add(typeof(SubdomainTenantResolver));
-            }
-
-            // 以下 Resolvers 需要额外的 ASP.NET Core 依赖,暂时注释掉
-            // if (strategy.HasFlag(TenantResolutionStrategy.QueryString))
-            // {
-            //     resolvers.Add(typeof(QueryStringTenantResolver));
-            // }
-
-            // if (strategy.HasFlag(TenantResolutionStrategy.Cookie))
-            // {
-            //     resolvers.Add(typeof(CookieTenantResolver));
-            // }
-
-            // if (strategy.HasFlag(TenantResolutionStrategy.Route))
-            // {
-            //     resolvers.Add(typeof(RouteTenantResolver));
-            // }
-
-            // 注册各个解析器
             foreach (var resolverType in resolvers)
             {
                 services.TryAddScoped(resolverType);
             }
 
-            // 注册复合解析器
             services.TryAddScoped<ITenantResolver>(sp =>
             {
                 var resolverInstances = resolvers
@@ -139,7 +114,7 @@ namespace CrestCreates.MultiTenancy
 
                 return new CompositeTenantResolver(
                     resolverInstances,
-                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<CompositeTenantResolver>>());
+                    sp.GetRequiredService<ILogger<CompositeTenantResolver>>());
             });
 
             return services;
@@ -154,21 +129,8 @@ namespace CrestCreates.MultiTenancy
             Action<InMemoryTenantProvider> configureTenants = null)
         {
             services.AddMultiTenancy(configureOptions);
-
-            // 从配置中获取策略，如果没有则使用默认的 Header
-            var strategy = TenantResolutionStrategy.Header;
-            using (var sp = services.BuildServiceProvider())
-            {
-                var options = sp.GetService<Microsoft.Extensions.Options.IOptions<MultiTenancyOptions>>();
-                if (options?.Value != null)
-                {
-                    strategy = options.Value.ResolutionStrategy;
-                }
-            }
-
-            services.AddTenantResolvers(strategy);
+            services.AddTenantResolversFromOptions();
             services.AddInMemoryTenantProvider(configureTenants);
-
             return services;
         }
 
@@ -180,21 +142,49 @@ namespace CrestCreates.MultiTenancy
             Action<MultiTenancyOptions> configureOptions = null)
         {
             services.AddMultiTenancy(configureOptions);
-
-            var strategy = TenantResolutionStrategy.Header;
-            using (var sp = services.BuildServiceProvider())
-            {
-                var options = sp.GetService<Microsoft.Extensions.Options.IOptions<MultiTenancyOptions>>();
-                if (options?.Value != null)
-                {
-                    strategy = options.Value.ResolutionStrategy;
-                }
-            }
-
-            services.AddTenantResolvers(strategy);
+            services.AddTenantResolversFromOptions();
             services.AddConfigurationTenantProvider();
+            return services;
+        }
+
+        private static IServiceCollection AddTenantResolversFromOptions(this IServiceCollection services)
+        {
+            services.TryAddScoped<HeaderTenantResolver>();
+            services.TryAddScoped<SubdomainTenantResolver>();
+            services.TryAddScoped<QueryStringTenantResolver>();
+            services.TryAddScoped<CookieTenantResolver>();
+            services.TryAddScoped<RouteTenantResolver>();
+
+            services.TryAddScoped<ITenantResolver>(sp =>
+            {
+                var options = sp.GetRequiredService<IOptions<MultiTenancyOptions>>();
+                var strategy = options.Value.ResolutionStrategy;
+                var resolvers = BuildResolverList(strategy);
+                var resolverInstances = resolvers
+                    .Select(t => (ITenantResolver)sp.GetRequiredService(t))
+                    .ToArray();
+                return new CompositeTenantResolver(
+                    resolverInstances,
+                    sp.GetRequiredService<ILogger<CompositeTenantResolver>>());
+            });
 
             return services;
+        }
+
+        private static List<Type> BuildResolverList(TenantResolutionStrategy strategy)
+        {
+            var resolvers = new List<Type>();
+            if (strategy.HasFlag(TenantResolutionStrategy.Header))
+                resolvers.Add(typeof(HeaderTenantResolver));
+            if (strategy.HasFlag(TenantResolutionStrategy.Subdomain))
+                resolvers.Add(typeof(SubdomainTenantResolver));
+            if (strategy.HasFlag(TenantResolutionStrategy.QueryString))
+                resolvers.Add(typeof(QueryStringTenantResolver));
+            if (strategy.HasFlag(TenantResolutionStrategy.Cookie))
+                resolvers.Add(typeof(CookieTenantResolver));
+            if (strategy.HasFlag(TenantResolutionStrategy.Route))
+                resolvers.Add(typeof(RouteTenantResolver));
+            return resolvers;
         }
     }
 
