@@ -20,7 +20,6 @@
 
     <PackageReference Include="SqlSugarCore" />
     <PackageReference Include="FreeSql" />
-    <PackageReference Include="AutoMapper" />
     <PackageReference Include="MediatR" />
   </ItemGroup>
 
