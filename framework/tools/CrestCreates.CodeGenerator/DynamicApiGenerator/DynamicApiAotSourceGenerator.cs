@@ -896,7 +896,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             return "void";
         }
 
-        return typeName.EndsWith("?", StringComparison.Ordinal)
+        return typeName!.EndsWith("?", StringComparison.Ordinal)
             ? typeName.Substring(0, typeName.Length - 1)
             : typeName;
     }

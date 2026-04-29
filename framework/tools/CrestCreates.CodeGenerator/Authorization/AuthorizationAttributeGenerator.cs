@@ -16,7 +16,7 @@ namespace CrestCreates.CodeGenerator.Authorization
         /// <summary>
         /// 资源名称（如 "Products"）
         /// </summary>
-        public string ResourceName { get; set; }
+        public string ResourceName { get; set; } = string.Empty;
 
         /// <summary>
         /// 是否生成 CRUD 权限
@@ -37,7 +37,7 @@ namespace CrestCreates.CodeGenerator.Authorization
         /// <summary>
         /// 默认角色要求
         /// </summary>
-        public string[] DefaultRoles { get; set; }
+        public string[] DefaultRoles { get; set; } = [];
 
         /// <summary>
         /// 是否要求所有权限（AND 逻辑）
@@ -110,7 +110,7 @@ namespace CrestCreates.CodeGenerator.Authorization
         /// <summary>
         /// 映射 HTTP 方法到 CRUD 权限
         /// </summary>
-        private string MapHttpMethodToPermission(string httpMethod)
+        private string? MapHttpMethodToPermission(string? httpMethod)
         {
             return httpMethod?.ToUpperInvariant() switch
             {
@@ -253,7 +253,7 @@ namespace CrestCreates.CodeGenerator.Authorization
                 _methodPermissions = methodPermissions;
             }
 
-            public override SyntaxNode VisitMethodDeclaration(MethodDeclarationSyntax node)
+            public override SyntaxNode? VisitMethodDeclaration(MethodDeclarationSyntax node)
             {
                 var methodName = node.Identifier.Text;
 
@@ -294,12 +294,15 @@ namespace CrestCreates.CodeGenerator.Authorization
     /// </summary>
     public class BatchAuthorizationGenerator
     {
+        /// <summary>
+        /// 实体授权配置
+        /// </summary>
         public class EntityAuthorizationConfig
         {
-            public string EntityName { get; set; }
-            public string ResourceName { get; set; }
+            public string EntityName { get; set; } = string.Empty;
+            public string ResourceName { get; set; } = string.Empty;
             public Dictionary<string, string> MethodPermissions { get; set; } = new();
-            public string[] RequiredRoles { get; set; }
+            public string[] RequiredRoles { get; set; } = [];
         }
 
         /// <summary>
