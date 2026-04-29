@@ -40,8 +40,16 @@ namespace CrestCreates.OrmProviders.EFCore.Modules
             // 注册 EF Core 数据库上下文工厂
             services.AddScoped<CrestCreatesDbContextFactory>();
 
-            // 注册租户 DbContext 工厂（DefaultTenantDbContextFactory 使用 Activator，AoT 场景可替换为源生成实现）
-            services.TryAddSingleton<ITenantDbContextFactory, DefaultTenantDbContextFactory>();
+            // 注册租户 DbContext 工厂：优先使用 Source Generator 生成的实现（AoT-friendly），回退到 DefaultTenantDbContextFactory（Activator）
+            var generatedFactory = TenantDbContextFactoryRegistryStore.GetFactory();
+            if (generatedFactory != null)
+            {
+                services.TryAddSingleton<ITenantDbContextFactory>(generatedFactory);
+            }
+            else
+            {
+                services.TryAddSingleton<ITenantDbContextFactory, DefaultTenantDbContextFactory>();
+            }
             
             // 注册 EF Core 工作单元
             services.AddScoped(sp => new EfCoreUnitOfWork(

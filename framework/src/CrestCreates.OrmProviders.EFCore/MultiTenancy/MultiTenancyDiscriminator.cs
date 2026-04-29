@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.EntityFrameworkCore;
 
@@ -75,17 +76,43 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
     }
 
     /// <summary>
-    /// 租户过滤器配置 — 编译时生成的 partial 类覆盖此 no-op 实现
+    /// 租户过滤器配置的运行时注册中心
+    /// Source Generator 通过 [ModuleInitializer] 将生成的 ApplyAll 委托注册到此存储
     /// </summary>
-    public static partial class TenantFilterConfiguration
+    public static class TenantFilterRegistryStore
+    {
+        private static volatile ApplyAllDelegate? _applyAll;
+
+        public delegate void ApplyAllDelegate(ModelBuilder modelBuilder, ICurrentTenant currentTenant);
+
+        /// <summary>
+        /// 注册编译时生成的 ApplyAll 实现
+        /// </summary>
+        public static void Register(ApplyAllDelegate applyAll)
+        {
+            ArgumentNullException.ThrowIfNull(applyAll);
+            _applyAll = applyAll;
+        }
+
+        /// <summary>
+        /// 获取已注册的 ApplyAll 委托，未注册时返回 null
+        /// </summary>
+        public static ApplyAllDelegate? GetApplyAll() => _applyAll;
+    }
+
+    /// <summary>
+    /// 租户过滤器配置
+    /// 优先使用 Source Generator 通过 TenantFilterRegistryStore 注册的编译时实现
+    /// 未注册时为 no-op（无 IMultiTenant 实体或生成器未运行）
+    /// </summary>
+    public static class TenantFilterConfiguration
     {
         /// <summary>
         /// 应用所有多租户查询过滤器
-        /// 当 Source Generator 发现 [Entity] + IMultiTenant 类时，生成的方法替代此 no-op
         /// </summary>
         public static void ApplyAll(ModelBuilder modelBuilder, ICurrentTenant currentTenant)
         {
-            // No IMultiTenant entities found — nothing to configure
+            TenantFilterRegistryStore.GetApplyAll()?.Invoke(modelBuilder, currentTenant);
         }
     }
 }

@@ -14,6 +14,7 @@ namespace CrestCreates.CodeGenerator.TenantDbContextFactoryGenerator
     public class TenantDbContextFactorySourceGenerator : IIncrementalGenerator
     {
         private const string ITenantDbContextFactoryFullName = "CrestCreates.OrmProviders.EFCore.MultiTenancy.ITenantDbContextFactory";
+        private const string RegistryStoreFullName = "CrestCreates.OrmProviders.EFCore.MultiTenancy.TenantDbContextFactoryRegistryStore";
 
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
@@ -26,7 +27,8 @@ namespace CrestCreates.CodeGenerator.TenantDbContextFactoryGenerator
 
             var hasFactoryInterface = context.CompilationProvider
                 .Select(static (compilation, _) =>
-                    compilation.GetTypeByMetadataName(ITenantDbContextFactoryFullName) is not null);
+                    compilation.GetTypeByMetadataName(ITenantDbContextFactoryFullName) is not null &&
+                    compilation.GetTypeByMetadataName(RegistryStoreFullName) is not null);
 
             var combined = dbContextClasses.Combine(hasFactoryInterface);
 
@@ -94,7 +96,7 @@ namespace CrestCreates.CodeGenerator.TenantDbContextFactoryGenerator
             sb.AppendLine();
             sb.AppendLine("namespace CrestCreates.OrmProviders.EFCore.MultiTenancy");
             sb.AppendLine("{");
-            sb.AppendLine("    public sealed class GeneratedTenantDbContextFactory : ITenantDbContextFactory");
+            sb.AppendLine("    internal sealed class GeneratedTenantDbContextFactory : ITenantDbContextFactory");
             sb.AppendLine("    {");
 
             foreach (var dbContext in dbContextList)
@@ -118,6 +120,15 @@ namespace CrestCreates.CodeGenerator.TenantDbContextFactoryGenerator
             }
 
             sb.AppendLine("            throw new InvalidOperationException($\"No factory registered for {typeof(TDbContext).Name}. Register an ITenantDbContextFactory or ensure the DbContext is discoverable by the source generator.\");");
+            sb.AppendLine("        }");
+            sb.AppendLine("    }");
+            sb.AppendLine();
+            sb.AppendLine("    internal static class GeneratedTenantDbContextFactoryRegistration");
+            sb.AppendLine("    {");
+            sb.AppendLine("        [System.Runtime.CompilerServices.ModuleInitializer]");
+            sb.AppendLine("        internal static void Register()");
+            sb.AppendLine("        {");
+            sb.AppendLine("            TenantDbContextFactoryRegistryStore.Register(new GeneratedTenantDbContextFactory());");
             sb.AppendLine("        }");
             sb.AppendLine("    }");
             sb.AppendLine("}");
