@@ -413,3 +413,11 @@ FodyWeavers.xsd
 99_RecycleBin/
 99_RecycleBin/*
 .worktrees/
+
+# keep graph outputs, skip heavy/local-only files
+
+# optional: commit for shared extraction speed, skip to keep repo small
+graphify-out/*
+
+!graphify-out/GRAPH_REPORT.md
+
