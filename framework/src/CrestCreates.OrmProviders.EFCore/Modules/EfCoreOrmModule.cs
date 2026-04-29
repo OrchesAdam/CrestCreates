@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Repositories.Permission;
@@ -7,6 +8,7 @@ using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.OrmProviders.Abstract.Modules;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
+using CrestCreates.OrmProviders.EFCore.MultiTenancy;
 using CrestCreates.OrmProviders.EFCore.Repositories;
 using CrestCreates.OrmProviders.EFCore.UnitOfWork;
 
@@ -37,6 +39,9 @@ namespace CrestCreates.OrmProviders.EFCore.Modules
         {
             // 注册 EF Core 数据库上下文工厂
             services.AddScoped<CrestCreatesDbContextFactory>();
+
+            // 注册租户 DbContext 工厂（DefaultTenantDbContextFactory 使用 Activator，AoT 场景可替换为源生成实现）
+            services.TryAddSingleton<ITenantDbContextFactory, DefaultTenantDbContextFactory>();
             
             // 注册 EF Core 工作单元
             services.AddScoped(sp => new EfCoreUnitOfWork(

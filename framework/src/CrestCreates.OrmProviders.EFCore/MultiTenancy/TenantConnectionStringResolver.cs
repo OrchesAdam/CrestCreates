@@ -20,7 +20,8 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
                 throw new InvalidOperationException("No tenant is available in the current context.");
             }
 
-            return _currentTenant.Tenant.ConnectionString;
+            return _currentTenant.Tenant.ConnectionString
+                ?? throw new InvalidOperationException($"Tenant '{_currentTenant.Tenant.Name}' has no connection string configured.");
         }
     }
 
@@ -28,32 +29,29 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
     {
         string Resolve();
     }
-}
 
-namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
-{
-    public class TenantDbContextFactory<TDbContext> : IDbContextFactory<TDbContext> 
+    public class TenantDbContextFactory<TDbContext> : IDbContextFactory<TDbContext>
         where TDbContext : DbContext
     {
-        private readonly IServiceProvider _serviceProvider;
         private readonly ITenantConnectionStringResolver _connectionStringResolver;
+        private readonly ITenantDbContextFactory _dbContextFactory;
 
         public TenantDbContextFactory(
-            IServiceProvider serviceProvider, 
-            ITenantConnectionStringResolver connectionStringResolver)
+            ITenantConnectionStringResolver connectionStringResolver,
+            ITenantDbContextFactory dbContextFactory)
         {
-            _serviceProvider = serviceProvider;
             _connectionStringResolver = connectionStringResolver;
+            _dbContextFactory = dbContextFactory;
         }
 
         public TDbContext CreateDbContext()
         {
             var connectionString = _connectionStringResolver.Resolve();
-            
+
             var optionsBuilder = new DbContextOptionsBuilder<TDbContext>();
-            optionsBuilder.UseSqlServer(connectionString); // 或者使用其他数据库提供程序
-            
-            return (TDbContext)Activator.CreateInstance(typeof(TDbContext), optionsBuilder.Options);
+            optionsBuilder.UseSqlServer(connectionString);
+
+            return _dbContextFactory.Create<TDbContext>(optionsBuilder.Options);
         }
     }
 }
