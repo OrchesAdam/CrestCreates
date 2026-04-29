@@ -1,4 +1,3 @@
-using AutoMapper;
 using LibraryManagement.Application.Contracts.DTOs;
 using LibraryManagement.Application.Contracts.Interfaces;
 using LibraryManagement.Domain.Entities;
@@ -25,14 +24,23 @@ public class MemberAppService :CrestAppServiceBase<Member, Guid,MemberDto, Creat
 {
     private readonly IMemberRepository _memberRepository;
     private readonly ILoanRepository _loanRepository;
-    private readonly IMapper _mapper;
 
-    public MemberAppService(ICrestRepositoryBase<Member, Guid> repository, IMapper mapper, IServiceProvider serviceProvider, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, IMemberRepository memberRepository, ILoanRepository loanRepository) : base(repository, mapper, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
+    public MemberAppService(ICrestRepositoryBase<Member, Guid> repository, IServiceProvider serviceProvider, ICurrentUser currentUser, IDataPermissionFilter dataPermissionFilter, IPermissionChecker permissionChecker, IMemberRepository memberRepository, ILoanRepository loanRepository) : base(repository, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
     {
         _memberRepository = memberRepository;
         _loanRepository = loanRepository;
-        _mapper = mapper;
     }
+
+    protected override Member MapToEntity(CreateMemberDto dto)
+        => new Member(Guid.NewGuid(), dto.Name, dto.Email, dto.Type, dto.Phone, dto.Address, dto.ExpiryDate);
+
+    protected override void MapToEntity(MemberDto dto, Member entity)
+    {
+        // MemberDto is used as TUpdateDto — no generated mapper for this direction
+    }
+
+    protected override MemberDto MapToDto(Member entity)
+        => MemberToMemberDtoMapper.ToTarget(entity);
 
     public async Task<MemberDto?> GetByEmailAsync(string email, CancellationToken cancellationToken = default)
     {
@@ -76,7 +84,7 @@ public class MemberAppService :CrestAppServiceBase<Member, Guid,MemberDto, Creat
 
     private async Task<MemberDto> MapToDtoAsync(Member member)
     {
-        var dto = _mapper.Map<MemberDto>(member);
+        var dto = MemberToMemberDtoMapper.ToTarget(member);
         dto.CurrentLoanCount = await _loanRepository.GetActiveLoanCountByMemberAsync(member.Id, CancellationToken.None);
         return dto;
     }
