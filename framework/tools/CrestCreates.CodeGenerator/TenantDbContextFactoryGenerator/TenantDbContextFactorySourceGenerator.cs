@@ -13,6 +13,8 @@ namespace CrestCreates.CodeGenerator.TenantDbContextFactoryGenerator
     [Generator]
     public class TenantDbContextFactorySourceGenerator : IIncrementalGenerator
     {
+        private const string ITenantDbContextFactoryFullName = "CrestCreates.OrmProviders.EFCore.MultiTenancy.ITenantDbContextFactory";
+
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
             var dbContextClasses = context.SyntaxProvider
@@ -22,7 +24,13 @@ namespace CrestCreates.CodeGenerator.TenantDbContextFactoryGenerator
                 .Where(static x => x is not null)
                 .Collect();
 
-            context.RegisterSourceOutput(dbContextClasses, ExecuteGeneration);
+            var hasFactoryInterface = context.CompilationProvider
+                .Select(static (compilation, _) =>
+                    compilation.GetTypeByMetadataName(ITenantDbContextFactoryFullName) is not null);
+
+            var combined = dbContextClasses.Combine(hasFactoryInterface);
+
+            context.RegisterSourceOutput(combined, ExecuteGeneration);
         }
 
         private static bool IsDbContextCandidate(SyntaxNode node)
@@ -57,8 +65,11 @@ namespace CrestCreates.CodeGenerator.TenantDbContextFactoryGenerator
             return null;
         }
 
-        private void ExecuteGeneration(SourceProductionContext context, ImmutableArray<INamedTypeSymbol?> dbContexts)
+        private void ExecuteGeneration(SourceProductionContext context, (ImmutableArray<INamedTypeSymbol?> DbContexts, bool HasFactoryInterface) input)
         {
+            var (dbContexts, hasFactoryInterface) = input;
+
+            if (!hasFactoryInterface) return;
             if (dbContexts.IsDefaultOrEmpty) return;
 
             var processed = new HashSet<string>();
@@ -89,8 +100,8 @@ namespace CrestCreates.CodeGenerator.TenantDbContextFactoryGenerator
             foreach (var dbContext in dbContextList)
             {
                 var fullName = dbContext.ToDisplayString();
-                sb.AppendLine($"        private static TDbContext Create{dbContext.Name}(DbContextOptions<TDbContext> options)");
-                sb.AppendLine($"            => (TDbContext)(object)new {fullName}(options);");
+                sb.AppendLine($"        private static DbContextOptions<{fullName}> CastOptions{dbContext.Name}(DbContextOptions<{fullName}> options) => options;");
+                sb.AppendLine($"        private static {fullName} Create{dbContext.Name}(DbContextOptions<{fullName}> options) => new {fullName}(options);");
                 sb.AppendLine();
             }
 
@@ -103,7 +114,7 @@ namespace CrestCreates.CodeGenerator.TenantDbContextFactoryGenerator
                 var fullName = dbContext.ToDisplayString();
                 var prefix = i == 0 ? "if" : "else if";
                 sb.AppendLine($"            {prefix} (typeof(TDbContext) == typeof({fullName}))");
-                sb.AppendLine($"                return Create{dbContext.Name}(options);");
+                sb.AppendLine($"                return (TDbContext)(object)Create{dbContext.Name}(CastOptions{dbContext.Name}((DbContextOptions<{fullName}>)(object)options));");
             }
 
             sb.AppendLine("            throw new InvalidOperationException($\"No factory registered for {typeof(TDbContext).Name}. Register an ITenantDbContextFactory or ensure the DbContext is discoverable by the source generator.\");");

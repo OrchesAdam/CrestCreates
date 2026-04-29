@@ -1,0 +1,7 @@
+<Project>
+  <!-- 测试项目禁用 AoT（Moq/Castle.DynamicProxy 需要运行时代码生成） -->
+  <PropertyGroup Condition="$(IsTestProject) == 'true'">
+    <PublishAot>false</PublishAot>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+  </PropertyGroup>
+</Project>
