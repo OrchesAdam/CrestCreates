@@ -179,13 +179,14 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     var generateController = GetAttributeBooleanValue(entityClass, "GenerateController", false);
                     var controllerRoute = GetCrudControllerRoute(entityClass, entityName);
 
+                    var dtosNamespace = $"{namespaceName}.Dtos";
                     GenerateEntityDto(context, entityClass, entityName, namespaceName, properties);
                     GenerateCreateEntityDto(context, entityClass, entityName, namespaceName, properties);
                     GenerateUpdateEntityDto(context, entityClass, entityName, namespaceName, properties);
                     GenerateEntityListRequestDto(context, entityClass, entityName, namespaceName, properties);
                     GenerateCrudServiceInterface(context, entityClass, entityName, namespaceName, idType, generateController, controllerRoute);
                     GenerateCrudServiceImplementation(context, entityClass, entityName, namespaceName, idType, properties, generateAsBaseClass);
-                    GenerateMappingProfile(context, entityClass, entityName, namespaceName);
+                    GenerateObjectMappingDeclarations(context, entityName, namespaceName, dtosNamespace);
                 }
                 catch (Exception ex)
                 {
@@ -495,7 +496,6 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("using System.Linq.Expressions;");
             builder.AppendLine("using System.Threading;");
             builder.AppendLine("using System.Threading.Tasks;");
-            builder.AppendLine("using AutoMapper;");
             builder.AppendLine("using Microsoft.EntityFrameworkCore;");
             builder.AppendLine("using CrestCreates.Application.Contracts.DTOs.Common;");
             builder.AppendLine("using CrestCreates.Domain.Exceptions;");
@@ -503,12 +503,12 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine($"using {namespaceName}.Dtos;");
             builder.AppendLine($"using {namespaceName}.Repositories;");
             builder.AppendLine($"using {namespaceName}.Services;");
+            builder.AppendLine($"using {namespaceName}.Mappings;");
             builder.AppendLine();
             builder.AppendLine($"namespace {namespaceName}.Services");
             builder.AppendLine("{");
             builder.AppendLine("    /// <summary>");
             var className = generateAsBaseClass ? $"{entityName}CrudServiceBase" : $"{entityName}CrudService";
-            var classModifier = generateAsBaseClass ? "abstract" : "";
             if (generateAsBaseClass)
             {
                 builder.AppendLine($"    /// {entityName} 的 CRUD 服务基类");
@@ -519,56 +519,57 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 builder.AppendLine($"    /// {entityName} CRUD 服务实现");
             }
             builder.AppendLine("    /// </summary>");
-            builder.AppendLine($"    public {classModifier} class {className} : I{entityName}CrudService");
+            builder.AppendLine($"    public abstract class {className} : I{entityName}CrudService");
             builder.AppendLine("    {");
 
             builder.AppendLine($"        protected readonly I{entityName}Repository _repository;");
-            builder.AppendLine("        protected readonly IMapper _mapper;");
             builder.AppendLine();
 
-            var modifier = generateAsBaseClass ? "protected" : "public";
-            builder.AppendLine($"        {modifier} {className}(I{entityName}Repository repository, IMapper mapper)");
+            builder.AppendLine($"        protected {className}(I{entityName}Repository repository)");
             builder.AppendLine("        {");
             builder.AppendLine("            _repository = repository ?? throw new ArgumentNullException(nameof(repository));");
-            builder.AppendLine("            _mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));");
             builder.AppendLine("        }");
             builder.AppendLine();
 
-            var methodModifier = generateAsBaseClass ? "virtual" : "";
+            builder.AppendLine("        /// <summary>");
+            builder.AppendLine($"        /// 将创建 DTO 映射为实体");
+            builder.AppendLine("        /// </summary>");
+            builder.AppendLine($"        protected abstract {entityName} MapToEntity(Create{entityName}Dto dto);");
+            builder.AppendLine();
 
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// 创建 {entityName}");
             builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        public {methodModifier} async Task<{entityName}Dto> CreateAsync(Create{entityName}Dto input, CancellationToken cancellationToken = default)");
+            builder.AppendLine($"        public virtual async Task<{entityName}Dto> CreateAsync(Create{entityName}Dto input, CancellationToken cancellationToken = default)");
             builder.AppendLine("        {");
             builder.AppendLine("            if (input == null)");
             builder.AppendLine("                throw new ArgumentNullException(nameof(input));");
             builder.AppendLine();
-            builder.AppendLine($"            var entity = _mapper.Map<{entityName}>(input);");
+            builder.AppendLine($"            var entity = MapToEntity(input);");
             builder.AppendLine($"            await OnCreatingAsync(entity, cancellationToken);");
             builder.AppendLine("            entity = await _repository.AddAsync(entity, cancellationToken);");
             builder.AppendLine($"            await OnCreatedAsync(entity, cancellationToken);");
-            builder.AppendLine($"            return _mapper.Map<{entityName}Dto>(entity);");
+            builder.AppendLine($"            return {entityName}To{entityName}DtoMapper.ToTarget(entity);");
             builder.AppendLine("        }");
             builder.AppendLine();
 
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// 根据 ID 获取 {entityName}");
             builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        public {methodModifier} async Task<{entityName}Dto?> GetByIdAsync({idType} id, CancellationToken cancellationToken = default)");
+            builder.AppendLine($"        public virtual async Task<{entityName}Dto?> GetByIdAsync({idType} id, CancellationToken cancellationToken = default)");
             builder.AppendLine("        {");
             builder.AppendLine("            var entity = await _repository.GetByIdAsync(id, cancellationToken);");
             builder.AppendLine("            if (entity == null)");
             builder.AppendLine("                return null;");
             builder.AppendLine();
-            builder.AppendLine($"            return _mapper.Map<{entityName}Dto>(entity);");
+            builder.AppendLine($"            return {entityName}To{entityName}DtoMapper.ToTarget(entity);");
             builder.AppendLine("        }");
             builder.AppendLine();
 
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// 获取 {entityName} 分页列表");
             builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        public {methodModifier} async Task<PagedResultDto<{entityName}Dto>> GetListAsync({entityName}ListRequestDto input, CancellationToken cancellationToken = default)");
+            builder.AppendLine($"        public virtual async Task<PagedResultDto<{entityName}Dto>> GetListAsync({entityName}ListRequestDto input, CancellationToken cancellationToken = default)");
             builder.AppendLine("        {");
             builder.AppendLine("            if (input == null)");
             builder.AppendLine("                throw new ArgumentNullException(nameof(input));");
@@ -631,7 +632,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("                ascending: false,");
             builder.AppendLine("                cancellationToken: cancellationToken);");
             builder.AppendLine();
-            builder.AppendLine($"            var dtos = _mapper.Map<List<{entityName}Dto>>(items);");
+            builder.AppendLine($"            var dtos = items.Select({entityName}To{entityName}DtoMapper.ToTarget).ToList();");
             builder.AppendLine("            return new PagedResultDto<" + entityName + "Dto>(dtos, totalCount, input.PageNumber, input.PageSize);");
             builder.AppendLine("        }");
             builder.AppendLine();
@@ -639,7 +640,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// 更新 {entityName}");
             builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        public {methodModifier} async Task<{entityName}Dto> UpdateAsync({idType} id, Update{entityName}Dto input, CancellationToken cancellationToken = default)");
+            builder.AppendLine($"        public virtual async Task<{entityName}Dto> UpdateAsync({idType} id, Update{entityName}Dto input, CancellationToken cancellationToken = default)");
             builder.AppendLine("        {");
             builder.AppendLine("            if (input == null)");
             builder.AppendLine("                throw new ArgumentNullException(nameof(input));");
@@ -649,17 +650,17 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine($"                throw new EntityNotFoundException(typeof({entityName}), id);");
             builder.AppendLine();
             builder.AppendLine($"            await OnUpdatingAsync(entity, input, cancellationToken);");
-            builder.AppendLine("            _mapper.Map(input, entity);");
+            builder.AppendLine($"            Update{entityName}DtoTo{entityName}Mapper.Apply(input, entity);");
             builder.AppendLine("            entity = await _repository.UpdateAsync(entity, cancellationToken);");
             builder.AppendLine($"            await OnUpdatedAsync(entity, cancellationToken);");
-            builder.AppendLine($"            return _mapper.Map<{entityName}Dto>(entity);");
+            builder.AppendLine($"            return {entityName}To{entityName}DtoMapper.ToTarget(entity);");
             builder.AppendLine("        }");
             builder.AppendLine();
 
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// 删除 {entityName}");
             builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        public {methodModifier} async Task DeleteAsync({idType} id, CancellationToken cancellationToken = default)");
+            builder.AppendLine($"        public virtual async Task DeleteAsync({idType} id, CancellationToken cancellationToken = default)");
             builder.AppendLine("        {");
             builder.AppendLine("            var entity = await _repository.GetByIdAsync(id, cancellationToken);");
             builder.AppendLine("            if (entity == null)");
@@ -685,68 +686,65 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine($"            return Expression.Lambda<Func<{entityName}, bool>>(body, parameter);");
             builder.AppendLine("        }");
 
-            if (generateAsBaseClass)
-            {
-                builder.AppendLine();
-                builder.AppendLine("        #region 钩子方法");
-                builder.AppendLine();
+            builder.AppendLine();
+            builder.AppendLine("        #region 钩子方法");
+            builder.AppendLine();
 
-                builder.AppendLine("        /// <summary>");
-                builder.AppendLine($"        /// 创建实体前调用的钩子方法");
-                builder.AppendLine("        /// </summary>");
-                builder.AppendLine($"        protected virtual Task OnCreatingAsync({entityName} entity, CancellationToken cancellationToken = default)");
-                builder.AppendLine("        {");
-                builder.AppendLine("            return Task.CompletedTask;");
-                builder.AppendLine("        }");
-                builder.AppendLine();
+            builder.AppendLine("        /// <summary>");
+            builder.AppendLine($"        /// 创建实体前调用的钩子方法");
+            builder.AppendLine("        /// </summary>");
+            builder.AppendLine($"        protected virtual Task OnCreatingAsync({entityName} entity, CancellationToken cancellationToken = default)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            return Task.CompletedTask;");
+            builder.AppendLine("        }");
+            builder.AppendLine();
 
-                builder.AppendLine("        /// <summary>");
-                builder.AppendLine($"        /// 创建实体后调用的钩子方法");
-                builder.AppendLine("        /// </summary>");
-                builder.AppendLine($"        protected virtual Task OnCreatedAsync({entityName} entity, CancellationToken cancellationToken = default)");
-                builder.AppendLine("        {");
-                builder.AppendLine("            return Task.CompletedTask;");
-                builder.AppendLine("        }");
-                builder.AppendLine();
+            builder.AppendLine("        /// <summary>");
+            builder.AppendLine($"        /// 创建实体后调用的钩子方法");
+            builder.AppendLine("        /// </summary>");
+            builder.AppendLine($"        protected virtual Task OnCreatedAsync({entityName} entity, CancellationToken cancellationToken = default)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            return Task.CompletedTask;");
+            builder.AppendLine("        }");
+            builder.AppendLine();
 
-                builder.AppendLine("        /// <summary>");
-                builder.AppendLine($"        /// 更新实体前调用的钩子方法");
-                builder.AppendLine("        /// </summary>");
-                builder.AppendLine($"        protected virtual Task OnUpdatingAsync({entityName} entity, Update{entityName}Dto input, CancellationToken cancellationToken = default)");
-                builder.AppendLine("        {");
-                builder.AppendLine("            return Task.CompletedTask;");
-                builder.AppendLine("        }");
-                builder.AppendLine();
+            builder.AppendLine("        /// <summary>");
+            builder.AppendLine($"        /// 更新实体前调用的钩子方法");
+            builder.AppendLine("        /// </summary>");
+            builder.AppendLine($"        protected virtual Task OnUpdatingAsync({entityName} entity, Update{entityName}Dto input, CancellationToken cancellationToken = default)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            return Task.CompletedTask;");
+            builder.AppendLine("        }");
+            builder.AppendLine();
 
-                builder.AppendLine("        /// <summary>");
-                builder.AppendLine($"        /// 更新实体后调用的钩子方法");
-                builder.AppendLine("        /// </summary>");
-                builder.AppendLine($"        protected virtual Task OnUpdatedAsync({entityName} entity, CancellationToken cancellationToken = default)");
-                builder.AppendLine("        {");
-                builder.AppendLine("            return Task.CompletedTask;");
-                builder.AppendLine("        }");
-                builder.AppendLine();
+            builder.AppendLine("        /// <summary>");
+            builder.AppendLine($"        /// 更新实体后调用的钩子方法");
+            builder.AppendLine("        /// </summary>");
+            builder.AppendLine($"        protected virtual Task OnUpdatedAsync({entityName} entity, CancellationToken cancellationToken = default)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            return Task.CompletedTask;");
+            builder.AppendLine("        }");
+            builder.AppendLine();
 
-                builder.AppendLine("        /// <summary>");
-                builder.AppendLine($"        /// 删除实体前调用的钩子方法");
-                builder.AppendLine("        /// </summary>");
-                builder.AppendLine($"        protected virtual Task OnDeletingAsync({entityName} entity, CancellationToken cancellationToken = default)");
-                builder.AppendLine("        {");
-                builder.AppendLine("            return Task.CompletedTask;");
-                builder.AppendLine("        }");
-                builder.AppendLine();
+            builder.AppendLine("        /// <summary>");
+            builder.AppendLine($"        /// 删除实体前调用的钩子方法");
+            builder.AppendLine("        /// </summary>");
+            builder.AppendLine($"        protected virtual Task OnDeletingAsync({entityName} entity, CancellationToken cancellationToken = default)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            return Task.CompletedTask;");
+            builder.AppendLine("        }");
+            builder.AppendLine();
 
-                builder.AppendLine("        /// <summary>");
-                builder.AppendLine($"        /// 删除实体后调用的钩子方法");
-                builder.AppendLine("        /// </summary>");
-                builder.AppendLine($"        protected virtual Task OnDeletedAsync({entityName} entity, CancellationToken cancellationToken = default)");
-                builder.AppendLine("        {");
-                builder.AppendLine("            return Task.CompletedTask;");
-                builder.AppendLine("        }");
-                builder.AppendLine();
+            builder.AppendLine("        /// <summary>");
+            builder.AppendLine($"        /// 删除实体后调用的钩子方法");
+            builder.AppendLine("        /// </summary>");
+            builder.AppendLine($"        protected virtual Task OnDeletedAsync({entityName} entity, CancellationToken cancellationToken = default)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            return Task.CompletedTask;");
+            builder.AppendLine("        }");
+            builder.AppendLine();
 
-                builder.AppendLine("        #endregion");
-            }
+            builder.AppendLine("        #endregion");
 
             builder.AppendLine("    }");
             builder.AppendLine("}");
@@ -754,32 +752,25 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             context.AddSource($"{className}.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
-        private void GenerateMappingProfile(SourceProductionContext context, INamedTypeSymbol entityClass, string entityName, string namespaceName)
+        private void GenerateObjectMappingDeclarations(SourceProductionContext context, string entityName, string namespaceName, string dtosNamespace)
         {
             var builder = new StringBuilder();
             builder.AppendLine("#nullable enable");
             builder.AppendLine("// <auto-generated />");
-            builder.AppendLine("using AutoMapper;");
+            builder.AppendLine("using CrestCreates.Domain.Shared.ObjectMapping;");
             builder.AppendLine($"using {namespaceName};");
-            builder.AppendLine($"using {namespaceName}.Dtos;");
+            builder.AppendLine($"using {dtosNamespace};");
             builder.AppendLine();
             builder.AppendLine($"namespace {namespaceName}.Mappings");
             builder.AppendLine("{");
-            builder.AppendLine("    /// <summary>");
-            builder.AppendLine($"    /// {entityName} AutoMapper 映射配置");
-            builder.AppendLine("    /// </summary>");
-            builder.AppendLine($"    public class {entityName}MappingProfile : Profile");
-            builder.AppendLine("    {");
-            builder.AppendLine($"        public {entityName}MappingProfile()");
-            builder.AppendLine("        {");
-            builder.AppendLine($"            CreateMap<{entityName}, {entityName}Dto>();");
-            builder.AppendLine($"            CreateMap<Create{entityName}Dto, {entityName}>();");
-            builder.AppendLine($"            CreateMap<Update{entityName}Dto, {entityName}>();");
-            builder.AppendLine("        }");
-            builder.AppendLine("    }");
+            builder.AppendLine($"    [GenerateObjectMapping(typeof({entityName}), typeof({entityName}Dto))]");
+            builder.AppendLine($"    public static partial class {entityName}To{entityName}DtoMapper {{ }}");
+            builder.AppendLine();
+            builder.AppendLine($"    [GenerateObjectMapping(typeof(Update{entityName}Dto), typeof({entityName}), Direction = MapDirection.Apply)]");
+            builder.AppendLine($"    public static partial class Update{entityName}DtoTo{entityName}Mapper {{ }}");
             builder.AppendLine("}");
 
-            context.AddSource($"{entityName}MappingProfile.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
+            context.AddSource($"{entityName}ObjectMappings.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
         private string GetEntityIdType(INamedTypeSymbol entityClass)
