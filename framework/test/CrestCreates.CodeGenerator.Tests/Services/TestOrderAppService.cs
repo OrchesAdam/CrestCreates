@@ -28,19 +28,15 @@ public class TestOrderAppService : CrestAppServiceBase<TestOrder, long, TestOrde
 
     protected override TestOrder MapToEntity(CreateTestOrderDto dto)
     {
-        return new TestOrder
-        {
-            OrderNumber = dto.OrderNumber,
-            CustomerId = dto.CustomerId,
-            TotalAmount = dto.TotalAmount,
-            Notes = dto.Notes ?? string.Empty
-        };
+        var order = new TestOrder(0, dto.OrderNumber, dto.CustomerId, dto.TotalAmount);
+        order.SetNotes(dto.Notes ?? string.Empty);
+        return order;
     }
 
     protected override void MapToEntity(UpdateTestOrderDto dto, TestOrder entity)
     {
         if (dto.Notes != null)
-            entity.Notes = dto.Notes;
+            entity.SetNotes(dto.Notes);
     }
 
     protected override TestOrderDto MapToDto(TestOrder entity)
@@ -52,7 +48,7 @@ public class TestOrderAppService : CrestAppServiceBase<TestOrder, long, TestOrde
             CustomerId = entity.CustomerId,
             TotalAmount = entity.TotalAmount,
             OrderDate = entity.OrderDate,
-            Status = entity.Status,
+            Status = (int)entity.Status,
             Notes = entity.Notes
         };
     }

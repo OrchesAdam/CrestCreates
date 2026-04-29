@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import graphify\")",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(python *)",
+      "Bash(git *)",
+      "Bash(taskkill //PID 41300 //F)",
+      "Bash(dotnet msbuild *)",
+      "Bash(taskkill //PID 23232 //F)",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(taskkill //F //IM \"OmniSharpServer.exe\")",
+      "Bash(taskkill //F //PID 2148)"
+    ]
+  }
+}

@@ -79,7 +79,6 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                     GenerateEntityDto(context, entityClass);
                     GenerateCreateEntityDto(context, entityClass);
                     GenerateUpdateEntityDto(context, entityClass);
-                    GenerateObjectMappingDeclarations(context, entityClass);
                     GenerateEntityExtensions(context, entityClass);
                     GenerateValidationRules(context, entityClass);
 

@@ -186,7 +186,6 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     GenerateEntityListRequestDto(context, entityClass, entityName, namespaceName, properties);
                     GenerateCrudServiceInterface(context, entityClass, entityName, namespaceName, idType, generateController, controllerRoute);
                     GenerateCrudServiceImplementation(context, entityClass, entityName, namespaceName, idType, properties, generateAsBaseClass);
-                    GenerateObjectMappingDeclarations(context, entityName, namespaceName, dtosNamespace);
                 }
                 catch (Exception ex)
                 {
