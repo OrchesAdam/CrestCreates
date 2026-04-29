@@ -498,7 +498,6 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("using AutoMapper;");
             builder.AppendLine("using Microsoft.EntityFrameworkCore;");
             builder.AppendLine("using CrestCreates.Application.Contracts.DTOs.Common;");
-            builder.AppendLine("using CrestCreates.Domain.Shared.DTOs;");
             builder.AppendLine("using CrestCreates.Domain.Exceptions;");
             builder.AppendLine($"using {namespaceName};");
             builder.AppendLine($"using {namespaceName}.Dtos;");
