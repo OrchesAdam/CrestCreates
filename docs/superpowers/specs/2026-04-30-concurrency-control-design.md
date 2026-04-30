@@ -121,8 +121,7 @@ public virtual async Task DeleteAsync(Guid id, string? expectedStamp = null, Can
     {
         if (string.IsNullOrEmpty(expectedStamp))
         {
-            throw new InvalidOperationException(
-                $"DELETE on {typeof(Book).Name} requires If-Match header with current ConcurrencyStamp.");
+            throw new CrestPreconditionRequiredException(typeof(Book).Name, id);
         }
         await _repository.DeleteAsync(id, expectedStamp!, ct);
         return;
@@ -133,7 +132,7 @@ public virtual async Task DeleteAsync(Guid id, string? expectedStamp = null, Can
 }
 ```
 
-Missing `If-Match` → `InvalidOperationException` → middleware maps to **428 Precondition Required**.
+Missing `If-Match` → `CrestPreconditionRequiredException` → middleware maps to **428 Precondition Required**.
 
 ### 3.4 Server-Side / Internal Delete (non-CRUD)
 
@@ -294,11 +293,33 @@ public class CrestConcurrencyException : Exception
 }
 ```
 
-### 7.2 Application Service — re-throw white list
+### 7.2 `CrestPreconditionRequiredException`
+
+**File**: `framework/src/CrestCreates.Domain/Exceptions/CrestPreconditionRequiredException.cs`
+
+```csharp
+public class CrestPreconditionRequiredException : Exception
+{
+    public string EntityType { get; }
+    public object? EntityId { get; }
+
+    public CrestPreconditionRequiredException(string entityType, object? entityId)
+        : base($"Precondition required: DELETE on {entityType} (Id={entityId}) "
+             + "requires If-Match header with current ConcurrencyStamp.")
+    {
+        EntityType = entityType;
+        EntityId = entityId;
+    }
+}
+```
+
+Thrown by the generated CRUD service when an `IHasConcurrencyStamp` entity is deleted without the `If-Match` header. Mapped to HTTP 428 in the middleware.
+
+### 7.3 Application Service — re-throw white list
 
 `CrestAppServiceBase.UpdateAsync` and `DeleteAsync` catch blocks: add `catch (CrestConcurrencyException) { throw; }` before `catch (Exception)`.
 
-### 7.3 Middleware — 409 and 428 mapping
+### 7.4 Middleware — 409 and 428 mapping
 
 **File**: `framework/src/CrestCreates.AspNetCore/Middlewares/ExceptionHandlingMiddleware.cs`
 
@@ -311,13 +332,14 @@ case CrestConcurrencyException concurrencyEx:
     errorResponse.Details = concurrencyEx.Message;
     break;
 
-case InvalidOperationException opEx when opEx.Message.Contains("If-Match"):
+case CrestPreconditionRequiredException preEx:
     context.Response.StatusCode = 428;                            // Precondition Required
     errorResponse.Message = "请求缺少 If-Match 头，请提供当前 ConcurrencyStamp";
+    errorResponse.Details = preEx.Message;
     break;
 ```
 
-### 7.4 Legacy path: CrudServiceBase
+### 7.5 Legacy path: CrudServiceBase
 
 `CrudServiceBase` and `ICrudService` are **legacy**. Mark with:
 
@@ -368,7 +390,7 @@ The generated CRUD service is the official main chain. Its `UpdateAsync` and `De
 | 5 | `Delete_WithCorrectStamp_ShouldSucceed` | Matching `If-Match` → 204 |
 | 6 | `Delete_WithStaleStamp_ShouldThrowConcurrencyException` | Stale `If-Match` → `CrestConcurrencyException` |
 | 7 | `Delete_WithStaleStamp_ShouldReturn409` | API: stale `If-Match` DELETE → HTTP 409 |
-| 8 | `Delete_ConcurrentEntity_WithoutIfMatch_ShouldReturn428` | Missing `If-Match` on concurrent entity → 428 |
+| 8 | `Delete_ConcurrentEntity_WithoutIfMatch_ShouldReturn428` | Missing `If-Match` on concurrent entity → `CrestPreconditionRequiredException` → 428 |
 | 9 | `Delete_NonConcurrentEntity_WithoutIfMatch_ShouldSucceed` | Non-concurrency entity: delete succeeds without header |
 | 10 | `Entity_WithoutConcurrency_ShouldStillWork` | No `IHasConcurrencyStamp` → old behavior |
 | 11 | `NewEntity_GetsConcurrencyStampOnConstruction` | New AuditedEntity → stamp is non-empty GUID |
@@ -390,6 +412,7 @@ The generated CRUD service is the official main chain. Its `UpdateAsync` and `De
 | `Domain/.../AuditedEntity.cs` | Add `ConcurrencyStamp` + `IHasConcurrencyStamp` |
 | `Domain/.../AuditedAggregateRoot.cs` | Add `ConcurrencyStamp` + `IHasConcurrencyStamp` |
 | `Domain/.../CrestConcurrencyException.cs` | New |
+| `Domain/.../CrestPreconditionRequiredException.cs` | New |
 | `Domain/.../ICrestRepositoryBase.cs` | Add `DeleteAsync(TKey, string expectedStamp, ...)` |
 | `Domain/.../CrestRepositoryBase.cs` | Add abstract `DeleteAsync(TKey, string expectedStamp, ...)` |
 | `OrmProviders.EFCore/.../ModelBuilderExtensions.cs` | New: `ConfigureConcurrencyStamp()` |
