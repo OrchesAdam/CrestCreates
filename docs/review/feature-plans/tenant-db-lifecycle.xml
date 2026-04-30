@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="tenant-db-lifecycle" group="先做" priority="P0" status="draft">
+  <title>多租户数据库初始化与迁移</title>
+  <goal>把租户从“能解析上下文”推进到“创建后能自动完成数据库初始化、迁移和种子数据”。</goal>
+  <scope>
+    <item>租户创建时触发数据库初始化主链。</item>
+    <item>支持 host 库、共享库、租户独立库三类场景的清晰边界。</item>
+    <item>记录初始化/迁移状态，失败可查询、可重试。</item>
+    <item>种子数据包括管理员用户、角色、默认权限、默认设置、默认功能值。</item>
+  </scope>
+  <nonGoals>
+    <item>不做 ad-hoc 业务样例初始化逻辑。</item>
+    <item>不把 TenantName 当上下文主键，统一使用 TenantId。</item>
+    <item>不引入运行时扫描 DbContext 的长期主链；能生成就生成。</item>
+  </nonGoals>
+  <implementation>
+    <component name="abstractions">
+      <step>新增 ITenantDatabaseInitializer，负责单租户数据库初始化。</step>
+      <step>新增 ITenantMigrationRunner，负责执行迁移并返回结构化结果。</step>
+      <step>新增 TenantInitializationResult、TenantInitializationStatus。</step>
+    </component>
+    <component name="application">
+      <step>TenantManager 创建租户后调用 TenantBootstrapper。</step>
+      <step>TenantBootstrapper 顺序执行数据库迁移、基础数据种子、设置/功能默认值。</step>
+      <step>失败时记录状态，不吞异常，不继续创建假成功租户。</step>
+    </component>
+    <component name="efcore">
+      <step>TenantConnectionStringResolver 只负责解析连接串，不负责迁移编排。</step>
+      <step>为租户独立库提供明确 migrator，不在业务服务里直接 Database.Migrate。</step>
+    </component>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>创建新租户后，该租户可立即登录或完成首次访问所需基础数据。</criterion>
+    <criterion>租户初始化失败有状态记录和错误信息。</criterion>
+    <criterion>重复初始化同一租户是幂等的。</criterion>
+    <criterion>租户连接串为空时走共享库策略；非空时走独立库策略。</criterion>
+    <criterion>测试覆盖成功、失败、重试、共享库、独立库。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>CreateTenant_ShouldInitializeDatabaseAndSeedAdmin</test>
+    <test>CreateTenant_WithMigrationFailure_ShouldRecordFailedStatus</test>
+    <test>RetryTenantInitialization_ShouldBeIdempotent</test>
+    <test>TenantIndependentDatabase_ShouldUseTenantConnectionString</test>
+  </tests>
+  <reviewChecklist>
+    <item>没有混用 TenantName 作为上下文主键。</item>
+    <item>初始化逻辑不写在 Web 层或 sample 层。</item>
+    <item>失败状态可观测，不是只写日志。</item>
+  </reviewChecklist>
+</featurePlan>

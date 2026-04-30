@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="dynamic-api-mainline" group="先做" priority="P0" status="draft">
+  <title>Dynamic API 主链收口</title>
+  <goal>让 Dynamic API 的正式路径只走编译期生成，停止强化 runtime scanner/executor。</goal>
+  <scope>
+    <item>Generated endpoint 是唯一正式执行路径。</item>
+    <item>Generated registry 提供路由、参数、HTTP method、权限等元数据。</item>
+    <item>测试和文档表达 generated path 是主链。</item>
+  </scope>
+  <nonGoals>
+    <item>不再给 DynamicApiScanner 加新能力。</item>
+    <item>不再给 DynamicApiEndpointExecutor 加 fallback 能力。</item>
+    <item>不做 runtime reflection 兼容路径的长期维护。</item>
+  </nonGoals>
+  <implementation>
+    <step>盘点 Dynamic API runtime scanner/executor 当前使用点。</step>
+    <step>把新增功能只接入 DynamicApiAotSourceGenerator。</step>
+    <step>新增 generated endpoint manifest，便于测试断言生成结果。</step>
+    <step>给 legacy runtime path 标注 Obsolete 或 internal legacy 注释。</step>
+    <step>修改测试：新主场景只测 generated path。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>sample 中 Dynamic API endpoint 均由生成代码注册。</criterion>
+    <criterion>CI 测试能证明 generated runtime 正常执行 CRUD/普通 app service。</criterion>
+    <criterion>没有新增 runtime scanner/executor 功能测试。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>GeneratedDynamicApi_ShouldRegisterExpectedEndpoints</test>
+    <test>GeneratedDynamicApi_ShouldBindRouteAndBodyParameters</test>
+    <test>GeneratedDynamicApi_ShouldUseUnitOfWorkForWriteEndpoints</test>
+  </tests>
+  <reviewChecklist>
+    <item>没有新增反射扫描作为主路径。</item>
+    <item>权限、UoW、异常都接 generated runtime。</item>
+  </reviewChecklist>
+</featurePlan>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="setting-management-mainline" group="先做" priority="P0" status="draft">
+  <title>设置管理收口</title>
+  <goal>所有运行时可管理配置统一进入 Setting Management，避免新模块各自造配置表。</goal>
+  <scope>
+    <item>统一 host、tenant、user 三类作用域。</item>
+    <item>支持缓存、加密、默认值、删除恢复默认值。</item>
+    <item>新模块配置必须通过 setting definition 定义。</item>
+  </scope>
+  <nonGoals>
+    <item>不把 feature flag 塞进 setting；Feature Management 单独处理。</item>
+    <item>不允许模块直接访问自建配置表作为运行时配置主链。</item>
+  </nonGoals>
+  <implementation>
+    <step>补 SettingDefinition 和 provider 注册规范。</step>
+    <step>盘点已有运行时配置入口，列出迁移表。</step>
+    <step>SettingManager 设置值后发布缓存失效事件。</step>
+    <step>敏感 setting 支持加密存储和解密读取。</step>
+    <step>SettingAppService 暴露 host/current tenant/current user 管理接口。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>同名 setting 的解析顺序稳定：user > tenant > host > default。</criterion>
+    <criterion>删除作用域值后回退到上一级值。</criterion>
+    <criterion>设置变更后缓存失效。</criterion>
+    <criterion>敏感设置不会明文持久化。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>GetAsync_ShouldUseScopePrecedence</test>
+    <test>SetTenantAsync_ShouldInvalidateCache</test>
+    <test>EncryptedSetting_ShouldStoreCipherText</test>
+    <test>RemoveUserAsync_ShouldFallbackToTenantValue</test>
+  </tests>
+  <reviewChecklist>
+    <item>没有新增 ad-hoc 配置表。</item>
+    <item>tenant id 使用 CurrentTenant.Id，不使用 TenantName。</item>
+  </reviewChecklist>
+</featurePlan>

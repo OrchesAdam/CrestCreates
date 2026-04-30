@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="concurrency-control" group="先做" priority="P0" status="designed">
+  <title>并发控制</title>
+  <goal>建立统一乐观并发主链，避免用户用旧数据覆盖或删除新数据。</goal>
+  <relatedSpecs>
+    <spec path="../superpowers/specs/2026-04-30-concurrency-control-design.md">已完成细化设计，作为实现主文档。</spec>
+  </relatedSpecs>
+  <scope>
+    <item>新增 IHasConcurrencyStamp，AuditedEntity/AuditedAggregateRoot 默认携带 ConcurrencyStamp。</item>
+    <item>Update 使用客户端传回的 expected stamp，仓储 WHERE 检查旧 stamp，并生成新 stamp。</item>
+    <item>Delete 对并发实体强制 If-Match，缺失返回 428，stamp 不匹配返回 409。</item>
+    <item>EF Core、FreeSql、SqlSugar 三套仓储主链行为一致。</item>
+  </scope>
+  <nonGoals>
+    <item>不支持 RowVersion 第二方案。</item>
+    <item>不让 CrudServiceBase 进入并发主链；它标记 legacy。</item>
+    <item>UpdateRangeAsync 不支持并发实体，直接抛 NotSupportedException。</item>
+  </nonGoals>
+  <implementation>
+    <step order="1">Domain.Shared 新增 IHasConcurrencyStamp。</step>
+    <step order="2">Domain 新增 CrestConcurrencyException 和 CrestPreconditionRequiredException。</step>
+    <step order="3">AuditedEntity/AuditedAggregateRoot 添加 ConcurrencyStamp。</step>
+    <step order="4">ICrestRepositoryBase/CrestRepositoryBase 增加 DeleteAsync(id, expectedStamp)。</step>
+    <step order="5">EF Core 仓储 update/delete 使用 ConcurrencyStamp WHERE；DbUpdateConcurrencyException 转 CrestConcurrencyException。</step>
+    <step order="6">FreeSql/SqlSugar update/delete 使用 Id + ConcurrencyStamp 条件更新/删除，affected rows 为 0 抛异常。</step>
+    <step order="7">CrudControllerBase 读取 If-Match header 并传给 ICrudAppService.DeleteAsync。</step>
+    <step order="8">CrudServiceSourceGenerator 生成带 expectedStamp 的 DeleteAsync，并对并发实体强制要求 If-Match。</step>
+    <step order="9">ExceptionHandlingMiddleware 映射 CrestConcurrencyException=409，CrestPreconditionRequiredException=428。</step>
+    <step order="10">EF Core ConfigureConcurrencyStamp 扩展，并在框架/样例 DbContext 调用。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>更新成功后返回 DTO 的 ConcurrencyStamp 必须变化。</criterion>
+    <criterion>旧 stamp 更新返回 409，不覆盖数据库。</criterion>
+    <criterion>并发实体 DELETE 缺 If-Match 返回 428。</criterion>
+    <criterion>并发实体 DELETE 旧 If-Match 返回 409。</criterion>
+    <criterion>非并发实体保持旧行为。</criterion>
+    <criterion>所有已知 DbContext 中 IHasConcurrencyStamp 实体的 ConcurrencyStamp 是 EF concurrency token。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>Update_WithCorrectStamp_ShouldSucceed</test>
+    <test>Update_WithStaleStamp_ShouldReturn409</test>
+    <test>Delete_ConcurrentEntity_WithoutIfMatch_ShouldReturn428</test>
+    <test>Delete_WithStaleIfMatch_ShouldReturn409</test>
+    <test>UpdateRangeAsync_WithConcurrentEntity_ThrowsNotSupported</test>
+    <test>AllDbContexts_ConcurrencyToken_IsConfigured</test>
+  </tests>
+  <reviewChecklist>
+    <item>没有引入 RowVersion 或第二套并发方案。</item>
+    <item>没有让 runtime reflection 成为并发主路径。</item>
+    <item>异常没有被 CrestAppServiceBase catch-all 包成 500。</item>
+    <item>生成器和手写主链行为一致。</item>
+  </reviewChecklist>
+</featurePlan>

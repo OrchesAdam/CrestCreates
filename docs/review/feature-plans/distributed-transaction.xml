@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="distributed-transaction" group="第三批" priority="P2" status="draft">
+  <title>分布式事务</title>
+  <goal>让 CAP、事务日志、补偿和重试形成稳定可运维闭环。</goal>
+  <scope>
+    <item>事务状态机、事务日志、补偿记录。</item>
+    <item>补偿执行器注册和幂等。</item>
+    <item>后台重试和可观测性。</item>
+  </scope>
+  <nonGoals>
+    <item>不把 CAP runtime subscriber 作为普通 EventBus 的主设计依据。</item>
+    <item>不承诺强一致两阶段提交。</item>
+  </nonGoals>
+  <implementation>
+    <step>定义 TransactionStatus 和 CompensationStatus 状态流转。</step>
+    <step>PersistentTransactionLogger 记录 begin/commit/fail。</step>
+    <step>CompensationExecutorRegistry 由属性或生成器注册执行器。</step>
+    <step>CompensationRetryBackgroundService 指数退避重试。</step>
+    <step>补偿执行必须幂等，按 compensation id 去重。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>事务失败后能看到失败原因和补偿状态。</criterion>
+    <criterion>补偿重复执行不会造成重复副作用。</criterion>
+    <criterion>后台重试达到最大次数后进入 Dead 状态。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>TransactionFailure_ShouldCreateCompensation</test>
+    <test>CompensationRetry_ShouldUseBackoff</test>
+    <test>CompensationExecutor_ShouldBeIdempotent</test>
+  </tests>
+  <reviewChecklist>
+    <item>状态流转明确，不能任意跳转。</item>
+    <item>失败不是只打日志。</item>
+  </reviewChecklist>
+</featurePlan>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="auth-mainline" group="第二批" priority="P1" status="draft">
+  <title>认证链路收口</title>
+  <goal>统一登录、claims、CurrentUser、CurrentTenant 的真相源。</goal>
+  <scope>
+    <item>OpenIddict password/refresh token 登录链路。</item>
+    <item>用户 claims 构建。</item>
+    <item>租户边界校验：CurrentUser.TenantId 必须匹配 CurrentTenant.Id。</item>
+    <item>登录失败、安全日志、刷新 token 生命周期。</item>
+  </scope>
+  <nonGoals>
+    <item>不新增第二套 token 或 claims 生成逻辑。</item>
+    <item>不绕开 CurrentUser/CurrentTenant 主链。</item>
+  </nonGoals>
+  <implementation>
+    <step>抽出 IdentityClaimsBuilder 作为唯一 claims 生成入口。</step>
+    <step>PasswordGrantHandler 登录成功后统一调用 claims builder。</step>
+    <step>MultiTenancyMiddleware 或认证处理器统一做租户边界检查。</step>
+    <step>刷新 token 只更新必要字段，并接审计/安全日志。</step>
+    <step>认证异常接全局异常错误码。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>同一用户在不同租户上下文登录行为明确。</criterion>
+    <criterion>跨租户 token 访问被拒绝。</criterion>
+    <criterion>刷新 token 后 CurrentUser claims 正确。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>PasswordGrant_WithValidTenant_ShouldIssueToken</test>
+    <test>PasswordGrant_WithTenantMismatch_ShouldFail</test>
+    <test>RefreshToken_ShouldPreserveTenantClaims</test>
+  </tests>
+  <reviewChecklist>
+    <item>没有复制 claims 逻辑。</item>
+    <item>认证错误不泄露密码/用户敏感信息。</item>
+  </reviewChecklist>
+</featurePlan>

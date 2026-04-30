@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlanReadme>
+  <purpose>本目录用于把 docs/review/crestcreates-abp-roadmap.xml 拆成可执行的功能计划。</purpose>
+  <howToUse>
+    <step order="1">先看 INDEX.xml，确定功能所属分组和文件名。</step>
+    <step order="2">实现某个功能前，只阅读对应 featurePlan 文件和其中列出的 relatedSpecs。</step>
+    <step order="3">实现时按 implementation/step 顺序推进，不临时扩范围。</step>
+    <step order="4">提交或 review 前逐项检查 acceptanceCriteria、tests、reviewChecklist。</step>
+    <step order="5">如果功能已有 docs/superpowers/specs 下的详细设计，以详细设计为实现主文档，本目录文件作为 roadmap 级验收入口。</step>
+  </howToUse>
+  <fileShape>
+    <section name="scope">这次功能必须覆盖的范围。</section>
+    <section name="nonGoals">明确不做什么，防止实现时扩散。</section>
+    <section name="implementation">主要实现步骤和模块边界。</section>
+    <section name="acceptanceCriteria">功能完成的验收标准。</section>
+    <section name="tests">建议新增或调整的测试。</section>
+    <section name="reviewChecklist">review 前自检项。</section>
+  </fileShape>
+  <maintenanceRules>
+    <rule>roadmap 的功能新增或删除时，同步更新 INDEX.xml。</rule>
+    <rule>某个 feature 进入实现后，如果产生更细的设计文档，在该 feature 文件中添加 relatedSpecs。</rule>
+    <rule>不要把业务样例补丁写进 feature plan；这里描述平台能力。</rule>
+    <rule>不要把 legacy 路径写成正式主链；必须标明 legacy、fallback 或 nonGoal。</rule>
+  </maintenanceRules>
+</featurePlanReadme>

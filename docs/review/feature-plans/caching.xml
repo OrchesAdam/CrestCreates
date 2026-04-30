@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="caching" group="第三批" priority="P2" status="draft">
+  <title>缓存</title>
+  <goal>统一缓存 key、租户隔离和失效策略，让设置/功能/权限变更后结果可靠更新。</goal>
+  <scope>
+    <item>本地缓存与分布式缓存职责划分。</item>
+    <item>租户隔离缓存 key。</item>
+    <item>设置、功能、权限变更后的主动失效。</item>
+  </scope>
+  <nonGoals>
+    <item>不让业务代码手写散落字符串 cache key。</item>
+    <item>第一版不实现复杂跨数据中心一致性。</item>
+  </nonGoals>
+  <implementation>
+    <step>定义 ICacheKeyProvider 或 cache key descriptor。</step>
+    <step>CacheMoAttribute 使用统一 key builder，并自动附加 tenant id。</step>
+    <step>Setting/Feature/Permission manager 发布 cache invalidation event。</step>
+    <step>本地缓存订阅失效事件；分布式缓存使用统一 prefix。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>不同租户同一 key 不互相污染。</criterion>
+    <criterion>设置变更后下一次读取不返回旧值。</criterion>
+    <criterion>权限变更后 PermissionChecker 不用旧缓存授权。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>CacheKey_ShouldIncludeTenantId</test>
+    <test>SettingChange_ShouldInvalidateCache</test>
+    <test>PermissionGrantChange_ShouldInvalidatePermissionCache</test>
+  </tests>
+  <reviewChecklist>
+    <item>cache key 不用随意字符串拼接。</item>
+    <item>缓存失效可测试，不只依赖过期时间。</item>
+  </reviewChecklist>
+</featurePlan>

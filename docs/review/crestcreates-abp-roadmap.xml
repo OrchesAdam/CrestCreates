@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="utf-8"?>
+<roadmap name="CrestCreates vs ABP Gap Roadmap">
+  <groups>
+    <group name="先做">
+      <epic id="concurrency-control">
+        <title>并发控制</title>
+        <currentState>现在没看到一套很明确、统一的乐观并发方案。</currentState>
+        <gap>和 ABP 这类框架相比，这里的并发控制主链比较弱。</gap>
+        <tasks>
+          <task>选一套并发方案，不要多套并存。</task>
+          <task>给实体加统一并发字段或接口。</task>
+          <task>仓储更新时统一处理并发冲突。</task>
+          <task>并发冲突时返回统一错误码。</task>
+          <task>补并发冲突测试。</task>
+        </tasks>
+      </epic>
+      <epic id="tenant-db-lifecycle">
+        <title>多租户数据库初始化与迁移</title>
+        <currentState>现在租户解析、隔离、权限边界已经有了，但新租户建库、迁移、初始化这条链还不够完整。</currentState>
+        <gap>差距不在租户识别，而在租户生命周期管理不够完整。</gap>
+        <tasks>
+          <task>做租户数据库初始化器。</task>
+          <task>新租户创建后自动建库、迁移、灌种子数据。</task>
+          <task>失败时记录状态。</task>
+          <task>支持重试或恢复。</task>
+          <task>补全链路测试。</task>
+        </tasks>
+      </epic>
+      <epic id="global-exception-handling">
+        <title>全局异常处理</title>
+        <currentState>已经有异常中间件，但还比较基础。</currentState>
+        <gap>和 ABP 这类框架相比，异常分类、错误码、本地化还不够统一。</gap>
+        <tasks>
+          <task>统一异常基类。</task>
+          <task>统一错误码。</task>
+          <task>区分参数错误、权限错误、业务错误、并发错误。</task>
+          <task>异常消息接本地化。</task>
+          <task>删除重复实现，只留一套正式版本。</task>
+        </tasks>
+      </epic>
+      <epic id="dynamic-api-mainline">
+        <title>Dynamic API 主链收口</title>
+        <currentState>项目方向已经明确是编译期生成，但遗留 runtime 路径还在。</currentState>
+        <gap>差距不是功能少，而是主链还没完全收干净。</gap>
+        <tasks>
+          <task>以后不要再给 runtime scanner 或 executor 加功能。</task>
+          <task>新功能只走 generated path。</task>
+          <task>新测试只测 generated path。</task>
+          <task>逐步清掉 legacy fallback。</task>
+        </tasks>
+      </epic>
+      <epic id="setting-management-mainline">
+        <title>设置管理收口</title>
+        <currentState>设置管理已经有了，也能用。</currentState>
+        <gap>问题不是没有，而是以后容易有人绕开它自己做配置表。</gap>
+        <tasks>
+          <task>所有运行时可改配置统一接 Setting Management。</task>
+          <task>清理旁路配置实现。</task>
+          <task>补 tenant、user、host 作用域测试。</task>
+          <task>补缓存失效测试。</task>
+        </tasks>
+      </epic>
+    </group>
+    <group name="第二批">
+      <epic id="feature-management-mainline">
+        <title>功能管理收口</title>
+        <currentState>功能管理也已经有。</currentState>
+        <gap>问题是容易和 Setting Management 混用。</gap>
+        <tasks>
+          <task>明确哪些属于 Feature，哪些属于 Setting。</task>
+          <task>统一 host 和 tenant 覆盖规则。</task>
+          <task>补缓存失效测试。</task>
+          <task>补文档。</task>
+        </tasks>
+      </epic>
+      <epic id="crud-mainline">
+        <title>CRUD 主链增强</title>
+        <currentState>已经有 CRUD 接口、基类、生成器，不是从零开始。</currentState>
+        <gap>差距是这条链还不够强，复杂查询、排序、过滤、权限映射还不够完善。</gap>
+        <tasks>
+          <task>统一分页、排序、过滤约定。</task>
+          <task>让 CRUD 权限自动映射。</task>
+          <task>强化生成器输出。</task>
+          <task>用 sample 验证少写样板代码。</task>
+        </tasks>
+      </epic>
+      <epic id="dto-mapping">
+        <title>DTO 映射完善</title>
+        <currentState>编译期映射已经有了，这是优势。</currentState>
+        <gap>差距主要是完整度和易用性，不是方向问题。</gap>
+        <tasks>
+          <task>映射失败时给清晰编译错误。</task>
+          <task>支持更复杂映射场景。</task>
+          <task>清理 AutoMapper 残留文档和心智。</task>
+          <task>用 sample 做真实验证。</task>
+        </tasks>
+      </epic>
+      <epic id="orm-consistency">
+        <title>多 ORM 一致性</title>
+        <currentState>EF Core、FreeSql、SqlSugar 都支持。</currentState>
+        <gap>真正问题不是有没有支持，而是三套 ORM 行为可能不一致。</gap>
+        <tasks>
+          <task>列能力清单：软删除、多租户、审计、事务、分页、并发。</task>
+          <task>对齐三套 ORM 行为。</task>
+          <task>补跨 ORM 测试。</task>
+          <task>明确哪些是官方重点支持。</task>
+        </tasks>
+      </epic>
+      <epic id="background-jobs">
+        <title>后台作业平台化</title>
+        <currentState>已经不只是 Quartz 定时器了，但目前还是偏调度。</currentState>
+        <gap>和 ABP 比，差在后台任务平台感还不够强。</gap>
+        <tasks>
+          <task>统一一次性任务、延迟任务、周期任务模型。</task>
+          <task>增加任务状态、历史、重试。</task>
+          <task>传递租户和用户上下文。</task>
+          <task>评估是否要补真正的队列任务模型。</task>
+        </tasks>
+      </epic>
+      <epic id="auth-mainline">
+        <title>认证链路收口</title>
+        <currentState>登录、用户上下文、租户边界基本都有。</currentState>
+        <gap>真正差距不是有没有认证，而是链路还可以更统一。</gap>
+        <tasks>
+          <task>统一 claims、current user、tenant 的真相源。</task>
+          <task>清理重复逻辑。</task>
+          <task>补登录、刷新、越权测试。</task>
+        </tasks>
+      </epic>
+      <epic id="permission-mainline">
+        <title>权限系统收口</title>
+        <currentState>权限定义、校验、租户范围校验已经有。</currentState>
+        <gap>差距不在基础权限，而在规则和边界还需要更清楚。</gap>
+        <tasks>
+          <task>统一权限授予和计算规则。</task>
+          <task>统一权限错误输出。</task>
+          <task>补角色、用户、租户维度测试。</task>
+        </tasks>
+      </epic>
+    </group>
+    <group name="第三批">
+      <epic id="organization-permission">
+        <title>组织架构权限</title>
+        <currentState>不是完全没有，已经有一些组织层级和数据权限相关能力。</currentState>
+        <gap>但还不是一个完整的组织架构子系统。</gap>
+        <tasks>
+          <task>先决定要不要正式做 OU 或组织树模块。</task>
+          <task>如果做，先定义清楚继承和范围规则。</task>
+          <task>接到现有权限和数据过滤主链。</task>
+          <task>补测试。</task>
+        </tasks>
+      </epic>
+      <epic id="localization">
+        <title>本地化</title>
+        <currentState>已经有 Localization 模块。</currentState>
+        <gap>差距在于还没充分接到平台主链里。</gap>
+        <tasks>
+          <task>异常消息接本地化。</task>
+          <task>验证消息接本地化。</task>
+          <task>权限提示接本地化。</task>
+          <task>完善多资源、多语言测试。</task>
+        </tasks>
+      </epic>
+      <epic id="caching">
+        <title>缓存</title>
+        <currentState>已经有缓存能力，也有租户相关处理。</currentState>
+        <gap>差距在于一致性和失效机制不够强。</gap>
+        <tasks>
+          <task>区分本地缓存和分布式缓存。</task>
+          <task>统一缓存 key 规范。</task>
+          <task>设置、功能、权限变更后自动失效。</task>
+          <task>补跨实例测试。</task>
+        </tasks>
+      </epic>
+      <epic id="event-bus">
+        <title>事件总线</title>
+        <currentState>本地事件、RabbitMQ、Kafka 都有。</currentState>
+        <gap>差距在于工程一致性和稳定性。</gap>
+        <tasks>
+          <task>统一事件命名和订阅规则。</task>
+          <task>明确本地事件和分布式事件边界。</task>
+          <task>做重试、死信、幂等。</task>
+          <task>补集成测试。</task>
+        </tasks>
+      </epic>
+      <epic id="distributed-transaction">
+        <title>分布式事务</title>
+        <currentState>CAP、补偿、事务日志这些都已经有。</currentState>
+        <gap>差距主要在稳定性和运维闭环。</gap>
+        <tasks>
+          <task>明确事务状态流转。</task>
+          <task>完善补偿幂等。</task>
+          <task>增加失败恢复和监控点。</task>
+          <task>补集成测试。</task>
+        </tasks>
+      </epic>
+      <epic id="module-system">
+        <title>模块系统增强</title>
+        <currentState>模块依赖、拓扑排序其实已经有了，不是缺失。</currentState>
+        <gap>真差距不是依赖声明，而是诊断能力和插件化能力还不够。</gap>
+        <tasks>
+          <task>增加循环依赖和缺依赖诊断。</task>
+          <task>输出模块加载顺序信息。</task>
+          <task>如果以后做插件，单独设计插件系统，不要污染主链。</task>
+        </tasks>
+      </epic>
+    </group>
+    <group name="最后做">
+      <epic id="mongodb-provider">
+        <title>MongoDB 支持</title>
+        <currentState>目前看不到 MongoDB 主链支持。</currentState>
+        <gap>这个差距是成立的。</gap>
+        <tasks>
+          <task>先确认是否真有需求。</task>
+          <task>如果要做，单独做 provider。</task>
+          <task>明确 Mongo 不强行套关系型语义。</task>
+          <task>补独立样例和测试。</task>
+        </tasks>
+      </epic>
+      <epic id="plugin-system">
+        <title>插件化系统</title>
+        <currentState>当前没有成熟的外部插件装载体系。</currentState>
+        <gap>这项确实比 ABP 弱。</gap>
+        <tasks>
+          <task>设计插件清单和装载方式。</task>
+          <task>处理版本兼容和隔离。</task>
+          <task>补诊断和失败提示。</task>
+        </tasks>
+      </epic>
+    </group>
+  </groups>
+</roadmap>

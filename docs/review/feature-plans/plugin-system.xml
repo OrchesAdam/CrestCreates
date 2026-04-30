@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="plugin-system" group="最后做" priority="P3" status="draft">
+  <title>插件化系统</title>
+  <goal>提供外部扩展装载能力，但保持默认模块主链仍然是编译期生成。</goal>
+  <scope>
+    <item>插件清单、版本、依赖、启停状态。</item>
+    <item>外部程序集加载、隔离、失败诊断。</item>
+    <item>插件模块与主应用模块边界。</item>
+  </scope>
+  <nonGoals>
+    <item>不让插件化替代默认模块系统。</item>
+    <item>不默认允许任意程序集无约束加载。</item>
+  </nonGoals>
+  <implementation>
+    <step>定义 plugin.json：id、name、version、entryAssembly、dependsOn、minFrameworkVersion。</step>
+    <step>PluginManager 读取清单并做版本/依赖校验。</step>
+    <step>AssemblyLoadContext 隔离加载可选插件。</step>
+    <step>插件暴露 IPluginModule，由插件系统桥接到 IModule 生命周期。</step>
+    <step>启动失败时输出明确诊断，不影响非必需插件时可降级。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>插件依赖缺失时启动失败信息明确。</criterion>
+    <criterion>禁用插件不会加载其程序集。</criterion>
+    <criterion>插件异常不会污染默认模块生成主链。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>PluginManager_ShouldLoadValidPlugin</test>
+    <test>PluginManager_MissingDependency_ShouldFailWithDiagnostic</test>
+    <test>DisabledPlugin_ShouldNotLoadAssembly</test>
+  </tests>
+  <reviewChecklist>
+    <item>插件系统是独立扩展，不修改 ModuleSourceGenerator 主链。</item>
+    <item>安全边界和失败诊断清楚。</item>
+  </reviewChecklist>
+</featurePlan>

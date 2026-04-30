@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="crud-mainline" group="第二批" priority="P1" status="draft">
+  <title>CRUD 主链增强</title>
+  <goal>把 generated CRUD 做成默认开发路径，减少手写样板，同时统一权限、查询、并发、异常。</goal>
+  <scope>
+    <item>生成 AppService、接口、DTO、Controller。</item>
+    <item>统一分页、排序、过滤、权限映射。</item>
+    <item>写操作接 UnitOfWorkMo、审计、并发控制。</item>
+  </scope>
+  <nonGoals>
+    <item>不继续增强 CrudServiceBase legacy 路径。</item>
+    <item>不引入 AutoMapper 作为主映射路径。</item>
+  </nonGoals>
+  <implementation>
+    <step>CrudServiceSourceGenerator 输出 ICrudAppService 实现，并依赖 ICrestRepositoryBase。</step>
+    <step>UpdateDto 包含 ConcurrencyStamp；CreateDto 排除 ConcurrencyStamp。</step>
+    <step>DeleteAsync 支持 If-Match expectedStamp。</step>
+    <step>GetList 支持 FilterDescriptor、SortDescriptor、PagedRequestDto。</step>
+    <step>生成权限名：Entity.Create/Get/Search/Update/Delete。</step>
+    <step>生成 Controller 使用 CrudControllerBase。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>普通实体可通过一个标记生成完整 CRUD API。</criterion>
+    <criterion>列表查询支持分页、排序、多个过滤条件。</criterion>
+    <criterion>写操作有权限检查和 UoW。</criterion>
+    <criterion>并发实体的更新/删除符合 concurrency-control 设计。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>GeneratedCrud_ShouldCompileForSampleEntity</test>
+    <test>GeneratedCrud_GetList_ShouldApplyFiltersAndSorts</test>
+    <test>GeneratedCrud_DeleteConcurrentEntity_RequiresIfMatch</test>
+    <test>GeneratedCrud_ShouldGeneratePermissions</test>
+  </tests>
+  <reviewChecklist>
+    <item>生成代码不依赖 runtime reflection。</item>
+    <item>生成路径和 Dynamic API generated path 一致。</item>
+  </reviewChecklist>
+</featurePlan>

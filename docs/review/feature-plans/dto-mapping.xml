@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="dto-mapping" group="第二批" priority="P1" status="draft">
+  <title>DTO 映射完善</title>
+  <goal>把编译期对象映射做成正式主链，替代 AutoMapper 心智。</goal>
+  <scope>
+    <item>支持 Entity -> Dto、CreateDto -> Entity、UpdateDto -> Entity.ApplyTo。</item>
+    <item>支持 MapFrom、MapIgnore、MapName、简单类型转换。</item>
+    <item>映射失败以编译诊断暴露。</item>
+  </scope>
+  <nonGoals>
+    <item>不引入运行时 AutoMapper。</item>
+    <item>不支持任意表达式运行时解释。</item>
+  </nonGoals>
+  <implementation>
+    <step>ObjectMappingSourceGenerator 生成强类型扩展方法。</step>
+    <step>EntitySourceGenerator 生成 DTO 时复用同一映射规则。</step>
+    <step>缺失目标属性、不可写属性、类型不兼容时输出 Diagnostic。</step>
+    <step>导航属性映射只支持显式 MapFrom 路径，不做隐式深层扫描。</step>
+    <step>清理文档中 AutoMapper 作为主链的表述。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>映射代码是编译期生成的静态方法。</criterion>
+    <criterion>错误映射在编译期失败或报警。</criterion>
+    <criterion>sample CRUD 不需要手写基础 DTO 映射。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>MapFrom_ShouldGenerateExpectedAssignment</test>
+    <test>MapIgnore_ShouldSkipProperty</test>
+    <test>InvalidMapFrom_ShouldEmitDiagnostic</test>
+    <test>UpdateDtoApplyTo_ShouldNotOverwriteCreateAuditFields</test>
+  </tests>
+  <reviewChecklist>
+    <item>没有新增反射映射。</item>
+    <item>生成代码 AoT 友好。</item>
+  </reviewChecklist>
+</featurePlan>

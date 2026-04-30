@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="orm-consistency" group="第二批" priority="P1" status="draft">
+  <title>多 ORM 一致性</title>
+  <goal>让 EF Core、FreeSql、SqlSugar 在框架主能力上表现一致，避免 provider 行为漂移。</goal>
+  <scope>
+    <item>软删除、多租户、审计、并发、事务、分页、排序、过滤。</item>
+    <item>定义 official support matrix。</item>
+    <item>跨 ORM 集成测试。</item>
+  </scope>
+  <nonGoals>
+    <item>不要求每个 ORM 支持完全相同的高级查询能力。</item>
+    <item>不为了兼容弱 provider 降低主链语义。</item>
+  </nonGoals>
+  <implementation>
+    <step>建立 docs/review/orm-capability-matrix.xml。</step>
+    <step>抽出 provider-agnostic 行为测试基类。</step>
+    <step>每个 ORM provider 实现同一组测试夹具。</step>
+    <step>明确哪些能力不支持时应抛 NotSupportedException。</step>
+    <step>修正软删除、多租户过滤、并发控制差异。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>主能力矩阵明确标注 Supported/Unsupported/Partial。</criterion>
+    <criterion>Supported 能力有跨 ORM 测试。</criterion>
+    <criterion>Unsupported 能力有明确异常，不静默降级。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>SoftDelete_ShouldFilterDeletedRows_AllProviders</test>
+    <test>MultiTenant_ShouldFilterByCurrentTenant_AllProviders</test>
+    <test>Concurrency_UpdateStaleStamp_ShouldThrow_AllProviders</test>
+    <test>Paging_ShouldReturnSameResult_AllProviders</test>
+  </tests>
+  <reviewChecklist>
+    <item>测试表达主链，不强化 legacy path。</item>
+    <item>provider 差异写入矩阵，不藏在代码里。</item>
+  </reviewChecklist>
+</featurePlan>

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="localization" group="第三批" priority="P2" status="draft">
+  <title>本地化</title>
+  <goal>让异常、验证、权限、平台消息都能走统一本地化主链。</goal>
+  <scope>
+    <item>资源贡献器、资源注册、culture 解析。</item>
+    <item>异常错误码到本地化消息。</item>
+    <item>验证消息、权限提示消息。</item>
+  </scope>
+  <nonGoals>
+    <item>第一版不强制做数据库本地化。</item>
+    <item>不让业务模块直接硬编码平台错误文案。</item>
+  </nonGoals>
+  <implementation>
+    <step>完善 ILocalizationResourceContributor 和 LocalizationResource。</step>
+    <step>模块在 OnConfigureServices 注册资源贡献器。</step>
+    <step>ExceptionHandlingMiddleware 优先用 ErrorCode 查本地化文本。</step>
+    <step>Validation/Permission 异常使用稳定 key。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>切换 culture 后平台异常消息变化。</criterion>
+    <criterion>找不到资源时返回默认中文或英文 fallback。</criterion>
+    <criterion>多个模块资源 key 不冲突。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>ExceptionMessage_ShouldUseCurrentCulture</test>
+    <test>MissingLocalizationKey_ShouldFallback</test>
+    <test>MultipleResourceContributors_ShouldResolveByKey</test>
+  </tests>
+  <reviewChecklist>
+    <item>错误码和本地化 key 稳定，不使用异常 message 做逻辑判断。</item>
+  </reviewChecklist>
+</featurePlan>

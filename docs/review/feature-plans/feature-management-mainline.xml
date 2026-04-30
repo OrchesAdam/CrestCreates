@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="feature-management-mainline" group="第二批" priority="P1" status="draft">
+  <title>功能管理收口</title>
+  <goal>让 Feature Management 专注功能开关，不和 Setting Management 混用。</goal>
+  <scope>
+    <item>功能定义、默认值、host 覆盖、tenant 覆盖。</item>
+    <item>运行时检查 IFeatureChecker。</item>
+    <item>Feature 变更后缓存失效。</item>
+  </scope>
+  <nonGoals>
+    <item>不承载普通业务配置；普通配置走 Setting Management。</item>
+    <item>不把权限判断写入 FeatureChecker。</item>
+  </nonGoals>
+  <implementation>
+    <step>定义 FeatureDefinition，包含 name、displayName、defaultValue、allowedScopes。</step>
+    <step>FeatureProvider 读取 tenant/host/default 覆盖链。</step>
+    <step>FeatureManager 写入 FeatureValue 后失效缓存。</step>
+    <step>FeatureAppService 提供当前租户与指定租户管理 API。</step>
+    <step>文档写清 Feature 与 Setting 的边界。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>tenant 显式值优先于 host/default。</criterion>
+    <criterion>未定义 feature 查询返回明确错误，不返回随机默认值。</criterion>
+    <criterion>修改 feature 后同请求外的新读取拿到最新值。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>IsEnabledAsync_ShouldUseTenantOverride</test>
+    <test>SetTenantFeature_ShouldInvalidateCache</test>
+    <test>UnknownFeature_ShouldThrowBusinessException</test>
+  </tests>
+  <reviewChecklist>
+    <item>没有把 feature flag 放进 SettingValue。</item>
+    <item>缓存 key 包含 tenant scope。</item>
+  </reviewChecklist>
+</featurePlan>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="event-bus" group="第三批" priority="P2" status="draft">
+  <title>事件总线</title>
+  <goal>统一本地事件和分布式事件边界，补齐重试、死信、幂等和可观测性。</goal>
+  <scope>
+    <item>LocalEventBus、RabbitMQ、Kafka。</item>
+    <item>事件命名、订阅注册、序列化、租户上下文。</item>
+    <item>失败重试、死信、幂等处理。</item>
+  </scope>
+  <nonGoals>
+    <item>不把 CAP 分布式事务事件和普通 EventBus 混成一个概念。</item>
+    <item>不使用运行时扫描作为订阅主链，优先 source generator。</item>
+  </nonGoals>
+  <implementation>
+    <step>定义 EventNameProvider 和事件命名规则。</step>
+    <step>SourceGenerator 生成订阅 registry。</step>
+    <step>事件 envelope 包含 eventId、tenantId、correlationId、occurredOn。</step>
+    <step>RabbitMQ/Kafka consumer 处理 retry 和 dead-letter。</step>
+    <step>幂等记录按 eventId 去重。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>同一事件不会因重试重复执行业务副作用。</criterion>
+    <criterion>失败事件可查询和重试。</criterion>
+    <criterion>租户事件在正确 tenant context 处理。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>LocalEvent_ShouldInvokeHandler</test>
+    <test>RabbitMqEvent_ShouldRetryAndDeadLetter</test>
+    <test>KafkaEvent_ShouldPreserveTenantContext</test>
+    <test>DuplicateEvent_ShouldBeIgnored</test>
+  </tests>
+  <reviewChecklist>
+    <item>事件订阅注册 AoT 友好。</item>
+    <item>分布式事件失败不静默吞掉。</item>
+  </reviewChecklist>
+</featurePlan>

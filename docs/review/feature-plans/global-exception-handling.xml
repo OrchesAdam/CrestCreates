@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="global-exception-handling" group="先做" priority="P0" status="draft">
+  <title>全局异常处理</title>
+  <goal>把异常处理中间件升级为统一平台能力，所有主链异常都有稳定错误码和 HTTP 语义。</goal>
+  <scope>
+    <item>统一错误响应模型：code、message、details、traceId。</item>
+    <item>区分业务异常、验证异常、权限异常、认证异常、并发异常、前置条件异常、基础设施异常。</item>
+    <item>只保留 CrestCreates.AspNetCore 的正式中间件实现。</item>
+    <item>异常消息接入本地化主链。</item>
+  </scope>
+  <nonGoals>
+    <item>不继续维护 Web 层被排除编译的中间件副本。</item>
+    <item>不把所有异常都包成普通 Exception。</item>
+  </nonGoals>
+  <implementation>
+    <step>新增 CrestException 基类，包含 ErrorCode、HttpStatusCode、Details。</step>
+    <step>新增常用派生异常：Business、Validation、Concurrency、PreconditionRequired、EntityNotFound。</step>
+    <step>ExceptionHandlingMiddleware 按异常类型映射 HTTP 状态码。</step>
+    <step>CrestAppServiceBase catch 白名单透传平台异常，避免包成 500。</step>
+    <step>接入 IStringLocalizer 或本地化服务，优先按 ErrorCode 找文案。</step>
+    <step>删除或明确废弃 Web/Middlewares/ExceptionHandlingMiddleware.cs。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>权限异常返回 403，认证异常返回 401，并发冲突返回 409，缺 If-Match 返回 428。</criterion>
+    <criterion>业务异常不会被 catch-all 包成 500。</criterion>
+    <criterion>错误响应格式在 Web、Dynamic API、generated CRUD 上一致。</criterion>
+    <criterion>有集成测试验证 traceId 和 error code。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>BusinessException_ShouldReturnExpectedErrorCode</test>
+    <test>ConcurrencyException_ShouldReturn409</test>
+    <test>PreconditionRequiredException_ShouldReturn428</test>
+    <test>UnhandledException_ShouldReturn500WithoutLeakingStackTrace</test>
+  </tests>
+  <reviewChecklist>
+    <item>异常判断按类型，不按 message.Contains。</item>
+    <item>中间件文件是 AspNetCore 下实际编译版本。</item>
+    <item>本地化失败时有安全 fallback。</item>
+  </reviewChecklist>
+</featurePlan>

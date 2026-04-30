@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="organization-permission" group="第三批" priority="P2" status="draft">
+  <title>组织架构权限</title>
+  <goal>把现有组织范围/数据权限能力产品化，但不复制一套平行权限系统。</goal>
+  <scope>
+    <item>组织树、组织成员、组织范围数据权限。</item>
+    <item>向现有 DataPermissionFilter 和 PermissionChecker 提供范围信息。</item>
+    <item>支持当前组织、下级组织、指定组织等范围。</item>
+  </scope>
+  <nonGoals>
+    <item>第一版不做复杂岗位/部门混合授权模型。</item>
+    <item>不让组织权限绕开租户边界。</item>
+  </nonGoals>
+  <implementation>
+    <step>定义 OrganizationUnit、OrganizationMembership、OrganizationScope。</step>
+    <step>OrganizationHierarchyService 提供 ancestor/descendant 查询。</step>
+    <step>DataPermissionFilter 接入组织范围贡献器。</step>
+    <step>权限授予仍使用现有 PermissionGrant，不新增第二套授权表。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>用户只能访问自己组织范围内数据。</criterion>
+    <criterion>下级组织继承规则清晰可测试。</criterion>
+    <criterion>跨租户组织访问被拒绝。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>DataFilter_ShouldLimitToCurrentOrganization</test>
+    <test>DataFilter_ShouldIncludeChildrenWhenScopeAllows</test>
+    <test>OrganizationScope_ShouldRespectTenantBoundary</test>
+  </tests>
+  <reviewChecklist>
+    <item>组织范围是权限/数据过滤输入，不是新权限真相源。</item>
+  </reviewChecklist>
+</featurePlan>

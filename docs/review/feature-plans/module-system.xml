@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="module-system" group="第三批" priority="P2" status="draft">
+  <title>模块系统增强</title>
+  <goal>在已有 DependsOn 和拓扑排序基础上补诊断、可观测性和可选插件边界。</goal>
+  <scope>
+    <item>编译期模块发现、依赖排序、初始化顺序输出。</item>
+    <item>循环依赖、缺失依赖、重复模块诊断。</item>
+    <item>插件化作为独立子系统规划，不污染模块主链。</item>
+  </scope>
+  <nonGoals>
+    <item>不回到运行时程序集扫描作为主链。</item>
+    <item>不把插件加载做进默认模块初始化路径。</item>
+  </nonGoals>
+  <implementation>
+    <step>ModuleSourceGenerator 遇到循环依赖输出 Diagnostic error。</step>
+    <step>BuildTasks 生成 module manifest，包括 module、dependsOn、order、assembly。</step>
+    <step>应用启动日志输出最终初始化顺序。</step>
+    <step>增加 ModuleGraphSnapshot 测试资产，便于 review。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>循环依赖编译失败，错误指出依赖链。</criterion>
+    <criterion>缺失依赖有明确诊断。</criterion>
+    <criterion>生成的初始化顺序可在测试中断言。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>ModuleGenerator_CircularDependency_ShouldEmitDiagnostic</test>
+    <test>ModuleGenerator_ShouldTopologicallySortDependsOn</test>
+    <test>ModuleManifest_ShouldContainAllModules</test>
+  </tests>
+  <reviewChecklist>
+    <item>没有引入 runtime reflection scanner 作为默认路径。</item>
+  </reviewChecklist>
+</featurePlan>

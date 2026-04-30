@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlanIndex source="../crestcreates-abp-roadmap.xml" lastUpdated="2026-04-30">
+  <purpose>把 CrestCreates vs ABP roadmap 拆成可实现、可验收、可 review 的功能计划文件。</purpose>
+  <rules>
+    <rule>优先强化 CrestCreates 当前主链，不按 ABP 功能名机械复制。</rule>
+    <rule>涉及 Dynamic API、模块、映射、租户过滤时，优先编译期生成和 AoT 友好路径。</rule>
+    <rule>每个 feature 文件必须写清楚 scope、nonGoals、implementation、acceptanceCriteria、tests、reviewChecklist。</rule>
+    <rule>实现前先看对应 feature 文件；实现后按 reviewChecklist 自检，减少反复 review。</rule>
+  </rules>
+  <groups>
+    <group name="先做">
+      <feature file="concurrency-control.xml" />
+      <feature file="tenant-db-lifecycle.xml" />
+      <feature file="global-exception-handling.xml" />
+      <feature file="dynamic-api-mainline.xml" />
+      <feature file="setting-management-mainline.xml" />
+    </group>
+    <group name="第二批">
+      <feature file="feature-management-mainline.xml" />
+      <feature file="crud-mainline.xml" />
+      <feature file="dto-mapping.xml" />
+      <feature file="orm-consistency.xml" />
+      <feature file="background-jobs.xml" />
+      <feature file="auth-mainline.xml" />
+      <feature file="permission-mainline.xml" />
+    </group>
+    <group name="第三批">
+      <feature file="organization-permission.xml" />
+      <feature file="localization.xml" />
+      <feature file="caching.xml" />
+      <feature file="event-bus.xml" />
+      <feature file="distributed-transaction.xml" />
+      <feature file="module-system.xml" />
+    </group>
+    <group name="最后做">
+      <feature file="mongodb-provider.xml" />
+      <feature file="plugin-system.xml" />
+    </group>
+  </groups>
+</featurePlanIndex>

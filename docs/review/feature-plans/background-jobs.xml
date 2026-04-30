@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="background-jobs" group="第二批" priority="P1" status="draft">
+  <title>后台作业平台化</title>
+  <goal>把现有 Quartz 调度能力提升为统一后台作业平台。</goal>
+  <scope>
+    <item>一次性任务、延迟任务、周期任务。</item>
+    <item>任务状态、历史、重试、失败记录。</item>
+    <item>租户上下文、用户上下文传递。</item>
+    <item>业务层只依赖抽象，不依赖 Quartz。</item>
+  </scope>
+  <nonGoals>
+    <item>第一版不强行引入 Hangfire 或消息队列。</item>
+    <item>不让业务模块直接使用 Quartz API。</item>
+  </nonGoals>
+  <implementation>
+    <step>统一 IBackgroundJob、IBackgroundJobManager、JobArgs、JobDescriptor。</step>
+    <step>BackgroundJobAttribute 由 SourceGenerator 生成 AddBackgroundJobs 注册代码。</step>
+    <step>Quartz 作为 adapter 实现，不泄漏到 Application 层。</step>
+    <step>JobExecutionHandler 记录开始、成功、失败、重试。</step>
+    <step>调度时捕获 TenantId/UserId，执行时恢复上下文。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>业务项目可以声明 job，不直接引用 Quartz。</criterion>
+    <criterion>失败 job 有状态和错误信息。</criterion>
+    <criterion>重试次数和下一次执行时间可查询。</criterion>
+    <criterion>租户 job 在正确 CurrentTenant 下执行。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>BackgroundJobAttribute_ShouldGenerateRegistration</test>
+    <test>DelayedJob_ShouldExecuteOnce</test>
+    <test>RecurringJob_ShouldUseQuartzAdapter</test>
+    <test>JobExecution_ShouldRestoreTenantContext</test>
+  </tests>
+  <reviewChecklist>
+    <item>业务层没有 Quartz 类型。</item>
+    <item>失败不会只写日志不落库。</item>
+  </reviewChecklist>
+</featurePlan>

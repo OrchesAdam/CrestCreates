@@ -409,6 +409,8 @@ FodyWeavers.xsd
 
 .trae/
 
+.superpowers/
+
 # Recycle Bin
 99_RecycleBin/
 99_RecycleBin/*

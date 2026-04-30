@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<featurePlan id="permission-mainline" group="第二批" priority="P1" status="draft">
+  <title>权限系统收口</title>
+  <goal>统一权限定义、授予、计算、租户范围校验和错误输出。</goal>
+  <scope>
+    <item>PermissionDefinition、PermissionGrant、PermissionChecker。</item>
+    <item>用户、角色、租户维度有效权限计算。</item>
+    <item>租户 scope 校验。</item>
+    <item>generated CRUD 权限自动生成和检查。</item>
+  </scope>
+  <nonGoals>
+    <item>不在权限系统里实现完整组织树；组织权限单独做。</item>
+    <item>不新增第二套权限存储。</item>
+  </nonGoals>
+  <implementation>
+    <step>PermissionDefinitionManager 汇总编译期/显式注册权限定义。</step>
+    <step>PermissionGrantManager 统一授予和撤销。</step>
+    <step>PermissionChecker 统一计算用户直接权限、角色权限、租户 scope。</step>
+    <step>TenantPermissionScopeValidator 拦截越权租户权限。</step>
+    <step>CrudServiceSourceGenerator 生成 CRUD 权限名并接检查。</step>
+  </implementation>
+  <acceptanceCriteria>
+    <criterion>用户有效权限结果可解释。</criterion>
+    <criterion>租户 A 的权限不能在租户 B 生效。</criterion>
+    <criterion>权限不存在时返回稳定错误码。</criterion>
+  </acceptanceCriteria>
+  <tests>
+    <test>UserEffectivePermissions_ShouldMergeUserAndRoleGrants</test>
+    <test>TenantScopeMismatch_ShouldDeny</test>
+    <test>GeneratedCrud_ShouldCheckPermissionBeforeWrite</test>
+  </tests>
+  <reviewChecklist>
+    <item>没有绕过 PermissionChecker。</item>
+    <item>权限错误接全局异常。</item>
+  </reviewChecklist>
+</featurePlan>
