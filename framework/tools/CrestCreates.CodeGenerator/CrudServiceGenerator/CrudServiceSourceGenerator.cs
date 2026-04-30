@@ -308,7 +308,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
         private void GenerateUpdateEntityDto(SourceProductionContext context, INamedTypeSymbol entityClass, string entityName, string namespaceName, List<IPropertySymbol> properties)
         {
             var excludedFromAttribute = GetAttributeStringArrayValue(entityClass, "ExcludeProperties", Array.Empty<string>());
-            var defaultExcludedProperties = new[] { "Id", "CreationTime", "CreatorId", "LastModificationTime", "LastModifierId", "IsDeleted", "DeletionTime", "DeleterId", "ConcurrencyStamp" };
+            var defaultExcludedProperties = new[] { "Id", "CreationTime", "CreatorId", "LastModificationTime", "LastModifierId", "IsDeleted", "DeletionTime", "DeleterId" };
             var allExcludedProperties = defaultExcludedProperties.Concat(excludedFromAttribute).ToArray();
 
             var builder = new StringBuilder();
@@ -498,6 +498,8 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("using Microsoft.EntityFrameworkCore;");
             builder.AppendLine("using CrestCreates.Application.Contracts.DTOs.Common;");
             builder.AppendLine("using CrestCreates.Domain.Exceptions;");
+            builder.AppendLine("using CrestCreates.Domain.Shared.Entities.Auditing;");
+            builder.AppendLine("using CrestCreates.Aop.Interceptors;");
             builder.AppendLine($"using {namespaceName};");
             builder.AppendLine($"using {namespaceName}.Dtos;");
             builder.AppendLine($"using {namespaceName}.Repositories;");
@@ -639,6 +641,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// 更新 {entityName}");
             builder.AppendLine("        /// </summary>");
+            builder.AppendLine("        [UnitOfWorkMo]");
             builder.AppendLine($"        public virtual async Task<{entityName}Dto> UpdateAsync({idType} id, Update{entityName}Dto input, CancellationToken cancellationToken = default)");
             builder.AppendLine("        {");
             builder.AppendLine("            if (input == null)");
@@ -659,8 +662,16 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// 删除 {entityName}");
             builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        public virtual async Task DeleteAsync({idType} id, CancellationToken cancellationToken = default)");
+            builder.AppendLine("        [UnitOfWorkMo]");
+            builder.AppendLine($"        public virtual async Task DeleteAsync({idType} id, string? expectedStamp = null, CancellationToken cancellationToken = default)");
             builder.AppendLine("        {");
+            builder.AppendLine("            if (typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(" + entityName + ")))");
+            builder.AppendLine("            {");
+            builder.AppendLine("                if (string.IsNullOrEmpty(expectedStamp))");
+            builder.AppendLine($"                    throw new CrestPreconditionRequiredException(typeof({entityName}).Name, id);");
+            builder.AppendLine("                await _repository.DeleteAsync(id, expectedStamp!, cancellationToken);");
+            builder.AppendLine("                return;");
+            builder.AppendLine("            }");
             builder.AppendLine("            var entity = await _repository.GetByIdAsync(id, cancellationToken);");
             builder.AppendLine("            if (entity == null)");
             builder.AppendLine($"                throw new EntityNotFoundException(typeof({entityName}), id);");

@@ -1079,7 +1079,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             builder.AppendLine($"    public partial class Create{entityName}Dto");
             builder.AppendLine("    {");
 
-            foreach (var prop in properties.Where(p => p.Name != "Id" && p.Name != "CreationTime" && p.Name != "LastModificationTime" && p.Name != "CreatorId" && p.Name != "LastModifierId"))
+            foreach (var prop in properties.Where(p => p.Name != "Id" && p.Name != "CreationTime" && p.Name != "LastModificationTime" && p.Name != "CreatorId" && p.Name != "LastModifierId" && p.Name != "ConcurrencyStamp"))
             {
                 var typeName = prop.Type.ToDisplayString();
                 if (prop.NullableAnnotation == NullableAnnotation.Annotated && !typeName.EndsWith("?"))
