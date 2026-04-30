@@ -7,8 +7,10 @@ using System.Threading.Tasks;
 using SqlSugar;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Repositories;
+using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Shared.DTOs;
 using CrestCreates.Domain.Shared.Entities;
+using CrestCreates.Domain.Shared.Entities.Auditing;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.OrmProviders.SqlSugar.Repositories
@@ -157,7 +159,20 @@ namespace CrestCreates.OrmProviders.SqlSugar.Repositories
             try
             {
                 _logger?.LogDebug("Updating entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
-                await _sqlSugarClient.Updateable(entity).IgnoreColumns("DomainEvents").ExecuteCommandAsync();
+                if (entity is IHasConcurrencyStamp stamp)
+                {
+                    var oldStamp = stamp.ConcurrencyStamp;
+                    stamp.ConcurrencyStamp = Guid.NewGuid().ToString();
+                    var rows = await _sqlSugarClient.Updateable(entity)
+                        .IgnoreColumns("DomainEvents")
+                        .Where("Id = @entityId AND ConcurrencyStamp = @oldStamp", new { entityId = entity.Id, oldStamp })
+                        .ExecuteCommandAsync();
+                    if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
+                }
+                else
+                {
+                    await _sqlSugarClient.Updateable(entity).IgnoreColumns("DomainEvents").ExecuteCommandAsync();
+                }
                 _logger?.LogDebug("Updated entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
                 return entity;
             }
@@ -174,6 +189,8 @@ namespace CrestCreates.OrmProviders.SqlSugar.Repositories
             {
                 _logger?.LogDebug("Updating many entities {EntityType}", typeof(TEntity).Name);
                 var entityList = entities.ToList();
+                if (entityList.Any(e => e is IHasConcurrencyStamp))
+                    throw new NotSupportedException("UpdateRangeAsync does not support entities with IHasConcurrencyStamp. Use UpdateAsync for concurrency-safe updates.");
                 await _sqlSugarClient.Updateable(entityList).IgnoreColumns("DomainEvents").ExecuteCommandAsync();
                 _logger?.LogDebug("Updated {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
                 return entityList;
@@ -214,6 +231,24 @@ namespace CrestCreates.OrmProviders.SqlSugar.Repositories
             catch (Exception ex)
             {
                 _logger?.LogError(ex, "Error deleting entity {EntityType} by id: {Id}", typeof(TEntity).Name, id);
+                throw;
+            }
+        }
+
+        public override async Task DeleteAsync(TKey id, string expectedStamp, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                _logger?.LogDebug("Deleting entity {EntityType} by id with concurrency check: {Id}", typeof(TEntity).Name, id);
+                var rows = await _sqlSugarClient.Deleteable<TEntity>()
+                    .Where("Id = @Id AND ConcurrencyStamp = @Stamp", new { Id = id, Stamp = expectedStamp })
+                    .ExecuteCommandAsync();
+                if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
+                _logger?.LogDebug("Deleted entity {EntityType} by id with concurrency check: {Id}", typeof(TEntity).Name, id);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Error deleting entity {EntityType} by id with concurrency check: {Id}", typeof(TEntity).Name, id);
                 throw;
             }
         }
