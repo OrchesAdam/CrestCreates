@@ -36,5 +36,22 @@ public class ConcurrencyStampTests
         Assert.Equal("custom-stamp", entity.ConcurrencyStamp);
     }
 
+    [Fact]
+    public void AuditedAggregateRoot_ImplementsIHasConcurrencyStamp()
+    {
+        var entity = new TestAuditedAggregateRoot();
+        Assert.IsAssignableFrom<IHasConcurrencyStamp>(entity);
+    }
+
+    [Fact]
+    public void NewAuditedEntities_HaveUniqueConcurrencyStamps()
+    {
+        var entity1 = new TestAuditedEntity();
+        var entity2 = new TestAuditedEntity();
+        Assert.NotEqual(entity1.ConcurrencyStamp, entity2.ConcurrencyStamp);
+    }
+
     private class TestAuditedEntity : AuditedEntity<Guid> { }
+
+    private class TestAuditedAggregateRoot : AuditedAggregateRoot<Guid> { }
 }
