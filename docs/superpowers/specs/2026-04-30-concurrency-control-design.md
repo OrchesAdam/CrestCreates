@@ -11,11 +11,11 @@
 | Field type | `string ConcurrencyStamp` (Guid) |
 | Entity scope | `AuditedEntity<TId>` and `AuditedAggregateRoot<TId>` (and all subclasses) |
 | DTO exposure | GetDto includes stamp; UpdateDto includes stamp; CreateDto excludes stamp |
-| Update stamp | Client sends expected stamp via UpdateDto; repository checks it in WHERE, generates new stamp |
-| Delete stamp | Client sends expected stamp via `If-Match` header; repository checks it in WHERE — **one atomic DELETE, no pre-read** |
+| Update | Client sends expected stamp via UpdateDto; repository WHERE-checks it, generates new stamp |
+| Delete | Client sends expected stamp via `If-Match` header; **required** for `IHasConcurrencyStamp` entities — no silent fallback |
+| Delete for non-concurrency entities | `If-Match` header is ignored; plain delete by id |
+| Error code | HTTP 409 for stamp mismatch; 428 for missing `If-Match` on concurrent entity |
 | ORM behavior | All 3 ORMs: WHERE includes expected stamp; 0 rows → throw `CrestConcurrencyException` |
-| Error code | HTTP 409, `CONCURRENCY_CONFLICT` |
-| Legacy path | `CrudServiceBase` / `ICrudService` — no concurrency support. Use generated CRUD service or `CrestAppServiceBase`. |
 
 ## 1. Interface Layer
 
@@ -32,6 +32,8 @@ public interface IHasConcurrencyStamp
 }
 ```
 
+`string` type for maximum cross-ORM compatibility. Placed in `Domain.Shared` — all layers can reference.
+
 ### 1.2 Entity Changes
 
 `AuditedEntity<TId>` and `AuditedAggregateRoot<TId>` add `IHasConcurrencyStamp` and:
@@ -46,36 +48,49 @@ public string ConcurrencyStamp { get; set; } = Guid.NewGuid().ToString();
 
 ### 1.3 Entity Scope Inventory
 
-**Covered** (inherit from `AuditedEntity` / `AuditedAggregateRoot`): `Tenant`, `SettingValue`, `FeatureValue`, all user-defined entities with `FullyAuditedEntity<TId>` base.
+**Covered**: `Tenant`, `SettingValue`, `FeatureValue`, all user entities with `FullyAuditedEntity<TId>` base.
 
-**Not covered** (inherit from `Entity<TId>` or `MustHaveTenantOrganizationEntity<TId>` directly): `Permission`, `PermissionGrant`, `Role`, `User`, `Organization`, `RefreshToken`, `AuditLog`, `IdentitySecurityLog`, `TenantConnectionString`, `TenantDomainMapping`, `DataPermission`, `RolePermission`, `UserRole`.
+**Not covered**: `Permission`, `PermissionGrant`, `Role`, `User`, `Organization`, `RefreshToken`, `AuditLog`, `IdentitySecurityLog`, `TenantConnectionString`, `TenantDomainMapping`, `DataPermission`, `RolePermission`, `UserRole`.
 
-These are infrastructure/internal entities that don't need optimistic concurrency. If needed later, add `IHasConcurrencyStamp` manually.
+Infrastructure/internal entities don't need optimistic concurrency. Add `IHasConcurrencyStamp` manually if later needed.
 
-## 2. Stamp Lifecycle
+## 2. Repository Interfaces — Main Chain vs Legacy
 
-### 2.1 Update Flow
+The framework has **three** repository interface families. This design touches only the main chain:
+
+| Interface | Location | Role | Concurrency changes |
+|-----------|----------|------|---------------------|
+| `ICrestRepositoryBase<TEntity, TKey>` | Domain.Repositories | **Main chain** — used by `CrestAppServiceBase` and generated CRUD services | Add `DeleteAsync(TKey id, string expectedStamp, ...)` |
+| `CrestRepositoryBase<TEntity, TKey>` | Domain.Repositories | Abstract base for all ORM repos | Add abstract `DeleteAsync(TKey id, string expectedStamp, ...)` |
+| `IRepository<TEntity, TId>` | Domain.Repositories | Legacy — used by `CrudServiceBase` | **No changes** |
+| `IRepository<TEntity>` / `IRepository<TEntity, TKey>` | OrmProviders.Abstract.Abstractions | ORM-level abstractions | **No changes** |
+
+The generated CRUD service and `CrestAppServiceBase` use `ICrestRepositoryBase`. `CrudServiceBase` uses `Domain.Repositories.IRepository` — it is legacy and gets no concurrency support.
+
+## 3. Stamp Lifecycle
+
+### 3.1 Update Flow
 
 ```
 Client reads GetDto → ConcurrencyStamp = "abc-123"
 Client sends PUT /x/5 with UpdateDto { ..., ConcurrencyStamp = "abc-123" }
   ↓
-AppService: Repository.GetAsync(5) → entity (DB stamp = "def-456")
-AppService: MapToEntity(input, entity) → entity.ConcurrencyStamp = "abc-123"  ← expected from client
+AppService: Repository.GetAsync(5) → entity (DB stamp is whatever it is)
+AppService: MapToEntity(input, entity) → entity.ConcurrencyStamp = "abc-123"  ← expected
   ↓
 Repository.UpdateAsync(entity):
-  oldStamp = entity.ConcurrencyStamp               // "abc-123"  ← expected
-  newStamp = Guid.NewGuid().ToString()              // "ghi-789"  ← new
+  oldStamp = entity.ConcurrencyStamp               // "abc-123"
+  newStamp = Guid.NewGuid().ToString()              // "ghi-789"
   entity.ConcurrencyStamp = newStamp
   UPDATE SET [all], ConcurrencyStamp='ghi-789' WHERE Id=5 AND ConcurrencyStamp='abc-123'
   ↓
-  rows == 1 → success, entity returned with stamp "ghi-789"
+  rows == 1 → success, returned entity.ConcurrencyStamp = "ghi-789"
   rows == 0 → throw CrestConcurrencyException
 ```
 
-Every successful update produces a new stamp. The client must use the returned stamp for its next update.
+Concurrency safety comes from **the `WHERE ConcurrencyStamp = expectedStamp` clause**, not from transaction isolation. Every successful update produces a new stamp.
 
-### 2.2 Delete Flow
+### 3.2 Delete Flow (concurrent entity)
 
 ```
 Client reads GetDto → ConcurrencyStamp = "abc-123"
@@ -84,7 +99,7 @@ Client sends DELETE /x/5 with If-Match: "abc-123"
 Controller reads [FromHeader] If-Match → expectedStamp = "abc-123"
 Controller calls Service.DeleteAsync(5, expectedStamp: "abc-123")
   ↓
-AppService: Repository.DeleteAsync(5, expectedStamp: "abc-123")
+Generated service: expectedStamp != null → Repository.DeleteAsync(5, "abc-123")
   ↓
   DELETE FROM X WHERE Id=5 AND ConcurrencyStamp='abc-123'
   ↓
@@ -92,11 +107,46 @@ AppService: Repository.DeleteAsync(5, expectedStamp: "abc-123")
   rows == 0 → throw CrestConcurrencyException
 ```
 
-**Single atomic operation** — no pre-read, no TOCTOU race. If the client sends a stale stamp (because someone else modified the entity), the delete is rejected. If the entity does NOT implement `IHasConcurrencyStamp`, the overload ignores the stamp and does a plain `DELETE BY Id`.
+**Single atomic DELETE** — no pre-read, no TOCTOU race.
 
-## 3. API Contract Changes
+### 3.3 Delete: If-Match Required for Concurrent Entities
 
-### 3.1 `ICrudAppService` — add optional stamp parameter
+For entities implementing `IHasConcurrencyStamp`, the generated CRUD service's `DeleteAsync` **requires** the `If-Match` header. Being optional at the interface level (for backward compatibility) does NOT mean silently falling back.
+
+```csharp
+// Generated CRUD service DeleteAsync — NO silent fallback:
+public virtual async Task DeleteAsync(Guid id, string? expectedStamp = null, CancellationToken ct = default)
+{
+    if (typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(Book)))
+    {
+        if (string.IsNullOrEmpty(expectedStamp))
+        {
+            throw new InvalidOperationException(
+                $"DELETE on {typeof(Book).Name} requires If-Match header with current ConcurrencyStamp.");
+        }
+        await _repository.DeleteAsync(id, expectedStamp!, ct);
+        return;
+    }
+
+    // Non-concurrency entity: normal delete by id
+    await _repository.DeleteAsync(id, ct);
+}
+```
+
+Missing `If-Match` → `InvalidOperationException` → middleware maps to **428 Precondition Required**.
+
+### 3.4 Server-Side / Internal Delete (non-CRUD)
+
+Internal code that needs to delete entities without a client-provided stamp (e.g., cleanup jobs, admin tools) uses:
+
+- `Repository.DeleteAsync(id)` — plain delete by id, zero concurrency check. Caller accepts the risk.
+- `Repository.DeleteAsync(entity)` — uses the entity's DB-read stamp. Has a TOCTOU race (read and delete are separate calls), acceptable for internal callers within a short-lived scope.
+
+These are **not exposed through CRUD controllers**. The strict path (If-Match) is the only path for client-facing CRUD operations on concurrent entities.
+
+## 4. API Contract Changes
+
+### 4.1 `ICrudAppService` — optional stamp parameter
 
 **File**: `framework/src/CrestCreates.Application.Contracts/Interfaces/ICrudAppService.cs`
 
@@ -108,11 +158,9 @@ Task DeleteAsync(TKey id, CancellationToken cancellationToken = default);
 Task DeleteAsync(TKey id, string? expectedStamp = null, CancellationToken cancellationToken = default);
 ```
 
-Rationale: if `expectedStamp` is non-null AND the entity implements `IHasConcurrencyStamp`, the service passes it to the repository's stamped delete overload. If null, fall back to entity-based delete (pre-read then delete with server-read stamp — suitable for server-side/internal callers).
+Optional at the interface level for backward compatibility. The generated implementation enforces it for `IHasConcurrencyStamp` entities (see §3.3).
 
-All existing implementations must add the parameter. For generated services, the generator emits the new signature automatically.
-
-### 3.2 Controller — `If-Match` header
+### 4.2 Controller — `If-Match` header
 
 **File**: `framework/src/CrestCreates.AspNetCore/Controllers/CrudControllerBase.cs`
 
@@ -128,19 +176,17 @@ public virtual async Task<IActionResult> DeleteAsync(
 }
 ```
 
-Standard HTTP: `If-Match: "stamp-guid"`. No new route, no body, no query parameter.
+## 5. Repository Layer
 
-## 4. Repository Layer
+### 5.1 New: `DeleteAsync(TKey id, string expectedStamp)`
 
-### 4.1 New: `DeleteAsync(TKey id, string expectedStamp)` overload
-
-**ICrestRepositoryBase** gets:
+**`ICrestRepositoryBase`** and **`CrestRepositoryBase`** get:
 
 ```csharp
 Task DeleteAsync(TKey id, string expectedStamp, CancellationToken cancellationToken = default);
 ```
 
-Concrete repositories implement it:
+If the entity type does NOT implement `IHasConcurrencyStamp`, the implementation ignores the stamp and does a plain `DELETE BY Id`. The stamped overload is only semantically meaningful for concurrent entities, but being unconditional avoids a runtime type-check surprise.
 
 #### EF Core
 
@@ -152,7 +198,7 @@ var rows = await _dbContext.Set<TEntity>()
 if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
 ```
 
-Uses `EF.Property<string>` to access ConcurrencyStamp generically without an interface cast. `ExecuteDeleteAsync` executes a single atomic `DELETE ... WHERE` — no pre-read, no `SaveChanges`.
+`EF.Property<string>` avoids interface-cast expression translation risk. `ExecuteDeleteAsync` is a single atomic SQL statement — no pre-read, no `SaveChanges`.
 
 #### FreeSql
 
@@ -173,25 +219,35 @@ var rows = await _sqlSugarClient.Deleteable<TEntity>()
 if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
 ```
 
-### 4.2 Entity overload `DeleteAsync(TEntity entity)` — no change
+### 5.2 UpdateAsync
 
-The existing entity-based delete (`DeleteAsync(TEntity entity)`) also gains concurrency: if the entity implements `IHasConcurrencyStamp`, the repository uses `entity.ConcurrencyStamp` as the expected stamp in the WHERE clause.
+Same as before: read old stamp from entity, generate new stamp, WHERE-check old stamp.
 
-However, this overload has a **TOCTOU race** between the service-level pre-read (`GetByIdAsync`) and the repository's delete (two separate DB calls). For production CRUD clients, use the stamped `DeleteAsync(id, expectedStamp)` overload instead. The entity overload is retained for server-side/internal callers where the race window is acceptable.
+### 5.3 `DeleteAsync(TEntity entity)` — entity-based, no interface change
 
-### 4.3 UpdateAsync — unchanged from before
+Existing overload gains concurrency internally: if entity implements `IHasConcurrencyStamp`, use `entity.ConcurrencyStamp` in WHERE. Has a TOCTOU race (service pre-reads entity, repository deletes separately). Acceptable for internal/server-side callers, not for client CRUD.
 
-Same as previous revision: read old stamp from entity, generate new stamp, WHERE check with old stamp.
+### 5.4 UpdateRangeAsync — throws for concurrent entities
 
-### 4.4 UpdateRangeAsync
+```csharp
+public override async Task<IEnumerable<TEntity>> UpdateRangeAsync(IEnumerable<TEntity> entities, ...)
+{
+    var entityList = entities.ToList();
+    if (entityList.Any(e => e is IHasConcurrencyStamp))
+    {
+        throw new NotSupportedException(
+            "UpdateRangeAsync does not support entities with IHasConcurrencyStamp. "
+            + "Update concurrent entities individually via UpdateAsync.");
+    }
+    // existing batch update logic...
+}
+```
 
-First version: **concurrent entities are not supported through UpdateRangeAsync**. Document as a known limitation. If callers need batch updates with concurrency, they must update entities one at a time via `UpdateAsync` within a `[UnitOfWorkMo]`-decorated method.
+All three ORM implementations follow this pattern. A test verifies the `NotSupportedException` is thrown when any entity in the range has `IHasConcurrencyStamp`.
 
-The UoW decoration on `CrestAppServiceBase.UpdateAsync` wraps each single-entity update in a transaction, ensuring the SELECT (by the service) and UPDATE (by the repository) are atomic. Batch update across multiple entities with mixed concurrency stamps requires caller-controlled transaction boundaries, which the current abstraction doesn't cleanly support across all three ORMs.
+## 6. EF Core Model Configuration
 
-## 5. EF Core Model Configuration
-
-### 5.1 `ConfigureConcurrencyStamp` extension
+### 6.1 `ConfigureConcurrencyStamp` extension
 
 **File**: `framework/src/CrestCreates.OrmProviders.EFCore/Extensions/ModelBuilderExtensions.cs`
 
@@ -211,21 +267,21 @@ public static ModelBuilder ConfigureConcurrencyStamp(this ModelBuilder modelBuil
 }
 ```
 
-Without `IsConcurrencyToken()`, EF Core does not include `ConcurrencyStamp` in the UPDATE WHERE clause and does not throw `DbUpdateConcurrencyException`.
+Without `IsConcurrencyToken()`, EF Core does not include `ConcurrencyStamp` in the UPDATE WHERE clause and does not throw `DbUpdateConcurrencyException` — silent overwrite.
 
-### 5.2 Where it's called
+### 6.2 Where it's called
 
 1. `CrestCreatesDbContext.OnModelCreating` calls `modelBuilder.ConfigureConcurrencyStamp()` at the end.
-2. Sample DbContexts that inherit from `CrestCreatesDbContext` and call `base.OnModelCreating()` get it automatically.
-3. Custom standalone DbContexts (e.g., `LibraryDbContext` which inherits from `DbContext` directly) must call it manually after their own entity configuration.
+2. Sample DbContexts inheriting from `CrestCreatesDbContext` get it via `base.OnModelCreating()`.
+3. Standalone DbContexts (e.g., `LibraryDbContext`) must call it manually.
 
-### 5.3 Safety net test
+### 6.3 Safety net test
 
-A test verifies: for every known DbContext in the solution (framework + samples), entities implementing `IHasConcurrencyStamp` have `IsConcurrencyToken == true` on their `ConcurrencyStamp` property in the EF model metadata. Any DbContext that forgot to call `ConfigureConcurrencyStamp()` fails this test.
+A test enumerates **all known DbContext types** in the solution (framework + samples), builds each model, and asserts: for every entity implementing `IHasConcurrencyStamp`, the `ConcurrencyStamp` property has `IsConcurrencyToken == true`. Any DbContext missing the call fails this test.
 
-## 6. Exception & Propagation
+## 7. Exception & Propagation
 
-### 6.1 `CrestConcurrencyException`
+### 7.1 `CrestConcurrencyException`
 
 **File**: `framework/src/CrestCreates.Domain/Exceptions/CrestConcurrencyException.cs`
 
@@ -234,114 +290,99 @@ public class CrestConcurrencyException : Exception
 {
     public string EntityType { get; }
     public object? EntityId { get; }
-
-    public CrestConcurrencyException(string entityType, object? entityId)
-        : base($"Concurrency conflict: {entityType} (Id={entityId}) has been modified by another user.")
-    {
-        EntityType = entityType;
-        EntityId = entityId;
-    }
+    // constructor with formatted message...
 }
 ```
 
-### 6.2 Application Service — re-throw white list
+### 7.2 Application Service — re-throw white list
 
 `CrestAppServiceBase.UpdateAsync` and `DeleteAsync` catch blocks: add `catch (CrestConcurrencyException) { throw; }` before `catch (Exception)`.
 
-### 6.3 Middleware — 409 mapping
+### 7.3 Middleware — 409 and 428 mapping
 
 **File**: `framework/src/CrestCreates.AspNetCore/Middlewares/ExceptionHandlingMiddleware.cs`
 
-(`CrestCreates.Web/Middlewares/ExceptionHandlingMiddleware.cs` is **excluded from compilation** — only the AspNetCore copy is active.)
+(`CrestCreates.Web/Middlewares/ExceptionHandlingMiddleware.cs` is **excluded from compilation**.)
 
 ```csharp
 case CrestConcurrencyException concurrencyEx:
-    context.Response.StatusCode = (int)HttpStatusCode.Conflict;
-    errorResponse.Code = (int)HttpStatusCode.Conflict;
+    context.Response.StatusCode = (int)HttpStatusCode.Conflict;   // 409
     errorResponse.Message = "数据已被其他用户修改，请刷新后重试";
     errorResponse.Details = concurrencyEx.Message;
     break;
+
+case InvalidOperationException opEx when opEx.Message.Contains("If-Match"):
+    context.Response.StatusCode = 428;                            // Precondition Required
+    errorResponse.Message = "请求缺少 If-Match 头，请提供当前 ConcurrencyStamp";
+    break;
 ```
 
-### 6.4 Legacy path: CrudServiceBase
+### 7.4 Legacy path: CrudServiceBase
 
-`CrudServiceBase` and `ICrudService` are **legacy** and do not get concurrency support. Mark with:
+`CrudServiceBase` and `ICrudService` are **legacy**. Mark with:
 
-```
+```csharp
 [Obsolete("Use generated CRUD service or CrestAppServiceBase for concurrency support.")]
 ```
 
-Add a test verifying: `CrudServiceBase.DeleteAsync` does NOT throw `CrestConcurrencyException` for stale-stamp scenarios (it has no concurrency awareness).
+A test verifies `CrudServiceBase.DeleteAsync` does NOT reject stale stamps (proving it has no concurrency awareness). Entities managed through `CrudServiceBase` get zero concurrency protection — this is documented and intentional.
 
-## 7. Code Generator Changes
+## 8. Code Generator Changes
 
-### 7.1 EntitySourceGenerator
+### 8.1 EntitySourceGenerator
 
 **File**: `framework/tools/CrestCreates.CodeGenerator/EntityGenerator/EntitySourceGenerator.cs`
 
 | Method | Change |
 |--------|--------|
-| `GenerateCreateEntityDto` (~line 1082) | Add `p.Name != "ConcurrencyStamp"` to exclusion list |
-| `GenerateUpdateEntityDto` (~line 1123) | No change — ConcurrencyStamp is NOT excluded (correct) |
-| `GenerateEntityDto` (~line 1045) | No change — includes all properties (correct) |
-| `GenerateMappingExtensions` → `UpdateXxxDto.ApplyTo` (~line 1246) | No change — maps ConcurrencyStamp (correct) |
+| `GenerateCreateEntityDto` (~line 1082) | Add `p.Name != "ConcurrencyStamp"` to exclusion |
+| `GenerateUpdateEntityDto` (~line 1123) | No change — ConcurrencyStamp is NOT excluded |
+| `GenerateEntityDto` (~line 1045) | No change — includes all properties |
+| `GenerateMappingExtensions` → `UpdateXxxDto.ApplyTo` (~line 1246) | No change — maps ConcurrencyStamp |
 
-### 7.2 CrudServiceSourceGenerator
+### 8.2 CrudServiceSourceGenerator
 
 **File**: `framework/tools/CrestCreates.CodeGenerator/CrudServiceGenerator/CrudServiceSourceGenerator.cs`
 
-| Method | Change |
-|--------|--------|
-| `GenerateCreateEntityDto` (~line 263) | Already excludes ConcurrencyStamp — no change |
-| `GenerateUpdateEntityDto` (~line 311) | Remove `"ConcurrencyStamp"` from exclusion list |
-| Generated `UpdateAsync` body (~line 580) | Map `input.ConcurrencyStamp` to entity before repository call |
-| Generated `DeleteAsync` signature (~line 662) | Add `string? expectedStamp = null` parameter |
-| Generated `DeleteAsync` body | If entity has `IHasConcurrencyStamp` AND `expectedStamp` is not null → call `Repository.DeleteAsync(id, expectedStamp)`. Otherwise → existing entity-based path |
+| Item | Change |
+|------|--------|
+| `GenerateCreateEntityDto` exclusion list | Already excludes ConcurrencyStamp — no change |
+| `GenerateUpdateEntityDto` exclusion list | Remove `"ConcurrencyStamp"` from exclusion |
+| Generated `UpdateAsync` body | Map `input.ConcurrencyStamp` to entity before `Repository.UpdateAsync` |
+| Generated `DeleteAsync` signature | Add `string? expectedStamp = null` parameter |
+| Generated `DeleteAsync` body | For `IHasConcurrencyStamp` entity: require `expectedStamp`, call `Repository.DeleteAsync(id, expectedStamp)`. Missing → throw. For non-concurrency: existing path. |
+| Generated `DeleteAsync` for concurrent entity | Add `[UnitOfWorkMo]` to match `CrestAppServiceBase` behavior |
 
-Generated DeleteAsync pseudocode:
+### 8.3 Generated service `[UnitOfWorkMo]`
 
-```csharp
-public virtual async Task DeleteAsync(Guid id, string? expectedStamp = null, CancellationToken ct = default)
-{
-    if (expectedStamp != null && typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(Book)))
-    {
-        // True optimistic concurrency: single atomic DELETE + WHERE stamp
-        await _repository.DeleteAsync(id, expectedStamp, ct);
-        return;
-    }
+The generated CRUD service is the official main chain. Its `UpdateAsync` and `DeleteAsync` methods are decorated with `[UnitOfWorkMo]` to ensure audit writes, domain events, and entity changes happen in a single transaction. This is about **side-effect consistency**, not concurrency safety — the concurrency safety comes from the SQL WHERE clause.
 
-    // Fallback: server-side delete with pre-read (entity-based concurrency)
-    var entity = await _repository.GetByIdAsync(id, ct);
-    if (entity == null) throw new EntityNotFoundException(typeof(Book), id);
-    await _repository.DeleteAsync(entity, ct);
-}
-```
-
-## 8. Testing
-
-### Test scenarios (EF Core — full coverage)
+## 9. Testing
 
 | # | Test | Description |
 |---|------|-------------|
 | 1 | `Update_WithCorrectStamp_ShouldSucceed` | Matching stamp → success, new stamp returned |
 | 2 | `Update_WithStaleStamp_ShouldThrowConcurrencyException` | Old stamp → `CrestConcurrencyException` |
 | 3 | `Update_WithStaleStamp_ShouldReturn409` | API: stale stamp PUT → HTTP 409 |
-| 4 | `ConcurrentUpdate_TwoRequests_OneSucceedsOneFails` | Two parallel tasks → one 200, one 409 |
+| 4 | `ConcurrentUpdate_TwoRequests_OneSucceedsOneFails` | Parallel tasks → one 200, one 409 |
 | 5 | `Delete_WithCorrectStamp_ShouldSucceed` | Matching `If-Match` → 204 |
 | 6 | `Delete_WithStaleStamp_ShouldThrowConcurrencyException` | Stale `If-Match` → `CrestConcurrencyException` |
 | 7 | `Delete_WithStaleStamp_ShouldReturn409` | API: stale `If-Match` DELETE → HTTP 409 |
-| 8 | `Entity_WithoutConcurrency_ShouldStillWork` | No `IHasConcurrencyStamp` → old behavior |
-| 9 | `NewEntity_GetsConcurrencyStampOnConstruction` | New AuditedEntity → stamp is non-empty GUID |
-| 10 | `AllDbContexts_ConcurrencyToken_IsConfigured` | Every DbContext: `IHasConcurrencyStamp` entities have `IsConcurrencyToken == true` |
-| 11 | `CrudServiceBase_Delete_NoConcurrencyProtection` | Legacy path: stale stamp doesn't prevent delete |
+| 8 | `Delete_ConcurrentEntity_WithoutIfMatch_ShouldReturn428` | Missing `If-Match` on concurrent entity → 428 |
+| 9 | `Delete_NonConcurrentEntity_WithoutIfMatch_ShouldSucceed` | Non-concurrency entity: delete succeeds without header |
+| 10 | `Entity_WithoutConcurrency_ShouldStillWork` | No `IHasConcurrencyStamp` → old behavior |
+| 11 | `NewEntity_GetsConcurrencyStampOnConstruction` | New AuditedEntity → stamp is non-empty GUID |
+| 12 | `AllDbContexts_ConcurrencyToken_IsConfigured` | Enumerate all known DbContexts: `IHasConcurrencyStamp` entities have `IsConcurrencyToken == true` |
+| 13 | `CrudServiceBase_Delete_HasNoConcurrencyProtection` | Legacy path: stale stamp doesn't prevent delete |
+| 14 | `UpdateRangeAsync_WithConcurrentEntity_ThrowsNotSupported` | Batch update with `IHasConcurrencyStamp` → `NotSupportedException` |
 
-### Cross-ORM coverage
+### Cross-ORM
 
-- EF Core: full coverage.
-- FreeSql: scenarios 2 and 6 (update/delete stale stamp → throw).
-- SqlSugar: scenarios 2 and 6 (update/delete stale stamp → throw).
+- EF Core: full coverage (14 scenarios).
+- FreeSql: scenarios 2, 6, 14 (update/delete stale stamp → throw; UpdateRangeAsync → throw).
+- SqlSugar: scenarios 2, 6, 14.
 
-## 9. Files Changed
+## 10. Files Changed
 
 | File | Action |
 |------|--------|
@@ -349,21 +390,21 @@ public virtual async Task DeleteAsync(Guid id, string? expectedStamp = null, Can
 | `Domain/.../AuditedEntity.cs` | Add `ConcurrencyStamp` + `IHasConcurrencyStamp` |
 | `Domain/.../AuditedAggregateRoot.cs` | Add `ConcurrencyStamp` + `IHasConcurrencyStamp` |
 | `Domain/.../CrestConcurrencyException.cs` | New |
-| `Domain/.../CrestRepositoryBase.cs` | Add `DeleteAsync(TKey id, string expectedStamp, ...)` abstract method |
-| `Domain/.../ICrestRepositoryBase.cs` | Add `DeleteAsync(TKey id, string expectedStamp, ...)` to interface |
+| `Domain/.../ICrestRepositoryBase.cs` | Add `DeleteAsync(TKey, string expectedStamp, ...)` |
+| `Domain/.../CrestRepositoryBase.cs` | Add abstract `DeleteAsync(TKey, string expectedStamp, ...)` |
 | `OrmProviders.EFCore/.../ModelBuilderExtensions.cs` | New: `ConfigureConcurrencyStamp()` |
-| `OrmProviders.EFCore/.../CrestCreatesDbContext.cs` | Call `modelBuilder.ConfigureConcurrencyStamp()` in `OnModelCreating` |
-| `OrmProviders.EFCore/.../EfCoreRepository.cs` | Concurrency in `UpdateAsync`, `DeleteAsync(TEntity)`, `DeleteAsync(TKey, string)` |
-| `OrmProviders.EFCore/.../EfCoreRepositoryBase.cs` | Concurrency in `UpdateAsync`, `DeleteAsync(TEntity)`, `DeleteAsync(TKey, string)` |
-| `OrmProviders.FreeSqlProvider/.../FreeSqlRepositoryBase.cs` | Concurrency in `UpdateAsync`, `DeleteAsync(TEntity)`, `DeleteAsync(TKey, string)` |
-| `OrmProviders.SqlSugar/.../SqlSugarRepository.cs` | Concurrency in `UpdateAsync`, `DeleteAsync(TEntity)`, `DeleteAsync(TKey, string)` |
-| `Application.Contracts/.../ICrudAppService.cs` | `DeleteAsync` add `string? expectedStamp = null` parameter |
-| `Application/.../CrestAppServiceBase.cs` | Re-throw `CrestConcurrencyException` in `UpdateAsync` / `DeleteAsync` |
-| `Application/.../CrudServiceBase.cs` | Mark `[Obsolete]` |
-| `Application/.../ICrudService.cs` | Mark `[Obsolete]` |
-| `AspNetCore/.../CrudControllerBase.cs` | `DeleteAsync` reads `[FromHeader] If-Match`, passes to service |
-| `AspNetCore/.../ExceptionHandlingMiddleware.cs` | Add `CrestConcurrencyException` → 409 case |
+| `OrmProviders.EFCore/.../CrestCreatesDbContext.cs` | Call `modelBuilder.ConfigureConcurrencyStamp()` |
+| `OrmProviders.EFCore/.../EfCoreRepository.cs` | Concurrency in `UpdateAsync`, `DeleteAsync(entity)`, `DeleteAsync(id, stamp)`, `UpdateRangeAsync` |
+| `OrmProviders.EFCore/.../EfCoreRepositoryBase.cs` | Concurrency in `UpdateAsync`, `DeleteAsync(entity)`, `DeleteAsync(id, stamp)`, `UpdateRangeAsync` |
+| `OrmProviders.FreeSqlProvider/.../FreeSqlRepositoryBase.cs` | Same concurrency methods |
+| `OrmProviders.SqlSugar/.../SqlSugarRepository.cs` | Same concurrency methods |
+| `Application.Contracts/.../ICrudAppService.cs` | `DeleteAsync` add `string? expectedStamp = null` |
+| `Application/.../CrestAppServiceBase.cs` | Re-throw `CrestConcurrencyException` |
+| `Application/.../CrudServiceBase.cs` | `[Obsolete]` |
+| `Application/.../ICrudService.cs` | `[Obsolete]` |
+| `AspNetCore/.../CrudControllerBase.cs` | `DeleteAsync` reads `[FromHeader] If-Match` |
+| `AspNetCore/.../ExceptionHandlingMiddleware.cs` | 409 + 428 cases |
 | `CodeGenerator/.../EntitySourceGenerator.cs` | Exclude `ConcurrencyStamp` from `CreateXxxDto` |
-| `CodeGenerator/.../CrudServiceSourceGenerator.cs` | Include `ConcurrencyStamp` in `UpdateXxxDto`; stamped `DeleteAsync` generation |
-| Sample/LibraryDbContext.cs | Call `modelBuilder.ConfigureConcurrencyStamp()` |
-| Test projects | 11 scenarios |
+| `CodeGenerator/.../CrudServiceSourceGenerator.cs` | Include stamp in `UpdateXxxDto`; stamped `DeleteAsync` with enforcement; `[UnitOfWorkMo]` on generated service methods |
+| `samples/.../LibraryDbContext.cs` (or any standalone DbContext) | Call `modelBuilder.ConfigureConcurrencyStamp()` |
+| Test projects | 14 scenarios |
