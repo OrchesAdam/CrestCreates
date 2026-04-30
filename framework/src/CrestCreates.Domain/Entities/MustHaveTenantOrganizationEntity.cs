@@ -13,4 +13,5 @@ public abstract class MustHaveTenantOrganizationEntity<TKey> : Entity<TKey>, IMu
     public DateTime CreationTime { get; set; }
     public DateTime? LastModificationTime { get; set; }
     public Guid? LastModifierId { get; set; }
+    public string ConcurrencyStamp { get; set; } = Guid.NewGuid().ToString();
 }
