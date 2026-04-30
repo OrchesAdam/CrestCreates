@@ -12,6 +12,7 @@ using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.DataFilter;
 using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.Domain.Shared.Entities.Auditing;
+using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Shared.Permissions;
 
 namespace CrestCreates.Application.Services;
@@ -236,6 +237,14 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         {
             throw;
         }
+        catch (CrestConcurrencyException)
+        {
+            throw;
+        }
+        catch (CrestPreconditionRequiredException)
+        {
+            throw;
+        }
         catch (System.Data.Common.DbException ex)
         {
             throw new Exception($"更新 {typeof(TEntity).Name} 失败: {ex.Message}", ex);
@@ -247,7 +256,7 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
     }
 
     [UnitOfWorkMo]
-    public virtual async Task DeleteAsync(TKey id, CancellationToken cancellationToken = default)
+    public virtual async Task DeleteAsync(TKey id, string? expectedStamp = null, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -259,6 +268,18 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
             }
 
             await Repository.DeleteAsync(id, cancellationToken);
+        }
+        catch (KeyNotFoundException)
+        {
+            throw;
+        }
+        catch (CrestConcurrencyException)
+        {
+            throw;
+        }
+        catch (CrestPreconditionRequiredException)
+        {
+            throw;
         }
         catch (System.Data.Common.DbException ex)
         {

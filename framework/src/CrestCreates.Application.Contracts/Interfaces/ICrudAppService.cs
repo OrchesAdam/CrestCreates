@@ -19,5 +19,5 @@ public interface ICrudAppService<TKey, TDto, in TCreateDto, in TUpdateDto, in TL
 
     Task<TDto> UpdateAsync(TKey id, TUpdateDto input, CancellationToken cancellationToken = default);
 
-    Task DeleteAsync(TKey id, CancellationToken cancellationToken = default);
+    Task DeleteAsync(TKey id, string? expectedStamp = null, CancellationToken cancellationToken = default);
 }
