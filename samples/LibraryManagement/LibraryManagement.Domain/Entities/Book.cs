@@ -25,6 +25,7 @@ public class Book : AuditedEntity<Guid>
     public Category Category { get; set; } = null!;
     public int TotalCopies { get; set; }
     public int AvailableCopies { get; set; }
+    [MapIgnore]
     public string? Location { get; set; }
 
     public Book() { }

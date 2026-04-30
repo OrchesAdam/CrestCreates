@@ -96,7 +96,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 var mapping = mappings[i];
                 var comma = i < mappings.Count - 1 ? "," : "";
                 var valueExpression = GetPropertyAssignmentExpression(mapping);
-                sb.AppendLine($"                {mapping.TargetProperty.Name} = {valueExpression}{comma}");
+                sb.AppendLine($"                {mapping.TargetPropertyName} = {valueExpression}{comma}");
             }
 
             sb.AppendLine("            };");
@@ -108,23 +108,64 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
 
         private string GetPropertyAssignmentExpression(PropertyMapping mapping)
         {
-            var baseExpression = $"source.{mapping.SourceProperty.Name}";
+            string sourceExpression;
+
+            if (mapping.NavigationSegments != null && mapping.NavigationSegments.Count > 1)
+            {
+                sourceExpression = BuildNavigationExpression(mapping);
+            }
+            else
+            {
+                sourceExpression = $"source.{mapping.SourceProperty.Name}";
+            }
+
+            // Custom converter
+            if (mapping.ConverterTypeFullName != null)
+            {
+                sourceExpression = $"{mapping.ConverterTypeFullName}.Convert({sourceExpression})";
+            }
 
             // Handle collection conversion
             if (mapping.NeedsCollectionConversion && mapping.CollectionConversionMethod != null)
             {
-                baseExpression = $"{baseExpression}.{mapping.CollectionConversionMethod}";
+                sourceExpression = $"{sourceExpression}.{mapping.CollectionConversionMethod}";
             }
 
             // Handle null check
             if (mapping.NeedsNullCheck)
             {
-                var targetTypeName = mapping.TargetProperty.Type.ToDisplayString();
-                var defaultValue = GetDefaultValue(targetTypeName);
-                return $"{baseExpression} ?? {defaultValue}";
+                var typeName = mapping.TargetProperty?.Type.ToDisplayString()
+                    ?? mapping.SourceProperty.Type.ToDisplayString();
+                var defaultValue = GetDefaultValue(typeName);
+                return $"{sourceExpression} ?? {defaultValue}";
             }
 
-            return baseExpression;
+            return sourceExpression;
+        }
+
+        private string BuildNavigationExpression(PropertyMapping mapping)
+        {
+            var segments = mapping.NavigationSegments!;
+            var firstProp = mapping.SourceProperty;
+
+            var parts = new List<string> { $"source.{segments[0]}" };
+
+            INamedTypeSymbol? currentType = firstProp.Type as INamedTypeSymbol;
+            for (int i = 1; i < segments.Count; i++)
+            {
+                if (currentType == null) break;
+                // Use ?. for reference type intermediate segments
+                bool isRefType = currentType.IsReferenceType
+                    || (currentType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T);
+                string op = isRefType ? "?." : ".";
+                parts.Add($"{op}{segments[i]}");
+
+                var segmentProp = currentType.GetMembers(segments[i])
+                    .OfType<IPropertySymbol>().FirstOrDefault(p => !p.IsStatic);
+                currentType = segmentProp?.Type as INamedTypeSymbol;
+            }
+
+            return string.Concat(parts);
         }
 
         private string GetDefaultValue(string typeName)
@@ -182,7 +223,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             foreach (var mapping in model.PropertyMappings.Where(m => !m.IsIgnored && !m.IsReadOnly))
             {
                 var valueExpression = GetPropertyAssignmentExpression(mapping);
-                sb.AppendLine($"            destination.{mapping.TargetProperty.Name} = {valueExpression};");
+                sb.AppendLine($"            destination.{mapping.TargetPropertyName} = {valueExpression};");
             }
 
             sb.AppendLine("            AfterApply(source, destination);");
@@ -202,8 +243,11 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             sb.AppendLine("            source => new " + targetType);
             sb.AppendLine("            {");
 
+            // Skip properties with navigation paths or custom converters (not Expression-compatible)
             var mappings = model.PropertyMappings
-                .Where(m => !m.IsIgnored && !m.IsReadOnly)
+                .Where(m => !m.IsIgnored && !m.IsReadOnly
+                    && m.NavigationSegments == null
+                    && m.ConverterTypeFullName == null)
                 .ToList();
 
             for (int i = 0; i < mappings.Count; i++)
@@ -211,7 +255,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 var mapping = mappings[i];
                 var comma = i < mappings.Count - 1 ? "," : "";
                 var valueExpression = GetPropertyAssignmentExpression(mapping);
-                sb.AppendLine($"                {mapping.TargetProperty.Name} = {valueExpression}{comma}");
+                sb.AppendLine($"                {mapping.TargetPropertyName} = {valueExpression}{comma}");
             }
 
             sb.AppendLine("            };");

@@ -78,6 +78,30 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             defaultSeverity: DiagnosticSeverity.Warning,
             isEnabledByDefault: true);
 
+        public static readonly DiagnosticDescriptor NavigationSegmentNotFound = new(
+            id: "OM010",
+            title: "Navigation segment not found",
+            messageFormat: "Navigation path segment '{0}' not found on type '{1}' for property '{2}'",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor InvalidConverterType = new(
+            id: "OM011",
+            title: "Invalid converter type",
+            messageFormat: "Converter type '{0}' for property '{1}' is not valid. Converter must be a static class with a Convert method.",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor NavigationPathInvalid = new(
+            id: "OM012",
+            title: "Navigation path invalid",
+            messageFormat: "Navigation path '{0}' for property '{1}' has an invalid segment '{2}'.",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
         public static Diagnostic Create(DiagnosticDescriptor descriptor, Location? location, params object[] args)
         {
             return Diagnostic.Create(descriptor, location, args);

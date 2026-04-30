@@ -23,13 +23,17 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
     internal sealed class PropertyMapping
     {
         public IPropertySymbol SourceProperty { get; set; } = null!;
-        public IPropertySymbol TargetProperty { get; set; } = null!;
+        public IPropertySymbol? TargetProperty { get; set; }
+        public string TargetPropertyName { get; set; } = string.Empty;
         public bool IsIgnored { get; set; }
         public bool IsReadOnly { get; set; }
         public string? CustomSourceName { get; set; }
         public bool NeedsNullCheck { get; set; }
         public bool NeedsCollectionConversion { get; set; }
         public string? CollectionConversionMethod { get; set; } // "ToList()", "ToArray()"
+        public string? SourceNavigationPath { get; set; }
+        public List<string>? NavigationSegments { get; set; }
+        public string? ConverterTypeFullName { get; set; }
     }
 
     /// <summary>
