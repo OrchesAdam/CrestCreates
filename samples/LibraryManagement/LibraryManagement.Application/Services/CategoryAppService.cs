@@ -33,38 +33,6 @@ public class CategoryAppService :CrestAppServiceBase<Category, Guid, CategoryDto
     protected override CategoryDto MapToDto(Category entity)
         => entity.ToDto();
 
-    public async Task<CategoryDto> GetAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        var category = await _categoryRepository.GetAsync(id);
-        if (category == null)
-            throw new Exception($"Category with id {id} not found");
-
-        return await MapToDtoAsync(category);
-    }
-
-    public async Task<IReadOnlyList<CategoryDto>> GetRootCategoriesAsync(CancellationToken cancellationToken = default)
-    {
-        var categories = await _categoryRepository.GetRootCategoriesAsync(cancellationToken);
-        var dtos = new List<CategoryDto>();
-        foreach (var category in categories)
-        {
-            dtos.Add(await MapToDtoAsync(category));
-        }
-        return dtos;
-    }
-
-    public async Task<IReadOnlyList<CategoryDto>> GetChildrenAsync(Guid parentId, CancellationToken cancellationToken = default)
-    {
-        var categories = await _categoryRepository.GetChildrenAsync(parentId, cancellationToken);
-        var dtos = new List<CategoryDto>();
-        foreach (var category in categories)
-        {
-            dtos.Add(await MapToDtoAsync(category));
-        }
-        return dtos;
-    }
-
-
     private async Task<CategoryDto> MapToDtoAsync(Category category)
     {
         var dto = category.ToDto();
