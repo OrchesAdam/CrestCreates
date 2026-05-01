@@ -10,7 +10,29 @@
       "Bash(taskkill //PID 23232 //F)",
       "Bash(echo \"Exit: $?\")",
       "Bash(taskkill //F //IM \"OmniSharpServer.exe\")",
-      "Bash(taskkill //F //PID 2148)"
+      "Bash(taskkill //F //PID 2148)",
+      "Bash(taskkill //F //PID 26164)",
+      "Bash(taskkill //F //PID 26128)",
+      "Bash(tasklist)",
+      "Bash(taskkill //F //IM \"dotnet.exe\")",
+      "Bash(mkdir -p 99_RecycleBin/Converters)",
+      "Bash(mv \"samples/LibraryManagement/LibraryManagement.Domain/Converters/BookStatusToStringConverter.cs\" \"99_RecycleBin/Converters/\")",
+      "Bash(dotnet tool *)",
+      "Bash(ildasm \"samples/LibraryManagement/LibraryManagement.Domain.Shared/obj/Debug/net10.0/ref/LibraryManagement.Domain.Shared.dll\")",
+      "Bash(dotnet new *)",
+      "Bash(ls -d .worktrees)",
+      "Bash(ls -d worktrees)",
+      "Bash(git check-ignore *)",
+      "Bash(taskkill /F /IM \"CSharpLanguageServer.exe\")",
+      "Bash(taskkill /F /IM \"dotnet.exe\")",
+      "Bash(cmd.exe /c \"taskkill /PID 22128 /F\")",
+      "Bash(taskkill /F /IM \"CSharpLanguageServer*\")",
+      "Bash(taskkill /F /IM \"csharp-ls*\")",
+      "Bash(powershell *)",
+      "Bash(cmd.exe *)",
+      "Bash(find framework/test/CrestCreates.CodeGenerator.Tests/obj -name \"*.g.cs\" -path \"*DynamicApi*\")",
+      "Bash(python -c ' *)",
+      "Bash(docker info *)"
     ]
   }
 }

@@ -134,26 +134,27 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             MappingProfile
         }
 
-        /// <summary>
-        /// Collects all properties of the entity, including inherited members from base classes
-        /// (e.g. ConcurrencyStamp declared in AuditedEntity{TId}), via GetMembers() which traverses
-        /// the base-type chain.  No explicit base-type walk is needed.
-        /// </summary>
         private List<IPropertySymbol> GetAllEntityProperties(INamedTypeSymbol entityClass)
         {
             var properties = new List<IPropertySymbol>();
             var propertyNames = new HashSet<string>();
 
-            foreach (var member in entityClass.GetMembers())
+            // Walk the full base-type chain so inherited properties (e.g. ConcurrencyStamp
+            // declared on AuditedEntity<TId>) are collected.  GetMembers() alone only returns
+            // directly-declared members, not inherited ones from referenced assemblies.
+            for (var current = entityClass; current != null; current = current.BaseType)
             {
-                if (member is not IPropertySymbol property || property.IsStatic)
-                    continue;
+                foreach (var member in current.GetMembers())
+                {
+                    if (member is not IPropertySymbol property || property.IsStatic)
+                        continue;
 
-                if (propertyNames.Contains(property.Name))
-                    continue;
+                    if (propertyNames.Contains(property.Name))
+                        continue;
 
-                propertyNames.Add(property.Name);
-                properties.Add(property);
+                    propertyNames.Add(property.Name);
+                    properties.Add(property);
+                }
             }
 
             return properties;
@@ -1177,6 +1178,8 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                     && p.SetMethod.DeclaredAccessibility == Accessibility.Public);
 
             // Writable non-Id properties for ApplyTo (must have public setter, exclude audit)
+            // ConcurrencyStamp is excluded from Create ApplyTo (CreateDto doesn't include it)
+            // but included in Update ApplyTo (UpdateDto carries the expected stamp from client).
             var writableNonIdMappings = nonIdMappings
                 .Where(m => m.SourceProperty.SetMethod != null
                     && m.SourceProperty.SetMethod.DeclaredAccessibility == Accessibility.Public
@@ -1184,6 +1187,10 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                     && m.TargetPropertyName != "LastModificationTime"
                     && m.TargetPropertyName != "CreatorId"
                     && m.TargetPropertyName != "LastModifierId")
+                .ToList();
+
+            var createWritableMappings = writableNonIdMappings
+                .Where(m => m.TargetPropertyName != "ConcurrencyStamp")
                 .ToList();
 
             var builder = new StringBuilder();
@@ -1237,7 +1244,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             builder.AppendLine("            BeforeApplyTo(source, destination);");
             builder.AppendLine();
 
-            foreach (var mapping in writableNonIdMappings)
+            foreach (var mapping in createWritableMappings)
             {
                 builder.AppendLine($"            destination.{mapping.TargetPropertyName} = source.{mapping.TargetPropertyName};");
             }

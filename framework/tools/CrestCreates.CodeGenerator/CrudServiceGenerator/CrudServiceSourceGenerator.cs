@@ -782,15 +782,19 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
         private List<IPropertySymbol> GetEntityProperties(INamedTypeSymbol entityClass)
         {
             var properties = new List<IPropertySymbol>();
-            var allMembers = entityClass.GetMembers();
+            var seen = new HashSet<string>();
 
-            foreach (var member in allMembers.OfType<IPropertySymbol>())
+            for (var current = entityClass; current != null; current = current.BaseType)
             {
-                if (member.DeclaredAccessibility == Accessibility.Public &&
-                    !member.IsStatic &&
-                    member.CanBeReferencedByName)
+                foreach (var member in current.GetMembers().OfType<IPropertySymbol>())
                 {
-                    properties.Add(member);
+                    if (member.DeclaredAccessibility == Accessibility.Public &&
+                        !member.IsStatic &&
+                        member.CanBeReferencedByName &&
+                        seen.Add(member.Name))
+                    {
+                        properties.Add(member);
+                    }
                 }
             }
 

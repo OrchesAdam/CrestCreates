@@ -680,10 +680,16 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             IEnumerable<string> targetPropertyNames,
             SourceProductionContext? context = null)
         {
-            var sourceProperties = sourceType.GetMembers()
-                .OfType<IPropertySymbol>()
-                .Where(p => !p.IsStatic && p.CanBeReferencedByName)
-                .ToList();
+            var sourceProperties = new List<IPropertySymbol>();
+            var seen = new HashSet<string>();
+            for (var current = sourceType; current != null; current = current.BaseType)
+            {
+                foreach (var member in current.GetMembers().OfType<IPropertySymbol>()
+                    .Where(p => !p.IsStatic && p.CanBeReferencedByName && seen.Add(p.Name)))
+                {
+                    sourceProperties.Add(member);
+                }
+            }
 
             var mappings = new List<PropertyMapping>();
             var targetNameSet = new HashSet<string>(targetPropertyNames);
