@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 using CrestCreates.OrmProviders.SqlSugar.Repositories;
@@ -20,6 +21,11 @@ namespace CrestCreates.OrmProviders.Tests
         public override IQueryable<TEntity> GetQueryableUnfiltered()
         {
             throw new NotImplementedException();
+        }
+
+        public override Task DeleteAsync(TKey id, string expectedStamp, CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException("SqlSugar concurrency delete not yet implemented.");
         }
     }
 

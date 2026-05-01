@@ -7,6 +7,7 @@ using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Settings;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.OrmProviders.Abstract;
+using CrestCreates.OrmProviders.EFCore.Extensions;
 using CrestCreates.OrmProviders.EFCore.MultiTenancy;
 using Microsoft.EntityFrameworkCore;
 
@@ -271,6 +272,8 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
                 entity.HasIndex(e => e.CreationTime);
                 entity.HasIndex(e => e.TraceId);
             });
+
+            modelBuilder.ConfigureConcurrencyStamp();
 
             if (_currentTenant != null && TenantFilterRegistryStore.HasRegistrations)
             {

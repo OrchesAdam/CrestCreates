@@ -6,9 +6,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.Entities;
+using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Entities;
+using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
+using Microsoft.EntityFrameworkCore;
 
 namespace CrestCreates.OrmProviders.EFCore.Repositories
 {
@@ -76,22 +79,62 @@ namespace CrestCreates.OrmProviders.EFCore.Repositories
 
         public override async Task<TEntity> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
-            _dbContext.Set<TEntity>().Update(entity);
-            await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
+            if (entity is IHasConcurrencyStamp stampEntity)
+            {
+                var dbContext = (DbContext)_dbContext.GetNativeContext();
+                var oldStamp = stampEntity.ConcurrencyStamp;
+                stampEntity.ConcurrencyStamp = Guid.NewGuid().ToString("N");
+                var entry = dbContext.Set<TEntity>().Update(entity);
+                entry.Property(nameof(IHasConcurrencyStamp.ConcurrencyStamp)).OriginalValue = oldStamp;
+            }
+            else
+            {
+                _dbContext.Set<TEntity>().Update(entity);
+            }
+
+            try
+            {
+                await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
+            }
             return entity;
         }
 
         public override async Task<IEnumerable<TEntity>> UpdateRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
-            _dbContext.Set<TEntity>().UpdateRange(entities);
+            var entityList = entities.ToList();
+            if (entityList.Any(e => e is IHasConcurrencyStamp))
+                throw new NotSupportedException("UpdateRangeAsync does not support entities with concurrency stamps. Use UpdateAsync for concurrency-safe updates.");
+            _dbContext.Set<TEntity>().UpdateRange(entityList);
             await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
-            return entities;
+            return entityList;
         }
 
         public override async Task DeleteAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
-            _dbContext.Set<TEntity>().Remove(entity);
-            await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
+            if (entity is IHasConcurrencyStamp)
+            {
+                var dbContext = (DbContext)_dbContext.GetNativeContext();
+                var entry = dbContext.Entry(entity);
+                entry.Property(nameof(IHasConcurrencyStamp.ConcurrencyStamp)).OriginalValue = ((IHasConcurrencyStamp)entity).ConcurrencyStamp;
+                entry.State = EntityState.Deleted;
+            }
+            else
+            {
+                _dbContext.Set<TEntity>().Remove(entity);
+            }
+
+            try
+            {
+                await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
+            }
         }
 
         public override async Task DeleteAsync(TId id, CancellationToken cancellationToken = default)
@@ -102,6 +145,15 @@ namespace CrestCreates.OrmProviders.EFCore.Repositories
                 _dbContext.Set<TEntity>().Remove(entity);
                 await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
             }
+        }
+
+        public override async Task DeleteAsync(TId id, string expectedStamp, CancellationToken cancellationToken = default)
+        {
+            var dbContext = (DbContext)_dbContext.GetNativeContext();
+            var rows = await dbContext.Set<TEntity>()
+                .Where(e => e.Id.Equals(id) && EF.Property<string>(e, "ConcurrencyStamp") == expectedStamp)
+                .ExecuteDeleteAsync(cancellationToken);
+            if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
         }
 
         public override async Task DeleteRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)

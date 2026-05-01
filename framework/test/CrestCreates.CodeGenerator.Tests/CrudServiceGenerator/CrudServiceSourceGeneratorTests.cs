@@ -149,7 +149,7 @@ namespace TestNamespace
             var dtoSource = result.GetSourceByFileName("UpdateProductDto.g.cs");
             Assert.NotNull(dtoSource);
             Assert.Contains("class UpdateProductDto", dtoSource.SourceText);
-            Assert.Contains("public Guid Id { get; set; }", dtoSource.SourceText);
+            Assert.Contains("public System.Guid Id { get; set; }", dtoSource.SourceText);
             Assert.Contains("public string Name { get; set; }", dtoSource.SourceText);
             Assert.Contains("public decimal Price { get; set; }", dtoSource.SourceText);
         }
@@ -378,11 +378,11 @@ namespace TestNamespace
             // Assert
             var interfaceSource = result.GetSourceByFileName("IProductCrudService.g.cs");
             Assert.NotNull(interfaceSource);
-            Assert.Contains("Task<ProductDto> CreateAsync(CreateProductDto input)", interfaceSource.SourceText);
-            Assert.Contains("Task<ProductDto?> GetByIdAsync(Guid id)", interfaceSource.SourceText);
-            Assert.Contains("Task<PagedResult<ProductDto>> GetListAsync(ProductListRequestDto input)", interfaceSource.SourceText);
-            Assert.Contains("Task<ProductDto> UpdateAsync(UpdateProductDto input)", interfaceSource.SourceText);
-            Assert.Contains("Task DeleteAsync(Guid id)", interfaceSource.SourceText);
+            Assert.Contains("Task<ProductDto> CreateAsync(CreateProductDto input, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
+            Assert.Contains("Task<ProductDto?> GetByIdAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
+            Assert.Contains("Task<PagedResultDto<ProductDto>> GetListAsync(ProductListRequestDto input, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
+            Assert.Contains("Task<ProductDto> UpdateAsync(System.Guid id, UpdateProductDto input, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
+            Assert.Contains("Task DeleteAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
         }
 
         [Fact]
@@ -423,8 +423,8 @@ namespace TestNamespace
             // Assert
             var interfaceSource = result.GetSourceByFileName("ICategoryCrudService.g.cs");
             Assert.NotNull(interfaceSource);
-            Assert.Contains("Task<CategoryDto?> GetByIdAsync(int id)", interfaceSource.SourceText);
-            Assert.Contains("Task DeleteAsync(int id)", interfaceSource.SourceText);
+            Assert.Contains("Task<CategoryDto?> GetByIdAsync(int id, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
+            Assert.Contains("Task DeleteAsync(int id, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
         }
 
         #endregion
@@ -511,9 +511,9 @@ namespace TestNamespace
             // Assert
             var implSource = result.GetSourceByFileName("ProductCrudService.g.cs");
             Assert.NotNull(implSource);
-            Assert.Contains("private readonly IProductRepository _repository", implSource.SourceText);
-            Assert.Contains("private readonly IMapper _mapper", implSource.SourceText);
-            Assert.Contains("IProductRepository repository, IMapper mapper", implSource.SourceText);
+            Assert.Contains("protected readonly IProductRepository _repository", implSource.SourceText);
+            Assert.Contains("IProductRepository repository", implSource.SourceText);
+            Assert.DoesNotContain("IMapper", implSource.SourceText);
         }
 
         [Fact]
@@ -554,10 +554,10 @@ namespace TestNamespace
             // Assert
             var implSource = result.GetSourceByFileName("ProductCrudService.g.cs");
             Assert.NotNull(implSource);
-            Assert.Contains("public async Task<ProductDto> CreateAsync(CreateProductDto input)", implSource.SourceText);
-            Assert.Contains("_mapper.Map<Product>(input)", implSource.SourceText);
-            Assert.Contains("_repository.AddAsync(entity)", implSource.SourceText);
-            Assert.Contains("_mapper.Map<ProductDto>(entity)", implSource.SourceText);
+            Assert.Contains("public virtual async Task<ProductDto> CreateAsync(CreateProductDto input, CancellationToken cancellationToken = default)", implSource.SourceText);
+            Assert.Contains("var entity = MapToEntity(input)", implSource.SourceText);
+            Assert.Contains("_repository.AddAsync(entity, cancellationToken)", implSource.SourceText);
+            Assert.Contains("entity.ToDto()", implSource.SourceText);
         }
 
         [Fact]
@@ -598,8 +598,8 @@ namespace TestNamespace
             // Assert
             var implSource = result.GetSourceByFileName("ProductCrudService.g.cs");
             Assert.NotNull(implSource);
-            Assert.Contains("public async Task<ProductDto?> GetByIdAsync(Guid id)", implSource.SourceText);
-            Assert.Contains("_repository.GetByIdAsync(id)", implSource.SourceText);
+            Assert.Contains("public virtual async Task<ProductDto?> GetByIdAsync(System.Guid id, CancellationToken cancellationToken = default)", implSource.SourceText);
+            Assert.Contains("_repository.GetByIdAsync(id, cancellationToken)", implSource.SourceText);
         }
 
         [Fact]
@@ -641,7 +641,7 @@ namespace TestNamespace
             // Assert
             var implSource = result.GetSourceByFileName("ProductCrudService.g.cs");
             Assert.NotNull(implSource);
-            Assert.Contains("public async Task<PagedResult<ProductDto>> GetListAsync(ProductListRequestDto input)", implSource.SourceText);
+            Assert.Contains("public virtual async Task<PagedResultDto<ProductDto>> GetListAsync(ProductListRequestDto input, CancellationToken cancellationToken = default)", implSource.SourceText);
             Assert.Contains("_repository.GetPagedListAsync", implSource.SourceText);
             Assert.Contains("input.PageNumber", implSource.SourceText);
             Assert.Contains("input.PageSize", implSource.SourceText);
@@ -685,11 +685,11 @@ namespace TestNamespace
             // Assert
             var implSource = result.GetSourceByFileName("ProductCrudService.g.cs");
             Assert.NotNull(implSource);
-            Assert.Contains("public async Task<ProductDto> UpdateAsync(UpdateProductDto input)", implSource.SourceText);
-            Assert.Contains("_repository.GetByIdAsync(input.Id)", implSource.SourceText);
+            Assert.Contains("public virtual async Task<ProductDto> UpdateAsync(System.Guid id, UpdateProductDto input, CancellationToken cancellationToken = default)", implSource.SourceText);
+            Assert.Contains("_repository.GetByIdAsync(id, cancellationToken)", implSource.SourceText);
             Assert.Contains("EntityNotFoundException", implSource.SourceText);
-            Assert.Contains("_mapper.Map(input, entity)", implSource.SourceText);
-            Assert.Contains("_repository.UpdateAsync(entity)", implSource.SourceText);
+            Assert.Contains("input.ApplyTo(entity)", implSource.SourceText);
+            Assert.Contains("_repository.UpdateAsync(entity, cancellationToken)", implSource.SourceText);
         }
 
         [Fact]
@@ -730,9 +730,11 @@ namespace TestNamespace
             // Assert
             var implSource = result.GetSourceByFileName("ProductCrudService.g.cs");
             Assert.NotNull(implSource);
-            Assert.Contains("public async Task DeleteAsync(Guid id)", implSource.SourceText);
-            Assert.Contains("_repository.GetByIdAsync(id)", implSource.SourceText);
-            Assert.Contains("_repository.DeleteAsync(entity)", implSource.SourceText);
+            Assert.Contains("public virtual async Task DeleteAsync(System.Guid id, string? expectedStamp = null", implSource.SourceText);
+            Assert.Contains("_repository.GetByIdAsync(id, cancellationToken)", implSource.SourceText);
+            Assert.Contains("_repository.DeleteAsync(entity, cancellationToken)", implSource.SourceText);
+            Assert.Contains("typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(Product))", implSource.SourceText);
+            Assert.Contains("CrestPreconditionRequiredException", implSource.SourceText);
         }
 
         #endregion
@@ -776,13 +778,12 @@ namespace TestNamespace
                 new[] { entitySource });
 
             // Assert
-            Assert.True(result.ContainsFile("ProductMappingProfile.g.cs"));
-            var profileSource = result.GetSourceByFileName("ProductMappingProfile.g.cs");
-            Assert.NotNull(profileSource);
-            Assert.Contains("class ProductMappingProfile : Profile", profileSource.SourceText);
-            Assert.Contains("CreateMap<Product, ProductDto>()", profileSource.SourceText);
-            Assert.Contains("CreateMap<CreateProductDto, Product>()", profileSource.SourceText);
-            Assert.Contains("CreateMap<UpdateProductDto, Product>()", profileSource.SourceText);
+            Assert.True(result.ContainsFile("ProductCrudService.g.cs"));
+            var implSource = result.GetSourceByFileName("ProductCrudService.g.cs");
+            Assert.NotNull(implSource);
+            Assert.Contains("abstract Product MapToEntity(CreateProductDto dto)", implSource.SourceText);
+            Assert.Contains("entity.ToDto()", implSource.SourceText);
+            Assert.Contains("input.ApplyTo(entity)", implSource.SourceText);
         }
 
         #endregion
@@ -1024,7 +1025,7 @@ namespace TestNamespace
             // Assert
             var implSource = result.GetSourceByFileName("ProductCrudService.g.cs");
             Assert.NotNull(implSource);
-            Assert.Contains("EntityNotFoundException(typeof(Product), input.Id)", implSource.SourceText);
+            Assert.Contains("EntityNotFoundException(typeof(Product), id)", implSource.SourceText);
         }
 
         #endregion

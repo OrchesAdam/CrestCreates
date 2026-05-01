@@ -34,6 +34,8 @@ public interface ICrestRepositoryBase<TEntity, TKey> where TEntity : class
 
     Task DeleteAsync(TKey id, CancellationToken cancellationToken = default);
 
+    Task DeleteAsync(TKey id, string expectedStamp, CancellationToken cancellationToken = default);
+
     Task DeleteRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default);
 
     Task DeleteRangeAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default);

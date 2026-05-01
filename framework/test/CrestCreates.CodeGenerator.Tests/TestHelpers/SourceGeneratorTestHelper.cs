@@ -88,10 +88,73 @@ namespace CrestCreates.CodeGenerator.Tests.TestHelpers
             "System.Runtime",
             "netstandard",
             "System.Collections",
+            "System.Linq",
             "System.Linq.Expressions",
             "System.Threading.Tasks",
+            "System.ComponentModel",
             "System.ComponentModel.Annotations"
         };
+
+        /// <summary>
+        /// 缺失的测试特性源代码（从 Domain.Shared 中移除）
+        /// 这些特性在源代码中查找需要使用，但已被从框架中移除
+        /// </summary>
+        internal const string TestAttributesSource = @"
+using System;
+
+namespace CrestCreates.Domain.Shared.Attributes
+{
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+    public class GenerateCrudServiceAttribute : Attribute
+    {
+        public bool GenerateDto { get; set; } = true;
+        public bool GenerateController { get; set; } = false;
+        public string ServiceRoute { get; set; } = string.Empty;
+
+        public GenerateCrudServiceAttribute() { }
+        public GenerateCrudServiceAttribute(string serviceRoute) { ServiceRoute = serviceRoute; }
+        public GenerateCrudServiceAttribute(bool generateController) { GenerateController = generateController; }
+        public GenerateCrudServiceAttribute(bool generateController, string serviceRoute) { GenerateController = generateController; ServiceRoute = serviceRoute; }
+    }
+
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+    public class GenerateRepositoryAttribute : Attribute
+    {
+        public CrestCreates.Domain.Shared.Enums.OrmProvider OrmProvider { get; set; } = CrestCreates.Domain.Shared.Enums.OrmProvider.EfCore;
+        public bool GenerateInterface { get; set; } = true;
+        public bool GenerateImplementation { get; set; } = true;
+
+        public GenerateRepositoryAttribute() { }
+        public GenerateRepositoryAttribute(CrestCreates.Domain.Shared.Enums.OrmProvider ormProvider) { OrmProvider = ormProvider; }
+    }
+
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+    public class GenerateEntityAttribute : Attribute
+    {
+        public bool GenerateRepository { get; set; } = true;
+        public bool GenerateRepositoryInterface { get; set; } = true;
+        public bool GenerateRepositoryImplementation { get; set; } = true;
+        public CrestCreates.Domain.Shared.Enums.OrmProvider OrmProvider { get; set; } = CrestCreates.Domain.Shared.Enums.OrmProvider.EfCore;
+        public bool GenerateCrudService { get; set; } = true;
+        public bool GenerateDto { get; set; } = true;
+        public string[]? ExcludeProperties { get; set; }
+        public bool GenerateQueryExtensions { get; set; } = true;
+        public string[]? FilterableProperties { get; set; }
+        public string[]? SortableProperties { get; set; }
+        public bool GenerateController { get; set; } = false;
+        public string? ControllerRoute { get; set; }
+        public bool GenerateAsBaseClass { get; set; } = true;
+        public bool EnableTransaction { get; set; } = true;
+        public bool EnableLogging { get; set; } = true;
+        public bool EnableValidation { get; set; } = true;
+        public bool EnableCaching { get; set; } = false;
+        public Type[]? CustomMoAttributes { get; set; }
+
+        public GenerateEntityAttribute() { }
+        public GenerateEntityAttribute(CrestCreates.Domain.Shared.Enums.OrmProvider ormProvider) { OrmProvider = ormProvider; }
+    }
+}
+";
 
         /// <summary>
         /// 运行源代码生成器并返回结果
@@ -137,10 +200,24 @@ namespace CrestCreates.CodeGenerator.Tests.TestHelpers
                 out var outputCompilation,
                 out var diagnostics);
 
-            // 获取生成的源代码
-            var generatedSources = outputCompilation.SyntaxTrees
-                .Where(tree => !sources.Any(s => tree.ToString().Contains(s.Substring(0, Math.Min(100, s.Length)))))
-                .Where(tree => !IsSystemFile(tree.FilePath))
+            // 获取生成的源代码 - 优先从 runResult 获取
+            var runResult = driver.GetRunResult();
+
+            // 将 runResult 的诊断信息也加入
+            var allDiagnostics = diagnostics.Concat(runResult.Diagnostics);
+
+            var generatedTrees = runResult.GeneratedTrees;
+
+            // 如果 runResult 没有生成的树，则从 outputCompilation 中提取
+            if (generatedTrees.IsEmpty)
+            {
+                generatedTrees = outputCompilation.SyntaxTrees
+                    .Where(tree => !sources.Any(s => tree.ToString().Contains(s.Substring(0, Math.Min(100, s.Length)))))
+                    .Where(tree => !IsSystemFile(tree.FilePath))
+                    .ToImmutableArray();
+            }
+
+            var generatedSources = generatedTrees
                 .Select(tree => new GeneratedSource(
                     tree.FilePath,
                     tree.ToString(),
@@ -159,7 +236,7 @@ namespace CrestCreates.CodeGenerator.Tests.TestHelpers
 
             return new SourceGeneratorResult(
                 generatedSources,
-                diagnostics.Concat(emitResult.Diagnostics).ToImmutableList(),
+                allDiagnostics.Concat(emitResult.Diagnostics).ToImmutableList(),
                 emitResult.Success,
                 compiledAssembly);
         }
@@ -253,6 +330,9 @@ namespace CrestCreates.CodeGenerator.Tests.TestHelpers
             // 创建语法树
             var syntaxTrees = new List<SyntaxTree>();
 
+            // 包含缺失的测试特性源代码
+            syntaxTrees.Add(CSharpSyntaxTree.ParseText(TestAttributesSource));
+
             foreach (var source in sources)
             {
                 syntaxTrees.Add(CSharpSyntaxTree.ParseText(source));
@@ -277,12 +357,11 @@ namespace CrestCreates.CodeGenerator.Tests.TestHelpers
         }
 
         /// <summary>
-        /// 判断是否为系统文件
+        /// 判断是否为系统文件（仅过滤 Microsoft.NET 内部文件）
         /// </summary>
         private static bool IsSystemFile(string filePath)
         {
-            return filePath.StartsWith("/", StringComparison.Ordinal) ||
-                   filePath.Contains("Microsoft.NET");
+            return filePath.Contains("Microsoft.NET");
         }
 
         private static void TryAddReference(List<MetadataReference> references, string assemblyName)
@@ -312,8 +391,7 @@ namespace CrestCreates.CodeGenerator.Tests.TestHelpers
         /// </summary>
         public static bool ContainsFile(this SourceGeneratorResult result, string fileName)
         {
-            return result.GeneratedSources.Any(s =>
-                s.FileName.Contains(fileName, StringComparison.OrdinalIgnoreCase));
+            return result.GeneratedSources.Any(s => MatchesFileName(s, fileName));
         }
 
         /// <summary>
@@ -321,8 +399,37 @@ namespace CrestCreates.CodeGenerator.Tests.TestHelpers
         /// </summary>
         public static GeneratedSource? GetSourceByFileName(this SourceGeneratorResult result, string fileName)
         {
-            return result.GeneratedSources.FirstOrDefault(s =>
-                s.FileName.Contains(fileName, StringComparison.OrdinalIgnoreCase));
+            return result.GeneratedSources.FirstOrDefault(s => MatchesFileName(s, fileName));
+        }
+
+        /// <summary>
+        /// 检查文件名是否匹配（支持精确匹配、路径结尾匹配、以及前缀匹配用于带 hash 后缀的文件名）
+        /// </summary>
+        private static bool MatchesFileName(GeneratedSource s, string fileName)
+        {
+            // 精确匹配
+            if (s.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // 路径结尾匹配（如 \BookController.g.cs）
+            if (s.FileName.EndsWith("\\" + fileName, StringComparison.OrdinalIgnoreCase) ||
+                s.FileName.EndsWith("/" + fileName, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // 如果 fileName 不以 .g.cs 结尾，尝试前缀匹配以支持带 hash 后缀的文件名
+            // 如 BookController.ABCD1234.g.cs 匹配 BookController
+            if (!fileName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase))
+            {
+                var lastSegment = s.FileName;
+                var lastSlash = s.FileName.LastIndexOfAny(new[] { '\\', '/' });
+                if (lastSlash >= 0)
+                    lastSegment = s.FileName.Substring(lastSlash + 1);
+
+                if (lastSegment.StartsWith(fileName + ".", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
         }
 
         /// <summary>

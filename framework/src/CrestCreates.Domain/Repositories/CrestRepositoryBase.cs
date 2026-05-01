@@ -60,6 +60,8 @@ public abstract class CrestRepositoryBase<TEntity, TKey> : ICrestRepositoryBase<
 
     public abstract Task DeleteAsync(TKey id, CancellationToken cancellationToken = default);
 
+    public abstract Task DeleteAsync(TKey id, string expectedStamp, CancellationToken cancellationToken = default);
+
     public abstract Task DeleteRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default);
 
     public abstract Task DeleteRangeAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default);

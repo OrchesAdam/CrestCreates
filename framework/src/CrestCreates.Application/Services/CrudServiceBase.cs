@@ -15,6 +15,7 @@ namespace CrestCreates.Application.Services
     /// <typeparam name="TDto">DTO 类型</typeparam>
     /// <typeparam name="TCreateDto">创建 DTO 类型</typeparam>
     /// <typeparam name="TUpdateDto">更新 DTO 类型</typeparam>
+    [Obsolete("Use generated CRUD service or CrestAppServiceBase for concurrency support.")]
     public abstract class CrudServiceBase<TEntity, TKey, TDto, TCreateDto, TUpdateDto>
         : ICrudService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>
         where TEntity : class

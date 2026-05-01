@@ -5,7 +5,7 @@ namespace CrestCreates.Domain.Shared.Entities.Auditing
     /// <summary>
     /// 审计实体接口（非泛型基接口）
     /// </summary>
-    public interface IAuditedEntity : IHasCreator
+    public interface IAuditedEntity : IHasCreator, IHasConcurrencyStamp
     {
         /// <summary>
         /// 创建时间

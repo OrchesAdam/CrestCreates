@@ -64,6 +64,18 @@ public class ExceptionHandlingMiddleware
                 errorResponse.Details = permissionException.Message;
                 logger.LogWarning(permissionException, "Permission denied for request {TraceId}", context.TraceIdentifier);
                 break;
+            case CrestCreates.Domain.Exceptions.CrestConcurrencyException concurrencyEx:
+                context.Response.StatusCode = (int)HttpStatusCode.Conflict;
+                errorResponse.Code = (int)HttpStatusCode.Conflict;
+                errorResponse.Message = "数据已被其他用户修改，请刷新后重试";
+                errorResponse.Details = concurrencyEx.Message;
+                break;
+            case CrestCreates.Domain.Exceptions.CrestPreconditionRequiredException preEx:
+                context.Response.StatusCode = 428;
+                errorResponse.Code = 428;
+                errorResponse.Message = "请求缺少 If-Match 头，请提供当前 ConcurrencyStamp";
+                errorResponse.Details = preEx.Message;
+                break;
             case ArgumentException argumentException:
                 context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
                 errorResponse.Code = (int)HttpStatusCode.BadRequest;

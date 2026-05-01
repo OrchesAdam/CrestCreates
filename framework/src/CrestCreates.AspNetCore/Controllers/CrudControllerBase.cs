@@ -56,9 +56,12 @@ public abstract class CrudControllerBase<TService, TKey, TDto, TCreateDto, TUpda
     }
 
     [HttpDelete("{id}")]
-    public virtual async Task<IActionResult> DeleteAsync([FromRoute] TKey id, CancellationToken cancellationToken = default)
+    public virtual async Task<IActionResult> DeleteAsync(
+        [FromRoute] TKey id,
+        [FromHeader(Name = "If-Match")] string? ifMatch = null,
+        CancellationToken cancellationToken = default)
     {
-        await Service.DeleteAsync(id, cancellationToken);
+        await Service.DeleteAsync(id, expectedStamp: ifMatch, cancellationToken);
         return NoContent();
     }
 }

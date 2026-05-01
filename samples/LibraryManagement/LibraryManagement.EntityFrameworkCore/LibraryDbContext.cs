@@ -6,6 +6,7 @@ using CrestCreates.Domain.Shared.Permissions;
 using System.Text.Json;
 using CrestCreates.Domain.Settings;
 using CrestCreates.Domain.Features;
+using CrestCreates.OrmProviders.EFCore.Extensions;
 
 namespace LibraryManagement.EntityFrameworkCore;
 
@@ -291,5 +292,7 @@ entity.HasIndex(e => new { e.Name, e.Scope, e.ProviderKey, e.TenantId }).IsUniqu
 
             entity.HasIndex(e => new { e.Name, e.Scope, e.ProviderKey, e.TenantId }).IsUnique();
         });
+
+        modelBuilder.ConfigureConcurrencyStamp();
     }
 }
