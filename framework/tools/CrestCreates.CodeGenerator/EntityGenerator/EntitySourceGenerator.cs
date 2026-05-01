@@ -134,6 +134,12 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             MappingProfile
         }
 
+        // Platform infrastructure properties that must never appear in DTOs.
+        private static readonly HashSet<string> s_platformExclusions = new(StringComparer.Ordinal)
+        {
+            "DomainEvents",       // internal domain-event collection — belongs to Entity<TId>
+        };
+
         private List<IPropertySymbol> GetAllEntityProperties(INamedTypeSymbol entityClass)
         {
             var properties = new List<IPropertySymbol>();
@@ -147,6 +153,9 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 foreach (var member in current.GetMembers())
                 {
                     if (member is not IPropertySymbol property || property.IsStatic)
+                        continue;
+
+                    if (s_platformExclusions.Contains(property.Name))
                         continue;
 
                     if (propertyNames.Contains(property.Name))

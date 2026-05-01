@@ -681,7 +681,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             SourceProductionContext? context = null)
         {
             var sourceProperties = new List<IPropertySymbol>();
-            var seen = new HashSet<string>();
+            var seen = new HashSet<string> { "DomainEvents" };
             for (var current = sourceType; current != null; current = current.BaseType)
             {
                 foreach (var member in current.GetMembers().OfType<IPropertySymbol>()

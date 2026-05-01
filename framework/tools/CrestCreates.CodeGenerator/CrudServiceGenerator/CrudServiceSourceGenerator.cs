@@ -779,6 +779,11 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             return "int";
         }
 
+        private static readonly HashSet<string> s_platformExclusions = new(StringComparer.Ordinal)
+        {
+            "DomainEvents",
+        };
+
         private List<IPropertySymbol> GetEntityProperties(INamedTypeSymbol entityClass)
         {
             var properties = new List<IPropertySymbol>();
@@ -791,6 +796,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     if (member.DeclaredAccessibility == Accessibility.Public &&
                         !member.IsStatic &&
                         member.CanBeReferencedByName &&
+                        !s_platformExclusions.Contains(member.Name) &&
                         seen.Add(member.Name))
                     {
                         properties.Add(member);
