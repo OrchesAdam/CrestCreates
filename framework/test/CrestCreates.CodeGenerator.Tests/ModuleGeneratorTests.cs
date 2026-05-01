@@ -33,6 +33,11 @@ namespace CrestCreates.CodeGenerator.Tests
         {
             var hostBuilder = Host.CreateDefaultBuilder();
             hostBuilder = ModuleAutoInitializer.RegisterModules(hostBuilder);
+            hostBuilder.ConfigureServices((context, services) =>
+            {
+                // 注册 IServiceCollection 以支持 InitializeModules 中生成的代码
+                services.AddSingleton<IServiceCollection>(services);
+            });
             var host = hostBuilder.Build();
             host = ModuleAutoInitializer.InitializeModules(host);
 
@@ -68,6 +73,9 @@ namespace CrestCreates.CodeGenerator.Tests
         [Fact]
         public void Should_Sort_Modules_By_Dependency()
         {
+            // 触发 ModuleAutoInitializer 静态构造函数以确保模块已注册
+            var _ = ModuleAutoInitializer.RegisteredModules;
+
             var descriptors = ModuleDescriptorRegistry.GetDescriptors();
             Assert.NotNull(descriptors);
             Assert.Equal(3, descriptors.Count);

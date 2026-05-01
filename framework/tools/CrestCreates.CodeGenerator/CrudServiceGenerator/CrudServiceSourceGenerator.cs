@@ -111,7 +111,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     continue;
 
                 var namedArgument = attr.NamedArguments.FirstOrDefault(arg => arg.Key == propertyName);
-                if (namedArgument.Value.Values != null && namedArgument.Value.Values.Length > 0)
+                if (namedArgument.Value.Kind == TypedConstantKind.Array && namedArgument.Value.Values.Length > 0)
                 {
                     var result = new List<string>();
                     foreach (var value in namedArgument.Value.Values)

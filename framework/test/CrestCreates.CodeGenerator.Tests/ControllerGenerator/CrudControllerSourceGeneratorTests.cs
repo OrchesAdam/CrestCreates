@@ -11,10 +11,10 @@ namespace CrestCreates.CodeGenerator.Tests.ControllerGenerator
         {
             var source = @"
 using System;
-using CrestCreates.Application.Contracts.Attributes;
+using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Application.Contracts.Interfaces;
 
-namespace CrestCreates.Application.Contracts.Attributes
+namespace CrestCreates.Domain.Shared.Attributes
 {
     [AttributeUsage(AttributeTargets.Interface, AllowMultiple = false, Inherited = false)]
     public sealed class CrestCrudApiControllerAttribute : Attribute
