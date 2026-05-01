@@ -215,7 +215,17 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Repositories
             try
             {
                 _logger?.LogDebug("Deleting entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
-                await _orm.Delete<TEntity>().Where(e => e.Id.Equals(entity.Id)).ExecuteAffrowsAsync(cancellationToken);
+                if (entity is IHasConcurrencyStamp stamp)
+                {
+                    var rows = await _orm.Delete<TEntity>()
+                        .Where("Id = @Id AND ConcurrencyStamp = @Stamp", new { Id = entity.Id, Stamp = stamp.ConcurrencyStamp })
+                        .ExecuteAffrowsAsync(cancellationToken);
+                    if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
+                }
+                else
+                {
+                    await _orm.Delete<TEntity>().Where(e => e.Id.Equals(entity.Id)).ExecuteAffrowsAsync(cancellationToken);
+                }
                 _logger?.LogDebug("Deleted entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
             }
             catch (Exception ex)
@@ -244,6 +254,11 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Repositories
         {
             try
             {
+                if (!typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)))
+                {
+                    await DeleteAsync(id, cancellationToken);
+                    return;
+                }
                 _logger?.LogDebug("Deleting entity {EntityType} by id with concurrency check: {Id}", typeof(TEntity).Name, id);
                 var rows = await _orm.Delete<TEntity>()
                     .Where("Id = @Id AND ConcurrencyStamp = @Stamp", new { Id = id, Stamp = expectedStamp })

@@ -261,6 +261,13 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         try
         {
             await CheckPermissionAsync(DeletePermissionName, cancellationToken);
+
+            if (!string.IsNullOrEmpty(expectedStamp) && typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)))
+            {
+                await Repository.DeleteAsync(id, expectedStamp, cancellationToken);
+                return;
+            }
+
             var entity = await Repository.GetAsync(id, cancellationToken);
             if (entity != null)
             {

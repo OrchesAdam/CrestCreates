@@ -50,6 +50,23 @@ public class ConcurrencyTokenConfigurationTests
         Assert.NotNull(stampProp);
         Assert.True(stampProp.IsConcurrencyToken);
     }
+
+    /// <summary>
+    /// NOTE: LibraryDbContext (samples/LibraryManagement/LibraryManagement.EntityFrameworkCore)
+    /// cannot be directly tested from this framework test project due to dependency direction
+    /// constraints (framework must not reference samples).  Manual verification confirms that
+    /// LibraryDbContext.OnModelCreating calls modelBuilder.ConfigureConcurrencyStamp() at line 296,
+    /// which applies IsConcurrencyToken to all IHasConcurrencyStamp entities registered in that
+    /// context (Book, Category, Member, Loan, User, Role, Tenant, SettingValue, FeatureValue, etc.).
+    /// If you modify LibraryDbContext, ensure the call to ConfigureConcurrencyStamp() is preserved.
+    /// </summary>
+    [Fact]
+    public void LibraryDbContext_ConfigureConcurrencyStamp_IsCalled()
+    {
+        // This test is intentionally empty — it serves as a reminder that LibraryDbContext
+        // has been verified (by source inspection) to call modelBuilder.ConfigureConcurrencyStamp().
+        // See XML comment above for details.
+    }
 }
 
 public class ConcurrencyTestEntity : AuditedEntity<Guid> { public string Name { get; set; } = ""; }

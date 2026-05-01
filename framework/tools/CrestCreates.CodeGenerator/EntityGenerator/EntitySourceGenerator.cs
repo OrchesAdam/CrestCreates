@@ -134,6 +134,11 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             MappingProfile
         }
 
+        /// <summary>
+        /// Collects all properties of the entity, including inherited members from base classes
+        /// (e.g. ConcurrencyStamp declared in AuditedEntity{TId}), via GetMembers() which traverses
+        /// the base-type chain.  No explicit base-type walk is needed.
+        /// </summary>
         private List<IPropertySymbol> GetAllEntityProperties(INamedTypeSymbol entityClass)
         {
             var properties = new List<IPropertySymbol>();

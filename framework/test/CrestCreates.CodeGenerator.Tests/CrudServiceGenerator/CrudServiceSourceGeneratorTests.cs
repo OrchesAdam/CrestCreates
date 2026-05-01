@@ -382,7 +382,7 @@ namespace TestNamespace
             Assert.Contains("Task<ProductDto?> GetByIdAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
             Assert.Contains("Task<PagedResultDto<ProductDto>> GetListAsync(ProductListRequestDto input, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
             Assert.Contains("Task<ProductDto> UpdateAsync(System.Guid id, UpdateProductDto input, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
-            Assert.Contains("Task DeleteAsync(System.Guid id, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
+            Assert.Contains("Task DeleteAsync(System.Guid id, string? expectedStamp = null, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
         }
 
         [Fact]
@@ -424,7 +424,7 @@ namespace TestNamespace
             var interfaceSource = result.GetSourceByFileName("ICategoryCrudService.g.cs");
             Assert.NotNull(interfaceSource);
             Assert.Contains("Task<CategoryDto?> GetByIdAsync(int id, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
-            Assert.Contains("Task DeleteAsync(int id, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
+            Assert.Contains("Task DeleteAsync(int id, string? expectedStamp = null, System.Threading.CancellationToken cancellationToken = default)", interfaceSource.SourceText);
         }
 
         #endregion

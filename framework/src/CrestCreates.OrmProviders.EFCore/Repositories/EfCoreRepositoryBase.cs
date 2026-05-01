@@ -153,6 +153,11 @@ namespace CrestCreates.OrmProviders.EFCore.Repositories
 
         public override async Task DeleteAsync(TKey id, string expectedStamp, CancellationToken cancellationToken = default)
         {
+            if (!typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)))
+            {
+                await DeleteAsync(id, cancellationToken);
+                return;
+            }
             var dbContext = (DbContext)_dbContext.GetNativeContext();
             var rows = await dbContext.Set<TEntity>()
                 .Where(e => e.Id.Equals(id) && EF.Property<string>(e, "ConcurrencyStamp") == expectedStamp)

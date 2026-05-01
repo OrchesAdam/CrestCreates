@@ -476,7 +476,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// 删除 {entityName}");
             builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        Task DeleteAsync({idType} id, System.Threading.CancellationToken cancellationToken = default);");
+            builder.AppendLine($"        Task DeleteAsync({idType} id, string? expectedStamp = null, System.Threading.CancellationToken cancellationToken = default);");
 
             builder.AppendLine("    }");
             builder.AppendLine("}");
