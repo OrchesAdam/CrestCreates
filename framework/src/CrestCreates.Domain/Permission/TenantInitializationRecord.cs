@@ -55,9 +55,7 @@ public class TenantInitializationRecord : Entity<Guid>
             CompletedAt = completedAt,
             Error = error
         });
-#pragma warning disable IL2026, IL3050
-        StepResultsJson = System.Text.Json.JsonSerializer.Serialize(results);
-#pragma warning restore IL2026, IL3050
+        StepResultsJson = System.Text.Json.JsonSerializer.Serialize(results, TenantInitializationRecordJsonContext.Default.ListStepResult);
     }
 
     public void MarkSucceeded()
@@ -84,10 +82,8 @@ public class TenantInitializationRecord : Entity<Guid>
     {
         if (string.IsNullOrEmpty(StepResultsJson))
             return new List<StepResult>();
-#pragma warning disable IL2026, IL3050
-        return System.Text.Json.JsonSerializer.Deserialize<List<StepResult>>(StepResultsJson)
+        return System.Text.Json.JsonSerializer.Deserialize(StepResultsJson, TenantInitializationRecordJsonContext.Default.ListStepResult)
                ?? new List<StepResult>();
-#pragma warning restore IL2026, IL3050
     }
 
     public class StepResult
