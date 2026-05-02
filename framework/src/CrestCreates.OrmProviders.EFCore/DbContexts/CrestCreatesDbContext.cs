@@ -43,6 +43,7 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
         public DbSet<SettingValue> SettingValues { get; set; }
         public DbSet<FeatureValue> FeatureValues { get; set; }
         public DbSet<AuditLog> AuditLogs { get; set; }
+        public DbSet<TenantInitializationRecord> TenantInitializationRecords { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -271,6 +272,24 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
                 entity.HasIndex(e => e.UserId);
                 entity.HasIndex(e => e.CreationTime);
                 entity.HasIndex(e => e.TraceId);
+            });
+
+            modelBuilder.Entity<TenantInitializationRecord>(entity =>
+            {
+                entity.ToTable("TenantInitializationRecords");
+
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).ValueGeneratedNever();
+                entity.Property(e => e.TenantId).IsRequired();
+                entity.Property(e => e.AttemptNo).IsRequired();
+                entity.Property(e => e.Status).HasConversion<int>().IsRequired();
+                entity.Property(e => e.CurrentStep).HasMaxLength(128);
+                entity.Property(e => e.StepResultsJson).IsRequired();
+                entity.Property(e => e.Error).HasMaxLength(2048);
+                entity.Property(e => e.StartedAt).IsRequired();
+                entity.Property(e => e.CorrelationId).IsRequired().HasMaxLength(128);
+
+                entity.HasIndex(e => new { e.TenantId, e.AttemptNo });
             });
 
             modelBuilder.ConfigureConcurrencyStamp();
