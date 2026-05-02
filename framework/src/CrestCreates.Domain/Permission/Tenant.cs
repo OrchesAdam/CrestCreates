@@ -69,18 +69,18 @@ public class Tenant : AuditedAggregateRoot<Guid>
         IsActive = false;
     }
 
-    internal void SetInitializationStatus(TenantInitializationStatus status)
+    public void SetInitializationStatus(TenantInitializationStatus status)
     {
         InitializationStatus = status;
     }
 
-    internal void MarkInitializationFailed(string sanitizedError)
+    public void MarkInitializationFailed(string sanitizedError)
     {
         InitializationStatus = TenantInitializationStatus.Failed;
         LastInitializationError = sanitizedError;
     }
 
-    internal void MarkInitializationSucceeded()
+    public void MarkInitializationSucceeded()
     {
         InitializationStatus = TenantInitializationStatus.Initialized;
         InitializedAt = DateTime.UtcNow;

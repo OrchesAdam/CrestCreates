@@ -3,12 +3,14 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
+using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Application.Tenants;
 using CrestCreates.Authorization;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Caching;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
+using CrestCreates.Domain.Shared;
 using CrestCreates.Domain.Shared.Permissions;
 using CrestCreates.EventBus;
 using CrestCreates.MultiTenancy;
@@ -54,35 +56,73 @@ public class TenantLifecycleIntegrationTests
             options,
             Mock.Of<ILogger<TenantBootstrapper>>());
 
-        var tenantBootstrapperMock = new Mock<ITenantBootstrapper>();
-        tenantBootstrapperMock
-            .Setup(b => b.BootstrapAsync(It.IsAny<Tenant>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        var storeMock = new Mock<ITenantInitializationStore>();
+        var dbInitializerMock = new Mock<ITenantDatabaseInitializer>();
+        var migrationRunnerMock = new Mock<ITenantMigrationRunner>();
+        var settingsSeederMock = new Mock<ITenantSettingDefaultsSeeder>();
+        var featuresSeederMock = new Mock<ITenantFeatureDefaultsSeeder>();
+
+        dbInitializerMock
+            .Setup(d => d.InitializeAsync(It.IsAny<TenantInitializationContext>(), default))
+            .ReturnsAsync(TenantDatabaseInitializeResult.Succeeded());
+        migrationRunnerMock
+            .Setup(m => m.RunAsync(It.IsAny<TenantInitializationContext>(), default))
+            .ReturnsAsync(TenantMigrationResult.Succeeded());
+        settingsSeederMock
+            .Setup(s => s.SeedAsync(It.IsAny<TenantInitializationContext>(), default))
+            .ReturnsAsync(TenantSettingDefaultsResult.Succeeded());
+        featuresSeederMock
+            .Setup(f => f.SeedAsync(It.IsAny<TenantInitializationContext>(), default))
+            .ReturnsAsync(TenantFeatureDefaultsResult.Succeeded());
+
+        var orchestrator = new TenantInitializationOrchestrator(
+            dbInitializerMock.Object,
+            migrationRunnerMock.Object,
+            bootstrapper,
+            settingsSeederMock.Object,
+            featuresSeederMock.Object,
+            storeMock.Object,
+            Mock.Of<ILogger<TenantInitializationOrchestrator>>());
 
         var tenantManager = new TenantManager(
             tenantRepositoryMock.Object,
-            tenantBootstrapperMock.Object,
             Mock.Of<ILogger<TenantManager>>());
 
         var tenantAppService = new TenantAppService(
             tenantManager,
-            tenantRepositoryMock.Object);
+            tenantRepositoryMock.Object,
+            orchestrator,
+            storeMock.Object);
+
+        var tenant = new Tenant(Guid.NewGuid(), "TestTenant")
+        {
+            DisplayName = "测试租户",
+            IsActive = true,
+            CreationTime = DateTime.UtcNow
+        };
+
+        tenantRepositoryMock
+            .Setup(r => r.FindByNameAsync("TESTTENANT", default))
+            .ReturnsAsync((Tenant?)null);
 
         tenantRepositoryMock
             .Setup(r => r.InsertAsync(It.IsAny<Tenant>(), default))
             .ReturnsAsync((Tenant t, CancellationToken _) => t);
 
-        userRepositoryMock
-            .Setup(r => r.InsertAsync(It.IsAny<User>(), default))
-            .ReturnsAsync((User u, CancellationToken _) => u);
+        tenantRepositoryMock
+            .Setup(r => r.UpdateAsync(It.IsAny<Tenant>(), default))
+            .ReturnsAsync((Tenant t, CancellationToken _) => t);
 
-        roleRepositoryMock
-            .Setup(r => r.InsertAsync(It.IsAny<Role>(), default))
-            .ReturnsAsync((Role r, CancellationToken _) => r);
+        storeMock
+            .Setup(s => s.TryBeginInitializationAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), default))
+            .ReturnsAsync(new TenantInitializationRecord(
+                Guid.NewGuid(), Guid.NewGuid(), 1, "correlation-id"));
 
-        permissionGrantRepositoryMock
-            .Setup(p => p.InsertAsync(It.IsAny<PermissionGrant>(), default))
-            .ReturnsAsync((PermissionGrant g, CancellationToken _) => g);
+        storeMock
+            .Setup(s => s.UpdateAsync(
+                It.IsAny<TenantInitializationRecord>(), default))
+            .Returns(Task.CompletedTask);
 
         var input = new CreateTenantDto
         {
@@ -98,40 +138,61 @@ public class TenantLifecycleIntegrationTests
     }
 
     [Fact]
-    public async Task CreateTenant_WhenBootstrapFails_ShouldRollback()
+    public async Task CreateTenant_WhenInitializeFails_ShouldMarkFailed()
     {
         var tenantRepositoryMock = new Mock<ITenantRepository>();
-        var tenantBootstrapperMock = new Mock<ITenantBootstrapper>();
 
-        var options = Options.Create(new TenantBootstrapOptions
-        {
-            EnableAutoBootstrap = true,
-            DefaultAdminUserName = "admin",
-            DefaultRoleName = "Default",
-            BootstrapAdminRole = true,
-            BootstrapBasicPermissions = true,
-            BasicPermissions = new[] { "Test.Permission" }
-        });
+        var storeMock = new Mock<ITenantInitializationStore>();
+        var dbInitializerMock = new Mock<ITenantDatabaseInitializer>();
+        var migrationRunnerMock = new Mock<ITenantMigrationRunner>();
+        var dataSeederMock = new Mock<ITenantDataSeeder>();
+        var settingsSeederMock = new Mock<ITenantSettingDefaultsSeeder>();
+        var featuresSeederMock = new Mock<ITenantFeatureDefaultsSeeder>();
+
+        dbInitializerMock
+            .Setup(d => d.InitializeAsync(It.IsAny<TenantInitializationContext>(), default))
+            .ReturnsAsync(TenantDatabaseInitializeResult.Failed("模拟数据库初始化失败"));
+
+        var orchestrator = new TenantInitializationOrchestrator(
+            dbInitializerMock.Object,
+            migrationRunnerMock.Object,
+            dataSeederMock.Object,
+            settingsSeederMock.Object,
+            featuresSeederMock.Object,
+            storeMock.Object,
+            Mock.Of<ILogger<TenantInitializationOrchestrator>>());
 
         var tenantManager = new TenantManager(
             tenantRepositoryMock.Object,
-            tenantBootstrapperMock.Object,
             Mock.Of<ILogger<TenantManager>>());
 
         var tenantAppService = new TenantAppService(
             tenantManager,
-            tenantRepositoryMock.Object);
+            tenantRepositoryMock.Object,
+            orchestrator,
+            storeMock.Object);
+
+        tenantRepositoryMock
+            .Setup(r => r.FindByNameAsync("FAILTENANT", default))
+            .ReturnsAsync((Tenant?)null);
 
         tenantRepositoryMock
             .Setup(r => r.InsertAsync(It.IsAny<Tenant>(), default))
             .ReturnsAsync((Tenant t, CancellationToken _) => t);
 
-        tenantBootstrapperMock
-            .Setup(b => b.BootstrapAsync(It.IsAny<Tenant>(), default))
-            .ThrowsAsync(new InvalidOperationException("数据库连接失败"));
-
         tenantRepositoryMock
-            .Setup(r => r.DeleteAsync(It.IsAny<Tenant>(), default))
+            .Setup(r => r.UpdateAsync(It.IsAny<Tenant>(), default))
+            .ReturnsAsync((Tenant t, CancellationToken _) => t);
+
+        storeMock
+            .Setup(s => s.TryBeginInitializationAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), default))
+            .ReturnsAsync(new TenantInitializationRecord(
+                Guid.NewGuid(), Guid.NewGuid(), 1, "correlation-id"));
+
+        storeMock
+            .Setup(s => s.UpdateAsync(
+                It.IsAny<TenantInitializationRecord>(), default))
             .Returns(Task.CompletedTask);
 
         var input = new CreateTenantDto
@@ -140,14 +201,11 @@ public class TenantLifecycleIntegrationTests
             DisplayName = "失败租户"
         };
 
-        var action = async () => await tenantAppService.CreateAsync(input);
+        var result = await tenantAppService.CreateAsync(input);
 
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*初始化失败*已自动回滚*");
-
-        tenantRepositoryMock.Verify(
-            r => r.DeleteAsync(It.IsAny<Tenant>(), default),
-            Times.Once, "初始化失败后应回滚删除租户");
+        result.Should().NotBeNull();
+        result.InitializationStatus.Should().Be(TenantInitializationStatus.Failed);
+        result.LastInitializationError.Should().NotBeNullOrEmpty();
     }
 
     [Fact]
