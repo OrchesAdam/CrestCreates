@@ -207,10 +207,17 @@ public class EfCoreTenantInitializationStore : ITenantInitializationStore
 
         try
         {
-            await _dbContext.Database.ExecuteSqlRawAsync(
-                "UPDATE Tenants SET InitializationStatus = {0}, InitializedAt = {1}, LastInitializationError = NULL WHERE Id = {2}",
-                new object[] { (int)TenantInitializationStatus.Initialized, DateTime.UtcNow, tenantId },
+            var rows = await _dbContext.Database.ExecuteSqlRawAsync(
+                "UPDATE Tenants SET InitializationStatus = {0}, InitializedAt = {1}, LastInitializationError = NULL WHERE Id = {2} AND InitializationStatus = {3}",
+                new object[] { (int)TenantInitializationStatus.Initialized, DateTime.UtcNow, tenantId, (int)TenantInitializationStatus.Initializing },
                 cancellationToken);
+
+            if (rows == 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw new InvalidOperationException(
+                    $"Cannot complete initialization for tenant {tenantId}: not in Initializing state.");
+            }
 
             DetachTrackedTenant(tenantId);
 
@@ -236,10 +243,17 @@ public class EfCoreTenantInitializationStore : ITenantInitializationStore
 
         try
         {
-            await _dbContext.Database.ExecuteSqlRawAsync(
-                "UPDATE Tenants SET InitializationStatus = {0}, LastInitializationError = {1} WHERE Id = {2}",
-                new object[] { (int)TenantInitializationStatus.Failed, sanitizedError, tenantId },
+            var rows = await _dbContext.Database.ExecuteSqlRawAsync(
+                "UPDATE Tenants SET InitializationStatus = {0}, LastInitializationError = {1} WHERE Id = {2} AND InitializationStatus = {3}",
+                new object[] { (int)TenantInitializationStatus.Failed, sanitizedError, tenantId, (int)TenantInitializationStatus.Initializing },
                 cancellationToken);
+
+            if (rows == 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw new InvalidOperationException(
+                    $"Cannot fail initialization for tenant {tenantId}: not in Initializing state.");
+            }
 
             DetachTrackedTenant(tenantId);
 

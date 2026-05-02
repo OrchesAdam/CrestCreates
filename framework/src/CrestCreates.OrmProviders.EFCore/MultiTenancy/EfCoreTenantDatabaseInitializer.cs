@@ -70,6 +70,10 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
 
                 return TenantDatabaseInitializeResult.Succeeded();
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(

@@ -82,6 +82,7 @@ public class TenantLifecycleIntegrationTests
             settingsSeederMock.Object,
             featuresSeederMock.Object,
             storeMock.Object,
+            Mock.Of<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(),
             Mock.Of<ILogger<TenantInitializationOrchestrator>>());
 
         var tenantManager = new TenantManager(
@@ -160,6 +161,7 @@ public class TenantLifecycleIntegrationTests
             settingsSeederMock.Object,
             featuresSeederMock.Object,
             storeMock.Object,
+            Mock.Of<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(),
             Mock.Of<ILogger<TenantInitializationOrchestrator>>());
 
         var tenantManager = new TenantManager(

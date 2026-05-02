@@ -42,6 +42,7 @@ public class TenantInitializationOrchestratorTests
             _settingsSeederMock.Object,
             _featuresSeederMock.Object,
             _storeMock.Object,
+            Mock.Of<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(),
             loggerMock.Object);
     }
 

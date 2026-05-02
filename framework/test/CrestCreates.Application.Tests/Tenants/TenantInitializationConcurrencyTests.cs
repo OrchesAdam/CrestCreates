@@ -58,6 +58,7 @@ public class TenantInitializationConcurrencyTests
             _settingsSeederMock.Object,
             _featuresSeederMock.Object,
             _storeMock.Object,
+            Mock.Of<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(),
             loggerMock.Object);
 
         _sharedContext = new TenantInitializationContext

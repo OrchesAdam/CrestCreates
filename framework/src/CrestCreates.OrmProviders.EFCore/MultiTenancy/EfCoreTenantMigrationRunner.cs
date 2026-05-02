@@ -30,6 +30,10 @@ public class EfCoreTenantMigrationRunner : ITenantMigrationRunner
 
             return TenantMigrationResult.Succeeded();
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Migration failed for tenant {TenantId}", context.TenantId);

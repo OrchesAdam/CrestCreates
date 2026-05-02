@@ -171,6 +171,7 @@ public class TenantAppServiceTests
             settingsMock.Object,
             featuresMock.Object,
             storeMock.Object,
+            Mock.Of<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(),
             loggerMock.Object);
     }
 }

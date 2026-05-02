@@ -6,6 +6,7 @@ using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Shared;
+using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.Application.Tenants;
@@ -18,6 +19,7 @@ public class TenantInitializationOrchestrator
     private readonly ITenantSettingDefaultsSeeder _settingsSeeder;
     private readonly ITenantFeatureDefaultsSeeder _featuresSeeder;
     private readonly ITenantInitializationStore _store;
+    private readonly ICurrentTenant _currentTenant;
     private readonly ILogger<TenantInitializationOrchestrator> _logger;
 
     private const int MaxErrorLength = 2000;
@@ -29,6 +31,7 @@ public class TenantInitializationOrchestrator
         ITenantSettingDefaultsSeeder settingsSeeder,
         ITenantFeatureDefaultsSeeder featuresSeeder,
         ITenantInitializationStore store,
+        ICurrentTenant currentTenant,
         ILogger<TenantInitializationOrchestrator> logger)
     {
         _dbInitializer = dbInitializer;
@@ -37,6 +40,7 @@ public class TenantInitializationOrchestrator
         _settingsSeeder = settingsSeeder;
         _featuresSeeder = featuresSeeder;
         _store = store;
+        _currentTenant = currentTenant;
         _logger = logger;
     }
 
@@ -95,6 +99,13 @@ public class TenantInitializationOrchestrator
                 if (step2.Status != TenantInitializationStepStatus.Succeeded)
                     return await BuildFailureResultAsync(context, record, steps, step2.Error, cancellationToken);
             }
+
+            // For independent DB, set tenant context so DI-resolved services
+            // (repositories, managers) use the tenant's connection string.
+            // For shared DB, no context switch needed — TenantId filtering applies.
+            using var tenantScope = context.IsIndependentDatabase
+                ? await _currentTenant.ChangeAsync(context.TenantId.ToString())
+                : null;
 
             // Phase 3: Data Seed
             var step3 = await ExecutePhaseAsync("DataSeed", record,
