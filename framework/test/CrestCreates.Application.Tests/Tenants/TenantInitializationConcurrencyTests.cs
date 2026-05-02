@@ -179,12 +179,6 @@ public class TenantInitializationConcurrencyTests
                 tenantId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(record);
 
-        // TryBegin (called inside orchestrator.InitializeAsync) returns a record
-        _storeMock
-            .Setup(s => s.TryBeginInitializationAsync(
-                tenantId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(record);
-
         // All phase services succeed
         _dbInitializerMock
             .Setup(d => d.InitializeAsync(It.IsAny<TenantInitializationContext>(), It.IsAny<CancellationToken>()))
@@ -211,6 +205,11 @@ public class TenantInitializationConcurrencyTests
         var result = await appService.ForceRetryInitializationAsync(tenantId);
 
         result.Success.Should().BeTrue();
+        // TryBegin should NOT be called — ForceRetry uses InitializeWithRecordAsync
+        _storeMock.Verify(
+            s => s.TryBeginInitializationAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]

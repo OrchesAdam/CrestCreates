@@ -231,7 +231,7 @@ public class TenantAppService : ITenantAppService
             RequestedByUserId = null
         };
 
-        var result = await _orchestrator.InitializeAsync(context, cancellationToken);
+        var result = await _orchestrator.InitializeWithRecordAsync(context, record, cancellationToken);
 
         if (result.Success)
             tenant.MarkInitializationSucceeded();
@@ -255,15 +255,27 @@ public class TenantAppService : ITenantAppService
                 $"Tenant '{tenant.Name}' is in '{tenant.InitializationStatus}' state; only Initializing tenants can be force-failed.");
         }
 
+        var correlationId = Guid.NewGuid().ToString("N");
         var record = await _store.GetLatestAsync(tenantId, cancellationToken);
 
-        if (record is not null)
+        if (record is not null && record.Status == TenantInitializationStatus.Initializing)
         {
-            record.MarkFailed("Force-failed by admin.");
+            record.MarkFailed("manually marked as failed");
             await _store.UpdateAsync(record, cancellationToken);
         }
+        else
+        {
+            // No active Initializing record — create a recovery record
+            var recoveryRecord = await _store.ForceBeginInitializationAsync(
+                tenantId, correlationId, "Recovery: force-fail with no active record", cancellationToken);
+            if (recoveryRecord is not null)
+            {
+                recoveryRecord.MarkFailed("manually marked as failed");
+                await _store.UpdateAsync(recoveryRecord, cancellationToken);
+            }
+        }
 
-        tenant.MarkInitializationFailed("Force-failed by admin.");
+        tenant.MarkInitializationFailed("manually marked as failed");
         await _tenantRepository.UpdateAsync(tenant, cancellationToken);
     }
 

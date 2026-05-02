@@ -44,7 +44,6 @@ public class TenantInitializationOrchestrator
         TenantInitializationContext context,
         CancellationToken cancellationToken = default)
     {
-        // 1. Atomic begin
         var record = await _store.TryBeginInitializationAsync(
             context.TenantId, context.CorrelationId, cancellationToken);
 
@@ -54,6 +53,26 @@ public class TenantInitializationOrchestrator
                 "Tenant is already initializing or initialized.",
                 Array.Empty<TenantInitializationStep>());
 
+        return await RunPhasesAsync(context, record, cancellationToken);
+    }
+
+    /// <summary>
+    /// Used by ForceRetry: the caller has already created a record via
+    /// ForceBeginInitializationAsync. Skips the normal begin step.
+    /// </summary>
+    public async Task<TenantInitializationResult> InitializeWithRecordAsync(
+        TenantInitializationContext context,
+        TenantInitializationRecord record,
+        CancellationToken cancellationToken = default)
+    {
+        return await RunPhasesAsync(context, record, cancellationToken);
+    }
+
+    private async Task<TenantInitializationResult> RunPhasesAsync(
+        TenantInitializationContext context,
+        TenantInitializationRecord record,
+        CancellationToken cancellationToken)
+    {
         var steps = new List<TenantInitializationStep>();
 
         try
@@ -66,7 +85,7 @@ public class TenantInitializationOrchestrator
                     cancellationToken);
                 steps.Add(step1);
                 if (step1.Status != TenantInitializationStepStatus.Succeeded)
-                    return BuildFailureResult(context, record, steps, step1.Error);
+                    return await BuildFailureResultAsync(context, record, steps, step1.Error);
 
                 // Phase 2: Migration (independent only)
                 var step2 = await ExecutePhaseAsync("Migration", record,
@@ -74,7 +93,7 @@ public class TenantInitializationOrchestrator
                     cancellationToken);
                 steps.Add(step2);
                 if (step2.Status != TenantInitializationStepStatus.Succeeded)
-                    return BuildFailureResult(context, record, steps, step2.Error);
+                    return await BuildFailureResultAsync(context, record, steps, step2.Error);
             }
 
             // Phase 3: Data Seed
@@ -83,7 +102,7 @@ public class TenantInitializationOrchestrator
                 cancellationToken);
             steps.Add(step3);
             if (step3.Status != TenantInitializationStepStatus.Succeeded)
-                return BuildFailureResult(context, record, steps, step3.Error);
+                return await BuildFailureResultAsync(context, record, steps, step3.Error);
 
             // Phase 4: Settings Defaults
             var step4 = await ExecutePhaseAsync("SettingsDefaults", record,
@@ -91,7 +110,7 @@ public class TenantInitializationOrchestrator
                 cancellationToken);
             steps.Add(step4);
             if (step4.Status != TenantInitializationStepStatus.Succeeded)
-                return BuildFailureResult(context, record, steps, step4.Error);
+                return await BuildFailureResultAsync(context, record, steps, step4.Error);
 
             // Phase 5: Feature Defaults
             var step5 = await ExecutePhaseAsync("FeatureDefaults", record,
@@ -99,7 +118,7 @@ public class TenantInitializationOrchestrator
                 cancellationToken);
             steps.Add(step5);
             if (step5.Status != TenantInitializationStepStatus.Succeeded)
-                return BuildFailureResult(context, record, steps, step5.Error);
+                return await BuildFailureResultAsync(context, record, steps, step5.Error);
 
             // Success
             record.MarkSucceeded();
@@ -186,7 +205,7 @@ public class TenantInitializationOrchestrator
         }
     }
 
-    private TenantInitializationResult BuildFailureResult(
+    private async Task<TenantInitializationResult> BuildFailureResultAsync(
         TenantInitializationContext context,
         TenantInitializationRecord record,
         List<TenantInitializationStep> steps,
@@ -195,6 +214,8 @@ public class TenantInitializationOrchestrator
         var detailedError = failedStepError ?? "Tenant initialization failed.";
         var publicError = Sanitize(detailedError);
         record.MarkFailed(detailedError);
+        await _store.UpdateAsync(record, CancellationToken.None);
+
         return TenantInitializationResult.Failed(context.CorrelationId, publicError, steps);
     }
 

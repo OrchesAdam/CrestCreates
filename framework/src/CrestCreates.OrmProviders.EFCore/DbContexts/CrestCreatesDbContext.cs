@@ -289,7 +289,7 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
                 entity.Property(e => e.StartedAt).IsRequired();
                 entity.Property(e => e.CorrelationId).IsRequired().HasMaxLength(128);
 
-                entity.HasIndex(e => new { e.TenantId, e.AttemptNo });
+                entity.HasIndex(e => new { e.TenantId, e.AttemptNo }).IsUnique();
             });
 
             modelBuilder.ConfigureConcurrencyStamp();

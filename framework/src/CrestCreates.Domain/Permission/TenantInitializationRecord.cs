@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Shared;
 
@@ -47,14 +48,23 @@ public class TenantInitializationRecord : Entity<Guid>
         DateTime startedAt, DateTime? completedAt, string? error)
     {
         var results = DeserializeResults();
-        results.Add(new StepResult
+        // Replace existing entry for the same phase name (Running → Succeeded/Failed)
+        // instead of appending a duplicate.
+        var existing = results.FindIndex(s => s.Name == name);
+        var entry = new StepResult
         {
             Name = name,
             Status = status,
             StartedAt = startedAt,
             CompletedAt = completedAt,
             Error = error
-        });
+        };
+
+        if (existing >= 0)
+            results[existing] = entry;
+        else
+            results.Add(entry);
+
         StepResultsJson = System.Text.Json.JsonSerializer.Serialize(results, TenantInitializationRecordJsonContext.Default.ListStepResult);
     }
 
