@@ -147,8 +147,9 @@ public interface ITenantInitializationStore
     Task<TenantInitializationRecord?> TryBeginInitializationAsync(
         Guid tenantId, string correlationId, CancellationToken cancellationToken);
 
-    /// <summary>Atomically transitions Initializing → Initializing (same state, new record),
-    /// for force-retry from a stuck Initializing state. Returns null if not Initializing.</summary>
+    /// <summary>Atomically transitions Pending/Failed/Initializing → Initializing,
+    /// computes AttemptNo, inserts a new recovery/retry record.
+    /// Returns null if tenant is Initialized or transition conflicts.</summary>
     Task<TenantInitializationRecord?> ForceBeginInitializationAsync(
         Guid tenantId, string correlationId, string reason, CancellationToken cancellationToken);
 
@@ -369,7 +370,7 @@ Task<TenantInitializationRecord?> ForceBeginInitializationAsync(
     Guid tenantId, string correlationId, string reason, CancellationToken cancellationToken);
 ```
 
-`ForceFailInitializationAsync` is a separate operation that atomically transitions `Initializing` → `Failed`. It updates the latest `Initializing` record (if one exists) to `Failed` with the error "manually marked as failed". Only if no active `Initializing` record exists does it create a new recovery record. It does not start an initialization chain.
+`ForceFailInitializationAsync` is a separate operation that atomically transitions `Initializing` → `Failed`. It updates the latest `Initializing` record (if one exists) to `Failed` with `CurrentStep = null`, `Error = "manually marked as failed"`, `CompletedAt = now`. Only if no active `Initializing` record exists does it create a new recovery record with `Status = Failed`, `CurrentStep = null`, `Error = "manually marked as failed"`, `StartedAt = now`, `CompletedAt = now`, `AttemptNo = max + 1`, `CorrelationId = <current request correlation id>`. It does not start an initialization chain.
 
 ### Error Categories
 
