@@ -11,7 +11,7 @@ public interface ITenantDatabaseInitializer
         CancellationToken cancellationToken = default);
 }
 
-public class TenantDatabaseInitializeResult
+public class TenantDatabaseInitializeResult : IPhaseResult
 {
     public bool Success { get; init; }
     public string? Error { get; init; }
