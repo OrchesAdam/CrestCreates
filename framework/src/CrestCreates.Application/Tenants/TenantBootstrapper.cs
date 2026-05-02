@@ -1,19 +1,19 @@
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Application.Contracts.DTOs.Tenants;
+using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Domain.Authorization;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared.Permissions;
-using CrestCreates.MultiTenancy;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace CrestCreates.Application.Tenants;
 
-public class TenantBootstrapper : ITenantBootstrapper
+public class TenantBootstrapper : ITenantDataSeeder
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly TenantBootstrapOptions _options;
@@ -29,36 +29,35 @@ public class TenantBootstrapper : ITenantBootstrapper
         _logger = logger;
     }
 
-    public async Task BootstrapAsync(Tenant tenant, CancellationToken cancellationToken = default)
+    public async Task<TenantSeedResult> SeedAsync(
+        TenantInitializationContext context,
+        CancellationToken cancellationToken = default)
     {
         if (!_options.EnableAutoBootstrap)
+            return TenantSeedResult.Succeeded();
+
+        try
         {
-            _logger.LogInformation("租户自动初始化已禁用，跳过租户 {TenantName} 的初始化", tenant.Name);
-            return;
+            using var scope = _serviceProvider.CreateScope();
+            await BootstrapAdminUserAsync(scope, context, cancellationToken);
+            await BootstrapDefaultRoleAsync(scope, context, cancellationToken);
+            await BootstrapBasicPermissionsAsync(scope, context, cancellationToken);
+
+            return TenantSeedResult.Succeeded();
         }
-
-        _logger.LogInformation("开始初始化租户 {TenantName} (ID: {TenantId})", tenant.Name, tenant.Id);
-
-        using var scope = _serviceProvider.CreateScope();
-        var userRepository = scope.ServiceProvider.GetRequiredService<IUserRepository>();
-        var roleRepository = scope.ServiceProvider.GetRequiredService<IRoleRepository>();
-        var permissionGrantRepository = scope.ServiceProvider.GetRequiredService<IPermissionGrantRepository>();
-        var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
-
-        var tenantId = tenant.Id.ToString();
-
-        await BootstrapAdminUserAsync(tenant, userRepository, passwordHasher, cancellationToken);
-        await BootstrapDefaultRoleAsync(tenant, roleRepository, cancellationToken);
-        await BootstrapBasicPermissionsAsync(tenant, permissionGrantRepository, cancellationToken);
-
-        _logger.LogInformation("租户 {TenantName} 初始化完成", tenant.Name);
+        catch (Exception ex)
+        {
+            return TenantSeedResult.Failed(ex.Message);
+        }
     }
 
-    private async Task BootstrapAdminUserAsync(Tenant tenant, IUserRepository userRepository, IPasswordHasher passwordHasher, CancellationToken cancellationToken)
+    private async Task BootstrapAdminUserAsync(IServiceScope scope, TenantInitializationContext context, CancellationToken cancellationToken)
     {
-        var adminEmail = string.Format(_options.DefaultAdminEmail, tenant.Name.ToLowerInvariant());
+        var userRepository = scope.ServiceProvider.GetRequiredService<IUserRepository>();
+        var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+        var adminEmail = string.Format(_options.DefaultAdminEmail, context.TenantName.ToLowerInvariant());
         var hashedPassword = passwordHasher.HashPassword(_options.DefaultAdminPassword);
-        var adminUser = new User(Guid.NewGuid(), _options.DefaultAdminUserName, adminEmail, tenant.Id.ToString())
+        var adminUser = new User(Guid.NewGuid(), _options.DefaultAdminUserName, adminEmail, context.TenantId.ToString())
         {
             IsActive = true,
             IsSuperAdmin = true,
@@ -66,23 +65,25 @@ public class TenantBootstrapper : ITenantBootstrapper
         };
 
         await userRepository.InsertAsync(adminUser, cancellationToken);
-        _logger.LogDebug("租户 {TenantName} 创建管理员用户 {UserName}", tenant.Name, adminUser.UserName);
+        _logger.LogDebug("租户 {TenantName} 创建管理员用户 {UserName}", context.TenantName, adminUser.UserName);
     }
 
-    private async Task BootstrapDefaultRoleAsync(Tenant tenant, IRoleRepository roleRepository, CancellationToken cancellationToken)
+    private async Task BootstrapDefaultRoleAsync(IServiceScope scope, TenantInitializationContext context, CancellationToken cancellationToken)
     {
-        var role = new Role(Guid.NewGuid(), _options.DefaultRoleName, tenant.Id.ToString())
+        var roleRepository = scope.ServiceProvider.GetRequiredService<IRoleRepository>();
+        var role = new Role(Guid.NewGuid(), _options.DefaultRoleName, context.TenantId.ToString())
         {
             DisplayName = _options.DefaultRoleDisplayName,
             IsActive = true
         };
 
         await roleRepository.InsertAsync(role, cancellationToken);
-        _logger.LogDebug("租户 {TenantName} 创建默认角色 {RoleName}", tenant.Name, role.Name);
+        _logger.LogDebug("租户 {TenantName} 创建默认角色 {RoleName}", context.TenantName, role.Name);
     }
 
-    private async Task BootstrapBasicPermissionsAsync(Tenant tenant, IPermissionGrantRepository permissionGrantRepository, CancellationToken cancellationToken)
+    private async Task BootstrapBasicPermissionsAsync(IServiceScope scope, TenantInitializationContext context, CancellationToken cancellationToken)
     {
+        var permissionGrantRepository = scope.ServiceProvider.GetRequiredService<IPermissionGrantRepository>();
         foreach (var permissionName in _options.BasicPermissions)
         {
             var grant = new PermissionGrant(
@@ -91,11 +92,11 @@ public class TenantBootstrapper : ITenantBootstrapper
                 PermissionGrantProviderType.Role,
                 _options.DefaultRoleName,
                 PermissionGrantScope.Tenant,
-                tenant.Id.ToString());
+                context.TenantId.ToString());
 
             await permissionGrantRepository.InsertAsync(grant, cancellationToken);
         }
 
-        _logger.LogDebug("租户 {TenantName} 授予 {Count} 个基础权限", tenant.Name, _options.BasicPermissions.Length);
+        _logger.LogDebug("租户 {TenantName} 授予 {Count} 个基础权限", context.TenantName, _options.BasicPermissions.Length);
     }
 }
