@@ -39,4 +39,14 @@ public interface ITenantInitializationStore
     Task UpdateAsync(
         TenantInitializationRecord record,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Atomically transitions Initializing → Failed on both the Tenant
+    /// and the latest Initializing record. If no active record exists,
+    /// creates a recovery record. Does NOT expose intermediate Initializing state.
+    /// </summary>
+    Task ForceFailAsync(
+        Guid tenantId,
+        string correlationId,
+        CancellationToken cancellationToken);
 }

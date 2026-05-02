@@ -138,6 +138,66 @@ public class EfCoreTenantInitializationStore : ITenantInitializationStore
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task ForceFailAsync(
+        Guid tenantId,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            // Atomically transition Initializing(1) → Failed(3)
+            var rows = await _dbContext.Database.ExecuteSqlRawAsync(
+                "UPDATE Tenants SET InitializationStatus = {0}, LastInitializationError = {1} WHERE Id = {2} AND InitializationStatus = 1",
+                new object[] { (int)TenantInitializationStatus.Failed, "manually marked as failed", tenantId },
+                cancellationToken);
+
+            if (rows == 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw new InvalidOperationException(
+                    $"Cannot force-fail tenant {tenantId}: it is not in Initializing state.");
+            }
+
+            DetachTrackedTenant(tenantId);
+
+            // Update the latest Initializing record if it exists
+            var dbSet = ((DbContext)_dbContext).Set<TenantInitializationRecord>();
+            var activeRecord = await dbSet
+                .Where(r => r.TenantId == tenantId && r.Status == TenantInitializationStatus.Initializing)
+                .OrderByDescending(r => r.AttemptNo)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (activeRecord is not null)
+            {
+                activeRecord.MarkFailed("manually marked as failed");
+                _dbContext.Set<TenantInitializationRecord>().Update(activeRecord);
+            }
+            else
+            {
+                // Recovery branch: no active Initializing record
+                var maxAttempt = await dbSet
+                    .Where(r => r.TenantId == tenantId)
+                    .MaxAsync(r => (int?)r.AttemptNo, cancellationToken) ?? 0;
+
+                var recoveryRecord = new TenantInitializationRecord(
+                    Guid.NewGuid(), tenantId, maxAttempt + 1, correlationId);
+                recoveryRecord.MarkFailed("manually marked as failed");
+
+                await _dbContext.Set<TenantInitializationRecord>().AddAsync(recoveryRecord, cancellationToken);
+            }
+
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
     private void DetachTrackedTenant(Guid tenantId)
     {
         foreach (var entry in _dbContext.ChangeTracker.Entries<Tenant>())

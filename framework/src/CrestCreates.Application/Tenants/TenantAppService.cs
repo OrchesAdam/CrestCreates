@@ -256,24 +256,7 @@ public class TenantAppService : ITenantAppService
         }
 
         var correlationId = Guid.NewGuid().ToString("N");
-        var record = await _store.GetLatestAsync(tenantId, cancellationToken);
-
-        if (record is not null && record.Status == TenantInitializationStatus.Initializing)
-        {
-            record.MarkFailed("manually marked as failed");
-            await _store.UpdateAsync(record, cancellationToken);
-        }
-        else
-        {
-            // No active Initializing record — create a recovery record
-            var recoveryRecord = await _store.ForceBeginInitializationAsync(
-                tenantId, correlationId, "Recovery: force-fail with no active record", cancellationToken);
-            if (recoveryRecord is not null)
-            {
-                recoveryRecord.MarkFailed("manually marked as failed");
-                await _store.UpdateAsync(recoveryRecord, cancellationToken);
-            }
-        }
+        await _store.ForceFailAsync(tenantId, correlationId, cancellationToken);
 
         tenant.MarkInitializationFailed("manually marked as failed");
         await _tenantRepository.UpdateAsync(tenant, cancellationToken);
