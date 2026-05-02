@@ -370,7 +370,7 @@ Task<TenantInitializationRecord?> ForceBeginInitializationAsync(
     Guid tenantId, string correlationId, string reason, CancellationToken cancellationToken);
 ```
 
-`ForceFailInitializationAsync` is a separate operation that atomically transitions `Initializing` → `Failed`. It updates the latest `Initializing` record (if one exists) to `Failed` with `CurrentStep = null`, `Error = "manually marked as failed"`, `CompletedAt = now`. Only if no active `Initializing` record exists does it create a new recovery record with `Status = Failed`, `CurrentStep = null`, `Error = "manually marked as failed"`, `StartedAt = now`, `CompletedAt = now`, `AttemptNo = max + 1`, `CorrelationId = <current request correlation id>`. It does not start an initialization chain.
+`ForceFailInitializationAsync` is a separate operation that atomically transitions `Initializing` → `Failed`. It updates the latest `Initializing` record (if one exists) to `Failed` with `CurrentStep = null`, `Error = "manually marked as failed"`, `CompletedAt = now`. Only if no active `Initializing` record exists does it create a new recovery record with `Status = Failed`, `CurrentStep = null`, `Error = "manually marked as failed"`, `StartedAt = now`, `CompletedAt = now`, `AttemptNo = max + 1`, `CorrelationId = <current request correlation id>`. This branch only exists to repair historical or manually corrupted data where the record was lost; normal `TryBeginInitializationAsync`/`ForceBeginInitializationAsync` flows always create a record atomically with the status transition. It does not start an initialization chain.
 
 ### Error Categories
 
