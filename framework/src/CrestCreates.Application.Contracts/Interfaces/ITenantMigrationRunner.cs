@@ -11,7 +11,7 @@ public interface ITenantMigrationRunner
         CancellationToken cancellationToken = default);
 }
 
-public class TenantMigrationResult
+public class TenantMigrationResult : IPhaseResult
 {
     public bool Success { get; init; }
     public string? Error { get; init; }

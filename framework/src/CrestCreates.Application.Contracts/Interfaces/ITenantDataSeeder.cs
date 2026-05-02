@@ -11,7 +11,7 @@ public interface ITenantDataSeeder
         CancellationToken cancellationToken = default);
 }
 
-public class TenantSeedResult
+public class TenantSeedResult : IPhaseResult
 {
     public bool Success { get; init; }
     public string? Error { get; init; }
