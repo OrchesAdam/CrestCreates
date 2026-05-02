@@ -1,4 +1,5 @@
 using System;
+using CrestCreates.Domain.Shared;
 
 namespace CrestCreates.Application.Contracts.DTOs.Tenants;
 
@@ -11,4 +12,7 @@ public class TenantDto
     public bool IsActive { get; set; }
     public DateTime CreationTime { get; set; }
     public DateTime? LastModificationTime { get; set; }
+    public TenantInitializationStatus InitializationStatus { get; set; }
+    public DateTime? InitializedAt { get; set; }
+    public string? LastInitializationError { get; set; }
 }
