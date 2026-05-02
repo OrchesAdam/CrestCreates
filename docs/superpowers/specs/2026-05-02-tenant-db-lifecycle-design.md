@@ -12,8 +12,9 @@
 
 ```
 TenantAppService.CreateAsync
-  → TenantManager.CreateAsync          // Domain: tenant aggregate rules only
-  → TenantRepository.InsertAsync       // Write host DB tenant metadata
+  → TenantRepository.FindByNameAsync     // Application: uniqueness check
+  → TenantManager.CreateAsync            // Domain: create aggregate, validate domain rules
+  → TenantRepository.InsertAsync         // Application: persist to host DB
   → TenantInitializationOrchestrator.InitializeAsync  // Application: full init chain
        → ITenantDatabaseInitializer.InitializeAsync   // Independent DB only
        → ITenantMigrationRunner.RunAsync              // Independent DB only
@@ -24,7 +25,7 @@ TenantAppService.CreateAsync
        → Write TenantInitializationRecord
 ```
 
-TenantManager is a Domain-layer component — it handles tenant aggregate creation rules (name validation, uniqueness) and repository insertion. It does **not** call the orchestrator. `TenantAppService` owns the orchestration: create tenant → then initialize.
+`TenantAppService` owns the full coordination: it checks uniqueness via repository, calls `TenantManager.CreateAsync` (which only constructs the aggregate and validates domain rules — no I/O), persists via repository, then invokes the orchestrator. `TenantManager` is a Domain-layer component that does **not** call repositories or the orchestrator.
 
 ### New Abstractions (in `CrestCreates.Application.Contracts`)
 
@@ -116,7 +117,7 @@ public enum TenantInitializationStepStatus
 | `AttemptNo` | `int` | Monotonically increasing per tenant |
 | `CorrelationId` | `string` | Links to structured logs |
 
-**ITenantInitializationRecordRepository** (in `CrestCreates.Domain` or `CrestCreates.Application.Contracts`):
+**ITenantInitializationRecordRepository** (in `CrestCreates.Application.Contracts`):
 
 ```csharp
 public interface ITenantInitializationRecordRepository
@@ -157,24 +158,28 @@ This gives the orchestrator a single persistence abstraction for record CRUD. Wi
 ```
 TenantAppService.CreateAsync(CreateTenantDto)
 │
-├─ 1. TenantManager.CreateAsync
-│     ├─ Validate name uniqueness
-│     ├─ Create Tenant entity (InitializationStatus = Pending)
-│     └─ Insert into host DB via TenantRepository
+├─ 1. TenantRepository.FindByNameAsync(normalizedName)
+│     └─ If exists → throw duplicate
 │
-├─ 2. TenantInitializationOrchestrator.InitializeAsync(context)
+├─ 2. TenantManager.CreateAsync(dto)
+│     ├─ Create Tenant entity (InitializationStatus = Pending)
+│     └─ Validate domain rules (no I/O)
+│
+├─ 3. TenantRepository.InsertAsync(tenant)
+│     └─ Persist tenant metadata to host DB
+│
+├─ 4. TenantInitializationOrchestrator.InitializeAsync(context)
 │     │
-│     ├─ 2a. Atomic status transition:
-│     │     UPDATE Tenant SET InitializationStatus = 'Initializing'
-│     │     WHERE <tenant primary key> = context.TenantId
-│     │       AND InitializationStatus IN ('Pending', 'Failed')
-│     │     → 0 rows = return conflict
-│     │
-│     ├─ 2b. Compute AttemptNo = max(existing AttemptNo for tenant) + 1
-│     │     (safe because only one caller holds the Initializing lock per tenant)
-│     │
-│     ├─ 2c. Insert TenantInitializationRecord (AttemptNo, Status = Initializing, CorrelationId)
-│     │     UNIQUE INDEX on (TenantId, AttemptNo) as safety net
+│     ├─ 4a. TryBeginInitializationAsync(tenantId, correlationId):
+│     │     Atomically, in one host-DB transaction:
+│     │       1. UPDATE Tenant SET InitializationStatus = 'Initializing'
+│     │          WHERE <tenant primary key> = @id
+│     │            AND InitializationStatus IN ('Pending', 'Failed')
+│     │          → 0 rows affected = return null (conflict)
+│     │       2. Compute AttemptNo = max(existing AttemptNo for tenant) + 1
+│     │       3. INSERT TenantInitializationRecord
+│     │          (AttemptNo, Status = Initializing, CorrelationId)
+│     │       4. Return the new TenantInitializationRecord
 │     │
 │     ├─ IF context.IsIndependentDatabase:
 │     │   ├─ Phase 1: ITenantDatabaseInitializer.InitializeAsync
@@ -191,21 +196,21 @@ TenantAppService.CreateAsync(CreateTenantDto)
 │     ├─ Phase 4: ITenantSettingDefaultsSeeder.SeedAsync
 │     ├─ Phase 5: ITenantFeatureDefaultsSeeder.SeedAsync
 │     │
-│     ├─ 2d. On success:
+│     ├─ 4d. On success:
 │     │     ├─ Tenant.InitializationStatus = Initialized, InitializedAt = now
 │     │     ├─ Record.Status = Initialized, CompletedAt = now, CurrentStep = null
 │     │     └─ Return TenantInitializationResult { Success = true, Steps = [...] }
 │     │
-│     └─ 2e. On failure at any phase (state persisted first in one transaction):
-│           ├─ Tenant.InitializationStatus = Failed
-│           ├─ Tenant.LastInitializationError = sanitized error message
-│           ├─ Record.Status = Failed
-│           ├─ Record.CurrentStep = null
-│           ├─ Record.Error = detailed error (connection strings redacted)
-│           ├─ Record.StepResultsJson updated with failed step
-│           ├─ Record.CompletedAt = now
-│           └─ Return TenantInitializationResult { Success = false, Error = ..., Steps = [...] }
-│               OR throw TenantInitializationException (state already persisted either way)
+│     └─ 4e. On failure at any phase:
+│           Phase-level business failure (e.g., migration conflict, seed constraint violation):
+│             ├─ Persist Tenant status + error + Record + step results in one host-DB transaction
+│             └─ Return TenantInitializationResult { Success = false, Error = ..., Steps = [...] }
+│
+│           Infrastructure failure (host-DB transaction fails, state cannot be written):
+│             └─ Throw — no safe result to return; caller handles as system error
+│
+│           In both cases: independent tenant DB changes from prior phases are NOT rolled back.
+│           Retry relies on phase idempotency to safely re-apply.
 ```
 
 ### Retry Flow
@@ -216,9 +221,9 @@ TenantAppService.RetryInitializationAsync(tenantId)
 ├─ Load tenant, verify status ∈ { Pending, Failed }
 ├─ Resolve TenantInitializationContext from tenant entity
 └─ TenantInitializationOrchestrator.InitializeAsync(context)
-    ├─ Atomic transition Pending/Failed → Initializing
-    ├─ AttemptNo = max(existing) + 1 (computed after lock acquired)
-    └─ Same chain as create; retry restarts from phase 1, not the failed phase.
+    ├─ TryBeginInitializationAsync: atomic transition + AttemptNo + record insert
+    │   └─ null = return conflict
+    └─ Same chain as create; retry restarts from phase 1.
        Idempotency ensures phases 1..N-1 are no-ops.
 ```
 
@@ -237,9 +242,11 @@ Host DB and independent tenant DB are **separate resources** — they cannot sha
 
 | Condition | Strategy | Orchestrator Behavior |
 |-----------|----------|-----------------------|
-| `context.IsIndependentDatabase == true` | Independent tenant DB | EnsureCreated → Migrate → Seed → Defaults |
-| `context.IsIndependentDatabase == false` | Shared tenant data | Skip DB init + migration, seed + defaults only |
-| Host DB | Out of scope | Handled by app startup / deployment migrator |
+| `context.IsIndependentDatabase == true` | Independent tenant DB | EnsureCreated → Migrate → Seed → Defaults. Seed/defaults write to the **tenant's independent DB**. |
+| `context.IsIndependentDatabase == false` | Shared tenant data | Skip DB init + migration, seed + defaults only. Seed/defaults write to the **shared DB** using the default host/shared connection string, with `TenantId` filtering for data isolation. |
+| Host DB migration | Out of scope | Handled by app startup / deployment migrator |
+
+**Connection string resolution for shared tenants**: When `ConnectionString` is empty, the business `DbContext` (resolved via `IEfCoreDbContextOptionsContributor` or equivalent) falls back to the host/shared connection string configured at startup. `ICurrentTenant` provides the `TenantId` for row-level data filtering. The orchestrator itself does not resolve connection strings — it delegates to the `TenantInitializationContext` which the caller populates from the tenant entity.
 
 ### Public API Contract
 
@@ -251,6 +258,8 @@ public interface ITenantAppService
     Task<TenantDto> CreateAsync(CreateTenantDto input);
     Task<TenantInitializationResult> RetryInitializationAsync(Guid tenantId);
     Task<TenantInitializationResult> GetInitializationStatusAsync(Guid tenantId);
+    Task<TenantInitializationResult> ForceRetryInitializationAsync(Guid tenantId);
+    Task<TenantInitializationResult> ForceFailInitializationAsync(Guid tenantId);
     // ... existing methods
 }
 ```
@@ -259,8 +268,12 @@ public interface ITenantAppService
 |--------|------------|-------------|
 | `RetryInitializationAsync` | `Tenant.RetryInitialization` | `POST /api/tenants/{id}/retry-initialization` |
 | `GetInitializationStatusAsync` | `Tenant.Read` | `GET /api/tenants/{id}/initialization-status` |
+| `ForceRetryInitializationAsync` | `Tenant.AdminForceRetry` | `POST /api/tenants/{id}/force-retry-initialization` |
+| `ForceFailInitializationAsync` | `Tenant.AdminForceRetry` | `POST /api/tenants/{id}/force-fail-initialization` |
 
 `RetryInitializationAsync` returns the same `TenantInitializationResult` type as the create flow — callers get the full step breakdown regardless of which path triggered initialization.
+
+`RetryInitializationAsync` only accepts `Pending`/`Failed` tenants. `ForceRetryInitializationAsync` and `ForceFailInitializationAsync` are admin-level recovery endpoints that operate on any status including `Initializing` — they exist to recover tenants stuck after a process crash.
 
 ### Lifecycle Rules
 
@@ -272,6 +285,7 @@ public interface ITenantAppService
 | Already initialized | Retry denied: status = `Initialized` |
 | Cleanup | Separate `DeleteTenantAsync` / `AbortTenantCreationAsync`, never auto-delete on failure |
 | Concurrent retry | Atomic transition rejects second caller → conflict |
+| Stuck at `Initializing` | If a process crashes mid-initialization, the tenant remains `Initializing` indefinitely. Recovery: an admin-level `ForceFailInitializationAsync` marks it `Failed` and writes a record with error "Initialization timed out or process terminated". `ForceRetryInitializationAsync` allows restart from any status including `Initializing`. Only the designated admin API performs this — the standard retry endpoint only accepts `Pending`/`Failed`. |
 
 ## 3. Error Handling
 
@@ -297,16 +311,26 @@ Each phase:
 
 | Mechanism | Purpose |
 |-----------|---------|
-| Atomic status update | `WHERE InitializationStatus IN ('Pending', 'Failed')` — only the caller that transitions to `Initializing` proceeds |
-| 0 rows affected | Return conflict: "tenant is already initializing or initialized" |
-| UNIQUE INDEX on `(TenantId, AttemptNo)` | Safety net against duplicate attempt numbers under extreme race |
-| AttemptNo computed after lock | `max(existing) + 1` while holding the `Initializing` lock — no two callers can compute the same number |
+| `TryBeginInitializationAsync` single transaction | Status transition + AttemptNo + record insert in one host-DB transaction. Returns the new record, or null if the transition fails. |
+| Status gate | `WHERE InitializationStatus IN ('Pending', 'Failed')` — only allowed states can enter Initializing. `Initialized` and `Initializing` are rejected. |
+| Null return → conflict | Caller gets conflict without touching any state in the non-transition case |
+| UNIQUE INDEX on `(TenantId, AttemptNo)` | Safety net against duplicate attempt numbers within the transaction |
+| No partial state | If record insert fails, the entire transaction rolls back — tenant is never left at `Initializing` with no record |
 
-Repository method for the atomic transition:
+Atomic initialization entry point (on `ITenantInitializationRecordRepository`):
 
 ```csharp
-// Returns true if the transition succeeded (1 row affected), false if rejected
-Task<bool> TryBeginInitializationAsync(Guid tenantId, CancellationToken cancellationToken);
+/// <summary>
+/// Atomically transitions tenant to Initializing, computes AttemptNo,
+/// inserts a new TenantInitializationRecord, and returns it.
+/// Returns null if the status transition fails (tenant is not Pending/Failed,
+/// or another caller already acquired the lock).
+/// All three operations run in a single host-DB transaction.
+/// </summary>
+Task<TenantInitializationRecord?> TryBeginInitializationAsync(
+    Guid tenantId,
+    string correlationId,
+    CancellationToken cancellationToken);
 ```
 
 ### Error Categories
