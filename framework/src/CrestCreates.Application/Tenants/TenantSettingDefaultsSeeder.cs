@@ -64,6 +64,10 @@ public class TenantSettingDefaultsSeeder : ITenantSettingDefaultsSeeder
 
             return TenantSettingDefaultsResult.Succeeded();
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex,

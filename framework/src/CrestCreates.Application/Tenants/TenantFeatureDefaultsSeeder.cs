@@ -64,6 +64,10 @@ public class TenantFeatureDefaultsSeeder : ITenantFeatureDefaultsSeeder
 
             return TenantFeatureDefaultsResult.Succeeded();
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex,

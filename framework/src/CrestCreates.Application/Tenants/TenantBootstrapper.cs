@@ -46,6 +46,10 @@ public class TenantBootstrapper : ITenantDataSeeder
 
             return TenantSeedResult.Succeeded();
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             return TenantSeedResult.Failed(ex.Message);
@@ -55,6 +59,12 @@ public class TenantBootstrapper : ITenantDataSeeder
     private async Task BootstrapAdminUserAsync(IServiceScope scope, TenantInitializationContext context, CancellationToken cancellationToken)
     {
         var userRepository = scope.ServiceProvider.GetRequiredService<IUserRepository>();
+
+        // Idempotent: skip if admin user already exists
+        var existing = await userRepository.FindByUserNameAsync(_options.DefaultAdminUserName, cancellationToken);
+        if (existing is not null)
+            return;
+
         var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
         var adminEmail = string.Format(_options.DefaultAdminEmail, context.TenantName.ToLowerInvariant());
         var hashedPassword = passwordHasher.HashPassword(_options.DefaultAdminPassword);
@@ -72,6 +82,13 @@ public class TenantBootstrapper : ITenantDataSeeder
     private async Task BootstrapDefaultRoleAsync(IServiceScope scope, TenantInitializationContext context, CancellationToken cancellationToken)
     {
         var roleRepository = scope.ServiceProvider.GetRequiredService<IRoleRepository>();
+
+        // Idempotent: skip if default role already exists
+        var existing = await roleRepository.FindByNameAsync(
+            _options.DefaultRoleName, context.TenantId.ToString(), cancellationToken);
+        if (existing is not null)
+            return;
+
         var role = new Role(Guid.NewGuid(), _options.DefaultRoleName, context.TenantId.ToString())
         {
             DisplayName = _options.DefaultRoleDisplayName,
@@ -87,6 +104,12 @@ public class TenantBootstrapper : ITenantDataSeeder
         var permissionGrantRepository = scope.ServiceProvider.GetRequiredService<IPermissionGrantRepository>();
         foreach (var permissionName in _options.BasicPermissions)
         {
+            // Idempotent: skip if permission grant already exists
+            var existing = await permissionGrantRepository.FindAsync(
+                permissionName, PermissionGrantProviderType.Role, _options.DefaultRoleName, cancellationToken);
+            if (existing is not null)
+                continue;
+
             var grant = new PermissionGrant(
                 Guid.NewGuid(),
                 permissionName,
