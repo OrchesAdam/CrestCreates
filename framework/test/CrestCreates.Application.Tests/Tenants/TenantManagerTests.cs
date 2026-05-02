@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
+using CrestCreates.Domain.Shared;
 using CrestCreates.MultiTenancy;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
@@ -26,15 +27,10 @@ public class TenantManagerTests
     }
 
     [Fact]
-    public async Task CreateAsync_WithValidInput_PersistsTenantWithDefaultConnectionString()
+    public async Task CreateAsync_WithValidInput_ReturnsTenantWithCorrectProperties()
     {
-        _tenantRepositoryMock
-            .Setup(repository => repository.FindByNameAsync("host", It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Tenant?)null);
-        _tenantRepositoryMock
-            .Setup(repository => repository.InsertAsync(It.IsAny<Tenant>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Tenant tenant, CancellationToken _) => tenant);
-
+        // TenantManager.CreateAsync is now a pure aggregate factory — no I/O.
+        // Repository operations (uniqueness check, insert) moved to TenantAppService.
         var result = await _tenantManager.CreateAsync(
             "host",
             "Host Tenant",
@@ -45,15 +41,7 @@ public class TenantManagerTests
         result.DisplayName.Should().Be("Host Tenant");
         result.IsActive.Should().BeTrue();
         result.GetDefaultConnectionString().Should().Be("Server=.;Database=HostDb;");
-
-        _tenantRepositoryMock.Verify(
-            repository => repository.InsertAsync(
-                It.Is<Tenant>(tenant =>
-                    tenant.Name == "host" &&
-                    tenant.NormalizedName == "HOST" &&
-                    tenant.ConnectionStrings.Count == 1),
-                It.IsAny<CancellationToken>()),
-            Times.Once);
+        result.InitializationStatus.Should().Be(TenantInitializationStatus.Pending);
     }
 
     [Fact]
