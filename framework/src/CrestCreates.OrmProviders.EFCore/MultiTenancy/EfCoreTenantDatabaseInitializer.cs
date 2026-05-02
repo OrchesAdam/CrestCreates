@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Contracts.Interfaces;
 using Microsoft.Data.SqlClient;
@@ -32,6 +33,12 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
                         "Connection string does not specify a database name.");
                 }
 
+                if (!IsValidDatabaseName(databaseName))
+                {
+                    return TenantDatabaseInitializeResult.Failed(
+                        $"Invalid database name '{databaseName}'. Only alphanumeric, underscore, and hyphen characters are allowed.");
+                }
+
                 builder.InitialCatalog = "master";
 
                 using var connection = new SqlConnection(builder.ConnectionString);
@@ -45,7 +52,9 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
                 if (!exists)
                 {
                     var createCmd = connection.CreateCommand();
-                    createCmd.CommandText = $"CREATE DATABASE [{databaseName}]";
+                    // databaseName has been validated, but escape ] as ]] for safe bracket quoting
+                    var escaped = databaseName.Replace("]", "]]");
+                    createCmd.CommandText = $"CREATE DATABASE [{escaped}]";
                     await createCmd.ExecuteNonQueryAsync(cancellationToken);
 
                     _logger.LogInformation(
@@ -70,5 +79,10 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
                 return TenantDatabaseInitializeResult.Failed(ex.Message);
             }
         }
+    }
+
+    private static bool IsValidDatabaseName(string name)
+    {
+        return Regex.IsMatch(name, @"^[a-zA-Z0-9_-]+$");
     }
 }

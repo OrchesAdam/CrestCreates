@@ -60,12 +60,12 @@ public class TenantAppService : ITenantAppService
         {
             var result = await _orchestrator.InitializeAsync(context, cancellationToken);
 
+            // Store already updated Tenant atomically. Sync in-memory copy for DTO mapping.
             if (result.Success)
                 tenant.MarkInitializationSucceeded();
             else
                 tenant.MarkInitializationFailed(result.Error ?? "Initialization failed");
 
-            await _tenantRepository.UpdateAsync(tenant, cancellationToken);
             return MapToDto(tenant);
         }
         catch
@@ -148,12 +148,12 @@ public class TenantAppService : ITenantAppService
 
         var result = await _orchestrator.InitializeAsync(context, cancellationToken);
 
+        // Store already updated Tenant atomically. Sync in-memory copy.
         if (result.Success)
             tenant.MarkInitializationSucceeded();
         else
             tenant.MarkInitializationFailed(result.Error ?? "Initialization failed");
 
-        await _tenantRepository.UpdateAsync(tenant, cancellationToken);
         return result;
     }
 
@@ -233,12 +233,12 @@ public class TenantAppService : ITenantAppService
 
         var result = await _orchestrator.InitializeWithRecordAsync(context, record, cancellationToken);
 
+        // Store already updated Tenant atomically. Sync in-memory copy.
         if (result.Success)
             tenant.MarkInitializationSucceeded();
         else
             tenant.MarkInitializationFailed(result.Error ?? "Force retry initialization failed");
 
-        await _tenantRepository.UpdateAsync(tenant, cancellationToken);
         return result;
     }
 

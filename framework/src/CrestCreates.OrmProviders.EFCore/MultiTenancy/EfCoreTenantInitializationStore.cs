@@ -198,6 +198,63 @@ public class EfCoreTenantInitializationStore : ITenantInitializationStore
         }
     }
 
+    public async Task CompleteInitializationAsync(
+        Guid tenantId,
+        TenantInitializationRecord record,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                "UPDATE Tenants SET InitializationStatus = {0}, InitializedAt = {1}, LastInitializationError = NULL WHERE Id = {2}",
+                new object[] { (int)TenantInitializationStatus.Initialized, DateTime.UtcNow, tenantId },
+                cancellationToken);
+
+            DetachTrackedTenant(tenantId);
+
+            record.MarkSucceeded();
+            _dbContext.Set<TenantInitializationRecord>().Update(record);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task FailInitializationAsync(
+        Guid tenantId,
+        TenantInitializationRecord record,
+        string sanitizedError,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                "UPDATE Tenants SET InitializationStatus = {0}, LastInitializationError = {1} WHERE Id = {2}",
+                new object[] { (int)TenantInitializationStatus.Failed, sanitizedError, tenantId },
+                cancellationToken);
+
+            DetachTrackedTenant(tenantId);
+
+            record.MarkFailed(sanitizedError);
+            _dbContext.Set<TenantInitializationRecord>().Update(record);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
     private void DetachTrackedTenant(Guid tenantId)
     {
         foreach (var entry in _dbContext.ChangeTracker.Entries<Tenant>())

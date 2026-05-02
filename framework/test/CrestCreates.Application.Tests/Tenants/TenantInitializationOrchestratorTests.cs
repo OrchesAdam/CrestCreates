@@ -74,11 +74,21 @@ public class TenantInitializationOrchestratorTests
             .ReturnsAsync(record);
     }
 
-    private void SetupStoreUpdatePassthrough()
+    private void SetupStorePassthrough()
     {
         _storeMock
             .Setup(s => s.UpdateAsync(
                 It.IsAny<TenantInitializationRecord>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        _storeMock
+            .Setup(s => s.CompleteInitializationAsync(
+                It.IsAny<Guid>(), It.IsAny<TenantInitializationRecord>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        _storeMock
+            .Setup(s => s.FailInitializationAsync(
+                It.IsAny<Guid>(), It.IsAny<TenantInitializationRecord>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
     }
 
@@ -88,7 +98,7 @@ public class TenantInitializationOrchestratorTests
         var context = CreateContext("Server=.;Database=TestDb;");
         var record = CreateRecord(context.TenantId, context.CorrelationId);
         SetupStoreBeginReturns(record);
-        SetupStoreUpdatePassthrough();
+        SetupStorePassthrough();
 
         _dbInitializerMock
             .Setup(x => x.InitializeAsync(context, It.IsAny<CancellationToken>()))
@@ -143,7 +153,7 @@ public class TenantInitializationOrchestratorTests
         var context = CreateContext(null); // ConnectionString is null → IsIndependentDatabase = false
         var record = CreateRecord(context.TenantId, context.CorrelationId);
         SetupStoreBeginReturns(record);
-        SetupStoreUpdatePassthrough();
+        SetupStorePassthrough();
 
         _dataSeederMock
             .Setup(x => x.SeedAsync(context, It.IsAny<CancellationToken>()))
@@ -215,7 +225,7 @@ public class TenantInitializationOrchestratorTests
         var context = CreateContext("Server=.;Database=TestDb;");
         var record = CreateRecord(context.TenantId, context.CorrelationId);
         SetupStoreBeginReturns(record);
-        SetupStoreUpdatePassthrough();
+        SetupStorePassthrough();
 
         _dbInitializerMock
             .Setup(x => x.InitializeAsync(context, It.IsAny<CancellationToken>()))
@@ -252,7 +262,7 @@ public class TenantInitializationOrchestratorTests
         var context = CreateContext("Server=secret;Password=p@ss");
         var record = CreateRecord(context.TenantId, context.CorrelationId);
         SetupStoreBeginReturns(record);
-        SetupStoreUpdatePassthrough();
+        SetupStorePassthrough();
 
         _dbInitializerMock
             .Setup(x => x.InitializeAsync(context, It.IsAny<CancellationToken>()))

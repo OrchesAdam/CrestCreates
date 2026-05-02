@@ -120,9 +120,8 @@ public class TenantInitializationOrchestrator
             if (step5.Status != TenantInitializationStepStatus.Succeeded)
                 return await BuildFailureResultAsync(context, record, steps, step5.Error, cancellationToken);
 
-            // Success
-            record.MarkSucceeded();
-            await _store.UpdateAsync(record, cancellationToken);
+            // Success — atomically update Tenant + Record
+            await _store.CompleteInitializationAsync(context.TenantId, record, cancellationToken);
 
             return TenantInitializationResult.Succeeded(context.CorrelationId, steps);
         }
@@ -183,6 +182,10 @@ public class TenantInitializationOrchestrator
                 };
             }
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             var completedAt = DateTime.UtcNow;
@@ -214,8 +217,9 @@ public class TenantInitializationOrchestrator
     {
         var detailedError = failedStepError ?? "Tenant initialization failed.";
         var publicError = Sanitize(detailedError);
-        record.MarkFailed(detailedError);
-        await _store.UpdateAsync(record, cancellationToken);
+
+        // Atomically update Tenant + Record in one host-DB transaction
+        await _store.FailInitializationAsync(context.TenantId, record, publicError, cancellationToken);
 
         return TenantInitializationResult.Failed(context.CorrelationId, publicError, steps);
     }

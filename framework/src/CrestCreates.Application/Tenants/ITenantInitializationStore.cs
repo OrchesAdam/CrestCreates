@@ -49,4 +49,21 @@ public interface ITenantInitializationStore
         Guid tenantId,
         string correlationId,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Atomically marks both Tenant and Record as Initialized in a single host-DB transaction.
+    /// </summary>
+    Task CompleteInitializationAsync(
+        Guid tenantId,
+        TenantInitializationRecord record,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Atomically marks both Tenant and Record as Failed in a single host-DB transaction.
+    /// </summary>
+    Task FailInitializationAsync(
+        Guid tenantId,
+        TenantInitializationRecord record,
+        string sanitizedError,
+        CancellationToken cancellationToken);
 }

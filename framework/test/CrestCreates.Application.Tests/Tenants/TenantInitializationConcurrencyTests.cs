@@ -40,6 +40,16 @@ public class TenantInitializationConcurrencyTests
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        _storeMock
+            .Setup(s => s.CompleteInitializationAsync(
+                It.IsAny<Guid>(), It.IsAny<TenantInitializationRecord>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        _storeMock
+            .Setup(s => s.FailInitializationAsync(
+                It.IsAny<Guid>(), It.IsAny<TenantInitializationRecord>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
         var loggerMock = new Mock<ILogger<TenantInitializationOrchestrator>>();
         _orchestrator = new TenantInitializationOrchestrator(
             _dbInitializerMock.Object,
