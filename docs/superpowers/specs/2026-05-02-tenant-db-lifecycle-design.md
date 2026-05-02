@@ -4,6 +4,8 @@
 **Date**: 2026-05-02
 **Status**: draft
 
+> This spec supersedes `docs/review/feature-plans/tenant-db-lifecycle.xml` for implementation details. The XML feature plan describes goals and scope; this document defines the concrete architecture, data flow, error handling, and testing strategy.
+
 ## 1. Architecture & Components
 
 ### Call Chain
@@ -34,7 +36,7 @@ TenantManager is a Domain-layer component — it handles tenant aggregate creati
 | `ITenantSettingDefaultsSeeder` | `Task<TenantSettingDefaultsResult> SeedAsync(TenantInitializationContext, CancellationToken)` | Write default settings for tenant |
 | `ITenantFeatureDefaultsSeeder` | `Task<TenantFeatureDefaultsResult> SeedAsync(TenantInitializationContext, CancellationToken)` | Write default feature values for tenant |
 
-Existing `TenantBootstrapper` implements `ITenantDataSeeder` — it already handles admin user, role, and permission seeding.
+Existing `TenantBootstrapper` implements `ITenantDataSeeder` — it already handles admin user, role, and permission seeding. The old `ITenantBootstrapper` interface is **retired**: TenantManager no longer calls `ITenantBootstrapper.BootstrapAsync` directly. The single main chain is `TenantInitializationOrchestrator.InitializeAsync`, which calls `ITenantDataSeeder.SeedAsync` as one phase. No dual-track compatibility shim — existing call sites in `TenantManager` are updated, and `TenantBootstrapper` is renamed or adapted to the new interface.
 
 ### EF Core Implementations (in `CrestCreates.OrmProviders.EFCore`)
 
@@ -57,7 +59,7 @@ public class TenantInitializationContext
     public Guid TenantId { get; init; }
     public string TenantName { get; init; }
     public string? ConnectionString { get; init; }
-    public bool IsIndependentDatabase => !string.IsNullOrEmpty(ConnectionString);
+    public bool IsIndependentDatabase => !string.IsNullOrWhiteSpace(ConnectionString);
     public string CorrelationId { get; init; }
     public Guid? RequestedByUserId { get; init; }
 }
@@ -65,10 +67,10 @@ public class TenantInitializationContext
 
 ### Status Model
 
-**Enum** (in `CrestCreates.Domain.Shared`):
+**Overall initialization status** (in `CrestCreates.Domain.Shared`):
 
 ```csharp
-public enum InitializationStatus
+public enum TenantInitializationStatus
 {
     Pending,
     Initializing,
@@ -77,11 +79,25 @@ public enum InitializationStatus
 }
 ```
 
+**Per-step status** (in `CrestCreates.Domain.Shared`):
+
+```csharp
+public enum TenantInitializationStepStatus
+{
+    Running,
+    Succeeded,
+    Failed,
+    Skipped
+}
+```
+
+`TenantInitializationStatus` is used on the Tenant entity and TenantInitializationRecord for the overall outcome. `TenantInitializationStepStatus` is used in StepResultsJson entries and TenantInitializationStep for per-phase tracking. The two enums are intentionally separate — overall state and step-level state have different semantics.
+
 **Tenant entity extensions** (in `CrestCreates.Domain`):
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `InitializationStatus` | `InitializationStatus` | Current initialization state for availability checks |
+| `InitializationStatus` | `TenantInitializationStatus` | Current initialization state for availability checks |
 | `InitializedAt` | `DateTime?` | When initialization completed successfully |
 | `LastInitializationError` | `string?` | Sanitized, user-safe error message for diagnostics |
 
@@ -91,21 +107,35 @@ public enum InitializationStatus
 |-------|------|---------|
 | `Id` | `Guid` | Primary key |
 | `TenantId` | `Guid` | FK to Tenant |
-| `Status` | `InitializationStatus` | Result status for this attempt |
+| `Status` | `TenantInitializationStatus` | Overall result for this attempt |
 | `CurrentStep` | `string?` | Which phase is executing (null when complete) |
-| `StepResultsJson` | `string` | JSON array: `[{Name, Status, StartedAt, CompletedAt, Error}, ...]` |
+| `StepResultsJson` | `string` | JSON array: `[{Name, Status, StartedAt, CompletedAt, Error}, ...]` where Status uses `TenantInitializationStepStatus` |
 | `Error` | `string?` | Detailed technical error (connection strings redacted) |
 | `StartedAt` | `DateTime` | When this attempt started |
 | `CompletedAt` | `DateTime?` | When this attempt finished |
 | `AttemptNo` | `int` | Monotonically increasing per tenant |
 | `CorrelationId` | `string` | Links to structured logs |
 
+**ITenantInitializationRecordRepository** (in `CrestCreates.Domain` or `CrestCreates.Application.Contracts`):
+
+```csharp
+public interface ITenantInitializationRecordRepository
+{
+    Task<TenantInitializationRecord?> GetLatestAsync(Guid tenantId, CancellationToken cancellationToken);
+    Task<int> GetMaxAttemptNoAsync(Guid tenantId, CancellationToken cancellationToken);
+    Task InsertAsync(TenantInitializationRecord record, CancellationToken cancellationToken);
+    Task UpdateAsync(TenantInitializationRecord record, CancellationToken cancellationToken);
+}
+```
+
+This gives the orchestrator a single persistence abstraction for record CRUD. Without it, implementers would scatter record persistence across the orchestrator or phase handlers.
+
 **TenantInitializationResult** (in `CrestCreates.Application.Contracts`):
 
 | Field | Type | Purpose |
 |-------|------|---------|
 | `Success` | `bool` | Overall outcome |
-| `Status` | `InitializationStatus` | Result status |
+| `Status` | `TenantInitializationStatus` | Result status |
 | `Error` | `string?` | Public-safe error message |
 | `CorrelationId` | `string` | Links to logs and records |
 | `Steps` | `IReadOnlyList<TenantInitializationStep>` | Per-step results |
@@ -115,7 +145,7 @@ public enum InitializationStatus
 | Field | Type |
 |-------|------|
 | `Name` | `string` |
-| `Status` | `InitializationStatus` |
+| `Status` | `TenantInitializationStepStatus` |
 | `StartedAt` | `DateTime?` |
 | `CompletedAt` | `DateTime?` |
 | `Error` | `string?` |
@@ -149,10 +179,11 @@ TenantAppService.CreateAsync(CreateTenantDto)
 │     ├─ IF context.IsIndependentDatabase:
 │     │   ├─ Phase 1: ITenantDatabaseInitializer.InitializeAsync
 │     │   │   ├─ Update Record.CurrentStep = "DatabaseInitialize"
-│     │   │   ├─ Append {Name, Status=Running, StartedAt} to StepResultsJson
+│     │   │   ├─ Append {Name, Status=Running, StartedAt} to StepResultsJson (using TenantInitializationStepStatus.Running)
 │     │   │   └─ Ensure database exists, create if needed
 │     │   └─ Phase 2: ITenantMigrationRunner.RunAsync
 │     │       ├─ Update Record.CurrentStep = "Migration"
+│     │       ├─ Append {Name, Status=Running, StartedAt} to StepResultsJson (using TenantInitializationStepStatus.Running)
 │     │       └─ Run pending migrations on tenant DB
 │     │
 │     ├─ Phase 3: ITenantDataSeeder.SeedAsync
@@ -191,6 +222,17 @@ TenantAppService.RetryInitializationAsync(tenantId)
        Idempotency ensures phases 1..N-1 are no-ops.
 ```
 
+### Transaction Boundaries
+
+Host DB and independent tenant DB are **separate resources** — they cannot share a transaction.
+
+| Resource | Transaction scope |
+|----------|-------------------|
+| Host DB (Tenant status, TenantInitializationRecord) | Atomic within host DB. Status transition + record insert/update happen in one host-DB transaction. |
+| Independent tenant DB (EnsureCreated, Migrate, seed, defaults) | Each phase is its own connection/transaction. No cross-DB two-phase commit. |
+
+**Failure recovery model**: If an independent-DB phase fails after host DB state is written, the host DB reflects `Failed` with step-level error details. Retry restarts from phase 1 and relies on phase idempotency (EnsureCreated no-op, zero pending migrations, seed existence checks) to safely re-apply. No cross-DB rollback is attempted.
+
 ### Scenario Routing
 
 | Condition | Strategy | Orchestrator Behavior |
@@ -198,6 +240,27 @@ TenantAppService.RetryInitializationAsync(tenantId)
 | `context.IsIndependentDatabase == true` | Independent tenant DB | EnsureCreated → Migrate → Seed → Defaults |
 | `context.IsIndependentDatabase == false` | Shared tenant data | Skip DB init + migration, seed + defaults only |
 | Host DB | Out of scope | Handled by app startup / deployment migrator |
+
+### Public API Contract
+
+Retry is exposed on `ITenantAppService`:
+
+```csharp
+public interface ITenantAppService
+{
+    Task<TenantDto> CreateAsync(CreateTenantDto input);
+    Task<TenantInitializationResult> RetryInitializationAsync(Guid tenantId);
+    Task<TenantInitializationResult> GetInitializationStatusAsync(Guid tenantId);
+    // ... existing methods
+}
+```
+
+| Method | Permission | Dynamic API |
+|--------|------------|-------------|
+| `RetryInitializationAsync` | `Tenant.RetryInitialization` | `POST /api/tenants/{id}/retry-initialization` |
+| `GetInitializationStatusAsync` | `Tenant.Read` | `GET /api/tenants/{id}/initialization-status` |
+
+`RetryInitializationAsync` returns the same `TenantInitializationResult` type as the create flow — callers get the full step breakdown regardless of which path triggered initialization.
 
 ### Lifecycle Rules
 
@@ -217,14 +280,16 @@ TenantAppService.RetryInitializationAsync(tenantId)
 ```
 Each phase:
   ├─ Update Record.CurrentStep = phase name
-  ├─ Append {Name, Status=Running, StartedAt} to StepResultsJson
+  ├─ Append {Name, Status=Running, StartedAt} to StepResultsJson (using TenantInitializationStepStatus.Running)
   ├─ Try
   │   └─ Execute phase
   ├─ Success
-  │   └─ Update StepResultsJson entry (Status=Success, CompletedAt)
+  │   └─ Update StepResultsJson entry (Status=TenantInitializationStepStatus.Succeeded, CompletedAt)
   └─ Catch
-      ├─ Update StepResultsJson entry (Status=Failed, Error, CompletedAt)
-      ├─ Persist Tenant status + Record + step results in one transaction
+      ├─ Update StepResultsJson entry (Status=TenantInitializationStepStatus.Failed, Error, CompletedAt)
+      ├─ Persist Tenant status + Record + step results in one host-DB transaction
+      ├─ Note: independent tenant DB changes from prior phases are NOT rolled back (no cross-DB transaction).
+      │   The tenant DB may be partially initialized. Retry relies on phase idempotency to safely re-apply.
       └─ Stop chain — do not proceed to next phase
 ```
 
@@ -287,6 +352,7 @@ Task<bool> TryBeginInitializationAsync(Guid tenantId, CancellationToken cancella
 | `Initialization_ShouldSanitizePublicError_AndKeepCorrelationId` | Public error has no connection string / stack trace; CorrelationId links to logs |
 | `Initialization_ShouldComputeAttemptNoAfterLock` | AttemptNo = max(existing) + 1 computed only after acquiring Initializing lock |
 | `Initialization_WhenRecordInsertUniqueViolation_ShouldReturnConflictOrRetrySafely` | Extreme concurrent unique index violation produces no dirty state |
+| `Initialization_OnFailure_ShouldPreserveTenantAndNotDelete` | Failure records status + error on Tenant and Record; tenant entity is NOT deleted — supersedes old "bootstrap failure deletes tenant" behavior |
 
 ### Additional Unit Tests
 
@@ -315,3 +381,4 @@ Task<bool> TryBeginInitializationAsync(Guid tenantId, CancellationToken cancella
 - Integration tests verify data is written correctly, not authentication
 - Concurrent lock tests use a `TryBeginInitializationAsync` semantics, not generic mock Get+Set
 - Admin login verification is optional E2E, not a gate
+- **Existing tests that verify "bootstrap failure deletes tenant" must be replaced** — the new design preserves the tenant on failure. Any legacy test asserting tenant deletion after bootstrap failure is testing a retired path and must be updated to assert tenant preservation with `Failed` status.
