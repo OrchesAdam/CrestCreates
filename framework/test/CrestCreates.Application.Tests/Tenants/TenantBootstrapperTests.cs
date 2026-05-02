@@ -1,7 +1,7 @@
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Tenants;
 using CrestCreates.Domain.Authorization;
 using CrestCreates.Domain.Permission;
@@ -26,6 +26,7 @@ public class TenantBootstrapperTests
     private readonly Mock<IPasswordHasher> _passwordHasherMock;
     private readonly IServiceProvider _serviceProvider;
     private readonly TenantBootstrapper _bootstrapper;
+    private readonly TenantInitializationContext _testContext;
 
     public TenantBootstrapperTests()
     {
@@ -59,16 +60,20 @@ public class TenantBootstrapperTests
             _serviceProvider,
             options,
             loggerMock.Object);
+
+        _testContext = new TenantInitializationContext
+        {
+            TenantId = Guid.NewGuid(),
+            TenantName = "TestTenant",
+            ConnectionString = null,
+            CorrelationId = Guid.NewGuid().ToString("N"),
+            RequestedByUserId = null
+        };
     }
 
     [Fact]
-    public async Task BootstrapAsync_WithValidTenant_CreatesDefaultRole()
+    public async Task SeedAsync_WithValidContext_CreatesDefaultRole()
     {
-        var tenant = new Tenant(Guid.NewGuid(), "TestTenant")
-        {
-            IsActive = true
-        };
-
         _userRepositoryMock
             .Setup(r => r.InsertAsync(It.IsAny<User>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((User user, CancellationToken _) => user);
@@ -81,14 +86,16 @@ public class TenantBootstrapperTests
             .Setup(p => p.InsertAsync(It.IsAny<PermissionGrant>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((PermissionGrant grant, CancellationToken _) => grant);
 
-        await _bootstrapper.BootstrapAsync(tenant);
+        var result = await _bootstrapper.SeedAsync(_testContext);
+
+        result.Success.Should().BeTrue();
 
         _userRepositoryMock.Verify(
             r => r.InsertAsync(
                 It.Is<User>(u =>
                     u.UserName == "admin" &&
                     u.IsSuperAdmin &&
-                    u.TenantId == tenant.Id.ToString()),
+                    u.TenantId == _testContext.TenantId.ToString()),
                 It.IsAny<CancellationToken>()),
             Times.Once);
 
@@ -96,19 +103,14 @@ public class TenantBootstrapperTests
             r => r.InsertAsync(
                 It.Is<Role>(role =>
                     role.Name == "Default" &&
-                    role.TenantId == tenant.Id.ToString()),
+                    role.TenantId == _testContext.TenantId.ToString()),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
     [Fact]
-    public async Task BootstrapAsync_WithValidTenant_GrantsBasicPermissions()
+    public async Task SeedAsync_WithValidContext_GrantsBasicPermissions()
     {
-        var tenant = new Tenant(Guid.NewGuid(), "TestTenant")
-        {
-            IsActive = true
-        };
-
         _userRepositoryMock
             .Setup(r => r.InsertAsync(It.IsAny<User>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((User user, CancellationToken _) => user);
@@ -121,7 +123,9 @@ public class TenantBootstrapperTests
             .Setup(p => p.InsertAsync(It.IsAny<PermissionGrant>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((PermissionGrant grant, CancellationToken _) => grant);
 
-        await _bootstrapper.BootstrapAsync(tenant);
+        var result = await _bootstrapper.SeedAsync(_testContext);
+
+        result.Success.Should().BeTrue();
 
         _permissionGrantRepositoryMock.Verify(
             p => p.InsertAsync(
@@ -129,19 +133,14 @@ public class TenantBootstrapperTests
                     grant.ProviderType == PermissionGrantProviderType.Role &&
                     grant.ProviderKey == "Default" &&
                     grant.Scope == PermissionGrantScope.Tenant &&
-                    grant.TenantId == tenant.Id.ToString()),
+                    grant.TenantId == _testContext.TenantId.ToString()),
                 It.IsAny<CancellationToken>()),
             Times.Exactly(2));
     }
 
     [Fact]
-    public async Task BootstrapAsync_WhenDisabled_DoesNotCreateRoleOrPermissions()
+    public async Task SeedAsync_WhenDisabled_DoesNotCreateRoleOrPermissions()
     {
-        var tenant = new Tenant(Guid.NewGuid(), "TestTenant")
-        {
-            IsActive = true
-        };
-
         var disabledOptions = Options.Create(new TenantBootstrapOptions
         {
             EnableAutoBootstrap = false
@@ -152,7 +151,9 @@ public class TenantBootstrapperTests
             disabledOptions,
             Mock.Of<ILogger<TenantBootstrapper>>());
 
-        await disabledBootstrapper.BootstrapAsync(tenant);
+        var result = await disabledBootstrapper.SeedAsync(_testContext);
+
+        result.Success.Should().BeTrue();
 
         _roleRepositoryMock.Verify(
             r => r.InsertAsync(It.IsAny<Role>(), It.IsAny<CancellationToken>()),

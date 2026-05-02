@@ -14,17 +14,14 @@ namespace CrestCreates.Application.Tests.Tenants;
 public class TenantManagerTests
 {
     private readonly Mock<ITenantRepository> _tenantRepositoryMock;
-    private readonly Mock<ITenantBootstrapper> _tenantBootstrapperMock;
     private readonly TenantManager _tenantManager;
 
     public TenantManagerTests()
     {
         _tenantRepositoryMock = new Mock<ITenantRepository>();
-        _tenantBootstrapperMock = new Mock<ITenantBootstrapper>();
         var logger = Mock.Of<ILogger<TenantManager>>();
         _tenantManager = new TenantManager(
             _tenantRepositoryMock.Object,
-            _tenantBootstrapperMock.Object,
             logger);
     }
 
@@ -37,9 +34,6 @@ public class TenantManagerTests
         _tenantRepositoryMock
             .Setup(repository => repository.InsertAsync(It.IsAny<Tenant>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Tenant tenant, CancellationToken _) => tenant);
-        _tenantBootstrapperMock
-            .Setup(b => b.BootstrapAsync(It.IsAny<Tenant>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
 
         var result = await _tenantManager.CreateAsync(
             "host",

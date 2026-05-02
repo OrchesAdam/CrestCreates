@@ -62,7 +62,7 @@ public class TenantInitializationOrchestrator
             if (context.IsIndependentDatabase)
             {
                 var step1 = await ExecutePhaseAsync("DatabaseInitialize", record,
-                    ct => _dbInitializer.InitializeAsync(context, ct),
+                    async ct => await _dbInitializer.InitializeAsync(context, ct),
                     cancellationToken);
                 steps.Add(step1);
                 if (step1.Status != TenantInitializationStepStatus.Succeeded)
@@ -70,7 +70,7 @@ public class TenantInitializationOrchestrator
 
                 // Phase 2: Migration (independent only)
                 var step2 = await ExecutePhaseAsync("Migration", record,
-                    ct => _migrationRunner.RunAsync(context, ct),
+                    async ct => await _migrationRunner.RunAsync(context, ct),
                     cancellationToken);
                 steps.Add(step2);
                 if (step2.Status != TenantInitializationStepStatus.Succeeded)
@@ -79,7 +79,7 @@ public class TenantInitializationOrchestrator
 
             // Phase 3: Data Seed
             var step3 = await ExecutePhaseAsync("DataSeed", record,
-                ct => _dataSeeder.SeedAsync(context, ct),
+                async ct => await _dataSeeder.SeedAsync(context, ct),
                 cancellationToken);
             steps.Add(step3);
             if (step3.Status != TenantInitializationStepStatus.Succeeded)
@@ -87,7 +87,7 @@ public class TenantInitializationOrchestrator
 
             // Phase 4: Settings Defaults
             var step4 = await ExecutePhaseAsync("SettingsDefaults", record,
-                ct => _settingsSeeder.SeedAsync(context, ct),
+                async ct => await _settingsSeeder.SeedAsync(context, ct),
                 cancellationToken);
             steps.Add(step4);
             if (step4.Status != TenantInitializationStepStatus.Succeeded)
@@ -95,7 +95,7 @@ public class TenantInitializationOrchestrator
 
             // Phase 5: Feature Defaults
             var step5 = await ExecutePhaseAsync("FeatureDefaults", record,
-                ct => _featuresSeeder.SeedAsync(context, ct),
+                async ct => await _featuresSeeder.SeedAsync(context, ct),
                 cancellationToken);
             steps.Add(step5);
             if (step5.Status != TenantInitializationStepStatus.Succeeded)
