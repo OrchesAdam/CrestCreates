@@ -57,19 +57,21 @@ public class TenantManagerTests
     }
 
     [Fact]
-    public async Task CreateAsync_WithDuplicateName_ThrowsInvalidOperationException()
+    public async Task CreateAsync_WithDuplicateName_CreatesTenantDirectly()
     {
-        _tenantRepositoryMock
-            .Setup(repository => repository.FindByNameAsync("host", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Tenant(Guid.NewGuid(), "host"));
-
-        var action = async () => await _tenantManager.CreateAsync(
+        // TenantManager.CreateAsync no longer checks for duplicates;
+        // the duplicate check has moved to TenantAppService.CreateAsync.
+        // The manager simply creates a tenant instance.
+        var result = await _tenantManager.CreateAsync(
             "host",
             "Host Tenant",
             null);
 
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*已存在*");
+        result.Name.Should().Be("host");
+        result.NormalizedName.Should().Be("HOST");
+        result.DisplayName.Should().Be("Host Tenant");
+        result.IsActive.Should().BeTrue();
+        result.GetDefaultConnectionString().Should().BeNull();
     }
 
     [Fact]

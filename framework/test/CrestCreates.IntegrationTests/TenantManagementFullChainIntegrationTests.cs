@@ -254,10 +254,69 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         public T? Data { get; set; }
     }
 
+    [Fact]
+    public async Task CreateTenant_SharedDb_ShouldSucceedWithSeedOnly()
+    {
+        var (adminClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
+        var tenantName = $"shared-{Guid.NewGuid():N}";
+
+        // Create tenant WITHOUT defaultConnectionString (shared database mode)
+        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenant", new
+        {
+            name = tenantName,
+            displayName = "Shared DB Tenant"
+        });
+
+        tenantResponse.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            await tenantResponse.Content.ReadAsStringAsync());
+
+        var tenantEnvelope = await ReadJsonAsync<DynamicApiResponse<TenantDtoResponse>>(tenantResponse);
+        var createdTenant = tenantEnvelope.Data!;
+        createdTenant.Name.Should().Be(tenantName);
+
+        // In shared-database mode, the orchestrator skips DatabaseInitialize and Migration
+        // and runs DataSeed, SettingsDefaults, FeatureDefaults phases only.
+        // When those succeed, InitializationStatus should be Initialized (2).
+        createdTenant.InitializationStatus.Should().Be(
+            2,
+            $"expected Initialized(2) but got {createdTenant.InitializationStatus}");
+    }
+
+    [Fact]
+    public async Task CreateTenant_IndependentDb_ShouldReachInitialized()
+    {
+        var (adminClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
+        var tenantName = $"indep-{Guid.NewGuid():N}";
+
+        // Create tenant with valid connection string (independent database mode)
+        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenant", new
+        {
+            name = tenantName,
+            displayName = "Independent DB Tenant",
+            defaultConnectionString = _factory.ConnectionString
+        });
+
+        tenantResponse.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            await tenantResponse.Content.ReadAsStringAsync());
+
+        var tenantEnvelope = await ReadJsonAsync<DynamicApiResponse<TenantDtoResponse>>(tenantResponse);
+        var createdTenant = tenantEnvelope.Data!;
+        createdTenant.Name.Should().Be(tenantName);
+
+        // In independent-database mode all five phases run.
+        createdTenant.InitializationStatus.Should().Be(
+            2,
+            $"expected Initialized(2) but got {createdTenant.InitializationStatus}");
+    }
+
     private sealed class TenantDtoResponse
     {
         public Guid Id { get; set; }
         public string Name { get; set; } = string.Empty;
         public string? DisplayName { get; set; }
+        public int InitializationStatus { get; set; }
+        public DateTime? InitializedAt { get; set; }
     }
 }
