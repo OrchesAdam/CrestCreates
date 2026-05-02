@@ -257,9 +257,6 @@ public class TenantAppService : ITenantAppService
 
         var correlationId = Guid.NewGuid().ToString("N");
         await _store.ForceFailAsync(tenantId, correlationId, cancellationToken);
-
-        tenant.MarkInitializationFailed("manually marked as failed");
-        await _tenantRepository.UpdateAsync(tenant, cancellationToken);
     }
 
     private static TenantDto MapToDto(Tenant tenant)
