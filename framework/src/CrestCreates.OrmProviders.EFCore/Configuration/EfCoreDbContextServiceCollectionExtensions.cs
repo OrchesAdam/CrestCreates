@@ -1,8 +1,11 @@
 using System;
 using System.Linq;
+using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.Application.Tenants;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
 using CrestCreates.OrmProviders.EFCore.Interceptors;
+using CrestCreates.OrmProviders.EFCore.MultiTenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +20,10 @@ public static class EfCoreDbContextServiceCollectionExtensions
         services.TryAddScoped<AuditInterceptor>();
         services.TryAddScoped<MultiTenancyInterceptor>();
         services.TryAddSingleton<TenantAwareModelCacheKeyFactory>();
+
+        services.TryAddScoped<ITenantDatabaseInitializer, EfCoreTenantDatabaseInitializer>();
+        services.TryAddScoped<ITenantMigrationRunner, EfCoreTenantMigrationRunner>();
+        services.TryAddScoped<ITenantInitializationStore, EfCoreTenantInitializationStore>();
 
         services.AddDbContext<CrestCreatesDbContext>((serviceProvider, optionsBuilder) =>
         {
