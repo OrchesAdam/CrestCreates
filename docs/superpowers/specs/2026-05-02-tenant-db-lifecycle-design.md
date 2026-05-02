@@ -110,6 +110,14 @@ public enum TenantInitializationStepStatus
 | `InitializedAt` | `DateTime?` | When initialization completed successfully |
 | `LastInitializationError` | `string?` | Sanitized, user-safe error message for diagnostics |
 
+**TenantDto extensions** (in `CrestCreates.Application.Contracts` — must mirror the entity fields):
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `InitializationStatus` | `TenantInitializationStatus` | Exposed to API consumers so `CreateAsync` / queries reflect init state |
+| `InitializedAt` | `DateTime?` | When initialization completed |
+| `LastInitializationError` | `string?` | Public-safe error summary, surfaced when status is `Failed` |
+
 **TenantInitializationRecord entity** (in `CrestCreates.Domain`):
 
 | Field | Type | Purpose |
@@ -150,6 +158,8 @@ public interface ITenantInitializationStore
 ```
 
 This gives the orchestrator a single persistence abstraction for record CRUD and atomic state transitions. Without it, implementers would scatter record persistence and status updates across the orchestrator or phase handlers. The store works with the Domain entity `TenantInitializationRecord` internally — it is not exposed to consumers of `Application.Contracts`.
+
+**Store implementation**: The interface lives in `CrestCreates.Application`. The EF Core implementation lives in `CrestCreates.OrmProviders.EFCore` (or `CrestCreates.Infrastructure` if a shared persistence project exists), where it has access to the host `DbContext` for atomic `UPDATE` + `INSERT` in a single transaction.
 
 **TenantInitializationResult** (in `CrestCreates.Application.Contracts`):
 
@@ -300,7 +310,7 @@ public interface ITenantAppService
 | `ForceRetryInitializationAsync` | `Tenant.AdminForceRetry` | `POST /api/tenants/{id}/force-retry-initialization` | `Pending`, `Failed`, `Initializing` |
 | `ForceFailInitializationAsync` | `Tenant.AdminForceRetry` | `POST /api/tenants/{id}/force-fail-initialization` | `Initializing` only |
 
-**CreateAsync contract**: Returns `TenantDto` which includes `InitializationStatus`. If the orchestrator fails during initialization (business failure), the tenant entity is persisted with `Failed` status and `LastInitializationError` set, and `CreateAsync` still returns the `TenantDto` — it does not throw for initialization business failures. The caller inspects `TenantDto.InitializationStatus` and uses `GetInitializationStatusAsync` for the full step breakdown. If the host-DB transaction itself fails (infrastructure failure), `CreateAsync` throws.
+**CreateAsync contract**: Returns `TenantDto` which includes the new fields `InitializationStatus`, `InitializedAt`, and `LastInitializationError`. If the orchestrator fails during initialization (business failure), the tenant entity is persisted with `Failed` status and `LastInitializationError` set, and `CreateAsync` still returns the `TenantDto` — it does not throw for initialization business failures. The caller inspects `TenantDto.InitializationStatus` and uses `GetInitializationStatusAsync` for the full step breakdown. If the host-DB transaction itself fails (infrastructure failure), `CreateAsync` throws.
 
 **Force API scope**: `ForceFailInitializationAsync` only transitions `Initializing` → `Failed` (records error "manually marked as failed"). `ForceRetryInitializationAsync` accepts `Pending`/`Failed`/`Initializing` and uses `ForceBeginInitializationAsync` which gates on those three statuses. `Initialized` tenants are always rejected by force endpoints — re-initializing a successfully initialized tenant requires a separate future feature.
 
@@ -314,7 +324,7 @@ public interface ITenantAppService
 | Already initialized | Retry denied: status = `Initialized` |
 | Cleanup | Separate `DeleteTenantAsync` / `AbortTenantCreationAsync`, never auto-delete on failure |
 | Concurrent retry | Atomic transition rejects second caller → conflict |
-| Stuck at `Initializing` | If a process crashes mid-initialization, the tenant remains `Initializing` indefinitely. Recovery: an admin-level `ForceFailInitializationAsync` marks it `Failed` and writes a record with error "Initialization timed out or process terminated". `ForceRetryInitializationAsync` allows restart from any status including `Initializing`. Only the designated admin API performs this — the standard retry endpoint only accepts `Pending`/`Failed`. |
+| Stuck at `Initializing` | If a process crashes mid-initialization, the tenant remains `Initializing` indefinitely. Recovery: `ForceFailInitializationAsync` updates the latest `Initializing` record to `Failed` (creating a recovery record only if no active record exists), and sets Tenant status to `Failed`. `ForceRetryInitializationAsync` uses `ForceBeginInitializationAsync` to start a new attempt from any of Pending/Failed/Initializing. Only admin-level APIs perform these operations — the standard retry endpoint only accepts `Pending`/`Failed`. |
 
 ## 3. Error Handling
 
@@ -341,7 +351,7 @@ Each phase:
 | Mechanism | Purpose |
 |-----------|---------|
 | `TryBeginInitializationAsync` single transaction | Status transition (Pending/Failed → Initializing) + AttemptNo + record insert in one host-DB transaction. Returns new record, or null if transition fails. |
-| `ForceBeginInitializationAsync` single transaction | Status transition (Initializing → Initializing, same state) + AttemptNo + record insert + `reason` logged. Returns new record, or null if not Initializing. Used by `ForceRetryInitializationAsync`. |
+| `ForceBeginInitializationAsync` single transaction | Status transition (Pending/Failed/Initializing → Initializing) + AttemptNo + record insert + `reason` logged. Returns new record, or null if tenant is `Initialized` or in conflict. Used by `ForceRetryInitializationAsync`. |
 | Null return → conflict | Caller gets conflict without touching any state in the non-transition case |
 | UNIQUE INDEX on `(TenantId, AttemptNo)` | Safety net against duplicate attempt numbers within the transaction |
 | No partial state | If record insert fails, the entire transaction rolls back — tenant is never left at `Initializing` with no record |
@@ -353,13 +363,13 @@ Both atomic methods live on `ITenantInitializationStore` (in `CrestCreates.Appli
 Task<TenantInitializationRecord?> TryBeginInitializationAsync(
     Guid tenantId, string correlationId, CancellationToken cancellationToken);
 
-/// <summary>Force path: accepts Initializing → Initializing (new record, new attempt).
-/// Used by ForceRetryInitializationAsync to recover stuck tenants.</summary>
+/// <summary>Force path: accepts Pending/Failed/Initializing → Initializing (new record, new attempt).
+/// Used by ForceRetryInitializationAsync to recover stuck or pre-failed tenants.</summary>
 Task<TenantInitializationRecord?> ForceBeginInitializationAsync(
     Guid tenantId, string correlationId, string reason, CancellationToken cancellationToken);
 ```
 
-`ForceFailInitializationAsync` is a separate operation that atomically transitions `Initializing` → `Failed` and writes a record with the error "manually marked as failed". It does not start an initialization chain.
+`ForceFailInitializationAsync` is a separate operation that atomically transitions `Initializing` → `Failed`. It updates the latest `Initializing` record (if one exists) to `Failed` with the error "manually marked as failed". Only if no active `Initializing` record exists does it create a new recovery record. It does not start an initialization chain.
 
 ### Error Categories
 
