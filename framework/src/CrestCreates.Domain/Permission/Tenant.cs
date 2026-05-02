@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using CrestCreates.Domain.Entities.Auditing;
+using CrestCreates.Domain.Shared;
 using CrestCreates.Domain.Shared.Entities.Auditing;
 
 namespace CrestCreates.Domain.Permission;
@@ -15,6 +16,10 @@ public class Tenant : AuditedAggregateRoot<Guid>
     public TenantLifecycleState LifecycleState { get; set; } = TenantLifecycleState.Active;
     public DateTime? ArchivedTime { get; set; }
     public List<TenantConnectionString> ConnectionStrings { get; set; } = new();
+    public TenantInitializationStatus InitializationStatus { get; private set; }
+        = TenantInitializationStatus.Pending;
+    public DateTime? InitializedAt { get; private set; }
+    public string? LastInitializationError { get; private set; }
 
     public Tenant()
     {
@@ -62,6 +67,24 @@ public class Tenant : AuditedAggregateRoot<Guid>
     {
         SetLifecycleState(TenantLifecycleState.Deleted);
         IsActive = false;
+    }
+
+    internal void SetInitializationStatus(TenantInitializationStatus status)
+    {
+        InitializationStatus = status;
+    }
+
+    internal void MarkInitializationFailed(string sanitizedError)
+    {
+        InitializationStatus = TenantInitializationStatus.Failed;
+        LastInitializationError = sanitizedError;
+    }
+
+    internal void MarkInitializationSucceeded()
+    {
+        InitializationStatus = TenantInitializationStatus.Initialized;
+        InitializedAt = DateTime.UtcNow;
+        LastInitializationError = null;
     }
 
     public string? GetDefaultConnectionString()
