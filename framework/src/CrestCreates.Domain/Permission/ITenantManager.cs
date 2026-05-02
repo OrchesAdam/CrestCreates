@@ -8,8 +8,7 @@ public interface ITenantManager
     Task<Tenant> CreateAsync(
         string name,
         string? displayName,
-        string? defaultConnectionString,
-        CancellationToken cancellationToken = default);
+        string? defaultConnectionString);
 
     Task<Tenant> UpdateAsync(
         string name,
