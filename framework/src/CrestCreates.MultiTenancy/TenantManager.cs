@@ -10,32 +10,22 @@ namespace CrestCreates.MultiTenancy;
 public class TenantManager : ITenantManager
 {
     private readonly ITenantRepository _tenantRepository;
-    private readonly ITenantBootstrapper _tenantBootstrapper;
     private readonly ILogger<TenantManager> _logger;
 
     public TenantManager(
         ITenantRepository tenantRepository,
-        ITenantBootstrapper tenantBootstrapper,
         ILogger<TenantManager> logger)
     {
         _tenantRepository = tenantRepository;
-        _tenantBootstrapper = tenantBootstrapper;
         _logger = logger;
     }
 
-    public async Task<Tenant> CreateAsync(
+    public Task<Tenant> CreateAsync(
         string name,
         string? displayName,
-        string? defaultConnectionString,
-        CancellationToken cancellationToken = default)
+        string? defaultConnectionString)
     {
         var normalizedName = NormalizeRequired(name, nameof(name));
-        var existingTenant = await _tenantRepository.FindByNameAsync(normalizedName, cancellationToken);
-        if (existingTenant is not null)
-        {
-            throw new InvalidOperationException($"租户 '{normalizedName}' 已存在");
-        }
-
         var tenant = new Tenant(Guid.NewGuid(), normalizedName)
         {
             DisplayName = NormalizeOptional(displayName),
@@ -44,22 +34,8 @@ public class TenantManager : ITenantManager
         };
 
         tenant.SetDefaultConnectionString(defaultConnectionString);
-        await _tenantRepository.InsertAsync(tenant, cancellationToken);
 
-        try
-        {
-            await _tenantBootstrapper.BootstrapAsync(tenant, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            await _tenantRepository.DeleteAsync(tenant, cancellationToken);
-            _logger.LogError(ex, "租户 {TenantName} 初始化失败，已自动回滚", tenant.Name);
-            throw new InvalidOperationException($"租户 '{tenant.Name}' 创建成功但初始化失败，已自动回滚", ex);
-        }
-
-        _logger.LogInformation("租户 {TenantName} (ID: {TenantId}) 创建并初始化完成", tenant.Name, tenant.Id);
-
-        return tenant;
+        return Task.FromResult(tenant);
     }
 
     public async Task<Tenant> UpdateAsync(
