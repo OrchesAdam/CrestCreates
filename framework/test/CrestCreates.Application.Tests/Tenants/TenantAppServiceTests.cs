@@ -19,7 +19,6 @@ public class TenantAppServiceTests
 {
     private readonly Mock<ITenantManager> _tenantManagerMock;
     private readonly Mock<ITenantRepository> _tenantRepositoryMock;
-    private readonly Mock<TenantInitializationOrchestrator> _orchestratorMock;
     private readonly Mock<ITenantInitializationStore> _storeMock;
     private readonly TenantAppService _tenantAppService;
 
@@ -27,19 +26,13 @@ public class TenantAppServiceTests
     {
         _tenantManagerMock = new Mock<ITenantManager>();
         _tenantRepositoryMock = new Mock<ITenantRepository>();
-        _orchestratorMock = new Mock<TenantInitializationOrchestrator>(
-            Mock.Of<ITenantDatabaseInitializer>(),
-            Mock.Of<ITenantMigrationRunner>(),
-            Mock.Of<ITenantDataSeeder>(),
-            Mock.Of<ITenantSettingDefaultsSeeder>(),
-            Mock.Of<ITenantFeatureDefaultsSeeder>(),
-            Mock.Of<ITenantInitializationStore>(),
-            Mock.Of<Microsoft.Extensions.Logging.ILogger<TenantInitializationOrchestrator>>());
         _storeMock = new Mock<ITenantInitializationStore>();
+
+        var orchestrator = CreateSuccessfulOrchestrator();
         _tenantAppService = new TenantAppService(
             _tenantManagerMock.Object,
             _tenantRepositoryMock.Object,
-            _orchestratorMock.Object,
+            orchestrator,
             _storeMock.Object);
     }
 
@@ -68,14 +61,6 @@ public class TenantAppServiceTests
         _tenantRepositoryMock
             .Setup(repository => repository.InsertAsync(tenant, It.IsAny<CancellationToken>()))
             .ReturnsAsync(tenant);
-
-        _orchestratorMock
-            .Setup(o => o.InitializeAsync(
-                It.IsAny<TenantInitializationContext>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(TenantInitializationResult.Succeeded(
-                Guid.NewGuid().ToString("N"),
-                Array.Empty<TenantInitializationStep>()));
 
         _tenantRepositoryMock
             .Setup(repository => repository.UpdateAsync(tenant, It.IsAny<CancellationToken>()))
@@ -119,5 +104,73 @@ public class TenantAppServiceTests
 
         result.Should().HaveCount(1);
         result[0].Name.Should().Be("host");
+    }
+
+    private static TenantInitializationOrchestrator CreateSuccessfulOrchestrator()
+    {
+        var storeMock = new Mock<ITenantInitializationStore>();
+        var correlationId = Guid.NewGuid().ToString("N");
+        var tenantId = Guid.NewGuid();
+        var record = new TenantInitializationRecord(
+            Guid.NewGuid(), tenantId, 1, correlationId);
+
+        storeMock
+            .Setup(s => s.TryBeginInitializationAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(record);
+
+        storeMock
+            .Setup(s => s.UpdateAsync(
+                It.IsAny<TenantInitializationRecord>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var dbInitMock = new Mock<ITenantDatabaseInitializer>();
+        dbInitMock
+            .Setup(d => d.InitializeAsync(
+                It.IsAny<TenantInitializationContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TenantDatabaseInitializeResult.Succeeded());
+
+        var migrationMock = new Mock<ITenantMigrationRunner>();
+        migrationMock
+            .Setup(m => m.RunAsync(
+                It.IsAny<TenantInitializationContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TenantMigrationResult.Succeeded());
+
+        var seederMock = new Mock<ITenantDataSeeder>();
+        seederMock
+            .Setup(s => s.SeedAsync(
+                It.IsAny<TenantInitializationContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TenantSeedResult.Succeeded());
+
+        var settingsMock = new Mock<ITenantSettingDefaultsSeeder>();
+        settingsMock
+            .Setup(s => s.SeedAsync(
+                It.IsAny<TenantInitializationContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TenantSettingDefaultsResult.Succeeded());
+
+        var featuresMock = new Mock<ITenantFeatureDefaultsSeeder>();
+        featuresMock
+            .Setup(f => f.SeedAsync(
+                It.IsAny<TenantInitializationContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TenantFeatureDefaultsResult.Succeeded());
+
+        var loggerMock = new Mock<ILogger<TenantInitializationOrchestrator>>();
+
+        return new TenantInitializationOrchestrator(
+            dbInitMock.Object,
+            migrationMock.Object,
+            seederMock.Object,
+            settingsMock.Object,
+            featuresMock.Object,
+            storeMock.Object,
+            loggerMock.Object);
     }
 }
