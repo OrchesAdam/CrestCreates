@@ -33,7 +33,11 @@ public class TenantFeatureDefaultsSeeder : ITenantFeatureDefaultsSeeder
     {
         try
         {
-            var featureManager = _serviceProvider.GetRequiredService<IFeatureManager>();
+            // Create a new scope so IFeatureManager resolves its DbContext within
+            // the ICurrentTenant context set by the orchestrator.
+            using var scope = _serviceProvider.CreateScope();
+
+            var featureManager = scope.ServiceProvider.GetRequiredService<IFeatureManager>();
             var tenantId = context.TenantId.ToString();
             var definitions = _featureDefinitionManager.GetAll()
                 .Where(d => d.SupportsScope(FeatureScope.Tenant) && d.DefaultValue != null)

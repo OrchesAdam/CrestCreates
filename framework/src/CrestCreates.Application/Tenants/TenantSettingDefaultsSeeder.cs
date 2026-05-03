@@ -33,7 +33,11 @@ public class TenantSettingDefaultsSeeder : ITenantSettingDefaultsSeeder
     {
         try
         {
-            var settingManager = _serviceProvider.GetRequiredService<ISettingManager>();
+            // Create a new scope so ISettingManager resolves its DbContext within
+            // the ICurrentTenant context set by the orchestrator.
+            using var scope = _serviceProvider.CreateScope();
+
+            var settingManager = scope.ServiceProvider.GetRequiredService<ISettingManager>();
             var tenantId = context.TenantId.ToString();
             var definitions = _settingDefinitionManager.GetAll()
                 .Where(d => d.SupportsScope(SettingScope.Tenant) && d.DefaultValue != null)
