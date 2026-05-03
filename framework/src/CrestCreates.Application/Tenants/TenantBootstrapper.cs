@@ -106,7 +106,8 @@ public class TenantBootstrapper : ITenantDataSeeder
         {
             // Idempotent: skip if permission grant already exists
             var existing = await permissionGrantRepository.FindAsync(
-                permissionName, PermissionGrantProviderType.Role, _options.DefaultRoleName, cancellationToken);
+                permissionName, PermissionGrantProviderType.Role, _options.DefaultRoleName,
+                PermissionGrantScope.Tenant, context.TenantId.ToString(), cancellationToken);
             if (existing is not null)
                 continue;
 

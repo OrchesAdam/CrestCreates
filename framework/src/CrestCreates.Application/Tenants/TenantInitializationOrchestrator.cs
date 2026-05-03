@@ -100,12 +100,11 @@ public class TenantInitializationOrchestrator
                     return await BuildFailureResultAsync(context, record, steps, step2.Error, cancellationToken);
             }
 
-            // For independent DB, set tenant context so DI-resolved services
-            // (repositories, managers) use the tenant's connection string.
-            // For shared DB, no context switch needed — TenantId filtering applies.
-            using var tenantScope = context.IsIndependentDatabase
-                ? await _currentTenant.ChangeAsync(context.TenantId.ToString())
-                : null;
+            // Set tenant context so DI-resolved services (repositories, managers)
+            // use the correct connection string (independent DB) or TenantId data
+            // filtering (shared DB). The IDisposable scope restores the original
+            // tenant on disposal.
+            using var tenantScope = await _currentTenant.ChangeAsync(context.TenantId.ToString());
 
             // Phase 3: Data Seed
             var step3 = await ExecutePhaseAsync("DataSeed", record,
