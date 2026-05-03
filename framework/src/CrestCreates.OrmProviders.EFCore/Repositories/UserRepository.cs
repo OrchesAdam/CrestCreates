@@ -28,6 +28,13 @@ public class UserRepository : EfCoreRepositoryBase<User, Guid>, IUserRepository
         return queryable.FirstOrDefaultAsync(user => user.UserName == userName, cancellationToken);
     }
 
+    public Task<User?> FindByUserNameAsync(string userName, string tenantId, CancellationToken cancellationToken = default)
+    {
+        var queryable = GetQueryable();
+        return queryable.FirstOrDefaultAsync(
+            user => user.UserName == userName && user.TenantId == tenantId, cancellationToken);
+    }
+
     public Task<User?> FindByEmailAsync(string email, CancellationToken cancellationToken = default)
     {
         var queryable = GetQueryable();

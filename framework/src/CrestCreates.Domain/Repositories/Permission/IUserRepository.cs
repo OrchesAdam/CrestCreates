@@ -10,6 +10,7 @@ namespace CrestCreates.Domain.Repositories.Permission
     public interface IUserRepository : ICrestRepositoryBase<User, Guid>
     {
         Task<User?> FindByUserNameAsync(string userName, CancellationToken cancellationToken = default);
+        Task<User?> FindByUserNameAsync(string userName, string tenantId, CancellationToken cancellationToken = default);
         Task<User?> FindByEmailAsync(string email, CancellationToken cancellationToken = default);
         Task<List<User>> GetByOrganizationIdAsync(Guid organizationId, CancellationToken cancellationToken = default);
         Task<List<User>> GetListByTenantIdAsync(string tenantId, CancellationToken cancellationToken = default);

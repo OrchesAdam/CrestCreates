@@ -61,7 +61,8 @@ public class TenantBootstrapper : ITenantDataSeeder
         var userRepository = scope.ServiceProvider.GetRequiredService<IUserRepository>();
 
         // Idempotent: skip if admin user already exists
-        var existing = await userRepository.FindByUserNameAsync(_options.DefaultAdminUserName, cancellationToken);
+        var existing = await userRepository.FindByUserNameAsync(
+            _options.DefaultAdminUserName, context.TenantId.ToString(), cancellationToken);
         if (existing is not null)
             return;
 
