@@ -28,6 +28,8 @@
     <ProjectReference Include="..\..\src\CrestCreates.AspNetCore\CrestCreates.AspNetCore.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.MultiTenancy\CrestCreates.MultiTenancy.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Web\CrestCreates.Web.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Localization\CrestCreates.Localization.csproj" />
   </ItemGroup>
 
 
