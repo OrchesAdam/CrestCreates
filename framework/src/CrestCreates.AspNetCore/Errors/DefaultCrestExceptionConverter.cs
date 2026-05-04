@@ -43,24 +43,12 @@ public class DefaultCrestExceptionConverter : ICrestExceptionConverter
         return new CrestExceptionConversionResult(response, logLevel);
     }
 
-    private static CrestErrorResponse MapUnauthorized(HttpContext context)
+    private CrestErrorResponse MapUnauthorized(HttpContext context)
     {
         var isAuthenticated = context.User?.Identity?.IsAuthenticated == true;
         return isAuthenticated
-            ? new CrestErrorResponse
-            {
-                Code = "Crest.Auth.Forbidden",
-                StatusCode = 403,
-                Message = "没有权限执行当前操作。",
-                TraceId = context.TraceIdentifier
-            }
-            : new CrestErrorResponse
-            {
-                Code = "Crest.Auth.Unauthorized",
-                StatusCode = 401,
-                Message = "当前请求未认证。",
-                TraceId = context.TraceIdentifier
-            };
+            ? Create(context, "Crest.Auth.Forbidden", 403, "没有权限执行当前操作。")
+            : Create(context, "Crest.Auth.Unauthorized", 401, "当前请求未认证。");
     }
 
     private CrestErrorResponse FromCrestException(HttpContext context, CrestException exception)
