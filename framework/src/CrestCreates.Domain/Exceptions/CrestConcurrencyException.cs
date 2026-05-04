@@ -1,16 +1,21 @@
-using System;
+using CrestCreates.Domain.Shared.Exceptions;
 
 namespace CrestCreates.Domain.Exceptions;
 
-public class CrestConcurrencyException : Exception
+public class CrestConcurrencyException : CrestException
 {
-    public string EntityType { get; }
-    public object? EntityId { get; }
-
     public CrestConcurrencyException(string entityType, object? entityId)
-        : base($"Concurrency conflict: {entityType} (Id={entityId}) has been modified by another user.")
+        : base(
+            "Crest.Concurrency.Conflict",
+            409,
+            "Concurrency conflict.",
+            $"{entityType} (Id={entityId}) has been modified by another user.")
     {
         EntityType = entityType;
         EntityId = entityId;
     }
+
+    public string EntityType { get; }
+
+    public object? EntityId { get; }
 }

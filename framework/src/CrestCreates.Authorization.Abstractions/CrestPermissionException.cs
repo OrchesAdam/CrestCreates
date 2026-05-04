@@ -1,26 +1,25 @@
-using System;
+using CrestCreates.Domain.Shared.Exceptions;
 
 namespace CrestCreates.Authorization.Abstractions;
 
-public class CrestPermissionException : Exception
+public class CrestPermissionException : CrestException
 {
-    public string PermissionName { get; }
-
     public CrestPermissionException(string permissionName)
-        : base($"Permission '{permissionName}' is not granted.")
+        : this(permissionName, $"Permission denied: {permissionName}")
     {
-        PermissionName = permissionName;
     }
 
     public CrestPermissionException(string permissionName, string message)
-        : base(message)
+        : base("Crest.Auth.Forbidden", 403, message, permissionName)
     {
         PermissionName = permissionName;
     }
 
     public CrestPermissionException(string permissionName, string message, Exception innerException)
-        : base(message, innerException)
+        : base("Crest.Auth.Forbidden", 403, message, permissionName, innerException)
     {
         PermissionName = permissionName;
     }
+
+    public string PermissionName { get; }
 }
