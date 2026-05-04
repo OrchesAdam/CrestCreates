@@ -90,12 +90,12 @@ public static class ExceptionHandlingMiddlewareExtensions
 {
     public static IServiceCollection AddCrestExceptionHandling(this IServiceCollection services)
     {
-        var exceptionResources = LoadExceptionResources();
+        var exceptionResources = new CrestExceptionLocalizationResources(LoadExceptionResources());
         services.TryAddSingleton(exceptionResources);
         services.TryAddSingleton<ICrestExceptionConverter>(sp =>
         {
             var provider = sp.GetRequiredService<IServiceProvider>();
-            var resources = sp.GetRequiredService<IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>>();
+            var resources = sp.GetRequiredService<CrestExceptionLocalizationResources>();
             var logger = sp.GetRequiredService<ILogger<DefaultCrestExceptionConverter>>();
             return new DefaultCrestExceptionConverter(provider, resources, logger);
         });

@@ -32,8 +32,8 @@ public class ConcurrencyIntegrationTests
         PropertyNameCaseInsensitive = true
     };
 
-    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _emptyExceptionResources
-        = new Dictionary<string, IReadOnlyDictionary<string, string>>();
+    private static readonly CrestExceptionLocalizationResources _emptyExceptionResources
+        = new(new Dictionary<string, IReadOnlyDictionary<string, string>>());
 
     private static ExceptionHandlingMiddleware CreateMiddleware(RequestDelegate next)
     {

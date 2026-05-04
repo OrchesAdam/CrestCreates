@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
 using System.Text.Json;
 using CrestCreates.AspNetCore.Errors;
 using CrestCreates.Authorization.Abstractions;
@@ -16,11 +17,35 @@ namespace CrestCreates.Web.Tests.Middlewares;
 public class ExceptionHandlingMiddlewareTests
 {
     [Fact]
-    public async Task InvokeAsync_ShouldReturnForbidden_ForUnauthorizedAccessException()
+    public async Task InvokeAsync_ShouldReturnUnauthorized_ForUnauthenticatedUser()
     {
         var logger = new TestLogger<ExceptionHandlingMiddleware>();
         var middleware = CreateMiddleware(_ => throw new UnauthorizedAccessException(), logger);
-        var context = new DefaultHttpContext { TraceIdentifier = "trace-403-unauth" };
+        var context = new DefaultHttpContext { TraceIdentifier = "trace-401-unauth" };
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context);
+
+        context.Response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        logger.Entries.Should().ContainSingle(entry => entry.Level == LogLevel.Warning);
+
+        var response = await DeserializeResponseAsync(context);
+        response.Code.Should().Be("Crest.Auth.Unauthorized");
+        response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        response.TraceId.Should().Be("trace-401-unauth");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ShouldReturnForbidden_ForAuthenticatedUnauthorizedAccessException()
+    {
+        var logger = new TestLogger<ExceptionHandlingMiddleware>();
+        var middleware = CreateMiddleware(_ => throw new UnauthorizedAccessException(), logger);
+        var identity = new ClaimsIdentity("test");
+        var context = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(identity),
+            TraceIdentifier = "trace-403-auth"
+        };
         context.Response.Body = new MemoryStream();
 
         await middleware.InvokeAsync(context);
@@ -31,7 +56,7 @@ public class ExceptionHandlingMiddlewareTests
         var response = await DeserializeResponseAsync(context);
         response.Code.Should().Be("Crest.Auth.Forbidden");
         response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
-        response.TraceId.Should().Be("trace-403-unauth");
+        response.TraceId.Should().Be("trace-403-auth");
     }
 
     [Fact]
@@ -96,8 +121,8 @@ public class ExceptionHandlingMiddlewareTests
         response.TraceId.Should().Be("trace-500");
     }
 
-    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _emptyResources
-        = new Dictionary<string, IReadOnlyDictionary<string, string>>();
+    private static readonly CrestExceptionLocalizationResources _emptyResources
+        = new(new Dictionary<string, IReadOnlyDictionary<string, string>>());
 
     private static ExceptionHandlingMiddleware CreateMiddleware(RequestDelegate next, TestLogger<ExceptionHandlingMiddleware> logger)
     {

@@ -15,8 +15,8 @@ namespace CrestCreates.Web.Tests.Middlewares;
 
 public class DefaultCrestExceptionConverterTests
 {
-    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _emptyResources
-        = new Dictionary<string, IReadOnlyDictionary<string, string>>();
+    private static readonly CrestExceptionLocalizationResources _emptyResources
+        = new(new Dictionary<string, IReadOnlyDictionary<string, string>>());
 
     [Fact]
     public void Convert_WithBusinessException_UsesExceptionErrorCode()
@@ -108,13 +108,14 @@ public class DefaultCrestExceptionConverterTests
     [Fact]
     public void Convert_WithExceptionResources_UsesResourceOverLocalizationService()
     {
-        var resourcesWithOverride = new Dictionary<string, IReadOnlyDictionary<string, string>>
-        {
-            ["zh-CN"] = new Dictionary<string, string>
+        var resourcesWithOverride = new CrestExceptionLocalizationResources(
+            new Dictionary<string, IReadOnlyDictionary<string, string>>
             {
-                ["Crest.Concurrency.Conflict"] = "来自资源的本地化并发冲突"
-            }
-        };
+                ["zh-CN"] = new Dictionary<string, string>
+                {
+                    ["Crest.Concurrency.Conflict"] = "来自资源的本地化并发冲突"
+                }
+            });
 
         var services = new ServiceCollection()
             .AddSingleton<ILocalizationService>(new FakeLocalizationService(new Dictionary<string, string>

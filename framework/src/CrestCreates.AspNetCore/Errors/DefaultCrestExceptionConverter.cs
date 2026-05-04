@@ -12,16 +12,16 @@ namespace CrestCreates.AspNetCore.Errors;
 public class DefaultCrestExceptionConverter : ICrestExceptionConverter
 {
     private readonly IServiceProvider _serviceProvider;
-    private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _exceptionResources;
+    private readonly CrestExceptionLocalizationResources _resources;
     private readonly ILogger<DefaultCrestExceptionConverter> _logger;
 
     public DefaultCrestExceptionConverter(
         IServiceProvider serviceProvider,
-        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> exceptionResources,
+        CrestExceptionLocalizationResources resources,
         ILogger<DefaultCrestExceptionConverter> logger)
     {
         _serviceProvider = serviceProvider;
-        _exceptionResources = exceptionResources;
+        _resources = resources;
         _logger = logger;
     }
 
@@ -31,7 +31,7 @@ public class DefaultCrestExceptionConverter : ICrestExceptionConverter
         {
             CrestPermissionException permissionException => Create(context, "Crest.Auth.Forbidden", 403, "没有权限执行当前操作。", permissionException.PermissionName),
             CrestException crestException => FromCrestException(context, crestException),
-            UnauthorizedAccessException => Create(context, "Crest.Auth.Forbidden", 403, "没有权限执行当前操作。"),
+            UnauthorizedAccessException => MapUnauthorized(context),
             KeyNotFoundException keyNotFoundException => Create(context, "Crest.Entity.NotFound", 404, "资源不存在。", keyNotFoundException.Message),
             ValidationException validationException => Create(context, "Crest.Validation.Failed", 400, "数据验证失败。", validationException.Message),
             ArgumentException => Create(context, "Crest.Request.InvalidArgument", 400, "请求参数错误。"),
@@ -41,6 +41,26 @@ public class DefaultCrestExceptionConverter : ICrestExceptionConverter
 
         var logLevel = response.StatusCode >= 500 ? LogLevel.Error : LogLevel.Warning;
         return new CrestExceptionConversionResult(response, logLevel);
+    }
+
+    private static CrestErrorResponse MapUnauthorized(HttpContext context)
+    {
+        var isAuthenticated = context.User?.Identity?.IsAuthenticated == true;
+        return isAuthenticated
+            ? new CrestErrorResponse
+            {
+                Code = "Crest.Auth.Forbidden",
+                StatusCode = 403,
+                Message = "没有权限执行当前操作。",
+                TraceId = context.TraceIdentifier
+            }
+            : new CrestErrorResponse
+            {
+                Code = "Crest.Auth.Unauthorized",
+                StatusCode = 401,
+                Message = "当前请求未认证。",
+                TraceId = context.TraceIdentifier
+            };
     }
 
     private CrestErrorResponse FromCrestException(HttpContext context, CrestException exception)
@@ -69,7 +89,7 @@ public class DefaultCrestExceptionConverter : ICrestExceptionConverter
     {
         // Check exception-specific resources first (loaded from embedded JSON, avoids DI conflict with LocalizationModule)
         var currentCulture = System.Globalization.CultureInfo.CurrentCulture.Name;
-        if (_exceptionResources.TryGetValue(currentCulture, out var entries)
+        if (_resources.Cultures.TryGetValue(currentCulture, out var entries)
             && entries.TryGetValue(errorCode, out var resourceValue))
         {
             return resourceValue;
