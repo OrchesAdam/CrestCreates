@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using CrestCreates.AspNetCore.Errors;
@@ -15,22 +16,22 @@ namespace CrestCreates.Web.Tests.Middlewares;
 public class ExceptionHandlingMiddlewareTests
 {
     [Fact]
-    public async Task InvokeAsync_ShouldReturnUnauthorized_ForUnauthorizedAccessException()
+    public async Task InvokeAsync_ShouldReturnForbidden_ForUnauthorizedAccessException()
     {
         var logger = new TestLogger<ExceptionHandlingMiddleware>();
         var middleware = CreateMiddleware(_ => throw new UnauthorizedAccessException(), logger);
-        var context = new DefaultHttpContext { TraceIdentifier = "trace-401" };
+        var context = new DefaultHttpContext { TraceIdentifier = "trace-403-unauth" };
         context.Response.Body = new MemoryStream();
 
         await middleware.InvokeAsync(context);
 
-        context.Response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        context.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
         logger.Entries.Should().ContainSingle(entry => entry.Level == LogLevel.Warning);
 
         var response = await DeserializeResponseAsync(context);
-        response.Code.Should().Be("Crest.Auth.Unauthorized");
-        response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
-        response.TraceId.Should().Be("trace-401");
+        response.Code.Should().Be("Crest.Auth.Forbidden");
+        response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        response.TraceId.Should().Be("trace-403-unauth");
     }
 
     [Fact]
@@ -95,10 +96,13 @@ public class ExceptionHandlingMiddlewareTests
         response.TraceId.Should().Be("trace-500");
     }
 
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _emptyResources
+        = new Dictionary<string, IReadOnlyDictionary<string, string>>();
+
     private static ExceptionHandlingMiddleware CreateMiddleware(RequestDelegate next, TestLogger<ExceptionHandlingMiddleware> logger)
     {
         var services = new ServiceCollection().BuildServiceProvider();
-        var converter = new DefaultCrestExceptionConverter(services, NullLogger<DefaultCrestExceptionConverter>.Instance);
+        var converter = new DefaultCrestExceptionConverter(services, _emptyResources, NullLogger<DefaultCrestExceptionConverter>.Instance);
         var jsonContext = new CrestCreates.AspNetCore.Serialization.CrestErrorResponseJsonContext();
         return new ExceptionHandlingMiddleware(next, converter, logger, jsonContext);
     }

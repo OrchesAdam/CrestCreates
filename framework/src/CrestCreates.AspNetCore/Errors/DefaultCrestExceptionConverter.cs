@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Collections.Generic;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Shared.Exceptions;
 using CrestCreates.Localization.Services;
@@ -11,13 +12,16 @@ namespace CrestCreates.AspNetCore.Errors;
 public class DefaultCrestExceptionConverter : ICrestExceptionConverter
 {
     private readonly IServiceProvider _serviceProvider;
+    private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _exceptionResources;
     private readonly ILogger<DefaultCrestExceptionConverter> _logger;
 
     public DefaultCrestExceptionConverter(
         IServiceProvider serviceProvider,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> exceptionResources,
         ILogger<DefaultCrestExceptionConverter> logger)
     {
         _serviceProvider = serviceProvider;
+        _exceptionResources = exceptionResources;
         _logger = logger;
     }
 
@@ -27,7 +31,7 @@ public class DefaultCrestExceptionConverter : ICrestExceptionConverter
         {
             CrestPermissionException permissionException => Create(context, "Crest.Auth.Forbidden", 403, "没有权限执行当前操作。", permissionException.PermissionName),
             CrestException crestException => FromCrestException(context, crestException),
-            UnauthorizedAccessException => Create(context, "Crest.Auth.Unauthorized", 401, "当前请求未认证。"),
+            UnauthorizedAccessException => Create(context, "Crest.Auth.Forbidden", 403, "没有权限执行当前操作。"),
             KeyNotFoundException keyNotFoundException => Create(context, "Crest.Entity.NotFound", 404, "资源不存在。", keyNotFoundException.Message),
             ValidationException validationException => Create(context, "Crest.Validation.Failed", 400, "数据验证失败。", validationException.Message),
             ArgumentException => Create(context, "Crest.Request.InvalidArgument", 400, "请求参数错误。"),
@@ -63,23 +67,30 @@ public class DefaultCrestExceptionConverter : ICrestExceptionConverter
 
     private string Localize(string errorCode, string fallbackMessage)
     {
-        var localizationService = _serviceProvider.GetService<ILocalizationService>();
-        if (localizationService is null)
+        // Check exception-specific resources first (loaded from embedded JSON, avoids DI conflict with LocalizationModule)
+        var currentCulture = System.Globalization.CultureInfo.CurrentCulture.Name;
+        if (_exceptionResources.TryGetValue(currentCulture, out var entries)
+            && entries.TryGetValue(errorCode, out var resourceValue))
         {
-            return fallbackMessage;
+            return resourceValue;
         }
 
-        try
+        // Fall back to ILocalizationService (registered by LocalizationModule)
+        var localizationService = _serviceProvider.GetService<ILocalizationService>();
+        if (localizationService is not null)
         {
-            var localized = localizationService.GetString(errorCode);
-            return string.IsNullOrWhiteSpace(localized) || localized == errorCode
-                ? fallbackMessage
-                : localized;
+            try
+            {
+                var localized = localizationService.GetString(errorCode);
+                if (!string.IsNullOrWhiteSpace(localized) && localized != errorCode)
+                    return localized;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to localize error code {ErrorCode}", errorCode);
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to localize error code {ErrorCode}", errorCode);
-            return fallbackMessage;
-        }
+
+        return fallbackMessage;
     }
 }

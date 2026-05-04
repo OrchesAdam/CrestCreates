@@ -5,16 +5,12 @@ using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using CrestCreates.AspNetCore.Errors;
-using CrestCreates.AspNetCore.Localization;
 using CrestCreates.AspNetCore.Serialization;
-using CrestCreates.Localization.Abstractions;
-using CrestCreates.Localization.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -94,26 +90,20 @@ public static class ExceptionHandlingMiddlewareExtensions
 {
     public static IServiceCollection AddCrestExceptionHandling(this IServiceCollection services)
     {
-        services.AddLocalization();
-        services.TryAddSingleton<ILocalizationService>(sp =>
+        var exceptionResources = LoadExceptionResources();
+        services.TryAddSingleton(exceptionResources);
+        services.TryAddSingleton<ICrestExceptionConverter>(sp =>
         {
-            var factory = sp.GetRequiredService<IStringLocalizerFactory>();
-            var service = new LocalizationService(factory);
-            var jsonResources = LoadExceptionLocalizationResources();
-            service.RegisterResource(new LocalizationResource
-            {
-                Name = "ExceptionErrorCodes",
-                Contributor = new DictionaryResourceContributor("ExceptionErrorCodes", jsonResources),
-                Priority = 0
-            });
-            return service;
+            var provider = sp.GetRequiredService<IServiceProvider>();
+            var resources = sp.GetRequiredService<IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>>();
+            var logger = sp.GetRequiredService<ILogger<DefaultCrestExceptionConverter>>();
+            return new DefaultCrestExceptionConverter(provider, resources, logger);
         });
-        services.TryAddSingleton<ICrestExceptionConverter, DefaultCrestExceptionConverter>();
         services.TryAddSingleton<CrestErrorResponseJsonContext>();
         return services;
     }
 
-    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> LoadExceptionLocalizationResources()
+    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> LoadExceptionResources()
     {
         var assembly = typeof(CrestCreates.Domain.Shared.Exceptions.CrestException).Assembly;
         var cultures = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
@@ -131,14 +121,28 @@ public static class ExceptionHandlingMiddlewareExtensions
             if (stream is null)
                 continue;
 
-            using var reader = new StreamReader(stream);
-            var json = reader.ReadToEnd();
-            var entries = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
-            if (entries is not null)
+            var entries = ParseJsonResource(stream);
+            if (entries.Count > 0)
                 cultures[culture] = entries;
         }
 
         return cultures;
+    }
+
+    private static IReadOnlyDictionary<string, string> ParseJsonResource(Stream stream)
+    {
+        var entries = new Dictionary<string, string>();
+
+        using var document = JsonDocument.Parse(stream);
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (property.Value.ValueKind == JsonValueKind.String)
+            {
+                entries[property.Name] = property.Value.GetString()!;
+            }
+        }
+
+        return entries;
     }
 
     private static string? ExtractCultureFromResourceName(string resourceName)

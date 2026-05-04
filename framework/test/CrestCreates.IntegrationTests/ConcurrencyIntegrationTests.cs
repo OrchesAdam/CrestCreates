@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -31,10 +32,13 @@ public class ConcurrencyIntegrationTests
         PropertyNameCaseInsensitive = true
     };
 
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _emptyExceptionResources
+        = new Dictionary<string, IReadOnlyDictionary<string, string>>();
+
     private static ExceptionHandlingMiddleware CreateMiddleware(RequestDelegate next)
     {
         var services = new ServiceCollection().BuildServiceProvider();
-        var converter = new DefaultCrestExceptionConverter(services, NullLogger<DefaultCrestExceptionConverter>.Instance);
+        var converter = new DefaultCrestExceptionConverter(services, _emptyExceptionResources, NullLogger<DefaultCrestExceptionConverter>.Instance);
         var jsonContext = new CrestCreates.AspNetCore.Serialization.CrestErrorResponseJsonContext();
         return new ExceptionHandlingMiddleware(next, converter, NullLogger<ExceptionHandlingMiddleware>.Instance, jsonContext);
     }

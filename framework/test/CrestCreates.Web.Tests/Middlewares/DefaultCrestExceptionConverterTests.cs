@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CrestCreates.AspNetCore.Errors;
 using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Shared.Exceptions;
@@ -14,6 +15,9 @@ namespace CrestCreates.Web.Tests.Middlewares;
 
 public class DefaultCrestExceptionConverterTests
 {
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> _emptyResources
+        = new Dictionary<string, IReadOnlyDictionary<string, string>>();
+
     [Fact]
     public void Convert_WithBusinessException_UsesExceptionErrorCode()
     {
@@ -94,11 +98,35 @@ public class DefaultCrestExceptionConverterTests
                 ["Crest.Concurrency.Conflict"] = "本地化并发冲突"
             }))
             .BuildServiceProvider();
-        var converter = new DefaultCrestExceptionConverter(services, NullLogger<DefaultCrestExceptionConverter>.Instance);
+        var converter = new DefaultCrestExceptionConverter(services, _emptyResources, NullLogger<DefaultCrestExceptionConverter>.Instance);
 
         var result = converter.Convert(new DefaultHttpContext(), new CrestConcurrencyException("Book", "b1"));
 
         result.Response.Message.Should().Be("本地化并发冲突");
+    }
+
+    [Fact]
+    public void Convert_WithExceptionResources_UsesResourceOverLocalizationService()
+    {
+        var resourcesWithOverride = new Dictionary<string, IReadOnlyDictionary<string, string>>
+        {
+            ["zh-CN"] = new Dictionary<string, string>
+            {
+                ["Crest.Concurrency.Conflict"] = "来自资源的本地化并发冲突"
+            }
+        };
+
+        var services = new ServiceCollection()
+            .AddSingleton<ILocalizationService>(new FakeLocalizationService(new Dictionary<string, string>
+            {
+                ["Crest.Concurrency.Conflict"] = "来自LocalizationService的值"
+            }))
+            .BuildServiceProvider();
+        var converter = new DefaultCrestExceptionConverter(services, resourcesWithOverride, NullLogger<DefaultCrestExceptionConverter>.Instance);
+
+        var result = converter.Convert(new DefaultHttpContext(), new CrestConcurrencyException("Book", "b1"));
+
+        result.Response.Message.Should().Be("来自资源的本地化并发冲突");
     }
 
     private static DefaultCrestExceptionConverter CreateConverter()
@@ -106,7 +134,7 @@ public class DefaultCrestExceptionConverterTests
         var services = new ServiceCollection()
             .AddSingleton<ILocalizationService>(new FakeLocalizationService(new Dictionary<string, string>()))
             .BuildServiceProvider();
-        return new DefaultCrestExceptionConverter(services, NullLogger<DefaultCrestExceptionConverter>.Instance);
+        return new DefaultCrestExceptionConverter(services, _emptyResources, NullLogger<DefaultCrestExceptionConverter>.Instance);
     }
 
     private sealed class FakeLocalizationService : ILocalizationService
