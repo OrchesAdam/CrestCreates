@@ -29,14 +29,7 @@
     <ProjectReference Include="..\CrestCreates.Aop\CrestCreates.Aop.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Remove="Middlewares\ExceptionHandlingMiddleware.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
+<ItemGroup>
     <PackageReference Include="DependencyInjection.StaticAccessor.Hosting" />
     <PackageReference Include="Swashbuckle.AspNetCore" />
       </ItemGroup>
