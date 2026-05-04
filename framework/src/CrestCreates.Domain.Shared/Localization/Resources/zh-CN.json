@@ -1,4 +1,13 @@
 {
+  "Crest.Auth.Unauthorized": "当前请求未认证。",
+  "Crest.Auth.Forbidden": "没有权限执行当前操作。",
+  "Crest.Validation.Failed": "数据验证失败。",
+  "Crest.Request.InvalidArgument": "请求参数错误。",
+  "Crest.Operation.Invalid": "当前操作无效。",
+  "Crest.Entity.NotFound": "资源不存在。",
+  "Crest.Concurrency.Conflict": "数据已被其他用户修改，请刷新后重试。",
+  "Crest.Concurrency.PreconditionRequired": "请求缺少 If-Match 头，请提供当前 ConcurrencyStamp。",
+  "Crest.InternalError": "服务器内部错误。",
   "greeting": "你好",
   "farewell": "再见",
   "error": {

@@ -1,0 +1,11 @@
+{
+  "Crest.Auth.Unauthorized": "The current request is not authenticated.",
+  "Crest.Auth.Forbidden": "You do not have permission to perform this operation.",
+  "Crest.Validation.Failed": "Validation failed.",
+  "Crest.Request.InvalidArgument": "The request arguments are invalid.",
+  "Crest.Operation.Invalid": "The current operation is invalid.",
+  "Crest.Entity.NotFound": "The requested resource was not found.",
+  "Crest.Concurrency.Conflict": "The data was modified by another user. Refresh and retry.",
+  "Crest.Concurrency.PreconditionRequired": "The request requires an If-Match header with the current ConcurrencyStamp.",
+  "Crest.InternalError": "An internal server error occurred."
+}
