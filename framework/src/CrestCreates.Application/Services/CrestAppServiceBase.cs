@@ -13,6 +13,7 @@ using CrestCreates.Domain.Shared.DataFilter;
 using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.Domain.Exceptions;
+using CrestCreates.Domain.Shared.Exceptions;
 using CrestCreates.Domain.Shared.Permissions;
 
 namespace CrestCreates.Application.Services;
@@ -159,6 +160,22 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
             var createdEntity = await Repository.InsertAsync(entity, cancellationToken);
             return MapToDto(createdEntity);
         }
+        catch (CrestException)
+        {
+            throw;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            throw;
+        }
+        catch (KeyNotFoundException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (System.Data.Common.DbException ex)
         {
             throw new Exception($"创建 {typeof(TEntity).Name} 失败: {ex.Message}", ex);
@@ -233,15 +250,19 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
             var updatedEntity = await Repository.UpdateAsync(entity, cancellationToken);
             return MapToDto(updatedEntity);
         }
+        catch (CrestException)
+        {
+            throw;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            throw;
+        }
         catch (KeyNotFoundException)
         {
             throw;
         }
-        catch (CrestConcurrencyException)
-        {
-            throw;
-        }
-        catch (CrestPreconditionRequiredException)
+        catch (OperationCanceledException)
         {
             throw;
         }
@@ -280,15 +301,19 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
 
             await Repository.DeleteAsync(id, cancellationToken);
         }
+        catch (CrestException)
+        {
+            throw;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            throw;
+        }
         catch (KeyNotFoundException)
         {
             throw;
         }
-        catch (CrestConcurrencyException)
-        {
-            throw;
-        }
-        catch (CrestPreconditionRequiredException)
+        catch (OperationCanceledException)
         {
             throw;
         }
