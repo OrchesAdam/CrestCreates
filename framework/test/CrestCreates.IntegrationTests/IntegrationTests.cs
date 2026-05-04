@@ -474,9 +474,11 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
 
     private sealed class ErrorResponse
     {
-        public int Code { get; set; }
+        public string Code { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
         public string? Details { get; set; }
+        public string? TraceId { get; set; }
+        public int StatusCode { get; set; }
     }
 
     private sealed class PagedResultResponse<T>

@@ -1,11 +1,13 @@
 using System;
 using System.IO;
-using System.Net;
 using System.Text.Json;
 using System.Threading.Tasks;
+using CrestCreates.AspNetCore.Errors;
 using CrestCreates.AspNetCore.Middlewares;
 using CrestCreates.Domain.Exceptions;
+using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -29,6 +31,13 @@ public class ConcurrencyIntegrationTests
         PropertyNameCaseInsensitive = true
     };
 
+    private static ExceptionHandlingMiddleware CreateMiddleware(RequestDelegate next)
+    {
+        var services = new ServiceCollection().BuildServiceProvider();
+        var converter = new DefaultCrestExceptionConverter(services, NullLogger<DefaultCrestExceptionConverter>.Instance);
+        return new ExceptionHandlingMiddleware(next, converter, NullLogger<ExceptionHandlingMiddleware>.Instance);
+    }
+
     [Fact]
     public async Task ExceptionHandlingMiddleware_MapsCrestConcurrencyException_To409Conflict()
     {
@@ -36,9 +45,8 @@ public class ConcurrencyIntegrationTests
         var context = new DefaultHttpContext();
         context.Response.Body = new MemoryStream();
 
-        var middleware = new ExceptionHandlingMiddleware(
-            next: _ => throw new CrestConcurrencyException("TestEntity", Guid.NewGuid().ToString()),
-            logger: NullLogger<ExceptionHandlingMiddleware>.Instance);
+        var middleware = CreateMiddleware(
+            _ => throw new CrestConcurrencyException("TestEntity", Guid.NewGuid().ToString()));
 
         // Act
         await middleware.InvokeAsync(context);
@@ -46,12 +54,14 @@ public class ConcurrencyIntegrationTests
         var body = await new StreamReader(context.Response.Body).ReadToEndAsync();
 
         // Assert
-        Assert.Equal((int)HttpStatusCode.Conflict, context.Response.StatusCode);
+        context.Response.StatusCode.Should().Be(StatusCodes.Status409Conflict);
 
-        var errorResponse = JsonSerializer.Deserialize<ErrorResponse>(body, JsonOptions);
-        Assert.NotNull(errorResponse);
-        Assert.Equal((int)HttpStatusCode.Conflict, errorResponse.Code);
-        Assert.Contains("数据已被其他用户修改", errorResponse.Message);
+        var errorResponse = JsonSerializer.Deserialize<CrestErrorResponseForTest>(body, JsonOptions);
+        errorResponse.Should().NotBeNull();
+        errorResponse!.Code.Should().Be("Crest.Concurrency.Conflict");
+        errorResponse.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        errorResponse.TraceId.Should().Be(context.TraceIdentifier);
+        errorResponse.Message.Should().Be("Concurrency conflict.");
     }
 
     [Fact]
@@ -61,9 +71,8 @@ public class ConcurrencyIntegrationTests
         var context = new DefaultHttpContext();
         context.Response.Body = new MemoryStream();
 
-        var middleware = new ExceptionHandlingMiddleware(
-            next: _ => throw new CrestPreconditionRequiredException("TestEntity", Guid.NewGuid().ToString()),
-            logger: NullLogger<ExceptionHandlingMiddleware>.Instance);
+        var middleware = CreateMiddleware(
+            _ => throw new CrestPreconditionRequiredException("TestEntity", Guid.NewGuid().ToString()));
 
         // Act
         await middleware.InvokeAsync(context);
@@ -71,11 +80,26 @@ public class ConcurrencyIntegrationTests
         var body = await new StreamReader(context.Response.Body).ReadToEndAsync();
 
         // Assert
-        Assert.Equal(428, context.Response.StatusCode);
+        context.Response.StatusCode.Should().Be(428);
 
-        var errorResponse = JsonSerializer.Deserialize<ErrorResponse>(body, JsonOptions);
-        Assert.NotNull(errorResponse);
-        Assert.Equal(428, errorResponse.Code);
-        Assert.Contains("If-Match", errorResponse.Message);
+        var errorResponse = JsonSerializer.Deserialize<CrestErrorResponseForTest>(body, JsonOptions);
+        errorResponse.Should().NotBeNull();
+        errorResponse!.Code.Should().Be("Crest.Concurrency.PreconditionRequired");
+        errorResponse.StatusCode.Should().Be(428);
+        errorResponse.TraceId.Should().Be(context.TraceIdentifier);
+        errorResponse.Message.Should().Be("Precondition required.");
+    }
+
+    private sealed class CrestErrorResponseForTest
+    {
+        public string Code { get; set; } = string.Empty;
+
+        public string Message { get; set; } = string.Empty;
+
+        public string? Details { get; set; }
+
+        public string? TraceId { get; set; }
+
+        public int StatusCode { get; set; }
     }
 }
