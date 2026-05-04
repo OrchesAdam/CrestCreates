@@ -136,6 +136,8 @@ namespace CrestCreates.Web
             services.AddScoped<ILocalizationProvider, JsonResourceLocalizationProvider>(sp =>
                 new JsonResourceLocalizationProvider("Localization/Resources"));
 
+            services.AddCrestExceptionHandling();
+
 
             Console.WriteLine("=== Module Auto Registration Demo ===");
             Console.WriteLine("Modules discovered and registered:");
