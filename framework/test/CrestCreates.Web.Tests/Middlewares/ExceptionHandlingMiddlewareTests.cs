@@ -99,7 +99,8 @@ public class ExceptionHandlingMiddlewareTests
     {
         var services = new ServiceCollection().BuildServiceProvider();
         var converter = new DefaultCrestExceptionConverter(services, NullLogger<DefaultCrestExceptionConverter>.Instance);
-        return new ExceptionHandlingMiddleware(next, converter, logger);
+        var jsonContext = new CrestCreates.AspNetCore.Serialization.CrestErrorResponseJsonContext();
+        return new ExceptionHandlingMiddleware(next, converter, logger, jsonContext);
     }
 
     private static async Task<CrestErrorResponse> DeserializeResponseAsync(HttpContext context)

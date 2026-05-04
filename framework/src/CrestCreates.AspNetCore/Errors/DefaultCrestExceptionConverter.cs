@@ -30,8 +30,8 @@ public class DefaultCrestExceptionConverter : ICrestExceptionConverter
             UnauthorizedAccessException => Create(context, "Crest.Auth.Unauthorized", 401, "当前请求未认证。"),
             KeyNotFoundException keyNotFoundException => Create(context, "Crest.Entity.NotFound", 404, "资源不存在。", keyNotFoundException.Message),
             ValidationException validationException => Create(context, "Crest.Validation.Failed", 400, "数据验证失败。", validationException.Message),
-            ArgumentException argumentException => Create(context, "Crest.Request.InvalidArgument", 400, "请求参数错误。", argumentException.Message),
-            InvalidOperationException invalidOperationException => Create(context, "Crest.Operation.Invalid", 400, "当前操作无效。", invalidOperationException.Message),
+            ArgumentException => Create(context, "Crest.Request.InvalidArgument", 400, "请求参数错误。"),
+            InvalidOperationException => Create(context, "Crest.Operation.Invalid", 400, "当前操作无效。"),
             _ => Create(context, "Crest.InternalError", 500, "服务器内部错误。")
         };
 

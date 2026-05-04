@@ -35,7 +35,8 @@ public class ConcurrencyIntegrationTests
     {
         var services = new ServiceCollection().BuildServiceProvider();
         var converter = new DefaultCrestExceptionConverter(services, NullLogger<DefaultCrestExceptionConverter>.Instance);
-        return new ExceptionHandlingMiddleware(next, converter, NullLogger<ExceptionHandlingMiddleware>.Instance);
+        var jsonContext = new CrestCreates.AspNetCore.Serialization.CrestErrorResponseJsonContext();
+        return new ExceptionHandlingMiddleware(next, converter, NullLogger<ExceptionHandlingMiddleware>.Instance, jsonContext);
     }
 
     [Fact]

@@ -66,6 +66,7 @@ builder.Services.AddSettingManagementInfrastructure();
 builder.Services.AddSettingManagementEfCore();
 builder.Services.AddFeatureManagement();
 builder.Services.AddFeatureManagementEfCore();
+builder.Services.AddCrestExceptionHandling();
 builder.Services.AddTenantManagement();
 builder.Services.AddTenantBootstrapper();
 builder.Services.AddTenantManagementCore();

@@ -7,4 +7,9 @@
     <OutputType>Library</OutputType>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Localization\Resources\en.json" />
+    <EmbeddedResource Include="Localization\Resources\zh-CN.json" />
+  </ItemGroup>
+
 </Project>
