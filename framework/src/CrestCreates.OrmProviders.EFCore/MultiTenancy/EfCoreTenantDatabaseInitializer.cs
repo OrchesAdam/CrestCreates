@@ -83,10 +83,10 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
                 return TenantDatabaseInitializeResult.Failed(ex.Message);
             }
         }
-    }
 
-    private static bool IsValidDatabaseName(string name)
-    {
-        return Regex.IsMatch(name, @"^[a-zA-Z0-9_-]+$");
+        private static bool IsValidDatabaseName(string name)
+        {
+            return Regex.IsMatch(name, @"^[a-zA-Z0-9_-]+$");
+        }
     }
 }
