@@ -18,6 +18,8 @@
     <ProjectReference Include="..\CrestCreates.DynamicApi\CrestCreates.DynamicApi.csproj" />
     <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
+    <ProjectReference Include="..\CrestCreates.Authorization.Abstractions\CrestCreates.Authorization.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Localization\CrestCreates.Localization.csproj" />
   </ItemGroup>
 
 </Project>
