@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Features;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Caching;
 using CrestCreates.Caching.Abstractions;
 using CrestCreates.Domain.Features;
@@ -283,6 +284,9 @@ public class FeatureManagementTests
         var currentTenant = new Mock<ICurrentTenant>();
         currentTenant.SetupGet(x => x.Id).Returns("tenant-1");
 
+        var permissionChecker = new Mock<IPermissionChecker>();
+        permissionChecker.Setup(x => x.IsGrantedAsync(It.IsAny<string>())).ReturnsAsync(true);
+
         var appService = new FeatureAppService(
             _featureManager,
             new FeatureProvider(
@@ -292,7 +296,8 @@ public class FeatureManagementTests
                 currentTenant.Object),
             _featureValueResolver,
             currentTenant.Object,
-            new FeatureValueAppServiceMapper());
+            new FeatureValueAppServiceMapper(),
+            permissionChecker.Object);
 
         var values = await appService.GetCurrentTenantValuesAsync();
 
