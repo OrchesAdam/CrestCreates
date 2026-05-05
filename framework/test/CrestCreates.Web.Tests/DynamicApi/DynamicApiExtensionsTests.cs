@@ -26,20 +26,28 @@ public class DynamicApiExtensionsTests
     }
 
     [Fact]
-    public void AddCrestDynamicApi_WithRuntimeFallbackOptIn_CanResolveEmptyRegistryForLegacyDiagnostics()
+    public void DynamicApiOptions_ShouldNotExposeRuntimeFallbackMembers()
+    {
+        typeof(DynamicApiOptions).GetProperty("EnableRuntimeReflectionFallback").Should().BeNull();
+        typeof(DynamicApiOptions).GetMethod("UseRuntimeReflectionFallback").Should().BeNull();
+    }
+
+    [Fact]
+    public void AddCrestDynamicApi_WithoutGeneratedProvider_ErrorShouldNotMentionRuntimeFallback()
     {
         var services = new ServiceCollection();
 
-        services.AddCrestDynamicApi(options =>
-        {
-            options.UseRuntimeReflectionFallback();
-            options.AddApplicationServiceAssembly(typeof(string).Assembly);
-        });
+        services.AddCrestDynamicApi(options => options.AddApplicationServiceAssembly(typeof(string).Assembly));
 
         using var serviceProvider = services.BuildServiceProvider();
-        var registry = serviceProvider.GetRequiredService<DynamicApiRegistry>();
 
-        registry.Services.Should().BeEmpty();
+        var action = () => serviceProvider.GetRequiredService<DynamicApiRegistry>();
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*编译期生成的 provider*")
+            .And.Message.Should().NotContain("RuntimeReflectionFallback")
+            .And.NotContain("UseRuntimeReflectionFallback")
+            .And.NotContain("fallback");
     }
 
     [Fact]
