@@ -27,7 +27,7 @@ public class FeatureValueResolver : IFeatureValueResolver
         CancellationToken cancellationToken = default)
     {
         var definition = _featureDefinitionManager.GetOrNull(name)
-                         ?? throw new InvalidOperationException($"未定义的功能特性: {name}");
+                         ?? throw FeatureManagementExceptionFactory.UndefinedFeature(name);
 
         var values = await ResolveValuesAsync([definition], tenantId, cancellationToken);
         return values[0];

@@ -291,6 +291,12 @@ entity.HasIndex(e => new { e.Name, e.Scope, e.ProviderKey, e.TenantId }).IsUniqu
             entity.Property(e => e.LastModificationTime);
 
             entity.HasIndex(e => new { e.Name, e.Scope, e.ProviderKey, e.TenantId }).IsUnique();
+            entity.HasIndex(e => new { e.Name, e.Scope, e.ProviderKey })
+                .IsUnique()
+                .HasFilter("\"TenantId\" IS NULL");
+            entity.HasIndex(e => new { e.Name, e.Scope, e.TenantId })
+                .IsUnique()
+                .HasFilter("\"TenantId\" IS NOT NULL");
         });
 
         modelBuilder.ConfigureConcurrencyStamp();

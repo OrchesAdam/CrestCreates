@@ -286,6 +286,10 @@ public class FeatureManagementTests
 
         var currentTenant = new Mock<ICurrentTenant>();
         currentTenant.SetupGet(x => x.Id).Returns("tenant-1");
+        var tenantInfo = new Mock<ITenantInfo>();
+        tenantInfo.SetupGet(t => t.Id).Returns("tenant-1");
+        tenantInfo.SetupGet(t => t.Name).Returns("tenant-1");
+        currentTenant.SetupGet(x => x.Tenant).Returns(tenantInfo.Object);
 
         var permissionChecker = new Mock<IPermissionChecker>();
         permissionChecker.Setup(x => x.IsGrantedAsync(It.IsAny<string>())).ReturnsAsync(true);

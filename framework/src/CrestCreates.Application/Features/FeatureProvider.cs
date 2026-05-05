@@ -39,7 +39,7 @@ public class FeatureProvider : IFeatureProvider
     public async Task<T?> GetAsync<T>(string name, CancellationToken cancellationToken = default)
     {
         var definition = _featureDefinitionManager.GetOrNull(name)
-                         ?? throw new InvalidOperationException($"未定义的功能特性: {name}");
+                         ?? throw FeatureManagementExceptionFactory.UndefinedFeature(name);
 
         var value = await GetOrNullAsync(name, cancellationToken);
         return _featureValueTypeConverter.ConvertTo<T>(value, definition.ValueType);

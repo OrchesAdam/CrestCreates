@@ -255,10 +255,24 @@ public class FeatureManager : IFeatureManager
     {
         return valueType switch
         {
-            FeatureValueType.Bool when bool.TryParse(value, out var boolValue) => boolValue.ToString().ToLowerInvariant(),
+            FeatureValueType.Bool => NormalizeBoolValue(value),
             FeatureValueType.Int when int.TryParse(value, out _) => value.Trim(),
             FeatureValueType.String => value.Trim(),
             _ => value.Trim()
         };
+    }
+
+    private static string NormalizeBoolValue(string value)
+    {
+        if (bool.TryParse(value, out var boolValue))
+            return boolValue.ToString().ToLowerInvariant();
+
+        if (value.Equals("1", StringComparison.OrdinalIgnoreCase))
+            return "true";
+
+        if (value.Equals("0", StringComparison.OrdinalIgnoreCase))
+            return "false";
+
+        return value.Trim();
     }
 }

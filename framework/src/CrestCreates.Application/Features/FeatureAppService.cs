@@ -56,6 +56,8 @@ public class FeatureAppService : IFeatureAppService
 
     public async Task<List<FeatureValueDto>> GetCurrentTenantValuesAsync()
     {
+        EnsureTenantContext();
+        await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         var tenantId = _currentTenant.Id;
         var resolved = await _featureValueResolver.ResolveAllAsync(
             tenantId: string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim());
@@ -79,6 +81,8 @@ public class FeatureAppService : IFeatureAppService
 
     public async Task<FeatureValueDto?> GetCurrentTenantValueAsync(string name)
     {
+        EnsureTenantContext();
+        await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         var tenantId = string.IsNullOrWhiteSpace(_currentTenant.Id) ? null : _currentTenant.Id.Trim();
         var resolved = await _featureValueResolver.ResolveAsync(name, tenantId);
         return _mapper.Map(resolved);
@@ -157,6 +161,14 @@ public class FeatureAppService : IFeatureAppService
         if (_currentTenant.Tenant is not null)
         {
             throw new CrestPermissionException(permission);
+        }
+    }
+
+    private void EnsureTenantContext()
+    {
+        if (_currentTenant.Tenant is null)
+        {
+            throw FeatureManagementExceptionFactory.MissingTenantContext();
         }
     }
 }

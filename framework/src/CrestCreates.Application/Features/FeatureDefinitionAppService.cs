@@ -2,9 +2,11 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Features;
 using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.Features;
+using CrestPermissionException = CrestCreates.Domain.Exceptions.CrestPermissionException;
 
 namespace CrestCreates.Application.Features;
 
@@ -12,14 +14,19 @@ namespace CrestCreates.Application.Features;
 public class FeatureDefinitionAppService : IFeatureDefinitionAppService
 {
     private readonly IFeatureDefinitionManager _featureDefinitionManager;
+    private readonly IPermissionChecker _permissionChecker;
 
-    public FeatureDefinitionAppService(IFeatureDefinitionManager featureDefinitionManager)
+    public FeatureDefinitionAppService(
+        IFeatureDefinitionManager featureDefinitionManager,
+        IPermissionChecker permissionChecker)
     {
         _featureDefinitionManager = featureDefinitionManager;
+        _permissionChecker = permissionChecker;
     }
 
-    public Task<List<FeatureDefinitionDto>> GetAllAsync()
+    public async Task<List<FeatureDefinitionDto>> GetAllAsync()
     {
+        await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         var definitions = _featureDefinitionManager.GetAll();
         var dtos = new List<FeatureDefinitionDto>();
 
@@ -28,22 +35,24 @@ public class FeatureDefinitionAppService : IFeatureDefinitionAppService
             dtos.Add(MapToDto(definition));
         }
 
-        return Task.FromResult(dtos);
+        return dtos;
     }
 
-    public Task<FeatureDefinitionDto?> GetAsync(string name)
+    public async Task<FeatureDefinitionDto?> GetAsync(string name)
     {
+        await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         var definition = _featureDefinitionManager.GetOrNull(name);
         if (definition == null)
         {
-            return Task.FromResult<FeatureDefinitionDto?>(null);
+            return null;
         }
 
-        return Task.FromResult<FeatureDefinitionDto?>(MapToDto(definition));
+        return MapToDto(definition);
     }
 
-    public Task<List<FeatureGroupDto>> GetGroupsAsync()
+    public async Task<List<FeatureGroupDto>> GetGroupsAsync()
     {
+        await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         var groups = _featureDefinitionManager.GetGroups();
         var dtos = new List<FeatureGroupDto>();
 
@@ -57,7 +66,15 @@ public class FeatureDefinitionAppService : IFeatureDefinitionAppService
             });
         }
 
-        return Task.FromResult(dtos);
+        return dtos;
+    }
+
+    private async Task EnsureGrantedAsync(string permission)
+    {
+        if (!await _permissionChecker.IsGrantedAsync(permission))
+        {
+            throw new CrestPermissionException(permission);
+        }
     }
 
     private static FeatureDefinitionDto MapToDto(FeatureDefinition definition)
