@@ -6,20 +6,27 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.AuditLog;
 using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.Application.Contracts.DTOs.Tenants;
+using CrestCreates.Application.Tenants;
 using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Services;
-using CrestCreates.AuditLogging.Options;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.AuditLog;
-using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Authorization;
+using CrestCreates.Domain.DomainEvents;
+using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories;
+using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.OrmProviders.EFCore.DbContexts;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.OrmProviders.EFCore.Repositories;
+using CrestCreates.OrmProviders.EFCore.Settings;
+using CrestCreates.OrmProviders.EFCore.UnitOfWork;
 using Microsoft.EntityFrameworkCore;
 using LibraryManagement.EntityFrameworkCore;
+using LibraryManagement.EntityFrameworkCore.Repositories;
 using Npgsql;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -263,6 +270,9 @@ public sealed class LibraryManagementWebApplicationFactory
 
         builder.ConfigureServices(services =>
         {
+            // Module system resolves IServiceCollection post-build for OnConfigureServices
+            services.AddSingleton<IServiceCollection>(services);
+
             services.RemoveAll<DbContextOptions<LibraryDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<LibraryDbContext>>();
             services.RemoveAll<LibraryDbContext>();
@@ -310,6 +320,33 @@ public sealed class LibraryManagementWebApplicationFactory
             {
                 options.UseNpgsql(_sharedConnection);
             });
+
+            // Repository registrations normally provided by EntityFrameworkCoreModule.OnConfigureServices()
+            // (Module OnConfigureServices runs post-build, so test factory must register them inline)
+            services.AddScoped(typeof(IRepository<,>), typeof(DomainRepositoryAdapter<,>));
+            services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
+
+            services.AddUnitOfWork(OrmProvider.EfCore);
+            services.AddScoped<EfCoreUnitOfWork>(sp => new EfCoreUnitOfWork(
+                sp.GetRequiredService<IDataBaseContext>(),
+                sp.GetRequiredService<IDomainEventPublisher>()));
+
+            // Sample-specific repositories
+            services.AddScoped<IPermissionGrantRepository, PermissionGrantRepository>();
+            services.AddScoped<IPermissionRepository, PermissionRepository>();
+            services.AddScoped<IRoleRepository, RoleRepository>();
+            services.AddScoped<ITenantRepository, TenantRepository>();
+            services.AddScoped<IUserRepository, UserRepository>();
+            services.AddScoped<IUserRoleRepository, UserRoleRepository>();
+            services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+            services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
+            services.AddSettingManagementEfCore();
+
+            // Tenant infrastructure - use no-op stubs since EfCoreTenantDatabaseInitializer
+            // uses SQL Server SqlConnection which doesn't work with PostgreSQL test containers
+            services.AddScoped<ITenantDatabaseInitializer, NoOpTenantDatabaseInitializer>();
+            services.AddScoped<ITenantMigrationRunner, NoOpTenantMigrationRunner>();
+            services.AddScoped<ITenantInitializationStore, NoOpTenantInitializationStore>();
         });
     }
 
@@ -319,5 +356,49 @@ public sealed class LibraryManagementWebApplicationFactory
         _seedLock.Dispose();
         await _postgres.DisposeAsync();
         await base.DisposeAsync();
+    }
+
+    private sealed class NoOpTenantDatabaseInitializer : ITenantDatabaseInitializer
+    {
+        public Task<TenantDatabaseInitializeResult> InitializeAsync(
+            TenantInitializationContext context, CancellationToken cancellationToken = default)
+            => Task.FromResult(TenantDatabaseInitializeResult.Succeeded());
+    }
+
+    private sealed class NoOpTenantMigrationRunner : ITenantMigrationRunner
+    {
+        public Task<TenantMigrationResult> RunAsync(
+            TenantInitializationContext context, CancellationToken cancellationToken = default)
+            => Task.FromResult(TenantMigrationResult.Succeeded());
+    }
+
+    private sealed class NoOpTenantInitializationStore : ITenantInitializationStore
+    {
+        public Task<TenantInitializationRecord?> TryBeginInitializationAsync(
+            Guid tenantId, string correlationId, CancellationToken cancellationToken)
+            => Task.FromResult<TenantInitializationRecord?>(null);
+
+        public Task<TenantInitializationRecord?> ForceBeginInitializationAsync(
+            Guid tenantId, string correlationId, string reason, CancellationToken cancellationToken)
+            => Task.FromResult<TenantInitializationRecord?>(null);
+
+        public Task<TenantInitializationRecord?> GetLatestAsync(
+            Guid tenantId, CancellationToken cancellationToken)
+            => Task.FromResult<TenantInitializationRecord?>(null);
+
+        public Task UpdateAsync(TenantInitializationRecord record, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task ForceFailAsync(
+            Guid tenantId, string correlationId, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task CompleteInitializationAsync(
+            Guid tenantId, TenantInitializationRecord record, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task FailInitializationAsync(
+            Guid tenantId, TenantInitializationRecord record, string sanitizedError, CancellationToken cancellationToken)
+            => Task.CompletedTask;
     }
 }
