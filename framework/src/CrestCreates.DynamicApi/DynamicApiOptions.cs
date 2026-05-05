@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Reflection;
 
 namespace CrestCreates.DynamicApi;
@@ -11,8 +10,6 @@ public sealed class DynamicApiOptions
 
     public string DefaultRoutePrefix { get; set; } = "api";
 
-    public bool EnableRuntimeReflectionFallback { get; private set; }
-
     public void AddApplicationServiceAssembly(Assembly assembly)
     {
         ArgumentNullException.ThrowIfNull(assembly);
@@ -22,12 +19,5 @@ public sealed class DynamicApiOptions
     public void AddApplicationServiceAssembly<TMarker>()
     {
         AddApplicationServiceAssembly(typeof(TMarker).Assembly);
-    }
-
-    [Obsolete("Dynamic API runtime reflection fallback is no longer the default execution path. Only use this for temporary diagnostics.")]
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public void UseRuntimeReflectionFallback()
-    {
-        EnableRuntimeReflectionFallback = true;
     }
 }
