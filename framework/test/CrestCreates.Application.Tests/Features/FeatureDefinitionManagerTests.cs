@@ -1,3 +1,4 @@
+using System;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Shared.Features;
 using FluentAssertions;
@@ -136,6 +137,8 @@ public class FeatureDefinitionManagerTests
                     "Duplicate definition",
                     "true",
                     FeatureValueType.Bool,
+                    true,
+                    true,
                     FeatureScope.Global | FeatureScope.Tenant);
         }
     }

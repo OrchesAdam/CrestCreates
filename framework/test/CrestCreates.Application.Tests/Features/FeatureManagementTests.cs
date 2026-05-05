@@ -207,9 +207,93 @@ public class FeatureManagementTests
         tenantValues.Should().ContainSingle(v => v.Name == "Storage.MaxFileCount");
     }
 
-    private void ConfigureRepository()
+    [Fact]
+    public async Task SetTenantAsync_WithGlobalOnlyFeature_ShouldThrowBusinessException()
     {
-        _featureRepositoryMock
+        var definitionManager = new FeatureDefinitionManager(new IFeatureDefinitionProvider[]
+        {
+            new GlobalOnlyFeatureProvider()
+        });
+
+        var features = new List<FeatureValue>();
+        var repoMock = new Mock<IFeatureRepository>();
+        ConfigureInMemoryRepo(repoMock, features);
+
+        var cacheService = new CrestCacheService(
+            new CrestMemoryCache(new CacheOptions { Prefix = $"FeatureScope:{Guid.NewGuid():N}:" }),
+            new CrestCacheKeyGenerator());
+        var cacheKeyContributor = new FeatureCacheKeyContributor();
+        var store = new FeatureStore(repoMock.Object, cacheService, cacheKeyContributor);
+
+        var manager = new FeatureManager(
+            definitionManager,
+            repoMock.Object,
+            store,
+            new FeatureValueTypeConverter(),
+            new FeatureCacheInvalidator(cacheService, cacheKeyContributor));
+
+        var action = async () => await manager.SetTenantAsync("Global.Only", "tenant-1", "true");
+
+        var exception = await action.Should().ThrowAsync<CrestBusinessException>();
+        exception.Which.ErrorCode.Should().Be(FeatureManagementErrorCodes.UnsupportedScope);
+    }
+
+    [Fact]
+    public async Task SetTenantAsync_CalledTwice_ShouldUpdateExistingRow()
+    {
+        await _featureManager.SetTenantAsync("Identity.UserCreationEnabled", "tenant-1", "true");
+        await _featureManager.SetTenantAsync("Identity.UserCreationEnabled", "tenant-1", "false");
+
+        _features.Where(feature =>
+                feature.Name == "Identity.UserCreationEnabled" &&
+                feature.Scope == FeatureScope.Tenant &&
+                feature.TenantId == "tenant-1")
+            .Should()
+            .ContainSingle()
+            .Which.Value.Should().Be("false");
+    }
+
+    [Fact]
+    public async Task SetTenantFeature_ShouldInvalidateOnlyThatTenantCache()
+    {
+        await _featureManager.SetGlobalAsync("Identity.UserCreationEnabled", "false");
+        await _featureManager.SetTenantAsync("Identity.UserCreationEnabled", "tenant-1", "true");
+
+        var tenant1Before = await _featureValueResolver.ResolveAsync("Identity.UserCreationEnabled", "tenant-1");
+        var tenant2Before = await _featureValueResolver.ResolveAsync("Identity.UserCreationEnabled", "tenant-2");
+
+        tenant1Before.Value.Should().Be("true");
+        tenant2Before.Value.Should().Be("false");
+
+        await _featureManager.SetTenantAsync("Identity.UserCreationEnabled", "tenant-1", "false");
+
+        var tenant1After = await _featureValueResolver.ResolveAsync("Identity.UserCreationEnabled", "tenant-1");
+        var tenant2After = await _featureValueResolver.ResolveAsync("Identity.UserCreationEnabled", "tenant-2");
+
+        tenant1After.Value.Should().Be("false");
+        tenant2After.Value.Should().Be("false");
+    }
+
+    private sealed class GlobalOnlyFeatureProvider : IFeatureDefinitionProvider
+    {
+        public void Define(FeatureDefinitionContext context)
+        {
+            context.GetOrAddGroup("Global", "Global")
+                .AddDefinition(
+                    "Global.Only",
+                    "Global Only",
+                    "Only global scope is supported",
+                    "false",
+                    FeatureValueType.Bool,
+                    true,
+                    true,
+                    FeatureScope.Global);
+        }
+    }
+
+    private static void ConfigureInMemoryRepo(Mock<IFeatureRepository> repoMock, List<FeatureValue> features)
+    {
+        repoMock
             .Setup(repository => repository.FindAsync(
                 It.IsAny<string>(),
                 It.IsAny<FeatureScope>(),
@@ -217,45 +301,50 @@ public class FeatureManagementTests
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((string name, FeatureScope scope, string providerKey, string? tenantId, CancellationToken _) =>
-                _features.FirstOrDefault(feature =>
+                features.FirstOrDefault(feature =>
                     feature.Name == name &&
                     feature.Scope == scope &&
                     feature.ProviderKey == providerKey &&
                     feature.TenantId == tenantId));
 
-        _featureRepositoryMock
+        repoMock
             .Setup(repository => repository.GetListByScopeAsync(
                 It.IsAny<FeatureScope>(),
                 It.IsAny<string?>(),
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((FeatureScope scope, string? providerKey, string? tenantId, CancellationToken _) =>
-                _features
+                features
                     .Where(feature => feature.Scope == scope)
                     .Where(feature => providerKey is null || feature.ProviderKey == providerKey)
                     .Where(feature => tenantId == null || feature.TenantId == tenantId)
                     .OrderBy(feature => feature.Name)
                     .ToList());
 
-        _featureRepositoryMock
+        repoMock
             .Setup(repository => repository.InsertAsync(It.IsAny<FeatureValue>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((FeatureValue feature, CancellationToken _) =>
             {
-                _features.Add(feature);
+                features.Add(feature);
                 return feature;
             });
 
-        _featureRepositoryMock
+        repoMock
             .Setup(repository => repository.UpdateAsync(It.IsAny<FeatureValue>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((FeatureValue feature, CancellationToken _) => feature);
 
-        _featureRepositoryMock
+        repoMock
             .Setup(repository => repository.DeleteAsync(It.IsAny<FeatureValue>(), It.IsAny<CancellationToken>()))
             .Returns((FeatureValue feature, CancellationToken _) =>
             {
-                _features.Remove(feature);
+                features.Remove(feature);
                 return Task.CompletedTask;
             });
+    }
+
+    private void ConfigureRepository()
+    {
+        ConfigureInMemoryRepo(_featureRepositoryMock, _features);
     }
 
     private IFeatureChecker CreateFeatureChecker(string? tenantId)
