@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
 using CrestCreates.AspNetCore.Errors;
@@ -19,8 +20,10 @@ public class ExceptionHandlingMiddlewareTests
     [Fact]
     public async Task InvokeAsync_ShouldReturnUnauthorized_ForUnauthenticatedUser()
     {
+        using var _ = new CultureScope("zh-CN");
         var logger = new TestLogger<ExceptionHandlingMiddleware>();
-        var middleware = CreateMiddleware(_ => throw new UnauthorizedAccessException(), logger);
+        var resources = CreateResources("Crest.Auth.Unauthorized", "来自资源的未认证消息");
+        var middleware = CreateMiddleware(_ => throw new UnauthorizedAccessException(), logger, resources);
         var context = new DefaultHttpContext { TraceIdentifier = "trace-401-unauth" };
         context.Response.Body = new MemoryStream();
 
@@ -32,14 +35,17 @@ public class ExceptionHandlingMiddlewareTests
         var response = await DeserializeResponseAsync(context);
         response.Code.Should().Be("Crest.Auth.Unauthorized");
         response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        response.Message.Should().Be("来自资源的未认证消息");
         response.TraceId.Should().Be("trace-401-unauth");
     }
 
     [Fact]
     public async Task InvokeAsync_ShouldReturnForbidden_ForAuthenticatedUnauthorizedAccessException()
     {
+        using var _ = new CultureScope("zh-CN");
         var logger = new TestLogger<ExceptionHandlingMiddleware>();
-        var middleware = CreateMiddleware(_ => throw new UnauthorizedAccessException(), logger);
+        var resources = CreateResources("Crest.Auth.Forbidden", "来自资源的无权限消息");
+        var middleware = CreateMiddleware(_ => throw new UnauthorizedAccessException(), logger, resources);
         var identity = new ClaimsIdentity("test");
         var context = new DefaultHttpContext
         {
@@ -56,6 +62,7 @@ public class ExceptionHandlingMiddlewareTests
         var response = await DeserializeResponseAsync(context);
         response.Code.Should().Be("Crest.Auth.Forbidden");
         response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        response.Message.Should().Be("来自资源的无权限消息");
         response.TraceId.Should().Be("trace-403-auth");
     }
 
@@ -124,12 +131,30 @@ public class ExceptionHandlingMiddlewareTests
     private static readonly CrestExceptionLocalizationResources _emptyResources
         = new(new Dictionary<string, IReadOnlyDictionary<string, string>>());
 
-    private static ExceptionHandlingMiddleware CreateMiddleware(RequestDelegate next, TestLogger<ExceptionHandlingMiddleware> logger)
+    private static ExceptionHandlingMiddleware CreateMiddleware(
+        RequestDelegate next,
+        TestLogger<ExceptionHandlingMiddleware> logger,
+        CrestExceptionLocalizationResources? resources = null)
     {
         var services = new ServiceCollection().BuildServiceProvider();
-        var converter = new DefaultCrestExceptionConverter(services, _emptyResources, NullLogger<DefaultCrestExceptionConverter>.Instance);
+        var converter = new DefaultCrestExceptionConverter(
+            services,
+            resources ?? _emptyResources,
+            NullLogger<DefaultCrestExceptionConverter>.Instance);
         var jsonContext = new CrestCreates.AspNetCore.Serialization.CrestErrorResponseJsonContext();
         return new ExceptionHandlingMiddleware(next, converter, logger, jsonContext);
+    }
+
+    private static CrestExceptionLocalizationResources CreateResources(string key, string value)
+    {
+        return new CrestExceptionLocalizationResources(
+            new Dictionary<string, IReadOnlyDictionary<string, string>>
+            {
+                ["zh-CN"] = new Dictionary<string, string>
+                {
+                    [key] = value
+                }
+            });
     }
 
     private static async Task<CrestErrorResponse> DeserializeResponseAsync(HttpContext context)
@@ -139,5 +164,26 @@ public class ExceptionHandlingMiddlewareTests
         var response = await JsonSerializer.DeserializeAsync<CrestErrorResponse>(context.Response.Body, options);
         response.Should().NotBeNull();
         return response!;
+    }
+
+    private sealed class CultureScope : IDisposable
+    {
+        private readonly CultureInfo _originalCulture;
+        private readonly CultureInfo _originalUiCulture;
+
+        public CultureScope(string cultureName)
+        {
+            _originalCulture = CultureInfo.CurrentCulture;
+            _originalUiCulture = CultureInfo.CurrentUICulture;
+            var culture = new CultureInfo(cultureName);
+            CultureInfo.CurrentCulture = culture;
+            CultureInfo.CurrentUICulture = culture;
+        }
+
+        public void Dispose()
+        {
+            CultureInfo.CurrentCulture = _originalCulture;
+            CultureInfo.CurrentUICulture = _originalUiCulture;
+        }
     }
 }

@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Globalization;
+using System.Security.Claims;
 using CrestCreates.AspNetCore.Errors;
 using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Shared.Exceptions;
@@ -130,6 +132,58 @@ public class DefaultCrestExceptionConverterTests
         result.Response.Message.Should().Be("来自资源的本地化并发冲突");
     }
 
+    [Fact]
+    public void Convert_WithUnauthenticatedUnauthorizedAccessException_UsesLocalizedUnauthorizedMessage()
+    {
+        using var _ = new CultureScope("zh-CN");
+        var resources = new CrestExceptionLocalizationResources(
+            new Dictionary<string, IReadOnlyDictionary<string, string>>
+            {
+                ["zh-CN"] = new Dictionary<string, string>
+                {
+                    ["Crest.Auth.Unauthorized"] = "来自资源的未认证消息"
+                }
+            });
+        var converter = new DefaultCrestExceptionConverter(
+            new ServiceCollection().BuildServiceProvider(),
+            resources,
+            NullLogger<DefaultCrestExceptionConverter>.Instance);
+
+        var result = converter.Convert(new DefaultHttpContext(), new UnauthorizedAccessException());
+
+        result.Response.Code.Should().Be("Crest.Auth.Unauthorized");
+        result.Response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        result.Response.Message.Should().Be("来自资源的未认证消息");
+    }
+
+    [Fact]
+    public void Convert_WithAuthenticatedUnauthorizedAccessException_UsesLocalizedForbiddenMessage()
+    {
+        using var _ = new CultureScope("zh-CN");
+        var resources = new CrestExceptionLocalizationResources(
+            new Dictionary<string, IReadOnlyDictionary<string, string>>
+            {
+                ["zh-CN"] = new Dictionary<string, string>
+                {
+                    ["Crest.Auth.Forbidden"] = "来自资源的无权限消息"
+                }
+            });
+        var converter = new DefaultCrestExceptionConverter(
+            new ServiceCollection().BuildServiceProvider(),
+            resources,
+            NullLogger<DefaultCrestExceptionConverter>.Instance);
+        var context = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity("test"))
+        };
+
+        var result = converter.Convert(context, new UnauthorizedAccessException());
+
+        result.Response.Code.Should().Be("Crest.Auth.Forbidden");
+        result.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        result.Response.Message.Should().Be("来自资源的无权限消息");
+    }
+
     private static DefaultCrestExceptionConverter CreateConverter()
     {
         var services = new ServiceCollection()
@@ -174,6 +228,27 @@ public class DefaultCrestExceptionConverterTests
             public void Dispose()
             {
             }
+        }
+    }
+
+    private sealed class CultureScope : IDisposable
+    {
+        private readonly CultureInfo _originalCulture;
+        private readonly CultureInfo _originalUiCulture;
+
+        public CultureScope(string cultureName)
+        {
+            _originalCulture = CultureInfo.CurrentCulture;
+            _originalUiCulture = CultureInfo.CurrentUICulture;
+            var culture = new CultureInfo(cultureName);
+            CultureInfo.CurrentCulture = culture;
+            CultureInfo.CurrentUICulture = culture;
+        }
+
+        public void Dispose()
+        {
+            CultureInfo.CurrentCulture = _originalCulture;
+            CultureInfo.CurrentUICulture = _originalUiCulture;
         }
     }
 }
