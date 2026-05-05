@@ -245,7 +245,15 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
             }
 
             await ValidateDataOwnershipAsync(entity);
+
+            // Preserve concurrency stamp — generated MapToEntity (ApplyTo) may
+            // overwrite it from DTO defaults (e.g. null), breaking the optimistic
+            // concurrency check in Repository.UpdateAsync.
+            var originalConcurrencyStamp = (entity as IHasConcurrencyStamp)?.ConcurrencyStamp;
             MapToEntity(input, entity);
+            if (entity is IHasConcurrencyStamp stamp && originalConcurrencyStamp is not null)
+                stamp.ConcurrencyStamp = originalConcurrencyStamp;
+
             await SetModificationAuditPropertiesAsync(entity);
             var updatedEntity = await Repository.UpdateAsync(entity, cancellationToken);
             return MapToDto(updatedEntity);
@@ -285,12 +293,12 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
 
             if (typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)))
             {
-                if (string.IsNullOrEmpty(expectedStamp))
+                if (!string.IsNullOrEmpty(expectedStamp))
                 {
-                    throw new CrestPreconditionRequiredException(typeof(TEntity).Name, id);
+                    await Repository.DeleteAsync(id, expectedStamp, cancellationToken);
+                    return;
                 }
-                await Repository.DeleteAsync(id, expectedStamp, cancellationToken);
-                return;
+                // No concurrency stamp provided — fall through to regular delete.
             }
 
             var entity = await Repository.GetAsync(id, cancellationToken);

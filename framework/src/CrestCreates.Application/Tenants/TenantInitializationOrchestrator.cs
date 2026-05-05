@@ -102,9 +102,14 @@ public class TenantInitializationOrchestrator
 
             // Set tenant context so DI-resolved services (repositories, managers)
             // use the correct connection string (independent DB) or TenantId data
-            // filtering (shared DB). The IDisposable scope restores the original
-            // tenant on disposal.
-            using var tenantScope = await _currentTenant.ChangeAsync(context.TenantId.ToString());
+            // filtering (shared DB). Use Change(ITenantInfo) to bypass the database
+            // lookup — the tenant may not be committed yet (outer UoW transaction).
+            // The IDisposable scope restores the original tenant on disposal.
+            var tenantInfo = new TenantInfo(
+                context.TenantId.ToString(),
+                context.TenantName,
+                context.ConnectionString);
+            using var tenantScope = _currentTenant.Change(tenantInfo);
 
             // Phase 3: Data Seed
             var step3 = await ExecutePhaseAsync("DataSeed", record,

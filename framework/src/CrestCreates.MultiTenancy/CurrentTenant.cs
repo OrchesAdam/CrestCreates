@@ -19,7 +19,7 @@ namespace CrestCreates.MultiTenancy
         public ITenantInfo Tenant => _currentTenant.Value?.Tenant;
         public string Id => Tenant?.Id;
 
-        public async Task<IDisposable> ChangeAsync(string tenantId)
+        public Task<IDisposable> ChangeAsync(string tenantId)
         {
             var oldTenant = Tenant;
             ITenantInfo newTenant = null;
@@ -27,17 +27,28 @@ namespace CrestCreates.MultiTenancy
             if (!string.IsNullOrEmpty(tenantId))
             {
                 var tenantProvider = _serviceProvider.GetRequiredService<ITenantProvider>();
-                newTenant = await tenantProvider.GetTenantAsync(tenantId);
+                newTenant = tenantProvider.GetTenantAsync(tenantId).GetAwaiter().GetResult();
             }
 
             _currentTenant.Value = new TenantContextHolder { Tenant = newTenant };
+
+            return Task.FromResult<IDisposable>(new DisposeAction(() =>
+            {
+                _currentTenant.Value = new TenantContextHolder { Tenant = oldTenant };
+            }));
+        }
+
+        public IDisposable Change(ITenantInfo tenant)
+        {
+            var oldTenant = Tenant;
+            _currentTenant.Value = new TenantContextHolder { Tenant = tenant };
 
             return new DisposeAction(() =>
             {
                 _currentTenant.Value = new TenantContextHolder { Tenant = oldTenant };
             });
         }
-        
+
         public void SetTenantId(string tenantId)
         {
             if (string.IsNullOrEmpty(tenantId))
@@ -45,7 +56,7 @@ namespace CrestCreates.MultiTenancy
                 _currentTenant.Value = new TenantContextHolder { Tenant = null };
                 return;
             }
-            
+
             var tenantProvider = _serviceProvider.GetRequiredService<ITenantProvider>();
             var tenant = tenantProvider.GetTenantAsync(tenantId).GetAwaiter().GetResult();
             _currentTenant.Value = new TenantContextHolder { Tenant = tenant };
