@@ -4,6 +4,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Text;
 
 namespace CrestCreates.CodeGenerator.DynamicApiGenerator;
@@ -11,13 +12,22 @@ namespace CrestCreates.CodeGenerator.DynamicApiGenerator;
 [Generator]
 public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
 {
+    private const string DynamicApiAotGenerationPropertyName = "build_property.CrestCreatesDynamicApiAotGeneration";
+
     private static readonly SymbolDisplayFormat FullyQualifiedFormat =
         SymbolDisplayFormat.FullyQualifiedFormat
             .WithMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var generationContextProvider = context.CompilationProvider.Select(static (compilation, _) => BuildGenerationContext(compilation));
+        var generationContextProvider = context.CompilationProvider
+            .Combine(context.AnalyzerConfigOptionsProvider)
+            .Select(static (input, _) =>
+            {
+                var (compilation, optionsProvider) = input;
+                return IsGenerationDisabled(optionsProvider) ? null : BuildGenerationContext(compilation);
+            });
+
         context.RegisterSourceOutput(generationContextProvider, static (productionContext, generationContext) =>
         {
             if (generationContext is null || generationContext.Services.Length == 0)
@@ -33,6 +43,20 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 "GeneratedDynamicApiEndpoints.g.cs",
                 SourceText.From(GenerateEndpointsSource(generationContext), Encoding.UTF8));
         });
+    }
+
+    private static bool IsGenerationDisabled(AnalyzerConfigOptionsProvider optionsProvider)
+    {
+        if (!optionsProvider.GlobalOptions.TryGetValue(DynamicApiAotGenerationPropertyName, out var value))
+        {
+            return false;
+        }
+
+        return value.Equals("false", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("off", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("disable", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("disabled", StringComparison.OrdinalIgnoreCase);
     }
 
     private static GenerationContext? BuildGenerationContext(Compilation compilation)

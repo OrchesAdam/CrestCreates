@@ -6,6 +6,8 @@
     <AssemblyName>CrestCreates.IntegrationTests</AssemblyName>
     <OutputType>Library</OutputType>
     <IsPackable>false</IsPackable>
+    <CrestCreatesCodeGeneration>false</CrestCreatesCodeGeneration>
+    <CrestCreatesDynamicApiAotGeneration>false</CrestCreatesDynamicApiAotGeneration>
   </PropertyGroup>
 
   <ItemGroup>

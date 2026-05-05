@@ -43,7 +43,7 @@ public class MultiTenancyMiddlewareTests
     public async Task InvokeAsync_WithValidTenant_SetsCurrentTenantAndCallsNext()
     {
         var services = new ServiceCollection();
-        services.AddSingleton<ITenantProvider>(new StaticTenantProvider("tenant-a"));
+        services.AddSingleton<ITenantProvider>(new DelayedTenantProvider("tenant-a"));
         var serviceProvider = services.BuildServiceProvider();
         var currentTenant = new CurrentTenant(serviceProvider);
         var nextCalled = false;
@@ -120,6 +120,22 @@ public class MultiTenancyMiddlewareTests
         public Task<ITenantInfo> GetTenantAsync(string tenantId, System.Threading.CancellationToken cancellationToken = default)
         {
             return Task.FromResult<ITenantInfo>(new TenantInfo(_tenantId, _tenantId));
+        }
+    }
+
+    private sealed class DelayedTenantProvider : ITenantProvider
+    {
+        private readonly string _tenantId;
+
+        public DelayedTenantProvider(string tenantId)
+        {
+            _tenantId = tenantId;
+        }
+
+        public async Task<ITenantInfo> GetTenantAsync(string tenantId, System.Threading.CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            return new TenantInfo(_tenantId, _tenantId);
         }
     }
 

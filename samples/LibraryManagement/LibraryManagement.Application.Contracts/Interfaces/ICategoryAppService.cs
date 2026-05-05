@@ -1,11 +1,10 @@
 using LibraryManagement.Application.Contracts.DTOs;
 using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
+using CrestCreates.Application.Contracts.Interfaces;
+using LibraryManagement.Domain.Entities;
 
 namespace LibraryManagement.Application.Contracts.Interfaces;
 
-public interface ICategoryAppService
+public interface ICategoryAppService : ICrestAppServiceBase<Category, Guid, CategoryDto, CreateCategoryDto, UpdateCategoryDto>
 {
 }

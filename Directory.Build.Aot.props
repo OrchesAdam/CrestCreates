@@ -33,7 +33,7 @@
     <ProjectReference Include="$(MSBuildThisFileDirectory)framework\tools\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false"
-                      Condition="$(MSBuildProjectName) != 'CrestCreates.CodeGenerator'" />
+                      Condition="$(MSBuildProjectName) != 'CrestCreates.CodeGenerator' and '$(CrestCreatesCodeGeneration)' != 'false'" />
   </ItemGroup>
 
   <!-- 为特定项目添加 AoT 配置 -->
