@@ -87,13 +87,13 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
             $"/api/feature/set-global?name={TestFeatureName}&value={TestFeatureGlobalValue}");
 
         var tenantId = await CreateTenantAndReturnIdAsync();
-        var (tenantClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, tenantId);
 
-        var setResponse = await tenantClient.GetAsync(
+        var setResponse = await hostClient.GetAsync(
             $"/api/feature/set-tenant?name={TestFeatureName}&tenantId={tenantId}&value={TestFeatureTenantValue}");
 
         setResponse.StatusCode.Should().Be(HttpStatusCode.OK, await setResponse.Content.ReadAsStringAsync());
 
+        var (tenantClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, tenantId);
         var getResponse = await tenantClient.GetAsync("/api/feature/current-tenant-values");
         getResponse.StatusCode.Should().Be(HttpStatusCode.OK, await getResponse.Content.ReadAsStringAsync());
 
@@ -121,18 +121,17 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
         globalFeature!.Value.Should().Be(TestFeatureGlobalValue, "global value should be set before testing fallback");
 
         var tenantId = await CreateTenantAndReturnIdAsync();
-        var (tenantClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, tenantId);
 
-        await tenantClient.GetAsync(
+        await hostClient.GetAsync(
             $"/api/feature/set-tenant?name={TestFeatureName}&tenantId={tenantId}&value={TestFeatureTenantValue}");
 
-        var deleteResponse = await tenantClient.GetAsync(
+        var deleteResponse = await hostClient.GetAsync(
             $"/api/feature/remove-tenant?name={TestFeatureName}&tenantId={tenantId}");
         deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK, await deleteResponse.Content.ReadAsStringAsync());
 
         // After removing tenant override, the feature should fallback to global
         // Use is-tenant-enabled to verify the fallback
-        var verifyResponse = await tenantClient.GetAsync($"/api/feature/is-tenant-enabled?tenantId={tenantId}&featureName={TestFeatureName}");
+        var verifyResponse = await hostClient.GetAsync($"/api/feature/is-tenant-enabled?tenantId={tenantId}&featureName={TestFeatureName}");
         verifyResponse.StatusCode.Should().Be(HttpStatusCode.OK, await verifyResponse.Content.ReadAsStringAsync());
         var verifyEnvelope = await ReadJsonAsync<DynamicApiResponse<bool>>(verifyResponse);
         verifyEnvelope.Data.Should().BeTrue("should fallback to global value (true) after tenant override is removed");
@@ -192,10 +191,9 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
             $"/api/feature/set-global?name={featureName}&value=false");
 
         var tenantId = await CreateTenantAndReturnIdAsync();
-        var (tenantClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, tenantId);
 
         // Enable for tenant
-        await tenantClient.GetAsync(
+        await hostClient.GetAsync(
             $"/api/feature/set-tenant?name={featureName}&tenantId={tenantId}&value=true");
 
         // Verify global resolution returns false
@@ -205,7 +203,7 @@ public class FeatureManagementIntegrationTests : IClassFixture<LibraryManagement
         globalEnvelope.Data.Should().BeFalse("global value should be false");
 
         // Verify tenant resolution returns true
-        var tenantEnabledResponse = await tenantClient.GetAsync($"/api/feature/is-tenant-enabled?tenantId={tenantId}&featureName={featureName}");
+        var tenantEnabledResponse = await hostClient.GetAsync($"/api/feature/is-tenant-enabled?tenantId={tenantId}&featureName={featureName}");
         tenantEnabledResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var tenantEnvelope = await ReadJsonAsync<DynamicApiResponse<bool>>(tenantEnabledResponse);
         tenantEnvelope.Data.Should().BeTrue("tenant value should be true");

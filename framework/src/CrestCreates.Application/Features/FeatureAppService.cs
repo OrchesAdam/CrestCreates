@@ -47,7 +47,7 @@ public class FeatureAppService : IFeatureAppService
 
     public async Task<List<FeatureValueDto>> GetTenantValuesAsync(string tenantId)
     {
-        EnsureCurrentTenantOrHost(tenantId, FeatureManagementPermissions.Read);
+        EnsureHostContext(FeatureManagementPermissions.Read);
         await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         return await GetScopedValuesAsync(FeatureScope.Tenant, tenantId, tenantId);
     }
@@ -61,14 +61,18 @@ public class FeatureAppService : IFeatureAppService
         return resolved.Select(_mapper.Map).ToList();
     }
 
-    public Task<FeatureValueDto?> GetGlobalValueAsync(string name)
+    public async Task<FeatureValueDto?> GetGlobalValueAsync(string name)
     {
-        return GetScopedValueAsync(name, FeatureScope.Global, string.Empty, null);
+        EnsureHostContext(FeatureManagementPermissions.Read);
+        await EnsureGrantedAsync(FeatureManagementPermissions.Read);
+        return await GetScopedValueAsync(name, FeatureScope.Global, string.Empty, null);
     }
 
-    public Task<FeatureValueDto?> GetTenantValueAsync(string name, string tenantId)
+    public async Task<FeatureValueDto?> GetTenantValueAsync(string name, string tenantId)
     {
-        return GetScopedValueAsync(name, FeatureScope.Tenant, tenantId, tenantId);
+        EnsureHostContext(FeatureManagementPermissions.Read);
+        await EnsureGrantedAsync(FeatureManagementPermissions.Read);
+        return await GetScopedValueAsync(name, FeatureScope.Tenant, tenantId, tenantId);
     }
 
     public async Task<FeatureValueDto?> GetCurrentTenantValueAsync(string name)
@@ -87,7 +91,7 @@ public class FeatureAppService : IFeatureAppService
 
     public async Task SetTenantAsync(string name, string tenantId, string? value, CancellationToken cancellationToken = default)
     {
-        EnsureCurrentTenantOrHost(tenantId, FeatureManagementPermissions.ManageTenant);
+        EnsureHostContext(FeatureManagementPermissions.ManageTenant);
         await EnsureGrantedAsync(FeatureManagementPermissions.ManageTenant);
         await _featureManager.SetTenantAsync(name, tenantId, value, cancellationToken);
     }
@@ -101,7 +105,7 @@ public class FeatureAppService : IFeatureAppService
 
     public async Task RemoveTenantAsync(string name, string tenantId, CancellationToken cancellationToken = default)
     {
-        EnsureCurrentTenantOrHost(tenantId, FeatureManagementPermissions.ManageTenant);
+        EnsureHostContext(FeatureManagementPermissions.ManageTenant);
         await EnsureGrantedAsync(FeatureManagementPermissions.ManageTenant);
         await _featureManager.RemoveTenantAsync(name, tenantId, cancellationToken);
     }
@@ -113,7 +117,7 @@ public class FeatureAppService : IFeatureAppService
 
     public async Task<bool> IsTenantEnabledAsync(string tenantId, string featureName, CancellationToken cancellationToken = default)
     {
-        EnsureCurrentTenantOrHost(tenantId, FeatureManagementPermissions.Read);
+        EnsureHostContext(FeatureManagementPermissions.Read);
         await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         var resolved = await _featureValueResolver.ResolveAsync(featureName, tenantId, cancellationToken);
         return bool.TryParse(resolved.Value, out var result) && result;
@@ -148,33 +152,7 @@ public class FeatureAppService : IFeatureAppService
 
     private void EnsureHostContext(string permission)
     {
-        // Allow when there is no tenant context (truly host) or when the
-        // current tenant is the special "host" tenant itself.
-        var tenantName = _currentTenant.Tenant?.Name;
-        if (tenantName is not null &&
-            !string.Equals(tenantName, "host", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new CrestPermissionException(permission);
-        }
-    }
-
-    private void EnsureCurrentTenantOrHost(string targetTenantId, string permission)
-    {
-        // Allow if there's no tenant context (truly host).
-        var currentTenant = _currentTenant.Tenant;
-        if (currentTenant is null)
-        {
-            return;
-        }
-
-        // Allow if the current tenant is the special "host" tenant itself.
-        if (string.Equals(currentTenant.Name, "host", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        // Otherwise, allow only if the target matches the current tenant.
-        if (!string.Equals(currentTenant.Id, targetTenantId.Trim(), StringComparison.OrdinalIgnoreCase))
+        if (_currentTenant.Tenant is not null)
         {
             throw new CrestPermissionException(permission);
         }
