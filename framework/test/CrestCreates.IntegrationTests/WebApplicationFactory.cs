@@ -271,7 +271,8 @@ public sealed class LibraryManagementWebApplicationFactory
                 ["SeedIdentity:UserName"] = "admin",
                 ["SeedIdentity:Email"] = "admin@library.local",
                 ["SeedIdentity:Password"] = "Admin123!",
-                ["CrestLogging:EnableFile"] = "false"
+                ["CrestLogging:EnableFile"] = "false",
+                ["AuditLogging:IsEnabledForGetRequests"] = "true"
             });
         });
 

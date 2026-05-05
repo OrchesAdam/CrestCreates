@@ -66,4 +66,9 @@ public class AuditLogListItemDto
     /// 客户端IP
     /// </summary>
     public string? ClientIpAddress { get; set; }
+
+    /// <summary>
+    /// 额外扩展数据（如 FeatureChanges）
+    /// </summary>
+    public System.Collections.Generic.Dictionary<string, object>? ExtraProperties { get; set; }
 }

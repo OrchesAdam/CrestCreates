@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Features;
+using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Features;
 using CrestPermissionException = CrestCreates.Domain.Exceptions.CrestPermissionException;
@@ -46,7 +47,7 @@ public class FeatureAppService : IFeatureAppService
 
     public async Task<List<FeatureValueDto>> GetTenantValuesAsync(string tenantId)
     {
-        EnsureHostContext(FeatureManagementPermissions.Read);
+        EnsureCurrentTenantOrHost(tenantId, FeatureManagementPermissions.Read);
         await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         return await GetScopedValuesAsync(FeatureScope.Tenant, tenantId, tenantId);
     }
@@ -86,7 +87,7 @@ public class FeatureAppService : IFeatureAppService
 
     public async Task SetTenantAsync(string name, string tenantId, string? value, CancellationToken cancellationToken = default)
     {
-        EnsureHostContext(FeatureManagementPermissions.ManageTenant);
+        EnsureCurrentTenantOrHost(tenantId, FeatureManagementPermissions.ManageTenant);
         await EnsureGrantedAsync(FeatureManagementPermissions.ManageTenant);
         await _featureManager.SetTenantAsync(name, tenantId, value, cancellationToken);
     }
@@ -100,7 +101,7 @@ public class FeatureAppService : IFeatureAppService
 
     public async Task RemoveTenantAsync(string name, string tenantId, CancellationToken cancellationToken = default)
     {
-        EnsureHostContext(FeatureManagementPermissions.ManageTenant);
+        EnsureCurrentTenantOrHost(tenantId, FeatureManagementPermissions.ManageTenant);
         await EnsureGrantedAsync(FeatureManagementPermissions.ManageTenant);
         await _featureManager.RemoveTenantAsync(name, tenantId, cancellationToken);
     }
@@ -112,7 +113,7 @@ public class FeatureAppService : IFeatureAppService
 
     public async Task<bool> IsTenantEnabledAsync(string tenantId, string featureName, CancellationToken cancellationToken = default)
     {
-        EnsureHostContext(FeatureManagementPermissions.Read);
+        EnsureCurrentTenantOrHost(tenantId, FeatureManagementPermissions.Read);
         await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         var resolved = await _featureValueResolver.ResolveAsync(featureName, tenantId, cancellationToken);
         return bool.TryParse(resolved.Value, out var result) && result;
@@ -147,7 +148,11 @@ public class FeatureAppService : IFeatureAppService
 
     private void EnsureHostContext(string permission)
     {
-        if (!string.IsNullOrWhiteSpace(_currentTenant.Id))
+        // Allow when there is no tenant context (truly host) or when the
+        // current tenant is the special "host" tenant itself.
+        var tenantName = _currentTenant.Tenant?.Name;
+        if (tenantName is not null &&
+            !string.Equals(tenantName, "host", StringComparison.OrdinalIgnoreCase))
         {
             throw new CrestPermissionException(permission);
         }
@@ -155,27 +160,23 @@ public class FeatureAppService : IFeatureAppService
 
     private void EnsureCurrentTenantOrHost(string targetTenantId, string permission)
     {
-        var currentTenantId = string.IsNullOrWhiteSpace(_currentTenant.Id) ? null : _currentTenant.Id.Trim();
-        if (currentTenantId is not null &&
-            !string.Equals(currentTenantId, targetTenantId.Trim(), StringComparison.OrdinalIgnoreCase))
+        // Allow if there's no tenant context (truly host).
+        var currentTenant = _currentTenant.Tenant;
+        if (currentTenant is null)
+        {
+            return;
+        }
+
+        // Allow if the current tenant is the special "host" tenant itself.
+        if (string.Equals(currentTenant.Name, "host", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        // Otherwise, allow only if the target matches the current tenant.
+        if (!string.Equals(currentTenant.Id, targetTenantId.Trim(), StringComparison.OrdinalIgnoreCase))
         {
             throw new CrestPermissionException(permission);
         }
     }
-}
-
-public interface IFeatureAppService
-{
-    Task<List<FeatureValueDto>> GetGlobalValuesAsync();
-    Task<List<FeatureValueDto>> GetTenantValuesAsync(string tenantId);
-    Task<List<FeatureValueDto>> GetCurrentTenantValuesAsync();
-    Task<FeatureValueDto?> GetGlobalValueAsync(string name);
-    Task<FeatureValueDto?> GetTenantValueAsync(string name, string tenantId);
-    Task<FeatureValueDto?> GetCurrentTenantValueAsync(string name);
-    Task SetGlobalAsync(string name, string? value, CancellationToken cancellationToken = default);
-    Task SetTenantAsync(string name, string tenantId, string? value, CancellationToken cancellationToken = default);
-    Task RemoveGlobalAsync(string name, CancellationToken cancellationToken = default);
-    Task RemoveTenantAsync(string name, string tenantId, CancellationToken cancellationToken = default);
-    Task<bool> IsEnabledAsync(string featureName, CancellationToken cancellationToken = default);
-    Task<bool> IsTenantEnabledAsync(string tenantId, string featureName, CancellationToken cancellationToken = default);
 }

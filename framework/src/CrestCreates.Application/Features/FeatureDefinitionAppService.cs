@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Features;
+using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.Features;
@@ -74,11 +75,4 @@ public class FeatureDefinitionAppService : IFeatureDefinitionAppService
             Scopes = definition.Scopes
         };
     }
-}
-
-public interface IFeatureDefinitionAppService
-{
-    Task<List<FeatureDefinitionDto>> GetAllAsync();
-    Task<FeatureDefinitionDto?> GetAsync(string name);
-    Task<List<FeatureGroupDto>> GetGroupsAsync();
 }

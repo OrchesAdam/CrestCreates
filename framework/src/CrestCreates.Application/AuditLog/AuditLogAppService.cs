@@ -52,7 +52,8 @@ public class AuditLogAppService : IAuditLogAppService
             ServiceName = item.ServiceName,
             MethodName = item.MethodName,
             Status = item.Status,
-            ClientIpAddress = item.ClientIpAddress
+            ClientIpAddress = item.ClientIpAddress,
+            ExtraProperties = item.ExtraProperties
         }).ToList();
 
         return new PagedResultDto<AuditLogListItemDto>(
