@@ -7,6 +7,7 @@ using CrestCreates.Application.Features;
 using CrestCreates.Caching;
 using CrestCreates.Caching.Abstractions;
 using CrestCreates.Domain.Features;
+using CrestCreates.Domain.Shared.Exceptions;
 using CrestCreates.Domain.Shared.Features;
 using CrestCreates.MultiTenancy.Abstract;
 using FluentAssertions;
@@ -76,8 +77,8 @@ public class FeatureManagementTests
     {
         var action = async () => await _featureManager.SetGlobalAsync("Unknown.Feature", "value");
 
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*未定义*");
+        var exception = await action.Should().ThrowAsync<CrestBusinessException>();
+        exception.Which.ErrorCode.Should().Be(FeatureManagementErrorCodes.UndefinedFeature);
     }
 
     [Fact]
@@ -85,8 +86,28 @@ public class FeatureManagementTests
     {
         var action = async () => await _featureManager.SetGlobalAsync("Identity.UserCreationEnabled", "abc");
 
-        await action.Should().ThrowAsync<ArgumentException>()
-            .WithMessage("*布尔值*");
+        var exception = await action.Should().ThrowAsync<CrestBusinessException>();
+        exception.Which.ErrorCode.Should().Be(FeatureManagementErrorCodes.InvalidValue);
+    }
+
+    [Fact]
+    public async Task UnknownFeature_ShouldThrowBusinessException()
+    {
+        var action = async () => await _featureManager.SetGlobalAsync("Unknown.Feature", "true");
+
+        var exception = await action.Should().ThrowAsync<CrestBusinessException>();
+        exception.Which.ErrorCode.Should().Be(FeatureManagementErrorCodes.UndefinedFeature);
+        exception.Which.Message.Should().Contain("Unknown.Feature");
+    }
+
+    [Fact]
+    public async Task InvalidFeatureValue_ShouldThrowBusinessException()
+    {
+        var action = async () => await _featureManager.SetGlobalAsync("Identity.UserCreationEnabled", "abc");
+
+        var exception = await action.Should().ThrowAsync<CrestBusinessException>();
+        exception.Which.ErrorCode.Should().Be(FeatureManagementErrorCodes.InvalidValue);
+        exception.Which.Message.Should().Contain("Identity.UserCreationEnabled");
     }
 
     [Fact]

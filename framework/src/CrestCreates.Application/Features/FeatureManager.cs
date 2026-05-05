@@ -92,7 +92,7 @@ public class FeatureManager : IFeatureManager
     {
         if (value == null)
         {
-            throw new ArgumentException("功能特性值不能为空，请使用删除接口移除覆盖值", nameof(value));
+            throw FeatureManagementExceptionFactory.InvalidValue(name, FeatureValueType.String, value);
         }
 
         var definition = EnsureDefinitionExists(name);
@@ -100,7 +100,14 @@ public class FeatureManager : IFeatureManager
         var normalizedProviderKey = NormalizeProviderKey(scope, providerKey, tenantId);
         var normalizedTenantId = NormalizeTenantId(scope, tenantId);
 
-        _featureValueTypeConverter.Validate(value, definition.ValueType, definition.Name);
+        try
+        {
+            _featureValueTypeConverter.Validate(value, definition.ValueType, definition.Name);
+        }
+        catch (ArgumentException)
+        {
+            throw FeatureManagementExceptionFactory.InvalidValue(definition.Name, definition.ValueType, value);
+        }
 
         var existing = await _featureRepository.FindAsync(
             definition.Name,
@@ -171,14 +178,14 @@ public class FeatureManager : IFeatureManager
     private FeatureDefinition EnsureDefinitionExists(string name)
     {
         return _featureDefinitionManager.GetOrNull(name)
-               ?? throw new InvalidOperationException($"未定义的功能特性: {name}");
+               ?? throw FeatureManagementExceptionFactory.UndefinedFeature(name);
     }
 
     private static void EnsureScopeAllowed(FeatureDefinition definition, FeatureScope scope)
     {
         if (!definition.SupportsScope(scope))
         {
-            throw new InvalidOperationException($"功能特性 '{definition.Name}' 不支持作用域 {scope}");
+            throw FeatureManagementExceptionFactory.UnsupportedScope(definition.Name, scope);
         }
     }
 
