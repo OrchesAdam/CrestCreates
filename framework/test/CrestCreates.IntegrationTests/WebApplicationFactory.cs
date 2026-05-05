@@ -12,6 +12,7 @@ using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.AuditLog;
+using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Authorization;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Permission;
@@ -276,6 +277,10 @@ public sealed class LibraryManagementWebApplicationFactory
         {
             // Module system resolves IServiceCollection post-build for OnConfigureServices
             services.AddSingleton<IServiceCollection>(services);
+
+            // Data filter state — enables tenant-filter on queries (normal startup registers
+            // this via PermissionModule.OnConfigureServices; must replicate inline for test host)
+            services.AddScoped<DataFilterState>();
 
             services.RemoveAll<DbContextOptions<LibraryDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<LibraryDbContext>>();
