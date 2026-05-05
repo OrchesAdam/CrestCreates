@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Features;
@@ -16,17 +17,20 @@ public class FeatureAppService : IFeatureAppService
     private readonly IFeatureProvider _featureProvider;
     private readonly IFeatureValueResolver _featureValueResolver;
     private readonly ICurrentTenant _currentTenant;
+    private readonly FeatureValueAppServiceMapper _mapper;
 
     public FeatureAppService(
         IFeatureManager featureManager,
         IFeatureProvider featureProvider,
         IFeatureValueResolver featureValueResolver,
-        ICurrentTenant currentTenant)
+        ICurrentTenant currentTenant,
+        FeatureValueAppServiceMapper mapper)
     {
         _featureManager = featureManager;
         _featureProvider = featureProvider;
         _featureValueResolver = featureValueResolver;
         _currentTenant = currentTenant;
+        _mapper = mapper;
     }
 
     public Task<List<FeatureValueDto>> GetGlobalValuesAsync()
@@ -39,15 +43,13 @@ public class FeatureAppService : IFeatureAppService
         return GetScopedValuesAsync(FeatureScope.Tenant, tenantId, tenantId);
     }
 
-    public Task<List<FeatureValueDto>> GetCurrentTenantValuesAsync()
+    public async Task<List<FeatureValueDto>> GetCurrentTenantValuesAsync()
     {
         var tenantId = _currentTenant.Id;
-        if (string.IsNullOrWhiteSpace(tenantId))
-        {
-            return GetGlobalValuesAsync();
-        }
+        var resolved = await _featureValueResolver.ResolveAllAsync(
+            tenantId: string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim());
 
-        return GetTenantValuesAsync(tenantId);
+        return resolved.Select(_mapper.Map).ToList();
     }
 
     public Task<FeatureValueDto?> GetGlobalValueAsync(string name)
@@ -60,15 +62,11 @@ public class FeatureAppService : IFeatureAppService
         return GetScopedValueAsync(name, FeatureScope.Tenant, tenantId, tenantId);
     }
 
-    public Task<FeatureValueDto?> GetCurrentTenantValueAsync(string name)
+    public async Task<FeatureValueDto?> GetCurrentTenantValueAsync(string name)
     {
-        var tenantId = _currentTenant.Id;
-        if (string.IsNullOrWhiteSpace(tenantId))
-        {
-            return GetGlobalValueAsync(name);
-        }
-
-        return GetTenantValueAsync(name, tenantId);
+        var tenantId = string.IsNullOrWhiteSpace(_currentTenant.Id) ? null : _currentTenant.Id.Trim();
+        var resolved = await _featureValueResolver.ResolveAsync(name, tenantId);
+        return _mapper.Map(resolved);
     }
 
     public Task SetGlobalAsync(string name, string? value, CancellationToken cancellationToken = default)
@@ -113,21 +111,7 @@ public class FeatureAppService : IFeatureAppService
         string? tenantId)
     {
         var values = await _featureManager.GetScopedValuesAsync(scope, providerKey, null, tenantId);
-        var dtos = new List<FeatureValueDto>();
-
-        foreach (var value in values)
-        {
-            dtos.Add(new FeatureValueDto
-            {
-                Name = value.Name,
-                Value = value.Value,
-                Scope = value.Scope,
-                ProviderKey = value.ProviderKey,
-                TenantId = value.TenantId
-            });
-        }
-
-        return dtos;
+        return values.Select(_mapper.Map).ToList();
     }
 
     private async Task<FeatureValueDto?> GetScopedValueAsync(
@@ -137,19 +121,7 @@ public class FeatureAppService : IFeatureAppService
         string? tenantId)
     {
         var value = await _featureManager.GetScopedValueOrNullAsync(name, scope, providerKey, tenantId);
-        if (value == null)
-        {
-            return null;
-        }
-
-        return new FeatureValueDto
-        {
-            Name = value.Name,
-            Value = value.Value,
-            Scope = value.Scope,
-            ProviderKey = value.ProviderKey,
-            TenantId = value.TenantId
-        };
+        return value == null ? null : _mapper.Map(value);
     }
 }
 

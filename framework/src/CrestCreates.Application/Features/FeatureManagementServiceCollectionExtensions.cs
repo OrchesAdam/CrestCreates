@@ -15,6 +15,7 @@ public static class FeatureManagementServiceCollectionExtensions
         services.TryAddSingleton<IFeatureDefinitionManager, FeatureDefinitionManager>();
         services.TryAddSingleton<FeatureCacheKeyContributor>();
         services.TryAddScoped<FeatureValueTypeConverter>();
+        services.TryAddScoped<FeatureValueAppServiceMapper>();
         services.TryAddScoped<IFeatureStore, FeatureStore>();
         services.TryAddScoped<IFeatureValueResolver, FeatureValueResolver>();
         services.TryAddScoped<IFeatureProvider, FeatureProvider>();

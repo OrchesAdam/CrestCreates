@@ -274,6 +274,37 @@ public class FeatureManagementTests
         tenant2After.Value.Should().Be("false");
     }
 
+    [Fact]
+    public async Task GetCurrentTenantValuesAsync_ShouldReturnResolvedDefinitions()
+    {
+        await _featureManager.SetGlobalAsync("Identity.UserCreationEnabled", "false");
+        await _featureManager.SetTenantAsync("Identity.UserCreationEnabled", "tenant-1", "true");
+
+        var currentTenant = new Mock<ICurrentTenant>();
+        currentTenant.SetupGet(x => x.Id).Returns("tenant-1");
+
+        var appService = new FeatureAppService(
+            _featureManager,
+            new FeatureProvider(
+                _featureDefinitionManager,
+                _featureValueResolver,
+                new FeatureValueTypeConverter(),
+                currentTenant.Object),
+            _featureValueResolver,
+            currentTenant.Object,
+            new FeatureValueAppServiceMapper());
+
+        var values = await appService.GetCurrentTenantValuesAsync();
+
+        values.Should().Contain(value =>
+            value.Name == "Identity.UserCreationEnabled" &&
+            value.Value == "true" &&
+            value.Scope == FeatureScope.Tenant &&
+            value.TenantId == "tenant-1");
+
+        values.Should().Contain(value => value.Name == "Storage.MaxFileCount");
+    }
+
     private sealed class GlobalOnlyFeatureProvider : IFeatureDefinitionProvider
     {
         public void Define(FeatureDefinitionContext context)
