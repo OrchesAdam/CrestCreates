@@ -24,22 +24,24 @@ public class FeatureDefinitionManager : IFeatureDefinitionManager
             .OrderBy(group => group.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        _definitions = new ReadOnlyDictionary<string, FeatureDefinition>(
-            _groups
-                .SelectMany(group => group.Definitions)
-                .GroupBy(definition => definition.Name, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(
-                    group => group.Key,
-                    group =>
-                    {
-                        if (group.Count() > 1)
-                        {
-                            throw new InvalidOperationException($"功能特性 '{group.Key}' 被重复定义");
-                        }
+        var definitions = _groups
+            .SelectMany(group => group.Definitions)
+            .ToArray();
 
-                        return group.Single();
-                    },
-                    StringComparer.OrdinalIgnoreCase));
+        var duplicate = definitions
+            .GroupBy(definition => definition.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+
+        if (duplicate is not null)
+        {
+            throw new InvalidOperationException($"重复的功能特性定义: {duplicate.Key}");
+        }
+
+        _definitions = new ReadOnlyDictionary<string, FeatureDefinition>(
+            definitions.ToDictionary(
+                definition => definition.Name,
+                definition => definition,
+                StringComparer.OrdinalIgnoreCase));
     }
 
     public IReadOnlyList<FeatureDefinitionGroup> GetGroups()

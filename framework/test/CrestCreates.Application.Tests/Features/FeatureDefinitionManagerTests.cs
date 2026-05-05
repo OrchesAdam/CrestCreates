@@ -110,4 +110,33 @@ public class FeatureDefinitionManagerTests
 
         definitions.Should().BeInAscendingOrder(d => d.Name);
     }
+
+    [Fact]
+    public void FeatureDefinitionManager_WithDuplicateName_ShouldFail()
+    {
+        var action = () => new FeatureDefinitionManager(
+            new IFeatureDefinitionProvider[]
+            {
+                new CoreFeatureDefinitionProvider(),
+                new DuplicateIdentityFeatureProvider()
+            });
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Identity.UserCreationEnabled*");
+    }
+
+    private sealed class DuplicateIdentityFeatureProvider : IFeatureDefinitionProvider
+    {
+        public void Define(FeatureDefinitionContext context)
+        {
+            context.GetOrAddGroup("Duplicate", "Duplicate")
+                .AddDefinition(
+                    "Identity.UserCreationEnabled",
+                    "Duplicate",
+                    "Duplicate definition",
+                    "true",
+                    FeatureValueType.Bool,
+                    FeatureScope.Global | FeatureScope.Tenant);
+        }
+    }
 }
