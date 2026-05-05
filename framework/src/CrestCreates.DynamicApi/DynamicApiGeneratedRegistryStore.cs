@@ -70,6 +70,6 @@ public static class DynamicApiGeneratedRegistryStore
             : string.Join(", ", options.ServiceAssemblies.Select(assembly => assembly.GetName().Name));
 
         return new InvalidOperationException(
-            $"Dynamic API 未找到编译期生成的 provider，当前主链只支持生成链。ServiceAssemblies: {assemblies}。如需临时诊断，可显式启用 {nameof(DynamicApiOptions.UseRuntimeReflectionFallback)}。");
+            $"Dynamic API 未找到编译期生成的 provider，当前主链只支持生成链。ServiceAssemblies: {assemblies}。请检查 CrestCreates.CodeGenerator 是否作为 analyzer 引用、应用服务程序集是否被当前项目引用、服务是否符合生成规则，以及 GeneratedDynamicApiRegistry.g.cs / GeneratedDynamicApiEndpoints.g.cs 是否生成并参与编译。");
     }
 }
