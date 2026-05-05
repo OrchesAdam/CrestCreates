@@ -62,6 +62,13 @@ public class FeatureAppServiceSecurityTests
             var resolver = new FeatureValueResolver(definitionManager, store);
             var currentTenant = new Mock<ICurrentTenant>();
             currentTenant.SetupGet(x => x.Id).Returns(currentTenantId ?? string.Empty);
+            if (currentTenantId is not null)
+            {
+                var tenantInfo = new Mock<ITenantInfo>();
+                tenantInfo.SetupGet(t => t.Id).Returns(currentTenantId);
+                tenantInfo.SetupGet(t => t.Name).Returns(currentTenantId);
+                currentTenant.SetupGet(x => x.Tenant).Returns(tenantInfo.Object);
+            }
 
             var permissionChecker = new Mock<IPermissionChecker>();
             permissionChecker
