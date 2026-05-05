@@ -40,9 +40,11 @@ public class FeatureAppService : IFeatureAppService
         _permissionChecker = permissionChecker;
     }
 
-    public Task<List<FeatureValueDto>> GetGlobalValuesAsync()
+    public async Task<List<FeatureValueDto>> GetGlobalValuesAsync()
     {
-        return GetScopedValuesAsync(FeatureScope.Global, string.Empty, null);
+        EnsureHostContext(FeatureManagementPermissions.Read);
+        await EnsureGrantedAsync(FeatureManagementPermissions.Read);
+        return await GetScopedValuesAsync(FeatureScope.Global, string.Empty, null);
     }
 
     public async Task<List<FeatureValueDto>> GetTenantValuesAsync(string tenantId)
