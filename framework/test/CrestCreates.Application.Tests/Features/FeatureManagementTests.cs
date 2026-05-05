@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Features;
+using CrestCreates.AuditLogging.Context;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Caching;
 using CrestCreates.Caching.Abstractions;
@@ -55,7 +56,8 @@ public class FeatureManagementTests
             _featureRepositoryMock.Object,
             _featureStore,
             new FeatureValueTypeConverter(),
-            new FeatureCacheInvalidator(cacheService, cacheKeyContributor));
+            new FeatureCacheInvalidator(cacheService, cacheKeyContributor),
+            new FeatureAuditRecorder());
     }
 
     [Fact]
@@ -231,7 +233,8 @@ public class FeatureManagementTests
             repoMock.Object,
             store,
             new FeatureValueTypeConverter(),
-            new FeatureCacheInvalidator(cacheService, cacheKeyContributor));
+            new FeatureCacheInvalidator(cacheService, cacheKeyContributor),
+            new FeatureAuditRecorder());
 
         var action = async () => await manager.SetTenantAsync("Global.Only", "tenant-1", "true");
 
@@ -308,6 +311,47 @@ public class FeatureManagementTests
             value.TenantId == "tenant-1");
 
         values.Should().Contain(value => value.Name == "Storage.MaxFileCount");
+    }
+
+    [Fact]
+    public async Task FeatureChange_ShouldWriteAuditEntry()
+    {
+        AuditContext.SetCurrentForTesting(new AuditContext
+        {
+            StartTime = DateTime.UtcNow,
+            ExecutionTime = DateTime.UtcNow,
+            UserId = "user-1",
+            TenantId = "tenant-1",
+            TraceId = "trace-1"
+        });
+
+        try
+        {
+            var auditedManager = new FeatureManager(
+                _featureDefinitionManager,
+                _featureRepositoryMock.Object,
+                _featureStore,
+                new FeatureValueTypeConverter(),
+                new FeatureCacheInvalidator(
+                    new CrestCacheService(
+                        new CrestMemoryCache(new CacheOptions { Prefix = $"FeatureAudit:{Guid.NewGuid():N}:" }),
+                        new CrestCacheKeyGenerator()),
+                    new FeatureCacheKeyContributor()),
+                new FeatureAuditRecorder());
+
+            await auditedManager.SetTenantAsync("Identity.UserCreationEnabled", "tenant-1", "true");
+
+            var auditContext = AuditContext.Current;
+            auditContext.Should().NotBeNull();
+            auditContext!.ExtraProperties.Should().ContainKey("FeatureChanges");
+            var changes = auditContext.ExtraProperties["FeatureChanges"] as List<FeatureAuditEntry>;
+            changes.Should().NotBeNull();
+            changes.Should().ContainSingle(entry => entry.FeatureName == "Identity.UserCreationEnabled");
+        }
+        finally
+        {
+            AuditContext.ClearCurrentForTesting();
+        }
     }
 
     private sealed class GlobalOnlyFeatureProvider : IFeatureDefinitionProvider

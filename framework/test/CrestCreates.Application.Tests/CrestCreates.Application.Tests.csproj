@@ -16,6 +16,7 @@
     <ProjectReference Include="..\..\src\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.EventBus.Abstract\CrestCreates.EventBus.Abstract.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.MultiTenancy\CrestCreates.MultiTenancy.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.AuditLogging\CrestCreates.AuditLogging.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -21,6 +21,7 @@ public static class FeatureManagementServiceCollectionExtensions
         services.TryAddScoped<IFeatureProvider, FeatureProvider>();
         services.TryAddScoped<IFeatureChecker, FeatureChecker>();
         services.TryAddScoped<IFeatureManager, FeatureManager>();
+        services.TryAddScoped<IFeatureAuditRecorder, FeatureAuditRecorder>();
         services.TryAddScoped<IFeatureDefinitionAppService, FeatureDefinitionAppService>();
         services.TryAddScoped<IFeatureAppService, FeatureAppService>();
         services.TryAddScoped<FeatureCacheInvalidator>();

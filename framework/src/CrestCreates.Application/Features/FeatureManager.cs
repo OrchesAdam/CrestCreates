@@ -16,19 +16,22 @@ public class FeatureManager : IFeatureManager
     private readonly IFeatureStore _featureStore;
     private readonly FeatureValueTypeConverter _featureValueTypeConverter;
     private readonly FeatureCacheInvalidator _featureCacheInvalidator;
+    private readonly IFeatureAuditRecorder _featureAuditRecorder;
 
     public FeatureManager(
         IFeatureDefinitionManager featureDefinitionManager,
         IFeatureRepository featureRepository,
         IFeatureStore featureStore,
         FeatureValueTypeConverter featureValueTypeConverter,
-        FeatureCacheInvalidator featureCacheInvalidator)
+        FeatureCacheInvalidator featureCacheInvalidator,
+        IFeatureAuditRecorder featureAuditRecorder)
     {
         _featureDefinitionManager = featureDefinitionManager;
         _featureRepository = featureRepository;
         _featureStore = featureStore;
         _featureValueTypeConverter = featureValueTypeConverter;
         _featureCacheInvalidator = featureCacheInvalidator;
+        _featureAuditRecorder = featureAuditRecorder;
     }
 
     public Task SetGlobalAsync(string name, string? value, CancellationToken cancellationToken = default)
@@ -116,6 +119,9 @@ public class FeatureManager : IFeatureManager
             normalizedTenantId,
             cancellationToken);
 
+        var oldValue = existing?.Value;
+        var normalizedValue = NormalizeValue(value, definition.ValueType);
+
         if (existing == null)
         {
             await _featureRepository.InsertAsync(
@@ -124,13 +130,13 @@ public class FeatureManager : IFeatureManager
                     definition.Name,
                     scope,
                     normalizedProviderKey,
-                    NormalizeValue(value, definition.ValueType),
+                    normalizedValue,
                     normalizedTenantId),
                 cancellationToken);
         }
         else
         {
-            existing.SetValue(NormalizeValue(value, definition.ValueType));
+            existing.SetValue(normalizedValue);
             await _featureRepository.UpdateAsync(existing, cancellationToken);
         }
 
@@ -139,6 +145,18 @@ public class FeatureManager : IFeatureManager
             scope,
             normalizedProviderKey,
             normalizedTenantId,
+            cancellationToken);
+
+        await _featureAuditRecorder.RecordAsync(
+            new FeatureAuditEntry
+            {
+                FeatureName = definition.Name,
+                Scope = scope,
+                TenantId = normalizedTenantId,
+                OldValue = oldValue,
+                NewValue = normalizedValue,
+                Operation = "Set"
+            },
             cancellationToken);
     }
 
@@ -166,12 +184,26 @@ public class FeatureManager : IFeatureManager
             return;
         }
 
+        var oldValue = existing.Value;
+
         await _featureRepository.DeleteAsync(existing, cancellationToken);
         await _featureCacheInvalidator.InvalidateAsync(
             definition.Name,
             scope,
             normalizedProviderKey,
             normalizedTenantId,
+            cancellationToken);
+
+        await _featureAuditRecorder.RecordAsync(
+            new FeatureAuditEntry
+            {
+                FeatureName = definition.Name,
+                Scope = scope,
+                TenantId = normalizedTenantId,
+                OldValue = oldValue,
+                NewValue = null,
+                Operation = "Remove"
+            },
             cancellationToken);
     }
 

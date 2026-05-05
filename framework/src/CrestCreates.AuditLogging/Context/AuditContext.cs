@@ -28,6 +28,16 @@ namespace CrestCreates.AuditLogging.Context
         internal static void ClearCurrent() => _current.Value = null;
 
         /// <summary>
+        /// 设置当前审计上下文（测试使用）
+        /// </summary>
+        public static void SetCurrentForTesting(AuditContext context) => _current.Value = context;
+
+        /// <summary>
+        /// 清除当前审计上下文（测试使用）
+        /// </summary>
+        public static void ClearCurrentForTesting() => _current.Value = null;
+
+        /// <summary>
         /// 跟踪ID
         /// </summary>
         public string? TraceId { get; set; }
