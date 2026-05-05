@@ -37,11 +37,11 @@ public class FeatureChecker : IFeatureChecker
     private async Task<bool> IsEnabledInternalAsync(string? tenantId, string featureName, CancellationToken cancellationToken)
     {
         var definition = _featureDefinitionManager.GetOrNull(featureName)
-                         ?? throw new InvalidOperationException($"未定义的功能特性: {featureName}");
+                         ?? throw FeatureManagementExceptionFactory.UndefinedFeature(featureName);
 
         if (!string.IsNullOrWhiteSpace(tenantId) && !definition.SupportsScope(FeatureScope.Tenant))
         {
-            throw new InvalidOperationException($"功能特性 '{featureName}' 不支持租户作用域");
+            throw FeatureManagementExceptionFactory.UnsupportedScope(featureName, FeatureScope.Tenant);
         }
 
         var resolved = await _featureValueResolver.ResolveAsync(featureName, tenantId, cancellationToken);
