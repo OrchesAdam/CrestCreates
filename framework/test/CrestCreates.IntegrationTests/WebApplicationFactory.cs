@@ -61,6 +61,8 @@ public sealed class LibraryManagementWebApplicationFactory
     private readonly string _schemaName = $"itest_{Guid.NewGuid():N}";
     private string _baseConnectionString = null!;
     private NpgsqlConnection _sharedConnection = null!;
+
+    internal NpgsqlConnection SharedConnection => _sharedConnection;
     private readonly SemaphoreSlim _seedLock = new(1, 1);
     private bool _seedCompleted;
 
@@ -396,11 +398,13 @@ public sealed class LibraryManagementWebApplicationFactory
     {
         public Task<TenantInitializationRecord?> TryBeginInitializationAsync(
             Guid tenantId, string correlationId, CancellationToken cancellationToken)
-            => Task.FromResult<TenantInitializationRecord?>(null);
+            => Task.FromResult<TenantInitializationRecord?>(
+                new TenantInitializationRecord(Guid.NewGuid(), tenantId, 1, correlationId));
 
         public Task<TenantInitializationRecord?> ForceBeginInitializationAsync(
             Guid tenantId, string correlationId, string reason, CancellationToken cancellationToken)
-            => Task.FromResult<TenantInitializationRecord?>(null);
+            => Task.FromResult<TenantInitializationRecord?>(
+                new TenantInitializationRecord(Guid.NewGuid(), tenantId, 1, correlationId));
 
         public Task<TenantInitializationRecord?> GetLatestAsync(
             Guid tenantId, CancellationToken cancellationToken)

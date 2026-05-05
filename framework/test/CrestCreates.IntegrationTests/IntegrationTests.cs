@@ -138,7 +138,7 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
             await deniedResponse.Content.ReadAsStringAsync());
 
         var deniedError = await ReadJsonAsync<ErrorResponse>(deniedResponse);
-        deniedError.Message.Should().Be("没有权限执行当前操作");
+        deniedError.Message.Should().Be("没有权限执行当前操作。");
 
         var grantResponse = await adminClient.GetAsync(
             $"/api/permission-grant/grant-to-user?userId={createdUser.Id}&permissionName=Book.Search&scope=0");
@@ -470,6 +470,7 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         public Guid Id { get; set; }
         public string Title { get; set; } = string.Empty;
         public string ISBN { get; set; } = string.Empty;
+        public string? ConcurrencyStamp { get; set; }
     }
 
     private sealed class ErrorResponse
