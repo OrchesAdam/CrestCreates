@@ -1,35 +1,319 @@
 <?xml version="1.0" encoding="utf-8"?>
 <featurePlan id="feature-management-mainline" group="第二批" priority="P1" status="draft">
-  <title>功能管理收口</title>
-  <goal>让 Feature Management 专注功能开关，不和 Setting Management 混用。</goal>
+  <title>Feature Management 主链收口</title>
+  <goal>把功能开关从定义、读取、覆盖、缓存、API、租户初始化到测试验收收口成一条主链；Feature Management 只管能力开关，不承载普通业务配置。</goal>
+
+  <context>
+    <currentState>
+      <item>已有 FeatureDefinition、FeatureDefinitionProvider、FeatureValue、FeatureStore、FeatureManager、FeatureProvider、FeatureChecker、FeatureAppService、EF Core repository 和缓存失效组件。</item>
+      <item>已有 Global/Tenant 两级 FeatureScope，解析顺序已经接近 tenant override -> global override -> definition default。</item>
+      <item>已有 TenantFeatureDefaultsSeeder，并接入租户初始化流程的 FeatureDefaults 阶段。</item>
+      <item>已有 Dynamic API 集成测试覆盖部分 Feature API，但主链边界、权限、安全和验收标准还需要写清楚。</item>
+    </currentState>
+    <mainlinePrinciples>
+      <item>Feature Management 使用独立 FeatureValue 主链，不把 feature flag 塞进 SettingValue。</item>
+      <item>普通运行时配置继续走 Setting Management；Feature 只表示某个能力是否开放或能力额度。</item>
+      <item>API 必须走 generated Dynamic API 主链，不补 runtime reflection scanner/executor。</item>
+      <item>租户上下文统一使用 CurrentTenant.Id 或明确传入 tenantId，不使用 TenantName 作为主键。</item>
+    </mainlinePrinciples>
+  </context>
+
   <scope>
-    <item>功能定义、默认值、host 覆盖、tenant 覆盖。</item>
-    <item>运行时检查 IFeatureChecker。</item>
-    <item>Feature 变更后缓存失效。</item>
+    <item>Feature 定义、默认值、分组、值类型、允许作用域。</item>
+    <item>Global 和 Tenant 两级覆盖值的读取、设置、删除和回退。</item>
+    <item>运行时检查 IFeatureProvider / IFeatureChecker。</item>
+    <item>Feature 变更后的缓存失效。</item>
+    <item>Host 管理全局和指定租户 Feature，租户上下文读取当前租户 Feature。</item>
+    <item>租户初始化时处理默认 Feature 值。</item>
+    <item>权限、审计、错误响应和集成测试验收。</item>
   </scope>
+
   <nonGoals>
-    <item>不承载普通业务配置；普通配置走 Setting Management。</item>
-    <item>不把权限判断写入 FeatureChecker。</item>
+    <item>不实现用户级 Feature override；本阶段只支持 Global 和 Tenant。</item>
+    <item>不实现灰度发布、百分比 rollout、实验平台或规则引擎。</item>
+    <item>不实现前端管理页面。</item>
+    <item>不把权限判断写进 FeatureChecker；权限仍走 Permission 主链。</item>
+    <item>不做远程配置中心或跨服务同步协议；只要求当前缓存主链可失效。</item>
   </nonGoals>
-  <implementation>
-    <step>定义 FeatureDefinition，包含 name、displayName、defaultValue、allowedScopes。</step>
-    <step>FeatureProvider 读取 tenant/host/default 覆盖链。</step>
-    <step>FeatureManager 写入 FeatureValue 后失效缓存。</step>
-    <step>FeatureAppService 提供当前租户与指定租户管理 API。</step>
-    <step>文档写清 Feature 与 Setting 的边界。</step>
-  </implementation>
+
+  <approach selected="A">
+    <option id="A" name="独立 FeatureValue 主链收口" recommendation="recommended">
+      <summary>保留 FeatureValue 独立表和现有 FeatureManager/Resolver/Store 架构，补清楚边界、权限、缓存、租户初始化和测试。</summary>
+      <pros>
+        <item>符合 Feature 与 Setting 分工。</item>
+        <item>改动集中，能复用现有代码。</item>
+        <item>不会破坏 Setting Management 已有主链。</item>
+      </pros>
+      <cons>
+        <item>需要维护一套与 Setting 类似但语义不同的定义、值和缓存组件。</item>
+      </cons>
+    </option>
+    <option id="B" name="复用 SettingValue 存储">
+      <summary>Feature 定义保留，但值写入 SettingValue。</summary>
+      <pros>
+        <item>少一张值表。</item>
+      </pros>
+      <cons>
+        <item>Feature 和 Setting 边界变模糊。</item>
+        <item>后续审计、权限和租户初始化容易混用。</item>
+      </cons>
+    </option>
+    <option id="C" name="高级规则引擎">
+      <summary>一次性加入用户、组织、百分比、表达式规则。</summary>
+      <pros>
+        <item>功能更强。</item>
+      </pros>
+      <cons>
+        <item>超出当前主链收口目标。</item>
+        <item>会引入复杂规则解释和运行时路径，不符合 YAGNI。</item>
+      </cons>
+    </option>
+  </approach>
+
+  <features>
+    <feature id="feature-definition">
+      <title>Feature 定义模型</title>
+      <gap>定义能力已有，但需要明确哪些字段是主链必需、哪些校验必须稳定。</gap>
+      <todo>
+        <item>确认 FeatureDefinition 包含 Name、DisplayName、Description、GroupName、DefaultValue、ValueType、Scopes。</item>
+        <item>FeatureDefinitionProvider 由模块注册定义，FeatureDefinitionManager 启动时聚合。</item>
+        <item>同名定义重复时应启动失败，不能静默覆盖。</item>
+        <item>DefaultValue 必须按 ValueType 规范化：Bool、Int、String。</item>
+        <item>Scopes 必须限制可写范围，例如只允许 Global 的 Feature 不能写 Tenant override。</item>
+      </todo>
+      <implementation>
+        <item>继续使用 Domain.Shared 的 FeatureDefinition / FeatureDefinitionGroup / FeatureScope / FeatureValueType。</item>
+        <item>继续使用 Domain 的 IFeatureDefinitionProvider / FeatureDefinitionManager。</item>
+        <item>新增或补齐定义重复、默认值非法、scope 不支持的单元测试。</item>
+      </implementation>
+      <acceptance>
+        <item>未定义 Feature 查询或写入返回明确业务错误，不返回随机默认值。</item>
+        <item>重复定义在启动或构造 FeatureDefinitionManager 时失败。</item>
+        <item>非法默认值不会进入运行时解析链。</item>
+      </acceptance>
+    </feature>
+
+    <feature id="feature-value-resolution">
+      <title>Feature 值解析链</title>
+      <gap>需要把解析顺序固定成框架契约，避免后续改动破坏租户覆盖。</gap>
+      <todo>
+        <item>固定解析顺序：Tenant override -> Global override -> Definition default。</item>
+        <item>无 CurrentTenant 时只解析 Global override -> Definition default。</item>
+        <item>ResolveAllAsync 必须按定义集合返回所有 Feature，不只返回有覆盖值的 Feature。</item>
+        <item>ResolvedFeatureValue 要带上来源 Scope、ProviderKey、TenantId，方便 API 和审计判断值来自哪里。</item>
+      </todo>
+      <implementation>
+        <item>继续由 IFeatureValueResolver 负责 fallback。</item>
+        <item>继续由 IFeatureProvider / IFeatureChecker 提供运行时读取入口。</item>
+        <item>FeatureProvider 只读当前上下文，不做写入。</item>
+      </implementation>
+      <acceptance>
+        <item>Tenant 显式值优先于 Global 和默认值。</item>
+        <item>删除 Tenant 值后立即回退到 Global。</item>
+        <item>删除 Global 值后立即回退到 Definition default。</item>
+        <item>ResolveAllAsync 返回定义中的全部 Feature，并标明每个值来源。</item>
+      </acceptance>
+    </feature>
+
+    <feature id="feature-write-management">
+      <title>Feature 写入管理</title>
+      <gap>写入必须统一走 FeatureManager，不能绕过 repository 直接写 FeatureValues。</gap>
+      <todo>
+        <item>SetGlobalAsync 写入 Global scope，ProviderKey 固定为空字符串。</item>
+        <item>SetTenantAsync 写入 Tenant scope，ProviderKey 和 TenantId 都使用 tenantId。</item>
+        <item>RemoveGlobalAsync 删除 Global override。</item>
+        <item>RemoveTenantAsync 删除 Tenant override。</item>
+        <item>写入前校验 Feature 已定义、ValueType 合法、Scope 支持。</item>
+        <item>重复设置同一 scope/name 时更新原记录，不插入重复记录。</item>
+      </todo>
+      <implementation>
+        <item>继续由 IFeatureManager 作为唯一写入口。</item>
+        <item>EF Core repository 需要保证按 Name + Scope + ProviderKey + TenantId 查找唯一记录。</item>
+        <item>数据库层应有唯一索引防止并发重复写入。</item>
+      </implementation>
+      <acceptance>
+        <item>同一租户同一 Feature 多次 Set 只保留一条有效记录。</item>
+        <item>不支持 Tenant scope 的 Feature 调用 SetTenantAsync 会失败。</item>
+        <item>非法 Bool/Int 值写入失败，String 按定义规则 trim 或保留。</item>
+      </acceptance>
+    </feature>
+
+    <feature id="feature-cache">
+      <title>缓存与失效</title>
+      <gap>Feature 读取依赖缓存，写入后必须精准失效，否则租户覆盖会读到旧值。</gap>
+      <todo>
+        <item>缓存 key 必须包含 Scope、ProviderKey、TenantId、FeatureName。</item>
+        <item>Set/Remove Global 后失效 Global 单项和 Global scope 列表缓存。</item>
+        <item>Set/Remove Tenant 后失效该 Tenant 单项和 Tenant scope 列表缓存。</item>
+        <item>Tenant 解析使用 Global + Tenant 列表时，Tenant 变更不能误清其他租户缓存。</item>
+      </todo>
+      <implementation>
+        <item>继续使用 FeatureCacheKeyContributor 和 FeatureCacheInvalidator。</item>
+        <item>FeatureStore 负责读缓存；FeatureManager 写入后调用 invalidator。</item>
+        <item>如果当前缓存服务不支持分布式同步，本计划只要求本实例缓存正确失效，跨实例同步归 caching 计划。</item>
+      </implementation>
+      <acceptance>
+        <item>同请求外的新读取能拿到最新 Feature 值。</item>
+        <item>Tenant A 变更不影响 Tenant B 的缓存。</item>
+        <item>删除覆盖值后不残留旧缓存。</item>
+      </acceptance>
+    </feature>
+
+    <feature id="dynamic-api-and-permission">
+      <title>Generated Dynamic API 与权限</title>
+      <gap>Feature 管理 API 必须走 generated Dynamic API 主链，并明确 host/tenant 权限边界。</gap>
+      <todo>
+        <item>FeatureDefinitionAppService 提供定义和分组查询 API。</item>
+        <item>FeatureAppService 提供 Global、指定 Tenant、当前 Tenant 的读写 API。</item>
+        <item>Host 才能调用 SetGlobalAsync、RemoveGlobalAsync、SetTenantAsync、RemoveTenantAsync、IsTenantEnabledAsync。</item>
+        <item>租户用户只能读取当前租户 Feature，不能传任意 tenantId 管理其他租户。</item>
+        <item>API 必须由 DynamicApiAotSourceGenerator 生成端点，测试不应依赖 runtime scanner。</item>
+      </todo>
+      <implementation>
+        <item>补齐 IFeatureAppService / IFeatureDefinitionAppService 契约所在位置，确保 source generator 能生成端点。</item>
+        <item>给管理方法绑定权限，例如 FeatureManagement.ManageGlobal、FeatureManagement.ManageTenant、FeatureManagement.Read。</item>
+        <item>跨租户写入前校验调用者是 host 或拥有明确管理权限。</item>
+      </implementation>
+      <acceptance>
+        <item>Swagger 中能看到 generated Feature API。</item>
+        <item>无权限用户调用写 API 返回 403。</item>
+        <item>租户 A 不能修改租户 B 的 Feature。</item>
+        <item>关闭 runtime reflection path 后 Feature API 仍可用。</item>
+      </acceptance>
+    </feature>
+
+    <feature id="tenant-initialization">
+      <title>租户初始化集成</title>
+      <gap>新租户创建后 Feature 默认值必须和租户初始化主链一致，不能在业务服务里临时补。</gap>
+      <todo>
+        <item>TenantFeatureDefaultsSeeder 作为 TenantInitializationOrchestrator 的 FeatureDefaults 阶段。</item>
+        <item>Seeder 必须在当前租户上下文下解析 IFeatureManager。</item>
+        <item>默认行为优先惰性读取 Definition default；只有需要显式 tenant override 的定义才写 Tenant FeatureValue。</item>
+        <item>Seeder 必须幂等，重复执行不产生重复 FeatureValue。</item>
+      </todo>
+      <implementation>
+        <item>复用 tenant-db-lifecycle 中的 TenantInitializationContext。</item>
+        <item>Seeder 从新 scope 解析 IFeatureManager，保证 CurrentTenant 生效。</item>
+        <item>失败要进入 TenantInitializationRecord 的 FeatureDefaults step。</item>
+      </implementation>
+      <acceptance>
+        <item>共享库和独立库租户初始化都会执行 FeatureDefaults 阶段。</item>
+        <item>FeatureDefaults 失败时租户状态变为 Failed，可查询错误并重试。</item>
+        <item>重试不会插入重复 FeatureValue。</item>
+      </acceptance>
+    </feature>
+
+    <feature id="audit-and-errors">
+      <title>审计与错误处理</title>
+      <gap>Feature 变更影响系统能力开关，必须可审计，错误响应也要统一。</gap>
+      <todo>
+        <item>Feature 写入和删除要进入审计日志，记录 Name、Scope、TenantId、OldValue、NewValue、Operator。</item>
+        <item>未定义 Feature、非法值、scope 不支持、跨租户访问都返回统一异常格式。</item>
+        <item>错误消息不泄露内部栈或 SQL。</item>
+      </todo>
+      <implementation>
+        <item>应用层抛 CrestBusinessException 或更具体的 FeatureManagement 异常。</item>
+        <item>依赖全局异常处理中间件转换为统一响应。</item>
+        <item>审计记录接入现有 AuditLogging 主链，不新增旁路日志表。</item>
+      </implementation>
+      <acceptance>
+        <item>非法 Feature 操作返回统一错误结构。</item>
+        <item>Feature 修改后能在审计日志查询到变更记录。</item>
+      </acceptance>
+    </feature>
+  </features>
+
+  <dataModel>
+    <entity name="FeatureValue">
+      <field>Name</field>
+      <field>Value</field>
+      <field>Scope</field>
+      <field>ProviderKey</field>
+      <field>TenantId</field>
+      <field>ConcurrencyStamp</field>
+      <constraint>唯一索引建议为 Name + Scope + ProviderKey + TenantId。</constraint>
+      <constraint>Tenant scope 必须有 TenantId；Global scope 的 TenantId 必须为空。</constraint>
+    </entity>
+    <definition name="FeatureDefinition">
+      <field>Name</field>
+      <field>DisplayName</field>
+      <field>Description</field>
+      <field>GroupName</field>
+      <field>DefaultValue</field>
+      <field>ValueType</field>
+      <field>Scopes</field>
+    </definition>
+  </dataModel>
+
+  <apiSurface>
+    <api name="FeatureDefinitionAppService.GetGroupsAsync">
+      <purpose>返回 Feature 分组和定义，用于管理端展示和测试定义聚合。</purpose>
+    </api>
+    <api name="FeatureAppService.GetGlobalValuesAsync">
+      <purpose>Host 查看全局覆盖值。</purpose>
+    </api>
+    <api name="FeatureAppService.GetTenantValuesAsync">
+      <purpose>Host 查看指定租户覆盖值。</purpose>
+    </api>
+    <api name="FeatureAppService.GetCurrentTenantValuesAsync">
+      <purpose>当前租户查看自身解析后的 Feature 值。</purpose>
+    </api>
+    <api name="FeatureAppService.SetGlobalAsync">
+      <purpose>Host 设置全局覆盖值。</purpose>
+    </api>
+    <api name="FeatureAppService.SetTenantAsync">
+      <purpose>Host 设置指定租户覆盖值。</purpose>
+    </api>
+    <api name="FeatureAppService.RemoveGlobalAsync">
+      <purpose>Host 删除全局覆盖，使其回退到默认值。</purpose>
+    </api>
+    <api name="FeatureAppService.RemoveTenantAsync">
+      <purpose>Host 删除租户覆盖，使其回退到全局值或默认值。</purpose>
+    </api>
+    <api name="FeatureAppService.IsEnabledAsync">
+      <purpose>按当前上下文检查布尔 Feature 是否启用。</purpose>
+    </api>
+    <api name="FeatureAppService.IsTenantEnabledAsync">
+      <purpose>Host 显式检查某租户布尔 Feature 是否启用。</purpose>
+    </api>
+  </apiSurface>
+
   <acceptanceCriteria>
-    <criterion>tenant 显式值优先于 host/default。</criterion>
-    <criterion>未定义 feature 查询返回明确错误，不返回随机默认值。</criterion>
-    <criterion>修改 feature 后同请求外的新读取拿到最新值。</criterion>
+    <criterion>解析顺序稳定：tenant override -> global override -> definition default。</criterion>
+    <criterion>未定义 Feature 查询或写入返回明确错误，不返回随机默认值。</criterion>
+    <criterion>修改 Feature 后，同请求外的新读取拿到最新值。</criterion>
+    <criterion>删除 Tenant override 后回退到 Global；删除 Global override 后回退到 Definition default。</criterion>
+    <criterion>租户 A 不能读取或修改租户 B 的 Feature 覆盖值。</criterion>
+    <criterion>Host 可以管理 Global 和指定 Tenant Feature。</criterion>
+    <criterion>Feature API 在关闭 runtime reflection fallback 后仍通过 generated Dynamic API 可用。</criterion>
+    <criterion>FeatureDefaults 阶段接入租户初始化，失败可查询、可重试。</criterion>
+    <criterion>Feature 变更写入审计日志。</criterion>
   </acceptanceCriteria>
+
   <tests>
-    <test>IsEnabledAsync_ShouldUseTenantOverride</test>
-    <test>SetTenantFeature_ShouldInvalidateCache</test>
-    <test>UnknownFeature_ShouldThrowBusinessException</test>
+    <test name="FeatureDefinitionManager_WithDuplicateName_ShouldFail">重复定义不能静默覆盖。</test>
+    <test name="FeatureValueResolver_ShouldUseTenantThenGlobalThenDefault">验证核心 fallback 顺序。</test>
+    <test name="RemoveTenantFeature_ShouldFallbackToGlobal">删除租户覆盖后回退全局值。</test>
+    <test name="RemoveGlobalFeature_ShouldFallbackToDefault">删除全局覆盖后回退定义默认值。</test>
+    <test name="SetTenantFeature_ShouldInvalidateOnlyThatTenantCache">验证缓存 key 包含租户作用域。</test>
+    <test name="SetGlobalFeature_ShouldInvalidateGlobalCache">验证全局缓存失效。</test>
+    <test name="UnknownFeature_ShouldThrowBusinessException">未知 Feature 返回统一业务异常。</test>
+    <test name="InvalidFeatureValue_ShouldBeRejected">非法 Bool/Int 值不能持久化。</test>
+    <test name="TenantUser_ShouldNotManageOtherTenantFeature">跨租户管理必须拒绝。</test>
+    <test name="FeatureDynamicApi_ShouldWorkOnGeneratedPath">验证 generated Dynamic API 主链。</test>
+    <test name="FeatureControlsRealCapability_TenantOverridesGlobal">Feature 值实际控制业务能力。</test>
+    <test name="TenantFeatureDefaultsSeeder_ShouldBeIdempotent">租户初始化重试不会重复写 FeatureValue。</test>
+    <test name="FeatureChange_ShouldWriteAuditLog">Feature 变更可审计。</test>
   </tests>
+
   <reviewChecklist>
-    <item>没有把 feature flag 放进 SettingValue。</item>
-    <item>缓存 key 包含 tenant scope。</item>
+    <item>没有把 Feature flag 放进 SettingValue。</item>
+    <item>没有新增 runtime reflection Dynamic API 路径。</item>
+    <item>缓存 key 包含 scope、providerKey、tenantId、featureName。</item>
+    <item>TenantId 使用 CurrentTenant.Id 或显式 tenantId，不使用 TenantName。</item>
+    <item>FeatureManager 是唯一写入口，AppService 和 Seeder 不直接写 FeatureRepository。</item>
+    <item>Host 与 Tenant 权限边界清楚，租户不能传 tenantId 管理其他租户。</item>
+    <item>FeatureDefaults 阶段失败会写入 TenantInitializationRecord。</item>
+    <item>测试验证的是 generated Dynamic API 主链，不强化 legacy runtime scanner。</item>
   </reviewChecklist>
 </featurePlan>
