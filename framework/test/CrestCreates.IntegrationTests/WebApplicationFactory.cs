@@ -26,7 +26,10 @@ using CrestCreates.OrmProviders.EFCore.Settings;
 using CrestCreates.OrmProviders.EFCore.UnitOfWork;
 using Microsoft.EntityFrameworkCore;
 using LibraryManagement.EntityFrameworkCore;
+using LibraryManagement.Domain.Repositories;
 using LibraryManagement.EntityFrameworkCore.Repositories;
+using LibraryManagement.Application.Contracts.Interfaces;
+using LibraryManagement.Application.Services;
 using Npgsql;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -36,6 +39,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.TestHost;
 using OpenIddict.Abstractions;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -268,7 +272,7 @@ public sealed class LibraryManagementWebApplicationFactory
             });
         });
 
-        builder.ConfigureServices(services =>
+        builder.ConfigureTestServices(services =>
         {
             // Module system resolves IServiceCollection post-build for OnConfigureServices
             services.AddSingleton<IServiceCollection>(services);
@@ -332,6 +336,10 @@ public sealed class LibraryManagementWebApplicationFactory
                 sp.GetRequiredService<IDomainEventPublisher>()));
 
             // Sample-specific repositories
+            services.AddScoped<IBookRepository, BookRepository>();
+            services.AddScoped<ICategoryRepository, CategoryRepository>();
+            services.AddScoped<IMemberRepository, MemberRepository>();
+            services.AddScoped<ILoanRepository, LoanRepository>();
             services.AddScoped<IPermissionGrantRepository, PermissionGrantRepository>();
             services.AddScoped<IPermissionRepository, PermissionRepository>();
             services.AddScoped<IRoleRepository, RoleRepository>();
@@ -341,6 +349,13 @@ public sealed class LibraryManagementWebApplicationFactory
             services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
             services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
             services.AddSettingManagementEfCore();
+
+            // Application services — normally registered by ApplicationModule.OnConfigureServices()
+            // (module OnConfigureServices runs post-build, so test factory must register them inline)
+            services.AddScoped<IBookAppService, BookAppService>();
+            services.AddScoped<ICategoryAppService, CategoryAppService>();
+            services.AddScoped<IMemberAppService, MemberAppService>();
+            services.AddScoped<ILoanAppService, LoanAppService>();
 
             // Tenant infrastructure - use no-op stubs since EfCoreTenantDatabaseInitializer
             // uses SQL Server SqlConnection which doesn't work with PostgreSQL test containers
