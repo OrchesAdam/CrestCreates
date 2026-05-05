@@ -32,16 +32,20 @@ public class TenantSeederScopeTests
         var definitionManager = new Mock<ISettingDefinitionManager>();
         definitionManager.Setup(d => d.GetAll()).Returns(Array.Empty<SettingDefinition>());
 
-        var scopeProvider = new Mock<IServiceProvider>();
+        var scopedProvider = new Mock<IServiceProvider>();
         var scope = new Mock<IServiceScope>();
-        var scopedServiceProvider = new Mock<IServiceProvider>();
         var settingManager = new Mock<ISettingManager>();
 
-        scope.Setup(s => s.ServiceProvider).Returns(scopedServiceProvider.Object);
-        scopeProvider.Setup(p => p.CreateScope()).Returns(scope.Object);
-        scopedServiceProvider
+        scope.Setup(s => s.ServiceProvider).Returns(scopedProvider.Object);
+        scopedProvider
             .Setup(p => p.GetService(typeof(ISettingManager)))
             .Returns(settingManager.Object);
+
+        var scopeFactory = new Mock<IServiceScopeFactory>();
+        scopeFactory.Setup(x => x.CreateScope()).Returns(scope.Object);
+
+        var scopeProvider = new Mock<IServiceProvider>();
+        scopeProvider.Setup(p => p.GetService(typeof(IServiceScopeFactory))).Returns(scopeFactory.Object);
 
         var seeder = new TenantSettingDefaultsSeeder(
             definitionManager.Object,
@@ -51,9 +55,9 @@ public class TenantSeederScopeTests
         var result = await seeder.SeedAsync(CreateContext());
 
         result.Success.Should().BeTrue();
-        scopeProvider.Verify(p => p.CreateScope(), Times.Once,
+        scopeProvider.Verify(p => p.GetService(typeof(IServiceScopeFactory)), Times.AtLeastOnce,
             "TenantSettingDefaultsSeeder must create a new scope to pick up ICurrentTenant context");
-        scopedServiceProvider.Verify(p => p.GetService(typeof(ISettingManager)), Times.AtLeastOnce,
+        scopedProvider.Verify(p => p.GetService(typeof(ISettingManager)), Times.AtLeastOnce,
             "ISettingManager must be resolved from the new scope, not the root provider");
     }
 
@@ -63,16 +67,20 @@ public class TenantSeederScopeTests
         var definitionManager = new Mock<IFeatureDefinitionManager>();
         definitionManager.Setup(d => d.GetAll()).Returns(Array.Empty<FeatureDefinition>());
 
-        var scopeProvider = new Mock<IServiceProvider>();
+        var scopedProvider = new Mock<IServiceProvider>();
         var scope = new Mock<IServiceScope>();
-        var scopedServiceProvider = new Mock<IServiceProvider>();
         var featureManager = new Mock<IFeatureManager>();
 
-        scope.Setup(s => s.ServiceProvider).Returns(scopedServiceProvider.Object);
-        scopeProvider.Setup(p => p.CreateScope()).Returns(scope.Object);
-        scopedServiceProvider
+        scope.Setup(s => s.ServiceProvider).Returns(scopedProvider.Object);
+        scopedProvider
             .Setup(p => p.GetService(typeof(IFeatureManager)))
             .Returns(featureManager.Object);
+
+        var scopeFactory = new Mock<IServiceScopeFactory>();
+        scopeFactory.Setup(x => x.CreateScope()).Returns(scope.Object);
+
+        var scopeProvider = new Mock<IServiceProvider>();
+        scopeProvider.Setup(p => p.GetService(typeof(IServiceScopeFactory))).Returns(scopeFactory.Object);
 
         var seeder = new TenantFeatureDefaultsSeeder(
             definitionManager.Object,
@@ -82,9 +90,75 @@ public class TenantSeederScopeTests
         var result = await seeder.SeedAsync(CreateContext());
 
         result.Success.Should().BeTrue();
-        scopeProvider.Verify(p => p.CreateScope(), Times.Once,
+        scopeProvider.Verify(p => p.GetService(typeof(IServiceScopeFactory)), Times.AtLeastOnce,
             "TenantFeatureDefaultsSeeder must create a new scope to pick up ICurrentTenant context");
-        scopedServiceProvider.Verify(p => p.GetService(typeof(IFeatureManager)), Times.AtLeastOnce,
+        scopedProvider.Verify(p => p.GetService(typeof(IFeatureManager)), Times.AtLeastOnce,
             "IFeatureManager must be resolved from the new scope, not the root provider");
+    }
+
+    [Fact]
+    public async Task FeatureDefaultsSeeder_ShouldBeIdempotent()
+    {
+        var definitionManager = new Mock<IFeatureDefinitionManager>();
+        definitionManager.Setup(x => x.GetAll()).Returns(new[]
+        {
+            new FeatureDefinition(
+                "Identity.UserCreationEnabled",
+                "Identity",
+                displayName: "User creation",
+                description: "Allows creating users",
+                defaultValue: "true",
+                valueType: FeatureValueType.Bool,
+                scopes: FeatureScope.Global | FeatureScope.Tenant)
+        });
+
+        var featureManager = new Mock<IFeatureManager>();
+        featureManager
+            .Setup(x => x.GetScopedValueOrNullAsync(
+                It.IsAny<string>(),
+                It.IsAny<FeatureScope>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FeatureValueEntry
+            {
+                Name = "Identity.UserCreationEnabled",
+                Value = "true",
+                Scope = FeatureScope.Tenant,
+                ProviderKey = "tenant-1",
+                TenantId = "tenant-1"
+            });
+
+        var scopedProvider = new Mock<IServiceProvider>();
+        scopedProvider.Setup(x => x.GetService(typeof(IFeatureManager))).Returns(featureManager.Object);
+
+        var scope = new Mock<IServiceScope>();
+        scope.SetupGet(x => x.ServiceProvider).Returns(scopedProvider.Object);
+
+        var scopeFactory = new Mock<IServiceScopeFactory>();
+        scopeFactory.Setup(x => x.CreateScope()).Returns(scope.Object);
+
+        var rootProvider = new Mock<IServiceProvider>();
+        rootProvider.Setup(x => x.GetService(typeof(IServiceScopeFactory))).Returns(scopeFactory.Object);
+
+        var seeder = new TenantFeatureDefaultsSeeder(
+            definitionManager.Object,
+            rootProvider.Object,
+            Mock.Of<ILogger<TenantFeatureDefaultsSeeder>>());
+
+        var result = await seeder.SeedAsync(new TenantInitializationContext
+        {
+            TenantId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            TenantName = "tenant-1",
+            CorrelationId = "test",
+            ConnectionString = null
+        });
+
+        result.Success.Should().BeTrue();
+        featureManager.Verify(x => x.SetTenantAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 }

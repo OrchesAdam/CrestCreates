@@ -40,8 +40,8 @@ public class TenantFeatureDefaultsSeeder : ITenantFeatureDefaultsSeeder
             var featureManager = scope.ServiceProvider.GetRequiredService<IFeatureManager>();
             var tenantId = context.TenantId.ToString();
             var definitions = _featureDefinitionManager.GetAll()
-                .Where(d => d.SupportsScope(FeatureScope.Tenant) && d.DefaultValue != null)
-                .ToList();
+                .Where(definition => definition.SupportsScope(FeatureScope.Tenant))
+                .ToArray();
 
             foreach (var definition in definitions)
             {
@@ -52,19 +52,18 @@ public class TenantFeatureDefaultsSeeder : ITenantFeatureDefaultsSeeder
                     tenantId,
                     cancellationToken);
 
-                if (existing == null)
+                if (existing is not null)
                 {
-                    await featureManager.SetTenantAsync(
-                        definition.Name,
-                        tenantId,
-                        definition.GetNormalizedDefaultValue(),
-                        cancellationToken);
+                    continue;
                 }
+
+                // Default behavior is lazy fallback. Current definitions do not declare explicit tenant
+                // defaults, so no write is needed.
             }
 
             _logger.LogInformation(
-                "Seeded {Count} tenant feature defaults for tenant {TenantId}",
-                definitions.Count, context.TenantId);
+                "Checked {Count} tenant feature definitions for tenant {TenantId}",
+                definitions.Length, context.TenantId);
 
             return TenantFeatureDefaultsResult.Succeeded();
         }
