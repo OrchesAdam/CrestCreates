@@ -56,6 +56,8 @@ namespace CrestCreates.Web
             services.AddCrestLogging(Configuration);
             services.Configure<AuditLoggingOptions>(Configuration.GetSection(AuditLoggingOptions.SectionName));
             services.AddScoped<AuditLoggingMiddleware>();
+            services.AddScoped<IAuditLogRedactor, AuditLogRedactor>();
+            services.AddScoped<IAuditLogWriter, AuditLogWriter>();
             services.AddScoped<IAuditLogService, AuditLogService>();
 
             services.AddControllers()

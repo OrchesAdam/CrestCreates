@@ -35,6 +35,8 @@ builder.Services.AddCrestLogging(builder.Configuration);
 builder.Services.Configure<AuditLoggingOptions>(
     builder.Configuration.GetSection(AuditLoggingOptions.SectionName));
 builder.Services.AddScoped<AuditLoggingMiddleware>();
+builder.Services.AddScoped<IAuditLogRedactor, AuditLogRedactor>();
+builder.Services.AddScoped<IAuditLogWriter, AuditLogWriter>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddAuditLogging();
 
@@ -70,11 +72,7 @@ builder.Services.AddCrestExceptionHandling();
 builder.Services.AddTenantManagement();
 builder.Services.AddTenantBootstrapper();
 builder.Services.AddTenantManagementCore();
-builder.Services.AddMediatR(configuration =>
-{
-    configuration.RegisterServicesFromAssembly(typeof(BookAppService).Assembly);
-    configuration.RegisterServicesFromAssembly(typeof(Program).Assembly);
-});
+
 builder.Services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, LocalEventBus>();
 builder.Services.AddScoped<IDomainEventPublisher, DomainEventPublisher>();
 builder.Services.AddMultiTenancy(options =>
