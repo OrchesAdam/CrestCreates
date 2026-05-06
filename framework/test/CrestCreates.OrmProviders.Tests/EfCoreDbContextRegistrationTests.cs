@@ -62,6 +62,11 @@ public class EfCoreDbContextRegistrationTests
             return Task.FromResult<IDisposable>(new NoopDisposable());
         }
 
+        public IDisposable Change(ITenantInfo tenant)
+        {
+            throw new NotImplementedException();
+        }
+
         public void SetTenantId(string tenantId)
         {
         }
