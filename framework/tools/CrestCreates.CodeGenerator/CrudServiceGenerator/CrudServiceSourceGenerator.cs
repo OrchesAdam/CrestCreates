@@ -246,6 +246,8 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     continue;
                 if (prop.Name == "IsDeleted" || prop.Name == "DeletionTime" || prop.Name == "DeleterId")
                     continue;
+                if (IsNavigationProperty(prop))
+                    continue;
 
                 var propType = GetPropertyTypeDeclaration(prop);
                 builder.AppendLine($"        public {propType} {prop.Name} {{ get; set; }}");
@@ -261,7 +263,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
         private void GenerateCreateEntityDto(SourceProductionContext context, INamedTypeSymbol entityClass, string entityName, string namespaceName, List<IPropertySymbol> properties)
         {
             var excludedFromAttribute = GetAttributeStringArrayValue(entityClass, "ExcludeProperties", Array.Empty<string>());
-            var defaultExcludedProperties = new[] { "Id", "CreationTime", "CreatorId", "LastModificationTime", "LastModifierId", "IsDeleted", "DeletionTime", "DeleterId", "ConcurrencyStamp" };
+            var defaultExcludedProperties = new[] { "Id", "CreationTime", "CreatorId", "LastModificationTime", "LastModifierId", "IsDeleted", "DeletionTime", "DeleterId", "ConcurrencyStamp", "TenantId" };
             var allExcludedProperties = defaultExcludedProperties.Concat(excludedFromAttribute).ToArray();
 
             var builder = new StringBuilder();
@@ -278,6 +280,8 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             foreach (var prop in properties)
             {
                 if (allExcludedProperties.Contains(prop.Name))
+                    continue;
+                if (IsNavigationProperty(prop))
                     continue;
 
                 var propType = GetPropertyTypeDeclaration(prop);
@@ -301,7 +305,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
         private void GenerateUpdateEntityDto(SourceProductionContext context, INamedTypeSymbol entityClass, string entityName, string namespaceName, List<IPropertySymbol> properties)
         {
             var excludedFromAttribute = GetAttributeStringArrayValue(entityClass, "ExcludeProperties", Array.Empty<string>());
-            var defaultExcludedProperties = new[] { "Id", "CreationTime", "CreatorId", "LastModificationTime", "LastModifierId", "IsDeleted", "DeletionTime", "DeleterId" };
+            var defaultExcludedProperties = new[] { "Id", "CreationTime", "CreatorId", "LastModificationTime", "LastModifierId", "IsDeleted", "DeletionTime", "DeleterId", "TenantId" };
             var allExcludedProperties = defaultExcludedProperties.Concat(excludedFromAttribute).ToArray();
 
             var builder = new StringBuilder();
@@ -318,6 +322,8 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             foreach (var prop in properties)
             {
                 if (allExcludedProperties.Contains(prop.Name))
+                    continue;
+                if (IsNavigationProperty(prop))
                     continue;
 
                 var propType = GetPropertyTypeDeclaration(prop);
@@ -668,7 +674,17 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("            query = await ConfigureListQueryAsync(query, input, cancellationToken);");
             builder.AppendLine();
             builder.AppendLine($"            query = QueryExecutor<{entityName}>.ApplyFilters(query, input.Filters ?? new List<FilterDescriptor>());");
-            builder.AppendLine($"            query = QueryExecutor<{entityName}>.ApplySorts(query, input.Sorts ?? new List<SortDescriptor>());");
+            builder.AppendLine($"            var sorts = input.Sorts;");
+            builder.AppendLine("            if (sorts == null || sorts.Count == 0)");
+            builder.AppendLine("            {");
+            // Default sort: CreationTime desc if available, otherwise Id
+            var hasCreationTime = properties.Any(p => p.Name == "CreationTime");
+            if (hasCreationTime)
+                builder.AppendLine($"                sorts = new List<SortDescriptor> {{ new SortDescriptor(\"CreationTime\", SortDirection.Descending) }};");
+            else
+                builder.AppendLine($"                sorts = new List<SortDescriptor> {{ new SortDescriptor(\"Id\", SortDirection.Descending) }};");
+            builder.AppendLine("            }");
+            builder.AppendLine($"            query = QueryExecutor<{entityName}>.ApplySorts(query, sorts);");
             builder.AppendLine();
             builder.AppendLine("            var totalCount = query.Count();");
             builder.AppendLine($"            query = QueryExecutor<{entityName}>.ApplyPaging(query, input.GetSkipCount(), input.PageSize);");
@@ -725,6 +741,14 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 builder.AppendLine("            if (string.IsNullOrWhiteSpace(expectedStamp))");
                 builder.AppendLine($"                throw new CrestPreconditionRequiredException(typeof({entityName}).Name, id);");
                 builder.AppendLine();
+                builder.AppendLine("            // Load entity for ownership validation and pre-delete hook before stamp check");
+                builder.AppendLine("            var entity = await Repository.GetAsync(id, cancellationToken);");
+                builder.AppendLine("            if (entity == null)");
+                builder.AppendLine($"                throw new CrestEntityNotFoundException(typeof({entityName}).Name, id);");
+                builder.AppendLine();
+                builder.AppendLine("            await ValidateDataOwnershipAsync(entity);");
+                builder.AppendLine("            await OnDeletingAsync(entity, cancellationToken);");
+                builder.AppendLine();
                 builder.AppendLine("            await Repository.DeleteAsync(id, expectedStamp!, cancellationToken);");
                 builder.AppendLine("            await OnDeletedAsync(id, cancellationToken);");
                 builder.AppendLine("            return;");
@@ -780,6 +804,16 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 }
                 baseType = baseType.BaseType;
             }
+
+            // Fallback: check IEntity<TKey> interface chain for custom base classes
+            foreach (var iface in entityClass.AllInterfaces)
+            {
+                if (iface.Name == "IEntity" && iface.TypeArguments.Length == 1)
+                {
+                    return iface.TypeArguments[0].ToDisplayString();
+                }
+            }
+
             return "int";
         }
 
