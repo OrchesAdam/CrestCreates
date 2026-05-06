@@ -484,6 +484,12 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             return ParameterSource.Route;
         }
 
+        // CRUD delete expectedStamp binds from If-Match header
+        if (parameter.Name == "expectedStamp" && parameter.Type.SpecialType == SpecialType.System_String)
+        {
+            return ParameterSource.Header;
+        }
+
         if (!bodyAssigned &&
             (httpMethod == "POST" || httpMethod == "PUT" || httpMethod == "PATCH") &&
             !IsScalar(parameter.Type))
@@ -851,6 +857,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             ParameterSource.Query when parameter.IsScalar => $"                    var {parameter.Name} = {GenerateParseExpression(parameter.TypeName, $"""context.Request.Query["{parameter.Name}"].ToString()""", parameter.IsOptional)};",
             ParameterSource.Query => GenerateQueryObjectBinding(parameter),
             ParameterSource.Body => GenerateBodyBinding(parameter),
+            ParameterSource.Header => $"                    // CRUD delete concurrency token is bound from If-Match.\n                    var {parameter.Name} = context.Request.Headers[\"If-Match\"].FirstOrDefault();",
             _ => $"                    {parameter.TypeName} {parameter.Name} = default!;"
         };
     }
@@ -982,6 +989,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         Route,
         Query,
         Body,
+        Header,
         CancellationToken
     }
 }
