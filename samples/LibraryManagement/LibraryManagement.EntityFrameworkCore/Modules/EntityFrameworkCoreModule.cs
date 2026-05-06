@@ -14,7 +14,6 @@ using LibraryManagement.EntityFrameworkCore.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 
 namespace LibraryManagement.EntityFrameworkCore.Modules;
 
@@ -31,7 +30,7 @@ public class EntityFrameworkCoreModule : ModuleBase
             var currentTenant = serviceProvider.GetService<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>();
             var connectionString = currentTenant?.Tenant?.ConnectionString
                                    ?? configuration.GetConnectionString("Default");
-            options.UseSqlServer(connectionString);
+            options.UseNpgsql(connectionString);
         });
 
         services.AddUnitOfWork(OrmProvider.EfCore);
