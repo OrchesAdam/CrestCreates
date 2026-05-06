@@ -144,6 +144,18 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         }
 
         sb.AppendLine();
+        for (var i = 0; i < modules.Count; i++)
+        {
+            var module = modules[i];
+            if (module.AutoRegisterServices)
+            {
+                sb.AppendLine($"        try {{");
+                sb.AppendLine($"            new {module.FullName}().OnConfigureServices(services);");
+                sb.AppendLine($"        }} catch (System.Exception ex) {{ System.Console.Error.WriteLine($\"[ConfigureServices] {module.FullName}: {{ex}}\"); throw; }}");
+            }
+        }
+
+        sb.AppendLine();
         sb.AppendLine("        _registeredModules.Clear();");
 
         foreach (var module in modules)

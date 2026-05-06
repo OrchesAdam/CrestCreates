@@ -29,7 +29,7 @@ public class ModuleSourceGenerator : IIncrementalGenerator
     private static ModuleInfo? GetModuleInfo(GeneratorSyntaxContext context)
     {
         var classDeclaration = (ClassDeclarationSyntax)context.Node;
-        var symbol = context.SemanticModel.GetDeclaredSymbol(classDeclaration);
+        var symbol = context.SemanticModel.GetDeclaredSymbol(classDeclaration) as INamedTypeSymbol;
         if (symbol is null) return null;
 
         var moduleAttribute = symbol.GetAttributes()
@@ -60,6 +60,11 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         var order = 0;
         var autoRegister = true;
 
+        // Check for parameterless constructor (AOT-friendly instantiation)
+        var ctors = symbol.Constructors.Where(c => !c.IsStatic).ToArray();
+        var hasParameterlessCtor = ctors.Length == 0
+            || ctors.Any(c => c.Parameters.IsEmpty);
+
         foreach (var namedArg in moduleAttribute.NamedArguments)
         {
             if (namedArg.Key == DependsOnAttribute && namedArg.Value.Value is ImmutableArray<TypedConstant> types)
@@ -87,7 +92,7 @@ public class ModuleSourceGenerator : IIncrementalGenerator
             }
         }
 
-        return new ModuleInfo(symbol.Name, symbol.ContainingNamespace.ToDisplayString(), dependsOn, order, autoRegister);
+        return new ModuleInfo(symbol.Name, symbol.ContainingNamespace.ToDisplayString(), dependsOn, order, autoRegister, hasParameterlessCtor);
     }
 
     private static void GenerateModuleCode(SourceProductionContext context, ImmutableArray<ModuleInfo?> modules)
@@ -165,11 +170,23 @@ public class ModuleSourceGenerator : IIncrementalGenerator
             sb.AppendLine($"                services.AddSingleton<{module.FullName}>();");
         }
         sb.AppendLine();
-        sb.AppendLine("                var descriptors = ModuleDescriptorRegistry.GetDescriptors();");
-        sb.AppendLine("                foreach (var descriptor in descriptors.Where(d => d.AutoRegisterServices)) {");
+        sb.AppendLine("                foreach (var descriptor in ModuleDescriptorRegistry.GetDescriptors().Where(d => d.AutoRegisterServices)) {");
         sb.AppendLine("                    try {");
-        sb.AppendLine("                        var module = (IModule)Activator.CreateInstance(descriptor.ModuleType)!;");
-        sb.AppendLine("                        module.OnConfigureServices(services);");
+        var instantiableModules = sortedModules.Where(m => m.HasParameterlessConstructor).ToList();
+        if (instantiableModules.Count > 0)
+        {
+            // AOT-friendly dispatch chain: if-else on known module types (only those with parameterless constructors)
+            sb.AppendLine("                        IModule module;");
+            for (int i = 0; i < instantiableModules.Count; i++)
+            {
+                var module = instantiableModules[i];
+                sb.AppendLine(i == 0
+                    ? $"                        if (descriptor.ModuleType == typeof({module.FullName})) module = new {module.FullName}();"
+                    : $"                        else if (descriptor.ModuleType == typeof({module.FullName})) module = new {module.FullName}();");
+            }
+            sb.AppendLine("                        else throw new NotSupportedException($\"Unknown module type: {descriptor.ModuleType.FullName}\");");
+            sb.AppendLine("                        module.OnConfigureServices(services);");
+        }
         sb.AppendLine("                    } catch (Exception ex) { System.Console.Error.WriteLine($\"[ConfigureServices] {descriptor.ModuleType.Name}: {ex}\"); throw; }");
         sb.AppendLine("                }");
         sb.AppendLine("            });");
@@ -268,13 +285,14 @@ public class ModuleSourceGenerator : IIncrementalGenerator
 
     private class ModuleInfo
     {
-        public ModuleInfo(string name, string ns, List<string> dependsOn, int order, bool autoRegisterServices)
+        public ModuleInfo(string name, string ns, List<string> dependsOn, int order, bool autoRegisterServices, bool hasParameterlessConstructor)
         {
             Name = name;
             Namespace = ns;
             DependsOn = dependsOn;
             Order = order;
             AutoRegisterServices = autoRegisterServices;
+            HasParameterlessConstructor = hasParameterlessConstructor;
         }
 
         public string Name { get; }
@@ -282,6 +300,7 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         public List<string> DependsOn { get; }
         public int Order { get; }
         public bool AutoRegisterServices { get; }
+        public bool HasParameterlessConstructor { get; set; }
         public string FullName => $"{Namespace}.{Name}";
     }
 }
