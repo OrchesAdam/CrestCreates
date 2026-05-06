@@ -204,9 +204,9 @@ namespace TestNamespace.Mappings
 {
     public static partial class ProductObjectMappings
     {
-        public static ProductDto ToProductDto(Product entity) => throw new NotImplementedException();
-        public static Product ToProduct(CreateProductDto dto) => throw new NotImplementedException();
-        public static void ApplyTo(UpdateProductDto dto, Product entity) => throw new NotImplementedException();
+        public static ProductDto ToTarget(Product entity) => throw new NotImplementedException();
+        public static Product ToTarget(CreateProductDto dto) => throw new NotImplementedException();
+        public static void Apply(UpdateProductDto dto, Product entity) => throw new NotImplementedException();
     }
 }
 """;

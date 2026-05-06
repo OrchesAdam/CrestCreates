@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis;
@@ -15,8 +16,9 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             var mappingDeclarations = context.SyntaxProvider
                 .CreateSyntaxProvider(
                     predicate: static (node, _) => IsCandidate(node),
-                    transform: static (ctx, _) => GetMappingDeclaration(ctx))
-                .Where(static x => x is not null)
+                    transform: static (ctx, _) => GetMappingDeclarations(ctx))
+                .Where(static x => !x.IsDefaultOrEmpty)
+                .SelectMany(static (x, _) => x)
                 .Collect();
 
             context.RegisterSourceOutput(mappingDeclarations, ExecuteGeneration);
@@ -29,45 +31,50 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 && classDecl.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword));
         }
 
-        private static MappingDeclaration? GetMappingDeclaration(GeneratorSyntaxContext context)
+        private static ImmutableArray<MappingDeclaration> GetMappingDeclarations(GeneratorSyntaxContext context)
         {
             var classDeclaration = (ClassDeclarationSyntax)context.Node;
             var symbol = context.SemanticModel.GetDeclaredSymbol(classDeclaration) as INamedTypeSymbol;
 
             if (symbol == null)
-                return null;
+                return ImmutableArray<MappingDeclaration>.Empty;
 
-            var attribute = symbol.GetAttributes().FirstOrDefault(HasGenerateObjectMappingAttribute);
-            if (attribute == null)
-                return null;
+            var attributes = symbol.GetAttributes().Where(HasGenerateObjectMappingAttribute).ToArray();
+            if (attributes.Length == 0)
+                return ImmutableArray<MappingDeclaration>.Empty;
 
-            // Extract source and target types from attribute constructor arguments
-            if (attribute.ConstructorArguments.Length < 2)
-                return null;
+            var declarations = ImmutableArray.CreateBuilder<MappingDeclaration>();
 
-            var sourceType = attribute.ConstructorArguments[0].Value as INamedTypeSymbol;
-            var targetType = attribute.ConstructorArguments[1].Value as INamedTypeSymbol;
-
-            if (sourceType == null || targetType == null)
-                return null;
-
-            // Extract Direction from named arguments
-            var direction = MapDirection.Both;
-            var directionArg = attribute.NamedArguments.FirstOrDefault(a => a.Key == "Direction");
-            if (directionArg.Value.Value is int dirValue)
+            foreach (var attribute in attributes)
             {
-                direction = (MapDirection)dirValue;
+                if (attribute.ConstructorArguments.Length < 2)
+                    continue;
+
+                var sourceType = attribute.ConstructorArguments[0].Value as INamedTypeSymbol;
+                var targetType = attribute.ConstructorArguments[1].Value as INamedTypeSymbol;
+
+                if (sourceType == null || targetType == null)
+                    continue;
+
+                var direction = MapDirection.Both;
+                var directionArg = attribute.NamedArguments.FirstOrDefault(a => a.Key == "Direction");
+                if (directionArg.Value.Value is int dirValue)
+                {
+                    direction = (MapDirection)dirValue;
+                }
+
+                declarations.Add(new MappingDeclaration
+                {
+                    SourceType = sourceType,
+                    TargetType = targetType,
+                    MapperClassName = symbol.Name,
+                    Namespace = symbol.ContainingNamespace.ToDisplayString(),
+                    Direction = direction,
+                    Location = classDeclaration.GetLocation()
+                });
             }
 
-            return new MappingDeclaration
-            {
-                SourceType = sourceType,
-                TargetType = targetType,
-                MapperClassName = symbol.Name,
-                Namespace = symbol.ContainingNamespace.ToDisplayString(),
-                Direction = direction,
-                Location = classDeclaration.GetLocation()
-            };
+            return declarations.ToImmutable();
         }
 
         private static bool HasGenerateObjectMappingAttribute(AttributeData attr)
@@ -81,7 +88,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
 
         private void ExecuteGeneration(
             SourceProductionContext context,
-            ImmutableArray<MappingDeclaration?> declarations)
+            ImmutableArray<MappingDeclaration> declarations)
         {
             if (declarations.IsDefaultOrEmpty)
                 return;
@@ -89,26 +96,38 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             var resolver = new ObjectMappingRuleResolver();
             var writer = new ObjectMappingCodeWriter();
 
-            foreach (var declaration in declarations)
+            // Group declarations by class name to detect duplicates needing disambiguation
+            var groups = declarations
+                .GroupBy(d => d.MapperClassName);
+
+            var usedFileNames = new HashSet<string>();
+
+            foreach (var group in groups)
             {
-                if (declaration == null)
-                    continue;
+                var declarationsInGroup = group.ToArray();
+                var needsDisambiguation = declarationsInGroup.Length > 1;
 
-                var model = resolver.Resolve(declaration);
-
-                // Report diagnostics
-                foreach (var diagnostic in model.Diagnostics)
+                foreach (var declaration in declarationsInGroup)
                 {
-                    context.ReportDiagnostic(diagnostic);
-                }
+                    var model = resolver.Resolve(declaration);
 
-                // Generate source if model is valid
-                if (model.IsValid)
-                {
-                    var source = writer.Write(model);
-                    context.AddSource(
-                        $"{declaration.MapperClassName}.g.cs",
-                        SourceText.From(source, System.Text.Encoding.UTF8));
+                    foreach (var diagnostic in model.Diagnostics)
+                    {
+                        context.ReportDiagnostic(diagnostic);
+                    }
+
+                    if (model.IsValid)
+                    {
+                        var source = writer.Write(model);
+                        var fileName = declaration.MapperClassName;
+                        if (needsDisambiguation && declaration.Direction != MapDirection.Both)
+                        {
+                            fileName += $".{declaration.Direction}";
+                        }
+                        fileName += ".g.cs";
+                        context.AddSource(fileName, SourceText.From(source, System.Text.Encoding.UTF8));
+                        usedFileNames.Add(fileName);
+                    }
                 }
             }
         }

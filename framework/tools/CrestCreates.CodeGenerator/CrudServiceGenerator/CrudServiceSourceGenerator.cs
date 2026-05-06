@@ -450,6 +450,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("using System.Threading.Tasks;");
             builder.AppendLine("using CrestCreates.Aop.Interceptors;");
             builder.AppendLine("using CrestCreates.Authorization.Abstractions;");
+            builder.AppendLine("using CrestCreates.Domain.Shared.Attributes;");
             builder.AppendLine("using CrestCreates.Application.Contracts.DTOs.Common;");
             builder.AppendLine("using CrestCreates.Application.Contracts.Query;");
             builder.AppendLine("using CrestCreates.Domain.Exceptions;");
@@ -469,6 +470,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
 
             if (generateAsBaseClass)
             {
+                builder.AppendLine("    [CrestService]");
                 builder.AppendLine($"    public abstract class {entityName}CrudServiceBase : I{entityName}AppService");
                 builder.AppendLine("    {");
                 builder.AppendLine($"        protected readonly ICrestRepositoryBase<{entityName}, {idType}> Repository;");
@@ -490,6 +492,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             }
             else
             {
+                builder.AppendLine("    [CrestService]");
                 builder.AppendLine($"    public partial class {entityName}AppService : I{entityName}AppService");
                 builder.AppendLine("    {");
                 builder.AppendLine($"        protected readonly ICrestRepositoryBase<{entityName}, {idType}> Repository;");
@@ -611,14 +614,14 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.Create, cancellationToken);");
             builder.AppendLine("            await ValidateCreateAsync(input, cancellationToken);");
             builder.AppendLine();
-            builder.AppendLine($"            var entity = {entityName}ObjectMappings.To{entityName}(input);");
+            builder.AppendLine($"            var entity = {entityName}ObjectMappings.ToTarget(input);");
             builder.AppendLine($"            await SetCreationAuditPropertiesAsync(entity);");
             builder.AppendLine($"            await OnCreatingAsync(entity, input, cancellationToken);");
             builder.AppendLine();
             builder.AppendLine("            var created = await Repository.InsertAsync(entity, cancellationToken);");
             builder.AppendLine("            await OnCreatedAsync(created, cancellationToken);");
             builder.AppendLine();
-            builder.AppendLine($"            return {entityName}ObjectMappings.To{entityName}Dto(created);");
+            builder.AppendLine($"            return {entityName}ObjectMappings.ToTarget(created);");
             builder.AppendLine("        }");
 
             // GetById method
@@ -637,7 +640,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine($"                throw new CrestEntityNotFoundException(typeof({entityName}).Name, id);");
             builder.AppendLine();
             builder.AppendLine("            await ValidateDataOwnershipAsync(entity);");
-            builder.AppendLine($"            return {entityName}ObjectMappings.To{entityName}Dto(entity);");
+            builder.AppendLine($"            return {entityName}ObjectMappings.ToTarget(entity);");
             builder.AppendLine("        }");
 
             // GetList method
@@ -666,7 +669,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine($"            query = QueryExecutor<{entityName}>.ApplyPaging(query, input.GetSkipCount(), input.PageSize);");
             builder.AppendLine();
             builder.AppendLine("            var entities = query.ToList();");
-            builder.AppendLine($"            var dtos = entities.Select({entityName}ObjectMappings.To{entityName}Dto).ToList();");
+            builder.AppendLine($"            var dtos = entities.Select({entityName}ObjectMappings.ToTarget).ToList();");
             builder.AppendLine();
             builder.AppendLine($"            return new PagedResultDto<{entityName}Dto>(dtos, totalCount, input.PageIndex, input.PageSize);");
             builder.AppendLine("        }");
@@ -692,13 +695,13 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("            await ValidateDataOwnershipAsync(entity);");
             builder.AppendLine("            await OnUpdatingAsync(entity, input, cancellationToken);");
             builder.AppendLine();
-            builder.AppendLine($"            {entityName}ObjectMappings.ApplyTo(input, entity);");
+            builder.AppendLine($"            {entityName}ObjectMappings.Apply(input, entity);");
             builder.AppendLine("            await SetModificationAuditPropertiesAsync(entity);");
             builder.AppendLine();
             builder.AppendLine("            var updated = await Repository.UpdateAsync(entity, cancellationToken);");
             builder.AppendLine("            await OnUpdatedAsync(updated, cancellationToken);");
             builder.AppendLine();
-            builder.AppendLine($"            return {entityName}ObjectMappings.To{entityName}Dto(updated);");
+            builder.AppendLine($"            return {entityName}ObjectMappings.ToTarget(updated);");
             builder.AppendLine("        }");
 
             // Delete method
