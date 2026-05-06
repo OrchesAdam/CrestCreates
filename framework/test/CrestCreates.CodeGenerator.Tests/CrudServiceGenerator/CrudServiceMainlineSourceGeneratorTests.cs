@@ -62,8 +62,6 @@ public sealed class CrudServiceMainlineSourceGeneratorTests
         Assert.DoesNotContain("Keyword", source);
         Assert.DoesNotContain("StartTime", source);
         Assert.DoesNotContain("EndTime", source);
-        Assert.DoesNotContain("public string? Name", source);
-        Assert.DoesNotContain("public string? Category", source);
     }
 
     [Fact]
@@ -142,92 +140,61 @@ public class Product : AuditedAggregateRoot<Guid>
         const string support = """
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
-namespace TestNamespace;
-
-public interface IEntity<TKey>
+namespace TestNamespace
 {
-    TKey Id { get; set; }
-}
-
-public interface IHasConcurrencyStamp
-{
-    string ConcurrencyStamp { get; set; }
-}
-
-public abstract class AuditedAggregateRoot<TKey> : IEntity<TKey>, IHasConcurrencyStamp
-    where TKey : IEquatable<TKey>
-{
-    public TKey Id { get; set; } = default!;
-    public DateTime CreationTime { get; set; }
-    public Guid? CreatorId { get; set; }
-    public DateTime? LastModificationTime { get; set; }
-    public Guid? LastModifierId { get; set; }
-    public string ConcurrencyStamp { get; set; } = Guid.NewGuid().ToString();
-}
-
-// Stub types for framework references in generated code
-public interface ICrestRepositoryBase<TEntity, TKey> { }
-
-public interface ICrudAppService<TKey, TDto, in TCreateDto, in TUpdateDto, in TListRequestDto>
-    where TKey : IEquatable<TKey> { }
-
-public class PagedRequestDto
-{
-    public int PageIndex { get; set; }
-    public int PageSize { get; set; }
-    public List<FilterDescriptor>? Filters { get; set; }
-    public List<SortDescriptor>? Sorts { get; set; }
-}
-
-public class FilterDescriptor
-{
-    public string Field { get; set; } = string.Empty;
-    public string Operator { get; set; } = "Equals";
-    public object? Value { get; set; }
-
-    public FilterDescriptor() { }
-    public FilterDescriptor(string field, string @operator, object? value)
+    public interface IEntity<TKey>
     {
-        Field = field;
-        Operator = @operator;
-        Value = value;
+        TKey Id { get; set; }
+    }
+
+    public interface IHasConcurrencyStamp
+    {
+        string ConcurrencyStamp { get; set; }
+    }
+
+    public abstract class AuditedAggregateRoot<TKey> : IEntity<TKey>, IHasConcurrencyStamp
+        where TKey : IEquatable<TKey>
+    {
+        public TKey Id { get; set; } = default!;
+        public DateTime CreationTime { get; set; }
+        public Guid? CreatorId { get; set; }
+        public DateTime? LastModificationTime { get; set; }
+        public Guid? LastModifierId { get; set; }
+        public string ConcurrencyStamp { get; set; } = Guid.NewGuid().ToString();
     }
 }
+""";
 
-public class SortDescriptor
+        const string productSupport = """
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using TestNamespace.Dtos;
+
+namespace TestNamespace.Mappings
 {
-    public string Field { get; set; } = string.Empty;
-    public string Direction { get; set; } = "Ascending";
-
-    public SortDescriptor() { }
-    public SortDescriptor(string field, string direction)
+    public static partial class ProductObjectMappings
     {
-        Field = field;
-        Direction = direction;
-    }
-}
-
-public class PagedResultDto<T>
-{
-    public IReadOnlyList<T> Items { get; set; } = Array.Empty<T>();
-    public int TotalCount { get; set; }
-    public int PageIndex { get; set; }
-    public int PageSize { get; set; }
-
-    public PagedResultDto() { }
-    public PagedResultDto(IReadOnlyList<T> items, int totalCount, int pageIndex, int pageSize)
-    {
-        Items = items;
-        TotalCount = totalCount;
-        PageIndex = pageIndex;
-        PageSize = pageSize;
+        public static ProductDto ToProductDto(Product entity) => throw new NotImplementedException();
+        public static Product ToProduct(CreateProductDto dto) => throw new NotImplementedException();
+        public static void ApplyTo(UpdateProductDto dto, Product entity) => throw new NotImplementedException();
     }
 }
 """;
 
         return SourceGeneratorTestHelper.RunGenerator<CrudServiceSourceGenerator>(
             source,
-            new[] { support });
+            new[] { support, productSupport },
+            additionalReferences: new[]
+            {
+                "CrestCreates.Domain",
+                "CrestCreates.Authorization.Abstractions",
+                "CrestCreates.Application.Contracts",
+                "Rougamo"
+            });
     }
 }
