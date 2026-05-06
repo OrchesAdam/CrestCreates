@@ -4,4 +4,9 @@
     <PublishAot>false</PublishAot>
     <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
   </PropertyGroup>
+  <!-- 修改SourceGenerator输出的目录 -->
+  <PropertyGroup  Condition="'$(EnforceExtendedAnalyzerRules)' != 'true'">
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <CompilerGeneratedFilesOutputPath>$(IntermediateOutputPath)\source-generators</CompilerGeneratedFilesOutputPath>
+  </PropertyGroup>
 </Project>
