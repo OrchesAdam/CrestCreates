@@ -119,6 +119,31 @@ public sealed class CrudServiceMainlineSourceGeneratorTests
         Assert.Contains("CrestEntityNotFoundException", source);
     }
 
+    [Fact]
+    public void GeneratedCrud_ShouldNotGenerateMainlineMvcController()
+    {
+        var result = RunProductGenerator();
+
+        Assert.DoesNotContain(result.GeneratedSources, x => x.FileName.Contains("Controller"));
+        Assert.DoesNotContain(result.GeneratedSources, x => x.SourceText.Contains("CrudControllerBase<"));
+        Assert.DoesNotContain(result.GeneratedSources, x => x.SourceText.Contains("[ApiController]"));
+    }
+
+    [Fact]
+    public void GeneratedCrud_AppService_ShouldCheckGeneratedPermissions()
+    {
+        var result = RunProductGenerator();
+
+        var source = result.GetSourceByFileName("ProductAppService.g.cs")!.SourceText;
+
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Create", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Get", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Search", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Update", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Delete", source);
+        Assert.DoesNotContain("Product.View", source);
+    }
+
     private static SourceGeneratorResult RunProductGenerator()
     {
         const string source = """
