@@ -1,101 +1,66 @@
-using System;
-using System.Collections.Generic;
-using System.Reflection;
-using System.Linq;
+using CrestCreates.CodeGenerator.Tests.Modules;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Xunit;
-using CrestCreates.Modularity;
-using CrestCreates.CodeGenerator.Tests.Modules;
 
 namespace CrestCreates.CodeGenerator.Tests
 {
     public class ModuleGeneratorTests
     {
         [Fact]
-        public void Should_Register_Modules_Using_Source_Generator()
+        public void Should_Register_Module_Using_ServiceCollection_Extension()
         {
-            var hostBuilder = Host.CreateDefaultBuilder();
-            hostBuilder = ModuleAutoInitializer.RegisterModules(hostBuilder);
-            var host = hostBuilder.Build();
+            var services = new ServiceCollection();
 
-            var coreModule = host.Services.GetService<CoreModule>();
-            var databaseModule = host.Services.GetService<DatabaseModule>();
-            var applicationModule = host.Services.GetService<ApplicationModule>();
+            services.AddCoreModule();
+
+            using var provider = services.BuildServiceProvider();
+            var coreModule = provider.GetService<CoreModule>();
 
             Assert.NotNull(coreModule);
-            Assert.NotNull(databaseModule);
-            Assert.NotNull(applicationModule);
         }
 
         [Fact]
-        public void Should_Initialize_Modules_Using_Source_Generator()
+        public void Should_Register_Module_Using_HostBuilder_Extension()
         {
             var hostBuilder = Host.CreateDefaultBuilder();
-            hostBuilder = ModuleAutoInitializer.RegisterModules(hostBuilder);
-            hostBuilder.ConfigureServices((context, services) =>
-            {
-                // 注册 IServiceCollection 以支持 InitializeModules 中生成的代码
-                services.AddSingleton<IServiceCollection>(services);
-            });
-            var host = hostBuilder.Build();
-            host = ModuleAutoInitializer.InitializeModules(host);
 
-            var coreModule = host.Services.GetService<CoreModule>();
+            hostBuilder.AddDatabaseModule();
+
+            using var host = hostBuilder.Build();
             var databaseModule = host.Services.GetService<DatabaseModule>();
-            var applicationModule = host.Services.GetService<ApplicationModule>();
 
-            Assert.NotNull(coreModule);
             Assert.NotNull(databaseModule);
-            Assert.NotNull(applicationModule);
         }
 
         [Fact]
-        public void Should_Have_RegisteredModules_Property()
+        public void Should_Generate_Get_And_TryGet_Module_Extensions()
         {
-            var registeredModules = ModuleAutoInitializer.RegisteredModules;
-            Assert.NotNull(registeredModules);
-            Assert.NotEmpty(registeredModules);
+            var services = new ServiceCollection();
+            services.AddApplicationModule();
 
-            var expectedModules = new[]
-            {
-                "CrestCreates.CodeGenerator.Tests.Modules.CoreModule",
-                "CrestCreates.CodeGenerator.Tests.Modules.DatabaseModule",
-                "CrestCreates.CodeGenerator.Tests.Modules.ApplicationModule"
-            };
+            using var provider = services.BuildServiceProvider();
 
-            foreach (var expectedModule in expectedModules)
-            {
-                Assert.Contains(expectedModule, registeredModules);
-            }
+            Assert.NotNull(provider.GetApplicationModule());
+            Assert.NotNull(provider.TryGetApplicationModule());
         }
 
         [Fact]
-        public void Should_Sort_Modules_By_Dependency()
+        public void Should_Not_Generate_Global_Module_Auto_Initializer()
         {
-            // 触发 ModuleAutoInitializer 静态构造函数以确保模块已注册
-            var _ = ModuleAutoInitializer.RegisteredModules;
+            var generatedType = typeof(ModuleGeneratorTests).Assembly
+                .GetType("CrestCreates.Modularity.ModuleAutoInitializer", throwOnError: false);
 
-            var descriptors = ModuleDescriptorRegistry.GetDescriptors();
-            Assert.NotNull(descriptors);
-            Assert.Equal(3, descriptors.Count);
-
-            var coreIndex = FindIndex(descriptors, "CoreModule");
-            var databaseIndex = FindIndex(descriptors, "DatabaseModule");
-            var applicationIndex = FindIndex(descriptors, "ApplicationModule");
-
-            Assert.True(coreIndex < databaseIndex, "CoreModule should be before DatabaseModule");
-            Assert.True(databaseIndex < applicationIndex, "DatabaseModule should be before ApplicationModule");
+            Assert.Null(generatedType);
         }
 
-        private static int FindIndex(IReadOnlyList<ModuleDescriptor> descriptors, string moduleName)
+        [Fact]
+        public void Should_Not_Generate_Global_Module_Descriptor_Registry()
         {
-            for (int i = 0; i < descriptors.Count; i++)
-            {
-                if (descriptors[i].ModuleType.Name == moduleName)
-                    return i;
-            }
-            return -1;
+            var generatedType = typeof(ModuleGeneratorTests).Assembly
+                .GetType("CrestCreates.Modularity.ModuleDescriptorRegistry", throwOnError: false);
+
+            Assert.Null(generatedType);
         }
     }
 }
