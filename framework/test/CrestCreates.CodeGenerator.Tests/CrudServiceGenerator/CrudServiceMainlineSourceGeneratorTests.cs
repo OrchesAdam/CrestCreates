@@ -186,6 +186,61 @@ public sealed class CrudServiceMainlineSourceGeneratorTests
         Assert.DoesNotContain("Product.View", source);
     }
 
+    [Fact]
+    public void GeneratedCrud_StringId_ShouldNotGenerateStringParse()
+    {
+        const string source = """
+using System;
+using CrestCreates.Domain.Shared.Attributes;
+
+namespace TestNamespace;
+
+[GenerateCrudService]
+public class Tag : StringEntity
+{
+    public string Name { get; set; } = string.Empty;
+}
+""";
+
+        const string support = """
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace TestNamespace
+{
+    public interface IEntity<TKey>
+    {
+        TKey Id { get; set; }
+    }
+
+    public abstract class StringEntity : IEntity<string>
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString();
+    }
+}
+""";
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CrudServiceSourceGenerator>(
+            source,
+            new[] { support, MappingSupport },
+            FrameworkReferences);
+
+        Assert.True(result.ContainsFile("TagCrudDynamicApi.g.cs"),
+            "Missing Dynamic API file. Got: " +
+            string.Join(", ", result.GeneratedSources.Select(s => s.FileName)));
+
+        var dynamicApi = result.GetSourceByFileName("TagCrudDynamicApi.g.cs")!.SourceText;
+
+        // String ID must read route value directly, not call string.Parse (which doesn't exist)
+        Assert.DoesNotContain("System.String.Parse(", dynamicApi);
+        Assert.DoesNotContain("string.Parse(", dynamicApi);
+        Assert.Contains("context.Request.RouteValues[\"id\"]?.ToString()", dynamicApi);
+        Assert.Contains("typeof(string)", dynamicApi);
+    }
+
     private const string EntitySource = """
 using System;
 using CrestCreates.Domain.Shared.Attributes;

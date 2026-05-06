@@ -1116,6 +1116,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 "System.Int32" => "int.Parse(context.Request.RouteValues[\"id\"]?.ToString() ?? throw new BadHttpRequestException(\"Missing id\"), CultureInfo.InvariantCulture)",
                 "long" => "long.Parse(context.Request.RouteValues[\"id\"]?.ToString() ?? throw new BadHttpRequestException(\"Missing id\"), CultureInfo.InvariantCulture)",
                 "System.Int64" => "long.Parse(context.Request.RouteValues[\"id\"]?.ToString() ?? throw new BadHttpRequestException(\"Missing id\"), CultureInfo.InvariantCulture)",
+                "string" or "System.String" => "context.Request.RouteValues[\"id\"]?.ToString() ?? throw new BadHttpRequestException(\"Missing id\")",
                 _ => $"{idType}.Parse(context.Request.RouteValues[\"id\"]?.ToString() ?? throw new BadHttpRequestException(\"Missing id\"), CultureInfo.InvariantCulture)"
             };
         }
