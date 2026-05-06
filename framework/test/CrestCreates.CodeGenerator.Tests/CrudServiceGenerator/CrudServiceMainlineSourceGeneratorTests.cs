@@ -256,18 +256,72 @@ namespace TestNamespace
     [Fact]
     public void GeneratedCrud_Dtos_ShouldExcludeNavigationProperties()
     {
-        var result = RunProductGenerator();
+        const string source = """
+using System;
+using System.Collections.Generic;
+using CrestCreates.Domain.Shared.Attributes;
 
-        var outputDto = result.GetSourceByFileName("ProductDto.g.cs")!.SourceText;
-        var createDto = result.GetSourceByFileName("CreateProductDto.g.cs")!.SourceText;
-        var updateDto = result.GetSourceByFileName("UpdateProductDto.g.cs")!.SourceText;
+namespace TestNamespace;
 
-        // Product entity has no nav props, but generated DTOs should not regress
-        // Verifying that DTO generation completes without errors is covered by other tests.
-        // This test ensures the nav property exclusion logic is wired into all DTO generators.
-        Assert.NotNull(outputDto);
-        Assert.NotNull(createDto);
-        Assert.NotNull(updateDto);
+[GenerateCrudService]
+public class Blog : Entity<Guid>
+{
+    public string Title { get; set; } = string.Empty;
+    public Author Author { get; set; } = null!;
+    public List<Tag> Tags { get; set; } = new();
+}
+
+public class Author
+{
+    public string Name { get; set; } = string.Empty;
+}
+
+public class Tag
+{
+    public string Name { get; set; } = string.Empty;
+}
+""";
+
+        const string support = """
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace TestNamespace
+{
+    public class Entity<TId> where TId : IEquatable<TId>
+    {
+        public TId Id { get; set; } = default!;
+    }
+}
+""";
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CrudServiceSourceGenerator>(
+            source,
+            new[] { support },
+            FrameworkReferences);
+
+        Assert.True(result.ContainsFile("BlogDto.g.cs"));
+        Assert.True(result.ContainsFile("CreateBlogDto.g.cs"));
+        Assert.True(result.ContainsFile("UpdateBlogDto.g.cs"));
+
+        var outputDto = result.GetSourceByFileName("BlogDto.g.cs")!.SourceText;
+        var createDto = result.GetSourceByFileName("CreateBlogDto.g.cs")!.SourceText;
+        var updateDto = result.GetSourceByFileName("UpdateBlogDto.g.cs")!.SourceText;
+
+        // Navigation properties (Author, Tags) must not appear in any DTO
+        Assert.DoesNotContain("Author", outputDto);
+        Assert.DoesNotContain("Author", createDto);
+        Assert.DoesNotContain("Author", updateDto);
+        Assert.DoesNotContain("Tags", outputDto);
+        Assert.DoesNotContain("Tags", createDto);
+        Assert.DoesNotContain("Tags", updateDto);
+
+        // Scalar properties should still be present
+        Assert.Contains("Title", outputDto);
+        Assert.Contains("Title", createDto);
+        Assert.Contains("Title", updateDto);
     }
 
     [Fact]
@@ -300,9 +354,10 @@ namespace TestNamespace
 
         var source = result.GetSourceByFileName("ProductAppService.g.cs")!.SourceText;
 
-        // IMultiTenant check in creation audit
+        // IMultiTenant check in creation audit — must reject null tenant like IMustHaveTenant
         Assert.Contains("IMultiTenant", source);
-        Assert.Contains("multiTenant.TenantId = CurrentUser.TenantId?.ToString()", source);
+        Assert.Contains("multiTenant.TenantId = CurrentUser.TenantId ?? throw", source);
+        Assert.DoesNotContain("?.ToString()", source);
         // IMultiTenant check in ownership validation
         Assert.Contains("IMultiTenant multiTenant && multiTenant.TenantId", source);
     }

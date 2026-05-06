@@ -556,7 +556,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("            if (entity is IMustHaveTenant mustHaveTenant)");
             builder.AppendLine("                mustHaveTenant.TenantId = CurrentUser.TenantId ?? throw new InvalidOperationException(\"当前用户没有关联租户\");");
             builder.AppendLine("            if (entity is IMultiTenant multiTenant)");
-            builder.AppendLine("                multiTenant.TenantId = CurrentUser.TenantId?.ToString();");
+            builder.AppendLine("                multiTenant.TenantId = CurrentUser.TenantId ?? throw new InvalidOperationException(\"当前用户没有关联租户\");");
             builder.AppendLine("            var creatorId = Guid.TryParse(CurrentUser.Id, out var userId) ? userId : (Guid?)null;");
             builder.AppendLine("            if (entity is IHasCreator hasCreator)");
             builder.AppendLine("                hasCreator.CreatorId = creatorId;");
@@ -584,7 +584,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("        {");
             builder.AppendLine("            if (entity is IMustHaveTenant mustHaveTenant && mustHaveTenant.TenantId != CurrentUser.TenantId)");
             builder.AppendLine("                throw new UnauthorizedAccessException(\"您没有权限访问此数据：租户不匹配\");");
-            builder.AppendLine("            if (entity is IMultiTenant multiTenant && multiTenant.TenantId != CurrentUser.TenantId?.ToString())");
+            builder.AppendLine("            if (entity is IMultiTenant multiTenant && multiTenant.TenantId != CurrentUser.TenantId)");
             builder.AppendLine("                throw new UnauthorizedAccessException(\"您没有权限访问此数据：租户不匹配\");");
             builder.AppendLine("            return Task.CompletedTask;");
             builder.AppendLine("        }");
