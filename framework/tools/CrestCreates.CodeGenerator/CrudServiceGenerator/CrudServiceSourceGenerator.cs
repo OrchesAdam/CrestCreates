@@ -25,7 +25,9 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 .Where(static x => x is not null)
                 .Collect();
 
-            context.RegisterSourceOutput(entityClasses, ExecuteGeneration);
+            var compilationAndClasses = context.CompilationProvider.Combine(entityClasses);
+
+            context.RegisterSourceOutput(compilationAndClasses, ExecuteGeneration);
         }
 
         private static bool IsEntityCandidate(SyntaxNode node)
@@ -156,9 +158,13 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             return defaultValue;
         }
 
-        private void ExecuteGeneration(SourceProductionContext context, ImmutableArray<(INamedTypeSymbol Symbol, bool GenerateAsBaseClass, bool IsUsingNewAttribute)?> entityClasses)
+        private void ExecuteGeneration(SourceProductionContext context, (Compilation Compilation, ImmutableArray<(INamedTypeSymbol Symbol, bool GenerateAsBaseClass, bool IsUsingNewAttribute)?> Classes) input)
         {
+            var (compilation, entityClasses) = input;
             if (entityClasses.IsDefaultOrEmpty) return;
+
+            var hasMultiTenant = compilation.GetTypeByMetadataName("CrestCreates.DataFilter.Entities.IMultiTenant") != null;
+            var hasDynamicApi = compilation.GetTypeByMetadataName("CrestCreates.DynamicApi.IDynamicApiGeneratedProvider") != null;
 
             var processedEntities = new HashSet<string>();
 
@@ -195,12 +201,13 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     GenerateObjectMappingDeclarations(context, entityClass, entityName, namespaceName);
 
                     // Generate mainline app service implementation
-                    GenerateCrudServiceImplementation(context, entityClass, entityName, namespaceName, idType, properties, generateAsBaseClass);
+                    GenerateCrudServiceImplementation(context, entityClass, entityName, namespaceName, idType, properties, generateAsBaseClass, hasMultiTenant);
 
                     // Generate self-contained Dynamic API registration so the CRUD service
                     // enters the HTTP main chain without depending on DynamicApiAotSourceGenerator
                     // discovering it (cross-generator visibility is not guaranteed in Roslyn).
-                    GenerateCrudDynamicApiRegistration(context, entityClass, entityName, namespaceName, idType, generateAsBaseClass);
+                    if (hasDynamicApi)
+                        GenerateCrudDynamicApiRegistration(context, entityClass, entityName, namespaceName, idType, generateAsBaseClass);
                 }
                 catch (Exception ex)
                 {
@@ -438,7 +445,8 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             string namespaceName,
             string idType,
             List<IPropertySymbol> properties,
-            bool generateAsBaseClass)
+            bool generateAsBaseClass,
+            bool hasMultiTenant)
         {
             var entityFullName = entityClass.ToDisplayString(FullyQualifiedFormat);
             var hasConcurrencyStamp = entityClass.AllInterfaces.Any(i =>
@@ -466,7 +474,8 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("using CrestCreates.Application.Contracts.Query;");
             builder.AppendLine("using CrestCreates.Domain.Exceptions;");
             builder.AppendLine("using CrestCreates.Domain.Repositories;");
-            builder.AppendLine("using CrestCreates.DataFilter.Entities;");
+            if (hasMultiTenant)
+                builder.AppendLine("using CrestCreates.DataFilter.Entities;");
             builder.AppendLine("using CrestCreates.Domain.Shared.DataFilter;");
             builder.AppendLine("using CrestCreates.Domain.Shared.Entities;");
             builder.AppendLine("using CrestCreates.Domain.Shared.Entities.Auditing;");
@@ -555,8 +564,11 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("        {");
             builder.AppendLine("            if (entity is IMustHaveTenant mustHaveTenant)");
             builder.AppendLine("                mustHaveTenant.TenantId = CurrentUser.TenantId ?? throw new InvalidOperationException(\"当前用户没有关联租户\");");
-            builder.AppendLine("            if (entity is IMultiTenant multiTenant)");
-            builder.AppendLine("                multiTenant.TenantId = CurrentUser.TenantId ?? throw new InvalidOperationException(\"当前用户没有关联租户\");");
+            if (hasMultiTenant)
+            {
+                builder.AppendLine("            if (entity is IMultiTenant multiTenant)");
+                builder.AppendLine("                multiTenant.TenantId = CurrentUser.TenantId ?? throw new InvalidOperationException(\"当前用户没有关联租户\");");
+            }
             builder.AppendLine("            var creatorId = Guid.TryParse(CurrentUser.Id, out var userId) ? userId : (Guid?)null;");
             builder.AppendLine("            if (entity is IHasCreator hasCreator)");
             builder.AppendLine("                hasCreator.CreatorId = creatorId;");
@@ -584,8 +596,11 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("        {");
             builder.AppendLine("            if (entity is IMustHaveTenant mustHaveTenant && mustHaveTenant.TenantId != CurrentUser.TenantId)");
             builder.AppendLine("                throw new UnauthorizedAccessException(\"您没有权限访问此数据：租户不匹配\");");
-            builder.AppendLine("            if (entity is IMultiTenant multiTenant && multiTenant.TenantId != CurrentUser.TenantId)");
-            builder.AppendLine("                throw new UnauthorizedAccessException(\"您没有权限访问此数据：租户不匹配\");");
+            if (hasMultiTenant)
+            {
+                builder.AppendLine("            if (entity is IMultiTenant multiTenant && multiTenant.TenantId != CurrentUser.TenantId)");
+                builder.AppendLine("                throw new UnauthorizedAccessException(\"您没有权限访问此数据：租户不匹配\");");
+            }
             builder.AppendLine("            return Task.CompletedTask;");
             builder.AppendLine("        }");
 
