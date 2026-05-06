@@ -8,10 +8,20 @@
     <EnableModuleManifestGeneration Condition="'$(EnableModuleManifestGeneration)' == ''">true</EnableModuleManifestGeneration>
     <ModuleManifestOutputPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\ModuleManifest.json</ModuleManifestOutputPath>
     <AggregatedModuleManifestPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\AggregatedModuleManifest.json</AggregatedModuleManifestPath>
-    <AggregatedModuleCodePath>$(MSBuildProjectDirectory)\CrestCreates.Generated\ModuleAutoInitializer.g.cs</AggregatedModuleCodePath>
+    <AggregatedModuleCodePath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\generated\CrestCreates.BuildTasks\ModuleAutoInitializer.g.cs</AggregatedModuleCodePath>
     <EnableEntityPermissionsScan Condition="'$(EnableEntityPermissionsScan)' == ''">true</EnableEntityPermissionsScan>
     <EntityPermissionsManifestOutputPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\EntityPermissionsManifest.json</EntityPermissionsManifestOutputPath>
   </PropertyGroup>
+
+  <!-- Clean stale generated files from previous path migrations -->
+  <Target Name="CleanStaleModuleAutoInitializer"
+          BeforeTargets="GenerateModuleManifest"
+          Condition="'$(EnableModuleManifestGeneration)' == 'true'">
+    <Delete Files="$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\ModuleAutoInitializer.g.cs"
+            Condition="Exists('$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\ModuleAutoInitializer.g.cs')" />
+    <Delete Files="$(MSBuildProjectDirectory)\CrestCreates.Generated\ModuleAutoInitializer.g.cs"
+            Condition="Exists('$(MSBuildProjectDirectory)\CrestCreates.Generated\ModuleAutoInitializer.g.cs')" />
+  </Target>
 
   <Target Name="GenerateModuleManifest"
           BeforeTargets="BeforeBuild"
