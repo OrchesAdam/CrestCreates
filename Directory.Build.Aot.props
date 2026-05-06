@@ -1,8 +1,8 @@
 <Project>
-  <!-- AoT 编译支持配置 (仅适用于 net10.0+ 项目，排除 netstandard2.0 的 CodeGenerator) -->
-  <PropertyGroup Condition="$(TargetFramework) != 'netstandard2.0'">
-    <!-- 启用 AoT 编译 -->
-    <PublishAot>true</PublishAot>
+  <!-- Trim 发布配置（仅适用于 net10.0+ 项目，排除 netstandard2.0 的 CodeGenerator） -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' != 'CrestCreates.CodeGenerator'">
+    <!-- 默认目标是 Trim 发布，不默认启用 NativeAOT。NativeAOT 需要显式传入 -p:CrestCreatesPublishMode=aot。 -->
+    <CrestCreatesPublishMode Condition="'$(CrestCreatesPublishMode)' == ''">trim</CrestCreatesPublishMode>
     <TrimMode>partial</TrimMode>
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
 
@@ -15,18 +15,26 @@
     <RuntimeIdentifiers>win-x64;linux-x64;osx-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
-  <!-- EF Core Aot 拦截器 -->
-  <PropertyGroup>
-    <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.EntityFrameworkCore.GeneratedInterceptors</InterceptorsNamespaces>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' != 'CrestCreates.CodeGenerator' and '$(CrestCreatesPublishMode)' == 'trim'">
+    <PublishTrimmed>true</PublishTrimmed>
+    <PublishAot>false</PublishAot>
   </PropertyGroup>
 
-  <!-- 配置修剪行为 -->
-  <ItemGroup Condition="$(TargetFramework) != 'netstandard2.0'">
-    <!-- 保留必要的类型和成员 -->
-    <TrimmerRootAssembly Include="CrestCreates.Domain" />
-    <TrimmerRootAssembly Include="CrestCreates.Infrastructure" />
-    <TrimmerRootAssembly Include="CrestCreates.Web" />
-  </ItemGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' != 'CrestCreates.CodeGenerator' and '$(CrestCreatesPublishMode)' == 'aot'">
+    <PublishTrimmed>true</PublishTrimmed>
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'CrestCreates.CodeGenerator'">
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishAot>false</PublishAot>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+  </PropertyGroup>
+
+  <!-- EF Core NativeAOT 拦截器，仅在显式 AOT 发布时启用。 -->
+  <PropertyGroup Condition="'$(CrestCreatesPublishMode)' == 'aot'">
+    <InterceptorsNamespaces>$(InterceptorsNamespaces);Microsoft.EntityFrameworkCore.GeneratedInterceptors</InterceptorsNamespaces>
+  </PropertyGroup>
 
   <!-- 全局 Source Generator (Analyzer) 引用 -->
   <ItemGroup>
@@ -36,11 +44,4 @@
                       Condition="$(MSBuildProjectName) != 'CrestCreates.CodeGenerator' and '$(CrestCreatesCodeGeneration)' != 'false'" />
   </ItemGroup>
 
-  <!-- 为特定项目添加 AoT 配置 -->
-  <Target Name="ConfigureAotForWeb" BeforeTargets="Build" Condition="$(MSBuildProjectName.Contains('Web'))">
-    <PropertyGroup>
-      <PublishAot>true</PublishAot>
-      <TrimMode>partial</TrimMode>
-    </PropertyGroup>
-  </Target>
 </Project>
