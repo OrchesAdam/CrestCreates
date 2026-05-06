@@ -144,12 +144,38 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             return false;
         }
 
-        if (!HasAttribute(typeSymbol, crestServiceAttribute))
+        if (dynamicApiIgnoreAttribute is not null && HasAttribute(typeSymbol, dynamicApiIgnoreAttribute))
         {
             return false;
         }
 
-        return dynamicApiIgnoreAttribute is null || !HasAttribute(typeSymbol, dynamicApiIgnoreAttribute);
+        // Accept [CrestService] classes
+        if (HasAttribute(typeSymbol, crestServiceAttribute))
+        {
+            return true;
+        }
+
+        // Also accept generated CRUD services that implement ICrudAppService<>.
+        // Generated types from other source generators are visible in the same
+        // compilation round when the CRUD generator executes before this generator.
+        if (ImplementsCrudAppService(typeSymbol))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool ImplementsCrudAppService(INamedTypeSymbol typeSymbol)
+    {
+        foreach (var iface in typeSymbol.AllInterfaces)
+        {
+            if (iface.Name == "ICrudAppService" && iface.TypeArguments.Length >= 5)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static IEnumerable<ServiceModel> BuildServiceModels(

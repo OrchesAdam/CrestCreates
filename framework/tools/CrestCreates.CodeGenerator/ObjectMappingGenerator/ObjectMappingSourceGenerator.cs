@@ -120,13 +120,24 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                     {
                         var source = writer.Write(model);
                         var fileName = declaration.MapperClassName;
-                        if (needsDisambiguation && declaration.Direction != MapDirection.Both)
+                        if (needsDisambiguation)
                         {
-                            fileName += $".{declaration.Direction}";
+                            // Use direction suffix; for Both, add an index to avoid collisions
+                            var suffix = declaration.Direction != MapDirection.Both
+                                ? $".{declaration.Direction}"
+                                : $".{declaration.Direction}{usedFileNames.Count}";
+                            fileName += suffix;
                         }
                         fileName += ".g.cs";
+                        if (!usedFileNames.Add(fileName))
+                        {
+                            // Guard: if still duplicate, append index
+                            var i = 1;
+                            while (!usedFileNames.Add($"{declaration.MapperClassName}.{i}.g.cs"))
+                                i++;
+                            fileName = $"{declaration.MapperClassName}.{i}.g.cs";
+                        }
                         context.AddSource(fileName, SourceText.From(source, System.Text.Encoding.UTF8));
-                        usedFileNames.Add(fileName);
                     }
                 }
             }

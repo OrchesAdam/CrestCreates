@@ -9,16 +9,55 @@ namespace CrestCreates.CodeGenerator.Tests.DynamicApiGenerator;
 public sealed class DynamicApiCrudMainlineTests
 {
     [Fact]
-    public void GeneratedDynamicApi_DeleteExpectedStamp_BindingCodePatternExists()
+    public void GeneratedDynamicApi_DeleteExpectedStamp_ShouldBindFromIfMatchHeader()
     {
-        // Verify that the DynamicApiAotSourceGenerator contains the Header parameter source
-        // and the If-Match binding logic for CRUD delete concurrency tokens.
-        // Full end-to-end test requires DynamicApi infrastructure stubs defined in
-        // DynamicApiAotSourceGeneratorTests, which test the standard endpoints.
-        //
-        // The CRUD mainline delete If-Match binding is verified via:
-        // 1. Generator code review (ResolveParameterSource detects expectedStamp)
-        // 2. Integration tests in GeneratedCrudMainlineIntegrationTests
-        // 3. Acceptance tests against the LibraryManagement sample
+        const string source = """
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using CrestCreates.Domain.Shared.Attributes;
+
+namespace TestContracts;
+
+public interface IProductAppService
+{
+    Task<ProductDto> CreateAsync(CreateProductDto input, CancellationToken cancellationToken = default);
+    Task<ProductDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<ProductDto> UpdateAsync(Guid id, UpdateProductDto input, CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid id, string? expectedStamp = null, CancellationToken cancellationToken = default);
+}
+
+[CrestService]
+public sealed class ProductAppService : IProductAppService
+{
+    public Task<ProductDto> CreateAsync(CreateProductDto input, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+    public Task<ProductDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+    public Task<ProductDto> UpdateAsync(Guid id, UpdateProductDto input, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+    public Task DeleteAsync(Guid id, string? expectedStamp = null, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+}
+
+public sealed class ProductDto { }
+public sealed class CreateProductDto { }
+public sealed class UpdateProductDto { }
+public sealed class ProductListRequestDto { }
+""";
+
+        var result = SourceGeneratorTestHelper.RunGenerator<DynamicApiAotSourceGenerator>(
+            source,
+            additionalSources: new[] { DynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs() });
+
+        Assert.True(result.ContainsFile("GeneratedDynamicApiEndpoints.g.cs"),
+            "Endpoints file not generated. Diagnostics: " +
+            string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+
+        var endpoints = result.GetSourceByFileName("GeneratedDynamicApiEndpoints.g.cs")!.SourceText;
+
+        Assert.Contains("If-Match", endpoints);
+        Assert.Contains("expectedStamp", endpoints);
+        Assert.Contains("context.Request.Headers", endpoints);
     }
 }
