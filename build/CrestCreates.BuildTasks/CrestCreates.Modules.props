@@ -63,10 +63,6 @@
       Namespace="$(RootNamespace)" />
 
     <Message Text="Generated aggregated module code at $(AggregatedModuleCodePath)" Importance="high" />
-
-    <ItemGroup>
-      <Compile Include="$(AggregatedModuleCodePath)" />
-    </ItemGroup>
   </Target>
 
   <Target Name="ScanEntityPermissions"
