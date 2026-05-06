@@ -353,7 +353,7 @@ namespace TestNamespace
     }
 
     [Fact]
-    public void GeneratedCrud_ShouldHandleIMultiTenant()
+    public void GeneratedCrud_WithoutDataFilterReference_ShouldNotGenerateIMultiTenant()
     {
         var result = RunProductGenerator();
 
@@ -368,6 +368,27 @@ namespace TestNamespace
         // This proves the using and code are conditional.
         Assert.DoesNotContain("using CrestCreates.DataFilter.Entities", source);
         Assert.DoesNotContain("IMultiTenant", source);
+    }
+
+    [Fact]
+    public void GeneratedCrud_WithDataFilterReference_ShouldHandleIMultiTenant()
+    {
+        var result = SourceGeneratorTestHelper.RunGenerator<CrudServiceSourceGenerator>(
+            EntitySource,
+            new[] { EntitySupport, MappingSupport, DataFilterSupport },
+            FrameworkReferences);
+
+        Assert.True(result.CompilationSuccess,
+            "Compilation failed. Diagnostics:\n" +
+            string.Join("\n", result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error).Select(d => d.ToString())));
+
+        var source = result.GetSourceByFileName("ProductAppService.g.cs")!.SourceText;
+
+        Assert.Contains("using CrestCreates.DataFilter.Entities;", source);
+        Assert.Contains("if (entity is IMultiTenant multiTenant)", source);
+        Assert.Contains("multiTenant.TenantId = CurrentUser.TenantId ?? throw", source);
+        Assert.Contains("IMultiTenant multiTenant && multiTenant.TenantId != CurrentUser.TenantId", source);
+        Assert.DoesNotContain("multiTenant.TenantId = CurrentUser.TenantId?.ToString()", source);
     }
 
     private const string EntitySource = """
@@ -414,6 +435,16 @@ namespace TestNamespace
         public DateTime? LastModificationTime { get; set; }
         public Guid? LastModifierId { get; set; }
         public string ConcurrencyStamp { get; set; } = Guid.NewGuid().ToString();
+    }
+}
+""";
+
+    private const string DataFilterSupport = """
+namespace CrestCreates.DataFilter.Entities
+{
+    public interface IMultiTenant
+    {
+        string? TenantId { get; set; }
     }
 }
 """;

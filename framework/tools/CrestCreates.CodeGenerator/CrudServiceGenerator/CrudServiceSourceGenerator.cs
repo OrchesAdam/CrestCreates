@@ -164,7 +164,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             if (entityClasses.IsDefaultOrEmpty) return;
 
             var hasMultiTenant = compilation.GetTypeByMetadataName("CrestCreates.DataFilter.Entities.IMultiTenant") != null;
-            var hasDynamicApi = compilation.GetTypeByMetadataName("CrestCreates.DynamicApi.IDynamicApiGeneratedProvider") != null;
+            var hasDynamicApi = HasDynamicApiSupport(compilation);
 
             var processedEntities = new HashSet<string>();
 
@@ -218,6 +218,26 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                         Location.None));
                 }
             }
+        }
+
+        private static bool HasDynamicApiSupport(Compilation compilation)
+        {
+            var requiredTypes = new[]
+            {
+                "CrestCreates.DynamicApi.IDynamicApiGeneratedProvider",
+                "CrestCreates.DynamicApi.DynamicApiGeneratedRegistryStore",
+                "CrestCreates.DynamicApi.DynamicApiOptions",
+                "CrestCreates.DynamicApi.DynamicApiRegistry",
+                "CrestCreates.DynamicApi.DynamicApiServiceDescriptor",
+                "CrestCreates.DynamicApi.DynamicApiActionDescriptor",
+                "CrestCreates.DynamicApi.DynamicApiGeneratedRuntime",
+                "CrestCreates.Validation.Modules.IValidationService",
+                "Microsoft.AspNetCore.Routing.IEndpointRouteBuilder",
+                "Microsoft.AspNetCore.Http.HttpContext",
+                "Microsoft.AspNetCore.Mvc.FromServicesAttribute"
+            };
+
+            return requiredTypes.All(typeName => compilation.GetTypeByMetadataName(typeName) != null);
         }
 
         private static string GetPropertyTypeDeclaration(IPropertySymbol prop)
