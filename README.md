@@ -1,6 +1,6 @@
 # CrestCreates
 
-CrestCreates 是一个模块化 .NET 10 企业级应用开发框架，基于领域驱动设计 (DDD) 和编译期代码生成，支持多 ORM、多租户、AoT 友好。
+CrestCreates 是一个模块化 .NET 10 企业级应用开发框架，基于领域驱动设计 (DDD) 和编译期代码生成，支持多 ORM、多租户、Trim 发布，并持续向 NativeAOT 友好主链收口。
 
 ## 核心特性
 
@@ -71,7 +71,24 @@ dotnet test
 
 # 运行示例应用
 dotnet run --project samples/LibraryManagement/LibraryManagement.Web
+
+# 默认 Trim 发布（非 NativeAOT）
+dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r win-x64 --self-contained true
+
+# 显式 NativeAOT 发布验证
+dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r win-x64 --self-contained true -p:CrestCreatesPublishMode=aot
 ```
+
+### 发布模式
+
+全局发布配置位于 `Directory.Build.Aot.props`。当前默认发布模式是 `trim`：启用 `PublishTrimmed=true`，但不默认启用 `PublishAot`。这样可以先保证框架和示例应用能够完成 Trim 发布，同时避免 EF Core、MVC、动态 LINQ 等尚未完全 AOT 化的链路在普通发布时直接失败。
+
+| 模式 | 命令 | 行为 |
+|------|------|------|
+| 默认 / `trim` | `dotnet publish ...` 或 `-p:CrestCreatesPublishMode=trim` | `PublishTrimmed=true`，`PublishAot=false` |
+| `aot` | `dotnet publish ... -p:CrestCreatesPublishMode=aot` | `PublishTrimmed=true`，`PublishAot=true`，启用 EF Core NativeAOT interceptor namespace |
+
+测试项目在 `Directory.Build.targets` 中强制关闭 `PublishTrimmed` 和 `PublishAot`，避免 Moq、Castle DynamicProxy 等运行时代码生成链路被 Trim/AOT 约束干扰。
 
 ### 创建使用框架的项目
 
@@ -123,7 +140,8 @@ CrestCreates/
 │   └── LibraryManagement/  # DDD 示例应用
 ├── docs/                 # 文档
 ├── CrestCreates.slnx     # 解决方案文件（.slnx 格式）
-├── Directory.Build.props # 全局构建配置（net10.0, AoT, 中央包管理）
+├── Directory.Build.props # 全局构建配置（net10.0, 中央包管理）
+├── Directory.Build.Aot.props # Trim / NativeAOT 发布模式配置
 └── Directory.Packages.props  # 中央包版本管理
 ```
 
@@ -212,7 +230,7 @@ public class BookAppService : CrestAppServiceBase<Book, Guid, BookDto, CreateBoo
 ## 设计原则
 
 1. **唯一主链** — 确定主实现后不再维护第二套，编译期生成优先于运行时反射
-2. **AoT 友好** — 所有主链路径必须 AoT 兼容，`PublishAot` 全局启用
+2. **Trim 优先，NativeAOT 显式验证** — 默认保证 Trim 发布可用；NativeAOT 作为显式模式持续推进，不再默认阻断普通发布链路
 3. **强类型优先** — 使用 contributor/definition/descriptor/provider 模式，不散落字符串拼装
 4. **平台能力优先** — 优先做可复用的平台能力，而非业务级补丁
 
