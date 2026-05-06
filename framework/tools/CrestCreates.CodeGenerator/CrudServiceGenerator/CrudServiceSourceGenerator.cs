@@ -870,6 +870,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("using System.Globalization;");
             builder.AppendLine("using System.Linq;");
             builder.AppendLine("using System.Reflection;");
+            builder.AppendLine("using CrestCreates.Application.Contracts.DTOs.Common;");
             builder.AppendLine("using CrestCreates.Authorization.Abstractions;");
             builder.AppendLine("using CrestCreates.DynamicApi;");
             builder.AppendLine("using CrestCreates.Validation.Modules;");
@@ -910,8 +911,9 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "Create", "", "POST", "Create");
             // GetById
             WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "GetById", "{id}", "GET", "Get");
-            // GetList - POST with body binding so Filters/Sorts descriptors are supported
-            WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "GetList", "", "POST", "Search");
+            // GetList - POST with body binding so Filters/Sorts descriptors are supported.
+            // Uses "search" sub-route to avoid colliding with Create (also POST "").
+            WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "GetList", "search", "POST", "Search");
             // Update
             WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "Update", "{id}", "PUT", "Update");
             // Delete
@@ -985,6 +987,8 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("                        {");
             if (actionName == "Delete")
                 builder.AppendLine("                            DeclaredType = typeof(void), PayloadType = null, IsVoid = true");
+            else if (actionName == "GetList")
+                builder.AppendLine($"                            DeclaredType = typeof(PagedResultDto<{serviceName}Dto>), PayloadType = typeof(PagedResultDto<{serviceName}Dto>), IsVoid = false");
             else
                 builder.AppendLine($"                            DeclaredType = typeof({serviceName}Dto), PayloadType = typeof({serviceName}Dto), IsVoid = false");
             builder.AppendLine("                        },");
@@ -1062,9 +1066,9 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine($"                }}).WithDisplayName(\"{contractTypeName}.GetById\").WithMetadata(perm_{s}_get).ExcludeFromDescription();");
             builder.AppendLine();
 
-            // GetList - POST with body binding to support Filters/Sorts descriptors
+            // GetList - POST /search with body binding to support Filters/Sorts descriptors
             builder.AppendLine($"            var perm_{s}_search = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{permSearch}\" }}, RequireAll = false }};");
-            builder.AppendLine($"            endpoints.MapMethods(BuildRoute(routePrefix, \"\"), new[] {{ \"POST\" }},");
+            builder.AppendLine($"            endpoints.MapMethods(BuildRoute(routePrefix, \"search\"), new[] {{ \"POST\" }},");
             builder.AppendLine($"                async (HttpContext context, [FromServices] {contractTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
             builder.AppendLine("                {");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, perm_{s}_search.Permissions);");

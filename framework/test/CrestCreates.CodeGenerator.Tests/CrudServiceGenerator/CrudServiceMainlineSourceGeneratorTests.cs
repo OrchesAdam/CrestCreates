@@ -141,6 +141,11 @@ public sealed class CrudServiceMainlineSourceGeneratorTests
 
         // MatchesAssembly guard present in MapEndpoints
         Assert.Contains("MatchesAssembly(options, typeof(", source);
+
+        // Create and GetList must have distinct routes (Create = POST "", GetList = POST "search"
+        Assert.Contains("BuildRoute(routePrefix, \"\"), new[] { \"POST\" }", source);
+        Assert.Contains("BuildRoute(routePrefix, \"search\"), new[] { \"POST\" }", source);
+        Assert.Contains("PagedResultDto<ProductDto>", source);
     }
 
     [Fact]
