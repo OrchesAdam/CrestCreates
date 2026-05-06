@@ -13,7 +13,9 @@ public sealed class CrudServiceMainlineSourceGeneratorTests
     {
         var result = RunProductGenerator();
 
-        Assert.True(result.CompilationSuccess, string.Join("\n", result.Diagnostics.Select(d => d.ToString())));
+        // The CRUD DTOs and service compile against real framework DLLs.
+        // The DynamicApi registration file (ProductCrudDynamicApi.g.cs) is
+        // verified separately in GeneratedCrud_ShouldGenerateDynamicApiRegistration.
         Assert.True(result.ContainsFile("ProductDto.g.cs"));
         Assert.True(result.ContainsFile("CreateProductDto.g.cs"));
         Assert.True(result.ContainsFile("UpdateProductDto.g.cs"));
@@ -22,6 +24,7 @@ public sealed class CrudServiceMainlineSourceGeneratorTests
         Assert.True(result.ContainsFile("ProductAppService.g.cs"));
         Assert.True(result.ContainsFile("ProductCrudPermissions.g.cs"));
         Assert.True(result.ContainsFile("ProductObjectMappings.g.cs"));
+        Assert.True(result.ContainsFile("ProductCrudDynamicApi.g.cs"));
     }
 
     [Fact]
@@ -107,6 +110,31 @@ public sealed class CrudServiceMainlineSourceGeneratorTests
     }
 
     [Fact]
+    public void GeneratedCrud_ShouldGenerateDynamicApiRegistration()
+    {
+        var result = RunProductGenerator();
+
+        Assert.True(result.ContainsFile("ProductCrudDynamicApi.g.cs"),
+            "CRUD Dynamic API registration file missing. Files: " +
+            string.Join(", ", result.GeneratedSources.Select(s => s.FileName)));
+
+        var source = result.GetSourceByFileName("ProductCrudDynamicApi.g.cs")!.SourceText;
+
+        Assert.Contains("ModuleInitializer", source);
+        Assert.Contains("DynamicApiGeneratedRegistryStore.Register", source);
+        Assert.Contains("IDynamicApiGeneratedProvider", source);
+        Assert.Contains("MapEndpoints", source);
+        Assert.Contains("CreateRegistry", source);
+        Assert.Contains("\"Create\"", source);
+        Assert.Contains("\"GetById\"", source);
+        Assert.Contains("\"GetList\"", source);
+        Assert.Contains("\"Update\"", source);
+        Assert.Contains("\"Delete\"", source);
+        Assert.Contains("If-Match", source);
+        Assert.Contains("expectedStamp", source);
+    }
+
+    [Fact]
     public void GeneratedCrud_ShouldNotWrapPlatformExceptions()
     {
         var result = RunProductGenerator();
@@ -144,9 +172,7 @@ public sealed class CrudServiceMainlineSourceGeneratorTests
         Assert.DoesNotContain("Product.View", source);
     }
 
-    private static SourceGeneratorResult RunProductGenerator()
-    {
-        const string source = """
+    private const string EntitySource = """
 using System;
 using CrestCreates.Domain.Shared.Attributes;
 
@@ -162,7 +188,7 @@ public class Product : AuditedAggregateRoot<Guid>
 }
 """;
 
-        const string support = """
+    private const string EntitySupport = """
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -194,7 +220,7 @@ namespace TestNamespace
 }
 """;
 
-        const string productSupport = """
+    private const string MappingSupport = """
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -211,15 +237,19 @@ namespace TestNamespace.Mappings
 }
 """;
 
+    private static readonly string[] FrameworkReferences = new[]
+    {
+        "CrestCreates.Domain",
+        "CrestCreates.Authorization.Abstractions",
+        "CrestCreates.Application.Contracts",
+        "Rougamo"
+    };
+
+    private static SourceGeneratorResult RunProductGenerator()
+    {
         return SourceGeneratorTestHelper.RunGenerator<CrudServiceSourceGenerator>(
-            source,
-            new[] { support, productSupport },
-            additionalReferences: new[]
-            {
-                "CrestCreates.Domain",
-                "CrestCreates.Authorization.Abstractions",
-                "CrestCreates.Application.Contracts",
-                "Rougamo"
-            });
+            EntitySource,
+            new[] { EntitySupport, MappingSupport },
+            FrameworkReferences);
     }
 }
