@@ -13,6 +13,9 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
     [Generator]
     public class CrudServiceSourceGenerator : IIncrementalGenerator
     {
+        private static readonly SymbolDisplayFormat FullyQualifiedFormat =
+            SymbolDisplayFormat.FullyQualifiedFormat;
+
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
             var entityClasses = context.SyntaxProvider
@@ -22,7 +25,9 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 .Where(static x => x is not null)
                 .Collect();
 
-            context.RegisterSourceOutput(entityClasses, ExecuteGeneration);
+            var compilationAndClasses = context.CompilationProvider.Combine(entityClasses);
+
+            context.RegisterSourceOutput(compilationAndClasses, ExecuteGeneration);
         }
 
         private static bool IsEntityCandidate(SyntaxNode node)
@@ -38,8 +43,8 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             if (symbol != null && HasGenerateCrudServiceAttribute(symbol))
             {
                 var isUsingNewAttribute = IsUsingGenerateEntityAttribute(symbol);
-                var generateAsBaseClass = isUsingNewAttribute ? 
-                    GetAttributeBooleanValue(symbol, "GenerateAsBaseClass", true) : 
+                var generateAsBaseClass = isUsingNewAttribute ?
+                    GetAttributeBooleanValue(symbol, "GenerateAsBaseClass", false) :
                     false;
                 return (symbol, generateAsBaseClass, isUsingNewAttribute);
             }
@@ -153,9 +158,13 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             return defaultValue;
         }
 
-        private void ExecuteGeneration(SourceProductionContext context, ImmutableArray<(INamedTypeSymbol Symbol, bool GenerateAsBaseClass, bool IsUsingNewAttribute)?> entityClasses)
+        private void ExecuteGeneration(SourceProductionContext context, (Compilation Compilation, ImmutableArray<(INamedTypeSymbol Symbol, bool GenerateAsBaseClass, bool IsUsingNewAttribute)?> Classes) input)
         {
+            var (compilation, entityClasses) = input;
             if (entityClasses.IsDefaultOrEmpty) return;
+
+            var hasMultiTenant = compilation.GetTypeByMetadataName("CrestCreates.DataFilter.Entities.IMultiTenant") != null;
+            var hasDynamicApi = HasDynamicApiSupport(compilation);
 
             var processedEntities = new HashSet<string>();
 
@@ -167,7 +176,6 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 var entityFullName = entityClass.ToDisplayString();
                 if (processedEntities.Contains(entityFullName)) continue;
 
-                // 注意：现在同时支持 GenerateCrudServiceAttribute 和 GenerateEntityAttribute
                 processedEntities.Add(entityFullName);
 
                 try
@@ -176,16 +184,30 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     var namespaceName = entityClass.ContainingNamespace.ToDisplayString();
                     var idType = GetEntityIdType(entityClass);
                     var properties = GetEntityProperties(entityClass);
-                    var generateController = GetAttributeBooleanValue(entityClass, "GenerateController", false);
-                    var controllerRoute = GetCrudControllerRoute(entityClass, entityName);
 
-                    var dtosNamespace = $"{namespaceName}.Dtos";
+                    // Generate DTOs
                     GenerateEntityDto(context, entityClass, entityName, namespaceName, properties);
                     GenerateCreateEntityDto(context, entityClass, entityName, namespaceName, properties);
                     GenerateUpdateEntityDto(context, entityClass, entityName, namespaceName, properties);
-                    GenerateEntityListRequestDto(context, entityClass, entityName, namespaceName, properties);
-                    GenerateCrudServiceInterface(context, entityClass, entityName, namespaceName, idType, generateController, controllerRoute);
-                    GenerateCrudServiceImplementation(context, entityClass, entityName, namespaceName, idType, properties, generateAsBaseClass);
+                    GenerateEntityListRequestDto(context, entityClass, entityName, namespaceName);
+
+                    // Generate contract
+                    GenerateCrudServiceInterface(context, entityName, namespaceName, idType);
+
+                    // Generate permissions
+                    GenerateCrudPermissions(context, entityName, namespaceName);
+
+                    // Generate object mapping declarations
+                    GenerateObjectMappingDeclarations(context, entityClass, entityName, namespaceName);
+
+                    // Generate mainline app service implementation
+                    GenerateCrudServiceImplementation(context, entityClass, entityName, namespaceName, idType, properties, generateAsBaseClass, hasMultiTenant);
+
+                    // Generate self-contained Dynamic API registration so the CRUD service
+                    // enters the HTTP main chain without depending on DynamicApiAotSourceGenerator
+                    // discovering it (cross-generator visibility is not guaranteed in Roslyn).
+                    if (hasDynamicApi)
+                        GenerateCrudDynamicApiRegistration(context, entityClass, entityName, namespaceName, idType, generateAsBaseClass);
                 }
                 catch (Exception ex)
                 {
@@ -198,32 +220,43 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             }
         }
 
-        private static string GetCrudControllerRoute(INamedTypeSymbol entityClass, string entityName)
+        private static bool HasDynamicApiSupport(Compilation compilation)
         {
-            var controllerRoute = GetAttributeStringValue(entityClass, "ControllerRoute", null);
-            if (!string.IsNullOrWhiteSpace(controllerRoute))
+            var requiredTypes = new[]
             {
-                return controllerRoute!;
-            }
+                "CrestCreates.DynamicApi.IDynamicApiGeneratedProvider",
+                "CrestCreates.DynamicApi.DynamicApiGeneratedRegistryStore",
+                "CrestCreates.DynamicApi.DynamicApiOptions",
+                "CrestCreates.DynamicApi.DynamicApiRegistry",
+                "CrestCreates.DynamicApi.DynamicApiServiceDescriptor",
+                "CrestCreates.DynamicApi.DynamicApiActionDescriptor",
+                "CrestCreates.DynamicApi.DynamicApiGeneratedRuntime",
+                "CrestCreates.Validation.Modules.IValidationService",
+                "Microsoft.AspNetCore.Routing.IEndpointRouteBuilder",
+                "Microsoft.AspNetCore.Http.HttpContext",
+                "Microsoft.AspNetCore.Mvc.FromServicesAttribute"
+            };
 
-            var serviceRoute = GetAttributeStringValue(entityClass, "ServiceRoute", null);
-            if (!string.IsNullOrWhiteSpace(serviceRoute))
-            {
-                return serviceRoute!;
-            }
-
-            return $"api/{entityName.ToLowerInvariant()}";
+            return requiredTypes.All(typeName => compilation.GetTypeByMetadataName(typeName) != null);
         }
 
-        private static string EscapeStringLiteral(string value)
+        private static string GetPropertyTypeDeclaration(IPropertySymbol prop)
         {
-            return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            var propType = prop.Type.ToDisplayString();
+            // If the type already has a nullable suffix (e.g., "System.Guid?"), don't add another
+            if (propType.EndsWith("?"))
+                return propType;
+
+            if (prop.NullableAnnotation == NullableAnnotation.Annotated)
+                return propType + "?";
+
+            return propType;
         }
 
         private void GenerateEntityDto(SourceProductionContext context, INamedTypeSymbol entityClass, string entityName, string namespaceName, List<IPropertySymbol> properties)
         {
             var excludedProperties = GetAttributeStringArrayValue(entityClass, "ExcludeProperties", Array.Empty<string>());
-            
+
             var builder = new StringBuilder();
             builder.AppendLine("#nullable enable");
             builder.AppendLine("// <auto-generated />");
@@ -231,9 +264,6 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine();
             builder.AppendLine($"namespace {namespaceName}.Dtos");
             builder.AppendLine("{");
-            builder.AppendLine("    /// <summary>");
-            builder.AppendLine($"    /// {entityName} 输出 DTO");
-            builder.AppendLine("    /// </summary>");
             builder.AppendLine($"    public partial class {entityName}Dto");
             builder.AppendLine("    {");
 
@@ -241,13 +271,13 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             {
                 if (excludedProperties.Contains(prop.Name))
                     continue;
+                if (prop.Name == "IsDeleted" || prop.Name == "DeletionTime" || prop.Name == "DeleterId")
+                    continue;
+                if (IsNavigationProperty(prop))
+                    continue;
 
-                var propType = prop.Type.ToDisplayString();
-                var nullableAnnotation = prop.NullableAnnotation == NullableAnnotation.Annotated ? "?" : "";
-                builder.AppendLine("        /// <summary>");
-                builder.AppendLine($"        /// {prop.Name}");
-                builder.AppendLine("        /// </summary>");
-                builder.AppendLine($"        public {propType}{nullableAnnotation} {prop.Name} {{ get; set; }}");
+                var propType = GetPropertyTypeDeclaration(prop);
+                builder.AppendLine($"        public {propType} {prop.Name} {{ get; set; }}");
                 builder.AppendLine();
             }
 
@@ -260,7 +290,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
         private void GenerateCreateEntityDto(SourceProductionContext context, INamedTypeSymbol entityClass, string entityName, string namespaceName, List<IPropertySymbol> properties)
         {
             var excludedFromAttribute = GetAttributeStringArrayValue(entityClass, "ExcludeProperties", Array.Empty<string>());
-            var defaultExcludedProperties = new[] { "Id", "CreationTime", "CreatorId", "LastModificationTime", "LastModifierId", "IsDeleted", "DeletionTime", "DeleterId", "ConcurrencyStamp" };
+            var defaultExcludedProperties = new[] { "Id", "CreationTime", "CreatorId", "LastModificationTime", "LastModifierId", "IsDeleted", "DeletionTime", "DeleterId", "ConcurrencyStamp", "TenantId" };
             var allExcludedProperties = defaultExcludedProperties.Concat(excludedFromAttribute).ToArray();
 
             var builder = new StringBuilder();
@@ -271,9 +301,6 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine();
             builder.AppendLine($"namespace {namespaceName}.Dtos");
             builder.AppendLine("{");
-            builder.AppendLine("    /// <summary>");
-            builder.AppendLine($"    /// 创建 {entityName} 输入 DTO");
-            builder.AppendLine("    /// </summary>");
             builder.AppendLine($"    public partial class Create{entityName}Dto");
             builder.AppendLine("    {");
 
@@ -281,13 +308,10 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             {
                 if (allExcludedProperties.Contains(prop.Name))
                     continue;
+                if (IsNavigationProperty(prop))
+                    continue;
 
-                var propType = prop.Type.ToDisplayString();
-                var nullableAnnotation = prop.NullableAnnotation == NullableAnnotation.Annotated ? "?" : "";
-
-                builder.AppendLine("        /// <summary>");
-                builder.AppendLine($"        /// {prop.Name}");
-                builder.AppendLine("        /// </summary>");
+                var propType = GetPropertyTypeDeclaration(prop);
 
                 if (prop.Type.SpecialType == SpecialType.System_String && prop.NullableAnnotation != NullableAnnotation.Annotated)
                 {
@@ -295,7 +319,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     builder.AppendLine("        [StringLength(255)]");
                 }
 
-                builder.AppendLine($"        public {propType}{nullableAnnotation} {prop.Name} {{ get; set; }}");
+                builder.AppendLine($"        public {propType} {prop.Name} {{ get; set; }}");
                 builder.AppendLine();
             }
 
@@ -308,7 +332,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
         private void GenerateUpdateEntityDto(SourceProductionContext context, INamedTypeSymbol entityClass, string entityName, string namespaceName, List<IPropertySymbol> properties)
         {
             var excludedFromAttribute = GetAttributeStringArrayValue(entityClass, "ExcludeProperties", Array.Empty<string>());
-            var defaultExcludedProperties = new[] { "Id", "CreationTime", "CreatorId", "LastModificationTime", "LastModifierId", "IsDeleted", "DeletionTime", "DeleterId" };
+            var defaultExcludedProperties = new[] { "Id", "CreationTime", "CreatorId", "LastModificationTime", "LastModifierId", "IsDeleted", "DeletionTime", "DeleterId", "TenantId" };
             var allExcludedProperties = defaultExcludedProperties.Concat(excludedFromAttribute).ToArray();
 
             var builder = new StringBuilder();
@@ -319,31 +343,17 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine();
             builder.AppendLine($"namespace {namespaceName}.Dtos");
             builder.AppendLine("{");
-            builder.AppendLine("    /// <summary>");
-            builder.AppendLine($"    /// 更新 {entityName} 输入 DTO");
-            builder.AppendLine("    /// </summary>");
             builder.AppendLine($"    public partial class Update{entityName}Dto");
             builder.AppendLine("    {");
-
-            var idType = GetEntityIdType(entityClass);
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine("        /// 实体 ID");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine("        [Required]");
-            builder.AppendLine($"        public {idType} Id {{ get; set; }}");
-            builder.AppendLine();
 
             foreach (var prop in properties)
             {
                 if (allExcludedProperties.Contains(prop.Name))
                     continue;
+                if (IsNavigationProperty(prop))
+                    continue;
 
-                var propType = prop.Type.ToDisplayString();
-                var nullableAnnotation = prop.NullableAnnotation == NullableAnnotation.Annotated ? "?" : "";
-
-                builder.AppendLine("        /// <summary>");
-                builder.AppendLine($"        /// {prop.Name}");
-                builder.AppendLine("        /// </summary>");
+                var propType = GetPropertyTypeDeclaration(prop);
 
                 if (prop.Type.SpecialType == SpecialType.System_String && prop.NullableAnnotation != NullableAnnotation.Annotated)
                 {
@@ -351,7 +361,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     builder.AppendLine("        [StringLength(255)]");
                 }
 
-                builder.AppendLine($"        public {propType}{nullableAnnotation} {prop.Name} {{ get; set; }}");
+                builder.AppendLine($"        public {propType} {prop.Name} {{ get; set; }}");
                 builder.AppendLine();
             }
 
@@ -361,212 +371,331 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             context.AddSource($"Update{entityName}Dto.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
-        private void GenerateEntityListRequestDto(SourceProductionContext context, INamedTypeSymbol entityClass, string entityName, string namespaceName, List<IPropertySymbol> properties)
+        private void GenerateEntityListRequestDto(SourceProductionContext context, INamedTypeSymbol entityClass, string entityName, string namespaceName)
         {
             var builder = new StringBuilder();
             builder.AppendLine("#nullable enable");
             builder.AppendLine("// <auto-generated />");
-            builder.AppendLine("using System;");
-            builder.AppendLine("using System.ComponentModel;");
             builder.AppendLine("using CrestCreates.Application.Contracts.DTOs.Common;");
             builder.AppendLine();
             builder.AppendLine($"namespace {namespaceName}.Dtos");
             builder.AppendLine("{");
-            builder.AppendLine("    /// <summary>");
-            builder.AppendLine($"    /// {entityName} 列表查询请求 DTO");
-            builder.AppendLine("    /// </summary>");
             builder.AppendLine($"    public partial class {entityName}ListRequestDto : PagedRequestDto");
             builder.AppendLine("    {");
-
-            var searchableProperties = properties
-                .Where(p => p.Type.SpecialType == SpecialType.System_String && p.Name != "Id" && p.Name != "ConcurrencyStamp")
-                .Take(3)
-                .ToList();
-
-            if (searchableProperties.Any())
-            {
-                builder.AppendLine("        /// <summary>");
-                builder.AppendLine("        /// 关键字搜索");
-                builder.AppendLine("        /// </summary>");
-                builder.AppendLine("        public string? Keyword { get; set; }");
-                builder.AppendLine();
-            }
-
-            foreach (var prop in searchableProperties)
-            {
-                builder.AppendLine("        /// <summary>");
-                builder.AppendLine($"        /// {prop.Name} 过滤");
-                builder.AppendLine("        /// </summary>");
-                builder.AppendLine($"        public {prop.Type.ToDisplayString()}? {prop.Name} {{ get; set; }}");
-                builder.AppendLine();
-            }
-
-            if (properties.Any(p => p.Name == "CreationTime"))
-            {
-                builder.AppendLine("        /// <summary>");
-                builder.AppendLine("        /// 开始时间");
-                builder.AppendLine("        /// </summary>");
-                builder.AppendLine("        public DateTime? StartTime { get; set; }");
-                builder.AppendLine();
-
-                builder.AppendLine("        /// <summary>");
-                builder.AppendLine("        /// 结束时间");
-                builder.AppendLine("        /// </summary>");
-                builder.AppendLine("        public DateTime? EndTime { get; set; }");
-                builder.AppendLine();
-            }
-
             builder.AppendLine("    }");
             builder.AppendLine("}");
 
             context.AddSource($"{entityName}ListRequestDto.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
-        private void GenerateCrudServiceInterface(SourceProductionContext context, INamedTypeSymbol entityClass, string entityName, string namespaceName, string idType, bool generateController, string controllerRoute)
+        private void GenerateCrudServiceInterface(
+            SourceProductionContext context,
+            string entityName,
+            string namespaceName,
+            string idType)
         {
             var builder = new StringBuilder();
             builder.AppendLine("#nullable enable");
             builder.AppendLine("// <auto-generated />");
             builder.AppendLine("using System;");
-            builder.AppendLine("using System.Threading.Tasks;");
-            if (generateController)
-            {
-                builder.AppendLine("using CrestCreates.Domain.Shared.Attributes;");
-            }
             builder.AppendLine("using CrestCreates.Application.Contracts.Interfaces;");
-            builder.AppendLine("using CrestCreates.Application.Contracts.DTOs.Common;");
             builder.AppendLine($"using {namespaceName}.Dtos;");
             builder.AppendLine();
             builder.AppendLine($"namespace {namespaceName}.Services");
             builder.AppendLine("{");
-            builder.AppendLine("    /// <summary>");
-            builder.AppendLine($"    /// {entityName} CRUD 服务接口");
-            builder.AppendLine("    /// </summary>");
-            if (generateController)
-            {
-                builder.AppendLine($"    [CrestCrudApiController(\"{EscapeStringLiteral(entityName)}\", \"{EscapeStringLiteral(controllerRoute)}\")]");
-            }
-            builder.AppendLine($"    public partial interface I{entityName}CrudService : ICrudAppService<{idType}, {entityName}Dto, Create{entityName}Dto, Update{entityName}Dto, {entityName}ListRequestDto>");
+            builder.AppendLine($"    public partial interface I{entityName}AppService : ICrudAppService<{idType}, {entityName}Dto, Create{entityName}Dto, Update{entityName}Dto, {entityName}ListRequestDto>");
             builder.AppendLine("    {");
-
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine($"        /// 创建 {entityName}");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        Task<{entityName}Dto> CreateAsync(Create{entityName}Dto input, System.Threading.CancellationToken cancellationToken = default);");
-            builder.AppendLine();
-
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine($"        /// 根据 ID 获取 {entityName}");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        Task<{entityName}Dto?> GetByIdAsync({idType} id, System.Threading.CancellationToken cancellationToken = default);");
-            builder.AppendLine();
-
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine($"        /// 获取 {entityName} 分页列表");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        Task<PagedResultDto<{entityName}Dto>> GetListAsync({entityName}ListRequestDto input, System.Threading.CancellationToken cancellationToken = default);");
-            builder.AppendLine();
-
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine($"        /// 更新 {entityName}");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        Task<{entityName}Dto> UpdateAsync({idType} id, Update{entityName}Dto input, System.Threading.CancellationToken cancellationToken = default);");
-            builder.AppendLine();
-
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine($"        /// 删除 {entityName}");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        Task DeleteAsync({idType} id, string? expectedStamp = null, System.Threading.CancellationToken cancellationToken = default);");
-
             builder.AppendLine("    }");
             builder.AppendLine("}");
 
-            context.AddSource($"I{entityName}CrudService.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
+            context.AddSource($"I{entityName}AppService.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
-        private void GenerateCrudServiceImplementation(SourceProductionContext context, INamedTypeSymbol entityClass, string entityName, string namespaceName, string idType, List<IPropertySymbol> properties, bool generateAsBaseClass)
+        private void GenerateCrudPermissions(SourceProductionContext context, string entityName, string namespaceName)
         {
+            var builder = new StringBuilder();
+            builder.AppendLine("#nullable enable");
+            builder.AppendLine("// <auto-generated />");
+            builder.AppendLine();
+            builder.AppendLine($"namespace {namespaceName}.Permissions");
+            builder.AppendLine("{");
+            builder.AppendLine($"    public static partial class {entityName}CrudPermissions");
+            builder.AppendLine("    {");
+            builder.AppendLine($"        public const string Create = \"{entityName}.Create\";");
+            builder.AppendLine($"        public const string Get = \"{entityName}.Get\";");
+            builder.AppendLine($"        public const string Search = \"{entityName}.Search\";");
+            builder.AppendLine($"        public const string Update = \"{entityName}.Update\";");
+            builder.AppendLine($"        public const string Delete = \"{entityName}.Delete\";");
+            builder.AppendLine("    }");
+            builder.AppendLine("}");
+
+            context.AddSource($"{entityName}CrudPermissions.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
+        }
+
+        private void GenerateObjectMappingDeclarations(
+            SourceProductionContext context,
+            INamedTypeSymbol entityClass,
+            string entityName,
+            string namespaceName)
+        {
+            var entityFullName = entityClass.ToDisplayString(FullyQualifiedFormat);
+            var builder = new StringBuilder();
+            builder.AppendLine("#nullable enable");
+            builder.AppendLine("// <auto-generated />");
+            builder.AppendLine("using CrestCreates.Domain.Shared.ObjectMapping;");
+            builder.AppendLine($"using {namespaceName}.Dtos;");
+            builder.AppendLine();
+            builder.AppendLine($"namespace {namespaceName}.Mappings");
+            builder.AppendLine("{");
+            builder.AppendLine($"    [GenerateObjectMapping(typeof({entityFullName}), typeof({entityName}Dto))]");
+            builder.AppendLine($"    [GenerateObjectMapping(typeof(Create{entityName}Dto), typeof({entityFullName}), Direction = MapDirection.Create)]");
+            builder.AppendLine($"    [GenerateObjectMapping(typeof(Update{entityName}Dto), typeof({entityFullName}), Direction = MapDirection.Apply)]");
+            builder.AppendLine($"    public static partial class {entityName}ObjectMappings");
+            builder.AppendLine("    {");
+            builder.AppendLine("    }");
+            builder.AppendLine("}");
+
+            context.AddSource($"{entityName}ObjectMappings.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
+        }
+
+        private void GenerateCrudServiceImplementation(
+            SourceProductionContext context,
+            INamedTypeSymbol entityClass,
+            string entityName,
+            string namespaceName,
+            string idType,
+            List<IPropertySymbol> properties,
+            bool generateAsBaseClass,
+            bool hasMultiTenant)
+        {
+            var entityFullName = entityClass.ToDisplayString(FullyQualifiedFormat);
+            var hasConcurrencyStamp = entityClass.AllInterfaces.Any(i =>
+                i.Name == "IHasConcurrencyStamp" && i.ContainingNamespace.ToDisplayString() == "CrestCreates.Domain.Shared.Entities");
+            // Also check for test stubs where IHasConcurrencyStamp is in the same namespace
+            if (!hasConcurrencyStamp)
+            {
+                hasConcurrencyStamp = entityClass.AllInterfaces.Any(i => i.Name == "IHasConcurrencyStamp");
+            }
+
+            var queryableProperties = GetQueryableProperties(properties);
+
             var builder = new StringBuilder();
             builder.AppendLine("#nullable enable");
             builder.AppendLine("// <auto-generated />");
             builder.AppendLine("using System;");
             builder.AppendLine("using System.Collections.Generic;");
             builder.AppendLine("using System.Linq;");
-            builder.AppendLine("using System.Linq.Expressions;");
             builder.AppendLine("using System.Threading;");
             builder.AppendLine("using System.Threading.Tasks;");
-            builder.AppendLine("using Microsoft.EntityFrameworkCore;");
-            builder.AppendLine("using CrestCreates.Application.Contracts.DTOs.Common;");
-            builder.AppendLine("using CrestCreates.Domain.Exceptions;");
-            builder.AppendLine("using CrestCreates.Domain.Shared.Entities.Auditing;");
             builder.AppendLine("using CrestCreates.Aop.Interceptors;");
+            builder.AppendLine("using CrestCreates.Authorization.Abstractions;");
+            builder.AppendLine("using CrestCreates.Domain.Shared.Attributes;");
+            builder.AppendLine("using CrestCreates.Application.Contracts.DTOs.Common;");
+            builder.AppendLine("using CrestCreates.Application.Contracts.Query;");
+            builder.AppendLine("using CrestCreates.Domain.Exceptions;");
+            builder.AppendLine("using CrestCreates.Domain.Repositories;");
+            if (hasMultiTenant)
+                builder.AppendLine("using CrestCreates.DataFilter.Entities;");
+            builder.AppendLine("using CrestCreates.Domain.Shared.DataFilter;");
+            builder.AppendLine("using CrestCreates.Domain.Shared.Entities;");
+            builder.AppendLine("using CrestCreates.Domain.Shared.Entities.Auditing;");
+            builder.AppendLine("using CrestCreates.Domain.Shared.Exceptions;");
             builder.AppendLine($"using {namespaceName};");
             builder.AppendLine($"using {namespaceName}.Dtos;");
-            builder.AppendLine($"using {namespaceName}.Repositories;");
+            builder.AppendLine($"using {namespaceName}.Mappings;");
+            builder.AppendLine($"using {namespaceName}.Permissions;");
             builder.AppendLine($"using {namespaceName}.Services;");
-            builder.AppendLine($"using {namespaceName}.Extensions;");
             builder.AppendLine();
             builder.AppendLine($"namespace {namespaceName}.Services");
             builder.AppendLine("{");
-            builder.AppendLine("    /// <summary>");
-            var className = generateAsBaseClass ? $"{entityName}CrudServiceBase" : $"{entityName}CrudService";
+
             if (generateAsBaseClass)
             {
-                builder.AppendLine($"    /// {entityName} 的 CRUD 服务基类");
-                builder.AppendLine("    /// 请继承此类创建具体的服务实现");
+                builder.AppendLine("    [CrestService]");
+                builder.AppendLine($"    public abstract class {entityName}CrudServiceBase : I{entityName}AppService");
+                builder.AppendLine("    {");
+                builder.AppendLine($"        protected readonly ICrestRepositoryBase<{entityName}, {idType}> Repository;");
+                builder.AppendLine("        protected readonly IPermissionChecker PermissionChecker;");
+                builder.AppendLine("        protected readonly ICurrentUser CurrentUser;");
+                builder.AppendLine("        protected readonly IDataPermissionFilter DataPermissionFilter;");
+                builder.AppendLine();
+                builder.AppendLine($"        protected {entityName}CrudServiceBase(");
+                builder.AppendLine($"            ICrestRepositoryBase<{entityName}, {idType}> repository,");
+                builder.AppendLine("            IPermissionChecker permissionChecker,");
+                builder.AppendLine("            ICurrentUser currentUser,");
+                builder.AppendLine("            IDataPermissionFilter dataPermissionFilter)");
+                builder.AppendLine("        {");
+                builder.AppendLine("            Repository = repository ?? throw new ArgumentNullException(nameof(repository));");
+                builder.AppendLine("            PermissionChecker = permissionChecker ?? throw new ArgumentNullException(nameof(permissionChecker));");
+                builder.AppendLine("            CurrentUser = currentUser ?? throw new ArgumentNullException(nameof(currentUser));");
+                builder.AppendLine("            DataPermissionFilter = dataPermissionFilter ?? throw new ArgumentNullException(nameof(dataPermissionFilter));");
+                builder.AppendLine("        }");
             }
             else
             {
-                builder.AppendLine($"    /// {entityName} CRUD 服务实现");
+                builder.AppendLine("    [CrestService]");
+                builder.AppendLine($"    public partial class {entityName}AppService : I{entityName}AppService");
+                builder.AppendLine("    {");
+                builder.AppendLine($"        protected readonly ICrestRepositoryBase<{entityName}, {idType}> Repository;");
+                builder.AppendLine("        protected readonly IPermissionChecker PermissionChecker;");
+                builder.AppendLine("        protected readonly ICurrentUser CurrentUser;");
+                builder.AppendLine("        protected readonly IDataPermissionFilter DataPermissionFilter;");
+                builder.AppendLine();
+                builder.AppendLine($"        public {entityName}AppService(");
+                builder.AppendLine($"            ICrestRepositoryBase<{entityName}, {idType}> repository,");
+                builder.AppendLine("            IPermissionChecker permissionChecker,");
+                builder.AppendLine("            ICurrentUser currentUser,");
+                builder.AppendLine("            IDataPermissionFilter dataPermissionFilter)");
+                builder.AppendLine("        {");
+                builder.AppendLine("            Repository = repository ?? throw new ArgumentNullException(nameof(repository));");
+                builder.AppendLine("            PermissionChecker = permissionChecker ?? throw new ArgumentNullException(nameof(permissionChecker));");
+                builder.AppendLine("            CurrentUser = currentUser ?? throw new ArgumentNullException(nameof(currentUser));");
+                builder.AppendLine("            DataPermissionFilter = dataPermissionFilter ?? throw new ArgumentNullException(nameof(dataPermissionFilter));");
+                builder.AppendLine("        }");
             }
-            builder.AppendLine("    /// </summary>");
-            builder.AppendLine($"    public abstract class {className} : I{entityName}CrudService");
-            builder.AppendLine("    {");
 
-            builder.AppendLine($"        protected readonly I{entityName}Repository _repository;");
+            // Allowed query fields
             builder.AppendLine();
-
-            builder.AppendLine($"        protected {className}(I{entityName}Repository repository)");
+            builder.AppendLine($"        private static readonly HashSet<string> AllowedQueryFields = new(StringComparer.OrdinalIgnoreCase)");
             builder.AppendLine("        {");
-            builder.AppendLine("            _repository = repository ?? throw new ArgumentNullException(nameof(repository));");
+            foreach (var prop in queryableProperties)
+            {
+                builder.AppendLine($"            \"{prop.Name}\",");
+            }
+            builder.AppendLine("        };");
+
+            // Permission check helper
+            builder.AppendLine();
+            builder.AppendLine("        protected virtual Task CheckPermissionAsync(string permissionName, CancellationToken cancellationToken = default)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            return PermissionChecker.CheckAsync(permissionName);");
             builder.AppendLine("        }");
-            builder.AppendLine();
 
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine($"        /// 将创建 DTO 映射为实体");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        protected abstract {entityName} MapToEntity(Create{entityName}Dto dto);");
+            // Data permission filter helper
             builder.AppendLine();
+            builder.AppendLine($"        protected virtual async Task<IQueryable<{entityName}>> ApplyDataPermissionFilterAsync(IQueryable<{entityName}> query)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            return await DataPermissionFilter.ApplyFilterAsync(query);");
+            builder.AppendLine("        }");
 
+            // Audit helpers
+            builder.AppendLine();
+            builder.AppendLine($"        protected virtual Task SetCreationAuditPropertiesAsync({entityName} entity)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            if (entity is IMustHaveTenant mustHaveTenant)");
+            builder.AppendLine("                mustHaveTenant.TenantId = CurrentUser.TenantId ?? throw new InvalidOperationException(\"当前用户没有关联租户\");");
+            if (hasMultiTenant)
+            {
+                builder.AppendLine("            if (entity is IMultiTenant multiTenant)");
+                builder.AppendLine("                multiTenant.TenantId = CurrentUser.TenantId ?? throw new InvalidOperationException(\"当前用户没有关联租户\");");
+            }
+            builder.AppendLine("            var creatorId = Guid.TryParse(CurrentUser.Id, out var userId) ? userId : (Guid?)null;");
+            builder.AppendLine("            if (entity is IHasCreator hasCreator)");
+            builder.AppendLine("                hasCreator.CreatorId = creatorId;");
+            builder.AppendLine("            if (entity is IAuditedEntity audited)");
+            builder.AppendLine("            {");
+            builder.AppendLine("                audited.CreationTime = DateTime.UtcNow;");
+            builder.AppendLine("                audited.CreatorId = creatorId;");
+            builder.AppendLine("            }");
+            builder.AppendLine("            return Task.CompletedTask;");
+            builder.AppendLine("        }");
+
+            builder.AppendLine();
+            builder.AppendLine($"        protected virtual Task SetModificationAuditPropertiesAsync({entityName} entity)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            if (entity is IAuditedEntity audited)");
+            builder.AppendLine("            {");
+            builder.AppendLine("                audited.LastModificationTime = DateTime.UtcNow;");
+            builder.AppendLine("                audited.LastModifierId = Guid.TryParse(CurrentUser.Id, out var userId) ? userId : (Guid?)null;");
+            builder.AppendLine("            }");
+            builder.AppendLine("            return Task.CompletedTask;");
+            builder.AppendLine("        }");
+
+            builder.AppendLine();
+            builder.AppendLine($"        protected virtual Task ValidateDataOwnershipAsync({entityName} entity)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            if (entity is IMustHaveTenant mustHaveTenant && mustHaveTenant.TenantId != CurrentUser.TenantId)");
+            builder.AppendLine("                throw new UnauthorizedAccessException(\"您没有权限访问此数据：租户不匹配\");");
+            if (hasMultiTenant)
+            {
+                builder.AppendLine("            if (entity is IMultiTenant multiTenant && multiTenant.TenantId != CurrentUser.TenantId)");
+                builder.AppendLine("                throw new UnauthorizedAccessException(\"您没有权限访问此数据：租户不匹配\");");
+            }
+            builder.AppendLine("            return Task.CompletedTask;");
+            builder.AppendLine("        }");
+
+            // Field validation guards
+            builder.AppendLine();
+            builder.AppendLine("        private static void EnsureAllowedFilterFields(IEnumerable<FilterDescriptor>? filters)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            if (filters == null)");
+            builder.AppendLine("                return;");
+            builder.AppendLine();
+            builder.AppendLine("            foreach (var filter in filters)");
+            builder.AppendLine("            {");
+            builder.AppendLine("                if (!AllowedQueryFields.Contains(filter.Field))");
+            builder.AppendLine($"                    throw new CrestBusinessException(\"Crest.Crud.InvalidFilterField\", typeof({entityName}).Name, filter.Field);");
+            builder.AppendLine("            }");
+            builder.AppendLine("        }");
+
+            builder.AppendLine();
+            builder.AppendLine("        private static void EnsureAllowedSortFields(IEnumerable<SortDescriptor>? sorts)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            if (sorts == null)");
+            builder.AppendLine("                return;");
+            builder.AppendLine();
+            builder.AppendLine("            foreach (var sort in sorts)");
+            builder.AppendLine("            {");
+            builder.AppendLine("                if (!AllowedQueryFields.Contains(sort.Field))");
+            builder.AppendLine($"                    throw new CrestBusinessException(\"Crest.Crud.InvalidSortField\", typeof({entityName}).Name, sort.Field);");
+            builder.AppendLine("            }");
+            builder.AppendLine("        }");
+
+            // Create method
+            builder.AppendLine();
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// 创建 {entityName}");
             builder.AppendLine("        /// </summary>");
+            builder.AppendLine("        [UnitOfWorkMo]");
             builder.AppendLine($"        public virtual async Task<{entityName}Dto> CreateAsync(Create{entityName}Dto input, CancellationToken cancellationToken = default)");
             builder.AppendLine("        {");
             builder.AppendLine("            if (input == null)");
             builder.AppendLine("                throw new ArgumentNullException(nameof(input));");
             builder.AppendLine();
-            builder.AppendLine($"            var entity = MapToEntity(input);");
-            builder.AppendLine($"            await OnCreatingAsync(entity, cancellationToken);");
-            builder.AppendLine("            entity = await _repository.AddAsync(entity, cancellationToken);");
-            builder.AppendLine($"            await OnCreatedAsync(entity, cancellationToken);");
-            builder.AppendLine($"            return entity.ToDto();");
-            builder.AppendLine("        }");
+            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.Create, cancellationToken);");
+            builder.AppendLine("            await ValidateCreateAsync(input, cancellationToken);");
             builder.AppendLine();
+            builder.AppendLine($"            var entity = {entityName}ObjectMappings.ToTarget(input);");
+            builder.AppendLine($"            await SetCreationAuditPropertiesAsync(entity);");
+            builder.AppendLine($"            await OnCreatingAsync(entity, input, cancellationToken);");
+            builder.AppendLine();
+            builder.AppendLine("            var created = await Repository.InsertAsync(entity, cancellationToken);");
+            builder.AppendLine("            await OnCreatedAsync(created, cancellationToken);");
+            builder.AppendLine();
+            builder.AppendLine($"            return {entityName}ObjectMappings.ToTarget(created);");
+            builder.AppendLine("        }");
 
+            // GetById method
+            builder.AppendLine();
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// 根据 ID 获取 {entityName}");
             builder.AppendLine("        /// </summary>");
             builder.AppendLine($"        public virtual async Task<{entityName}Dto?> GetByIdAsync({idType} id, CancellationToken cancellationToken = default)");
             builder.AppendLine("        {");
-            builder.AppendLine("            var entity = await _repository.GetByIdAsync(id, cancellationToken);");
+            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.Get, cancellationToken);");
+            builder.AppendLine();
+            builder.AppendLine("            var query = Repository.GetQueryable();");
+            builder.AppendLine("            query = await ApplyDataPermissionFilterAsync(query);");
+            builder.AppendLine("            var entity = query.FirstOrDefault(x => x.Id.Equals(id));");
             builder.AppendLine("            if (entity == null)");
-            builder.AppendLine("                return null;");
+            builder.AppendLine($"                throw new CrestEntityNotFoundException(typeof({entityName}).Name, id);");
             builder.AppendLine();
-            builder.AppendLine($"            return entity.ToDto();");
+            builder.AppendLine("            await ValidateDataOwnershipAsync(entity);");
+            builder.AppendLine($"            return {entityName}ObjectMappings.ToTarget(entity);");
             builder.AppendLine("        }");
-            builder.AppendLine();
 
+            // GetList method
+            builder.AppendLine();
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// 获取 {entityName} 分页列表");
             builder.AppendLine("        /// </summary>");
@@ -575,69 +704,39 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("            if (input == null)");
             builder.AppendLine("                throw new ArgumentNullException(nameof(input));");
             builder.AppendLine();
-            builder.AppendLine("            Expression<Func<" + entityName + ", bool>>? predicate = null;");
+            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.Search, cancellationToken);");
             builder.AppendLine();
-
-            var searchableProperties = properties
-                .Where(p => p.Type.SpecialType == SpecialType.System_String && p.Name != "Id" && p.Name != "ConcurrencyStamp")
-                .Take(3)
-                .ToList();
-
-            if (searchableProperties.Any())
-            {
-                builder.AppendLine("            if (!string.IsNullOrWhiteSpace(input.Keyword))");
-                builder.AppendLine("            {");
-                var keywordConditions = searchableProperties
-                    .Select(p => $"e.{p.Name}.Contains(input.Keyword)")
-                    .ToList();
-                builder.AppendLine($"                predicate = e => {string.Join(" || ", keywordConditions)};");
-                builder.AppendLine("            }");
-                builder.AppendLine();
-            }
-
-            foreach (var prop in searchableProperties)
-            {
-                builder.AppendLine($"            if (!string.IsNullOrWhiteSpace(input.{prop.Name}))");
-                builder.AppendLine("            {");
-                builder.AppendLine($"                predicate = predicate == null");
-                builder.AppendLine($"                    ? e => e.{prop.Name} == input.{prop.Name}");
-                builder.AppendLine($"                    : CombinePredicates(predicate, e => e.{prop.Name} == input.{prop.Name});");
-                builder.AppendLine("            }");
-                builder.AppendLine();
-            }
-
-            if (properties.Any(p => p.Name == "CreationTime"))
-            {
-                builder.AppendLine("            if (input.StartTime.HasValue)");
-                builder.AppendLine("            {");
-                builder.AppendLine("                predicate = predicate == null");
-                builder.AppendLine("                    ? e => e.CreationTime >= input.StartTime.Value");
-                builder.AppendLine("                    : CombinePredicates(predicate, e => e.CreationTime >= input.StartTime.Value);");
-                builder.AppendLine("            }");
-                builder.AppendLine();
-
-                builder.AppendLine("            if (input.EndTime.HasValue)");
-                builder.AppendLine("            {");
-                builder.AppendLine("                predicate = predicate == null");
-                builder.AppendLine("                    ? e => e.CreationTime <= input.EndTime.Value");
-                builder.AppendLine("                    : CombinePredicates(predicate, e => e.CreationTime <= input.EndTime.Value);");
-                builder.AppendLine("            }");
-                builder.AppendLine();
-            }
-
-            builder.AppendLine("            var (items, totalCount) = await _repository.GetPagedListAsync(");
-            builder.AppendLine("                input.PageNumber,");
-            builder.AppendLine("                input.PageSize,");
-            builder.AppendLine("                predicate,");
-            builder.AppendLine("                e => e.Id,");
-            builder.AppendLine("                ascending: false,");
-            builder.AppendLine("                cancellationToken: cancellationToken);");
+            builder.AppendLine("            EnsureAllowedFilterFields(input.Filters);");
+            builder.AppendLine("            EnsureAllowedSortFields(input.Sorts);");
             builder.AppendLine();
-            builder.AppendLine($"            var dtos = items.Select(e => e.ToDto()).ToList();");
-            builder.AppendLine("            return new PagedResultDto<" + entityName + "Dto>(dtos, totalCount, input.PageNumber, input.PageSize);");
+            builder.AppendLine("            var query = Repository.GetQueryable();");
+            builder.AppendLine("            query = await ApplyDataPermissionFilterAsync(query);");
+            builder.AppendLine("            query = await ConfigureListQueryAsync(query, input, cancellationToken);");
+            builder.AppendLine();
+            builder.AppendLine($"            query = QueryExecutor<{entityName}>.ApplyFilters(query, input.Filters ?? new List<FilterDescriptor>());");
+            builder.AppendLine($"            var sorts = input.Sorts;");
+            builder.AppendLine("            if (sorts == null || sorts.Count == 0)");
+            builder.AppendLine("            {");
+            // Default sort: CreationTime desc if available, otherwise Id
+            var hasCreationTime = properties.Any(p => p.Name == "CreationTime");
+            if (hasCreationTime)
+                builder.AppendLine($"                sorts = new List<SortDescriptor> {{ new SortDescriptor(\"CreationTime\", SortDirection.Descending) }};");
+            else
+                builder.AppendLine($"                sorts = new List<SortDescriptor> {{ new SortDescriptor(\"Id\", SortDirection.Descending) }};");
+            builder.AppendLine("            }");
+            builder.AppendLine($"            query = QueryExecutor<{entityName}>.ApplySorts(query, sorts);");
+            builder.AppendLine();
+            builder.AppendLine("            var totalCount = query.Count();");
+            builder.AppendLine($"            query = QueryExecutor<{entityName}>.ApplyPaging(query, input.GetSkipCount(), input.PageSize);");
+            builder.AppendLine();
+            builder.AppendLine("            var entities = query.ToList();");
+            builder.AppendLine($"            var dtos = entities.Select({entityName}ObjectMappings.ToTarget).ToList();");
+            builder.AppendLine();
+            builder.AppendLine($"            return new PagedResultDto<{entityName}Dto>(dtos, totalCount, input.PageIndex, input.PageSize);");
             builder.AppendLine("        }");
-            builder.AppendLine();
 
+            // Update method
+            builder.AppendLine();
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// 更新 {entityName}");
             builder.AppendLine("        /// </summary>");
@@ -647,119 +746,88 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("            if (input == null)");
             builder.AppendLine("                throw new ArgumentNullException(nameof(input));");
             builder.AppendLine();
-            builder.AppendLine("            var entity = await _repository.GetByIdAsync(id, cancellationToken);");
+            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.Update, cancellationToken);");
+            builder.AppendLine("            await ValidateUpdateAsync(id, input, cancellationToken);");
+            builder.AppendLine();
+            builder.AppendLine("            var entity = await Repository.GetAsync(id, cancellationToken);");
             builder.AppendLine("            if (entity == null)");
-            builder.AppendLine($"                throw new EntityNotFoundException(typeof({entityName}), id);");
+            builder.AppendLine($"                throw new CrestEntityNotFoundException(typeof({entityName}).Name, id);");
             builder.AppendLine();
-            builder.AppendLine($"            await OnUpdatingAsync(entity, input, cancellationToken);");
-            builder.AppendLine($"            input.ApplyTo(entity);");
-            builder.AppendLine("            entity = await _repository.UpdateAsync(entity, cancellationToken);");
-            builder.AppendLine($"            await OnUpdatedAsync(entity, cancellationToken);");
-            builder.AppendLine($"            return entity.ToDto();");
+            builder.AppendLine("            await ValidateDataOwnershipAsync(entity);");
+            builder.AppendLine("            await OnUpdatingAsync(entity, input, cancellationToken);");
+            builder.AppendLine();
+            builder.AppendLine($"            {entityName}ObjectMappings.Apply(input, entity);");
+            builder.AppendLine("            await SetModificationAuditPropertiesAsync(entity);");
+            builder.AppendLine();
+            builder.AppendLine("            var updated = await Repository.UpdateAsync(entity, cancellationToken);");
+            builder.AppendLine("            await OnUpdatedAsync(updated, cancellationToken);");
+            builder.AppendLine();
+            builder.AppendLine($"            return {entityName}ObjectMappings.ToTarget(updated);");
             builder.AppendLine("        }");
-            builder.AppendLine();
 
+            // Delete method
+            builder.AppendLine();
             builder.AppendLine("        /// <summary>");
             builder.AppendLine($"        /// 删除 {entityName}");
             builder.AppendLine("        /// </summary>");
             builder.AppendLine("        [UnitOfWorkMo]");
             builder.AppendLine($"        public virtual async Task DeleteAsync({idType} id, string? expectedStamp = null, CancellationToken cancellationToken = default)");
             builder.AppendLine("        {");
-            builder.AppendLine("            if (typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(" + entityName + ")))");
-            builder.AppendLine("            {");
-            builder.AppendLine("                if (string.IsNullOrEmpty(expectedStamp))");
-            builder.AppendLine($"                    throw new CrestPreconditionRequiredException(typeof({entityName}).Name, id);");
-            builder.AppendLine("                await _repository.DeleteAsync(id, expectedStamp!, cancellationToken);");
-            builder.AppendLine("                return;");
-            builder.AppendLine("            }");
-            builder.AppendLine("            var entity = await _repository.GetByIdAsync(id, cancellationToken);");
-            builder.AppendLine("            if (entity == null)");
-            builder.AppendLine($"                throw new EntityNotFoundException(typeof({entityName}), id);");
+            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.Delete, cancellationToken);");
             builder.AppendLine();
-            builder.AppendLine($"            await OnDeletingAsync(entity, cancellationToken);");
-            builder.AppendLine("            await _repository.DeleteAsync(entity, cancellationToken);");
-            builder.AppendLine($"            await OnDeletedAsync(entity, cancellationToken);");
+
+            if (hasConcurrencyStamp)
+            {
+                builder.AppendLine("            if (string.IsNullOrWhiteSpace(expectedStamp))");
+                builder.AppendLine($"                throw new CrestPreconditionRequiredException(typeof({entityName}).Name, id);");
+                builder.AppendLine();
+                builder.AppendLine("            // Load entity for ownership validation and pre-delete hook before stamp check");
+                builder.AppendLine("            var entity = await Repository.GetAsync(id, cancellationToken);");
+                builder.AppendLine("            if (entity == null)");
+                builder.AppendLine($"                throw new CrestEntityNotFoundException(typeof({entityName}).Name, id);");
+                builder.AppendLine();
+                builder.AppendLine("            await ValidateDataOwnershipAsync(entity);");
+                builder.AppendLine("            await OnDeletingAsync(entity, cancellationToken);");
+                builder.AppendLine();
+                builder.AppendLine("            await Repository.DeleteAsync(id, expectedStamp!, cancellationToken);");
+                builder.AppendLine("            await OnDeletedAsync(id, cancellationToken);");
+                builder.AppendLine("            return;");
+            }
+            else
+            {
+                builder.AppendLine("            var entity = await Repository.GetAsync(id, cancellationToken);");
+                builder.AppendLine("            if (entity == null)");
+                builder.AppendLine($"                throw new CrestEntityNotFoundException(typeof({entityName}).Name, id);");
+                builder.AppendLine();
+                builder.AppendLine("            await ValidateDataOwnershipAsync(entity);");
+                builder.AppendLine("            await OnDeletingAsync(entity, cancellationToken);");
+                builder.AppendLine("            await Repository.DeleteAsync(entity, cancellationToken);");
+                builder.AppendLine("            await OnDeletedAsync(id, cancellationToken);");
+            }
+
             builder.AppendLine("        }");
-            builder.AppendLine();
 
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine("        /// 组合两个谓词条件");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        private static Expression<Func<{entityName}, bool>> CombinePredicates(");
-            builder.AppendLine($"            Expression<Func<{entityName}, bool>> expr1,");
-            builder.AppendLine($"            Expression<Func<{entityName}, bool>> expr2)");
-            builder.AppendLine("        {");
-            builder.AppendLine("            var parameter = Expression.Parameter(typeof(" + entityName + "), \"e\");");
-            builder.AppendLine("            var body = Expression.AndAlso(");
-            builder.AppendLine("                Expression.Invoke(expr1, parameter),");
-            builder.AppendLine("                Expression.Invoke(expr2, parameter));");
-            builder.AppendLine($"            return Expression.Lambda<Func<{entityName}, bool>>(body, parameter);");
-            builder.AppendLine("        }");
-
+            // Extension hooks
             builder.AppendLine();
-            builder.AppendLine("        #region 钩子方法");
+            builder.AppendLine("        #region Extension Hooks");
             builder.AppendLine();
-
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine($"        /// 创建实体前调用的钩子方法");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        protected virtual Task OnCreatingAsync({entityName} entity, CancellationToken cancellationToken = default)");
-            builder.AppendLine("        {");
-            builder.AppendLine("            return Task.CompletedTask;");
-            builder.AppendLine("        }");
+            builder.AppendLine($"        protected virtual Task ValidateCreateAsync(Create{entityName}Dto input, CancellationToken cancellationToken = default) => Task.CompletedTask;");
+            builder.AppendLine($"        protected virtual Task ValidateUpdateAsync({idType} id, Update{entityName}Dto input, CancellationToken cancellationToken = default) => Task.CompletedTask;");
+            builder.AppendLine($"        protected virtual Task OnCreatingAsync({entityName} entity, Create{entityName}Dto input, CancellationToken cancellationToken = default) => Task.CompletedTask;");
+            builder.AppendLine($"        protected virtual Task OnCreatedAsync({entityName} entity, CancellationToken cancellationToken = default) => Task.CompletedTask;");
+            builder.AppendLine($"        protected virtual Task OnUpdatingAsync({entityName} entity, Update{entityName}Dto input, CancellationToken cancellationToken = default) => Task.CompletedTask;");
+            builder.AppendLine($"        protected virtual Task OnUpdatedAsync({entityName} entity, CancellationToken cancellationToken = default) => Task.CompletedTask;");
+            builder.AppendLine($"        protected virtual Task OnDeletingAsync({entityName} entity, CancellationToken cancellationToken = default) => Task.CompletedTask;");
+            builder.AppendLine($"        protected virtual Task OnDeletedAsync({idType} id, CancellationToken cancellationToken = default) => Task.CompletedTask;");
+            builder.AppendLine($"        protected virtual Task<IQueryable<{entityName}>> ConfigureListQueryAsync(IQueryable<{entityName}> query, {entityName}ListRequestDto input, CancellationToken cancellationToken = default) => Task.FromResult(query);");
             builder.AppendLine();
-
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine($"        /// 创建实体后调用的钩子方法");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        protected virtual Task OnCreatedAsync({entityName} entity, CancellationToken cancellationToken = default)");
-            builder.AppendLine("        {");
-            builder.AppendLine("            return Task.CompletedTask;");
-            builder.AppendLine("        }");
-            builder.AppendLine();
-
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine($"        /// 更新实体前调用的钩子方法");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        protected virtual Task OnUpdatingAsync({entityName} entity, Update{entityName}Dto input, CancellationToken cancellationToken = default)");
-            builder.AppendLine("        {");
-            builder.AppendLine("            return Task.CompletedTask;");
-            builder.AppendLine("        }");
-            builder.AppendLine();
-
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine($"        /// 更新实体后调用的钩子方法");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        protected virtual Task OnUpdatedAsync({entityName} entity, CancellationToken cancellationToken = default)");
-            builder.AppendLine("        {");
-            builder.AppendLine("            return Task.CompletedTask;");
-            builder.AppendLine("        }");
-            builder.AppendLine();
-
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine($"        /// 删除实体前调用的钩子方法");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        protected virtual Task OnDeletingAsync({entityName} entity, CancellationToken cancellationToken = default)");
-            builder.AppendLine("        {");
-            builder.AppendLine("            return Task.CompletedTask;");
-            builder.AppendLine("        }");
-            builder.AppendLine();
-
-            builder.AppendLine("        /// <summary>");
-            builder.AppendLine($"        /// 删除实体后调用的钩子方法");
-            builder.AppendLine("        /// </summary>");
-            builder.AppendLine($"        protected virtual Task OnDeletedAsync({entityName} entity, CancellationToken cancellationToken = default)");
-            builder.AppendLine("        {");
-            builder.AppendLine("            return Task.CompletedTask;");
-            builder.AppendLine("        }");
-            builder.AppendLine();
-
             builder.AppendLine("        #endregion");
 
             builder.AppendLine("    }");
             builder.AppendLine("}");
 
-            context.AddSource($"{className}.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
+            var fileName = generateAsBaseClass ? $"{entityName}CrudServiceBase.g.cs" : $"{entityName}AppService.g.cs";
+            context.AddSource(fileName, SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
         private string GetEntityIdType(INamedTypeSymbol entityClass)
@@ -776,6 +844,16 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 }
                 baseType = baseType.BaseType;
             }
+
+            // Fallback: check IEntity<TKey> interface chain for custom base classes
+            foreach (var iface in entityClass.AllInterfaces)
+            {
+                if (iface.Name == "IEntity" && iface.TypeArguments.Length == 1)
+                {
+                    return iface.TypeArguments[0].ToDisplayString();
+                }
+            }
+
             return "int";
         }
 
@@ -805,6 +883,341 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             }
 
             return properties;
+        }
+
+        private static List<IPropertySymbol> GetQueryableProperties(List<IPropertySymbol> properties)
+        {
+            var excludedNames = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "DomainEvents", "IsDeleted", "DeletionTime", "DeleterId"
+            };
+
+            return properties
+                .Where(p => !excludedNames.Contains(p.Name))
+                .Where(p => p.Type.TypeKind != TypeKind.Array)
+                .Where(p => !IsNavigationProperty(p))
+                .ToList();
+        }
+
+        private static bool IsNavigationProperty(IPropertySymbol property)
+        {
+            if (property.Type.TypeKind == TypeKind.Class &&
+                property.Type.SpecialType == SpecialType.None &&
+                property.Type.ToDisplayString() != "System.String" &&
+                property.Type.ToDisplayString() != "System.DateTime" &&
+                property.Type.ToDisplayString() != "System.DateTimeOffset" &&
+                property.Type.ToDisplayString() != "System.Guid" &&
+                property.Type.TypeKind != TypeKind.Enum)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private void GenerateCrudDynamicApiRegistration(
+            SourceProductionContext context,
+            INamedTypeSymbol entityClass,
+            string entityName,
+            string namespaceName,
+            string idType,
+            bool generateAsBaseClass)
+        {
+            // Skip for abstract base-class mode — the base class can't be resolved
+            // from DI and endpoint handlers would fail at runtime.
+            if (generateAsBaseClass)
+                return;
+
+            var hasConcurrencyStamp = entityClass.AllInterfaces.Any(i => i.Name == "IHasConcurrencyStamp");
+            var serviceName = entityName;
+            var serviceVar = char.ToLowerInvariant(entityName[0]) + entityName.Substring(1);
+            var implTypeName = generateAsBaseClass
+                ? $"{namespaceName}.Services.{entityName}CrudServiceBase"
+                : $"{namespaceName}.Services.{entityName}AppService";
+            var contractTypeName = $"{namespaceName}.Services.I{entityName}AppService";
+
+            var builder = new StringBuilder();
+            builder.AppendLine("#nullable enable");
+            builder.AppendLine("// <auto-generated />");
+            builder.AppendLine("using System;");
+            builder.AppendLine("using System.Collections.Generic;");
+            builder.AppendLine("using System.Globalization;");
+            builder.AppendLine("using System.Linq;");
+            builder.AppendLine("using System.Reflection;");
+            builder.AppendLine("using CrestCreates.Application.Contracts.DTOs.Common;");
+            builder.AppendLine("using CrestCreates.Authorization.Abstractions;");
+            builder.AppendLine("using CrestCreates.DynamicApi;");
+            builder.AppendLine("using CrestCreates.Validation.Modules;");
+            builder.AppendLine("using Microsoft.AspNetCore.Builder;");
+            builder.AppendLine("using Microsoft.AspNetCore.Http;");
+            builder.AppendLine("using Microsoft.AspNetCore.Mvc;");
+            builder.AppendLine("using Microsoft.AspNetCore.Routing;");
+            builder.AppendLine($"using {namespaceName}.Services;");
+            builder.AppendLine();
+            builder.AppendLine($"namespace CrestCreates.DynamicApi.Generated;");
+            builder.AppendLine();
+            builder.AppendLine($"internal static class GeneratedCrudRegistration_{ToSafeName(entityName)}");
+            builder.AppendLine("{");
+            builder.AppendLine("    [System.Runtime.CompilerServices.ModuleInitializer]");
+            builder.AppendLine("    internal static void Register()");
+            builder.AppendLine("    {");
+            builder.AppendLine($"        DynamicApiGeneratedRegistryStore.Register(new GeneratedCrudProvider_{ToSafeName(entityName)}());");
+            builder.AppendLine("    }");
+            builder.AppendLine();
+            builder.AppendLine($"    internal sealed class GeneratedCrudProvider_{ToSafeName(entityName)} : IDynamicApiGeneratedProvider");
+            builder.AppendLine("    {");
+            builder.AppendLine($"        public IReadOnlyCollection<Assembly> ServiceAssemblies => new[] {{ typeof({implTypeName}).Assembly }};");
+            builder.AppendLine();
+            builder.AppendLine("        public DynamicApiRegistry CreateRegistry(DynamicApiOptions options)");
+            builder.AppendLine("        {");
+            builder.AppendLine($"            if (!MatchesAssembly(options, typeof({implTypeName}).Assembly))");
+            builder.AppendLine("                return new DynamicApiRegistry(Array.Empty<DynamicApiServiceDescriptor>());");
+            builder.AppendLine($"            var routePrefix = ResolveRoutePrefix(options, \"{ToKebab(serviceName)}\");");
+            builder.AppendLine("            var service = new DynamicApiServiceDescriptor");
+            builder.AppendLine("            {");
+            builder.AppendLine($"                ServiceName = \"{serviceName}\",");
+            builder.AppendLine("                RoutePrefix = routePrefix,");
+            builder.AppendLine($"                ServiceType = typeof({contractTypeName}),");
+            builder.AppendLine($"                ImplementationType = typeof({implTypeName}),");
+            builder.AppendLine("                Actions = new DynamicApiActionDescriptor[]");
+            builder.AppendLine("                {");
+            // Create
+            WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "Create", "", "POST", "Create");
+            // GetById
+            WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "GetById", "{id}", "GET", "Get");
+            // GetList - POST with body binding so Filters/Sorts descriptors are supported.
+            // Uses "search" sub-route to avoid colliding with Create (also POST "").
+            WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "GetList", "search", "POST", "Search");
+            // Update
+            WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "Update", "{id}", "PUT", "Update");
+            // Delete
+            WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "Delete", "{id}", "DELETE", "Delete");
+            builder.AppendLine("                }");
+            builder.AppendLine("            };");
+            builder.AppendLine("            return new DynamicApiRegistry(new[] { service });");
+            builder.AppendLine("        }");
+            builder.AppendLine();
+            builder.AppendLine("        public void MapEndpoints(IEndpointRouteBuilder endpoints, DynamicApiOptions options)");
+            builder.AppendLine("        {");
+            builder.AppendLine($"            var routePrefix = ResolveRoutePrefix(options, \"{ToKebab(serviceName)}\");");
+            builder.AppendLine("            if (!MatchesAssembly(options, typeof(" + implTypeName + ").Assembly))");
+            builder.AppendLine("                return;");
+            builder.AppendLine();
+            WriteEndpointHandlers(builder, entityName, serviceName, contractTypeName, idType, hasConcurrencyStamp);
+            builder.AppendLine("        }");
+            builder.AppendLine();
+            builder.AppendLine("        private static bool MatchesAssembly(DynamicApiOptions options, Assembly assembly)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            return options.ServiceAssemblies.Count == 0 || options.ServiceAssemblies.Contains(assembly);");
+            builder.AppendLine("        }");
+            builder.AppendLine();
+            builder.AppendLine("        private static string ResolveRoutePrefix(DynamicApiOptions options, string routeTemplate)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            return $\"{options.DefaultRoutePrefix.TrimEnd('/')}/{routeTemplate}\";");
+            builder.AppendLine("        }");
+            builder.AppendLine();
+            builder.AppendLine("        private static string BuildRoute(string routePrefix, string relativeRoute)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            return string.IsNullOrWhiteSpace(relativeRoute)");
+            builder.AppendLine("                ? routePrefix");
+            builder.AppendLine("                : $\"{routePrefix}/{relativeRoute}\";");
+            builder.AppendLine("        }");
+            builder.AppendLine("    }");
+            builder.AppendLine("}");
+
+            context.AddSource($"{entityName}CrudDynamicApi.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
+        }
+
+        private static string GetIdTypeOf(string idType) => idType switch
+        {
+            "System.Guid" => "typeof(System.Guid)",
+            "int" => "typeof(int)",
+            "System.Int32" => "typeof(int)",
+            "long" => "typeof(long)",
+            "System.Int64" => "typeof(long)",
+            "string" or "System.String" => "typeof(string)",
+            _ => $"typeof({idType})"
+        };
+
+        private static void WriteActionDescriptor(
+            StringBuilder builder,
+            string serviceName,
+            string contractTypeName,
+            string idType,
+            string actionName,
+            string relativeRoute,
+            string httpMethod,
+            string permission)
+        {
+            builder.AppendLine("                    new DynamicApiActionDescriptor");
+            builder.AppendLine("                    {");
+            builder.AppendLine($"                        ActionName = \"{actionName}\",");
+            builder.AppendLine($"                        DeclaringTypeName = \"{contractTypeName}\",");
+            builder.AppendLine($"                        OperationId = \"{contractTypeName}_{actionName}\",");
+            builder.AppendLine($"                        RelativeRoute = \"{relativeRoute}\",");
+            builder.AppendLine($"                        HttpMethod = \"{httpMethod}\",");
+            builder.AppendLine($"                        RoutePrefix = routePrefix,");
+            builder.AppendLine("                        ReturnDescriptor = new DynamicApiReturnDescriptor");
+            builder.AppendLine("                        {");
+            if (actionName == "Delete")
+                builder.AppendLine("                            DeclaredType = typeof(void), PayloadType = null, IsVoid = true");
+            else if (actionName == "GetList")
+                builder.AppendLine($"                            DeclaredType = typeof(PagedResultDto<{serviceName}Dto>), PayloadType = typeof(PagedResultDto<{serviceName}Dto>), IsVoid = false");
+            else
+                builder.AppendLine($"                            DeclaredType = typeof({serviceName}Dto), PayloadType = typeof({serviceName}Dto), IsVoid = false");
+            builder.AppendLine("                        },");
+            builder.AppendLine($"                        Permission = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{serviceName}.{permission}\" }}, RequireAll = false }},");
+            builder.AppendLine("                        Parameters = new DynamicApiParameterDescriptor[]");
+            builder.AppendLine("                        {");
+            switch (actionName)
+            {
+                case "Create":
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"input\", ParameterType = typeof(Create{serviceName}Dto), Source = DynamicApiParameterSource.Body, IsOptional = false }},");
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"cancellationToken\", ParameterType = typeof(System.Threading.CancellationToken), Source = DynamicApiParameterSource.CancellationToken, IsOptional = true }}");
+                    break;
+                case "GetById":
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"id\", ParameterType = {GetIdTypeOf(idType)}, Source = DynamicApiParameterSource.Route, IsOptional = false }},");
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"cancellationToken\", ParameterType = typeof(System.Threading.CancellationToken), Source = DynamicApiParameterSource.CancellationToken, IsOptional = true }}");
+                    break;
+                case "GetList":
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"input\", ParameterType = typeof({serviceName}ListRequestDto), Source = DynamicApiParameterSource.Body, IsOptional = true }},");
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"cancellationToken\", ParameterType = typeof(System.Threading.CancellationToken), Source = DynamicApiParameterSource.CancellationToken, IsOptional = true }}");
+                    break;
+                case "Update":
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"id\", ParameterType = {GetIdTypeOf(idType)}, Source = DynamicApiParameterSource.Route, IsOptional = false }},");
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"input\", ParameterType = typeof(Update{serviceName}Dto), Source = DynamicApiParameterSource.Body, IsOptional = false }},");
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"cancellationToken\", ParameterType = typeof(System.Threading.CancellationToken), Source = DynamicApiParameterSource.CancellationToken, IsOptional = true }}");
+                    break;
+                case "Delete":
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"id\", ParameterType = {GetIdTypeOf(idType)}, Source = DynamicApiParameterSource.Route, IsOptional = false }},");
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"expectedStamp\", ParameterType = typeof(string), Source = DynamicApiParameterSource.Header, IsOptional = true }},");
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"cancellationToken\", ParameterType = typeof(System.Threading.CancellationToken), Source = DynamicApiParameterSource.CancellationToken, IsOptional = true }}");
+                    break;
+            }
+            builder.AppendLine("                        }");
+            builder.AppendLine("                    },");
+        }
+
+        private static void WriteEndpointHandlers(
+            StringBuilder builder,
+            string entityName,
+            string serviceName,
+            string contractTypeName,
+            string idType,
+            bool hasConcurrencyStamp)
+        {
+            var s = char.ToLowerInvariant(serviceName[0]) + serviceName.Substring(1);
+
+            // Permission names
+            var permCreate = $"{serviceName}.Create";
+            var permGet = $"{serviceName}.Get";
+            var permSearch = $"{serviceName}.Search";
+            var permUpdate = $"{serviceName}.Update";
+            var permDelete = $"{serviceName}.Delete";
+
+            // Create
+            builder.AppendLine($"            var perm_{s}_create = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{permCreate}\" }}, RequireAll = false }};");
+            builder.AppendLine($"            endpoints.MapMethods(BuildRoute(routePrefix, \"\"), new[] {{ \"POST\" }},");
+            builder.AppendLine($"                async (HttpContext context, [FromServices] {contractTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
+            builder.AppendLine("                {");
+            builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, perm_{s}_create.Permissions);");
+            builder.AppendLine($"                    var input = await DynamicApiGeneratedRuntime.ReadBodyAsync<Create{serviceName}Dto>(context, false);");
+            builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, input);");
+            builder.AppendLine($"                    var result = await DynamicApiGeneratedRuntime.ExecuteAsync(context, true, () => service.CreateAsync(input, context.RequestAborted));");
+            builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapResult(result);");
+            builder.AppendLine($"                }}).WithDisplayName(\"{contractTypeName}.Create\").WithMetadata(perm_{s}_create).ExcludeFromDescription();");
+            builder.AppendLine();
+
+            // GetById
+            builder.AppendLine($"            var perm_{s}_get = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{permGet}\" }}, RequireAll = false }};");
+            builder.AppendLine($"            endpoints.MapMethods(BuildRoute(routePrefix, \"{{id}}\"), new[] {{ \"GET\" }},");
+            builder.AppendLine($"                async (HttpContext context, [FromServices] {contractTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
+            builder.AppendLine("                {");
+            builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, perm_{s}_get.Permissions);");
+            builder.AppendLine($"                    var id = {GenerateRouteParamParse(idType)};");
+            builder.AppendLine($"                    var result = await service.GetByIdAsync(id, context.RequestAborted);");
+            builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapGetResult(result);");
+            builder.AppendLine($"                }}).WithDisplayName(\"{contractTypeName}.GetById\").WithMetadata(perm_{s}_get).ExcludeFromDescription();");
+            builder.AppendLine();
+
+            // GetList - POST /search with body binding to support Filters/Sorts descriptors
+            builder.AppendLine($"            var perm_{s}_search = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{permSearch}\" }}, RequireAll = false }};");
+            builder.AppendLine($"            endpoints.MapMethods(BuildRoute(routePrefix, \"search\"), new[] {{ \"POST\" }},");
+            builder.AppendLine($"                async (HttpContext context, [FromServices] {contractTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
+            builder.AppendLine("                {");
+            builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, perm_{s}_search.Permissions);");
+            builder.AppendLine($"                    var input = await DynamicApiGeneratedRuntime.ReadBodyAsync<{serviceName}ListRequestDto>(context, false);");
+            builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, input);");
+            builder.AppendLine($"                    var result = await service.GetListAsync(input, context.RequestAborted);");
+            builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapResult(result);");
+            builder.AppendLine($"                }}).WithDisplayName(\"{contractTypeName}.GetList\").WithMetadata(perm_{s}_search).ExcludeFromDescription();");
+            builder.AppendLine();
+
+            // Update
+            builder.AppendLine($"            var perm_{s}_update = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{permUpdate}\" }}, RequireAll = false }};");
+            builder.AppendLine($"            endpoints.MapMethods(BuildRoute(routePrefix, \"{{id}}\"), new[] {{ \"PUT\" }},");
+            builder.AppendLine($"                async (HttpContext context, [FromServices] {contractTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
+            builder.AppendLine("                {");
+            builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, perm_{s}_update.Permissions);");
+            builder.AppendLine($"                    var id = {GenerateRouteParamParse(idType)};");
+            builder.AppendLine($"                    var input = await DynamicApiGeneratedRuntime.ReadBodyAsync<Update{serviceName}Dto>(context, false);");
+            builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, input);");
+            builder.AppendLine($"                    var result = await DynamicApiGeneratedRuntime.ExecuteAsync(context, true, () => service.UpdateAsync(id, input, context.RequestAborted));");
+            builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapResult(result);");
+            builder.AppendLine($"                }}).WithDisplayName(\"{contractTypeName}.Update\").WithMetadata(perm_{s}_update).ExcludeFromDescription();");
+            builder.AppendLine();
+
+            // Delete
+            builder.AppendLine($"            var perm_{s}_delete = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{permDelete}\" }}, RequireAll = false }};");
+            builder.AppendLine($"            endpoints.MapMethods(BuildRoute(routePrefix, \"{{id}}\"), new[] {{ \"DELETE\" }},");
+            builder.AppendLine($"                async (HttpContext context, [FromServices] {contractTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
+            builder.AppendLine("                {");
+            builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, perm_{s}_delete.Permissions);");
+            builder.AppendLine($"                    var id = {GenerateRouteParamParse(idType)};");
+            builder.AppendLine($"                    var expectedStamp = context.Request.Headers[\"If-Match\"].FirstOrDefault();");
+            builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, expectedStamp);");
+            builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ExecuteAsync(context, true, () => service.DeleteAsync(id, expectedStamp, context.RequestAborted));");
+            builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapVoidResult();");
+            builder.AppendLine($"                }}).WithDisplayName(\"{contractTypeName}.Delete\").WithMetadata(perm_{s}_delete).ExcludeFromDescription();");
+        }
+
+        private static string GenerateRouteParamParse(string idType)
+        {
+            return idType switch
+            {
+                "System.Guid" => "Guid.Parse(context.Request.RouteValues[\"id\"]?.ToString() ?? throw new BadHttpRequestException(\"Missing id\"))",
+                "int" => "int.Parse(context.Request.RouteValues[\"id\"]?.ToString() ?? throw new BadHttpRequestException(\"Missing id\"), CultureInfo.InvariantCulture)",
+                "System.Int32" => "int.Parse(context.Request.RouteValues[\"id\"]?.ToString() ?? throw new BadHttpRequestException(\"Missing id\"), CultureInfo.InvariantCulture)",
+                "long" => "long.Parse(context.Request.RouteValues[\"id\"]?.ToString() ?? throw new BadHttpRequestException(\"Missing id\"), CultureInfo.InvariantCulture)",
+                "System.Int64" => "long.Parse(context.Request.RouteValues[\"id\"]?.ToString() ?? throw new BadHttpRequestException(\"Missing id\"), CultureInfo.InvariantCulture)",
+                "string" or "System.String" => "context.Request.RouteValues[\"id\"]?.ToString() ?? throw new BadHttpRequestException(\"Missing id\")",
+                _ => $"{idType}.Parse(context.Request.RouteValues[\"id\"]?.ToString() ?? throw new BadHttpRequestException(\"Missing id\"), CultureInfo.InvariantCulture)"
+            };
+        }
+
+        private static string ToKebab(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+            var builder = new StringBuilder(value.Length + 8);
+            for (var i = 0; i < value.Length; i++)
+            {
+                var c = value[i];
+                if (char.IsUpper(c))
+                {
+                    if (i > 0) builder.Append('-');
+                    builder.Append(char.ToLowerInvariant(c));
+                }
+                else builder.Append(c);
+            }
+            return builder.ToString();
+        }
+
+        private static string ToSafeName(string value)
+        {
+            var builder = new StringBuilder();
+            foreach (var c in value)
+                builder.Append(char.IsLetterOrDigit(c) || c == '_' ? c : '_');
+            return builder.ToString();
         }
     }
 }

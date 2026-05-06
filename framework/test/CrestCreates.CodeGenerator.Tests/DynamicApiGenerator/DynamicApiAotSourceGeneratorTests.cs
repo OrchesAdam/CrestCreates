@@ -125,7 +125,7 @@ public class DynamicApiAotSourceGeneratorTests
                """;
     }
 
-    private static string BuildDynamicApiStubs()
+    internal static string BuildDynamicApiStubs()
     {
         return """
                using System;
@@ -173,11 +173,47 @@ public class DynamicApiAotSourceGeneratorTests
                    {
                        public IQueryCollection Query { get; set; } = new QueryCollection();
                        public IDictionary<string, string?> RouteValues { get; set; } = new Dictionary<string, string?>();
+                       public IHeaderDictionary Headers { get; set; } = new HeaderDictionary();
                        public Stream Body { get; set; } = new MemoryStream();
                        public long? ContentLength { get; set; }
                        public IServiceProvider RequestServices { get; set; } = new ServiceProviderStub();
 
                        public void EnableBuffering() { }
+                   }
+
+                   public interface IHeaderDictionary : IEnumerable<string>
+                   {
+                       StringValues this[string key] { get; }
+                   }
+
+                   /// <summary>Minimal stub for Microsoft.Extensions.Primitives.StringValues that supports FirstOrDefault().</summary>
+                   public struct StringValues : IEnumerable<string>
+                   {
+                       private readonly string? _value;
+                       private readonly string[]? _values;
+
+                       public StringValues(string? value) { _value = value; _values = null; }
+                       public StringValues(string[]? values) { _value = null; _values = values; }
+
+                       public static implicit operator StringValues(string? value) => new(value);
+                       public static implicit operator StringValues(string[]? values) => new(values);
+
+                       public IEnumerator<string> GetEnumerator() =>
+                           (_values ?? (_value != null ? new[] { _value } : Array.Empty<string>())).AsEnumerable().GetEnumerator();
+
+                       System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+                   }
+
+                   public class HeaderDictionary : IHeaderDictionary
+                   {
+                       private readonly Dictionary<string, StringValues> _data = new();
+                       public StringValues this[string key]
+                       {
+                           get => _data.TryGetValue(key, out var value) ? value : default;
+                           set => _data[key] = value;
+                       }
+                       public IEnumerator<string> GetEnumerator() => _data.Keys.GetEnumerator();
+                       System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
                    }
 
                    public class HttpResponse

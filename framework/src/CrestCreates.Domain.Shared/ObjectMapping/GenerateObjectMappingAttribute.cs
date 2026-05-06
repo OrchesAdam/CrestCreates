@@ -6,7 +6,7 @@ namespace CrestCreates.Domain.Shared.ObjectMapping;
 /// Marks a static partial class as an object mapping declaration.
 /// The source generator will produce mapping methods for the specified types.
 /// </summary>
-[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
 public sealed class GenerateObjectMappingAttribute : Attribute
 {
     /// <summary>

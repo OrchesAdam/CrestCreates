@@ -144,12 +144,38 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             return false;
         }
 
-        if (!HasAttribute(typeSymbol, crestServiceAttribute))
+        if (dynamicApiIgnoreAttribute is not null && HasAttribute(typeSymbol, dynamicApiIgnoreAttribute))
         {
             return false;
         }
 
-        return dynamicApiIgnoreAttribute is null || !HasAttribute(typeSymbol, dynamicApiIgnoreAttribute);
+        // Accept [CrestService] classes
+        if (HasAttribute(typeSymbol, crestServiceAttribute))
+        {
+            return true;
+        }
+
+        // Also accept generated CRUD services that implement ICrudAppService<>.
+        // Generated types from other source generators are visible in the same
+        // compilation round when the CRUD generator executes before this generator.
+        if (ImplementsCrudAppService(typeSymbol))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool ImplementsCrudAppService(INamedTypeSymbol typeSymbol)
+    {
+        foreach (var iface in typeSymbol.AllInterfaces)
+        {
+            if (iface.Name == "ICrudAppService" && iface.TypeArguments.Length >= 5)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static IEnumerable<ServiceModel> BuildServiceModels(
@@ -482,6 +508,12 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         if (routeTokens.Contains(parameter.Name))
         {
             return ParameterSource.Route;
+        }
+
+        // CRUD delete expectedStamp binds from If-Match header
+        if (parameter.Name == "expectedStamp" && parameter.Type.SpecialType == SpecialType.System_String)
+        {
+            return ParameterSource.Header;
         }
 
         if (!bodyAssigned &&
@@ -851,6 +883,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             ParameterSource.Query when parameter.IsScalar => $"                    var {parameter.Name} = {GenerateParseExpression(parameter.TypeName, $"""context.Request.Query["{parameter.Name}"].ToString()""", parameter.IsOptional)};",
             ParameterSource.Query => GenerateQueryObjectBinding(parameter),
             ParameterSource.Body => GenerateBodyBinding(parameter),
+            ParameterSource.Header => $"                    // CRUD delete concurrency token is bound from If-Match.\n                    var {parameter.Name} = context.Request.Headers[\"If-Match\"].FirstOrDefault();",
             _ => $"                    {parameter.TypeName} {parameter.Name} = default!;"
         };
     }
@@ -982,6 +1015,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         Route,
         Query,
         Body,
+        Header,
         CancellationToken
     }
 }
