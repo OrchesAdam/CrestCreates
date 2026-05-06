@@ -6,25 +6,32 @@
 
   <PropertyGroup>
     <EnableModuleManifestGeneration Condition="'$(EnableModuleManifestGeneration)' == ''">true</EnableModuleManifestGeneration>
-    <ModuleManifestOutputPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\ModuleManifest.json</ModuleManifestOutputPath>
-    <AggregatedModuleManifestPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\AggregatedModuleManifest.json</AggregatedModuleManifestPath>
-    <AggregatedModuleCodePath>$(CompilerGeneratedFilesOutputPath)CrestCreates.BuildTasks\ModuleAutoInitializer.g.cs</AggregatedModuleCodePath>
     <EnableEntityPermissionsScan Condition="'$(EnableEntityPermissionsScan)' == ''">true</EnableEntityPermissionsScan>
-    <EntityPermissionsManifestOutputPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\EntityPermissionsManifest.json</EntityPermissionsManifestOutputPath>
   </PropertyGroup>
+
+  <Target Name="InitializeCrestCreatesBuildTaskPaths"
+          BeforeTargets="CleanStaleModuleAutoInitializer;GenerateModuleManifest;CollectAndGenerateAggregatedModules;ScanEntityPermissions">
+    <PropertyGroup>
+      <ModuleManifestOutputPath Condition="'$(ModuleManifestOutputPath)' == ''">$(IntermediateOutputPath)ModuleManifest.json</ModuleManifestOutputPath>
+      <AggregatedModuleManifestPath Condition="'$(AggregatedModuleManifestPath)' == ''">$(IntermediateOutputPath)AggregatedModuleManifest.json</AggregatedModuleManifestPath>
+      <AggregatedModuleCodePath Condition="'$(AggregatedModuleCodePath)' == ''">$(IntermediateOutputPath)ModuleAutoInitializer.g.cs</AggregatedModuleCodePath>
+      <EntityPermissionsManifestOutputPath Condition="'$(EntityPermissionsManifestOutputPath)' == ''">$(IntermediateOutputPath)EntityPermissionsManifest.json</EntityPermissionsManifestOutputPath>
+    </PropertyGroup>
+  </Target>
 
   <!-- Clean stale generated files from previous path migrations -->
   <Target Name="CleanStaleModuleAutoInitializer"
           BeforeTargets="GenerateModuleManifest"
           Condition="'$(EnableModuleManifestGeneration)' == 'true'">
-    <Delete Files="$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\ModuleAutoInitializer.g.cs"
-            Condition="Exists('$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\ModuleAutoInitializer.g.cs')" />
+    <Delete Files="$(IntermediateOutputPath)\ModuleAutoInitializer.g.cs"
+            Condition="Exists('$(IntermediateOutputPath)\ModuleAutoInitializer.g.cs')" />
+    <Delete Files="$(IntermediateOutputPath)ModuleAutoInitializer.g.cs"
+            Condition="Exists('$(IntermediateOutputPath)ModuleAutoInitializer.g.cs')" />
     <Delete Files="$(MSBuildProjectDirectory)\CrestCreates.Generated\ModuleAutoInitializer.g.cs"
             Condition="Exists('$(MSBuildProjectDirectory)\CrestCreates.Generated\ModuleAutoInitializer.g.cs')" />
   </Target>
 
   <Target Name="GenerateModuleManifest"
-          BeforeTargets="BeforeBuild"
           Condition="'$(EnableModuleManifestGeneration)' == 'true'">
 
     <PropertyGroup>
@@ -39,8 +46,9 @@
   </Target>
 
   <Target Name="CollectAndGenerateAggregatedModules"
-          AfterTargets="GenerateModuleManifest"
-          Condition="'$(EnableModuleManifestGeneration)' == 'true' AND Exists('$(ModuleManifestOutputPath)')">
+          DependsOnTargets="GenerateModuleManifest"
+          BeforeTargets="CoreCompile"
+          Condition="'$(EnableModuleManifestGeneration)' == 'true'">
 
     <ItemGroup>
       <_ModuleManifestFiles Include="$(ModuleManifestOutputPath)" />
@@ -60,9 +68,16 @@
     <GenerateAggregatedModuleCode
       ModuleManifestFile="$(AggregatedModuleManifestPath)"
       OutputPath="$(AggregatedModuleCodePath)"
-      Namespace="$(RootNamespace)" />
+      Namespace="CrestCreates.Modularity" />
 
     <Message Text="Generated aggregated module code at $(AggregatedModuleCodePath)" Importance="high" />
+
+    <!-- Include the generated file before CoreCompile so it participates in the current compilation. -->
+    <ItemGroup Condition="Exists('$(AggregatedModuleCodePath)')">
+      <Compile Include="$(AggregatedModuleCodePath)"
+               Link="ModuleAutoInitializer.g.cs"
+               Visible="false" />
+    </ItemGroup>
   </Target>
 
   <Target Name="ScanEntityPermissions"

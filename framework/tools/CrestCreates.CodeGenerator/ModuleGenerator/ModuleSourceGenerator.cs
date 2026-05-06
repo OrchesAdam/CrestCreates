@@ -107,8 +107,6 @@ public class ModuleSourceGenerator : IIncrementalGenerator
     {
         var sortedModules = TopologicalSort(modules);
 
-        GenerateAutoModuleRegistration(context, sortedModules);
-
         foreach (var module in modules)
         {
             var extensionCode = GenerateSingleModuleExtension(module);
@@ -267,7 +265,6 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         sb.AppendLine($"        public static IServiceCollection Add{module.Name}(this IServiceCollection services)");
         sb.AppendLine("        {");
         sb.AppendLine($"            services.AddSingleton<{module.FullName}>();");
-        sb.AppendLine($"            ModuleDescriptorRegistry.Register(typeof({module.FullName}), {module.Order}, {module.AutoRegisterServices.ToString().ToLower()});");
         sb.AppendLine($"            return services;");
         sb.AppendLine("        }");
         sb.AppendLine();

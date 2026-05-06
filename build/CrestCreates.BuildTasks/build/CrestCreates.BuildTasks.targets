@@ -10,14 +10,27 @@
   <UsingTask TaskName="CrestCreates.BuildTasks.CollectModuleManifests" AssemblyFile="$(MSBuildThisFileDirectory)net10.0\CrestCreates.BuildTasks.dll" />
   <UsingTask TaskName="CrestCreates.BuildTasks.GenerateAggregatedModuleCode" AssemblyFile="$(MSBuildThisFileDirectory)net10.0\CrestCreates.BuildTasks.dll" />
   <UsingTask TaskName="CrestCreates.BuildTasks.ScanEntityPermissions" AssemblyFile="$(MSBuildThisFileDirectory)net10.0\CrestCreates.BuildTasks.dll" />
-  
+  <PropertyGroup>
+    <EnableModuleManifestGeneration Condition="'$(EnableModuleManifestGeneration)' == ''">true</EnableModuleManifestGeneration>
+    <EnableEntityPermissionsScan Condition="'$(EnableEntityPermissionsScan)' == ''">true</EnableEntityPermissionsScan>
+  </PropertyGroup>
+
+  <Target Name="InitializeCrestCreatesBuildTaskPaths"
+          BeforeTargets="GenerateModuleManifest;CollectAndGenerateAggregatedModules;ScanEntityPermissions;CleanModuleManifests">
+    <PropertyGroup>
+      <ModuleManifestOutputPath Condition="'$(ModuleManifestOutputPath)' == ''">$(IntermediateOutputPath)ModuleManifest.json</ModuleManifestOutputPath>
+      <AggregatedModuleManifestPath Condition="'$(AggregatedModuleManifestPath)' == ''">$(IntermediateOutputPath)AggregatedModuleManifest.json</AggregatedModuleManifestPath>
+      <CrestCreatesModuleAutoInitializerFile Condition="'$(CrestCreatesModuleAutoInitializerFile)' == ''">$(IntermediateOutputPath)ModuleAutoInitializer.g.cs</CrestCreatesModuleAutoInitializerFile>
+      <AggregatedModuleCodePath Condition="'$(AggregatedModuleCodePath)' == ''">$(CrestCreatesModuleAutoInitializerFile)</AggregatedModuleCodePath>
+      <EntityPermissionsManifestOutputPath Condition="'$(EntityPermissionsManifestOutputPath)' == ''">$(IntermediateOutputPath)EntityPermissionsManifest.json</EntityPermissionsManifestOutputPath>
+    </PropertyGroup>
+  </Target>
   <!-- 
     Target: GenerateModuleManifest
     Description: Scans source files for [Module] attributes and generates a manifest
-    Runs: Before Build
+    Runs: Before CoreCompile through CollectAndGenerateAggregatedModules dependency
   -->
   <Target Name="GenerateModuleManifest"
-          BeforeTargets="BeforeBuild"
           Condition="'$(EnableModuleManifestGeneration)' == 'true'">
     
     <PropertyGroup>
@@ -34,11 +47,12 @@
   <!-- 
     Target: CollectAndGenerateAggregatedModules
     Description: Collects modules from referenced projects and generates registration code
-    Runs: After GenerateModuleManifest
+    Runs: Before CoreCompile
   -->
   <Target Name="CollectAndGenerateAggregatedModules"
-          AfterTargets="GenerateModuleManifest"
-          Condition="'$(EnableModuleManifestGeneration)' == 'true' AND Exists('$(ModuleManifestOutputPath)')">
+          DependsOnTargets="GenerateModuleManifest"
+          BeforeTargets="CoreCompile"
+          Condition="'$(EnableModuleManifestGeneration)' == 'true'">
     
     <ItemGroup>
       <_ModuleManifestFiles Include="$(ModuleManifestOutputPath)" />
@@ -60,13 +74,15 @@
     <GenerateAggregatedModuleCode
       ModuleManifestFile="$(AggregatedModuleManifestPath)"
       OutputPath="$(AggregatedModuleCodePath)"
-      Namespace="$(RootNamespace)" />
+      Namespace="CrestCreates.Modularity" />
     
     <Message Text="[CrestCreates] Generated module registration code: $(AggregatedModuleCodePath)" Importance="high" />
     
-    <!-- Include the generated file in compilation -->
-    <ItemGroup>
-      <Compile Include="$(AggregatedModuleCodePath)" />
+    <!-- Include the generated file before CoreCompile so it participates in the current compilation. -->
+    <ItemGroup Condition="Exists('$(AggregatedModuleCodePath)')">
+      <Compile Include="$(AggregatedModuleCodePath)"
+               Link="ModuleAutoInitializer.g.cs"
+               Visible="false" />
     </ItemGroup>
   </Target>
   

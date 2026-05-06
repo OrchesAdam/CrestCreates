@@ -120,7 +120,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("using CrestCreates.Modularity;");
         sb.AppendLine();
 
-        sb.AppendLine("public static partial class ModuleAutoInitializer");
+        sb.AppendLine("internal static partial class ModuleAutoInitializer");
         sb.AppendLine("{");
         sb.AppendLine("    private static readonly List<ModuleDescriptor> _registeredModules = new();");
         sb.AppendLine();
@@ -196,6 +196,21 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("                moduleInstance.OnPostInitialize();");
         sb.AppendLine("            }");
         sb.AppendLine("        }");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    public static IHost InitializeModules(this IHost host)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        InitializeAllModules(host.Services);");
+        sb.AppendLine();
+        sb.AppendLine("        foreach (var module in _registeredModules.OrderBy(m => m.Order))");
+        sb.AppendLine("        {");
+        sb.AppendLine("            if (host.Services.GetService(module.ModuleType) is IModule moduleInstance)");
+        sb.AppendLine("            {");
+        sb.AppendLine("                moduleInstance.OnApplicationInitialization(host);");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+        sb.AppendLine("        return host;");
         sb.AppendLine("    }");
         sb.AppendLine("}");
 
