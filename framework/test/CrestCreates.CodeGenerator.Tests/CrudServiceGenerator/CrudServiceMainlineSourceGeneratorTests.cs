@@ -132,6 +132,15 @@ public sealed class CrudServiceMainlineSourceGeneratorTests
         Assert.Contains("\"Delete\"", source);
         Assert.Contains("If-Match", source);
         Assert.Contains("expectedStamp", source);
+
+        // CreateRegistry matches assembly before creating descriptor
+        Assert.Contains("MatchesAssembly", source);
+
+        // GetList uses POST with body binding for Filters/Sorts support
+        Assert.Contains("\"POST\"", source);
+
+        // MatchesAssembly guard present in MapEndpoints
+        Assert.Contains("MatchesAssembly(options, typeof(", source);
     }
 
     [Fact]

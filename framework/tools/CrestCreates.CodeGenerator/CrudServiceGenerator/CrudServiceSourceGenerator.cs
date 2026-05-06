@@ -849,6 +849,11 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             string idType,
             bool generateAsBaseClass)
         {
+            // Skip for abstract base-class mode — the base class can't be resolved
+            // from DI and endpoint handlers would fail at runtime.
+            if (generateAsBaseClass)
+                return;
+
             var hasConcurrencyStamp = entityClass.AllInterfaces.Any(i => i.Name == "IHasConcurrencyStamp");
             var serviceName = entityName;
             var serviceVar = char.ToLowerInvariant(entityName[0]) + entityName.Substring(1);
@@ -890,6 +895,8 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine();
             builder.AppendLine("        public DynamicApiRegistry CreateRegistry(DynamicApiOptions options)");
             builder.AppendLine("        {");
+            builder.AppendLine($"            if (!MatchesAssembly(options, typeof({implTypeName}).Assembly))");
+            builder.AppendLine("                return new DynamicApiRegistry(Array.Empty<DynamicApiServiceDescriptor>());");
             builder.AppendLine($"            var routePrefix = ResolveRoutePrefix(options, \"{ToKebab(serviceName)}\");");
             builder.AppendLine("            var service = new DynamicApiServiceDescriptor");
             builder.AppendLine("            {");
@@ -900,15 +907,15 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("                Actions = new DynamicApiActionDescriptor[]");
             builder.AppendLine("                {");
             // Create
-            WriteActionDescriptor(builder, serviceName, contractTypeName, "Create", "", "POST", "Create");
+            WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "Create", "", "POST", "Create");
             // GetById
-            WriteActionDescriptor(builder, serviceName, contractTypeName, "GetById", "{id}", "GET", "Get");
-            // GetList
-            WriteActionDescriptor(builder, serviceName, contractTypeName, "GetList", "", "GET", "Search");
+            WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "GetById", "{id}", "GET", "Get");
+            // GetList - POST with body binding so Filters/Sorts descriptors are supported
+            WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "GetList", "", "POST", "Search");
             // Update
-            WriteActionDescriptor(builder, serviceName, contractTypeName, "Update", "{id}", "PUT", "Update");
+            WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "Update", "{id}", "PUT", "Update");
             // Delete
-            WriteActionDescriptor(builder, serviceName, contractTypeName, "Delete", "{id}", "DELETE", "Delete");
+            WriteActionDescriptor(builder, serviceName, contractTypeName, idType, "Delete", "{id}", "DELETE", "Delete");
             builder.AppendLine("                }");
             builder.AppendLine("            };");
             builder.AppendLine("            return new DynamicApiRegistry(new[] { service });");
@@ -945,10 +952,22 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             context.AddSource($"{entityName}CrudDynamicApi.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
+        private static string GetIdTypeOf(string idType) => idType switch
+        {
+            "System.Guid" => "typeof(System.Guid)",
+            "int" => "typeof(int)",
+            "System.Int32" => "typeof(int)",
+            "long" => "typeof(long)",
+            "System.Int64" => "typeof(long)",
+            "string" or "System.String" => "typeof(string)",
+            _ => $"typeof({idType})"
+        };
+
         private static void WriteActionDescriptor(
             StringBuilder builder,
             string serviceName,
             string contractTypeName,
+            string idType,
             string actionName,
             string relativeRoute,
             string httpMethod,
@@ -979,20 +998,20 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"cancellationToken\", ParameterType = typeof(System.Threading.CancellationToken), Source = DynamicApiParameterSource.CancellationToken, IsOptional = true }}");
                     break;
                 case "GetById":
-                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"id\", ParameterType = typeof(System.Guid), Source = DynamicApiParameterSource.Route, IsOptional = false }},");
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"id\", ParameterType = {GetIdTypeOf(idType)}, Source = DynamicApiParameterSource.Route, IsOptional = false }},");
                     builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"cancellationToken\", ParameterType = typeof(System.Threading.CancellationToken), Source = DynamicApiParameterSource.CancellationToken, IsOptional = true }}");
                     break;
                 case "GetList":
-                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"input\", ParameterType = typeof({serviceName}ListRequestDto), Source = DynamicApiParameterSource.Query, IsOptional = true }},");
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"input\", ParameterType = typeof({serviceName}ListRequestDto), Source = DynamicApiParameterSource.Body, IsOptional = true }},");
                     builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"cancellationToken\", ParameterType = typeof(System.Threading.CancellationToken), Source = DynamicApiParameterSource.CancellationToken, IsOptional = true }}");
                     break;
                 case "Update":
-                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"id\", ParameterType = typeof(System.Guid), Source = DynamicApiParameterSource.Route, IsOptional = false }},");
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"id\", ParameterType = {GetIdTypeOf(idType)}, Source = DynamicApiParameterSource.Route, IsOptional = false }},");
                     builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"input\", ParameterType = typeof(Update{serviceName}Dto), Source = DynamicApiParameterSource.Body, IsOptional = false }},");
                     builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"cancellationToken\", ParameterType = typeof(System.Threading.CancellationToken), Source = DynamicApiParameterSource.CancellationToken, IsOptional = true }}");
                     break;
                 case "Delete":
-                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"id\", ParameterType = typeof(System.Guid), Source = DynamicApiParameterSource.Route, IsOptional = false }},");
+                    builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"id\", ParameterType = {GetIdTypeOf(idType)}, Source = DynamicApiParameterSource.Route, IsOptional = false }},");
                     builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"expectedStamp\", ParameterType = typeof(string), Source = DynamicApiParameterSource.Header, IsOptional = true }},");
                     builder.AppendLine($"                            new DynamicApiParameterDescriptor {{ Name = \"cancellationToken\", ParameterType = typeof(System.Threading.CancellationToken), Source = DynamicApiParameterSource.CancellationToken, IsOptional = true }}");
                     break;
@@ -1043,19 +1062,16 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine($"                }}).WithDisplayName(\"{contractTypeName}.GetById\").WithMetadata(perm_{s}_get).ExcludeFromDescription();");
             builder.AppendLine();
 
-            // GetList
+            // GetList - POST with body binding to support Filters/Sorts descriptors
             builder.AppendLine($"            var perm_{s}_search = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{permSearch}\" }}, RequireAll = false }};");
-            builder.AppendLine($"            endpoints.MapMethods(BuildRoute(routePrefix, \"\"), new[] {{ \"GET\" }},");
+            builder.AppendLine($"            endpoints.MapMethods(BuildRoute(routePrefix, \"\"), new[] {{ \"POST\" }},");
             builder.AppendLine($"                async (HttpContext context, [FromServices] {contractTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
             builder.AppendLine("                {");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, perm_{s}_search.Permissions);");
-            builder.AppendLine($"                    var input = new {serviceName}ListRequestDto();");
-            builder.AppendLine($"                    if (!string.IsNullOrWhiteSpace(context.Request.Query[\"PageIndex\"].ToString()))");
-            builder.AppendLine($"                        input.PageIndex = int.Parse(context.Request.Query[\"PageIndex\"].ToString(), CultureInfo.InvariantCulture);");
-            builder.AppendLine($"                    if (!string.IsNullOrWhiteSpace(context.Request.Query[\"PageSize\"].ToString()))");
-            builder.AppendLine($"                        input.PageSize = int.Parse(context.Request.Query[\"PageSize\"].ToString(), CultureInfo.InvariantCulture);");
+            builder.AppendLine($"                    var input = await DynamicApiGeneratedRuntime.ReadBodyAsync<{serviceName}ListRequestDto>(context, false);");
+            builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, input);");
             builder.AppendLine($"                    var result = await service.GetListAsync(input, context.RequestAborted);");
-            builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapGetResult(result);");
+            builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapResult(result);");
             builder.AppendLine($"                }}).WithDisplayName(\"{contractTypeName}.GetList\").WithMetadata(perm_{s}_search).ExcludeFromDescription();");
             builder.AppendLine();
 
