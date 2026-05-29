@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -7,6 +8,7 @@ using System.Runtime.Loader;
 using System.Text.Json;
 using CrestCreates.PluginSystem.Abstractions;
 using CrestCreates.PluginSystem.Models;
+using CrestCreates.PluginSystem.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -14,6 +16,8 @@ namespace CrestCreates.PluginSystem.Services;
 
 /// <summary>
 /// 插件管理器接口
+/// 注意：插件系统依赖运行时反射和动态程序集加载，与 NativeAOT 不兼容。
+/// 使用时需确保发布配置排除此模块或使用完整框架发布。
 /// </summary>
 public interface IPluginManager
 {
@@ -56,6 +60,8 @@ public interface IPluginManager
 /// <summary>
 /// 插件管理器实现
 /// </summary>
+[RequiresDynamicCode("Plugin system loads assemblies and discovers types at runtime")]
+[RequiresUnreferencedCode("Plugin system discovers types via reflection at runtime")]
 public class PluginManager : IPluginManager
 {
     private readonly ILogger<PluginManager> _logger;
@@ -278,14 +284,7 @@ public class PluginManager : IPluginManager
     private PluginManifest? LoadManifest(string manifestFile)
     {
         var json = File.ReadAllText(manifestFile);
-        return JsonSerializer.Deserialize<PluginManifest>(json, new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true,
-            // 安全选项：禁用反射实例化，防止恶意 plugin.json 注入
-            AllowTrailingCommas = true,
-            ReadCommentHandling = JsonCommentHandling.Skip,
-            MaxDepth = 10  // 防止深度嵌套攻击
-        });
+        return JsonSerializer.Deserialize(json, PluginManifestJsonContext.Default.PluginManifest);
     }
 
     private string? GetAssemblyPath(string manifestFile, string entryAssembly)

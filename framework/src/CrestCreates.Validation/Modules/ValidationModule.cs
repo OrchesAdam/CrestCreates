@@ -77,7 +77,7 @@ namespace CrestCreates.Validation.Modules
                 PropertyName = e.PropertyName,
                 ErrorMessage = e.ErrorMessage,
                 ErrorCode = e.ErrorCode,
-                AttemptedValue = e.AttemptedValue
+                AttemptedValue = e.AttemptedValue?.ToString()
             }).ToList();
 
             return ValidationResult.FailureWithCodes(details);

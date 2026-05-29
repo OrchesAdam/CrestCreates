@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.MultiTenancy.Abstract;
@@ -33,6 +34,7 @@ public static class MongoServiceCollectionExtensions
     /// <summary>
     /// 注册 MongoDB 仓储
     /// </summary>
+    [RequiresUnreferencedCode("ActivatorUtilities.CreateInstance requires constructor metadata which may be trimmed")]
     public static IServiceCollection AddMongoRepository<TEntity, TKey, TRepository>(
         this IServiceCollection services)
         where TEntity : class, IEntity<TKey>

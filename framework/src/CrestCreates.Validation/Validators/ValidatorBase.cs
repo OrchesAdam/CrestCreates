@@ -95,10 +95,10 @@ namespace CrestCreates.Validation.Validators
         public string? ErrorCode { get; set; }
 
         /// <summary>
-        /// 用户尝试输入的值。注意：对于密码、信用卡号等敏感字段，此值可能包含敏感数据，
+        /// 用户尝试输入的值（字符串形式）。注意：对于密码、信用卡号等敏感字段，
         /// 序列化为 API 响应前应考虑脱敏或忽略。
         /// </summary>
-        public object? AttemptedValue { get; set; }
+        public string? AttemptedValue { get; set; }
     }
 
     /// <summary>
@@ -126,7 +126,7 @@ namespace CrestCreates.Validation.Validators
                 PropertyName = e.PropertyName,
                 ErrorMessage = e.ErrorMessage,
                 ErrorCode = e.ErrorCode,
-                AttemptedValue = e.AttemptedValue
+                AttemptedValue = e.AttemptedValue?.ToString()
             }).ToList();
 
             return ValidationResult.FailureWithCodes(details);
