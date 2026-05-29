@@ -5,6 +5,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using CrestCreates.AspNetCore.Authentication.OpenIddict.Handlers;
+using CrestCreates.Infrastructure.Authorization;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
@@ -25,19 +26,22 @@ public class OpenIddictController : ControllerBase
     private readonly IOpenIddictScopeManager _scopeManager;
     private readonly IPasswordGrantHandler _passwordGrantHandler;
     private readonly IRefreshTokenGrantHandler _refreshTokenGrantHandler;
+    private readonly IIdentityClaimsBuilder _claimsBuilder;
 
     public OpenIddictController(
         IOpenIddictApplicationManager applicationManager,
         IOpenIddictAuthorizationManager authorizationManager,
         IOpenIddictScopeManager scopeManager,
         IPasswordGrantHandler passwordGrantHandler,
-        IRefreshTokenGrantHandler refreshTokenGrantHandler)
+        IRefreshTokenGrantHandler refreshTokenGrantHandler,
+        IIdentityClaimsBuilder claimsBuilder)
     {
         _applicationManager = applicationManager;
         _authorizationManager = authorizationManager;
         _scopeManager = scopeManager;
         _passwordGrantHandler = passwordGrantHandler;
         _refreshTokenGrantHandler = refreshTokenGrantHandler;
+        _claimsBuilder = claimsBuilder;
     }
 
     [HttpGet("authorize")]
@@ -79,35 +83,19 @@ public class OpenIddictController : ControllerBase
                 scopes: request.GetScopes());
         }
 
-        var claims = new List<Claim>
+        var claimsContext = new IdentityClaimsContext
         {
-            new Claim(Claims.Subject, result.Principal.GetClaim(ClaimTypes.NameIdentifier)!),
-            new Claim(Claims.Name, result.Principal.GetClaim(ClaimTypes.Name) ?? string.Empty)
+            UserId = Guid.TryParse(result.Principal.GetClaim(ClaimTypes.NameIdentifier), out var userId) ? userId : Guid.Empty,
+            UserName = result.Principal.GetClaim(ClaimTypes.Name) ?? string.Empty,
+            Email = result.Principal.GetClaim(ClaimTypes.Email),
+            TenantId = result.Principal.GetClaim("tenantid"),
+            OrganizationId = Guid.TryParse(result.Principal.GetClaim("org_id"), out var orgId) ? orgId : null,
+            IsSuperAdmin = string.Equals(result.Principal.GetClaim("is_super_admin"), "true", StringComparison.OrdinalIgnoreCase),
+            Roles = result.Principal.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList(),
+            Permissions = Array.Empty<string>()
         };
 
-        var tenantId = result.Principal.GetClaim("tenantid");
-        if (!string.IsNullOrEmpty(tenantId))
-        {
-            claims.Add(new Claim("tenantid", tenantId));
-        }
-
-        var orgId = result.Principal.GetClaim("org_id");
-        if (!string.IsNullOrEmpty(orgId))
-        {
-            claims.Add(new Claim("org_id", orgId));
-        }
-
-        var isSuperAdmin = result.Principal.GetClaim("is_super_admin");
-        if (!string.IsNullOrEmpty(isSuperAdmin))
-        {
-            claims.Add(new Claim("is_super_admin", isSuperAdmin));
-        }
-
-        var roles = result.Principal.FindAll(ClaimTypes.Role);
-        foreach (var role in roles)
-        {
-            claims.Add(new Claim(Claims.Role, role.Value));
-        }
+        var claims = _claimsBuilder.Build(claimsContext);
 
         var identity = new ClaimsIdentity(claims, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         var principal = new ClaimsPrincipal(identity);
@@ -164,36 +152,20 @@ public class OpenIddictController : ControllerBase
             return Forbid(properties, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         }
 
-        // 构建 Token 内嵌 claims：tenant_id、is_super_admin、roles（不含 permission）
-        var claims = new List<Claim>
+        // 使用 IdentityClaimsBuilder 构建 claims
+        var claimsContext = new IdentityClaimsContext
         {
-            new Claim(Claims.Subject, result.UserId.ToString()),
-            new Claim(Claims.Name, result.UserName),
-            new Claim(ClaimTypes.NameIdentifier, result.UserId.ToString())
+            UserId = result.UserId,
+            UserName = result.UserName,
+            Email = result.Email,
+            TenantId = result.TenantId,
+            OrganizationId = Guid.TryParse(result.OrganizationId, out var orgId) ? orgId : null,
+            IsSuperAdmin = result.IsSuperAdmin,
+            Roles = result.Roles,
+            Permissions = Array.Empty<string>() // Token 内不嵌 permissions，按需查询
         };
 
-        if (!string.IsNullOrEmpty(result.TenantId))
-        {
-            claims.Add(new Claim("tenantid", result.TenantId));
-            claims.Add(new Claim("tenant_id", result.TenantId));
-        }
-
-        if (!string.IsNullOrEmpty(result.Email))
-        {
-            claims.Add(new Claim(ClaimTypes.Email, result.Email));
-        }
-
-        if (!string.IsNullOrEmpty(result.OrganizationId))
-        {
-            claims.Add(new Claim("org_id", result.OrganizationId));
-        }
-
-        claims.Add(new Claim("is_super_admin", result.IsSuperAdmin ? "true" : "false"));
-
-        foreach (var role in result.Roles)
-        {
-            claims.Add(new Claim(Claims.Role, role));
-        }
+        var claims = _claimsBuilder.Build(claimsContext);
 
         var identity = new ClaimsIdentity(claims, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         var principal = new ClaimsPrincipal(identity);

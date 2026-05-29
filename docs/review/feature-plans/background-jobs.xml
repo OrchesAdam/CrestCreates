@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="background-jobs" group="第二批" priority="P1" status="draft">
+<featurePlan id="background-jobs" group="第二批" priority="P1" status="implemented">
   <title>后台作业平台化</title>
   <goal>把现有 Quartz 调度能力提升为统一后台作业平台。</goal>
   <scope>

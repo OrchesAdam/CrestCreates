@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="mongodb-provider" group="最后做" priority="P3" status="draft">
+<featurePlan id="mongodb-provider" group="最后做" priority="P3" status="implemented">
   <title>MongoDB 支持</title>
   <goal>作为独立 provider 支持文档数据库场景，但不影响关系型 ORM 主链。</goal>
   <scope>
@@ -31,4 +31,9 @@
   <reviewChecklist>
     <item>Provider 独立，不污染现有 ORM 抽象。</item>
   </reviewChecklist>
+  <gaps>
+    <gap>已实现：CrestCreates.OrmProviders.MongoDB 项目已创建，包含 MongoRepositoryBase 实现 ICrestRepositoryBase。</gap>
+    <gap>支持：基础 CRUD、分页查询、租户过滤（IMustHaveTenant/IMultiTenant）、软删除、并发控制。</gap>
+    <gap>限制：不支持关系型事务语义（UpdateRangeAsync 逐个更新）。</gap>
+  </gaps>
 </featurePlan>

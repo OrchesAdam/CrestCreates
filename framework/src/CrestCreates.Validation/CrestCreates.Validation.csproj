@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="..\CrestCreates.Localization\CrestCreates.Localization.csproj" />
   </ItemGroup>
 
 </Project>

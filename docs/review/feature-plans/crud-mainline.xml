@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="crud-mainline" group="第二批" priority="P1" status="draft">
+<featurePlan id="crud-mainline" group="第二批" priority="P1" status="implemented">
   <title>CRUD 主链增强</title>
   <goal>把 generated CRUD 做成默认开发路径，减少手写样板，同时统一权限、查询、并发、异常。</goal>
   <scope>

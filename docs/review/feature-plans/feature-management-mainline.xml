@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="feature-management-mainline" group="第二批" priority="P1" status="draft">
+<featurePlan id="feature-management-mainline" group="第二批" priority="P1" status="implemented">
   <title>Feature Management 主链收口</title>
   <goal>把功能开关从定义、读取、覆盖、缓存、API、租户初始化到测试验收收口成一条主链；Feature Management 只管能力开关，不承载普通业务配置。</goal>
 

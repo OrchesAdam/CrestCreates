@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="localization" group="第三批" priority="P2" status="draft">
+<featurePlan id="localization" group="第三批" priority="P2" status="implemented">
   <title>本地化</title>
   <goal>让异常、验证、权限、平台消息都能走统一本地化主链。</goal>
   <scope>
@@ -30,4 +30,8 @@
   <reviewChecklist>
     <item>错误码和本地化 key 稳定，不使用异常 message 做逻辑判断。</item>
   </reviewChecklist>
+  <gaps>
+    <gap>已解决：添加了 ValidationErrorCodes 和 ValidationLocalizationExtensions，支持验证错误码本地化。</gap>
+    <gap>ILocalizationResourceContributor 和异常消息本地化已实现。</gap>
+  </gaps>
 </featurePlan>

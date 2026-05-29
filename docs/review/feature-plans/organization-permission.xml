@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="organization-permission" group="第三批" priority="P2" status="draft">
+<featurePlan id="organization-permission" group="第三批" priority="P2" status="implemented">
   <title>组织架构权限</title>
   <goal>把现有组织范围/数据权限能力产品化，但不复制一套平行权限系统。</goal>
   <scope>
@@ -30,4 +30,8 @@
   <reviewChecklist>
     <item>组织范围是权限/数据过滤输入，不是新权限真相源。</item>
   </reviewChecklist>
+  <gaps>
+    <gap>已解决：Organization 实体已作为组织单元，User.OrganizationId 已作为组织成员关系。第一版采用一对一关系，不实现多对多 OrganizationMembership。</gap>
+    <gap>OrganizationHierarchyService 和 DataPermissionFilter 已实现组织范围过滤（Organization 和 OrganizationAndSub scope）。</gap>
+  </gaps>
 </featurePlan>

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="caching" group="第三批" priority="P2" status="draft">
+<featurePlan id="caching" group="第三批" priority="P2" status="implemented">
   <title>缓存</title>
   <goal>统一缓存 key、租户隔离和失效策略，让设置/功能/权限变更后结果可靠更新。</goal>
   <scope>

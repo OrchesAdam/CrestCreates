@@ -1,6 +1,9 @@
 using System;
 using SqlSugar;
 using CrestCreates.Domain.Shared.Entities.Auditing;
+using CrestCreates.DataFilter.Entities;
+using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.OrmProviders.Abstract.Abstractions;
 
 namespace CrestCreates.OrmProviders.SqlSugar.Interceptors
 {
@@ -11,22 +14,23 @@ namespace CrestCreates.OrmProviders.SqlSugar.Interceptors
     public static class SqlSugarAuditInterceptor
     {
         /// <summary>
-        /// 配置 SqlSugar 审计拦截器
+        /// 配置 SqlSugar 审计拦截器（包含审计、软删除、多租户）
         /// </summary>
-        public static void ConfigureAuditInterceptor(this SqlSugarClient client, ICurrentUserProvider currentUserProvider)
+        public static void ConfigureAuditInterceptor(this SqlSugarClient client, ICurrentUserProvider currentUserProvider, ICurrentTenant? currentTenant = null)
         {
             // 插入前拦截（实体级别）
             client.Aop.DataExecuting = (oldValue, entityInfo) =>
             {
+                var now = DateTime.UtcNow;
+                var currentUserId = currentUserProvider?.GetCurrentUserId();
+                var tenantId = currentTenant?.Id;
+
+                // 1. 处理审计实体
                 if (entityInfo.EntityValue is IAuditedEntity auditedEntity)
                 {
-                    var now = DateTime.UtcNow;
-                    var currentUserId = currentUserProvider?.GetCurrentUserId();
-
                     switch (entityInfo.OperationType)
                     {
                         case DataFilterType.InsertByObject:
-                            // 插入操作
                             if (entityInfo.PropertyName == nameof(IAuditedEntity.CreationTime))
                             {
                                 entityInfo.SetValue(now);
@@ -38,7 +42,6 @@ namespace CrestCreates.OrmProviders.SqlSugar.Interceptors
                             break;
 
                         case DataFilterType.UpdateByObject:
-                            // 更新操作
                             if (entityInfo.PropertyName == nameof(IAuditedEntity.LastModificationTime))
                             {
                                 entityInfo.SetValue(now);
@@ -50,7 +53,6 @@ namespace CrestCreates.OrmProviders.SqlSugar.Interceptors
                             break;
 
                         case DataFilterType.DeleteByObject:
-                            // 删除操作 - 如果是软删除实体，转换为更新操作
                             if (entityInfo.EntityValue is ISoftDelete softDelete)
                             {
                                 if (entityInfo.PropertyName == nameof(ISoftDelete.IsDeleted))
@@ -69,6 +71,55 @@ namespace CrestCreates.OrmProviders.SqlSugar.Interceptors
                             break;
                     }
                 }
+
+                // 2. 处理多租户实体（插入时自动设置租户ID）
+                if (!string.IsNullOrEmpty(tenantId))
+                {
+                    if (entityInfo.EntityValue is IMultiTenant multiTenant)
+                    {
+                        switch (entityInfo.OperationType)
+                        {
+                            case DataFilterType.InsertByObject:
+                                if (string.IsNullOrEmpty(multiTenant.TenantId) && entityInfo.PropertyName == nameof(IMultiTenant.TenantId))
+                                {
+                                    entityInfo.SetValue(tenantId);
+                                }
+                                break;
+
+                            case DataFilterType.UpdateByObject:
+                            case DataFilterType.DeleteByObject:
+                                if (!string.IsNullOrEmpty(multiTenant.TenantId) &&
+                                    !string.Equals(multiTenant.TenantId, tenantId, StringComparison.Ordinal))
+                                {
+                                    throw new InvalidOperationException(
+                                        $"Cannot modify entity from tenant '{multiTenant.TenantId}' while current tenant is '{tenantId}'");
+                                }
+                                break;
+                        }
+                    }
+
+                    if (entityInfo.EntityValue is IMustHaveTenant mustHaveTenant)
+                    {
+                        switch (entityInfo.OperationType)
+                        {
+                            case DataFilterType.InsertByObject:
+                                if (string.IsNullOrEmpty(mustHaveTenant.TenantId) && entityInfo.PropertyName == nameof(IMustHaveTenant.TenantId))
+                                {
+                                    entityInfo.SetValue(tenantId);
+                                }
+                                break;
+
+                            case DataFilterType.UpdateByObject:
+                            case DataFilterType.DeleteByObject:
+                                if (!string.Equals(mustHaveTenant.TenantId, tenantId, StringComparison.Ordinal))
+                                {
+                                    throw new InvalidOperationException(
+                                        $"Cannot modify entity from tenant '{mustHaveTenant.TenantId}' while current tenant is '{tenantId}'");
+                                }
+                                break;
+                        }
+                    }
+                }
             };
         }
 
@@ -80,25 +131,24 @@ namespace CrestCreates.OrmProviders.SqlSugar.Interceptors
             // 全局软删除过滤器
             client.QueryFilter.Add(new TableFilterItem<ISoftDelete>(it => it.IsDeleted == false));
         }
-    }
 
-    /// <summary>
-    /// 当前用户提供者接口
-    /// </summary>
-    public interface ICurrentUserProvider
-    {
-        Guid? GetCurrentUserId();
-    }
-
-    /// <summary>
-    /// 默认当前用户提供者实现
-    /// </summary>
-    public class DefaultCurrentUserProvider : ICurrentUserProvider
-    {
-        public Guid? GetCurrentUserId()
+        /// <summary>
+        /// 配置多租户过滤器
+        /// </summary>
+        public static void ConfigureMultiTenantFilter(this SqlSugarClient client, ICurrentTenant currentTenant)
         {
-            // TODO: 从 HttpContext 或 ClaimsPrincipal 获取当前用户ID
-            return null;
+            if (currentTenant == null || string.IsNullOrEmpty(currentTenant.Id))
+            {
+                return;
+            }
+
+            var tenantId = currentTenant.Id;
+
+            // 多租户过滤器 - IMultiTenant (nullable TenantId)
+            client.QueryFilter.Add(new TableFilterItem<IMultiTenant>(it => it.TenantId == null || it.TenantId == tenantId));
+
+            // 多租户过滤器 - IMustHaveTenant (required TenantId)
+            client.QueryFilter.Add(new TableFilterItem<IMustHaveTenant>(it => it.TenantId == tenantId));
         }
     }
 }

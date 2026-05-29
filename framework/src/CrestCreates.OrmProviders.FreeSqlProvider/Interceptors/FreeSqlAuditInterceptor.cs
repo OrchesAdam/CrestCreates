@@ -1,6 +1,9 @@
 using System;
 using FreeSql;
 using CrestCreates.Domain.Shared.Entities.Auditing;
+using CrestCreates.DataFilter.Entities;
+using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.OrmProviders.Abstract.Abstractions;
 
 namespace CrestCreates.OrmProviders.FreeSqlProvider.Interceptors
 {
@@ -10,21 +13,18 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Interceptors
     /// </summary>
     public static class FreeSqlAuditInterceptor
     {
-        // 用于跟踪当前是否正在处理软删除
-        private static readonly System.Threading.AsyncLocal<bool> _isDeletingContext = new System.Threading.AsyncLocal<bool>();
-
         /// <summary>
-        /// 配置 FreeSql 审计拦截器
+        /// 配置 FreeSql 审计拦截器（包含审计、软删除、多租户）
         /// </summary>
-        public static void ConfigureAuditInterceptor(this IFreeSql freeSql, ICurrentUserProvider currentUserProvider)
+        public static void ConfigureAuditInterceptor(this IFreeSql freeSql, ICurrentUserProvider currentUserProvider, ICurrentTenant? currentTenant = null)
         {
-            // 插入前拦截
             freeSql.Aop.AuditValue += (sender, e) =>
             {
                 var now = DateTime.UtcNow;
                 var currentUserId = currentUserProvider?.GetCurrentUserId();
+                var tenantId = currentTenant?.Id;
 
-                // 处理审计实体
+                // 1. 处理审计实体
                 if (e.Object is IAuditedEntity)
                 {
                     switch (e.AuditValueType)
@@ -55,17 +55,10 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Interceptors
                     }
                 }
 
-                // 处理软删除 - 当 IsDeleted 被设置为 true 时，自动填充删除相关字段
-                if (e.Object is ISoftDelete && e.AuditValueType == FreeSql.Aop.AuditValueType.Update)
+                // 2. 处理软删除 - 当 IsDeleted 为 true 时，自动填充删除相关字段
+                if (e.Object is ISoftDelete softDelete && e.AuditValueType == FreeSql.Aop.AuditValueType.Update)
                 {
-                    // 检测到 IsDeleted 属性被设置为 true，标记正在删除
-                    if (e.Property.Name == nameof(ISoftDelete.IsDeleted) && e.Value is bool isDeleted && isDeleted)
-                    {
-                        _isDeletingContext.Value = true;
-                    }
-
-                    // 如果正在删除，自动填充删除时间和删除人
-                    if (_isDeletingContext.Value)
+                    if (softDelete.IsDeleted)
                     {
                         if (e.Property.Name == nameof(ISoftDelete.DeletionTime))
                         {
@@ -74,6 +67,57 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Interceptors
                         else if (e.Property.Name == nameof(ISoftDelete.DeleterId) && currentUserId.HasValue)
                         {
                             e.Value = currentUserId.Value;
+                        }
+                    }
+                }
+
+                // 3. 处理多租户实体（插入时自动设置租户ID）
+                if (!string.IsNullOrEmpty(tenantId))
+                {
+                    if (e.Object is IMultiTenant multiTenant)
+                    {
+                        switch (e.AuditValueType)
+                        {
+                            case FreeSql.Aop.AuditValueType.Insert:
+                                // 插入时自动设置租户ID（如果未设置）
+                                if (string.IsNullOrEmpty(multiTenant.TenantId) && e.Property.Name == nameof(IMultiTenant.TenantId))
+                                {
+                                    e.Value = tenantId;
+                                }
+                                break;
+
+                            case FreeSql.Aop.AuditValueType.Update:
+                                // 更新时验证租户边界
+                                if (!string.IsNullOrEmpty(multiTenant.TenantId) &&
+                                    !string.Equals(multiTenant.TenantId, tenantId, StringComparison.Ordinal))
+                                {
+                                    throw new InvalidOperationException(
+                                        $"Cannot modify entity from tenant '{multiTenant.TenantId}' while current tenant is '{tenantId}'");
+                                }
+                                break;
+                        }
+                    }
+
+                    if (e.Object is IMustHaveTenant mustHaveTenant)
+                    {
+                        switch (e.AuditValueType)
+                        {
+                            case FreeSql.Aop.AuditValueType.Insert:
+                                // 插入时自动设置租户ID（如果未设置）
+                                if (string.IsNullOrEmpty(mustHaveTenant.TenantId) && e.Property.Name == nameof(IMustHaveTenant.TenantId))
+                                {
+                                    e.Value = tenantId;
+                                }
+                                break;
+
+                            case FreeSql.Aop.AuditValueType.Update:
+                                // 更新时验证租户边界
+                                if (!string.Equals(mustHaveTenant.TenantId, tenantId, StringComparison.Ordinal))
+                                {
+                                    throw new InvalidOperationException(
+                                        $"Cannot modify entity from tenant '{mustHaveTenant.TenantId}' while current tenant is '{tenantId}'");
+                                }
+                                break;
                         }
                     }
                 }
@@ -90,6 +134,29 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Interceptors
         {
             // 全局软删除过滤器
             freeSql.GlobalFilter.Apply<ISoftDelete>("SoftDelete", entity => entity.IsDeleted == false);
+        }
+
+        /// <summary>
+        /// 配置多租户查询过滤器
+        /// </summary>
+        public static void ConfigureMultiTenantFilter(this IFreeSql freeSql, ICurrentTenant currentTenant)
+        {
+            if (currentTenant == null || string.IsNullOrEmpty(currentTenant.Id))
+            {
+                return;
+            }
+
+            var tenantId = currentTenant.Id;
+
+            // IMultiTenant: 可选租户ID，查询自身租户或无租户的数据
+            freeSql.GlobalFilter.Apply<IMultiTenant>(
+                "MultiTenant",
+                entity => entity.TenantId == null || entity.TenantId == tenantId);
+
+            // IMustHaveTenant: 必须有租户ID，只查询当前租户的数据
+            freeSql.GlobalFilter.Apply<IMustHaveTenant>(
+                "MustHaveTenant",
+                entity => entity.TenantId == tenantId);
         }
 
         /// <summary>
@@ -111,26 +178,6 @@ namespace CrestCreates.OrmProviders.FreeSqlProvider.Interceptors
                     }
                 }
             };
-        }
-    }
-
-    /// <summary>
-    /// 当前用户提供者接口
-    /// </summary>
-    public interface ICurrentUserProvider
-    {
-        Guid? GetCurrentUserId();
-    }
-
-    /// <summary>
-    /// 默认当前用户提供者实现
-    /// </summary>
-    public class DefaultCurrentUserProvider : ICurrentUserProvider
-    {
-        public Guid? GetCurrentUserId()
-        {
-            // TODO: 从 HttpContext 或 ClaimsPrincipal 获取当前用户ID
-            return null;
         }
     }
 }
