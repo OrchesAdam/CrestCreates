@@ -140,17 +140,35 @@ public class DynamicApiAotSourceGeneratorTests
                using CrestCreates.Authorization.Abstractions;
                using CrestCreates.Validation.Modules;
 
+               namespace Microsoft.AspNetCore.Builder
+               {
+                   public interface IEndpointConventionBuilder
+                   {
+                       IEndpointConventionBuilder WithDisplayName(string displayName);
+                       IEndpointConventionBuilder WithMetadata(object metadata);
+                       IEndpointConventionBuilder ExcludeFromDescription();
+                   }
+
+                   public abstract class EndpointBuilder
+                   {
+                       public IServiceProvider ServiceProvider { get; set; } = new ServiceProviderStub();
+                       public string? DisplayName { get; set; }
+                       public IList<object> Metadata { get; } = new List<object>();
+                       public RequestDelegate? RequestDelegate { get; set; }
+                   }
+               }
+
                namespace Microsoft.AspNetCore.Routing
                {
                    public interface IEndpointRouteBuilder
                    {
                    }
 
-                   public sealed class RouteHandlerBuilder
+                   public sealed class RouteHandlerBuilder : Microsoft.AspNetCore.Builder.IEndpointConventionBuilder
                    {
-                       public RouteHandlerBuilder WithDisplayName(string name) => this;
-                       public RouteHandlerBuilder WithMetadata(object metadata) => this;
-                       public RouteHandlerBuilder ExcludeFromDescription() => this;
+                       public Microsoft.AspNetCore.Builder.IEndpointConventionBuilder WithDisplayName(string displayName) => this;
+                       public Microsoft.AspNetCore.Builder.IEndpointConventionBuilder WithMetadata(object metadata) => this;
+                       public Microsoft.AspNetCore.Builder.IEndpointConventionBuilder ExcludeFromDescription() => this;
                    }
 
                    public static class RoutingEndpointExtensions
@@ -161,6 +179,8 @@ public class DynamicApiAotSourceGeneratorTests
 
                namespace Microsoft.AspNetCore.Http
                {
+                   public delegate Task RequestDelegate(HttpContext context);
+
                    public class HttpContext
                    {
                        public HttpRequest Request { get; set; } = new();

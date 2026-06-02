@@ -326,6 +326,7 @@ namespace CrestCreates.Domain.Shared.Attributes
             TryAddReference(references, "CrestCreates.DynamicApi");
             TryAddReference(references, "CrestCreates.Aop");
             TryAddReference(references, "Microsoft.AspNetCore.Routing");
+            TryAddReference(references, "Microsoft.AspNetCore.Http.Abstractions");
 
             // 创建语法树
             var syntaxTrees = new List<SyntaxTree>();
