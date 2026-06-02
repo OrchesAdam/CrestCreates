@@ -1,3 +1,4 @@
+using System;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
@@ -9,6 +10,7 @@ using System.Text;
 namespace CrestCreates.CodeGenerator.DynamicApiGenerator;
 
 [Generator]
+[Obsolete("Use DynamicApiAotSourceGenerator instead. This MVC controller-based generator will be removed in a future version.")]
 public class DynamicApiSourceGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
