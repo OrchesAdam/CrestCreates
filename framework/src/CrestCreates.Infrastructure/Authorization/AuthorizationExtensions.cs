@@ -33,8 +33,7 @@ namespace CrestCreates.Infrastructure.Authorization
 
             services.TryAddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
-            // services.AddAuthorization();
-            services.AddAuthorizationCore();
+            services.AddAuthorization();
 
             services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
 
@@ -45,7 +44,7 @@ namespace CrestCreates.Infrastructure.Authorization
             this IServiceCollection services,
             Action<Microsoft.AspNetCore.Authorization.AuthorizationOptions> configure = null)
         {
-            services.AddAuthorizationCore(options =>
+            services.AddAuthorization(options =>
             {
                 configure?.Invoke(options);
             });

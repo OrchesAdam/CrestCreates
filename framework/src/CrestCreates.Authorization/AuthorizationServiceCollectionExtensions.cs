@@ -24,7 +24,7 @@ public static class AuthorizationServiceCollectionExtensions
         services.TryAddScoped<IPermissionGrantStore, PermissionGrantStore>();
         services.TryAddScoped<IPermissionGrantManager, PermissionGrantManager>();
 
-        services.AddAuthorizationCore();
+        services.AddAuthorization();
 
         return services;
     }
