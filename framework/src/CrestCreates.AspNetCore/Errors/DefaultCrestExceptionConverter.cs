@@ -6,6 +6,7 @@ using CrestCreates.Localization.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using FluentValidation;
 
 namespace CrestCreates.AspNetCore.Errors;
 
@@ -33,7 +34,8 @@ public class DefaultCrestExceptionConverter : ICrestExceptionConverter
             CrestException crestException => FromCrestException(context, crestException),
             UnauthorizedAccessException => MapUnauthorized(context),
             KeyNotFoundException keyNotFoundException => Create(context, "Crest.Entity.NotFound", 404, "资源不存在。", keyNotFoundException.Message),
-            ValidationException validationException => Create(context, "Crest.Validation.Failed", 400, "数据验证失败。", validationException.Message),
+            System.ComponentModel.DataAnnotations.ValidationException validationException => Create(context, "Crest.Validation.Failed", 400, "数据验证失败。", validationException.Message),
+            FluentValidation.ValidationException fluentValidationException => Create(context, "Crest.Validation.Failed", 400, "数据验证失败。", string.Join("; ", fluentValidationException.Errors.Select(e => e.ErrorMessage))),
             ArgumentException => Create(context, "Crest.Request.InvalidArgument", 400, "请求参数错误。"),
             InvalidOperationException => Create(context, "Crest.Operation.Invalid", 400, "当前操作无效。"),
             _ => Create(context, "Crest.InternalError", 500, "服务器内部错误。")

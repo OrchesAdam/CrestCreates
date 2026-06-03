@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="distributed-transaction" group="第三批" priority="P2" status="draft">
+<featurePlan id="distributed-transaction" group="第三批" priority="P2" status="implemented">
   <title>分布式事务</title>
   <goal>让 CAP、事务日志、补偿和重试形成稳定可运维闭环。</goal>
   <scope>

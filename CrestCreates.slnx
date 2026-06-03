@@ -84,6 +84,14 @@
     <Project Path="samples/LibraryManagement/LibraryManagement.EntityFrameworkCore/LibraryManagement.EntityFrameworkCore.csproj" />
     <Project Path="samples/LibraryManagement/LibraryManagement.Web/LibraryManagement.Web.csproj" />
   </Folder>
+  <Folder Name="/src/samples/SaaSHelpdesk/">
+    <Project Path="samples/SaaSHelpdesk/SaaSHelpdesk.Application.Contracts/SaaSHelpdesk.Application.Contracts.csproj" />
+    <Project Path="samples/SaaSHelpdesk/SaaSHelpdesk.Application/SaaSHelpdesk.Application.csproj" />
+    <Project Path="samples/SaaSHelpdesk/SaaSHelpdesk.Domain.Shared/SaaSHelpdesk.Domain.Shared.csproj" />
+    <Project Path="samples/SaaSHelpdesk/SaaSHelpdesk.Domain/SaaSHelpdesk.Domain.csproj" />
+    <Project Path="samples/SaaSHelpdesk/SaaSHelpdesk.EntityFrameworkCore/SaaSHelpdesk.EntityFrameworkCore.csproj" />
+    <Project Path="samples/SaaSHelpdesk/SaaSHelpdesk.Web/SaaSHelpdesk.Web.csproj" />
+  </Folder>
   <Folder Name="/src/test/">
     <Project Path="framework/test/CrestCreates.Application.Tests/CrestCreates.Application.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.AuditLogging.Tests/CrestCreates.AuditLogging.Tests.csproj" />

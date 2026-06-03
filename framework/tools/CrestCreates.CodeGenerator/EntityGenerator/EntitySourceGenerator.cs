@@ -1057,7 +1057,8 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             builder.AppendLine($"        public {idType} Id {{ get; set; }}");
             builder.AppendLine();
 
-            foreach (var prop in properties.Where(p => p.Name != "Id"))
+            foreach (var prop in properties.Where(p => p.Name != "Id"
+                && !IsNavigationProperty(p)))
             {
                 var typeName = prop.Type.ToDisplayString();
                 if (prop.NullableAnnotation == NullableAnnotation.Annotated && !typeName.EndsWith("?"))
@@ -1094,7 +1095,13 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             builder.AppendLine($"    public partial class Create{entityName}Dto");
             builder.AppendLine("    {");
 
-            foreach (var prop in properties.Where(p => p.Name != "Id" && p.Name != "CreationTime" && p.Name != "LastModificationTime" && p.Name != "CreatorId" && p.Name != "LastModifierId" && p.Name != "ConcurrencyStamp"))
+            foreach (var prop in properties.Where(p => p.Name != "Id"
+                && p.Name != "CreationTime" && p.Name != "LastModificationTime"
+                && p.Name != "CreatorId" && p.Name != "LastModifierId"
+                && p.Name != "ConcurrencyStamp"
+                && p.Name != "IsDeleted" && p.Name != "DeletionTime" && p.Name != "DeleterId"
+                && p.Name != "TenantId"
+                && !IsNavigationProperty(p)))
             {
                 var typeName = prop.Type.ToDisplayString();
                 if (prop.NullableAnnotation == NullableAnnotation.Annotated && !typeName.EndsWith("?"))
@@ -1135,7 +1142,12 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             builder.AppendLine($"        public {idType} Id {{ get; set; }}");
             builder.AppendLine();
 
-            foreach (var prop in properties.Where(p => p.Name != "Id" && p.Name != "CreationTime" && p.Name != "LastModificationTime" && p.Name != "CreatorId" && p.Name != "LastModifierId"))
+            foreach (var prop in properties.Where(p => p.Name != "Id"
+                && p.Name != "CreationTime" && p.Name != "LastModificationTime"
+                && p.Name != "CreatorId" && p.Name != "LastModifierId"
+                && p.Name != "IsDeleted" && p.Name != "DeletionTime" && p.Name != "DeleterId"
+                && p.Name != "TenantId"
+                && !IsNavigationProperty(p)))
             {
                 var typeName = prop.Type.ToDisplayString();
                 if (prop.NullableAnnotation == NullableAnnotation.Annotated && !typeName.EndsWith("?"))
@@ -1159,10 +1171,11 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             var dtosNamespace = GetTargetNamespace(namespaceName, GeneratedCodeType.Dto);
             var idType = GetEntityIdType(entityClass);
 
-            // Derive DTO property names (same logic as DTO generation: exclude audit properties)
+            // Derive DTO property names — include only properties that exist on the generated DTOs.
+            // Navigation properties are excluded from DTOs, so they must be excluded here too
+            // to avoid generating mapping code for non-existent DTO properties.
             var dtoPropertyNames = new HashSet<string>(properties
-                .Where(p => p.Name != "CreationTime" && p.Name != "LastModificationTime"
-                    && p.Name != "CreatorId" && p.Name != "LastModifierId")
+                .Where(p => !IsNavigationProperty(p))
                 .Select(p => p.Name));
 
             // Resolve mappings from source-side attributes
@@ -1186,7 +1199,9 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 .Any(p => p.Name == "Id" && p.SetMethod != null
                     && p.SetMethod.DeclaredAccessibility == Accessibility.Public);
 
-            // Writable non-Id properties for ApplyTo (must have public setter, exclude audit)
+            // Writable non-Id properties for ApplyTo (must have public setter, exclude audit).
+            // Audit timestamps/creator IDs, soft-delete fields, and TenantId are system-managed
+            // and do not appear on Create/Update DTOs.
             // ConcurrencyStamp is excluded from Create ApplyTo (CreateDto doesn't include it)
             // but included in Update ApplyTo (UpdateDto carries the expected stamp from client).
             var writableNonIdMappings = nonIdMappings
@@ -1195,7 +1210,11 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                     && m.TargetPropertyName != "CreationTime"
                     && m.TargetPropertyName != "LastModificationTime"
                     && m.TargetPropertyName != "CreatorId"
-                    && m.TargetPropertyName != "LastModifierId")
+                    && m.TargetPropertyName != "LastModifierId"
+                    && m.TargetPropertyName != "IsDeleted"
+                    && m.TargetPropertyName != "DeletionTime"
+                    && m.TargetPropertyName != "DeleterId"
+                    && m.TargetPropertyName != "TenantId")
                 .ToList();
 
             var createWritableMappings = writableNonIdMappings
@@ -1551,6 +1570,44 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             return SyntaxFacts.GetKeywordKind(identifier) == SyntaxKind.None
                 ? identifier
                 : $"@{identifier}";
+        }
+
+        private static bool IsNavigationProperty(IPropertySymbol property)
+        {
+            var type = property.Type;
+
+            // Unwrap Nullable<T> for reference navigation like Category?
+            if (type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullableType)
+                type = nullableType.TypeArguments[0];
+
+            if (type is not INamedTypeSymbol namedType)
+                return false;
+
+            // Collection navigation: ICollection<T>, List<T>, IEnumerable<T>, HashSet<T>
+            // where T is an entity class. Check this FIRST because generic collection types
+            // themselves are System.* types but contain entity elements.
+            if (namedType.TypeArguments.Length > 0)
+            {
+                var elementType = namedType.TypeArguments[0];
+                if (elementType.TypeKind == TypeKind.Class && elementType.SpecialType == SpecialType.None)
+                    return true;
+            }
+
+            // Only check class types for direct reference navigation (Category?, Book?)
+            if (namedType.TypeKind != TypeKind.Class)
+                return false;
+
+            var typeName = namedType.ToDisplayString();
+
+            // System.* types are not navigation properties (String, DateTime, Guid, etc.)
+            if (typeName.StartsWith("System.", StringComparison.Ordinal))
+                return false;
+
+            // Direct reference navigation: Category, Book, etc.
+            if (namedType.SpecialType == SpecialType.None)
+                return true;
+
+            return false;
         }
 
         private static string EscapeStringLiteral(string value)

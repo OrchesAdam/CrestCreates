@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 CrestCreates is a .NET 10 enterprise application framework (similar to ABP Framework) focused on modular DDD architecture with multi-ORM support. The framework emphasizes compile-time code generation, AoT friendliness, and a single main chain approach.
 
+**Core Goal**: Close the framework main chain, not continue adding module names. Prioritize compile-time code generation over runtime reflection, ensure AoT-friendliness, and maintain a single primary implementation path.
+
 ## Build & Test Commands
 
 ```bash
@@ -16,6 +18,10 @@ dotnet test framework/test/CrestCreates.Domain.Tests   # Run a single test proje
 dotnet test --filter "FullyQualifiedName~CrestCreates.Application.Tests.Tenants.TenantAppServiceTests"  # Run specific test class
 dotnet test --filter "FullyQualifiedName~SomeTestClass.SomeTestMethod"  # Run specific test method
 dotnet run --project samples/LibraryManagement/LibraryManagement.Web  # Run sample app
+
+# Publish modes
+dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r win-x64 --self-contained true  # Default trim mode
+dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r win-x64 --self-contained true -p:CrestCreatesPublishMode=aot  # NativeAOT
 ```
 
 - Solution file: `CrestCreates.slnx` (new XML-based `.slnx` format, not `.sln`)
@@ -119,21 +125,14 @@ samples/LibraryManagement/  → DDD sample (6 projects following strict layering
 
 ## Key Principles
 
-### Single Main Chain
+### Single Main Chain (Critical)
 Once a main implementation is chosen, do not maintain alternatives. This applies especially to:
 - Dynamic API (compile-time generated endpoints, not runtime reflection)
 - Module initialization (SourceGenerator + BuildTasks, not runtime scanning)
 - Authentication/authorization (existing platform chains)
 - Tenant creation/initialization
 
-### Code Generation Priority
-- Prefer compile-time generation over runtime reflection
-- Prefer strong typing over string concatenation for cache keys, routes, providers
-- AoT-friendly design is a first-class requirement
-- If a capability can be compile-time generated OR runtime-scanned, prefer generation
-
-### Change Self-Check
-Before any change, verify:
+**Before any change, verify:**
 1. Is this strengthening single main chain or preserving dual-track?
 2. Is this reducing reflection/AoT or continuing runtime dependency?
 3. Is this platform capability or business patch?
@@ -141,6 +140,12 @@ Before any change, verify:
 5. Will this mislead future maintainers into maintaining a legacy path?
 
 If 1, 2, 4, or 5 are unfavorable, stop and redesign.
+
+### Code Generation Priority
+- Prefer compile-time generation over runtime reflection
+- Prefer strong typing over string concatenation for cache keys, routes, providers
+- AoT-friendly design is a first-class requirement
+- If a capability can be compile-time generated OR runtime-scanned, prefer generation
 
 ### Priority Order
 1. Close the framework main chain
@@ -156,7 +161,12 @@ If 1, 2, 4, or 5 are unfavorable, stop and redesign.
 - Tests must verify the "real main chain", not legacy paths
 - Prefer real integration tests for: auth chain, tenant chain, Dynamic API main chain, Setting Management
 - Mock tests can complement but not replace full-chain verification
-- If a test verifies a downgraded legacy path, ask: is this still the official main chain? Will this mislead future maintainers?
+
+**Test signal must align with main chain**: If a test verifies a downgraded legacy path, ask: is this still the official main chain? Will this mislead future maintainers?
+
+## Design Specs
+
+Design specifications are located at `docs/superpowers/specs/`. These documents describe architectural decisions and implementation plans for major features. Reference them when working on related areas.
 
 ## Naming Conventions
 

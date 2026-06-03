@@ -48,14 +48,9 @@ namespace CrestCreates.Validation.Modules
                 return ValidationResult.Success;
             }
 
-            var result = validator.Validate(instance);
-            if (result.IsValid)
-            {
-                return ValidationResult.Success;
-            }
-
-            var errors = result.Errors.Select(e => e.ErrorMessage).ToList();
-            return ValidationResult.Failure(errors.ToArray());
+            // 直接调用 FluentValidation 并转换为我们的 ValidationResult
+            var fluentResult = validator.Validate(instance);
+            return ConvertResult(fluentResult);
         }
 
         public async Task<ValidationResult> ValidateAsync<T>(T instance)
@@ -66,14 +61,26 @@ namespace CrestCreates.Validation.Modules
                 return ValidationResult.Success;
             }
 
-            var result = await validator.ValidateAsync(instance);
-            if (result.IsValid)
+            var fluentResult = await validator.ValidateAsync(instance);
+            return ConvertResult(fluentResult);
+        }
+
+        private static ValidationResult ConvertResult(FluentValidation.Results.ValidationResult fluentResult)
+        {
+            if (fluentResult.IsValid)
             {
                 return ValidationResult.Success;
             }
 
-            var errors = result.Errors.Select(e => e.ErrorMessage).ToList();
-            return ValidationResult.Failure(errors.ToArray());
+            var details = fluentResult.Errors.Select(e => new ValidationErrorDetail
+            {
+                PropertyName = e.PropertyName,
+                ErrorMessage = e.ErrorMessage,
+                ErrorCode = e.ErrorCode,
+                AttemptedValue = e.AttemptedValue?.ToString()
+            }).ToList();
+
+            return ValidationResult.FailureWithCodes(details);
         }
     }
 }

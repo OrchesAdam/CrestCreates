@@ -33,6 +33,7 @@
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.1" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Tasks" Version="$(RuntimePackageVersion)"/>
     <!-- ORM 提供程序 -->
+    <PackageVersion Include="MongoDB.Driver" Version="3.4.0" />
     <PackageVersion Include="Rougamo.Extensions.DependencyInjection.Abstractions" Version="1.0.1" />
     <PackageVersion Include="Rougamo.Extensions.DependencyInjection.Microsoft" Version="10.0.0" />
     <PackageVersion Include="SqlSugarCore" Version="5.1.4.214" />

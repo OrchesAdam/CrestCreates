@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="dto-mapping" group="第二批" priority="P1" status="draft">
+<featurePlan id="dto-mapping" group="第二批" priority="P1" status="implemented">
   <title>DTO 映射完善</title>
   <goal>把编译期对象映射做成正式主链，替代 AutoMapper 心智。</goal>
   <scope>

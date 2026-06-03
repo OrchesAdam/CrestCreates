@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using FluentValidation;
+using CrestCreates.Validation.Localization;
 
 namespace CrestCreates.Validation.Validators
 {
@@ -26,7 +27,7 @@ namespace CrestCreates.Validation.Validators
     }
 
     /// <summary>
-    /// 验证结果
+    /// 验证结果（支持错误码本地化）
     /// </summary>
     public class ValidationResult
     {
@@ -36,9 +37,19 @@ namespace CrestCreates.Validation.Validators
         public bool IsValid { get; set; }
 
         /// <summary>
-        /// 错误信息
+        /// 错误信息列表
         /// </summary>
         public List<string> Errors { get; set; } = new List<string>();
+
+        /// <summary>
+        /// 错误码列表（用于本地化）
+        /// </summary>
+        public List<string> ErrorCodes { get; set; } = new List<string>();
+
+        /// <summary>
+        /// 属性名-错误码映射（用于精准本地化）
+        /// </summary>
+        public List<ValidationErrorDetail> ErrorDetails { get; set; } = new List<ValidationErrorDetail>();
 
         /// <summary>
         /// 成功结果
@@ -58,6 +69,36 @@ namespace CrestCreates.Validation.Validators
                 Errors = errors.ToList()
             };
         }
+
+        /// <summary>
+        /// 失败结果（带错误码）
+        /// </summary>
+        public static ValidationResult FailureWithCodes(List<ValidationErrorDetail> details)
+        {
+            return new ValidationResult
+            {
+                IsValid = false,
+                Errors = details.Select(d => d.ErrorMessage).ToList(),
+                ErrorCodes = details.Select(d => d.ErrorCode ?? ValidationErrorCodes.Unknown).ToList(),
+                ErrorDetails = details
+            };
+        }
+    }
+
+    /// <summary>
+    /// 验证错误详情
+    /// </summary>
+    public class ValidationErrorDetail
+    {
+        public string PropertyName { get; set; } = string.Empty;
+        public string ErrorMessage { get; set; } = string.Empty;
+        public string? ErrorCode { get; set; }
+
+        /// <summary>
+        /// 用户尝试输入的值（字符串形式）。注意：对于密码、信用卡号等敏感字段，
+        /// 序列化为 API 响应前应考虑脱敏或忽略。
+        /// </summary>
+        public string? AttemptedValue { get; set; }
     }
 
     /// <summary>
@@ -80,8 +121,15 @@ namespace CrestCreates.Validation.Validators
                 return ValidationResult.Success;
             }
 
-            var errors = result.Errors.Select(e => e.ErrorMessage).ToList();
-            return ValidationResult.Failure(errors.ToArray());
+            var details = result.Errors.Select(e => new ValidationErrorDetail
+            {
+                PropertyName = e.PropertyName,
+                ErrorMessage = e.ErrorMessage,
+                ErrorCode = e.ErrorCode,
+                AttemptedValue = e.AttemptedValue?.ToString()
+            }).ToList();
+
+            return ValidationResult.FailureWithCodes(details);
         }
     }
 }

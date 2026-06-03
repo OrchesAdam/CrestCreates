@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="plugin-system" group="最后做" priority="P3" status="draft">
+<featurePlan id="plugin-system" group="最后做" priority="P3" status="implemented">
   <title>插件化系统</title>
   <goal>提供外部扩展装载能力，但保持默认模块主链仍然是编译期生成。</goal>
   <scope>
@@ -32,4 +32,9 @@
     <item>插件系统是独立扩展，不修改 ModuleSourceGenerator 主链。</item>
     <item>安全边界和失败诊断清楚。</item>
   </reviewChecklist>
+  <gaps>
+    <gap>已实现：CrestCreates.PluginSystem 项目已创建，包含 PluginManager、IPluginModule、PluginManifest。</gap>
+    <gap>支持：plugin.json 清单解析、依赖校验、AssemblyLoadContext 隔离加载、插件启停。</gap>
+    <gap>限制：插件加载后卸载（Unload）需要 collectible AssemblyLoadContext 支持，已预置。</gap>
+  </gaps>
 </featurePlan>

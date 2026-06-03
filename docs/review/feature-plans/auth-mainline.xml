@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="auth-mainline" group="第二批" priority="P1" status="draft">
+<featurePlan id="auth-mainline" group="第二批" priority="P1" status="implemented">
   <title>认证链路收口</title>
   <goal>统一登录、claims、CurrentUser、CurrentTenant 的真相源。</goal>
   <scope>
@@ -33,4 +33,8 @@
     <item>没有复制 claims 逻辑。</item>
     <item>认证错误不泄露密码/用户敏感信息。</item>
   </reviewChecklist>
+  <gaps>
+    <gap>已解决：OpenIddictController 现已注入并使用 IIdentityClaimsBuilder 作为 claims 构建单一入口。</gap>
+    <gap>认证异常已接入全局异常处理，认证失败返回 OpenIddict 标准错误响应。</gap>
+  </gaps>
 </featurePlan>

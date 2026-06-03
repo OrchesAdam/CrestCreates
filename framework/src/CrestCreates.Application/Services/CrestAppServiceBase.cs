@@ -176,6 +176,10 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         {
             throw;
         }
+        catch (ArgumentException)
+        {
+            throw;
+        }
         catch (System.Data.Common.DbException ex)
         {
             throw new Exception($"创建 {typeof(TEntity).Name} 失败: {ex.Message}", ex);
@@ -274,6 +278,10 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         {
             throw;
         }
+        catch (ArgumentException)
+        {
+            throw;
+        }
         catch (System.Data.Common.DbException ex)
         {
             throw new Exception($"更新 {typeof(TEntity).Name} 失败: {ex.Message}", ex);
@@ -322,6 +330,10 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
             throw;
         }
         catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (ArgumentException)
         {
             throw;
         }

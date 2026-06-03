@@ -17,6 +17,8 @@
     <ProjectReference Include="..\..\src\CrestCreates.EventBus.Abstract\CrestCreates.EventBus.Abstract.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.MultiTenancy\CrestCreates.MultiTenancy.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.AuditLogging\CrestCreates.AuditLogging.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.AspNetCore.Authentication.OpenIddict\CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

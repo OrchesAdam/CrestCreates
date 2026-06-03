@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="orm-consistency" group="第二批" priority="P1" status="draft">
+<featurePlan id="orm-consistency" group="第二批" priority="P1" status="implemented">
   <title>多 ORM 一致性</title>
   <goal>让 EF Core、FreeSql、SqlSugar 在框架主能力上表现一致，避免 provider 行为漂移。</goal>
   <scope>
@@ -33,4 +33,9 @@
     <item>测试表达主链，不强化 legacy path。</item>
     <item>provider 差异写入矩阵，不藏在代码里。</item>
   </reviewChecklist>
+  <gaps>
+    <gap>已解决：FreeSql 和 SqlSugar 已添加 ConfigureMultiTenantFilter 和 ConfigureMultiTenantAudit 方法，支持 IMultiTenant 和 IMustHaveTenant 过滤。</gap>
+    <gap>缺少 ORM capability matrix 文档（建议后续补充）。</gap>
+    <gap>缺少跨 ORM 的统一测试基类（建议后续补充）。</gap>
+  </gaps>
 </featurePlan>

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="setting-management-mainline" group="先做" priority="P0" status="draft">
+<featurePlan id="setting-management-mainline" group="先做" priority="P0" status="implemented">
   <title>设置管理收口</title>
   <goal>所有运行时可管理配置统一进入 Setting Management，避免新模块各自造配置表。</goal>
   <scope>

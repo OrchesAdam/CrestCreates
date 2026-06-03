@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<featurePlan id="permission-mainline" group="第二批" priority="P1" status="draft">
+<featurePlan id="permission-mainline" group="第二批" priority="P1" status="implemented">
   <title>权限系统收口</title>
   <goal>统一权限定义、授予、计算、租户范围校验和错误输出。</goal>
   <scope>
