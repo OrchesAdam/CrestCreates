@@ -50,11 +50,8 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 if (attribute.ConstructorArguments.Length < 2)
                     continue;
 
-                var sourceType = attribute.ConstructorArguments[0].Value as INamedTypeSymbol;
-                var targetType = attribute.ConstructorArguments[1].Value as INamedTypeSymbol;
-
-                if (sourceType == null || targetType == null)
-                    continue;
+                var sourceTypeResolved = TryGetNamedType(attribute.ConstructorArguments[0], out var sourceType, out var sourceTypeName);
+                var targetTypeResolved = TryGetNamedType(attribute.ConstructorArguments[1], out var targetType, out var targetTypeName);
 
                 var direction = MapDirection.Both;
                 var directionArg = attribute.NamedArguments.FirstOrDefault(a => a.Key == "Direction");
@@ -67,6 +64,10 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 {
                     SourceType = sourceType,
                     TargetType = targetType,
+                    SourceTypeName = sourceTypeName,
+                    TargetTypeName = targetTypeName,
+                    SourceTypeResolved = sourceTypeResolved,
+                    TargetTypeResolved = targetTypeResolved,
                     MapperClassName = symbol.Name,
                     Namespace = symbol.ContainingNamespace.ToDisplayString(),
                     Direction = direction,
@@ -75,6 +76,20 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             }
 
             return declarations.ToImmutable();
+        }
+
+        private static bool TryGetNamedType(TypedConstant constant, out INamedTypeSymbol? namedType, out string typeName)
+        {
+            namedType = constant.Value as INamedTypeSymbol;
+            if (namedType != null && namedType.TypeKind != TypeKind.Error)
+            {
+                typeName = namedType.ToDisplayString();
+                return true;
+            }
+
+            namedType = null;
+            typeName = constant.Type?.ToDisplayString() ?? constant.Value?.ToString() ?? string.Empty;
+            return false;
         }
 
         private static bool HasGenerateObjectMappingAttribute(AttributeData attr)
@@ -106,39 +121,65 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             {
                 var declarationsInGroup = group.ToArray();
                 var needsDisambiguation = declarationsInGroup.Length > 1;
+                var expressionEmitted = false;
 
                 foreach (var declaration in declarationsInGroup)
                 {
+                    var hasMissingType = false;
+                    if (!declaration.SourceTypeResolved)
+                    {
+                        context.ReportDiagnostic(ObjectMappingDiagnostics.Create(
+                            ObjectMappingDiagnostics.SourceTypeNotFound,
+                            declaration.Location,
+                            declaration.SourceTypeName));
+                        hasMissingType = true;
+                    }
+
+                    if (!declaration.TargetTypeResolved)
+                    {
+                        context.ReportDiagnostic(ObjectMappingDiagnostics.Create(
+                            ObjectMappingDiagnostics.TargetTypeNotFound,
+                            declaration.Location,
+                            declaration.TargetTypeName));
+                        hasMissingType = true;
+                    }
+
+                    if (hasMissingType)
+                        continue;
+
                     var model = resolver.Resolve(declaration);
+                    model.IncludeToTargetExpression = !expressionEmitted
+                        && declaration.Direction is MapDirection.Create or MapDirection.Both;
+                    if (model.IncludeToTargetExpression)
+                    {
+                        expressionEmitted = true;
+                    }
 
                     foreach (var diagnostic in model.Diagnostics)
                     {
                         context.ReportDiagnostic(diagnostic);
                     }
 
-                    if (model.IsValid)
+                    var source = writer.Write(model);
+                    var fileName = declaration.MapperClassName;
+                    if (needsDisambiguation)
                     {
-                        var source = writer.Write(model);
-                        var fileName = declaration.MapperClassName;
-                        if (needsDisambiguation)
-                        {
-                            // Use direction suffix; for Both, add an index to avoid collisions
-                            var suffix = declaration.Direction != MapDirection.Both
-                                ? $".{declaration.Direction}"
-                                : $".{declaration.Direction}{usedFileNames.Count}";
-                            fileName += suffix;
-                        }
-                        fileName += ".g.cs";
-                        if (!usedFileNames.Add(fileName))
-                        {
-                            // Guard: if still duplicate, append index
-                            var i = 1;
-                            while (!usedFileNames.Add($"{declaration.MapperClassName}.{i}.g.cs"))
-                                i++;
-                            fileName = $"{declaration.MapperClassName}.{i}.g.cs";
-                        }
-                        context.AddSource(fileName, SourceText.From(source, System.Text.Encoding.UTF8));
+                        // Use direction suffix; for Both, add an index to avoid collisions
+                        var suffix = declaration.Direction != MapDirection.Both
+                            ? $".{declaration.Direction}"
+                            : $".{declaration.Direction}{usedFileNames.Count}";
+                        fileName += suffix;
                     }
+                    fileName += ".g.cs";
+                    if (!usedFileNames.Add(fileName))
+                    {
+                        // Guard: if still duplicate, append index
+                        var i = 1;
+                        while (!usedFileNames.Add($"{declaration.MapperClassName}.{i}.g.cs"))
+                            i++;
+                        fileName = $"{declaration.MapperClassName}.{i}.g.cs";
+                    }
+                    context.AddSource(fileName, SourceText.From(source, System.Text.Encoding.UTF8));
                 }
             }
         }

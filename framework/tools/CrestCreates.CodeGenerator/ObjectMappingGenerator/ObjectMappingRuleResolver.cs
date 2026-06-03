@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
@@ -27,15 +28,49 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 }
             }
 
-            // Check for unmapped target properties (warning)
+            // Validate source-side MapName declarations so DTO input rename typos fail fast.
+            var targetPropertyNames = new HashSet<string>(targetProperties.Select(p => p.Name));
+            foreach (var sourceProp in sourceProperties)
+            {
+                if (HasMapIgnoreAttribute(sourceProp))
+                {
+                    continue;
+                }
+
+                var mapName = GetMapNameAttribute(sourceProp);
+                if (mapName == null)
+                {
+                    continue;
+                }
+
+                if (!targetPropertyNames.Contains(mapName))
+                {
+                    model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
+                        ObjectMappingDiagnostics.SourcePropertyNotFound,
+                        declaration.Location,
+                        mapName,
+                        declaration.TargetType.Name));
+                }
+            }
+
+            // Check for unmapped target properties.
             var mappedTargetNames = new HashSet<string>(
                 model.PropertyMappings
-                    .Where(m => !m.IsIgnored)
                     .Select(m => m.TargetPropertyName));
 
             foreach (var targetProp in targetProperties)
             {
-                if (!mappedTargetNames.Contains(targetProp.Name) && !HasMapIgnoreAttribute(targetProp))
+                if (mappedTargetNames.Contains(targetProp.Name) ||
+                    HasMapIgnoreAttribute(targetProp) ||
+                    GetMapFromAttributeName(targetProp) != null ||
+                    GetMapNameAttribute(targetProp) != null ||
+                    targetProp.IsReadOnly ||
+                    IsProtectedTargetProperty(targetProp, declaration.Direction))
+                {
+                    continue;
+                }
+
+                if (!mappedTargetNames.Contains(targetProp.Name))
                 {
                     model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
                         ObjectMappingDiagnostics.TargetPropertyNotMapped,
@@ -67,7 +102,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             }
 
             // Find all matching source properties
-            var matches = FindAllMatchingSourceProperties(targetProp, sourceProperties);
+            var matches = FindAllMatchingSourceProperties(targetProp, sourceProperties, declaration, model);
 
             // Check for ambiguous mapping (multiple matches)
             if (matches.Count > 1)
@@ -97,6 +132,11 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             var mapFromName = GetMapFromAttributeName(targetProp);
             if (mapFromName != null)
             {
+                if (mapFromName.Contains('.'))
+                {
+                    return null;
+                }
+
                 return CreateErrorMapping(targetProp, declaration.Location,
                     ObjectMappingDiagnostics.SourcePropertyNotFound,
                     model, mapFromName, declaration.SourceType.Name);
@@ -108,6 +148,13 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 return CreateErrorMapping(targetProp, declaration.Location,
                     ObjectMappingDiagnostics.SourcePropertyNotFound,
                     model, mapName, declaration.SourceType.Name);
+            }
+
+            if (targetProp.IsReadOnly)
+            {
+                return CreateErrorMapping(targetProp, declaration.Location,
+                    ObjectMappingDiagnostics.ReadOnlyTarget,
+                    model, targetProp.Name);
             }
 
             return null;
@@ -131,13 +178,31 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 ConverterTypeFullName = matchResult?.ConverterTypeFullName ?? FindConverterForProperty(targetProp)
             };
 
-            // Check for read-only target in Apply direction
-            if (targetProp.IsReadOnly && declaration.Direction is MapDirection.Apply or MapDirection.Both)
+            // Check for read-only target in any mapping direction.
+            if (targetProp.IsReadOnly)
             {
                 model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
                     ObjectMappingDiagnostics.ReadOnlyTarget,
                     declaration.Location,
                     targetProp.Name));
+                mapping.IsIgnored = true;
+                return mapping;
+            }
+
+            // Check for protected input fields in create/apply directions.
+            if (declaration.Direction is MapDirection.Create or MapDirection.Apply)
+            {
+                var includeConcurrencyStamp = declaration.Direction == MapDirection.Create;
+                if (ObjectMappingProtectedFields.IsProtectedInputField(targetProp.Name, includeConcurrencyStamp))
+                {
+                    mapping.IsProtected = true;
+                    model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
+                        ObjectMappingDiagnostics.ProtectedInputFieldWriteSkipped,
+                        declaration.Location,
+                        targetProp.Name));
+                    mapping.IsIgnored = true;
+                    return mapping;
+                }
             }
 
             // Determine effective source type: use final segment type for navigation paths
@@ -154,32 +219,42 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             {
                 if (incompatibleElementTypes)
                 {
-                    // Report OM008 for collection element type incompatibility
+                    // Report OM007 for collection element type incompatibility
                     model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
                         ObjectMappingDiagnostics.MissingElementMapping,
                         declaration.Location,
                         targetProp.Name,
                         GetElementTypeName(sourceProp.Type),
                         GetElementTypeName(targetProp.Type)));
+                    mapping.IsIgnored = true;
                 }
                 else
                 {
-                    model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
-                        ObjectMappingDiagnostics.TypeIncompatibility,
-                        declaration.Location,
-                        targetProp.Name,
-                        effectiveSourceType.ToDisplayString(),
-                        targetProp.Type.ToDisplayString()));
+                    // Check for simple static type conversion before reporting OM005
+                    var conversionKind = DetectSimpleConversion(effectiveSourceType, targetProp.Type);
+                    if (conversionKind != ObjectMappingConversionKind.None)
+                    {
+                        mapping.ConversionKind = conversionKind;
+                    }
+                    else
+                    {
+                        model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
+                            ObjectMappingDiagnostics.TypeIncompatibility,
+                            declaration.Location,
+                            targetProp.Name,
+                            effectiveSourceType.ToDisplayString(),
+                            targetProp.Type.ToDisplayString()));
+                        mapping.IsIgnored = true;
+                    }
                 }
-                mapping.IsIgnored = true;
             }
             else if (needsNullCheck)
             {
-                mapping.NeedsNullCheck = true;
                 model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
                     ObjectMappingDiagnostics.NullabilityMismatch,
                     declaration.Location,
                     sourceProp.Name));
+                mapping.IsIgnored = true;
             }
             else if (collectionConversion != null)
             {
@@ -215,7 +290,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             incompatibleElementTypes = false;
 
             // Same type
-            if (SymbolEqualityComparer.Default.Equals(sourceType, targetType))
+            if (SymbolEqualityComparer.IncludeNullability.Equals(sourceType, targetType))
             {
                 return true;
             }
@@ -289,8 +364,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 return true;
             }
 
-            // Check implicit conversion
-            return HasImplicitConversion(sourceType, targetType);
+            return false;
         }
 
         private static bool IsEnumCompatible(ITypeSymbol sourceType, ITypeSymbol targetType)
@@ -319,7 +393,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             needsNullCheck = false;
 
             // Same type
-            if (SymbolEqualityComparer.Default.Equals(sourceElementType, targetElementType))
+            if (SymbolEqualityComparer.IncludeNullability.Equals(sourceElementType, targetElementType))
             {
                 return true;
             }
@@ -365,17 +439,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 return true;
             }
 
-            // Check implicit conversion
-            return HasImplicitConversion(sourceElementType, targetElementType);
-        }
-
-        private static bool HasImplicitConversion(ITypeSymbol sourceType, ITypeSymbol targetType)
-        {
-            var conversion = Microsoft.CodeAnalysis.CSharp.CSharpCompilation
-                .Create("Temp")
-                .ClassifyConversion(sourceType, targetType);
-
-            return conversion.IsImplicit;
+            return false;
         }
 
         private static bool IsCollectionType(ITypeSymbol type, out ITypeSymbol? elementType)
@@ -427,7 +491,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 return false;
 
             // Same collection type - no conversion needed
-            if (SymbolEqualityComparer.Default.Equals(sourceType, targetType))
+            if (SymbolEqualityComparer.IncludeNullability.Equals(sourceType, targetType))
                 return false;
 
             // Determine if conversion is needed based on target type
@@ -532,7 +596,9 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
 
         private List<PropertyMapping> FindAllMatchingSourceProperties(
             IPropertySymbol targetProp,
-            List<IPropertySymbol> sourceProperties)
+            List<IPropertySymbol> sourceProperties,
+            MappingDeclaration declaration,
+            ObjectMappingModel model)
         {
             var converterType = FindConverterForProperty(targetProp);
 
@@ -543,7 +609,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 // Navigation path: "Category.Name" contains '.'
                 if (mapFromName.Contains('.'))
                 {
-                    var mapping = CreateNavigationMapping(targetProp, sourceProperties, mapFromName, converterType);
+                    var mapping = CreateNavigationMapping(targetProp, sourceProperties, mapFromName, converterType, declaration, model);
                     if (mapping != null)
                         return new List<PropertyMapping> { mapping };
                     return new List<PropertyMapping>();
@@ -554,13 +620,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 {
                     return new List<PropertyMapping>
                     {
-                        new PropertyMapping
-                        {
-                            SourceProperty = sourceProp,
-                            TargetProperty = targetProp,
-                            TargetPropertyName = targetProp.Name,
-                            ConverterTypeFullName = converterType
-                        }
+                        CreateSimpleMapping(sourceProp, targetProp, converterType)
                     };
                 }
                 return new List<PropertyMapping>();
@@ -575,31 +635,38 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 {
                     return new List<PropertyMapping>
                     {
-                        new PropertyMapping
-                        {
-                            SourceProperty = sourceProp,
-                            TargetProperty = targetProp,
-                            TargetPropertyName = targetProp.Name,
-                            ConverterTypeFullName = converterType
-                        }
+                        CreateSimpleMapping(sourceProp, targetProp, converterType)
                     };
                 }
                 return new List<PropertyMapping>();
             }
 
+            // Check source-side MapName (DTO input mainline)
+            var matches = sourceProperties
+                .Where(p => !HasMapIgnoreAttribute(p))
+                .Where(p => string.Equals(GetMapNameAttribute(p), targetProp.Name, StringComparison.Ordinal))
+                .Select(p => CreateSimpleMapping(p, targetProp, converterType))
+                .ToList();
+
+            if (matches.Count > 0)
+            {
+                var sameNameMatch = sourceProperties.FirstOrDefault(p => p.Name == targetProp.Name && !HasMapIgnoreAttribute(p));
+                if (sameNameMatch != null &&
+                    matches.All(m => !SymbolEqualityComparer.Default.Equals(m.SourceProperty, sameNameMatch)))
+                {
+                    matches.Add(CreateSimpleMapping(sameNameMatch, targetProp, converterType));
+                }
+
+                return matches;
+            }
+
             // Default: same-name matching
-            var sameNameMatch = sourceProperties.FirstOrDefault(p => p.Name == targetProp.Name);
-            if (sameNameMatch != null)
+            var sameNameOnlyMatch = sourceProperties.FirstOrDefault(p => p.Name == targetProp.Name && !HasMapIgnoreAttribute(p));
+            if (sameNameOnlyMatch != null)
             {
                 return new List<PropertyMapping>
                 {
-                    new PropertyMapping
-                    {
-                        SourceProperty = sameNameMatch,
-                        TargetProperty = targetProp,
-                        TargetPropertyName = targetProp.Name,
-                        ConverterTypeFullName = converterType
-                    }
+                    CreateSimpleMapping(sameNameOnlyMatch, targetProp, converterType)
                 };
             }
 
@@ -610,22 +677,81 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             IPropertySymbol targetProp,
             List<IPropertySymbol> sourceProperties,
             string mapFromValue,
-            string? converterType)
+            string? converterType,
+            MappingDeclaration? declaration,
+            ObjectMappingModel? model)
         {
             var segments = mapFromValue.Split('.').ToList();
             var firstProp = sourceProperties.FirstOrDefault(p => p.Name == segments[0]);
-            if (firstProp == null) return null;
+            if (firstProp == null)
+            {
+                if (declaration != null && model != null)
+                {
+                    model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
+                        ObjectMappingDiagnostics.NavigationPathInvalid,
+                        declaration.Location,
+                        mapFromValue,
+                        targetProp.Name,
+                        segments[0],
+                        declaration.SourceType.Name));
+                }
+
+                return null;
+            }
 
             // Validate segments
-            INamedTypeSymbol? currentType = firstProp.Type as INamedTypeSymbol;
+            ITypeSymbol? currentType = firstProp.Type;
             for (int i = 1; i < segments.Count; i++)
             {
-                if (currentType == null) return null;
-                var segmentProp = currentType.GetMembers(segments[i])
+                var namedType = UnwrapNullable(currentType) as INamedTypeSymbol;
+                if (namedType == null)
+                {
+                    if (declaration != null && model != null)
+                    {
+                        model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
+                            ObjectMappingDiagnostics.NavigationPathInvalid,
+                            declaration.Location,
+                            mapFromValue,
+                            targetProp.Name,
+                            segments[i],
+                            currentType?.ToDisplayString() ?? declaration.SourceType.Name));
+                    }
+
+                    return null;
+                }
+
+                var segmentProp = namedType.GetMembers(segments[i])
                     .OfType<IPropertySymbol>()
                     .FirstOrDefault(p => !p.IsStatic);
-                if (segmentProp == null) return null;
-                currentType = segmentProp.Type as INamedTypeSymbol;
+                if (segmentProp == null)
+                {
+                    if (declaration != null && model != null)
+                    {
+                        model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
+                            ObjectMappingDiagnostics.NavigationPathInvalid,
+                            declaration.Location,
+                            mapFromValue,
+                            targetProp.Name,
+                            segments[i],
+                            namedType.ToDisplayString()));
+                    }
+
+                    return null;
+                }
+
+                currentType = segmentProp.Type;
+            }
+
+            var canReturnNull = NavigationPathCanReturnNull(firstProp, segments);
+            if (declaration != null && model != null &&
+                canReturnNull &&
+                !IsNullableTargetType(targetProp.Type, targetProp.NullableAnnotation))
+            {
+                model.Diagnostics.Add(ObjectMappingDiagnostics.Create(
+                    ObjectMappingDiagnostics.NullabilityMismatch,
+                    declaration.Location,
+                    mapFromValue));
+                return null;
             }
 
             return new PropertyMapping
@@ -635,8 +761,97 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 TargetPropertyName = targetProp.Name,
                 SourceNavigationPath = mapFromValue,
                 NavigationSegments = segments,
+                NavigationPathCanReturnNull = canReturnNull,
                 ConverterTypeFullName = converterType
             };
+        }
+
+        private static PropertyMapping CreateSimpleMapping(
+            IPropertySymbol sourceProp,
+            IPropertySymbol targetProp,
+            string? converterType)
+        {
+            return new PropertyMapping
+            {
+                SourceProperty = sourceProp,
+                TargetProperty = targetProp,
+                TargetPropertyName = targetProp.Name,
+                ConverterTypeFullName = converterType
+            };
+        }
+
+        private static bool IsProtectedTargetProperty(IPropertySymbol targetProp, MapDirection direction)
+        {
+            return direction is MapDirection.Create or MapDirection.Apply &&
+                   ObjectMappingProtectedFields.IsProtectedInputField(targetProp.Name);
+        }
+
+        private static bool NavigationPathCanReturnNull(IPropertySymbol firstProp, List<string> segments)
+        {
+            if (IsNullableType(firstProp.Type))
+            {
+                return true;
+            }
+
+            ITypeSymbol currentType = firstProp.Type;
+            for (int i = 1; i < segments.Count; i++)
+            {
+                var namedType = UnwrapNullable(currentType) as INamedTypeSymbol;
+                if (namedType == null)
+                {
+                    return true;
+                }
+
+                var segmentProp = namedType.GetMembers(segments[i])
+                    .OfType<IPropertySymbol>()
+                    .FirstOrDefault(p => !p.IsStatic);
+                if (segmentProp == null)
+                {
+                    return true;
+                }
+
+                if (i < segments.Count - 1 && IsNullableType(segmentProp.Type))
+                {
+                    return true;
+                }
+
+                currentType = segmentProp.Type;
+            }
+
+            return false;
+        }
+
+        private static bool IsNullableTargetType(ITypeSymbol type, NullableAnnotation annotation)
+        {
+            if (IsNullableType(type))
+            {
+                return true;
+            }
+
+            return annotation == NullableAnnotation.Annotated;
+        }
+
+        private static bool IsNullableType(ITypeSymbol type)
+        {
+            if (type.NullableAnnotation == NullableAnnotation.Annotated)
+            {
+                return true;
+            }
+
+            return type is INamedTypeSymbol named &&
+                   named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T;
+        }
+
+        private static ITypeSymbol UnwrapNullable(ITypeSymbol type)
+        {
+            if (type is INamedTypeSymbol named &&
+                named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
+                named.TypeArguments.Length == 1)
+            {
+                return named.TypeArguments[0];
+            }
+
+            return type;
         }
 
         private string? FindConverterForProperty(IPropertySymbol property)
@@ -653,6 +868,67 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 return (attr.ConstructorArguments[0].Value as INamedTypeSymbol)?.ToDisplayString();
             }
             return null;
+        }
+
+        /// <summary>
+        /// Detects whether a simple static type conversion is possible between source and target types.
+        /// Returns the conversion kind, or None if no simple conversion is available.
+        /// </summary>
+        private static ObjectMappingConversionKind DetectSimpleConversion(ITypeSymbol sourceType, ITypeSymbol targetType)
+        {
+            var sourceSpecial = sourceType.SpecialType;
+            var targetSpecial = targetType.SpecialType;
+            var sourceName = sourceType.Name;
+            var targetName = targetType.Name;
+
+            // Enum ↔ String
+            if (sourceType.TypeKind == TypeKind.Enum && targetSpecial == SpecialType.System_String)
+                return ObjectMappingConversionKind.EnumToString;
+
+            if (sourceSpecial == SpecialType.System_String && targetType.TypeKind == TypeKind.Enum)
+                return ObjectMappingConversionKind.StringToEnum;
+
+            // Enum ↔ Int
+            if (sourceType.TypeKind == TypeKind.Enum && targetSpecial == SpecialType.System_Int32)
+                return ObjectMappingConversionKind.EnumToInt;
+
+            if (sourceSpecial == SpecialType.System_Int32 && targetType.TypeKind == TypeKind.Enum)
+                return ObjectMappingConversionKind.IntToEnum;
+
+            // String ↔ Int
+            if (sourceSpecial == SpecialType.System_String && targetSpecial == SpecialType.System_Int32)
+                return ObjectMappingConversionKind.StringToInt;
+
+            if (sourceSpecial == SpecialType.System_Int32 && targetSpecial == SpecialType.System_String)
+                return ObjectMappingConversionKind.IntToString;
+
+            // String ↔ Guid
+            if (sourceSpecial == SpecialType.System_String && targetName == "Guid")
+                return ObjectMappingConversionKind.StringToGuid;
+
+            if (sourceName == "Guid" && targetSpecial == SpecialType.System_String)
+                return ObjectMappingConversionKind.GuidToString;
+
+            // Numeric cast (widening or safe cast between numeric types)
+            if (IsNumericType(sourceSpecial) && IsNumericType(targetSpecial))
+                return ObjectMappingConversionKind.NumericCast;
+
+            return ObjectMappingConversionKind.None;
+        }
+
+        private static bool IsNumericType(SpecialType type)
+        {
+            return type is SpecialType.System_Byte
+                or SpecialType.System_SByte
+                or SpecialType.System_Int16
+                or SpecialType.System_UInt16
+                or SpecialType.System_Int32
+                or SpecialType.System_UInt32
+                or SpecialType.System_Int64
+                or SpecialType.System_UInt64
+                or SpecialType.System_Single
+                or SpecialType.System_Double
+                or SpecialType.System_Decimal;
         }
 
         private static ITypeSymbol? ResolveFinalSegmentType(IPropertySymbol firstProp, List<string> segments)

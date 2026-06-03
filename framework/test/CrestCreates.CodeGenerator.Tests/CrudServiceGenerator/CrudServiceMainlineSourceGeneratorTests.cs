@@ -1,18 +1,43 @@
 using System;
 using System.Linq;
 using CrestCreates.CodeGenerator.CrudServiceGenerator;
+using CrestCreates.CodeGenerator.ObjectMappingGenerator;
 using CrestCreates.CodeGenerator.Tests.TestHelpers;
 using Microsoft.CodeAnalysis;
 using Xunit;
 
 namespace CrestCreates.CodeGenerator.Tests.CrudServiceGenerator;
 
-public sealed class CrudServiceMainlineSourceGeneratorTests
-{
-    [Fact]
-    public void GeneratedCrud_ShouldCompileForSampleEntity()
+    public sealed class CrudServiceMainlineSourceGeneratorTests
     {
-        var result = RunProductGenerator();
+        [Fact]
+        public void GeneratedCrud_WithObjectMappingGenerator_ShouldCompileGeneratedMappings()
+        {
+            var result = SourceGeneratorTestHelper.RunGenerators(
+                EntitySource,
+                new IIncrementalGenerator[] { new CrudServiceSourceGenerator(), new ObjectMappingSourceGenerator() },
+                new[] { EntitySupport },
+                FrameworkReferences);
+
+            Assert.True(result.CompilationSuccess,
+                "Compilation failed. Diagnostics:\n" +
+                string.Join("\n", result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error).Select(d => d.ToString())));
+
+            Assert.True(result.ContainsFile("ProductObjectMappings.g.cs"));
+            Assert.True(result.ContainsSource("public static partial class ProductObjectMappings"));
+            Assert.True(result.ContainsSource("ToTarget("));
+            Assert.True(result.ContainsSource("Apply("));
+
+            var implSource = result.GetSourceByFileName("ProductAppService.g.cs")!.SourceText;
+            Assert.Contains("ProductObjectMappings.ToTarget(input)", implSource);
+            Assert.Contains("ProductObjectMappings.ToTarget(created)", implSource);
+            Assert.Contains("ProductObjectMappings.Apply(input, entity)", implSource);
+        }
+
+        [Fact]
+        public void GeneratedCrud_ShouldCompileForSampleEntity()
+        {
+            var result = RunProductGenerator();
 
         Assert.True(result.CompilationSuccess,
             "Compilation failed. Diagnostics:\n" +

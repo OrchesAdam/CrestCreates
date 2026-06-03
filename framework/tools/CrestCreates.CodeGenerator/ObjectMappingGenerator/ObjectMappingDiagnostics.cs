@@ -7,7 +7,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
         private const string Category = "ObjectMapping";
 
         public static readonly DiagnosticDescriptor SourceTypeNotFound = new(
-            id: "OM001",
+            id: "OM100",
             title: "Source type not found",
             messageFormat: "Source type '{0}' could not be found",
             category: Category,
@@ -15,7 +15,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             isEnabledByDefault: true);
 
         public static readonly DiagnosticDescriptor TargetTypeNotFound = new(
-            id: "OM002",
+            id: "OM101",
             title: "Target type not found",
             messageFormat: "Target type '{0}' could not be found",
             category: Category,
@@ -23,23 +23,23 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             isEnabledByDefault: true);
 
         public static readonly DiagnosticDescriptor SourcePropertyNotFound = new(
-            id: "OM003",
+            id: "OM002",
             title: "Source property not found",
-            messageFormat: "Source property '{0}' not found on type '{1}'",
+            messageFormat: "Source property or path '{0}' not found on type '{1}'",
             category: Category,
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
 
         public static readonly DiagnosticDescriptor TargetPropertyNotMapped = new(
-            id: "OM004",
+            id: "OM001",
             title: "Target property not mapped",
             messageFormat: "Target property '{0}' on type '{1}' has no matching source",
             category: Category,
-            defaultSeverity: DiagnosticSeverity.Warning,
+            defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
 
         public static readonly DiagnosticDescriptor TypeIncompatibility = new(
-            id: "OM005",
+            id: "OM004",
             title: "Type incompatibility",
             messageFormat: "Cannot map property '{0}': type '{1}' is not compatible with '{2}'",
             category: Category,
@@ -49,13 +49,13 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
         public static readonly DiagnosticDescriptor ReadOnlyTarget = new(
             id: "OM006",
             title: "Read-only target",
-            messageFormat: "Target property '{0}' is read-only and cannot be mapped in Apply direction",
+            messageFormat: "Target property '{0}' is read-only and cannot be mapped",
             category: Category,
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
 
         public static readonly DiagnosticDescriptor AmbiguousMapping = new(
-            id: "OM007",
+            id: "OM003",
             title: "Ambiguous mapping",
             messageFormat: "Multiple source properties match target '{0}': {1}",
             category: Category,
@@ -63,41 +63,41 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             isEnabledByDefault: true);
 
         public static readonly DiagnosticDescriptor MissingElementMapping = new(
-            id: "OM008",
+            id: "OM007",
             title: "Missing element mapping",
             messageFormat: "Cannot map collection '{0}': no mapping exists for element type '{1}' to '{2}'",
             category: Category,
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
 
-        public static readonly DiagnosticDescriptor NullabilityMismatch = new(
+        public static readonly DiagnosticDescriptor ProtectedInputFieldWriteSkipped = new(
             id: "OM009",
-            title: "Nullability mismatch",
-            messageFormat: "Source property '{0}' is nullable but target is non-nullable. Using default value fallback.",
-            category: Category,
-            defaultSeverity: DiagnosticSeverity.Warning,
-            isEnabledByDefault: true);
-
-        public static readonly DiagnosticDescriptor NavigationSegmentNotFound = new(
-            id: "OM010",
-            title: "Navigation segment not found",
-            messageFormat: "Navigation path segment '{0}' not found on type '{1}' for property '{2}'",
+            title: "Protected input field write skipped",
+            messageFormat: "Property '{0}' is a protected input field and will not be assigned by mapping.",
             category: Category,
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
 
-        public static readonly DiagnosticDescriptor InvalidConverterType = new(
-            id: "OM011",
-            title: "Invalid converter type",
-            messageFormat: "Converter type '{0}' for property '{1}' is not valid. Converter must be a static class with a Convert method.",
+        public static readonly DiagnosticDescriptor NullabilityMismatch = new(
+            id: "OM005",
+            title: "Nullability mismatch",
+            messageFormat: "Source property '{0}' is nullable but target is non-nullable.",
             category: Category,
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
 
         public static readonly DiagnosticDescriptor NavigationPathInvalid = new(
-            id: "OM012",
+            id: "OM008",
             title: "Navigation path invalid",
-            messageFormat: "Navigation path '{0}' for property '{1}' has an invalid segment '{2}'.",
+            messageFormat: "Navigation path '{0}' for property '{1}' has invalid segment '{2}' on type '{3}'.",
+            category: Category,
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true);
+
+        public static readonly DiagnosticDescriptor InvalidConverterType = new(
+            id: "OM012",
+            title: "Custom converter invalid",
+            messageFormat: "Converter type '{0}' for property '{1}' is not valid. Converter must be a static class with a Convert method.",
             category: Category,
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);

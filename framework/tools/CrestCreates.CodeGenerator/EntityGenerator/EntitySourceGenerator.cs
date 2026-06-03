@@ -80,7 +80,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                     GenerateEntityDto(context, entityClass);
                     GenerateCreateEntityDto(context, entityClass);
                     GenerateUpdateEntityDto(context, entityClass);
-                    GenerateMappingExtensions(context, entityClass);
+                    GenerateObjectMappingDeclarations(context, entityClass);
                     GenerateEntityExtensions(context, entityClass);
                     GenerateValidationRules(context, entityClass);
 
@@ -167,6 +167,25 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             }
 
             return properties;
+        }
+
+        private List<IPropertySymbol> GetInputEntityProperties(INamedTypeSymbol entityClass, bool includeConcurrencyStamp)
+        {
+            return GetAllEntityProperties(entityClass)
+                .Where(HasPublicSetter)
+                .Where(p => !ObjectMappingProtectedFields.IsProtectedInputProperty(p.Name, includeConcurrencyStamp))
+                .Where(p => !IsNavigationProperty(p))
+                .ToList();
+        }
+
+        private static bool HasPublicSetter(IPropertySymbol property)
+        {
+            if (property.SetMethod is null)
+                return false;
+
+            return property.SetMethod.DeclaredAccessibility == Accessibility.Public
+                || (property.SetMethod.DeclaredAccessibility == Accessibility.NotApplicable
+                    && property.DeclaredAccessibility == Accessibility.Public);
         }
 
         private void GenerateRepositoryInterface(SourceProductionContext context, INamedTypeSymbol entityClass)
@@ -1078,7 +1097,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
         {
             var entityName = entityClass.Name;
             var namespaceName = entityClass.ContainingNamespace.ToDisplayString();
-            var properties = GetAllEntityProperties(entityClass);
+            var properties = GetInputEntityProperties(entityClass, includeConcurrencyStamp: true);
             var dtosNamespace = GetTargetNamespace(namespaceName, GeneratedCodeType.CreateDto);
 
             var builder = new StringBuilder();
@@ -1095,13 +1114,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             builder.AppendLine($"    public partial class Create{entityName}Dto");
             builder.AppendLine("    {");
 
-            foreach (var prop in properties.Where(p => p.Name != "Id"
-                && p.Name != "CreationTime" && p.Name != "LastModificationTime"
-                && p.Name != "CreatorId" && p.Name != "LastModifierId"
-                && p.Name != "ConcurrencyStamp"
-                && p.Name != "IsDeleted" && p.Name != "DeletionTime" && p.Name != "DeleterId"
-                && p.Name != "TenantId"
-                && !IsNavigationProperty(p)))
+            foreach (var prop in properties)
             {
                 var typeName = prop.Type.ToDisplayString();
                 if (prop.NullableAnnotation == NullableAnnotation.Annotated && !typeName.EndsWith("?"))
@@ -1121,7 +1134,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
         {
             var entityName = entityClass.Name;
             var namespaceName = entityClass.ContainingNamespace.ToDisplayString();
-            var properties = GetAllEntityProperties(entityClass);
+            var properties = GetInputEntityProperties(entityClass, includeConcurrencyStamp: false);
             var dtosNamespace = GetTargetNamespace(namespaceName, GeneratedCodeType.UpdateDto);
             var idType = GetEntityIdType(entityClass);
 
@@ -1142,12 +1155,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             builder.AppendLine($"        public {idType} Id {{ get; set; }}");
             builder.AppendLine();
 
-            foreach (var prop in properties.Where(p => p.Name != "Id"
-                && p.Name != "CreationTime" && p.Name != "LastModificationTime"
-                && p.Name != "CreatorId" && p.Name != "LastModifierId"
-                && p.Name != "IsDeleted" && p.Name != "DeletionTime" && p.Name != "DeleterId"
-                && p.Name != "TenantId"
-                && !IsNavigationProperty(p)))
+            foreach (var prop in properties)
             {
                 var typeName = prop.Type.ToDisplayString();
                 if (prop.NullableAnnotation == NullableAnnotation.Annotated && !typeName.EndsWith("?"))
@@ -1163,218 +1171,29 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             context.AddSource($"Update{entityName}Dto.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
-        private void GenerateMappingExtensions(SourceProductionContext context, INamedTypeSymbol entityClass)
+        private void GenerateObjectMappingDeclarations(SourceProductionContext context, INamedTypeSymbol entityClass)
         {
             var entityName = entityClass.Name;
             var namespaceName = entityClass.ContainingNamespace.ToDisplayString();
-            var properties = GetAllEntityProperties(entityClass);
-            var dtosNamespace = GetTargetNamespace(namespaceName, GeneratedCodeType.Dto);
-            var idType = GetEntityIdType(entityClass);
-
-            // Derive DTO property names — include only properties that exist on the generated DTOs.
-            // Navigation properties are excluded from DTOs, so they must be excluded here too
-            // to avoid generating mapping code for non-existent DTO properties.
-            var dtoPropertyNames = new HashSet<string>(properties
-                .Where(p => !IsNavigationProperty(p))
-                .Select(p => p.Name));
-
-            // Resolve mappings from source-side attributes
-            var resolver = new ObjectMappingRuleResolver();
-            var mappings = resolver.ResolvePropertyMappingsFromSource(entityClass, dtoPropertyNames, context);
-
-            // Filter ignored
-            var activeMappings = mappings
-                .Where(m => !m.IsIgnored)
-                .ToList();
-
-            // Separate Id from other properties (Id may not be resolved from base class via GetMembers)
-            var idMapping = activeMappings.FirstOrDefault(m => m.TargetPropertyName == "Id");
-            var nonIdMappings = activeMappings
-                .Where(m => m.TargetPropertyName != "Id")
-                .OrderBy(m => m.TargetPropertyName)
-                .ToList();
-
-            // Check if entity has writable Id
-            var hasWritableId = entityClass.GetMembers().OfType<IPropertySymbol>()
-                .Any(p => p.Name == "Id" && p.SetMethod != null
-                    && p.SetMethod.DeclaredAccessibility == Accessibility.Public);
-
-            // Writable non-Id properties for ApplyTo (must have public setter, exclude audit).
-            // Audit timestamps/creator IDs, soft-delete fields, and TenantId are system-managed
-            // and do not appear on Create/Update DTOs.
-            // ConcurrencyStamp is excluded from Create ApplyTo (CreateDto doesn't include it)
-            // but included in Update ApplyTo (UpdateDto carries the expected stamp from client).
-            var writableNonIdMappings = nonIdMappings
-                .Where(m => m.SourceProperty.SetMethod != null
-                    && m.SourceProperty.SetMethod.DeclaredAccessibility == Accessibility.Public
-                    && m.TargetPropertyName != "CreationTime"
-                    && m.TargetPropertyName != "LastModificationTime"
-                    && m.TargetPropertyName != "CreatorId"
-                    && m.TargetPropertyName != "LastModifierId"
-                    && m.TargetPropertyName != "IsDeleted"
-                    && m.TargetPropertyName != "DeletionTime"
-                    && m.TargetPropertyName != "DeleterId"
-                    && m.TargetPropertyName != "TenantId")
-                .ToList();
-
-            var createWritableMappings = writableNonIdMappings
-                .Where(m => m.TargetPropertyName != "ConcurrencyStamp")
-                .ToList();
+            var entityFullName = entityClass.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
             var builder = new StringBuilder();
             builder.AppendLine("#nullable enable");
             builder.AppendLine("// <auto-generated />");
-            builder.AppendLine("using System;");
-            builder.AppendLine("using System.Linq.Expressions;");
-            builder.AppendLine($"using {namespaceName};");
-            builder.AppendLine($"using {dtosNamespace};");
+            builder.AppendLine("using CrestCreates.Domain.Shared.ObjectMapping;");
+            builder.AppendLine($"using {namespaceName}.Dtos;");
             builder.AppendLine();
-            builder.AppendLine($"namespace {namespaceName}.Extensions");
+            builder.AppendLine($"namespace {namespaceName}.Mappings");
             builder.AppendLine("{");
-            builder.AppendLine($"    public static partial class {entityName}MappingExtensions");
+            builder.AppendLine($"    [GenerateObjectMapping(typeof({entityFullName}), typeof({entityName}Dto))]");
+            builder.AppendLine($"    [GenerateObjectMapping(typeof(Create{entityName}Dto), typeof({entityFullName}), Direction = MapDirection.Create)]");
+            builder.AppendLine($"    [GenerateObjectMapping(typeof(Update{entityName}Dto), typeof({entityFullName}), Direction = MapDirection.Apply)]");
+            builder.AppendLine($"    public static partial class {entityName}ObjectMappings");
             builder.AppendLine("    {");
-
-            // --- ToDto() ---
-            builder.AppendLine($"        public static {entityName}Dto ToDto(this {entityName} source)");
-            builder.AppendLine("        {");
-            builder.AppendLine("            if (source is null)");
-            builder.AppendLine("                throw new ArgumentNullException(nameof(source));");
-            builder.AppendLine();
-            builder.AppendLine($"            var result = new {entityName}Dto");
-            builder.AppendLine("            {");
-
-            // Id always first (hardcoded — may not be resolved from base class via GetMembers)
-            builder.AppendLine($"                Id = source.Id,");
-
-            for (int i = 0; i < nonIdMappings.Count; i++)
-            {
-                var mapping = nonIdMappings[i];
-                var comma = i < nonIdMappings.Count - 1 ? "," : "";
-                var expr = GetEntityMappingExpression(mapping);
-                builder.AppendLine($"                {mapping.TargetPropertyName} = {expr}{comma}");
-            }
-
-            builder.AppendLine("            };");
-            builder.AppendLine();
-            builder.AppendLine("            AfterToDto(source, result);");
-            builder.AppendLine("            return result;");
-            builder.AppendLine("        }");
-            builder.AppendLine();
-
-            // --- CreateXxxDto.ApplyTo() ---
-            builder.AppendLine($"        public static void ApplyTo(this Create{entityName}Dto source, {entityName} destination)");
-            builder.AppendLine("        {");
-            builder.AppendLine("            if (source is null)");
-            builder.AppendLine("                throw new ArgumentNullException(nameof(source));");
-            builder.AppendLine("            if (destination is null)");
-            builder.AppendLine("                throw new ArgumentNullException(nameof(destination));");
-            builder.AppendLine();
-            builder.AppendLine("            BeforeApplyTo(source, destination);");
-            builder.AppendLine();
-
-            foreach (var mapping in createWritableMappings)
-            {
-                builder.AppendLine($"            destination.{mapping.TargetPropertyName} = source.{mapping.TargetPropertyName};");
-            }
-
-            builder.AppendLine();
-            builder.AppendLine("            AfterApplyTo(source, destination);");
-            builder.AppendLine("        }");
-            builder.AppendLine();
-
-            // --- UpdateXxxDto.ApplyTo() ---
-            builder.AppendLine($"        public static void ApplyTo(this Update{entityName}Dto source, {entityName} destination)");
-            builder.AppendLine("        {");
-            builder.AppendLine("            if (source is null)");
-            builder.AppendLine("                throw new ArgumentNullException(nameof(source));");
-            builder.AppendLine("            if (destination is null)");
-            builder.AppendLine("                throw new ArgumentNullException(nameof(destination));");
-            builder.AppendLine();
-            builder.AppendLine("            BeforeApplyTo(source, destination);");
-            builder.AppendLine();
-
-            if (hasWritableId)
-            {
-                builder.AppendLine("            destination.Id = source.Id;");
-            }
-
-            foreach (var mapping in writableNonIdMappings)
-            {
-                builder.AppendLine($"            destination.{mapping.TargetPropertyName} = source.{mapping.TargetPropertyName};");
-            }
-
-            builder.AppendLine();
-            builder.AppendLine("            AfterApplyTo(source, destination);");
-            builder.AppendLine("        }");
-            builder.AppendLine();
-
-            // --- ToDtoExpression (skip navigation/converter properties) ---
-            var exprMappings = nonIdMappings
-                .Where(m => m.NavigationSegments == null && m.ConverterTypeFullName == null)
-                .ToList();
-
-            builder.AppendLine($"        public static Expression<Func<{entityName}, {entityName}Dto>> ToDtoExpression =>");
-            builder.AppendLine($"            source => new {entityName}Dto");
-            builder.AppendLine("            {");
-
-            builder.AppendLine($"                Id = source.Id,");
-
-            for (int i = 0; i < exprMappings.Count; i++)
-            {
-                var mapping = exprMappings[i];
-                var comma = i < exprMappings.Count - 1 ? "," : "";
-                builder.AppendLine($"                {mapping.TargetPropertyName} = source.{mapping.SourceProperty.Name}{comma}");
-            }
-
-            builder.AppendLine("            };");
-            builder.AppendLine();
-
-            // --- Partial hook declarations ---
-            builder.AppendLine($"        static partial void AfterToDto({entityName} source, {entityName}Dto destination);");
-            builder.AppendLine($"        static partial void BeforeApplyTo(Create{entityName}Dto source, {entityName} destination);");
-            builder.AppendLine($"        static partial void AfterApplyTo(Create{entityName}Dto source, {entityName} destination);");
-            builder.AppendLine($"        static partial void BeforeApplyTo(Update{entityName}Dto source, {entityName} destination);");
-            builder.AppendLine($"        static partial void AfterApplyTo(Update{entityName}Dto source, {entityName} destination);");
-
             builder.AppendLine("    }");
             builder.AppendLine("}");
 
-            context.AddSource($"{entityName}MappingExtensions.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
-        }
-
-        private static string GetEntityMappingExpression(PropertyMapping mapping)
-        {
-            if (mapping.NavigationSegments != null && mapping.NavigationSegments.Count > 1)
-            {
-                var segments = mapping.NavigationSegments;
-                var firstProp = mapping.SourceProperty;
-
-                var parts = new List<string> { $"source.{segments[0]}" };
-
-                INamedTypeSymbol? currentType = firstProp.Type as INamedTypeSymbol;
-                for (int i = 1; i < segments.Count; i++)
-                {
-                    if (currentType == null) break;
-                    bool isRefType = currentType.IsReferenceType
-                        || (currentType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T);
-                    string op = isRefType ? "?." : ".";
-                    parts.Add($"{op}{segments[i]}");
-
-                    var segmentProp = currentType.GetMembers(segments[i])
-                        .OfType<IPropertySymbol>().FirstOrDefault(p => !p.IsStatic);
-                    currentType = segmentProp?.Type as INamedTypeSymbol;
-                }
-
-                var expr = string.Concat(parts);
-                if (mapping.ConverterTypeFullName != null)
-                    return $"{mapping.ConverterTypeFullName}.Convert({expr})";
-                return expr;
-            }
-
-            var baseExpr = $"source.{mapping.SourceProperty.Name}";
-            if (mapping.ConverterTypeFullName != null)
-                return $"{mapping.ConverterTypeFullName}.Convert({baseExpr})";
-            return baseExpr;
+            context.AddSource($"{entityName}ObjectMappings.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
         private void GenerateEntityExtensions(SourceProductionContext context, INamedTypeSymbol entityClass)

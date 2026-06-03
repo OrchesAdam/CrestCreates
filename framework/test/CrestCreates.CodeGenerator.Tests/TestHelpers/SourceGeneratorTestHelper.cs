@@ -170,7 +170,7 @@ namespace CrestCreates.Domain.Shared.Attributes
             string[]? additionalReferences = null)
             where TGenerator : IIncrementalGenerator, new()
         {
-            return RunGenerator<TGenerator>(new[] { source }, additionalSources, additionalReferences);
+            return RunGenerators(new[] { source }, new IIncrementalGenerator[] { new TGenerator() }, additionalSources, additionalReferences);
         }
 
         /// <summary>
@@ -187,46 +187,74 @@ namespace CrestCreates.Domain.Shared.Attributes
             string[]? additionalReferences = null)
             where TGenerator : IIncrementalGenerator, new()
         {
-            // 创建编译
+            return RunGenerators(sources, new IIncrementalGenerator[] { new TGenerator() }, additionalSources, additionalReferences);
+        }
+
+        /// <summary>
+        /// 运行多个源代码生成器并返回结果
+        /// </summary>
+        public static SourceGeneratorResult RunGenerators(
+            string source,
+            IEnumerable<IIncrementalGenerator> generators,
+            string[]? additionalSources = null,
+            string[]? additionalReferences = null)
+        {
+            return RunGenerators(new[] { source }, generators, additionalSources, additionalReferences);
+        }
+
+        /// <summary>
+        /// 运行多个源代码生成器并返回结果（多文件输入）
+        /// </summary>
+        public static SourceGeneratorResult RunGenerators(
+            string[] sources,
+            IEnumerable<IIncrementalGenerator> generators,
+            string[]? additionalSources = null,
+            string[]? additionalReferences = null)
+        {
             var compilation = CreateCompilation(sources, additionalSources, additionalReferences);
-
-            // 创建生成器
-            var generator = new TGenerator();
-            var driver = CSharpGeneratorDriver.Create(generator);
-
-            // 运行生成器
-            driver.RunGeneratorsAndUpdateCompilation(
-                compilation,
-                out var outputCompilation,
-                out var diagnostics);
-
-            // 获取生成的源代码 - 优先从 runResult 获取
-            var runResult = driver.GetRunResult();
-
-            // 将 runResult 的诊断信息也加入
-            var allDiagnostics = diagnostics.Concat(runResult.Diagnostics);
-
-            var generatedTrees = runResult.GeneratedTrees;
-
-            // 如果 runResult 没有生成的树，则从 outputCompilation 中提取
-            if (generatedTrees.IsEmpty)
+            var allDiagnostics = new List<Diagnostic>();
+            var generatedSources = new List<GeneratedSource>();
+            var originalSourceTexts = new HashSet<string>(sources, StringComparer.Ordinal);
+            if (additionalSources != null)
             {
-                generatedTrees = outputCompilation.SyntaxTrees
-                    .Where(tree => !sources.Any(s => tree.ToString().Contains(s.Substring(0, Math.Min(100, s.Length)))))
-                    .Where(tree => !IsSystemFile(tree.FilePath))
-                    .ToImmutableArray();
+                foreach (var source in additionalSources)
+                {
+                    originalSourceTexts.Add(source);
+                }
             }
 
-            var generatedSources = generatedTrees
-                .Select(tree => new GeneratedSource(
+            foreach (var generator in generators)
+            {
+                var driver = CSharpGeneratorDriver.Create(generator.AsSourceGenerator());
+
+                driver.RunGeneratorsAndUpdateCompilation(
+                    compilation,
+                    out var outputCompilation,
+                    out var diagnostics);
+
+                var runResult = driver.GetRunResult();
+                allDiagnostics.AddRange(diagnostics);
+                allDiagnostics.AddRange(runResult.Diagnostics);
+
+                var generatedTrees = runResult.GeneratedTrees;
+                if (generatedTrees.IsEmpty)
+                {
+                    generatedTrees = outputCompilation.SyntaxTrees
+                        .Where(tree => !originalSourceTexts.Any(s => tree.ToString().Contains(s.Substring(0, Math.Min(100, s.Length)))))
+                        .Where(tree => !IsSystemFile(tree.FilePath))
+                        .ToImmutableArray();
+                }
+
+                generatedSources.AddRange(generatedTrees.Select(tree => new GeneratedSource(
                     tree.FilePath,
                     tree.ToString(),
-                    tree.GetText()))
-                .ToList();
+                    tree.GetText())));
 
-            // 尝试编译生成的代码
+                compilation = outputCompilation;
+            }
+
             var memoryStream = new System.IO.MemoryStream();
-            var emitResult = outputCompilation.Emit(memoryStream);
+            var emitResult = compilation.Emit(memoryStream);
             byte[]? compiledAssembly = null;
             if (emitResult.Success)
             {
@@ -352,7 +380,9 @@ namespace CrestCreates.Domain.Shared.Attributes
                 "TestCompilation",
                 syntaxTrees,
                 references,
-                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+                new CSharpCompilationOptions(
+                    OutputKind.DynamicallyLinkedLibrary,
+                    nullableContextOptions: NullableContextOptions.Enable));
 
             return compilation;
         }

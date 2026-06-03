@@ -58,7 +58,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             }
 
             // Generate ToTargetExpression if needed
-            if (declaration.Direction is MapDirection.Create or MapDirection.Both)
+            if (declaration.Direction is MapDirection.Create or MapDirection.Both && model.IncludeToTargetExpression)
             {
                 WriteToTargetExpression(sb, model, sourceType, targetType);
                 sb.AppendLine();
@@ -125,6 +125,13 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
                 sourceExpression = $"{mapping.ConverterTypeFullName}.Convert({sourceExpression})";
             }
 
+            // Simple static conversion
+            if (mapping.ConversionKind != ObjectMappingConversionKind.None)
+            {
+                var targetTypeName = mapping.TargetProperty?.Type.ToDisplayString() ?? "object";
+                sourceExpression = GetConversionExpression(mapping.ConversionKind, sourceExpression, targetTypeName);
+            }
+
             // Handle collection conversion
             if (mapping.NeedsCollectionConversion && mapping.CollectionConversionMethod != null)
             {
@@ -146,26 +153,66 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
         private string BuildNavigationExpression(PropertyMapping mapping)
         {
             var segments = mapping.NavigationSegments!;
-            var firstProp = mapping.SourceProperty;
-
             var parts = new List<string> { $"source.{segments[0]}" };
 
-            INamedTypeSymbol? currentType = firstProp.Type as INamedTypeSymbol;
+            ITypeSymbol currentType = mapping.SourceProperty.Type;
             for (int i = 1; i < segments.Count; i++)
             {
-                if (currentType == null) break;
-                // Use ?. for reference type intermediate segments
-                bool isRefType = currentType.IsReferenceType
-                    || (currentType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T);
-                string op = isRefType ? "?." : ".";
+                var namedType = UnwrapNullable(currentType) as INamedTypeSymbol;
+                if (namedType == null)
+                {
+                    break;
+                }
+
+                var op = CanBeNull(namedType) ? "?." : ".";
                 parts.Add($"{op}{segments[i]}");
 
-                var segmentProp = currentType.GetMembers(segments[i])
+                var segmentProp = namedType.GetMembers(segments[i])
                     .OfType<IPropertySymbol>().FirstOrDefault(p => !p.IsStatic);
-                currentType = segmentProp?.Type as INamedTypeSymbol;
+                if (segmentProp == null)
+                {
+                    break;
+                }
+
+                currentType = segmentProp.Type;
             }
 
             return string.Concat(parts);
+        }
+
+        private static bool CanBeNull(INamedTypeSymbol type)
+        {
+            return type.IsReferenceType ||
+                   type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T;
+        }
+
+        private static ITypeSymbol UnwrapNullable(ITypeSymbol type)
+        {
+            if (type is INamedTypeSymbol named &&
+                named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
+                named.TypeArguments.Length == 1)
+            {
+                return named.TypeArguments[0];
+            }
+
+            return type;
+        }
+
+        private static string GetConversionExpression(ObjectMappingConversionKind kind, string expression, string targetTypeName)
+        {
+            return kind switch
+            {
+                ObjectMappingConversionKind.EnumToString => $"{expression}.ToString()",
+                ObjectMappingConversionKind.StringToEnum => $"({targetTypeName})Enum.Parse(typeof({targetTypeName}), {expression})",
+                ObjectMappingConversionKind.EnumToInt => $"(int)(object){expression}",
+                ObjectMappingConversionKind.IntToEnum => $"({targetTypeName})(object){expression}",
+                ObjectMappingConversionKind.StringToInt => $"int.Parse({expression})",
+                ObjectMappingConversionKind.IntToString => $"{expression}.ToString()",
+                ObjectMappingConversionKind.StringToGuid => $"Guid.Parse({expression})",
+                ObjectMappingConversionKind.GuidToString => $"{expression}.ToString()",
+                ObjectMappingConversionKind.NumericCast => $"({targetTypeName}){expression}",
+                _ => expression
+            };
         }
 
         private string GetDefaultValue(string typeName)
@@ -220,7 +267,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             sb.AppendLine();
             sb.AppendLine("            BeforeApply(source, destination);");
 
-            foreach (var mapping in model.PropertyMappings.Where(m => !m.IsIgnored && !m.IsReadOnly))
+            foreach (var mapping in model.PropertyMappings.Where(m => !m.IsIgnored && !m.IsReadOnly && !m.IsProtected))
             {
                 var valueExpression = GetPropertyAssignmentExpression(mapping);
                 sb.AppendLine($"            destination.{mapping.TargetPropertyName} = {valueExpression};");

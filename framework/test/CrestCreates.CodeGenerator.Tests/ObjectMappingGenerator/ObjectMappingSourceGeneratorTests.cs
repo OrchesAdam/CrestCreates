@@ -373,14 +373,8 @@ namespace TestNamespace
             var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
 
             // Assert
-            var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
-            Assert.NotNull(generatedSource);
-
-            // Print the generated source for debugging
-            var sourceText = generatedSource.SourceText;
-
-            // Should generate null-coalescing for nullable-to-non-nullable value types
-            Assert.Contains("Count = source.Count ?? 0", sourceText);
+            var errors = result.GetErrors().ToList();
+            Assert.Contains(errors, e => e.Id == "OM005");
         }
 
         [Fact]
@@ -414,14 +408,12 @@ namespace TestNamespace
             var result = SourceGeneratorTestHelper.RunGenerator<ObjectMappingSourceGenerator>(source);
 
             // Assert
+            var errors = result.GetErrors().ToList();
+            Assert.Contains(errors, e => e.Id == "OM005");
             var generatedSource = result.GetSourceByFileName("TestMapper.g.cs");
             Assert.NotNull(generatedSource);
-
-            // Expression should use null-coalescing for value types
-            Assert.Contains("Count = source.Count ?? 0", generatedSource.SourceText);
-            // For string, the generator may or may not apply null-coalescing depending on nullable annotation detection
-            // The key is that the code compiles and handles the nullable value type correctly
-            Assert.Contains("Name = source.Name", generatedSource.SourceText);
+            Assert.DoesNotContain("Count = source.Count ?? 0", generatedSource.SourceText);
+            Assert.DoesNotContain("Name = source.Name", generatedSource.SourceText);
         }
 
         [Fact]
@@ -648,7 +640,7 @@ namespace TestNamespace
         // === Diagnostic Tests ===
 
         [Fact]
-        public void Should_Report_OM005_For_Type_Incompatibility()
+        public void Should_Report_OM004_For_Type_Incompatibility()
         {
             // Arrange
             var source = @"
@@ -663,7 +655,7 @@ namespace TestNamespace
 
     public class Target
     {
-        public string Value { get; set; } = string.Empty;
+        public System.DateTime Value { get; set; }
     }
 
     [GenerateObjectMapping(typeof(Source), typeof(Target))]
@@ -677,7 +669,7 @@ namespace TestNamespace
             // Assert
             var errors = result.GetErrors().ToList();
             Assert.NotEmpty(errors);
-            Assert.Contains(errors, e => e.Id == "OM005");
+            Assert.Contains(errors, e => e.Id == "OM004");
         }
 
         [Fact]
@@ -714,7 +706,7 @@ namespace TestNamespace
         }
 
         [Fact]
-        public void Should_Report_OM008_For_Collection_Element_Incompatibility()
+        public void Should_Report_OM007_For_Collection_Element_Incompatibility()
         {
             // Arrange
             var source = @"
@@ -744,11 +736,11 @@ namespace TestNamespace
             // Assert
             var errors = result.GetErrors().ToList();
             Assert.NotEmpty(errors);
-            Assert.Contains(errors, e => e.Id == "OM008");
+            Assert.Contains(errors, e => e.Id == "OM007");
         }
 
         [Fact]
-        public void Should_Report_OM003_For_Missing_Source_Property()
+        public void Should_Report_OM002_For_Missing_Source_Property()
         {
             // Arrange
             var source = @"
@@ -778,7 +770,7 @@ namespace TestNamespace
             // Assert
             var errors = result.GetErrors().ToList();
             Assert.NotEmpty(errors);
-            Assert.Contains(errors, e => e.Id == "OM003");
+            Assert.Contains(errors, e => e.Id == "OM002");
         }
     }
 }
