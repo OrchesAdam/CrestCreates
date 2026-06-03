@@ -883,7 +883,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             ParameterSource.Query when parameter.IsScalar => $"                    var {parameter.Name} = {GenerateParseExpression(parameter.TypeName, $"""context.Request.Query["{parameter.Name}"].ToString()""", parameter.IsOptional)};",
             ParameterSource.Query => GenerateQueryObjectBinding(parameter),
             ParameterSource.Body => GenerateBodyBinding(parameter),
-            ParameterSource.Header => $"                    // CRUD delete concurrency token is bound from If-Match.\n                    var {parameter.Name} = context.Request.Headers[\"If-Match\"].FirstOrDefault();",
+            ParameterSource.Header => $"                    // CRUD delete concurrency token is bound from If-Match.\n                    var {parameter.Name} = context.Request.Headers[\"If-Match\"].FirstOrDefault()?.Trim('\"');",
             _ => $"                    {parameter.TypeName} {parameter.Name} = default!;"
         };
     }
@@ -913,6 +913,14 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
     private static string GenerateParseExpression(string typeName, string rawExpression, bool optional)
     {
         var normalizedType = typeName.EndsWith("?", StringComparison.Ordinal) ? typeName.Substring(0, typeName.Length - 1) : typeName;
+
+        // Handle nullable value types first — return default(T?) when the query string is empty
+        if (typeName.EndsWith("?", StringComparison.Ordinal) && normalizedType != typeName)
+        {
+            var inner = GenerateParseExpression(normalizedType, rawExpression, optional);
+            return $"string.IsNullOrWhiteSpace({rawExpression}) ? default({typeName}) : {inner}";
+        }
+
         return normalizedType switch
         {
             "string" or "global::System.String" => optional
@@ -930,8 +938,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             "global::System.DateTime" => $"DateTime.Parse({rawExpression}, CultureInfo.InvariantCulture)",
             "global::System.DateTimeOffset" => $"DateTimeOffset.Parse({rawExpression}, CultureInfo.InvariantCulture)",
             "global::System.TimeSpan" => $"TimeSpan.Parse({rawExpression}, CultureInfo.InvariantCulture)",
-            _ when typeName.EndsWith("?", StringComparison.Ordinal) && normalizedType != typeName => $"string.IsNullOrWhiteSpace({rawExpression}) ? default({typeName}) : {GenerateParseExpression(normalizedType, rawExpression, false)}",
-            _ => $"({typeName})Enum.Parse(typeof({typeName}), {rawExpression}, true)"
+            _ => $"({normalizedType})Enum.Parse(typeof({normalizedType}), {rawExpression}, true)"
         };
     }
 

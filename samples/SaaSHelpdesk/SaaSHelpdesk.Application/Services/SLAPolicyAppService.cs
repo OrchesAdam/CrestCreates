@@ -57,6 +57,7 @@ public class SLAPolicyAppService : CrestAppServiceBase<SLAPolicy, Guid, SLAPolic
             UrgentPriorityResponseMinutes = entity.UrgentPriorityResponseMinutes,
             UrgentPriorityResolutionMinutes = entity.UrgentPriorityResolutionMinutes,
             CreationTime = entity.CreationTime,
+            ConcurrencyStamp = entity.ConcurrencyStamp,
         };
     }
 

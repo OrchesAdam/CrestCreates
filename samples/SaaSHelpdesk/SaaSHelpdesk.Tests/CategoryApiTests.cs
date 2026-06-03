@@ -186,17 +186,17 @@ public class CategoryApiTests : BaseTest
         await CreateCategoryAsync(client, "Cat-B", sortOrder: 2);
 
         // Act
-        var response = await GetAsync(client, "/api/category?pageIndex=0&pageSize=10");
+        var response = await GetAsync(client, "/api/category/all");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var raw = await response.Content.ReadAsStringAsync();
-        var apiResponse = DeserializeJson<DynamicApiResponse<PagedResultResponse<CategoryResponse>>>(raw);
+        var apiResponse = DeserializeJson<DynamicApiResponse<List<CategoryResponse>>>(raw);
         apiResponse.Should().NotBeNull();
         apiResponse!.Data.Should().NotBeNull();
-        apiResponse.Data!.Items.Should().NotBeEmpty();
-        apiResponse.Data.Items.Any(c => c.Name == "Cat-A").Should().BeTrue();
-        apiResponse.Data.Items.Any(c => c.Name == "Cat-B").Should().BeTrue();
+        apiResponse.Data!.Should().NotBeEmpty();
+        apiResponse.Data.Any(c => c.Name == "Cat-A").Should().BeTrue();
+        apiResponse.Data.Any(c => c.Name == "Cat-B").Should().BeTrue();
     }
 
     [Fact]
@@ -262,15 +262,11 @@ public class CategoryApiTests : BaseTest
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var raw = await response.Content.ReadAsStringAsync();
-        raw.Should().Contain("Software");
-        raw.Should().Contain("OS");
-        raw.Should().Contain("Drivers");
+        var apiResult = await ReadApiResponseAsync<List<CategoryResponse>>(response);
+        var roots = apiResult.Data!;
 
-        // Verify root is present and children are nested
-        var roots = DeserializeJson<List<CategoryResponse>>(raw);
         roots.Should().NotBeNull();
-        roots!.Should().ContainSingle(c => c.Name == "Software");
+        roots.Should().ContainSingle(c => c.Name == "Software");
     }
 
     [Fact]
@@ -426,8 +422,8 @@ public class CategoryApiTests : BaseTest
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var content = await response.Content.ReadAsStringAsync();
-        // Should be a valid JSON array (possibly empty or with data)
-        content.TrimStart().Should().StartWith("[");
+        // Should be a valid JSON response (wrapped in DynamicApiResponse)
+        content.TrimStart().Should().StartWith("{");
     }
 
     [Fact]
@@ -479,6 +475,33 @@ public class CategoryApiTests : BaseTest
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         var error = await ReadJsonAsync<ErrorResponse>(response);
         error.Code.Should().Be("Crest.Entity.NotFound");
+    }
+
+    [Fact]
+    public async Task MoveAsync_NullParent_ShouldMakeCategoryRoot()
+    {
+        // Arrange — create a parent with a child
+        var (client, _) = await CreateAuthenticatedAdminClientAsync();
+        var parent = await CreateCategoryAsync(client, "Parent", sortOrder: 0);
+        var child = await CreateCategoryAsync(client, "Child", sortOrder: 0, parentId: parent.Id);
+
+        // Verify child has a parent
+        var childBefore = await GetCategoryByIdAsync(client, child.Id);
+        childBefore.ParentId.Should().Be(parent.Id);
+
+        // Act — move child to root (null parent) — omit newParentId to pass null
+        var moveResponse = await GetAsync(client,
+            $"/api/category/move?id={child.Id}&newParentId=");
+
+        // Assert — child should now be a root (ParentId = null)
+        moveResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var movedDto = await ReadApiResponseAsync<CategoryResponse>(moveResponse);
+        movedDto.Data!.ParentId.Should().BeNull();
+
+        // Verify child is no longer under parent
+        var root1ChildrenRaw = await GetAsync(client, $"/api/category/children/{parent.Id}");
+        var root1Children = await ReadApiResponseAsync<List<CategoryResponse>>(root1ChildrenRaw);
+        root1Children.Data.Should().NotContain(c => c.Id == child.Id);
     }
 
     [Fact]

@@ -42,7 +42,11 @@ builder.Services.AddAuditLogging();
 
 // Add services to the container
 builder.Services.AddControllers()
-    .AddApplicationPart(typeof(CrestCreates.AspNetCore.Authentication.OpenIddict.Controllers.OpenIddictController).Assembly);
+    .AddApplicationPart(typeof(CrestCreates.AspNetCore.Authentication.OpenIddict.Controllers.OpenIddictController).Assembly)
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.Preserve;
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {

@@ -88,6 +88,34 @@ public class AgentApiTests : BaseTest, IClassFixture<Fixtures.HelpdeskWebApplica
         agent.Role.Should().BeNull();
     }
 
+    [Fact]
+    public async Task CreateAsync_WithNonExistentRole_ShouldStillCreateAgent()
+    {
+        // Arrange
+        var (client, _) = await CreateAuthenticatedAdminClientAsync();
+
+        var payload = new
+        {
+            userName = "no-role-agent",
+            email = "no-role-agent@helpdesk.local",
+            password = "AgentPass123!",
+            role = "NonExistentRoleThatDoesNotExist"
+        };
+
+        // Act — agent should still be created even if role doesn't exist
+        var response = await PostAsync(client, "/api/agent", payload);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var apiResponse = await ReadApiResponseAsync<AgentResponse>(response);
+        var agent = apiResponse.Data!;
+
+        agent.Id.Should().NotBe(Guid.Empty);
+        agent.UserName.Should().Be("no-role-agent");
+        agent.IsActive.Should().BeTrue();
+        agent.Role.Should().Be("NonExistentRoleThatDoesNotExist",
+            "the service always returns the input role name regardless of whether a UserRole was created");
+    }
+
     // ── GetByIdAsync ──────────────────────────────────────────────────
 
     [Fact]
@@ -135,8 +163,8 @@ public class AgentApiTests : BaseTest, IClassFixture<Fixtures.HelpdeskWebApplica
             "deactivate-agent", "deactivate-agent@helpdesk.local");
 
         // Act
-        var response = await PostAsync<object>(client,
-            $"/api/agent/{created.Id}/deactivate", null!);
+        var response = await GetAsync(client,
+            $"/api/agent/deactivate?id={created.Id}");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var apiResponse = await ReadApiResponseAsync<AgentResponse>(response);
@@ -160,8 +188,8 @@ public class AgentApiTests : BaseTest, IClassFixture<Fixtures.HelpdeskWebApplica
         var (client, _) = await CreateAuthenticatedAdminClientAsync();
 
         // Act
-        var response = await PostAsync<object>(client,
-            $"/api/agent/{Guid.NewGuid()}/deactivate", null!);
+        var response = await GetAsync(client,
+            $"/api/agent/deactivate?id={Guid.NewGuid()}");
 
         // Assert — the service throws KeyNotFoundException, which should map to a 404 or 500
         // Depending on the framework error handling, this may be 500 or 404

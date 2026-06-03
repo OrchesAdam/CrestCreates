@@ -22,7 +22,8 @@ public abstract class BaseTest : IClassFixture<Fixtures.HelpdeskWebApplicationFa
 
     protected static readonly JsonSerializerOptions JsonOptions = new()
     {
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+        ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.Preserve
     };
 
     protected readonly Fixtures.HelpdeskWebApplicationFactory Factory;
@@ -157,9 +158,14 @@ public abstract class BaseTest : IClassFixture<Fixtures.HelpdeskWebApplicationFa
 
     protected async Task<HttpResponseMessage> DeleteAsync(
         HttpClient client,
-        string url)
+        string url,
+        string? concurrencyStamp = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Delete, url);
+        if (!string.IsNullOrEmpty(concurrencyStamp))
+        {
+            request.Headers.IfMatch.Add(new System.Net.Http.Headers.EntityTagHeaderValue($"\"{concurrencyStamp}\""));
+        }
         return await client.SendAsync(request);
     }
 

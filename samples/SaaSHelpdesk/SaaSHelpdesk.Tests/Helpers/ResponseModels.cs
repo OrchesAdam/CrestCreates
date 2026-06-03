@@ -15,7 +15,7 @@ public sealed class DynamicApiResponse<T>
 /// </summary>
 public sealed class PagedResultResponse<T>
 {
-    public T[] Items { get; set; } = Array.Empty<T>();
+    public List<T> Items { get; set; } = new List<T>();
     public int TotalCount { get; set; }
     public int PageIndex { get; set; }
     public int PageSize { get; set; }

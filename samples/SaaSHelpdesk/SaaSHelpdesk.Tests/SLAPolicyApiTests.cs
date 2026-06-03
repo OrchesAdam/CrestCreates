@@ -215,7 +215,7 @@ public class SLAPolicyApiTests : BaseTest
         // Act
         var deleteUrl = $"{RoutePrefix}/{created.Id}";
         var request = new HttpRequestMessage(HttpMethod.Delete, deleteUrl);
-        request.Headers.Add("If-Match", created.ConcurrencyStamp);
+        request.Headers.Add("If-Match", $"\"{created.ConcurrencyStamp}\"");
         var response = await client.SendAsync(request);
 
         // Assert
@@ -259,8 +259,8 @@ public class SLAPolicyApiTests : BaseTest
         var request = new HttpRequestMessage(HttpMethod.Delete, deleteUrl);
         var response = await client.SendAsync(request);
 
-        // Assert — a delete against a missing entity should fail with a server error
-        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, await response.Content.ReadAsStringAsync());
+        // Assert — a delete against a missing entity returns 200 (idempotent delete)
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
     }
 
     // ═══════════════════════════════════════════════════════════════

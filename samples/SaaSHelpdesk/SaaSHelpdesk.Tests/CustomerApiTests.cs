@@ -129,16 +129,15 @@ public class CustomerApiTests : BaseTest, IClassFixture<Fixtures.HelpdeskWebAppl
             email: "listtest@example.com");
 
         // Act
-        var response = await GetAsync(client, "/api/customer?pageIndex=0&pageSize=10");
+        var response = await GetAsync(client, "/api/customer/all");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var envelope = await ReadJsonAsync<DynamicApiResponse<PagedResultResponse<CustomerDto>>>(response);
+        var envelope = await ReadJsonAsync<DynamicApiResponse<IReadOnlyList<CustomerDto>>>(response);
 
         // Assert
         envelope.Data.Should().NotBeNull();
-        envelope.Data!.TotalCount.Should().BeGreaterThan(0);
-        envelope.Data.Items.Should().NotBeEmpty();
-        envelope.Data.Items.Should().Contain(c => c.Id == created.Id);
+        envelope.Data!.Should().NotBeEmpty();
+        envelope.Data.Should().Contain(c => c.Id == created.Id);
     }
 
     // ── UpdateAsync (inherited) ─────────────────────────────────────

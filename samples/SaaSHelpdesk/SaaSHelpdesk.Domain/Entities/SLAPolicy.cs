@@ -25,6 +25,7 @@ public class SLAPolicy : AuditedEntity<Guid>
     {
         Id = id;
         SetName(name);
+        ConcurrencyStamp = Guid.NewGuid().ToString();
     }
 
     public void SetName(string name)

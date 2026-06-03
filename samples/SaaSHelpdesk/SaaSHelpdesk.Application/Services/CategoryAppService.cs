@@ -29,7 +29,9 @@ public class CategoryAppService : CrestAppServiceBase<Category, Guid, CategoryDt
 
     protected override Category MapToEntity(CreateCategoryDto dto)
     {
-        return new Category(Guid.NewGuid(), dto.Name, dto.SortOrder, dto.ParentId);
+        var category = new Category(Guid.NewGuid(), dto.Name, dto.SortOrder, dto.ParentId);
+        category.SetDescription(dto.Description);
+        return category;
     }
 
     protected override CategoryDto MapToDto(Category entity)
@@ -112,17 +114,13 @@ public class CategoryAppService : CrestAppServiceBase<Category, Guid, CategoryDt
     {
         var dto = MapToDto(node);
 
-        var children = allCategories.Values
+        var childEntities = allCategories.Values
             .Where(c => c.ParentId == node.Id)
             .OrderBy(c => c.SortOrder)
             .ToList();
 
-        dto.Children = children;
-
-        foreach (var child in children)
-        {
-            BuildTree(child, allCategories);
-        }
+        // Recursively build child DTOs and assign to the partial Children property
+        dto.Children = childEntities.Select(child => BuildTree(child, allCategories)).ToList();
 
         return dto;
     }

@@ -123,6 +123,8 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("internal static partial class ModuleAutoInitializer");
         sb.AppendLine("{");
         sb.AppendLine("    private static readonly List<ModuleDescriptor> _registeredModules = new();");
+        sb.AppendLine("    private static readonly object _lock = new();");
+        sb.AppendLine("    private static bool _isInitialized;");
         sb.AppendLine();
 
         sb.AppendLine("    public static IHostBuilder RegisterModules(this IHostBuilder builder)");
@@ -156,13 +158,21 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         }
 
         sb.AppendLine();
-        sb.AppendLine("        _registeredModules.Clear();");
+        sb.AppendLine("        lock (_lock)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            if (_isInitialized)");
+        sb.AppendLine("                return services;");
+        sb.AppendLine();
+        sb.AppendLine("            _registeredModules.Clear();");
 
         foreach (var module in modules)
         {
-            sb.AppendLine($"        _registeredModules.Add(new ModuleDescriptor(typeof({module.FullName}), {module.Order}, {(module.AutoRegisterServices ? "true" : "false")}));");
+            sb.AppendLine($"            _registeredModules.Add(new ModuleDescriptor(typeof({module.FullName}), {module.Order}, {(module.AutoRegisterServices ? "true" : "false")}));");
         }
 
+        sb.AppendLine();
+        sb.AppendLine("            _isInitialized = true;");
+        sb.AppendLine("        }");
         sb.AppendLine();
         sb.AppendLine("        return services;");
         sb.AppendLine("    }");

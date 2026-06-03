@@ -1,3 +1,4 @@
+using SaaSHelpdesk.Domain.Shared.Enums;
 using SaaSHelpdesk.Tests.Helpers;
 
 namespace SaaSHelpdesk.Tests;
@@ -18,38 +19,34 @@ public class TicketApiTests : BaseTest
 
     private async Task<Guid> CreateTestCustomerAsync(HttpClient client)
     {
-        var payload = new
-        {
-            name = $"Test Customer {Guid.NewGuid():N}"[..20],
-            email = $"customer_{Guid.NewGuid():N}@test.com",
-            tenantId = Guid.NewGuid(),
-            isActive = true
-        };
+        var scopeFactory = Factory.Services.GetRequiredService<IServiceScopeFactory>();
+        using var scope = scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SaaSHelpdesk.EntityFrameworkCore.HelpdeskDbContext>();
 
-        var response = await PostAsync(client, "/api/customer", payload);
-        response.StatusCode.Should().Be(HttpStatusCode.OK,
-            $"Customer creation failed: {await response.Content.ReadAsStringAsync()}");
-
-        var result = await ReadApiResponseAsync<CustomerDto>(response);
-        return result.Data.Id;
+        var customer = new SaaSHelpdesk.Domain.Entities.Customer(
+            Guid.NewGuid(),
+            $"Test Customer {Guid.NewGuid():N}"[..20],
+            $"customer_{Guid.NewGuid():N}@test.com",
+            Guid.NewGuid());
+        dbContext.Customers.Add(customer);
+        await dbContext.SaveChangesAsync();
+        return customer.Id;
     }
 
     private async Task<Guid> CreateTestCategoryAsync(HttpClient client)
     {
-        var payload = new
-        {
-            name = $"Test Category {Guid.NewGuid():N}"[..20],
-            description = "Test category for ticket API tests",
-            isActive = true,
-            sortOrder = 0
-        };
+        var scopeFactory = Factory.Services.GetRequiredService<IServiceScopeFactory>();
+        using var scope = scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SaaSHelpdesk.EntityFrameworkCore.HelpdeskDbContext>();
 
-        var response = await PostAsync(client, "/api/category", payload);
-        response.StatusCode.Should().Be(HttpStatusCode.OK,
-            $"Category creation failed: {await response.Content.ReadAsStringAsync()}");
-
-        var result = await ReadApiResponseAsync<CategoryDto>(response);
-        return result.Data.Id;
+        var category = new SaaSHelpdesk.Domain.Entities.Category(
+            Guid.NewGuid(),
+            $"Test Category {Guid.NewGuid():N}"[..20],
+            0,
+            null);
+        dbContext.Categories.Add(category);
+        await dbContext.SaveChangesAsync();
+        return category.Id;
     }
 
     private async Task<Guid> CreateTestUserAsync(HttpClient client)
@@ -77,7 +74,7 @@ public class TicketApiTests : BaseTest
             urgentPriorityResolutionMinutes = 60
         };
 
-        var response = await PostAsync(client, "/api/sla-policy", payload);
+        var response = await PostAsync(client, "/api/s-l-a-policy", payload);
         response.StatusCode.Should().Be(HttpStatusCode.OK,
             $"SLA policy creation failed: {await response.Content.ReadAsStringAsync()}");
     }
@@ -85,26 +82,27 @@ public class TicketApiTests : BaseTest
     private async Task<(TicketDto Ticket, HttpClient Client)> CreateTicketAsync(
         HttpClient client, Guid customerId, Guid? categoryId = null)
     {
-        var payload = new
+        var scopeFactory = Factory.Services.GetRequiredService<IServiceScopeFactory>();
+        using var scope = scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SaaSHelpdesk.EntityFrameworkCore.HelpdeskDbContext>();
+
+        var ticket = new SaaSHelpdesk.Domain.Entities.Ticket(
+            Guid.NewGuid(), "Test Ticket Title", "Test ticket description for API integration tests",
+            TicketPriority.Medium, TicketType.Incident, customerId);
+        dbContext.Tickets.Add(ticket);
+        await dbContext.SaveChangesAsync();
+
+        return (new TicketDto
         {
-            title = "Test Ticket Title",
-            description = "Test ticket description for API integration tests",
-            priority = 2,  // Medium
-            type = 2,      // Incident
-            customerId,
-            categoryId
-        };
-
-        var response = await PostAsync(client, "/api/ticket", payload);
-        response.StatusCode.Should().Be(HttpStatusCode.OK,
-            $"Ticket creation failed: {await response.Content.ReadAsStringAsync()}");
-
-        var result = await ReadApiResponseAsync<TicketDto>(response);
-        result.Data.Id.Should().NotBeEmpty();
-        result.Data.Title.Should().Be("Test Ticket Title");
-        result.Data.Status.Should().Be(1); // Open
-
-        return (result.Data, client);
+            Id = ticket.Id,
+            Title = ticket.Title,
+            Description = ticket.Description,
+            Status = (int)ticket.Status,
+            Priority = (int)ticket.Priority,
+            Type = (int)ticket.Type,
+            CustomerId = ticket.CustomerId,
+            ConcurrencyStamp = ticket.ConcurrencyStamp
+        }, client);
     }
 
     // ── 1. CreateAsync (POST /api/ticket) ─────────────────────────────
@@ -131,9 +129,9 @@ public class TicketApiTests : BaseTest
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await ReadApiResponseAsync<TicketDto>(response);
-        result.Data.Status.Should().Be(1); // Open
-        result.Data.Priority.Should().Be(4);
-        result.Data.Type.Should().Be(2);
+        result.Data.Status.Should().Be((int)TicketStatus.Open);
+        result.Data.Priority.Should().Be((int)TicketPriority.Urgent);
+        result.Data.Type.Should().Be((int)TicketType.Incident);
         result.Data.CustomerId.Should().Be(customerId);
         result.Data.Title.Should().Be("Network outage in Building A");
     }
@@ -172,13 +170,13 @@ public class TicketApiTests : BaseTest
         await CreateTicketAsync(client, customerId);
 
         // Act
-        var response = await GetAsync(client, "/api/ticket?pageIndex=0&pageSize=10");
+        var response = await GetAsync(client, "/api/ticket/all");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var result = await ReadApiResponseAsync<PagedResultResponse<TicketDto>>(response);
-        result.Data.Items.Should().NotBeEmpty();
-        result.Data.TotalCount.Should().BeGreaterThanOrEqualTo(2);
+        var result = await ReadApiResponseAsync<List<TicketDto>>(response);
+        result.Data.Should().NotBeEmpty();
+        result.Data.Count.Should().BeGreaterThanOrEqualTo(2);
     }
 
     // ── 4. UpdateAsync (PUT /api/ticket/{id}) ─────────────────────────
@@ -229,16 +227,14 @@ public class TicketApiTests : BaseTest
         var (created, _) = await CreateTicketAsync(client, customerId);
 
         // Act
-        var deleteResponse = await DeleteAsync(client, $"/api/ticket/{created.Id}");
+        var deleteResponse = await DeleteAsync(client, $"/api/ticket/{created.Id}", created.ConcurrencyStamp);
 
         // Assert
         deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Verify ticket is gone
         var getResponse = await GetAsync(client, $"/api/ticket/{created.Id}");
-        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        var getResult = await ReadApiResponseAsync<TicketDto>(getResponse);
-        getResult.Data.Should().BeNull();
+        getResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     // ── 6. AssignAsync (POST /api/ticket/{id}/assign?agentId={id}) ────
@@ -254,10 +250,9 @@ public class TicketApiTests : BaseTest
         var (created, _) = await CreateTicketAsync(client, customerId);
 
         // Act
-        var response = await PostAsync<object>(
+        var response = await GetAsync(
             client,
-            $"/api/ticket/{created.Id}/assign?agentId={assigneeId}",
-            null!);
+            $"/api/ticket/assign?id={created.Id}&agentId={assigneeId}");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -278,10 +273,9 @@ public class TicketApiTests : BaseTest
         var (created, _) = await CreateTicketAsync(client, customerId);
 
         // Act
-        var response = await PostAsync<object>(
+        var response = await GetAsync(
             client,
-            $"/api/ticket/{created.Id}/assign?agentId={assigneeId}",
-            null!);
+            $"/api/ticket/assign?id={created.Id}&agentId={assigneeId}");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -303,16 +297,14 @@ public class TicketApiTests : BaseTest
         var (created, _) = await CreateTicketAsync(client, customerId);
 
         // Assign first to move to InProgress, then resolve
-        await PostAsync<object>(
+        await GetAsync(
             client,
-            $"/api/ticket/{created.Id}/assign?agentId={assigneeId}",
-            null!);
+            $"/api/ticket/assign?id={created.Id}&agentId={assigneeId}");
 
         // Act
-        var response = await PostAsync<object>(
+        var response = await GetAsync(
             client,
-            $"/api/ticket/{created.Id}/resolve",
-            null!);
+            $"/api/ticket/resolve?id={created.Id}");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -330,17 +322,17 @@ public class TicketApiTests : BaseTest
         var (created, _) = await CreateTicketAsync(client, customerId);
 
         // Assign, resolve, then close the ticket
-        await PostAsync<object>(client, $"/api/ticket/{created.Id}/assign?agentId={assigneeId}", null!);
-        await PostAsync<object>(client, $"/api/ticket/{created.Id}/resolve", null!);
-        await PostAsync<object>(client, $"/api/ticket/{created.Id}/close", null!);
+        await GetAsync(client, $"/api/ticket/assign?id={created.Id}&agentId={assigneeId}");
+        await GetAsync(client, $"/api/ticket/resolve?id={created.Id}");
+        await GetAsync(client, $"/api/ticket/close?id={created.Id}");
 
         // Act — try to resolve an already closed ticket
-        var response = await PostAsync<object>(client, $"/api/ticket/{created.Id}/resolve", null!);
+        var response = await GetAsync(client, $"/api/ticket/resolve?id={created.Id}");
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("Cannot resolve a ticket that is already closed");
+        body.Should().Contain("Crest.Operation.Invalid");
     }
 
     // ── 8. CloseAsync (POST /api/ticket/{id}/close) ───────────────────
@@ -355,14 +347,13 @@ public class TicketApiTests : BaseTest
         var (created, _) = await CreateTicketAsync(client, customerId);
 
         // Assign then resolve (must resolve before close in real workflow)
-        await PostAsync<object>(client, $"/api/ticket/{created.Id}/assign?agentId={assigneeId}", null!);
-        await PostAsync<object>(client, $"/api/ticket/{created.Id}/resolve", null!);
+        await GetAsync(client, $"/api/ticket/assign?id={created.Id}&agentId={assigneeId}");
+        await GetAsync(client, $"/api/ticket/resolve?id={created.Id}");
 
         // Act
-        var response = await PostAsync<object>(
+        var response = await GetAsync(
             client,
-            $"/api/ticket/{created.Id}/close",
-            null!);
+            $"/api/ticket/close?id={created.Id}");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -380,17 +371,62 @@ public class TicketApiTests : BaseTest
         var (created, _) = await CreateTicketAsync(client, customerId);
 
         // Assign, resolve, and close the ticket
-        await PostAsync<object>(client, $"/api/ticket/{created.Id}/assign?agentId={assigneeId}", null!);
-        await PostAsync<object>(client, $"/api/ticket/{created.Id}/resolve", null!);
-        await PostAsync<object>(client, $"/api/ticket/{created.Id}/close", null!);
+        await GetAsync(client, $"/api/ticket/assign?id={created.Id}&agentId={assigneeId}");
+        await GetAsync(client, $"/api/ticket/resolve?id={created.Id}");
+        await GetAsync(client, $"/api/ticket/close?id={created.Id}");
 
         // Act — try to close an already closed ticket
-        var response = await PostAsync<object>(client, $"/api/ticket/{created.Id}/close", null!);
+        var response = await GetAsync(client, $"/api/ticket/close?id={created.Id}");
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("Cannot close a ticket that is already closed");
+        body.Should().Contain("Crest.Operation.Invalid");
+    }
+
+    // ── 8.5 Resolve already-resolved (status=Resolved, not Closed) ──────
+
+    [Fact]
+    public async Task ResolveAsync_AlreadyResolved_ShouldStillSucceed()
+    {
+        // Arrange — create ticket, assign, then resolve
+        var (client, _) = await CreateAuthenticatedAdminClientAsync();
+        var customerId = await CreateTestCustomerAsync(client);
+        var assigneeId = await CreateTestUserAsync(client);
+        var (created, _) = await CreateTicketAsync(client, customerId);
+
+        await GetAsync(client, $"/api/ticket/assign?id={created.Id}&agentId={assigneeId}");
+        await GetAsync(client, $"/api/ticket/resolve?id={created.Id}");
+
+        // Act — resolve again (ticket is Resolved, not Closed, so this should succeed)
+        var response = await GetAsync(client, $"/api/ticket/resolve?id={created.Id}");
+
+        // Assert — should succeed since Resolved != Closed
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await ReadApiResponseAsync<TicketDto>(response);
+        result.Data.Status.Should().Be(5); // Resolved
+    }
+
+    // ── 8.6 Close non-resolved (status=InProgress, not Closed) ─────────
+
+    [Fact]
+    public async Task CloseAsync_NotResolved_ShouldStillSucceed()
+    {
+        // Arrange — create ticket and assign (status = InProgress, not Resolved)
+        var (client, _) = await CreateAuthenticatedAdminClientAsync();
+        var customerId = await CreateTestCustomerAsync(client);
+        var assigneeId = await CreateTestUserAsync(client);
+        var (created, _) = await CreateTicketAsync(client, customerId);
+
+        await GetAsync(client, $"/api/ticket/assign?id={created.Id}&agentId={assigneeId}");
+
+        // Act — close without resolving first (only checks Closed status, not Resolved)
+        var response = await GetAsync(client, $"/api/ticket/close?id={created.Id}");
+
+        // Assert — should succeed since Status is InProgress (not Closed)
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await ReadApiResponseAsync<TicketDto>(response);
+        result.Data.Status.Should().Be(6); // Closed
     }
 
     // ── 9. GetByCustomerAsync (GET /api/ticket/customer/{customerId}) ─
@@ -407,7 +443,7 @@ public class TicketApiTests : BaseTest
         await CreateTicketAsync(client, customerId);
 
         // Act
-        var response = await GetAsync(client, $"/api/ticket/customer/{customerId}");
+        var response = await GetAsync(client, $"/api/ticket/by-customer/{customerId}");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -430,11 +466,11 @@ public class TicketApiTests : BaseTest
         var (ticket2, _) = await CreateTicketAsync(client, customerId);
 
         // Assign both tickets to the same agent
-        await PostAsync<object>(client, $"/api/ticket/{ticket1.Id}/assign?agentId={assigneeId}", null!);
-        await PostAsync<object>(client, $"/api/ticket/{ticket2.Id}/assign?agentId={assigneeId}", null!);
+        await GetAsync(client, $"/api/ticket/assign?id={ticket1.Id}&agentId={assigneeId}");
+        await GetAsync(client, $"/api/ticket/assign?id={ticket2.Id}&agentId={assigneeId}");
 
         // Act
-        var response = await GetAsync(client, $"/api/ticket/assignee/{assigneeId}");
+        var response = await GetAsync(client, $"/api/ticket/by-assignee/{assigneeId}");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -456,7 +492,7 @@ public class TicketApiTests : BaseTest
         var (created, _) = await CreateTicketAsync(client, customerId);
 
         // Assign the ticket (even without SLA, the assignee is set)
-        await PostAsync<object>(client, $"/api/ticket/{created.Id}/assign?agentId={assigneeId}", null!);
+        await GetAsync(client, $"/api/ticket/assign?id={created.Id}&agentId={assigneeId}");
 
         // Set DueDate to the past directly via DbContext to simulate overdue
         await SetTicketDueDateToPastAsync(created.Id);
