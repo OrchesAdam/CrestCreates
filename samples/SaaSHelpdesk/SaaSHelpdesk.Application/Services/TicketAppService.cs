@@ -21,9 +21,11 @@ namespace SaaSHelpdesk.Application.Services;
 public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, CreateTicketDto, UpdateTicketDto>, ITicketAppService
 {
     private readonly ITicketRepository _ticketRepository;
+    private readonly ICrestRepositoryBase<SLAPolicy, Guid> _slaPolicyRepository;
 
     public TicketAppService(
         ITicketRepository repository,
+        ICrestRepositoryBase<SLAPolicy, Guid> slaPolicyRepository,
         IServiceProvider serviceProvider,
         ICurrentUser currentUser,
         IDataPermissionFilter dataPermissionFilter,
@@ -31,6 +33,7 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
         : base(repository, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
     {
         _ticketRepository = repository;
+        _slaPolicyRepository = slaPolicyRepository;
     }
 
     protected override Ticket MapToEntity(CreateTicketDto dto)
@@ -65,12 +68,22 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
         entity.SetTitle(dto.Title);
         entity.SetDescription(dto.Description);
         entity.SetPriority(dto.Priority);
+        entity.SetCategory(dto.CategoryId);
     }
 
     public async Task<TicketDto> AssignAsync(Guid id, Guid agentId)
     {
         var ticket = await Repository.GetAsync(id);
         ticket.AssignTo(agentId);
+
+        var activeSlaPolicy = _slaPolicyRepository.GetQueryable()
+            .FirstOrDefault(p => p.IsActive);
+        if (activeSlaPolicy != null)
+        {
+            var responseMinutes = activeSlaPolicy.GetResponseMinutes(ticket.Priority);
+            ticket.SetDueDate(DateTime.UtcNow.AddMinutes(responseMinutes));
+        }
+
         await Repository.UpdateAsync(ticket);
         return MapToDto(ticket);
     }
@@ -78,6 +91,8 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
     public async Task<TicketDto> ResolveAsync(Guid id)
     {
         var ticket = await Repository.GetAsync(id);
+        if (ticket.Status == TicketStatus.Closed)
+            throw new InvalidOperationException("Cannot resolve a ticket that is already closed.");
         ticket.Resolve();
         await Repository.UpdateAsync(ticket);
         return MapToDto(ticket);
@@ -86,6 +101,8 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
     public async Task<TicketDto> CloseAsync(Guid id)
     {
         var ticket = await Repository.GetAsync(id);
+        if (ticket.Status == TicketStatus.Closed)
+            throw new InvalidOperationException("Cannot close a ticket that is already closed.");
         ticket.Close();
         await Repository.UpdateAsync(ticket);
         return MapToDto(ticket);

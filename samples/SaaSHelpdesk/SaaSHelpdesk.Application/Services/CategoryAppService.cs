@@ -77,6 +77,23 @@ public class CategoryAppService : CrestAppServiceBase<Category, Guid, CategoryDt
         var category = await Repository.GetAsync(id);
         if (category == null)
             throw new KeyNotFoundException($"Category {id} not found");
+
+        if (newParentId.HasValue)
+        {
+            var allCategories = await Repository.GetListAsync();
+            var currentId = newParentId.Value;
+            while (currentId != Guid.Empty)
+            {
+                if (currentId == id)
+                    throw new InvalidOperationException(
+                        "Cannot move a category to one of its descendants (circular reference).");
+                var parent = allCategories.FirstOrDefault(c => c.Id == currentId);
+                if (parent?.ParentId == null)
+                    break;
+                currentId = parent.ParentId.Value;
+            }
+        }
+
         category.MoveTo(newParentId);
         await Repository.UpdateAsync(category);
         return MapToDto(category);
@@ -94,6 +111,19 @@ public class CategoryAppService : CrestAppServiceBase<Category, Guid, CategoryDt
     private CategoryDto BuildTree(Category node, Dictionary<Guid, Category> allCategories)
     {
         var dto = MapToDto(node);
+
+        var children = allCategories.Values
+            .Where(c => c.ParentId == node.Id)
+            .OrderBy(c => c.SortOrder)
+            .ToList();
+
+        dto.Children = children;
+
+        foreach (var child in children)
+        {
+            BuildTree(child, allCategories);
+        }
+
         return dto;
     }
 }

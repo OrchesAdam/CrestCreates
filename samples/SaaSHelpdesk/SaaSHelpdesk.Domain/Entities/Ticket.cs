@@ -59,6 +59,16 @@ public class Ticket : AuditedEntity<Guid>, IHasDomainEvents
         Priority = priority;
     }
 
+    public void SetCategory(Guid? categoryId)
+    {
+        CategoryId = categoryId;
+    }
+
+    public void SetDueDate(DateTime? dueDate)
+    {
+        DueDate = dueDate;
+    }
+
     public void AssignTo(Guid agentId)
     {
         AssigneeId = agentId;

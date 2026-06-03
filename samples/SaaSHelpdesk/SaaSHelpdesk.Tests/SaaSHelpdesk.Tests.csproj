@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SaaSHelpdesk.Tests</RootNamespace>
+    <AssemblyName>SaaSHelpdesk.Tests</AssemblyName>
+    <OutputType>Library</OutputType>
+    <IsPackable>false</IsPackable>
+    <CrestCreatesCodeGeneration>false</CrestCreatesCodeGeneration>
+    <CrestCreatesDynamicApiAotGeneration>false</CrestCreatesDynamicApiAotGeneration>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../SaaSHelpdesk.Web/SaaSHelpdesk.Web.csproj" />
+    <ProjectReference Include="../SaaSHelpdesk.EntityFrameworkCore/SaaSHelpdesk.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Moq" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Testcontainers" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="OpenIddict.EntityFrameworkCore" />
+    <PackageReference Include="OpenIddict.EntityFrameworkCore.Models" />
+  </ItemGroup>
+
+</Project>

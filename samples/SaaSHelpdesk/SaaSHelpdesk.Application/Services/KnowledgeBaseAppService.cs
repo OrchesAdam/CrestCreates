@@ -86,6 +86,16 @@ public class KnowledgeBaseAppService : CrestAppServiceBase<KnowledgeBaseArticle,
 
     public async Task<List<KnowledgeBaseArticleDto>> SearchAsync(string keyword)
     {
+        if (string.IsNullOrWhiteSpace(keyword))
+        {
+            return new List<KnowledgeBaseArticleDto>();
+        }
+
+        // NOTE: Loads all articles into memory and filters in-app because the
+        // repository base does not expose a Where(predicate) overload for
+        // string.Contains operations. This is acceptable for small datasets
+        // but should be replaced with a database-level query if the article
+        // count grows significantly.
         var articles = await Repository.GetListAsync();
         return articles.Where(a => a.IsPublished)
             .Where(a => a.Title.Contains(keyword, StringComparison.OrdinalIgnoreCase)
@@ -96,6 +106,14 @@ public class KnowledgeBaseAppService : CrestAppServiceBase<KnowledgeBaseArticle,
 
     public async Task<List<KnowledgeBaseArticleDto>> GetPopularAsync(int count = 10)
     {
+        if (count <= 0)
+        {
+            return new List<KnowledgeBaseArticleDto>();
+        }
+
+        // In-memory operation: loads all articles then sorts and takes top N.
+        // Acceptable for small datasets; replace with database-level query if
+        // the article count grows significantly.
         var articles = await Repository.GetListAsync();
         return articles.Where(a => a.IsPublished)
             .OrderByDescending(a => a.ViewCount)

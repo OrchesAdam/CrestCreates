@@ -24,8 +24,9 @@ public class DashboardAppService : IDashboardAppService
     public async Task<DashboardSummaryDto> GetSummaryAsync()
     {
         var today = DateTime.UtcNow.Date;
-        var allTickets = await _ticketRepository.GetListAsync();
 
+        // Load all tickets for in-memory aggregation (acceptable for dashboard workloads)
+        var allTickets = await _ticketRepository.GetListAsync();
         var counted = allTickets.ToList();
 
         var byPriority = new Dictionary<string, int>();
@@ -37,6 +38,24 @@ public class DashboardAppService : IDashboardAppService
             byPriority[t.Priority.ToString()]++;
         }
 
+        // Average resolution hours for resolved tickets (based on ResolvedAt)
+        var resolvedTickets = counted.Where(t => t.ResolvedAt.HasValue).ToList();
+        var averageResolutionHours = resolvedTickets.Count > 0
+            ? resolvedTickets.Average(t => (t.ResolvedAt!.Value - t.CreationTime).TotalHours)
+            : 0.0;
+
+        // Agent workloads: group assigned tickets by AssigneeId
+        var agentWorkloads = counted
+            .Where(t => t.AssigneeId.HasValue)
+            .GroupBy(t => t.AssigneeId!.Value)
+            .Select(g => new AgentWorkloadDto
+            {
+                AgentName = g.Key.ToString(),
+                AssignedTickets = g.Count(),
+                ResolvedTickets = g.Count(t => t.Status == TicketStatus.Resolved)
+            })
+            .ToList();
+
         return new DashboardSummaryDto
         {
             TotalTickets = counted.Count,
@@ -46,7 +65,9 @@ public class DashboardAppService : IDashboardAppService
             ClosedTickets = counted.Count(t => t.Status == TicketStatus.Closed),
             OverdueTickets = counted.Count(t => t.DueDate.HasValue && t.DueDate.Value.Date < today && t.Status != TicketStatus.Closed),
             TicketsCreatedToday = counted.Count(t => t.CreationTime.Date >= today),
+            AverageResolutionHours = averageResolutionHours,
             TicketsByPriority = byPriority,
+            AgentWorkloads = agentWorkloads,
         };
     }
 }

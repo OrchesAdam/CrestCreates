@@ -40,6 +40,11 @@ public class Customer : AuditedEntity<Guid>
         Company = company;
     }
 
+    public void SetNotes(string? notes)
+    {
+        Notes = notes;
+    }
+
     public void Activate()
     {
         IsActive = true;
