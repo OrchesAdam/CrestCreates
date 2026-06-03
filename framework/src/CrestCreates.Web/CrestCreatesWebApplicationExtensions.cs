@@ -7,7 +7,6 @@ using CrestCreates.Application.Settings;
 using CrestCreates.Application.Tenants;
 using CrestCreates.AspNetCore;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
-using CrestCreates.AspNetCore.Authentication.OpenIddict.Controllers;
 using CrestCreates.AspNetCore.Middlewares;
 using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Options;
@@ -38,8 +37,6 @@ using CrestCreates.OrmProviders.EFCore.Settings;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.ApplicationParts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -65,18 +62,6 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddScoped<IAuditLogWriter, AuditLogWriter>();
         services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddAuditLogging();
-
-        services.AddControllers()
-            .ConfigureApplicationPartManager(partManager =>
-            {
-                partManager.ApplicationParts.Clear();
-                partManager.ApplicationParts.Add(new AssemblyPart(typeof(OpenIddictController).Assembly));
-            })
-            .AddJsonOptions(options =>
-            {
-                options.JsonSerializerOptions.PropertyNamingPolicy = null;
-                options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.Preserve;
-            });
 
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen(options =>
@@ -179,9 +164,8 @@ public static class CrestCreatesWebApplicationExtensions
 
     public static WebApplication MapCrestWeb(this WebApplication app)
     {
-        // Keep MVC routing limited to the OpenIddict controller assembly only.
+        app.MapCrestOpenIddictEndpoints();
         app.MapCrestAspNetCoreDynamicApi();
-        app.MapControllers();
         return app;
     }
 

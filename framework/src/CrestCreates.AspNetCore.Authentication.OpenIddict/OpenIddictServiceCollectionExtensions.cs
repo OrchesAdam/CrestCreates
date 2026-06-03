@@ -76,6 +76,7 @@ public static class OpenIddictServiceCollectionExtensions
                 serverOptions.DisableAccessTokenEncryption();
 
                 serverOptions.UseAspNetCore()
+                    .EnableAuthorizationEndpointPassthrough()
                     .EnableTokenEndpointPassthrough()
                     .EnableUserInfoEndpointPassthrough();
             })

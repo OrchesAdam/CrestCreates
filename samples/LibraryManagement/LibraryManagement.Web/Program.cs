@@ -40,9 +40,6 @@ builder.Services.AddScoped<IAuditLogWriter, AuditLogWriter>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddAuditLogging();
 
-// Add services to the container
-builder.Services.AddControllers()
-    .AddApplicationPart(typeof(CrestCreates.AspNetCore.Authentication.OpenIddict.Controllers.OpenIddictController).Assembly);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -110,7 +107,7 @@ app.UseMultiTenancy();
 app.UseAuthentication();
 app.UseTenantBoundary();
 app.UseAuthorization();
-app.MapControllers();
+app.MapCrestOpenIddictEndpoints();
 app.MapCrestAspNetCoreDynamicApi();
 
 // Initialize all modules
