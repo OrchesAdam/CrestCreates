@@ -8,36 +8,36 @@ using Xunit;
 
 namespace CrestCreates.CodeGenerator.Tests.CrudServiceGenerator;
 
-    public sealed class CrudServiceMainlineSourceGeneratorTests
+public sealed class CrudServiceMainlineSourceGeneratorTests
+{
+    [Fact]
+    public void GeneratedCrud_WithObjectMappingGenerator_ShouldCompileGeneratedMappings()
     {
-        [Fact]
-        public void GeneratedCrud_WithObjectMappingGenerator_ShouldCompileGeneratedMappings()
-        {
-            var result = SourceGeneratorTestHelper.RunGenerators(
-                EntitySource,
-                new IIncrementalGenerator[] { new CrudServiceSourceGenerator(), new ObjectMappingSourceGenerator() },
-                new[] { EntitySupport },
-                FrameworkReferences);
+        var result = SourceGeneratorTestHelper.RunGenerators(
+            EntitySource,
+            new IIncrementalGenerator[] { new CrudServiceSourceGenerator(), new ObjectMappingSourceGenerator() },
+            new[] { EntitySupport },
+            FrameworkReferences);
 
-            Assert.True(result.CompilationSuccess,
-                "Compilation failed. Diagnostics:\n" +
-                string.Join("\n", result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error).Select(d => d.ToString())));
+        Assert.True(result.CompilationSuccess,
+            "Compilation failed. Diagnostics:\n" +
+            string.Join("\n", result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error).Select(d => d.ToString())));
 
-            Assert.True(result.ContainsFile("ProductObjectMappings.g.cs"));
-            Assert.True(result.ContainsSource("public static partial class ProductObjectMappings"));
-            Assert.True(result.ContainsSource("ToTarget("));
-            Assert.True(result.ContainsSource("Apply("));
+        Assert.True(result.ContainsFile("ProductObjectMappings.g.cs"));
+        Assert.True(result.ContainsSource("public static partial class ProductObjectMappings"));
+        Assert.True(result.ContainsSource("ToTarget("));
+        Assert.True(result.ContainsSource("Apply("));
 
-            var implSource = result.GetSourceByFileName("ProductAppService.g.cs")!.SourceText;
-            Assert.Contains("ProductObjectMappings.ToTarget(input)", implSource);
-            Assert.Contains("ProductObjectMappings.ToTarget(created)", implSource);
-            Assert.Contains("ProductObjectMappings.Apply(input, entity)", implSource);
-        }
+        var implSource = result.GetSourceByFileName("ProductAppService.g.cs")!.SourceText;
+        Assert.Contains("ProductObjectMappings.ToTarget(input)", implSource);
+        Assert.Contains("ProductObjectMappings.ToTarget(created)", implSource);
+        Assert.Contains("ProductObjectMappings.Apply(input, entity)", implSource);
+    }
 
-        [Fact]
-        public void GeneratedCrud_ShouldCompileForSampleEntity()
-        {
-            var result = RunProductGenerator();
+    [Fact]
+    public void GeneratedCrud_ShouldCompileForSampleEntity()
+    {
+        var result = RunProductGenerator();
 
         Assert.True(result.CompilationSuccess,
             "Compilation failed. Diagnostics:\n" +
@@ -52,6 +52,75 @@ namespace CrestCreates.CodeGenerator.Tests.CrudServiceGenerator;
         Assert.True(result.ContainsFile("ProductCrudPermissions.g.cs"));
         Assert.True(result.ContainsFile("ProductObjectMappings.g.cs"));
         // Dynamic API registration is conditional on IDynamicApiGeneratedProvider presence
+    }
+
+    [Fact]
+    public void GeneratedCrud_ForDomainEntities_ShouldUseApplicationContractsDtosNamespace()
+    {
+        const string source = """
+using System;
+using CrestCreates.Domain.Shared.Attributes;
+
+namespace Sample.Domain.Entities;
+
+[GenerateCrudService]
+public class Category : AuditedAggregateRoot<Guid>
+{
+    public string Name { get; set; } = string.Empty;
+}
+""";
+
+        const string support = """
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Sample.Domain.Entities
+{
+    public interface IEntity<TKey>
+    {
+        TKey Id { get; set; }
+    }
+
+    public interface IHasConcurrencyStamp
+    {
+        string ConcurrencyStamp { get; set; }
+    }
+
+    public abstract class AuditedAggregateRoot<TKey> : IEntity<TKey>, IHasConcurrencyStamp
+        where TKey : IEquatable<TKey>
+    {
+        public TKey Id { get; set; } = default!;
+        public DateTime CreationTime { get; set; }
+        public Guid? CreatorId { get; set; }
+        public DateTime? LastModificationTime { get; set; }
+        public Guid? LastModifierId { get; set; }
+        public string ConcurrencyStamp { get; set; } = Guid.NewGuid().ToString();
+    }
+}
+""";
+
+        var result = SourceGeneratorTestHelper.RunGenerators(
+            source,
+            new IIncrementalGenerator[] { new CrudServiceSourceGenerator(), new ObjectMappingSourceGenerator() },
+            new[] { support },
+            FrameworkReferences);
+
+        Assert.True(result.CompilationSuccess,
+            "Compilation failed. Diagnostics:\n" +
+            string.Join("\n", result.Diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error).Select(d => d.ToString())));
+
+        Assert.Contains("namespace Sample.Application.Contracts.DTOs", result.GetSourceByFileName("CategoryDto.g.cs")!.SourceText);
+        Assert.Contains("namespace Sample.Application.Contracts.DTOs", result.GetSourceByFileName("CreateCategoryDto.g.cs")!.SourceText);
+        Assert.Contains("namespace Sample.Application.Contracts.DTOs", result.GetSourceByFileName("UpdateCategoryDto.g.cs")!.SourceText);
+        Assert.Contains("namespace Sample.Application.Contracts.DTOs", result.GetSourceByFileName("CategoryListRequestDto.g.cs")!.SourceText);
+        Assert.Contains("using Sample.Application.Contracts.DTOs;", result.GetSourceByFileName("ICategoryAppService.g.cs")!.SourceText);
+        Assert.Contains("using Sample.Application.Contracts.DTOs;", result.GetSourceByFileName("CategoryAppService.g.cs")!.SourceText);
+        Assert.Contains("using Sample.Application.Contracts.DTOs;", result.GetSourceByFileName("CategoryObjectMappings.g.cs")!.SourceText);
+        Assert.DoesNotContain("Sample.Domain.Entities.Dtos", result.GetSourceByFileName("CategoryDto.g.cs")!.SourceText);
+        Assert.DoesNotContain("Sample.Domain.Entities.Dtos", result.GetSourceByFileName("CategoryObjectMappings.g.cs")!.SourceText);
     }
 
     [Fact]
