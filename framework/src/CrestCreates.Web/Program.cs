@@ -1,24 +1,14 @@
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.Hosting;
-using CrestCreates.Logging.Extensions;
+using CrestCreates.Web;
+using Microsoft.AspNetCore.Builder;
 using CrestCreates.Modularity;
 
-namespace CrestCreates.Web
-{
-    public class Program
-    {
-        public static void Main(string[] args)
-        {
-            CreateHostBuilder(args).Build().InitializeModules().Run();
-        }
+var builder = WebApplication.CreateBuilder(args);
+builder.AddCrestWeb();
 
-        public static IHostBuilder CreateHostBuilder(string[] args) =>
-            Host.CreateDefaultBuilder(args)
-                .UseCrestSerilog()
-                .UsePinnedScopeServiceProvider()
-                .ConfigureWebHostDefaults(webBuilder =>
-                {
-                    webBuilder.UseStartup<Startup>();
-                });
-    }
-}
+var app = builder.Build();
+app.UseCrestWeb();
+app.MapCrestWeb();
+app.InitializeModules();
+app.Run();
+
+public partial class Program;
