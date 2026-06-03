@@ -35,7 +35,7 @@ CrestCreates 当前重点是把框架主链收口，而不是继续堆模块名�
 | Feature Management | 已完成 | 支持 Feature 定义、Global / Tenant 覆盖、解析顺序、缓存失效、权限边界、租户初始化、审计和 generated API。 |
 | 全局异常处理 | 已完成 | 统一异常基类、业务异常、验证异常、权限异常、并发异常、错误响应格式和本地化资源已接入。 |
 | 审计日志 | 已完成 | 请求级和方法级审计、查询 API、扩展属性和清理能力已接入示例和测试。 |
-| 对象映射生成 | 已完成 | 编译期对象映射已作为主方向，支持常见 DTO / Entity 映射场景，减少运行时反射依赖。 |
+| DTO / 对象映射生成 | 已完成 | `ObjectMappingSourceGenerator` 已作为唯一映射主链，支持 DTO / Entity、Create、Update Apply、受保护字段、简单转换、导航路径诊断，并已接入 CRUD / Entity 生成器。 |
 | 多 ORM 基础支持 | 已完成 | EF Core、FreeSql、SqlSugar Provider 已存在，统一仓储抽象已可用。 |
 | 事件总线基础能力 | 已完成 | Local、RabbitMQ、Kafka、EventStore 等事件通道已有实现。 |
 | 分布式事务基础能力 | 已完成 | CAP 集成、事务日志和补偿机制已有基础主链。 |
@@ -47,7 +47,7 @@ CrestCreates 当前重点是把框架主链收口，而不是继续堆模块名�
 | Feature | 优先级 | 要做的事 |
 |---------|--------|----------|
 | CRUD 主链增强 | P1 | 强化通用 CRUD 服务、复杂查询、排序过滤、权限映射和生成器输出，减少样板代码。 |
-| DTO 映射完整度 | P1 | 提升复杂映射支持、编译期诊断质量和 sample 覆盖，逐步弱化 AutoMapper 心智。 |
+| 映射生态覆盖 | P2 | 继续补充复杂业务样例、更多 converter 场景和文档示例；主链已完成，不再引入 AutoMapper 或运行时 mapper。 |
 | 多 ORM 一致性 | P1 | 对齐 EF Core / FreeSql / SqlSugar 在软删除、多租户、审计、事务、分页、并发上的行为和测试。 |
 | 后台作业平台化 | P1 | 统一一次性任务、延迟任务、周期任务、状态、历史、重试、取消、暂停和租户上下文传递。 |
 | 认证链路收口 | P1 | 继续统一 claims、current user、tenant 上下文和 token / refresh / 越权测试，清理重复认证逻辑。 |
@@ -222,7 +222,7 @@ public class BookAppService : CrestAppServiceBase<Book, Guid, BookDto, CreateBoo
 | 调度 | Quartz 3.17 |
 | AOP | Rougamo/Fody 5 |
 | 日志 | Serilog |
-| 映射 | AutoMapper / 编译期 GenerateObjectMapping |
+| 映射 | 编译期 GenerateObjectMapping |
 | 验证 | FluentValidation |
 | 中介者 | MediatR |
 | 测试 | xUnit / FluentAssertions / Moq / AutoFixture |
