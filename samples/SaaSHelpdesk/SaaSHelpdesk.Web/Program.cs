@@ -120,16 +120,14 @@ lifetime.ApplicationStarted.Register(() =>
 {
     var addresses = app.Urls;
     Console.WriteLine();
-    Console.WriteLine("┌──────────────────────────────────────────────────────┐");
-    Console.WriteLine("│ SaaSHelpdesk application started                     │");
-    Console.WriteLine("├──────────────────────────────────────────────────────┤");
+    Console.WriteLine("  SaaSHelpdesk application started");
+    Console.WriteLine("  ─────────────────────────────────");
     foreach (var address in addresses)
     {
-        Console.WriteLine($"│   {address}                          │");
-        Console.WriteLine($"│   OpenAPI:   {address}/openapi/v1.json");
-        Console.WriteLine($"│   Scalar UI: {address}/scalar/v1");
+        Console.WriteLine($"  Listen:     {address}");
+        Console.WriteLine($"  OpenAPI:    {address}/openapi/v1.json");
+        Console.WriteLine($"  Scalar UI:  {address}/scalar/v1");
     }
-    Console.WriteLine("└──────────────────────────────────────────────────────┘");
     Console.WriteLine();
 });
 
