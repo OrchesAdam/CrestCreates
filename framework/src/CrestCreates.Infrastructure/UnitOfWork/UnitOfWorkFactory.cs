@@ -94,7 +94,7 @@ namespace CrestCreates.Infrastructure.UnitOfWork
             {
                 RegisterUnitOfWorkFactory(OrmProvider.EfCore, sp =>
                 {
-                    var type = Type.GetType("CrestCreates.OrmProviders.EFCore.UnitOfWork.EfCoreUnitOfWork");
+                    var type = Type.GetType("CrestCreates.Data.EFCore.UnitOfWork.EfCoreUnitOfWork");
                     return type != null ? (IUnitOfWork)sp.GetRequiredService(type) : throw new NotSupportedException("EfCore unit of work type not found");
                 });
             }
@@ -105,7 +105,7 @@ namespace CrestCreates.Infrastructure.UnitOfWork
             {
                 RegisterUnitOfWorkFactory(OrmProvider.SqlSugar, sp =>
                 {
-                    var type = Type.GetType("CrestCreates.OrmProviders.SqlSugar.UnitOfWork.SqlSugarUnitOfWork");
+                    var type = Type.GetType("CrestCreates.Data.SqlSugar.UnitOfWork.SqlSugarUnitOfWork");
                     return type != null ? (IUnitOfWork)sp.GetRequiredService(type) : throw new NotSupportedException("SqlSugar unit of work type not found");
                 });
             }
@@ -116,7 +116,7 @@ namespace CrestCreates.Infrastructure.UnitOfWork
             {
                 RegisterUnitOfWorkFactory(OrmProvider.FreeSql, sp =>
                 {
-                    var type = Type.GetType("CrestCreates.OrmProviders.FreeSqlProvider.UnitOfWork.FreeSqlUnitOfWork");
+                    var type = Type.GetType("CrestCreates.Data.FreeSqlProvider.UnitOfWork.FreeSqlUnitOfWork");
                     return type != null ? (IUnitOfWork)sp.GetRequiredService(type) : throw new NotSupportedException("FreeSql unit of work type not found");
                 });
             }
@@ -163,9 +163,9 @@ namespace CrestCreates.Infrastructure.UnitOfWork
         {
             string typeName = provider switch
             {
-                OrmProvider.EfCore => "CrestCreates.OrmProviders.EFCore.UnitOfWork.EfCoreUnitOfWork",
-                OrmProvider.SqlSugar => "CrestCreates.OrmProviders.SqlSugar.UnitOfWork.SqlSugarUnitOfWork",
-                OrmProvider.FreeSql => "CrestCreates.OrmProviders.FreeSqlProvider.UnitOfWork.FreeSqlUnitOfWork",
+                OrmProvider.EfCore => "CrestCreates.Data.EFCore.UnitOfWork.EfCoreUnitOfWork",
+                OrmProvider.SqlSugar => "CrestCreates.Data.SqlSugar.UnitOfWork.SqlSugarUnitOfWork",
+                OrmProvider.FreeSql => "CrestCreates.Data.FreeSqlProvider.UnitOfWork.FreeSqlUnitOfWork",
                 _ => throw new NotSupportedException($"ORM provider '{provider}' is not supported")
             };
 

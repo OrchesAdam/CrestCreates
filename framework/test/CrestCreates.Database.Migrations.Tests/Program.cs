@@ -1,7 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.DbContexts;
 
 namespace CrestCreates.Database.Migrations.Tests
 {

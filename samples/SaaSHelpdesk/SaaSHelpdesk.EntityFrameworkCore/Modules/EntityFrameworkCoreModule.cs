@@ -6,13 +6,13 @@ using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using CrestCreates.OpenApi;
-using CrestCreates.OrmProviders.Abstract;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
-using CrestCreates.OrmProviders.EFCore.MultiTenancy;
-using CrestCreates.OrmProviders.EFCore.Repositories;
-using CrestCreates.OrmProviders.EFCore.Settings;
-using CrestCreates.OrmProviders.EFCore.UnitOfWork;
-using CrestCreates.OrmProviders.EFCore.ValueConverters;
+using CrestCreates.Data.Abstractions;
+using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.MultiTenancy;
+using CrestCreates.Data.EFCore.Repositories;
+using CrestCreates.Data.EFCore.Settings;
+using CrestCreates.Data.EFCore.UnitOfWork;
+using CrestCreates.Data.EFCore.ValueConverters;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -49,7 +49,7 @@ public class EntityFrameworkCoreModule : ModuleBase
             new EfCoreDbContextAdapter(sp.GetRequiredService<HelpdeskDbContext>()));
         services.AddScoped<IDataBaseContext>(sp =>
             sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
-        services.AddScoped(typeof(IRepository<,>), typeof(DomainRepositoryAdapter<,>));
+        services.AddScoped(typeof(CrestCreates.Domain.Repositories.IRepository<,>), typeof(DomainRepositoryAdapter<,>));
         services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
         // Framework repositories

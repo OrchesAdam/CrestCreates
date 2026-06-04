@@ -12,6 +12,7 @@ public static class TenantManagementServiceCollectionExtensions
         services.TryAddScoped<TenantInitializationOrchestrator>();
         services.TryAddScoped<ITenantSettingDefaultsSeeder, TenantSettingDefaultsSeeder>();
         services.TryAddScoped<ITenantFeatureDefaultsSeeder, TenantFeatureDefaultsSeeder>();
+        services.TryAddScoped<ITenantInitializationEventSink, TenantInitializationEventSink>();
         return services;
     }
 }

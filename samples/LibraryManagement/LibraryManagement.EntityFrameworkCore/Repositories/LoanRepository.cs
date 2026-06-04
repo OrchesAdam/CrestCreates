@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.DbContextProvider.Abstract;
-using CrestCreates.OrmProviders.EFCore.Repositories;
+using CrestCreates.Data.EFCore.Repositories;
 using LibraryManagement.Domain.Entities;
 using LibraryManagement.Domain.Repositories;
 using LibraryManagement.Domain.Shared.Enums;

@@ -20,12 +20,12 @@ using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.MultiTenancy.Abstract;
-using CrestCreates.OrmProviders.Abstract;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
+using CrestCreates.Data.Abstractions;
+using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
-using CrestCreates.OrmProviders.EFCore.Repositories;
-using CrestCreates.OrmProviders.EFCore.Settings;
-using CrestCreates.OrmProviders.EFCore.UnitOfWork;
+using CrestCreates.Data.EFCore.Repositories;
+using CrestCreates.Data.EFCore.Settings;
+using CrestCreates.Data.EFCore.UnitOfWork;
 using SaaSHelpdesk.Application.Contracts.Interfaces;
 using SaaSHelpdesk.Application.Services;
 using SaaSHelpdesk.Domain.Repositories;
@@ -352,7 +352,7 @@ public sealed class HelpdeskWebApplicationFactory
             });
 
             // Generic repository registrations (normally provided by EntityFrameworkCoreModule)
-            services.AddScoped(typeof(IRepository<,>), typeof(DomainRepositoryAdapter<,>));
+            services.AddScoped(typeof(CrestCreates.Domain.Repositories.IRepository<,>), typeof(DomainRepositoryAdapter<,>));
             services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
             // Unit of Work

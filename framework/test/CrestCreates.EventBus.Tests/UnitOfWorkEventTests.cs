@@ -9,9 +9,9 @@ using SqlSugar;
 using FreeSql;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Entities;
-using CrestCreates.OrmProviders.EFCore.UnitOfWork;
-using CrestCreates.OrmProviders.SqlSugar.UnitOfWork;
-using CrestCreates.OrmProviders.FreeSqlProvider.UnitOfWork;
+using CrestCreates.Data.EFCore.UnitOfWork;
+using CrestCreates.Data.SqlSugar.UnitOfWork;
+using CrestCreates.Data.FreeSqlProvider.UnitOfWork;
 using CrestCreates.EventBus.Local;
 using CrestCreates.EventBus.Tests.Events;
 

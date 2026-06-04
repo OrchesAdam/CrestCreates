@@ -9,7 +9,7 @@ namespace CrestCreates.CodeGenerator.Tests.TenantFilterGenerator;
 public class TenantFilterSourceGeneratorTests
 {
     private const string IMultiTenantStub = """
-        namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
+        namespace CrestCreates.Data.EFCore.MultiTenancy
         {
             public interface IMultiTenant
             {
@@ -37,7 +37,7 @@ public class TenantFilterSourceGeneratorTests
         using Microsoft.EntityFrameworkCore;
         using CrestCreates.MultiTenancy.Abstract;
 
-        namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
+        namespace CrestCreates.Data.EFCore.MultiTenancy
         {
             public static class TenantFilterRegistryStore
             {
@@ -76,7 +76,7 @@ public class TenantFilterSourceGeneratorTests
     {
         var source = """
             using CrestCreates.Domain.Shared.Attributes;
-            using CrestCreates.OrmProviders.EFCore.MultiTenancy;
+            using CrestCreates.Data.EFCore.MultiTenancy;
 
             [Entity]
             public class Book : IMultiTenant
@@ -103,7 +103,7 @@ public class TenantFilterSourceGeneratorTests
     {
         var source1 = """
             using CrestCreates.Domain.Shared.Attributes;
-            using CrestCreates.OrmProviders.EFCore.MultiTenancy;
+            using CrestCreates.Data.EFCore.MultiTenancy;
 
             [Entity]
             public class Book : IMultiTenant
@@ -114,7 +114,7 @@ public class TenantFilterSourceGeneratorTests
 
         var source2 = """
             using CrestCreates.Domain.Shared.Attributes;
-            using CrestCreates.OrmProviders.EFCore.MultiTenancy;
+            using CrestCreates.Data.EFCore.MultiTenancy;
 
             [Entity]
             public class Order : IMultiTenant
@@ -159,7 +159,7 @@ public class TenantFilterSourceGeneratorTests
     {
         var source = """
             using CrestCreates.Domain.Shared.Attributes;
-            using CrestCreates.OrmProviders.EFCore.MultiTenancy;
+            using CrestCreates.Data.EFCore.MultiTenancy;
 
             [Entity]
             public class Book : IMultiTenant
@@ -179,7 +179,7 @@ public class TenantFilterSourceGeneratorTests
     public void GeneratesTenantFilter_ForTenantEntityReferencedByDbContextDbSet()
     {
         var entitySource = """
-            using CrestCreates.OrmProviders.EFCore.MultiTenancy;
+            using CrestCreates.Data.EFCore.MultiTenancy;
 
             namespace External.Domain
             {
@@ -217,7 +217,7 @@ public class TenantFilterSourceGeneratorTests
     {
         var source = """
             using CrestCreates.Domain.Shared.Attributes;
-            using CrestCreates.OrmProviders.EFCore.MultiTenancy;
+            using CrestCreates.Data.EFCore.MultiTenancy;
 
             [Entity]
             public class Book : IMultiTenant

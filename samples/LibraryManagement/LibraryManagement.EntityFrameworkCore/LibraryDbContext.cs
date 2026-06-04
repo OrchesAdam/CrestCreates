@@ -6,7 +6,7 @@ using CrestCreates.Domain.Shared.Permissions;
 using System.Text.Json;
 using CrestCreates.Domain.Settings;
 using CrestCreates.Domain.Features;
-using CrestCreates.OrmProviders.EFCore.Extensions;
+using CrestCreates.Data.EFCore.Extensions;
 
 namespace LibraryManagement.EntityFrameworkCore;
 

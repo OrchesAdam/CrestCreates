@@ -2,8 +2,8 @@ using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Settings;
 using CrestCreates.Domain.Features;
-using CrestCreates.OrmProviders.EFCore.Extensions;
-using CrestCreates.OrmProviders.EFCore.ValueConverters;
+using CrestCreates.Data.EFCore.Extensions;
+using CrestCreates.Data.EFCore.ValueConverters;
 using Microsoft.EntityFrameworkCore;
 using SaaSHelpdesk.Domain.Entities;
 

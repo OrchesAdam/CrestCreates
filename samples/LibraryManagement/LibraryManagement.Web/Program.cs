@@ -27,8 +27,8 @@ using Microsoft.Extensions.Hosting;
 using CrestCreates.Application.Settings;
 using CrestCreates.Application.Features;
 using CrestCreates.Application.AuditLog;
-using CrestCreates.OrmProviders.EFCore.Settings;
-using CrestCreates.OrmProviders.EFCore.Features;
+using CrestCreates.Data.EFCore.Settings;
+using CrestCreates.Data.EFCore.Features;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Host.UseCrestSerilog();

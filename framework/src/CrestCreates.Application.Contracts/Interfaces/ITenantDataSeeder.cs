@@ -1,14 +1,10 @@
-using System.Threading;
-using System.Threading.Tasks;
-using CrestCreates.Application.Contracts.DTOs.Tenants;
+using System;
 
 namespace CrestCreates.Application.Contracts.Interfaces;
 
-public interface ITenantDataSeeder
+[Obsolete("Use ITenantDataSeedContributor instead.")]
+public interface ITenantDataSeeder : ITenantDataSeedContributor
 {
-    Task<TenantSeedResult> SeedAsync(
-        TenantInitializationContext context,
-        CancellationToken cancellationToken = default);
 }
 
 public class TenantSeedResult : IPhaseResult

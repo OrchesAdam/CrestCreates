@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\framework\src\CrestCreates.AuditLogging\CrestCreates.AuditLogging.csproj" />
-    <ProjectReference Include="..\..\..\framework\src\CrestCreates.OrmProviders.EFCore\CrestCreates.OrmProviders.EFCore.csproj" />
+    <ProjectReference Include="..\..\..\framework\src\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
     <ProjectReference Include="..\..\..\framework\src\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\LibraryManagement.Application\LibraryManagement.Application.csproj" />
     <ProjectReference Include="..\LibraryManagement.Domain\LibraryManagement.Domain.csproj" />

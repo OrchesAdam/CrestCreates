@@ -3,14 +3,16 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Threading.Tasks;
 using CrestCreates.Authorization.Abstractions;
+using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Permission;
 using CrestCreates.MultiTenancy.Abstract;
-using CrestCreates.OrmProviders.EFCore.Configuration;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
-using CrestCreates.OrmProviders.EFCore.Interceptors;
-using CrestCreates.OrmProviders.EFCore.MultiTenancy;
+using CrestCreates.Data.EFCore.DatabaseProviders.SqlServer;
+using CrestCreates.Data.EFCore.Configuration;
+using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.Interceptors;
+using CrestCreates.Data.EFCore.MultiTenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions;
@@ -27,6 +29,7 @@ public class EfCoreDbContextRegistrationTests
         var services = new ServiceCollection();
         services.AddSingleton<ICurrentTenant>(new FakeCurrentTenant("tenant-1"));
         services.AddSingleton<ICurrentUser>(new FakeCurrentUser("9b2f4dc0-3c3f-4f1b-9d4f-7854c5e4f6c1"));
+        services.AddLogging();
         services.AddSingleton<IEfCoreDbContextOptionsContributor>(
             new DelegateEfCoreDbContextOptionsContributor(options => options.UseSqlite("Data Source=:memory:")));
         services.AddCrestCreatesEfCoreDbContext();
@@ -42,6 +45,8 @@ public class EfCoreDbContextRegistrationTests
             extension.GetType().Name.Contains("Sqlite", StringComparison.OrdinalIgnoreCase));
         Assert.IsType<AuditInterceptor>(scope.ServiceProvider.GetRequiredService<AuditInterceptor>());
         Assert.IsType<MultiTenancyInterceptor>(scope.ServiceProvider.GetRequiredService<MultiTenancyInterceptor>());
+        Assert.IsType<SqlServerTenantDatabaseProvisioner>(scope.ServiceProvider.GetRequiredService<ITenantDatabaseProvisioner>());
+        Assert.IsType<EfCoreTenantSchemaMigrator>(scope.ServiceProvider.GetRequiredService<ITenantSchemaMigrator>());
         Assert.Same(context, scope.ServiceProvider.GetRequiredService<IEntityFrameworkCoreDbContext>());
     }
 
@@ -222,4 +227,3 @@ public class EfCoreDbContextRegistrationTests
         }
     }
 }
-

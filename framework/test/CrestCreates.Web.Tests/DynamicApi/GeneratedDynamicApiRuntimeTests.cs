@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.UnitOfWork;
 using CrestCreates.DynamicApi;
-using CrestCreates.OrmProviders.Abstract;
+using CrestCreates.Data.Abstractions;
 using CrestCreates.Validation.Modules;
 using CrestCreates.Validation.Validators;
 using FluentAssertions;

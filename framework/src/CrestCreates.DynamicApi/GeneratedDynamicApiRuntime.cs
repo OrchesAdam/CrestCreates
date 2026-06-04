@@ -3,7 +3,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using CrestCreates.Authorization.Abstractions;
-using CrestCreates.OrmProviders.Abstract;
+using CrestCreates.Data.Abstractions;
 using CrestCreates.Validation.Modules;
 using CrestCreates.Validation.Validators;
 using Microsoft.AspNetCore.Http;

@@ -434,7 +434,7 @@ public class DynamicApiAotSourceGeneratorTests
                    }
                }
 
-               namespace CrestCreates.OrmProviders.Abstract
+               namespace CrestCreates.Data.Abstractions
                {
                    public interface IUnitOfWorkManager
                    {

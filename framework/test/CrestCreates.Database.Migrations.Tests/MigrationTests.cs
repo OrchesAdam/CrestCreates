@@ -2,7 +2,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 using FluentAssertions;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.DbContexts;
 
 namespace CrestCreates.Database.Migrations.Tests
 {

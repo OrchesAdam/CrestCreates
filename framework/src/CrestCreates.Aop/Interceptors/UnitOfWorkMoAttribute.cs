@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Aop.Abstractions;
 using CrestCreates.Aop.Extensions;
-using CrestCreates.OrmProviders.Abstract;
+using CrestCreates.Data.Abstractions;
 using Microsoft.Extensions.Logging;
 using Rougamo;
 using Rougamo.Context;

@@ -19,12 +19,12 @@ using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.MultiTenancy.Abstract;
-using CrestCreates.OrmProviders.Abstract;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
+using CrestCreates.Data.Abstractions;
+using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
-using CrestCreates.OrmProviders.EFCore.Repositories;
-using CrestCreates.OrmProviders.EFCore.Settings;
-using CrestCreates.OrmProviders.EFCore.UnitOfWork;
+using CrestCreates.Data.EFCore.Repositories;
+using CrestCreates.Data.EFCore.Settings;
+using CrestCreates.Data.EFCore.UnitOfWork;
 using Microsoft.EntityFrameworkCore;
 using LibraryManagement.EntityFrameworkCore;
 using LibraryManagement.Domain.Repositories;
@@ -335,7 +335,7 @@ public sealed class LibraryManagementWebApplicationFactory
 
             // Repository registrations normally provided by EntityFrameworkCoreModule.OnConfigureServices()
             // (Module OnConfigureServices runs post-build, so test factory must register them inline)
-            services.AddScoped(typeof(IRepository<,>), typeof(DomainRepositoryAdapter<,>));
+            services.AddScoped(typeof(CrestCreates.Domain.Repositories.IRepository<,>), typeof(DomainRepositoryAdapter<,>));
             services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
             services.AddUnitOfWork(OrmProvider.EfCore);
@@ -365,9 +365,11 @@ public sealed class LibraryManagementWebApplicationFactory
             services.AddScoped<IMemberAppService, MemberAppService>();
             services.AddScoped<ILoanAppService, LoanAppService>();
 
-            // Tenant infrastructure - use no-op stubs since EfCoreTenantDatabaseInitializer
-            // uses SQL Server SqlConnection which doesn't work with PostgreSQL test containers
+            // Tenant infrastructure - use no-op stubs since the SQL Server provisioner
+            // does not work with PostgreSQL test containers.
+            services.AddScoped<ITenantDatabaseProvisioner, NoOpTenantDatabaseInitializer>();
             services.AddScoped<ITenantDatabaseInitializer, NoOpTenantDatabaseInitializer>();
+            services.AddScoped<ITenantSchemaMigrator, NoOpTenantMigrationRunner>();
             services.AddScoped<ITenantMigrationRunner, NoOpTenantMigrationRunner>();
             services.AddScoped<ITenantInitializationStore, NoOpTenantInitializationStore>();
         });

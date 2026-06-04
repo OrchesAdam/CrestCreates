@@ -13,7 +13,7 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
     [Generator]
     public class TenantFilterSourceGenerator : IIncrementalGenerator
     {
-        private const string TenantFilterRegistryStoreFullName = "CrestCreates.OrmProviders.EFCore.MultiTenancy.TenantFilterRegistryStore";
+        private const string TenantFilterRegistryStoreFullName = "CrestCreates.Data.EFCore.MultiTenancy.TenantFilterRegistryStore";
 
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
@@ -132,7 +132,7 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
             foreach (var iface in symbol.AllInterfaces)
             {
                 var fullName = iface.ToDisplayString();
-                if (fullName == "CrestCreates.OrmProviders.EFCore.MultiTenancy.IMultiTenant" ||
+                if (fullName == "CrestCreates.Data.EFCore.MultiTenancy.IMultiTenant" ||
                     fullName == "CrestCreates.DataFilter.Entities.IMultiTenant" ||
                     fullName == "CrestCreates.Domain.Shared.Entities.Auditing.IMustHaveTenant" ||
                     iface.Name == "IMultiTenant" ||
@@ -181,9 +181,9 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
             sb.AppendLine("using System;");
             sb.AppendLine("using Microsoft.EntityFrameworkCore;");
             sb.AppendLine("using CrestCreates.MultiTenancy.Abstract;");
-            sb.AppendLine("using CrestCreates.OrmProviders.EFCore.MultiTenancy;");
+            sb.AppendLine("using CrestCreates.Data.EFCore.MultiTenancy;");
             sb.AppendLine();
-            sb.AppendLine("namespace CrestCreates.OrmProviders.EFCore.MultiTenancy");
+            sb.AppendLine("namespace CrestCreates.Data.EFCore.MultiTenancy");
             sb.AppendLine("{");
             sb.AppendLine("    internal static class GeneratedTenantFilterRegistration");
             sb.AppendLine("    {");

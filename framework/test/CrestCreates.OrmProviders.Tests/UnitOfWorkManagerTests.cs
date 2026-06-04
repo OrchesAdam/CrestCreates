@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using CrestCreates.Domain.UnitOfWork;
-using CrestCreates.OrmProviders.Abstract;
+using CrestCreates.Data.Abstractions;
 using FluentAssertions;
 using Xunit;
 

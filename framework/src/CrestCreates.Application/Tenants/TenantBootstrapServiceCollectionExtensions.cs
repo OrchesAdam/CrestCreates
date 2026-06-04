@@ -2,6 +2,7 @@ using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Domain.Permission;
 using CrestCreates.MultiTenancy;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace CrestCreates.Application.Tenants;
 
@@ -13,6 +14,7 @@ public static class TenantBootstrapServiceCollectionExtensions
         {
         });
 
+        services.TryAddScoped<ITenantDataSeedContributor, TenantBootstrapper>();
         services.AddScoped<ITenantDataSeeder, TenantBootstrapper>();
 
         return services;

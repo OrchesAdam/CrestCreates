@@ -26,7 +26,7 @@ public class BookAppService : CrestAppServiceBase<Book,Guid, BookDto, CreateBook
     public async Task<BookDto?> GetByIsbnAsync(string isbn, CancellationToken cancellationToken = default)
     {
         var book = await _repository.GetByIsbnAsync(isbn, cancellationToken);
-        return book == null ? null : book.ToDto();
+        return book == null ? null : book.ToDto().AddDisplayFields(book);
     }
 
     /// <summary>
@@ -85,7 +85,7 @@ public class BookAppService : CrestAppServiceBase<Book,Guid, BookDto, CreateBook
     }
 
     protected override BookDto MapToDto(Book entity)
-        => entity.ToDto();
+        => entity.ToDto().AddDisplayFields(entity);
 
     protected override void MapToEntity(UpdateBookDto dto, Book entity)
     {

@@ -12,9 +12,9 @@
   <ItemGroup>
     <!-- 项目引用 -->
     <ProjectReference Include="..\..\src\CrestCreates.Domain\CrestCreates.Domain.csproj" />
-    <ProjectReference Include="..\..\src\CrestCreates.OrmProviders.EFCore\CrestCreates.OrmProviders.EFCore.csproj" />
-    <ProjectReference Include="..\..\src\CrestCreates.OrmProviders.FreeSqlProvider\CrestCreates.OrmProviders.FreeSqlProvider.csproj" />
-    <ProjectReference Include="..\..\src\CrestCreates.OrmProviders.SqlSugar\CrestCreates.OrmProviders.SqlSugar.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Data.FreeSqlProvider\CrestCreates.Data.FreeSqlProvider.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Data.SqlSugar\CrestCreates.Data.SqlSugar.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -6,7 +6,7 @@ using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.Domain.Shared.Entities.Auditing;
-using CrestCreates.OrmProviders.SqlSugar.Repositories;
+using CrestCreates.Data.SqlSugar.Repositories;
 using SqlSugar;
 using Xunit;
 

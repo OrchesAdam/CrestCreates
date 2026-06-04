@@ -3,7 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Contracts.Interfaces;
-using CrestCreates.OrmProviders.EFCore.MultiTenancy;
+using CrestCreates.Data.EFCore.MultiTenancy;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;

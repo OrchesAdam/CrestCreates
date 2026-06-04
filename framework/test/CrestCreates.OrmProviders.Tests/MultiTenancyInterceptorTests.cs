@@ -4,9 +4,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using CrestCreates.Domain.Permission;
 using CrestCreates.MultiTenancy.Abstract;
-using CrestCreates.OrmProviders.EFCore.Configuration;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
-using CrestCreates.OrmProviders.EFCore.Interceptors;
+using CrestCreates.Data.EFCore.Configuration;
+using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.Interceptors;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 

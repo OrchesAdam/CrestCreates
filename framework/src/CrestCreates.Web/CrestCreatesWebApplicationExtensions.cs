@@ -29,11 +29,11 @@ using CrestCreates.Modularity;
 using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.MultiTenancy.Providers;
-using CrestCreates.OrmProviders.Abstract;
-using CrestCreates.OrmProviders.EFCore.Configuration;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
-using CrestCreates.OrmProviders.EFCore.Repositories;
-using CrestCreates.OrmProviders.EFCore.Settings;
+using CrestCreates.Data.Abstractions;
+using CrestCreates.Data.EFCore.Configuration;
+using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.Repositories;
+using CrestCreates.Data.EFCore.Settings;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -85,11 +85,11 @@ public static class CrestCreatesWebApplicationExtensions
             }));
 
         services.AddCrestCreatesEfCoreDbContext();
-        services.AddScoped(typeof(IRepository<,>), typeof(DomainRepositoryAdapter<,>));
+        services.AddScoped(typeof(CrestCreates.Domain.Repositories.IRepository<,>), typeof(DomainRepositoryAdapter<,>));
         services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
         services.AddUnitOfWork(OrmProvider.EfCore);
-        services.AddScoped(sp => new CrestCreates.OrmProviders.EFCore.UnitOfWork.EfCoreUnitOfWork(
+        services.AddScoped(sp => new CrestCreates.Data.EFCore.UnitOfWork.EfCoreUnitOfWork(
             sp.GetRequiredService<IDataBaseContext>(),
             sp.GetRequiredService<IDomainEventPublisher>()));
         services.AddDataFilterServices();

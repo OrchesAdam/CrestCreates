@@ -1,14 +1,10 @@
-using System.Threading;
-using System.Threading.Tasks;
-using CrestCreates.Application.Contracts.DTOs.Tenants;
+using System;
 
 namespace CrestCreates.Application.Contracts.Interfaces;
 
-public interface ITenantDatabaseInitializer
+[Obsolete("Use ITenantDatabaseProvisioner instead.")]
+public interface ITenantDatabaseInitializer : ITenantDatabaseProvisioner
 {
-    Task<TenantDatabaseInitializeResult> InitializeAsync(
-        TenantInitializationContext context,
-        CancellationToken cancellationToken = default);
 }
 
 public class TenantDatabaseInitializeResult : IPhaseResult

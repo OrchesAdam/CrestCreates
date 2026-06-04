@@ -4,9 +4,9 @@ using System.Threading.Tasks;
 using CrestCreates.Domain.Entities.Auditing;
 using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Shared.Entities.Auditing;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
-using CrestCreates.OrmProviders.EFCore.Extensions;
-using CrestCreates.OrmProviders.EFCore.Repositories;
+using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.Extensions;
+using CrestCreates.Data.EFCore.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 

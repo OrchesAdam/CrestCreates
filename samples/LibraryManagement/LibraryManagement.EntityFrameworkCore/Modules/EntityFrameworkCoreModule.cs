@@ -3,11 +3,11 @@ using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
-using CrestCreates.OrmProviders.Abstract;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
-using CrestCreates.OrmProviders.EFCore.Repositories;
-using CrestCreates.OrmProviders.EFCore.UnitOfWork;
-using CrestCreates.OrmProviders.EFCore.Settings;
+using CrestCreates.Data.Abstractions;
+using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.Repositories;
+using CrestCreates.Data.EFCore.UnitOfWork;
+using CrestCreates.Data.EFCore.Settings;
 using LibraryManagement.Application.Modules;
 using LibraryManagement.Domain.Repositories;
 using LibraryManagement.EntityFrameworkCore.Repositories;
@@ -42,7 +42,7 @@ public class EntityFrameworkCoreModule : ModuleBase
             new EfCoreDbContextAdapter(sp.GetRequiredService<LibraryDbContext>()));
         services.AddScoped<IDataBaseContext>(sp =>
             sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
-        services.AddScoped(typeof(IRepository<,>), typeof(DomainRepositoryAdapter<,>));
+        services.AddScoped(typeof(global::CrestCreates.Domain.Repositories.IRepository<,>), typeof(DomainRepositoryAdapter<,>));
         services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
         // 注册仓储

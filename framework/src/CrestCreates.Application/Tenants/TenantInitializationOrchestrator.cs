@@ -13,17 +13,38 @@ namespace CrestCreates.Application.Tenants;
 
 public class TenantInitializationOrchestrator
 {
-    private readonly ITenantDatabaseInitializer _dbInitializer;
-    private readonly ITenantMigrationRunner _migrationRunner;
-    private readonly ITenantDataSeeder _dataSeeder;
+    private readonly ITenantDatabaseProvisioner _dbProvisioner;
+    private readonly ITenantSchemaMigrator _schemaMigrator;
+    private readonly IReadOnlyList<ITenantDataSeedContributor> _dataSeedContributors;
     private readonly ITenantSettingDefaultsSeeder _settingsSeeder;
     private readonly ITenantFeatureDefaultsSeeder _featuresSeeder;
     private readonly ITenantInitializationStore _store;
     private readonly ICurrentTenant _currentTenant;
-    private readonly ILogger<TenantInitializationOrchestrator> _logger;
+    private readonly ITenantInitializationEventSink _eventSink;
 
     private const int MaxErrorLength = 2000;
 
+    public TenantInitializationOrchestrator(
+        ITenantDatabaseProvisioner dbProvisioner,
+        ITenantSchemaMigrator schemaMigrator,
+        IEnumerable<ITenantDataSeedContributor> dataSeedContributors,
+        ITenantSettingDefaultsSeeder settingsSeeder,
+        ITenantFeatureDefaultsSeeder featuresSeeder,
+        ITenantInitializationStore store,
+        ICurrentTenant currentTenant,
+        ITenantInitializationEventSink eventSink)
+    {
+        _dbProvisioner = dbProvisioner;
+        _schemaMigrator = schemaMigrator;
+        _dataSeedContributors = dataSeedContributors as IReadOnlyList<ITenantDataSeedContributor> ?? new List<ITenantDataSeedContributor>(dataSeedContributors);
+        _settingsSeeder = settingsSeeder;
+        _featuresSeeder = featuresSeeder;
+        _store = store;
+        _currentTenant = currentTenant;
+        _eventSink = eventSink;
+    }
+
+    [Obsolete("Use the constructor that depends on ITenantDatabaseProvisioner, ITenantSchemaMigrator, ITenantDataSeedContributor, and ITenantInitializationEventSink.")]
     public TenantInitializationOrchestrator(
         ITenantDatabaseInitializer dbInitializer,
         ITenantMigrationRunner migrationRunner,
@@ -33,15 +54,16 @@ public class TenantInitializationOrchestrator
         ITenantInitializationStore store,
         ICurrentTenant currentTenant,
         ILogger<TenantInitializationOrchestrator> logger)
+        : this(
+            dbInitializer,
+            migrationRunner,
+            new[] { dataSeeder },
+            settingsSeeder,
+            featuresSeeder,
+            store,
+            currentTenant,
+            new LegacyTenantInitializationEventSink(logger))
     {
-        _dbInitializer = dbInitializer;
-        _migrationRunner = migrationRunner;
-        _dataSeeder = dataSeeder;
-        _settingsSeeder = settingsSeeder;
-        _featuresSeeder = featuresSeeder;
-        _store = store;
-        _currentTenant = currentTenant;
-        _logger = logger;
     }
 
     public async Task<TenantInitializationResult> InitializeAsync(
@@ -85,7 +107,8 @@ public class TenantInitializationOrchestrator
             if (context.IsIndependentDatabase)
             {
                 var step1 = await ExecutePhaseAsync("DatabaseInitialize", record,
-                    async ct => await _dbInitializer.InitializeAsync(context, ct),
+                    context,
+                    async ct => await _dbProvisioner.InitializeAsync(context, ct),
                     cancellationToken);
                 steps.Add(step1);
                 if (step1.Status != TenantInitializationStepStatus.Succeeded)
@@ -93,7 +116,8 @@ public class TenantInitializationOrchestrator
 
                 // Phase 2: Migration (independent only)
                 var step2 = await ExecutePhaseAsync("Migration", record,
-                    async ct => await _migrationRunner.RunAsync(context, ct),
+                    context,
+                    async ct => await _schemaMigrator.RunAsync(context, ct),
                     cancellationToken);
                 steps.Add(step2);
                 if (step2.Status != TenantInitializationStepStatus.Succeeded)
@@ -113,7 +137,8 @@ public class TenantInitializationOrchestrator
 
             // Phase 3: Data Seed
             var step3 = await ExecutePhaseAsync("DataSeed", record,
-                async ct => await _dataSeeder.SeedAsync(context, ct),
+                context,
+                async ct => await RunDataSeedContributorsAsync(context, ct),
                 cancellationToken);
             steps.Add(step3);
             if (step3.Status != TenantInitializationStepStatus.Succeeded)
@@ -121,6 +146,7 @@ public class TenantInitializationOrchestrator
 
             // Phase 4: Settings Defaults
             var step4 = await ExecutePhaseAsync("SettingsDefaults", record,
+                context,
                 async ct => await _settingsSeeder.SeedAsync(context, ct),
                 cancellationToken);
             steps.Add(step4);
@@ -129,6 +155,7 @@ public class TenantInitializationOrchestrator
 
             // Phase 5: Feature Defaults
             var step5 = await ExecutePhaseAsync("FeatureDefaults", record,
+                context,
                 async ct => await _featuresSeeder.SeedAsync(context, ct),
                 cancellationToken);
             steps.Add(step5);
@@ -142,16 +169,31 @@ public class TenantInitializationOrchestrator
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex,
-                "Infrastructure failure during tenant {TenantId} initialization. CorrelationId: {CorrelationId}",
-                context.TenantId, context.CorrelationId);
+            await _eventSink.InfrastructureFailureAsync(context, ex, cancellationToken);
             throw;
         }
+    }
+
+    private async Task<TenantSeedResult> RunDataSeedContributorsAsync(
+        TenantInitializationContext context,
+        CancellationToken cancellationToken)
+    {
+        foreach (var contributor in _dataSeedContributors)
+        {
+            var result = await contributor.SeedAsync(context, cancellationToken);
+            if (!result.Success)
+            {
+                return result;
+            }
+        }
+
+        return TenantSeedResult.Succeeded();
     }
 
     private async Task<TenantInitializationStep> ExecutePhaseAsync(
         string phaseName,
         TenantInitializationRecord record,
+        TenantInitializationContext context,
         Func<CancellationToken, Task<IPhaseResult>> phaseAction,
         CancellationToken cancellationToken)
     {
@@ -160,6 +202,7 @@ public class TenantInitializationOrchestrator
         record.SetCurrentStep(phaseName);
         record.AppendStepResult(phaseName, TenantInitializationStepStatus.Running, startedAt, null, null);
         await _store.UpdateAsync(record, cancellationToken);
+        await _eventSink.PhaseStartedAsync(context, phaseName, cancellationToken);
 
         try
         {
@@ -171,6 +214,7 @@ public class TenantInitializationOrchestrator
                 record.AppendStepResult(phaseName, TenantInitializationStepStatus.Succeeded,
                     startedAt, completedAt, null);
                 await _store.UpdateAsync(record, cancellationToken);
+                await _eventSink.PhaseSucceededAsync(context, phaseName, cancellationToken);
 
                 return new TenantInitializationStep
                 {
@@ -186,6 +230,7 @@ public class TenantInitializationOrchestrator
                 record.AppendStepResult(phaseName, TenantInitializationStepStatus.Failed,
                     startedAt, completedAt, error);
                 await _store.UpdateAsync(record, cancellationToken);
+                await _eventSink.PhaseFailedAsync(context, phaseName, error, cancellationToken);
 
                 return new TenantInitializationStep
                 {
@@ -208,9 +253,7 @@ public class TenantInitializationOrchestrator
             record.AppendStepResult(phaseName, TenantInitializationStepStatus.Failed,
                 startedAt, completedAt, error);
             await _store.UpdateAsync(record, cancellationToken);
-
-            _logger.LogError(ex, "Phase {PhaseName} failed for tenant initialization. CorrelationId: {CorrelationId}",
-                phaseName, record.CorrelationId);
+            await _eventSink.PhaseFailedAsync(context, phaseName, error, cancellationToken);
 
             return new TenantInitializationStep
             {
@@ -254,5 +297,62 @@ public class TenantInitializationOrchestrator
     {
         if (string.IsNullOrEmpty(value)) return string.Empty;
         return value.Length <= MaxErrorLength ? value : value[..MaxErrorLength];
+    }
+
+    private sealed class LegacyTenantInitializationEventSink : ITenantInitializationEventSink
+    {
+        private readonly ILogger<TenantInitializationOrchestrator> _logger;
+
+        public LegacyTenantInitializationEventSink(ILogger<TenantInitializationOrchestrator> logger)
+        {
+            _logger = logger;
+        }
+
+        public Task PhaseStartedAsync(
+            TenantInitializationContext context,
+            string phaseName,
+            CancellationToken cancellationToken = default)
+        {
+            _logger.LogInformation(
+                "Tenant initialization phase {PhaseName} started for tenant {TenantId}. CorrelationId: {CorrelationId}",
+                phaseName, context.TenantId, context.CorrelationId);
+            return Task.CompletedTask;
+        }
+
+        public Task PhaseSucceededAsync(
+            TenantInitializationContext context,
+            string phaseName,
+            CancellationToken cancellationToken = default)
+        {
+            _logger.LogInformation(
+                "Tenant initialization phase {PhaseName} succeeded for tenant {TenantId}. CorrelationId: {CorrelationId}",
+                phaseName, context.TenantId, context.CorrelationId);
+            return Task.CompletedTask;
+        }
+
+        public Task PhaseFailedAsync(
+            TenantInitializationContext context,
+            string phaseName,
+            string error,
+            CancellationToken cancellationToken = default)
+        {
+            _logger.LogWarning(
+                "Tenant initialization phase {PhaseName} failed for tenant {TenantId}. CorrelationId: {CorrelationId}. Error: {Error}",
+                phaseName, context.TenantId, context.CorrelationId, error);
+            return Task.CompletedTask;
+        }
+
+        public Task InfrastructureFailureAsync(
+            TenantInitializationContext context,
+            Exception exception,
+            CancellationToken cancellationToken = default)
+        {
+            _logger.LogError(
+                exception,
+                "Infrastructure failure during tenant {TenantId} initialization. CorrelationId: {CorrelationId}",
+                context.TenantId,
+                context.CorrelationId);
+            return Task.CompletedTask;
+        }
     }
 }

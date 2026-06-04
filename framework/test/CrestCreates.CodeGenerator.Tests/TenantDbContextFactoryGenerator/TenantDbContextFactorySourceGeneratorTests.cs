@@ -17,7 +17,7 @@ public class TenantDbContextFactorySourceGeneratorTests
     private const string ITenantDbContextFactoryStub = """
         using Microsoft.EntityFrameworkCore;
 
-        namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
+        namespace CrestCreates.Data.EFCore.MultiTenancy
         {
             public interface ITenantDbContextFactory
             {
@@ -29,7 +29,7 @@ public class TenantDbContextFactorySourceGeneratorTests
     private const string RegistryStoreStub = """
         using Microsoft.EntityFrameworkCore;
 
-        namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
+        namespace CrestCreates.Data.EFCore.MultiTenancy
         {
             public static class TenantDbContextFactoryRegistryStore
             {

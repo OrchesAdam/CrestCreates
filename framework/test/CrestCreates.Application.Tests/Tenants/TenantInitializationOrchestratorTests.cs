@@ -283,4 +283,77 @@ public class TenantInitializationOrchestratorTests
         result.Error.Should().NotContain("Server=");
         result.Error.Should().NotContain("Password=");
     }
+
+    [Fact]
+    public async Task InitializeAsync_NewConstructor_ExecutesAllDataSeedContributors()
+    {
+        var provisionerMock = new Mock<ITenantDatabaseProvisioner>();
+        var migratorMock = new Mock<ITenantSchemaMigrator>();
+        var contributor1Mock = new Mock<ITenantDataSeedContributor>();
+        var contributor2Mock = new Mock<ITenantDataSeedContributor>();
+        var eventSinkMock = new Mock<ITenantInitializationEventSink>();
+        var storeMock = new Mock<ITenantInitializationStore>();
+        var context = CreateContext(null);
+        var record = CreateRecord(context.TenantId, context.CorrelationId);
+
+        storeMock
+            .Setup(s => s.TryBeginInitializationAsync(
+                context.TenantId, context.CorrelationId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(record);
+        storeMock
+            .Setup(s => s.UpdateAsync(It.IsAny<TenantInitializationRecord>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        storeMock
+            .Setup(s => s.CompleteInitializationAsync(
+                It.IsAny<Guid>(), It.IsAny<TenantInitializationRecord>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        storeMock
+            .Setup(s => s.FailInitializationAsync(
+                It.IsAny<Guid>(), It.IsAny<TenantInitializationRecord>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        contributor1Mock
+            .Setup(c => c.SeedAsync(context, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TenantSeedResult.Succeeded());
+        contributor2Mock
+            .Setup(c => c.SeedAsync(context, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TenantSeedResult.Succeeded());
+        _settingsSeederMock
+            .Setup(s => s.SeedAsync(context, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TenantSettingDefaultsResult.Succeeded());
+        _featuresSeederMock
+            .Setup(f => f.SeedAsync(context, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TenantFeatureDefaultsResult.Succeeded());
+        eventSinkMock.Setup(s => s.PhaseStartedAsync(It.IsAny<TenantInitializationContext>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        eventSinkMock.Setup(s => s.PhaseSucceededAsync(It.IsAny<TenantInitializationContext>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        eventSinkMock.Setup(s => s.PhaseFailedAsync(It.IsAny<TenantInitializationContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        eventSinkMock.Setup(s => s.InfrastructureFailureAsync(It.IsAny<TenantInitializationContext>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var orchestrator = new TenantInitializationOrchestrator(
+            provisionerMock.Object,
+            migratorMock.Object,
+            new[] { contributor1Mock.Object, contributor2Mock.Object },
+            _settingsSeederMock.Object,
+            _featuresSeederMock.Object,
+            storeMock.Object,
+            Mock.Of<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(),
+            eventSinkMock.Object);
+
+        var result = await orchestrator.InitializeAsync(context);
+
+        result.Success.Should().BeTrue();
+        result.Steps.Should().HaveCount(3);
+        contributor1Mock.Verify(c => c.SeedAsync(context, It.IsAny<CancellationToken>()), Times.Once);
+        contributor2Mock.Verify(c => c.SeedAsync(context, It.IsAny<CancellationToken>()), Times.Once);
+        provisionerMock.Verify(
+            p => p.InitializeAsync(It.IsAny<TenantInitializationContext>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        migratorMock.Verify(
+            m => m.RunAsync(It.IsAny<TenantInitializationContext>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
 }

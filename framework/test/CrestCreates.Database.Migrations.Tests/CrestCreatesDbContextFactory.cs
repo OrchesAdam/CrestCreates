@@ -2,7 +2,7 @@ using System.IO;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.Extensions.Configuration;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.DbContexts;
 
 namespace CrestCreates.Database.Migrations.Tests
 {

@@ -1,14 +1,10 @@
-using System.Threading;
-using System.Threading.Tasks;
-using CrestCreates.Application.Contracts.DTOs.Tenants;
+using System;
 
 namespace CrestCreates.Application.Contracts.Interfaces;
 
-public interface ITenantMigrationRunner
+[Obsolete("Use ITenantSchemaMigrator instead.")]
+public interface ITenantMigrationRunner : ITenantSchemaMigrator
 {
-    Task<TenantMigrationResult> RunAsync(
-        TenantInitializationContext context,
-        CancellationToken cancellationToken = default);
 }
 
 public class TenantMigrationResult : IPhaseResult

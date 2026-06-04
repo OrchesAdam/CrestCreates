@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.DbContextProvider.Abstract;
-using CrestCreates.OrmProviders.EFCore.Repositories;
+using CrestCreates.Data.EFCore.Repositories;
 using Microsoft.EntityFrameworkCore;
 using SaaSHelpdesk.Domain.Entities;
 using SaaSHelpdesk.Domain.Repositories;

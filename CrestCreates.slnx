@@ -36,7 +36,7 @@
     <Project Path="framework/src/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
     <Project Path="framework/src/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
     <Project Path="framework/src/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
-    <Project Path="framework/src/CrestCreates.OrmProviders.Abstract/CrestCreates.OrmProviders.Abstract.csproj" />
+    <Project Path="framework/src/CrestCreates.Data.Abstractions/CrestCreates.Data.Abstractions.csproj" />
     <Project Path="framework/src/CrestCreates.Scheduling/CrestCreates.Scheduling.Abstractions.csproj" />
     <Project Path="framework/src/CrestCreates.Security/CrestCreates.Security.csproj" />
       
@@ -66,10 +66,11 @@
     <Project Path="framework/src/CrestCreates.HealthCheck.AspNetCore/CrestCreates.HealthCheck.AspNetCore.csproj" />      
     <Project Path="framework/src/CrestCreates.HealthCheck.Mvc/CrestCreates.HealthCheck.Mvc.csproj" />      
   </Folder>
-  <Folder Name="/src/modules/OrmProviders/">
-    <Project Path="framework/src/CrestCreates.OrmProviders.EFCore/CrestCreates.OrmProviders.EFCore.csproj" />
-    <Project Path="framework/src/CrestCreates.OrmProviders.FreeSqlProvider/CrestCreates.OrmProviders.FreeSqlProvider.csproj" />
-    <Project Path="framework/src/CrestCreates.OrmProviders.SqlSugar/CrestCreates.OrmProviders.SqlSugar.csproj" />
+  <Folder Name="/src/modules/Data/">
+    <Project Path="framework/src/CrestCreates.Data.EFCore/CrestCreates.Data.EFCore.csproj" />
+    <Project Path="framework/src/CrestCreates.Data.FreeSqlProvider/CrestCreates.Data.FreeSqlProvider.csproj" />
+    <Project Path="framework/src/CrestCreates.Data.SqlSugar/CrestCreates.Data.SqlSugar.csproj" />
+    <Project Path="framework/src/CrestCreates.Data.EFCore.PostgreSQL/CrestCreates.Data.EFCore.PostgreSQL.csproj" />
   </Folder>
   <Folder Name="/src/modules/SchedulingJob/">
     <Project Path="framework/src/CrestCreates.Scheduling.Quartz/CrestCreates.Scheduling.Quartz.csproj" />      

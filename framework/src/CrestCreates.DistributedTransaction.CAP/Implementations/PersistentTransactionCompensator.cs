@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using CrestCreates.DistributedTransaction.Abstractions;
 using CrestCreates.DistributedTransaction.Models;
 using CrestCreates.DistributedTransaction.CAP.Options;
-using CrestCreates.OrmProviders.Abstract.Abstractions;
+using CrestCreates.Data.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace CrestCreates.DistributedTransaction.CAP.Implementations

@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using CrestCreates.DistributedTransaction.Abstractions;
 using CrestCreates.DistributedTransaction.Models;
-using CrestCreates.OrmProviders.Abstract.Abstractions;
+using CrestCreates.Data.Abstractions;
 
 namespace CrestCreates.DistributedTransaction.CAP.Implementations
 {
