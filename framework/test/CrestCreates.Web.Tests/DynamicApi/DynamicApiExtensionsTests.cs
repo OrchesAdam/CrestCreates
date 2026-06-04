@@ -66,17 +66,6 @@ public class DynamicApiExtensionsTests
             .WithMessage("*编译期生成的 provider*");
     }
 
-    [Fact]
-    public void AddCrestDynamicApi_RegistersSwaggerPostConfigureForGeneratedMainline()
-    {
-        var services = new ServiceCollection();
-
-        services.AddCrestDynamicApi(options => options.AddApplicationServiceAssembly(typeof(string).Assembly));
-
-        services.Should().Contain(descriptor =>
-            descriptor.ServiceType == typeof(Microsoft.Extensions.Options.IPostConfigureOptions<Swashbuckle.AspNetCore.SwaggerGen.SwaggerGenOptions>));
-    }
-
     private sealed class DefaultEndpointRouteBuilder : IEndpointRouteBuilder
     {
         public DefaultEndpointRouteBuilder(IServiceProvider serviceProvider)

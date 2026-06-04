@@ -41,7 +41,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.OpenApi;
+using CrestCreates.OpenApi;
 
 namespace CrestCreates.Web;
 
@@ -63,11 +63,7 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddAuditLogging();
 
-        services.AddEndpointsApiExplorer();
-        services.AddSwaggerGen(options =>
-        {
-            options.SwaggerDoc("v1", new OpenApiInfo { Title = "CrestCreates API", Version = "v1" });
-        });
+        services.AddCrestOpenApi();
 
         services.AddOpenIddictServer(options =>
         {
@@ -146,8 +142,6 @@ public static class CrestCreatesWebApplicationExtensions
         if (app.Environment.IsDevelopment())
         {
             app.UseDeveloperExceptionPage();
-            app.UseSwagger();
-            app.UseSwaggerUI(options => options.SwaggerEndpoint("/swagger/v1/swagger.json", "CrestCreates API v1"));
         }
 
         app.UseCrestRequestLogging();
@@ -166,6 +160,7 @@ public static class CrestCreatesWebApplicationExtensions
     {
         app.MapCrestOpenIddictEndpoints();
         app.MapCrestAspNetCoreDynamicApi();
+        app.MapCrestOpenApi();
         return app;
     }
 

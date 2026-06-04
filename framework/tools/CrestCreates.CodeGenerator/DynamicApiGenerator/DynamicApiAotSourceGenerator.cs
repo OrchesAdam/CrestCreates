@@ -842,7 +842,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 builder.AppendLine("                });");
                 builder.AppendLine($"            {routeBuilderName}.WithDisplayName(\"{Escape(action.DeclaringTypeName)}.{Escape(action.ActionName)}\");");
                 builder.AppendLine($"            {routeBuilderName}.WithMetadata({permissionName});");
-                builder.AppendLine($"            {routeBuilderName}.ExcludeFromDescription();");
+                builder.AppendLine($"            {routeBuilderName}.WithTags(\"{Escape(service.ServiceName)}\");");
             }
             builder.AppendLine("        }");
         }

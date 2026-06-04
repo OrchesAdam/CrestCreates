@@ -31,7 +31,7 @@
 
 <ItemGroup>
     <PackageReference Include="DependencyInjection.StaticAccessor.Hosting" />
-    <PackageReference Include="Swashbuckle.AspNetCore" />
+    <ProjectReference Include="..\CrestCreates.OpenApi\CrestCreates.OpenApi.csproj" />
       </ItemGroup>
 
 </Project>

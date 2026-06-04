@@ -26,6 +26,7 @@
     <Project Path="framework/src/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
     <Project Path="framework/src/CrestCreates.Domain/CrestCreates.Domain.csproj" />
     <Project Path="framework/src/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
+    <Project Path="framework/src/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
     <Project Path="framework/src/CrestCreates.EventBus.Abstract/CrestCreates.EventBus.Abstract.csproj" />
     <Project Path="framework/src/CrestCreates.FileManagement/CrestCreates.FileManagement.csproj" />
     <Project Path="framework/src/CrestCreates.HealthCheck/CrestCreates.HealthCheck.csproj" />

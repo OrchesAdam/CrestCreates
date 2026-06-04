@@ -25,24 +25,22 @@ public static class OpenIddictEndpointRouteBuilderExtensions
     public static IEndpointRouteBuilder MapCrestOpenIddictEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/connect")
-            .DisableAntiforgery();
+            .DisableAntiforgery()
+            .ExcludeFromDescription();
 
         group.MapGet("/authorize", (Delegate)AuthorizeAsync)
             .WithName("CrestOpenIddictAuthorizeGet")
-            .WithTags("OpenIddict")
             .Produces(StatusCodes.Status302Found)
             .Produces(StatusCodes.Status401Unauthorized);
 
         group.MapPost("/authorize", (Delegate)AuthorizeAsync)
             .WithName("CrestOpenIddictAuthorizePost")
-            .WithTags("OpenIddict")
             .Produces(StatusCodes.Status302Found)
             .Produces(StatusCodes.Status401Unauthorized)
             .DisableAntiforgery();
 
         group.MapPost("/token", (Delegate)ExchangeAsync)
             .WithName("CrestOpenIddictToken")
-            .WithTags("OpenIddict")
             .Accepts<OpenIddictTokenRequest>("application/x-www-form-urlencoded")
             .Produces<OpenIddictTokenResponse>(StatusCodes.Status200OK)
             .Produces<OpenIddictErrorResponse>(StatusCodes.Status400BadRequest)
@@ -51,25 +49,21 @@ public static class OpenIddictEndpointRouteBuilderExtensions
 
         group.MapGet("/userinfo", (Delegate)UserinfoAsync)
             .WithName("CrestOpenIddictUserinfoGet")
-            .WithTags("OpenIddict")
             .Produces<Dictionary<string, object>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized);
 
         group.MapPost("/userinfo", (Delegate)UserinfoAsync)
             .WithName("CrestOpenIddictUserinfoPost")
-            .WithTags("OpenIddict")
             .Produces<Dictionary<string, object>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .DisableAntiforgery();
 
         group.MapGet("/logout", (Delegate)LogoutAsync)
             .WithName("CrestOpenIddictLogoutGet")
-            .WithTags("OpenIddict")
             .Produces<OpenIddictLogoutResponse>(StatusCodes.Status200OK);
 
         group.MapPost("/logout", (Delegate)LogoutAsync)
             .WithName("CrestOpenIddictLogoutPost")
-            .WithTags("OpenIddict")
             .Produces<OpenIddictLogoutResponse>(StatusCodes.Status200OK)
             .DisableAntiforgery();
 

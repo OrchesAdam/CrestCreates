@@ -1,3 +1,4 @@
+using CrestCreates.OpenApi;
 using CrestCreates.Modularity;
 using LibraryManagement.Application.Services;
 using CrestCreates.AuditLogging.Services;
@@ -40,11 +41,7 @@ builder.Services.AddScoped<IAuditLogWriter, AuditLogWriter>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddAuditLogging();
 
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options =>
-{
-    options.CustomSchemaIds(CrestCreates.DynamicApi.DynamicApiSwaggerSchemaIdHelper.GetSchemaId);
-});
+builder.Services.AddCrestOpenApi();
 builder.Services.AddOpenIddictServer(options =>
 {
     options.EnablePasswordFlow = true;
@@ -92,13 +89,6 @@ builder.Host.RegisterModules();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
 app.UseCrestRequestLogging();
 app.UseExceptionHandling();
 app.UseAuditLogging();
@@ -109,6 +99,7 @@ app.UseTenantBoundary();
 app.UseAuthorization();
 app.MapCrestOpenIddictEndpoints();
 app.MapCrestAspNetCoreDynamicApi();
+app.MapCrestOpenApi();
 
 // Initialize all modules
 app.InitializeModules();

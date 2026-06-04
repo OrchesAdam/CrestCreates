@@ -1,3 +1,4 @@
+using CrestCreates.OpenApi;
 using CrestCreates.Modularity;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.Application.Identity;
@@ -8,19 +9,14 @@ using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.AspNetCore;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
-using OpenIddict.Server.AspNetCore;
 using CrestCreates.Authorization;
 using CrestCreates.Infrastructure.Authorization;
 using CrestCreates.Infrastructure.Settings;
 using CrestCreates.Infrastructure.Permission;
 using CrestCreates.Logging.Extensions;
 using CrestCreates.MultiTenancy;
-using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.AspNetCore.Middlewares;
 using CrestCreates.EventBus.Local;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using CrestCreates.Application.Settings;
 using CrestCreates.Application.Features;
 using CrestCreates.Application.AuditLog;
@@ -40,11 +36,7 @@ builder.Services.AddScoped<IAuditLogWriter, AuditLogWriter>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddAuditLogging();
 
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options =>
-{
-    options.CustomSchemaIds(CrestCreates.DynamicApi.DynamicApiSwaggerSchemaIdHelper.GetSchemaId);
-});
+builder.Services.AddCrestOpenApi();
 builder.Services.AddOpenIddictServer(options =>
 {
     options.EnablePasswordFlow = true;
@@ -106,13 +98,6 @@ builder.Host.RegisterModules();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
 app.UseCrestRequestLogging();
 app.UseExceptionHandling();
 app.UseAuditLogging();
@@ -124,6 +109,7 @@ app.UseAuthorization();
 app.MapCrestOpenIddictEndpoints();
 app.MapHealthChecks("/health");
 app.MapCrestAspNetCoreDynamicApi();
+app.MapCrestOpenApi();
 
 // Initialize all modules
 app.InitializeModules();
