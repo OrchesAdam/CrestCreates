@@ -69,6 +69,9 @@ public static class EfCoreDbContextServiceCollectionExtensions
 
         services.TryAdd(ServiceDescriptor.Scoped<IEntityFrameworkCoreDbContext>(sp => sp.GetRequiredService<CrestCreatesDbContext>()));
         services.TryAdd(ServiceDescriptor.Scoped<IDataBaseContext>(sp => sp.GetRequiredService<IEntityFrameworkCoreDbContext>()));
+        // Register DbContext base class so services injecting DbContext (e.g. EfCoreTenantInitializationStore)
+        // can resolve it. AddDbContext<T>() only registers the concrete T, not the base DbContext.
+        services.TryAddScoped<DbContext>(sp => sp.GetRequiredService<CrestCreatesDbContext>());
 
         return services;
     }
