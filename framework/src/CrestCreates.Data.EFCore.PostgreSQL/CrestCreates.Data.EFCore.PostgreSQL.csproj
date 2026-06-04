@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Application.Contracts\CrestCreates.Application.Contracts.csproj" />
+    <ProjectReference Include="..\CrestCreates.AspNetCore.Authentication.OpenIddict\CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
+    <ProjectReference Include="..\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>

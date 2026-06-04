@@ -9,6 +9,7 @@ using CrestCreates.OpenApi;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.MultiTenancy;
+using CrestCreates.Data.EFCore.PostgreSQL.Configuration;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.Settings;
 using CrestCreates.Data.EFCore.UnitOfWork;
@@ -21,7 +22,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using SaaSHelpdesk.Application.Modules;
 using SaaSHelpdesk.Domain.Repositories;
 using SaaSHelpdesk.EntityFrameworkCore.Repositories;
-using SaaSHelpdesk.EntityFrameworkCore.MultiTenancy;
 
 namespace SaaSHelpdesk.EntityFrameworkCore.Modules;
 
@@ -39,6 +39,9 @@ public class EntityFrameworkCoreModule : ModuleBase
                                    ?? configuration.GetConnectionString("Default");
             options.UseNpgsql(connectionString);
         });
+
+        // PostgreSQL-specific framework services (OpenIddictDbContext, IEfCoreDbContextOptionsContributor, ITenantDatabaseInitializer)
+        services.AddCrestCreatesEfCorePostgreSql();
 
         services.AddUnitOfWork(OrmProvider.EfCore);
         services.AddScoped(sp => new EfCoreUnitOfWork(
@@ -64,7 +67,6 @@ public class EntityFrameworkCoreModule : ModuleBase
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
 
         // Tenant infrastructure — override framework defaults for Npgsql (PostgreSQL)
-        services.Replace(ServiceDescriptor.Scoped<ITenantDatabaseInitializer, HelpdeskTenantDatabaseInitializer>());
         services.RemoveAll<Func<string, DbContext>>();
         services.AddSingleton<Func<string, DbContext>>(connectionString =>
         {

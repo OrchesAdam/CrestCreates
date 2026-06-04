@@ -107,11 +107,4 @@ public static class OpenIddictServiceCollectionExtensions
             options.DefaultScheme = OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme;
         });
     }
-
-    public class ApplicationDbContext : Microsoft.EntityFrameworkCore.DbContext
-    {
-        public ApplicationDbContext(DbContextOptions options) : base(options)
-        {
-        }
-    }
 }
