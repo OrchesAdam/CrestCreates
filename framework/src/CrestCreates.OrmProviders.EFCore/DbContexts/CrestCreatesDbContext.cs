@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Text.Json;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Features;
@@ -9,6 +8,7 @@ using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.OrmProviders.Abstract;
 using CrestCreates.OrmProviders.EFCore.Extensions;
 using CrestCreates.OrmProviders.EFCore.MultiTenancy;
+using CrestCreates.OrmProviders.EFCore.ValueConverters;
 using Microsoft.EntityFrameworkCore;
 
 namespace CrestCreates.OrmProviders.EFCore.DbContexts
@@ -267,12 +267,7 @@ namespace CrestCreates.OrmProviders.EFCore.DbContexts
                 entity.Property(e => e.Status).IsRequired();
                 entity.Property(e => e.CreationTime).IsRequired();
                 entity.Property(e => e.ExtraProperties)
-                    .HasConversion(
-                        value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null),
-                        value => string.IsNullOrWhiteSpace(value)
-                            ? new Dictionary<string, object>()
-                            : JsonSerializer.Deserialize<Dictionary<string, object>>(value, (JsonSerializerOptions?)null)
-                                ?? new Dictionary<string, object>());
+                    .HasConversion<DictionaryToJsonValueConverter>();
 
                 entity.HasIndex(e => e.TenantId);
                 entity.HasIndex(e => e.UserId);

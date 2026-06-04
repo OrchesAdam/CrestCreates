@@ -26,7 +26,7 @@ public static class OpenIddictEndpointRouteBuilderExtensions
     {
         var group = endpoints.MapGroup("/connect")
             .DisableAntiforgery()
-            .ExcludeFromDescription();
+            .WithTags("OAuth2");
 
         group.MapGet("/authorize", (Delegate)AuthorizeAsync)
             .WithName("CrestOpenIddictAuthorizeGet")
@@ -362,7 +362,7 @@ public static class OpenIddictEndpointRouteBuilderExtensions
         return Task.FromResult<IResult>(Results.Ok(new { message = "已退出登录" }));
     }
 
-    private sealed class OpenIddictTokenRequest
+    internal sealed class OpenIddictTokenRequest
     {
         [JsonPropertyName("grant_type")]
         public string? GrantType { get; set; }
@@ -392,7 +392,7 @@ public static class OpenIddictEndpointRouteBuilderExtensions
         public string? Scope { get; set; }
     }
 
-    private sealed class OpenIddictTokenResponse
+    public sealed class OpenIddictTokenResponse
     {
         [JsonPropertyName("access_token")]
         public string? AccessToken { get; set; }
@@ -410,7 +410,7 @@ public static class OpenIddictEndpointRouteBuilderExtensions
         public string? Scope { get; set; }
     }
 
-    private sealed class OpenIddictErrorResponse
+    public sealed class OpenIddictErrorResponse
     {
         [JsonPropertyName("error")]
         public string? Error { get; set; }
@@ -419,7 +419,7 @@ public static class OpenIddictEndpointRouteBuilderExtensions
         public string? ErrorDescription { get; set; }
     }
 
-    private sealed class OpenIddictLogoutResponse
+    public sealed class OpenIddictLogoutResponse
     {
         [JsonPropertyName("message")]
         public string? Message { get; set; }

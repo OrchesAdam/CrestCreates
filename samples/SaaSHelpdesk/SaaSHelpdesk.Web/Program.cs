@@ -36,7 +36,7 @@ builder.Services.AddScoped<IAuditLogWriter, AuditLogWriter>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddAuditLogging();
 
-builder.Services.AddCrestOpenApi();
+builder.Services.AddCrestOpenApi(builder.Configuration.GetSection("CrestOpenApi"));
 builder.Services.AddOpenIddictServer(options =>
 {
     options.EnablePasswordFlow = true;
@@ -113,6 +113,25 @@ app.MapCrestOpenApi();
 
 // Initialize all modules
 app.InitializeModules();
+
+// Print startup URLs
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+lifetime.ApplicationStarted.Register(() =>
+{
+    var addresses = app.Urls;
+    Console.WriteLine();
+    Console.WriteLine("┌──────────────────────────────────────────────────────┐");
+    Console.WriteLine("│ SaaSHelpdesk application started                     │");
+    Console.WriteLine("├──────────────────────────────────────────────────────┤");
+    foreach (var address in addresses)
+    {
+        Console.WriteLine($"│   {address}                          │");
+        Console.WriteLine($"│   OpenAPI:   {address}/openapi/v1.json");
+        Console.WriteLine($"│   Scalar UI: {address}/scalar/v1");
+    }
+    Console.WriteLine("└──────────────────────────────────────────────────────┘");
+    Console.WriteLine();
+});
 
 app.Run();
 
