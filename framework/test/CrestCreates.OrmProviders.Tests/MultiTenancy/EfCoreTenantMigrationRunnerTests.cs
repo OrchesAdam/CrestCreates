@@ -5,6 +5,7 @@ using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.OrmProviders.EFCore.MultiTenancy;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -13,20 +14,33 @@ namespace CrestCreates.OrmProviders.Tests.MultiTenancy;
 
 public class EfCoreTenantMigrationRunnerTests
 {
+    private static Func<string, DbContext> CreateStubFactory()
+    {
+        // Returns a factory that creates a DbContext with in-memory options
+        // (never actually used for migration in these unit tests)
+        return _ =>
+        {
+            var options = new DbContextOptionsBuilder<DbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            return new DbContext(options);
+        };
+    }
+
     [Fact]
     public void Implements_ITenantMigrationRunner()
     {
         var logger = Mock.Of<ILogger<EfCoreTenantMigrationRunner>>();
-        var runner = new EfCoreTenantMigrationRunner(logger);
+        var runner = new EfCoreTenantMigrationRunner(CreateStubFactory(), logger);
 
         runner.Should().BeAssignableTo<ITenantMigrationRunner>();
     }
 
     [Fact]
-    public void Constructor_AcceptsLogger()
+    public void Constructor_AcceptsFactoryAndLogger()
     {
         var logger = Mock.Of<ILogger<EfCoreTenantMigrationRunner>>();
-        var runner = new EfCoreTenantMigrationRunner(logger);
+        var runner = new EfCoreTenantMigrationRunner(CreateStubFactory(), logger);
 
         runner.Should().NotBeNull();
     }
@@ -35,7 +49,7 @@ public class EfCoreTenantMigrationRunnerTests
     public void RunAsync_ReturnsTaskOfTenantMigrationResult()
     {
         var logger = Mock.Of<ILogger<EfCoreTenantMigrationRunner>>();
-        var runner = new EfCoreTenantMigrationRunner(logger);
+        var runner = new EfCoreTenantMigrationRunner(CreateStubFactory(), logger);
 
         var context = new TenantInitializationContext
         {
@@ -54,7 +68,7 @@ public class EfCoreTenantMigrationRunnerTests
     public async Task RunAsync_WithCancelledToken_ReturnsFailedResult()
     {
         var logger = Mock.Of<ILogger<EfCoreTenantMigrationRunner>>();
-        var runner = new EfCoreTenantMigrationRunner(logger);
+        var runner = new EfCoreTenantMigrationRunner(CreateStubFactory(), logger);
 
         var context = new TenantInitializationContext
         {
@@ -71,7 +85,9 @@ public class EfCoreTenantMigrationRunnerTests
 
         // The runner wraps all exceptions into a Failed result;
         // a cancelled token leads to an OperationCanceledException
-        // caught and converted to Failed.
+        // which is re-thrown (not caught), but the in-memory DbContext
+        // will throw before that since MigrateAsync is not supported.
+        // Either way, the result should indicate failure.
         result.Success.Should().BeFalse();
         result.Error.Should().NotBeNullOrWhiteSpace();
     }

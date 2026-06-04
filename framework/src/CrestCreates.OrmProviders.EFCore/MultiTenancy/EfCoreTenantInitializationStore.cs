@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using CrestCreates.Application.Tenants;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Shared;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -13,11 +12,11 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy;
 
 public class EfCoreTenantInitializationStore : ITenantInitializationStore
 {
-    private readonly CrestCreatesDbContext _dbContext;
+    private readonly DbContext _dbContext;
     private readonly ILogger<EfCoreTenantInitializationStore> _logger;
 
     public EfCoreTenantInitializationStore(
-        CrestCreatesDbContext dbContext,
+        DbContext dbContext,
         ILogger<EfCoreTenantInitializationStore> logger)
     {
         _dbContext = dbContext;
@@ -49,7 +48,7 @@ public class EfCoreTenantInitializationStore : ITenantInitializationStore
             DetachTrackedTenant(tenantId);
 
             // Compute next attempt number using the underlying DbSet for LINQ queries
-            var dbSet = ((DbContext)_dbContext).Set<TenantInitializationRecord>();
+            var dbSet = _dbContext.Set<TenantInitializationRecord>();
             var maxAttempt = await dbSet
                 .Where(r => r.TenantId == tenantId)
                 .MaxAsync(r => (int?)r.AttemptNo, cancellationToken) ?? 0;
@@ -95,7 +94,7 @@ public class EfCoreTenantInitializationStore : ITenantInitializationStore
             DetachTrackedTenant(tenantId);
 
             // Compute next attempt number using the underlying DbSet for LINQ queries
-            var dbSet = ((DbContext)_dbContext).Set<TenantInitializationRecord>();
+            var dbSet = _dbContext.Set<TenantInitializationRecord>();
             var maxAttempt = await dbSet
                 .Where(r => r.TenantId == tenantId)
                 .MaxAsync(r => (int?)r.AttemptNo, cancellationToken) ?? 0;
@@ -122,7 +121,7 @@ public class EfCoreTenantInitializationStore : ITenantInitializationStore
         CancellationToken cancellationToken)
     {
         // Use the underlying DbSet for LINQ queries
-        var dbSet = ((DbContext)_dbContext).Set<TenantInitializationRecord>();
+        var dbSet = _dbContext.Set<TenantInitializationRecord>();
 
         return await dbSet
             .Where(r => r.TenantId == tenantId)

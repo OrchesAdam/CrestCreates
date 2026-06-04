@@ -10,6 +10,7 @@ namespace CrestCreates.EventBus.Local
     {
         public override void OnConfigureServices(IServiceCollection services)
         {
+            services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(LocalEventBusModule).Assembly));
             services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, LocalEventBus>();
             services.AddScoped<CrestCreates.Domain.DomainEvents.IDomainEventPublisher, DomainEventPublisher>();
         }

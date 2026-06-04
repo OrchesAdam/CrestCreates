@@ -1,6 +1,5 @@
 using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Contracts.Interfaces;
-using CrestCreates.OrmProviders.EFCore.DbContexts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -8,11 +7,14 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy;
 
 public class EfCoreTenantMigrationRunner : ITenantMigrationRunner
 {
+    private readonly Func<string, DbContext> _tenantDbContextFactory;
     private readonly ILogger<EfCoreTenantMigrationRunner> _logger;
 
     public EfCoreTenantMigrationRunner(
+        Func<string, DbContext> tenantDbContextFactory,
         ILogger<EfCoreTenantMigrationRunner> logger)
     {
+        _tenantDbContextFactory = tenantDbContextFactory;
         _logger = logger;
     }
 
@@ -22,12 +24,8 @@ public class EfCoreTenantMigrationRunner : ITenantMigrationRunner
     {
         try
         {
-            var optionsBuilder = new DbContextOptionsBuilder<CrestCreatesDbContext>();
-            optionsBuilder.UseSqlServer(context.ConnectionString);
-
-            await using var dbContext = new CrestCreatesDbContext(optionsBuilder.Options);
+            await using var dbContext = _tenantDbContextFactory(context.ConnectionString);
             await dbContext.Database.MigrateAsync(cancellationToken);
-
             return TenantMigrationResult.Succeeded();
         }
         catch (OperationCanceledException)

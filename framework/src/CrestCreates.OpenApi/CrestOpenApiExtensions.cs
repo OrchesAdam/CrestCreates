@@ -1,9 +1,11 @@
 using CrestCreates.DynamicApi;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Scalar.AspNetCore;
 
 namespace CrestCreates.OpenApi;
@@ -20,6 +22,10 @@ public static class CrestOpenApiExtensions
         configure?.Invoke(options);
 
         services.AddSingleton(options);
+
+        // Aggregate all IOpenApiJsonTypeInfoContributor resolvers into JsonOptions
+        // for AoT/trimming-compatible OpenAPI schema generation
+        services.AddSingleton<IPostConfigureOptions<JsonOptions>, OpenApiJsonTypeInfoPostConfigureOptions>();
 
         services.AddOpenApi(options.DocumentVersion, openApiOptions =>
         {
@@ -44,6 +50,10 @@ public static class CrestOpenApiExtensions
         configure?.Invoke(options);
 
         services.AddSingleton(options);
+
+        // Aggregate all IOpenApiJsonTypeInfoContributor resolvers into JsonOptions
+        // for AoT/trimming-compatible OpenAPI schema generation
+        services.AddSingleton<IPostConfigureOptions<JsonOptions>, OpenApiJsonTypeInfoPostConfigureOptions>();
 
         services.AddOpenApi(options.DocumentVersion, openApiOptions =>
         {

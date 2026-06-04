@@ -12,6 +12,7 @@
     <ProjectReference Include="../../../framework/src/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
     <ProjectReference Include="../../../framework/src/CrestCreates.OrmProviders.EFCore/CrestCreates.OrmProviders.EFCore.csproj" />
     <ProjectReference Include="../../../framework/src/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="../../../framework/src/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Application/SaaSHelpdesk.Application.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Domain/SaaSHelpdesk.Domain.csproj" />
   </ItemGroup>

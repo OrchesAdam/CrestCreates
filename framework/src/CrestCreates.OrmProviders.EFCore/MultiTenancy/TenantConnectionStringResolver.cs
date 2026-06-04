@@ -34,23 +34,22 @@ namespace CrestCreates.OrmProviders.EFCore.MultiTenancy
     {
         private readonly ITenantConnectionStringResolver _connectionStringResolver;
         private readonly ITenantDbContextFactory _dbContextFactory;
+        private readonly Func<string, DbContext> _tenantDbContextFactory;
 
         public TenantDbContextFactory(
             ITenantConnectionStringResolver connectionStringResolver,
-            ITenantDbContextFactory dbContextFactory)
+            ITenantDbContextFactory dbContextFactory,
+            Func<string, DbContext> tenantDbContextFactory)
         {
             _connectionStringResolver = connectionStringResolver;
             _dbContextFactory = dbContextFactory;
+            _tenantDbContextFactory = tenantDbContextFactory;
         }
 
         public TDbContext CreateDbContext()
         {
             var connectionString = _connectionStringResolver.Resolve();
-
-            var optionsBuilder = new DbContextOptionsBuilder<TDbContext>();
-            optionsBuilder.UseSqlServer(connectionString);
-
-            return _dbContextFactory.Create<TDbContext>(optionsBuilder.Options);
+            return (TDbContext)_tenantDbContextFactory(connectionString);
         }
     }
 }

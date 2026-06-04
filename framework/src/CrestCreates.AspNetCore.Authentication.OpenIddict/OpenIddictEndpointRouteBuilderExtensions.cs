@@ -362,7 +362,7 @@ public static class OpenIddictEndpointRouteBuilderExtensions
         return Task.FromResult<IResult>(Results.Ok(new { message = "已退出登录" }));
     }
 
-    internal sealed class OpenIddictTokenRequest
+    public sealed class OpenIddictTokenRequest
     {
         [JsonPropertyName("grant_type")]
         public string? GrantType { get; set; }

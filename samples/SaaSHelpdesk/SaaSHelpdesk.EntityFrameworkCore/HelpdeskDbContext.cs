@@ -1,9 +1,11 @@
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.AuditLog;
+using CrestCreates.Domain.Settings;
+using CrestCreates.Domain.Features;
 using CrestCreates.OrmProviders.EFCore.Extensions;
+using CrestCreates.OrmProviders.EFCore.ValueConverters;
 using Microsoft.EntityFrameworkCore;
 using SaaSHelpdesk.Domain.Entities;
-using System.Text.Json;
 
 namespace SaaSHelpdesk.EntityFrameworkCore;
 
@@ -34,6 +36,7 @@ public class HelpdeskDbContext : DbContext
     public DbSet<TenantConnectionString> TenantConnectionStrings { get; set; } = null!;
     public DbSet<CrestCreates.Domain.Settings.SettingValue> SettingValues { get; set; } = null!;
     public DbSet<CrestCreates.Domain.Features.FeatureValue> FeatureValues { get; set; } = null!;
+    public DbSet<TenantInitializationRecord> TenantInitializationRecords { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -139,12 +142,24 @@ public class HelpdeskDbContext : DbContext
             entity.Property(e => e.Status).IsRequired();
             entity.Property(e => e.CreationTime).IsRequired();
             entity.Property(e => e.ExtraProperties)
-                .HasConversion(
-                    value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null),
-                    value => string.IsNullOrWhiteSpace(value)
-                        ? new Dictionary<string, object>()
-                        : JsonSerializer.Deserialize<Dictionary<string, object>>(value, (JsonSerializerOptions?)null)
-                            ?? new Dictionary<string, object>());
+                .HasConversion<DictionaryToJsonValueConverter>();
+        });
+
+        modelBuilder.Entity<TenantInitializationRecord>(entity =>
+        {
+            entity.ToTable("TenantInitializationRecords");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.TenantId).IsRequired();
+            entity.Property(e => e.AttemptNo).IsRequired();
+            entity.Property(e => e.Status).HasConversion<int>().IsRequired();
+            entity.Property(e => e.CurrentStep).HasMaxLength(128);
+            entity.Property(e => e.StepResultsJson).IsRequired();
+            entity.Property(e => e.Error).HasMaxLength(2048);
+            entity.Property(e => e.StartedAt).IsRequired();
+            entity.Property(e => e.CorrelationId).IsRequired().HasMaxLength(128);
+
+            entity.HasIndex(e => new { e.TenantId, e.AttemptNo }).IsUnique();
         });
 
         // Configure concurrency stamp

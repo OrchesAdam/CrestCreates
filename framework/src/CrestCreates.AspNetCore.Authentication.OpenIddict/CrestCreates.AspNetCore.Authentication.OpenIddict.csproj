@@ -20,6 +20,7 @@
     <ProjectReference Include="..\CrestCreates.DbContextProvider.Abstract\CrestCreates.DbContextProvider.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
     <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="..\CrestCreates.OpenApi\CrestCreates.OpenApi.csproj" />
   </ItemGroup>
 
 </Project>
