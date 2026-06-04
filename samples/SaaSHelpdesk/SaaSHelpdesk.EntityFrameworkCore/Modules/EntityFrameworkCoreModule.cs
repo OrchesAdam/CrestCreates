@@ -76,6 +76,7 @@ public class EntityFrameworkCoreModule : ModuleBase
             return new HelpdeskDbContext(options);
         });
         services.Replace(ServiceDescriptor.Scoped<ITenantMigrationRunner, EfCoreTenantMigrationRunner>());
+        services.TryAddScoped<ITenantSchemaMigrator, EfCoreTenantSchemaMigrator>();
         services.Replace(ServiceDescriptor.Scoped<ITenantInitializationStore, EfCoreTenantInitializationStore>());
 
         // MediatR for domain events

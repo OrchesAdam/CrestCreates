@@ -1,6 +1,6 @@
-using CrestCreates.AspNetCore.Authentication.OpenIddict.Data;
+using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.Data.EFCore.Configuration;
-using CrestCreates.Data.EFCore.PostgreSQL.DatabaseProviders;
+using CrestCreates.Data.EFCore.PostgreSQL.DatabaseProviders.PostgreSQL;
 using CrestCreates.Application.Contracts.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -33,8 +33,9 @@ public static class NpgsqlServiceCollectionExtensions
             optionsBuilder.UseNpgsql(connectionString);
         });
 
-        // Register PostgreSQL tenant database initializer (CREATE DATABASE support)
-        services.AddScoped<ITenantDatabaseInitializer, PostgreSqlTenantDatabaseProvisioner>();
+        // Register PostgreSQL tenant database provisioner (CREATE DATABASE support)
+        services.AddScoped<PostgreSqlTenantDatabaseProvisioner>();
+        services.AddScoped<ITenantDatabaseProvisioner, PostgreSqlTenantDatabaseProvisioner>();
 
         return services;
     }

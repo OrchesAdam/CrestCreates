@@ -1,5 +1,6 @@
 using CrestCreates.Data.EFCore.Configuration;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Data.EFCore.PostgreSQL.Configuration;
