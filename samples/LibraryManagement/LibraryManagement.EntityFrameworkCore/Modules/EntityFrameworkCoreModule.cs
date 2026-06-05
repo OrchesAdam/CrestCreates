@@ -4,9 +4,11 @@ using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore;
 using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.DataSeed;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.UnitOfWork;
 using CrestCreates.Data.EFCore.Settings;
@@ -68,5 +70,8 @@ public class EntityFrameworkCoreModule : ModuleBase
             typeof(LibraryDbContext),
         });
         services.AddSingleton<HostMigrationAndSeedRunner>();
+
+        // Register host identity data seeder
+        services.AddScoped<IDataSeeder, HostIdentityDataSeeder>();
     }
 }

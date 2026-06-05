@@ -10,6 +10,7 @@ using CrestCreates.OpenApi;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.Data.EFCore;
+using CrestCreates.Data.EFCore.DataSeed;
 using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.MultiTenancy;
 using CrestCreates.Data.EFCore.PostgreSql.Configuration;
@@ -101,5 +102,6 @@ public class EntityFrameworkCoreModule : ModuleBase
 
         // Register demo data seeder
         services.AddScoped<IDataSeeder, DemoDataSeeder>();
+        services.AddScoped<IDataSeeder, HostIdentityDataSeeder>();
     }
 }

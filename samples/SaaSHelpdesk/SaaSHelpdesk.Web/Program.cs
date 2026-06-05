@@ -112,7 +112,7 @@ app.MapCrestAspNetCoreDynamicApi();
 app.MapCrestOpenApi();
 
 // Initialize all modules
-app.InitializeModules();
+await app.InitializeModulesAsync();
 
 // Print startup URLs
 var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();

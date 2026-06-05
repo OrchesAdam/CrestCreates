@@ -102,7 +102,7 @@ app.MapCrestAspNetCoreDynamicApi();
 app.MapCrestOpenApi();
 
 // Initialize all modules
-app.InitializeModules();
+await app.InitializeModulesAsync();
 
 app.Run();
 
