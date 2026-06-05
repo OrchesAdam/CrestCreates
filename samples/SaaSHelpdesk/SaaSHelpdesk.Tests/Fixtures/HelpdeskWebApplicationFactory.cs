@@ -371,9 +371,6 @@ public sealed class HelpdeskWebApplicationFactory
             services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
             services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
 
-            services.AddMediatR(cfg =>
-                cfg.RegisterServicesFromAssembly(typeof(HelpdeskWebApplicationFactory).Assembly));
-
             services.AddSettingManagementEfCore();
 
             // Sample-specific repositories

@@ -42,8 +42,8 @@
     <PackageVersion Include="FreeSql.Provider.Sqlite" Version="3.5.308" />
     <PackageVersion Include="SQLitePCLRaw.bundle_green" Version="2.1.11" />
     <!-- 中介者模式 -->
-    <PackageVersion Include="MediatR" Version="14.1.0" />
-    <PackageVersion Include="MediatR.Extensions.Microsoft.DependencyInjection" Version="11.1.0" />
+    <PackageVersion Include="Mediator.Abstractions" Version="3.0.2" />
+    <PackageVersion Include="Mediator.SourceGenerator" Version="3.0.2" />
     <!-- 验证 -->
     <PackageVersion Include="FluentValidation" Version="12.1.1" />
     <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
@@ -115,6 +115,7 @@
     <PackageVersion Include="Serilog.Enrichers.Environment" Version="3.0.1" />
     <PackageVersion Include="Serilog.Enrichers.Thread" Version="4.0.0" />
     <!-- 其他工具包 -->
+    <PackageVersion Include="Azure.Core" Version="1.47.1" />
     <PackageVersion Include="Azure.Storage.Blobs" Version="12.24.0" />
     <PackageVersion Include="System.Text.Json" Version="$(RuntimePackageVersion)" />
     <PackageVersion Include="System.ComponentModel.Annotations" Version="5.0.0" />

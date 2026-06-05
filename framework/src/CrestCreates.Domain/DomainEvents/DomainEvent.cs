@@ -1,9 +1,9 @@
 using System;
-using MediatR;
+using CrestCreates.EventBus.Abstractions;
 
 namespace CrestCreates.Domain.DomainEvents
 {
-    public interface IDomainEvent : INotification
+    public interface IDomainEvent : ILocalEvent
     {
         DateTime OccurredOn { get; }
     }

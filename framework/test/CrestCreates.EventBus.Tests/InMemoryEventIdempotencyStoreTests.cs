@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using FluentAssertions;
 using Xunit;
 using CrestCreates.EventBus.Local;
 
@@ -20,7 +19,7 @@ namespace CrestCreates.EventBus.Tests
             var result = await store.IsProcessedAsync(eventId);
 
             // Assert
-            result.Should().BeFalse();
+            Assert.False(result);
         }
 
         [Fact]
@@ -35,7 +34,7 @@ namespace CrestCreates.EventBus.Tests
             var result = await store.IsProcessedAsync(eventId);
 
             // Assert
-            result.Should().BeTrue();
+            Assert.True(result);
         }
 
         [Fact]
@@ -54,7 +53,8 @@ namespace CrestCreates.EventBus.Tests
             };
 
             // Assert
-            await act.Should().NotThrowAsync();
+            var exception = await Record.ExceptionAsync(act);
+            Assert.Null(exception);
         }
 
         [Fact]
@@ -75,7 +75,7 @@ namespace CrestCreates.EventBus.Tests
 
             // Assert
             var result = await store.IsProcessedAsync(eventId);
-            result.Should().BeTrue();
+            Assert.True(result);
         }
     }
 }

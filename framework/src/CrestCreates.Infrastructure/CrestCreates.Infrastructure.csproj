@@ -15,7 +15,6 @@
 
     <PackageReference Include="SqlSugarCore" />
     <PackageReference Include="FreeSql" />
-    <PackageReference Include="MediatR" />
   </ItemGroup>
 
   <ItemGroup>

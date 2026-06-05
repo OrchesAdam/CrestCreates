@@ -28,6 +28,7 @@
     <Project Path="framework/src/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
     <Project Path="framework/src/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
     <Project Path="framework/src/CrestCreates.EventBus.Abstract/CrestCreates.EventBus.Abstract.csproj" />
+    <Project Path="framework/src/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
     <Project Path="framework/src/CrestCreates.FileManagement/CrestCreates.FileManagement.csproj" />
     <Project Path="framework/src/CrestCreates.HealthCheck/CrestCreates.HealthCheck.csproj" />
     <Project Path="framework/src/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
@@ -58,8 +59,10 @@
   </Folder>
   <Folder Name="/src/modules/EventBus/">
     <Project Path="framework/src/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj" />
+    <Project Path="framework/src/CrestCreates.EventBus.Local.Channel/CrestCreates.EventBus.Local.Channel.csproj" />
     <Project Path="framework/src/CrestCreates.EventBus.Kafka/CrestCreates.EventBus.Kafka.csproj" />      
     <Project Path="framework/src/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />      
+    <Project Path="framework/src/CrestCreates.EventBus.MediatorAdapter/CrestCreates.EventBus.MediatorAdapter.csproj" />
     <Project Path="framework/src/CrestCreates.EventBus.RabbitMQ/CrestCreates.EventBus.RabbitMQ.csproj" />      
   </Folder>
   <Folder Name="/src/modules/HealthCheck/">

@@ -3,14 +3,12 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Reflection;
 using System.Threading.Tasks;
-using Xunit;
-using Moq;
-using FluentAssertions;
-using MediatR;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Entities;
+using CrestCreates.EventBus.Abstractions;
 using CrestCreates.EventBus.Local;
 using CrestCreates.EventBus.Tests.Events;
+using Xunit;
 
 namespace CrestCreates.EventBus.Tests
 {
@@ -24,15 +22,14 @@ namespace CrestCreates.EventBus.Tests
             var domainEvent = new TestDomainEvent(entity.Id);
             entity.AddDomainEvent(domainEvent);
 
-            var mediatorMock = new Mock<IMediator>();
-            var domainEventPublisher = new DomainEventPublisher(mediatorMock.Object);
+            var domainEventPublisher = new DomainEventPublisher(new NoOpLocalEventBus());
 
             // Act & Assert
             var reflectionTime = MeasureReflectionTime(entity, domainEventPublisher);
             var generatedCodeTime = MeasureGeneratedCodeTime(entity, domainEventPublisher);
 
             // 验证生成的代码性能优于反射
-            generatedCodeTime.Should().BeLessThan(reflectionTime);
+            Assert.True(generatedCodeTime < reflectionTime);
         }
 
         private long MeasureReflectionTime(Entity<Guid> entity, DomainEventPublisher publisher)
@@ -86,6 +83,19 @@ namespace CrestCreates.EventBus.Tests
 
             stopwatch.Stop();
             return stopwatch.ElapsedMilliseconds;
+        }
+
+        private sealed class NoOpLocalEventBus : ILocalEventBus
+        {
+            public Task PublishAsync(ILocalEvent @event, System.Threading.CancellationToken cancellationToken = default)
+            {
+                return Task.CompletedTask;
+            }
+
+            public Task PublishAsync<TEvent>(TEvent @event, System.Threading.CancellationToken cancellationToken = default) where TEvent : ILocalEvent
+            {
+                return Task.CompletedTask;
+            }
         }
     }
 }
