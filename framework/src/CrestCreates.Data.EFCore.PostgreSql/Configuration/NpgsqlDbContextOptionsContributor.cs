@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace CrestCreates.Data.EFCore.PostgreSQL.Configuration;
+namespace CrestCreates.Data.EFCore.PostgreSql.Configuration;
 
 /// <summary>
 /// <see cref="IEfCoreDbContextOptionsContributor"/> that configures DbContexts to use Npgsql (PostgreSQL).

@@ -7,7 +7,7 @@ using CrestCreates.Application.Contracts.Interfaces;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
-namespace CrestCreates.Data.EFCore.PostgreSQL.DatabaseProviders.PostgreSQL;
+namespace CrestCreates.Data.EFCore.PostgreSql.DatabaseProviders.PostgreSQL;
 
 public class PostgreSqlTenantDatabaseProvisioner : ITenantDatabaseProvisioner
 {

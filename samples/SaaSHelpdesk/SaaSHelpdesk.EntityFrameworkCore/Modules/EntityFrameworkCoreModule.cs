@@ -9,7 +9,7 @@ using CrestCreates.OpenApi;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.MultiTenancy;
-using CrestCreates.Data.EFCore.PostgreSQL.Configuration;
+using CrestCreates.Data.EFCore.PostgreSql.Configuration;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.Settings;
 using CrestCreates.Data.EFCore.UnitOfWork;

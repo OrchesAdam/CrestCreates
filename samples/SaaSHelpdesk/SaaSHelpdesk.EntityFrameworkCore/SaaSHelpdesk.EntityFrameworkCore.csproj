@@ -11,7 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="../../../framework/src/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
     <ProjectReference Include="../../../framework/src/CrestCreates.Data.EFCore/CrestCreates.Data.EFCore.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.Data.EFCore.PostgreSQL/CrestCreates.Data.EFCore.PostgreSQL.csproj" />
+    <ProjectReference Include="../../../framework/src/CrestCreates.Data.EFCore.PostgreSql/CrestCreates.Data.EFCore.PostgreSql.csproj" />
     <ProjectReference Include="../../../framework/src/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
     <ProjectReference Include="../../../framework/src/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Application/SaaSHelpdesk.Application.csproj" />
