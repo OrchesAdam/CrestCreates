@@ -8,7 +8,7 @@ builder.AddCrestWeb();
 var app = builder.Build();
 app.UseCrestWeb();
 app.MapCrestWeb();
-app.InitializeModules();
+await app.InitializeModulesAsync();
 app.Run();
 
 public partial class Program;
