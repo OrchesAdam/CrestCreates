@@ -11,7 +11,7 @@ using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Data.EFCore.UnitOfWork;
 using CrestCreates.Data.SqlSugar.UnitOfWork;
-using CrestCreates.Data.FreeSqlProvider.UnitOfWork;
+using CrestCreates.Data.FreeSql.UnitOfWork;
 using CrestCreates.EventBus.Local;
 using CrestCreates.EventBus.Tests.Events;
 

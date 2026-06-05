@@ -5,7 +5,7 @@ using CrestCreates.DataFilter.Entities;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Data.Abstractions;
 
-namespace CrestCreates.Data.FreeSqlProvider.Interceptors
+namespace CrestCreates.Data.FreeSql.Interceptors
 {
     /// <summary>
     /// FreeSql 审计拦截器配置
@@ -29,7 +29,7 @@ namespace CrestCreates.Data.FreeSqlProvider.Interceptors
                 {
                     switch (e.AuditValueType)
                     {
-                        case FreeSql.Aop.AuditValueType.Insert:
+                        case global::FreeSql.Aop.AuditValueType.Insert:
                             // 插入操作 - 设置创建信息
                             if (e.Property.Name == nameof(IAuditedEntity.CreationTime))
                             {
@@ -41,7 +41,7 @@ namespace CrestCreates.Data.FreeSqlProvider.Interceptors
                             }
                             break;
 
-                        case FreeSql.Aop.AuditValueType.Update:
+                        case global::FreeSql.Aop.AuditValueType.Update:
                             // 更新操作 - 设置修改信息
                             if (e.Property.Name == nameof(IAuditedEntity.LastModificationTime))
                             {
@@ -56,7 +56,7 @@ namespace CrestCreates.Data.FreeSqlProvider.Interceptors
                 }
 
                 // 2. 处理软删除 - 当 IsDeleted 为 true 时，自动填充删除相关字段
-                if (e.Object is ISoftDelete softDelete && e.AuditValueType == FreeSql.Aop.AuditValueType.Update)
+                if (e.Object is ISoftDelete softDelete && e.AuditValueType == global::FreeSql.Aop.AuditValueType.Update)
                 {
                     if (softDelete.IsDeleted)
                     {
@@ -78,7 +78,7 @@ namespace CrestCreates.Data.FreeSqlProvider.Interceptors
                     {
                         switch (e.AuditValueType)
                         {
-                            case FreeSql.Aop.AuditValueType.Insert:
+                            case global::FreeSql.Aop.AuditValueType.Insert:
                                 // 插入时自动设置租户ID（如果未设置）
                                 if (string.IsNullOrEmpty(multiTenant.TenantId) && e.Property.Name == nameof(IMultiTenant.TenantId))
                                 {
@@ -86,7 +86,7 @@ namespace CrestCreates.Data.FreeSqlProvider.Interceptors
                                 }
                                 break;
 
-                            case FreeSql.Aop.AuditValueType.Update:
+                            case global::FreeSql.Aop.AuditValueType.Update:
                                 // 更新时验证租户边界
                                 if (!string.IsNullOrEmpty(multiTenant.TenantId) &&
                                     !string.Equals(multiTenant.TenantId, tenantId, StringComparison.Ordinal))
@@ -102,7 +102,7 @@ namespace CrestCreates.Data.FreeSqlProvider.Interceptors
                     {
                         switch (e.AuditValueType)
                         {
-                            case FreeSql.Aop.AuditValueType.Insert:
+                            case global::FreeSql.Aop.AuditValueType.Insert:
                                 // 插入时自动设置租户ID（如果未设置）
                                 if (string.IsNullOrEmpty(mustHaveTenant.TenantId) && e.Property.Name == nameof(IMustHaveTenant.TenantId))
                                 {
@@ -110,7 +110,7 @@ namespace CrestCreates.Data.FreeSqlProvider.Interceptors
                                 }
                                 break;
 
-                            case FreeSql.Aop.AuditValueType.Update:
+                            case global::FreeSql.Aop.AuditValueType.Update:
                                 // 更新时验证租户边界
                                 if (!string.Equals(mustHaveTenant.TenantId, tenantId, StringComparison.Ordinal))
                                 {
@@ -167,7 +167,7 @@ namespace CrestCreates.Data.FreeSqlProvider.Interceptors
             // 配置删除行为
             freeSql.Aop.CurdBefore += (sender, e) =>
             {
-                if (e.CurdType == FreeSql.Aop.CurdType.Delete && e.EntityType != null)
+                if (e.CurdType == global::FreeSql.Aop.CurdType.Delete && e.EntityType != null)
                 {
                     // 检查实体是否实现了软删除接口
                     if (typeof(ISoftDelete).IsAssignableFrom(e.EntityType))

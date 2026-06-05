@@ -13,7 +13,7 @@
     <!-- 项目引用 -->
     <ProjectReference Include="..\..\src\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
-    <ProjectReference Include="..\..\src\CrestCreates.Data.FreeSqlProvider\CrestCreates.Data.FreeSqlProvider.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Data.FreeSql\CrestCreates.Data.FreeSql.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Data.SqlSugar\CrestCreates.Data.SqlSugar.csproj" />
   </ItemGroup>
 

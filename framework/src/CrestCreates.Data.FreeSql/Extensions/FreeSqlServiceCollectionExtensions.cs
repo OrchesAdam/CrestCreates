@@ -2,9 +2,9 @@ using System;
 using System.Reflection;
 using FreeSql;
 using Microsoft.Extensions.DependencyInjection;
-using CrestCreates.Data.FreeSqlProvider.UnitOfWork;
+using CrestCreates.Data.FreeSql.UnitOfWork;
 
-namespace CrestCreates.Data.FreeSqlProvider.Extensions
+namespace CrestCreates.Data.FreeSql.Extensions
 {
     /// <summary>
     /// FreeSql 依赖注入扩展

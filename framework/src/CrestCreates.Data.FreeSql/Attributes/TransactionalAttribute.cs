@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FreeSql;
 
-namespace CrestCreates.Data.FreeSqlProvider.Attributes
+namespace CrestCreates.Data.FreeSql.Attributes
 {
     /// <summary>
     /// 事务特性（基于 Rougamo AOP）

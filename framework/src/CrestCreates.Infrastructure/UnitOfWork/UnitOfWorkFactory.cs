@@ -116,7 +116,7 @@ namespace CrestCreates.Infrastructure.UnitOfWork
             {
                 RegisterUnitOfWorkFactory(OrmProvider.FreeSql, sp =>
                 {
-                    var type = Type.GetType("CrestCreates.Data.FreeSqlProvider.UnitOfWork.FreeSqlUnitOfWork");
+                    var type = Type.GetType("CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWork");
                     return type != null ? (IUnitOfWork)sp.GetRequiredService(type) : throw new NotSupportedException("FreeSql unit of work type not found");
                 });
             }
@@ -165,7 +165,7 @@ namespace CrestCreates.Infrastructure.UnitOfWork
             {
                 OrmProvider.EfCore => "CrestCreates.Data.EFCore.UnitOfWork.EfCoreUnitOfWork",
                 OrmProvider.SqlSugar => "CrestCreates.Data.SqlSugar.UnitOfWork.SqlSugarUnitOfWork",
-                OrmProvider.FreeSql => "CrestCreates.Data.FreeSqlProvider.UnitOfWork.FreeSqlUnitOfWork",
+                OrmProvider.FreeSql => "CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWork",
                 _ => throw new NotSupportedException($"ORM provider '{provider}' is not supported")
             };
 

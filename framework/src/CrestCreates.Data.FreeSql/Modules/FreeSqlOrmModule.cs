@@ -5,9 +5,9 @@ using FreeSql;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.Abstractions.Modules;
-using CrestCreates.Data.FreeSqlProvider.UnitOfWork;
+using CrestCreates.Data.FreeSql.UnitOfWork;
 
-namespace CrestCreates.Data.FreeSqlProvider.Modules
+namespace CrestCreates.Data.FreeSql.Modules
 {
     /// <summary>
     /// FreeSql ORM 模块

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.Data.Core\CrestCreates.Data.Core.csproj" />
     <ProjectReference Include="..\CrestCreates.Data.Abstractions\CrestCreates.Data.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
@@ -17,6 +18,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RootNamespace>CrestCreates.Data.FreeSql</RootNamespace>
   </PropertyGroup>
 
 </Project>

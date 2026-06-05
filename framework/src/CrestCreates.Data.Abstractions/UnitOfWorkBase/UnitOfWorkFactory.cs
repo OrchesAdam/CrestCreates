@@ -35,7 +35,7 @@ namespace CrestCreates.Data.Abstractions
             {
                 OrmProvider.EfCore => "CrestCreates.Data.EFCore.UnitOfWork.EfCoreUnitOfWork",
                 OrmProvider.SqlSugar => "CrestCreates.Data.SqlSugar.UnitOfWork.SqlSugarUnitOfWork",
-                OrmProvider.FreeSql => "CrestCreates.Data.FreeSqlProvider.UnitOfWork.FreeSqlUnitOfWork",
+                OrmProvider.FreeSql => "CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWork",
                 _ => throw new NotSupportedException($"ORM provider '{provider}' is not supported.")
             };
 

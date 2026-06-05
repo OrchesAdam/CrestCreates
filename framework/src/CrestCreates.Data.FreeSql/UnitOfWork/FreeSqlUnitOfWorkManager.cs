@@ -2,7 +2,7 @@ using System;
 using System.Data;
 using FreeSql;
 
-namespace CrestCreates.Data.FreeSqlProvider.UnitOfWork
+namespace CrestCreates.Data.FreeSql.UnitOfWork
 {
     /// <summary>
     /// FreeSql 工作单元管理器
@@ -38,7 +38,7 @@ namespace CrestCreates.Data.FreeSqlProvider.UnitOfWork
         /// 将仓储绑定到当前工作单元管理器
         /// </summary>
         /// <param name="repository">仓储实例</param>
-        public void Binding(FreeSql.IBaseRepository repository)
+        public void Binding(global::FreeSql.IBaseRepository repository)
         {
             _unitOfWorkManager.Binding(repository);
         }

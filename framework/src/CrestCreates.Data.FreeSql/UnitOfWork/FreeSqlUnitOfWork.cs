@@ -8,7 +8,7 @@ using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Data.Abstractions.UnitOfWorkBase;
 
-namespace CrestCreates.Data.FreeSqlProvider.UnitOfWork
+namespace CrestCreates.Data.FreeSql.UnitOfWork
 {
     /// <summary>
     /// FreeSql 工作单元实现
@@ -17,7 +17,7 @@ namespace CrestCreates.Data.FreeSqlProvider.UnitOfWork
     public class FreeSqlUnitOfWork : UnitOfWorkWithEvents
     {
         private readonly FreeSqlUnitOfWorkManager _unitOfWorkManager;
-        private FreeSql.IUnitOfWork? _unitOfWork;
+        private global::FreeSql.IUnitOfWork? _unitOfWork;
         private bool _disposed;
         private readonly List<object> _trackedEntities = new List<object>();
 

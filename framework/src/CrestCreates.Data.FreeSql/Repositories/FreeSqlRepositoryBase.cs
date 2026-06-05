@@ -13,7 +13,7 @@ using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.Domain.Shared.Entities.Auditing;
 using Microsoft.Extensions.Logging;
 
-namespace CrestCreates.Data.FreeSqlProvider.Repositories
+namespace CrestCreates.Data.FreeSql.Repositories
 {
     /// <summary>
     /// FreeSql 仓储基类（支持 UnitOfWorkManager）
