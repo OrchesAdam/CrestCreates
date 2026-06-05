@@ -3,17 +3,13 @@ using System.Linq;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Application.Tenants;
 using CrestCreates.DbContextProvider.Abstract;
-using CrestCreates.Data.EFCore.DatabaseProviders.SqlServer;
 using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.Interceptors;
 using CrestCreates.Data.EFCore.MultiTenancy;
-using CrestCreates.Data.EFCore.ValueConverters;
-using Microsoft.AspNetCore.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Options;
 
 namespace CrestCreates.Data.EFCore.Configuration;
 
@@ -31,21 +27,16 @@ public static class EfCoreDbContextServiceCollectionExtensions
         services.TryAddScoped<MultiTenancyInterceptor>();
         services.TryAddSingleton<TenantAwareModelCacheKeyFactory>();
 
-        services.TryAddScoped<SqlServerTenantDatabaseProvisioner>();
-        services.TryAddScoped<ITenantDatabaseProvisioner, SqlServerTenantDatabaseProvisioner>();
+        // ITenantDatabaseProvisioner is registered by the provider-specific project
+        // (e.g., AddCrestCreatesEfCoreSqlServer, AddCrestCreatesEfCorePostgreSql, AddCrestCreatesEfCoreMySql).
+        // If no provider registers one, tenant database provisioning will fail at runtime.
+
         services.TryAddScoped<ITenantSchemaMigrator, EfCoreTenantSchemaMigrator>();
         services.TryAddScoped<ITenantInitializationStore, EfCoreTenantInitializationStore>();
 
-        // Default factory for tenant migration: creates CrestCreatesDbContext with UseSqlServer.
-        // Projects using a custom DbContext or different provider should register their own factory
-        // BEFORE calling this method, so TryAddSingleton skips this default registration.
-        services.TryAddSingleton<Func<string, DbContext>>(connectionString =>
-        {
-            var options = new DbContextOptionsBuilder<CrestCreatesDbContext>()
-                .UseSqlServer(connectionString)
-                .Options;
-            return new CrestCreatesDbContext(options);
-        });
+        // Provider-specific projects must register their own Func<string, DbContext> factory.
+        // No default factory is provided here since this project no longer references any
+        // specific database provider (SqlServer, Sqlite, etc.).
 
         services.AddDbContext<CrestCreatesDbContext>((serviceProvider, optionsBuilder) =>
         {
@@ -69,8 +60,6 @@ public static class EfCoreDbContextServiceCollectionExtensions
 
         services.TryAdd(ServiceDescriptor.Scoped<IEntityFrameworkCoreDbContext>(sp => sp.GetRequiredService<CrestCreatesDbContext>()));
         services.TryAdd(ServiceDescriptor.Scoped<IDataBaseContext>(sp => sp.GetRequiredService<IEntityFrameworkCoreDbContext>()));
-        // Register DbContext base class so services injecting DbContext (e.g. EfCoreTenantInitializationStore)
-        // can resolve it. AddDbContext<T>() only registers the concrete T, not the base DbContext.
         services.TryAddScoped<DbContext>(sp => sp.GetRequiredService<CrestCreatesDbContext>());
 
         return services;
