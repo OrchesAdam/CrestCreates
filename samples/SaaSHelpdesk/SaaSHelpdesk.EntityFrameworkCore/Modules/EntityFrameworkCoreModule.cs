@@ -18,7 +18,6 @@ using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.Settings;
 using CrestCreates.Data.EFCore.UnitOfWork;
 using CrestCreates.Data.EFCore.ValueConverters;
-using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -81,9 +80,6 @@ public class EntityFrameworkCoreModule : ModuleBase
         });
         services.TryAddScoped<ITenantSchemaMigrator, EfCoreTenantSchemaMigrator>();
         services.Replace(ServiceDescriptor.Scoped<ITenantInitializationStore, EfCoreTenantInitializationStore>());
-
-        // MediatR for domain events
-        services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(EntityFrameworkCoreModule).Assembly));
 
         // Source-generated JSON metadata for OpenAPI schema generation (AoT/trimming compatibility)
         services.AddSingleton<IOpenApiJsonTypeInfoContributor, JsonTypeInfoContributor<DictionaryJsonContext>>();

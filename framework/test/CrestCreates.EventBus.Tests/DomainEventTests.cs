@@ -1,4 +1,12 @@
-using System;using System.Collections.Generic;using System.Threading.Tasks;using Xunit;using Moq;using FluentAssertions;using MediatR;using CrestCreates.Domain.DomainEvents;using CrestCreates.Domain.Entities;using CrestCreates.EventBus.Local;using CrestCreates.EventBus.Tests.Events;using CrestCreates.EventBus.Tests.Handlers;
+using System;
+using CrestCreates.Domain.DomainEvents;
+using CrestCreates.Domain.Entities;
+using CrestCreates.EventBus.Abstractions;
+using CrestCreates.EventBus.Local;
+using CrestCreates.EventBus.Tests.Events;
+using CrestCreates.EventBus.Tests.Handlers;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
 
 namespace CrestCreates.EventBus.Tests
 {
@@ -11,7 +19,7 @@ namespace CrestCreates.EventBus.Tests
             var domainEvent = new TestDomainEvent(Guid.NewGuid());
 
             // Assert
-            domainEvent.OccurredOn.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(1));
+            Assert.InRange((DateTime.UtcNow - domainEvent.OccurredOn).Duration(), TimeSpan.Zero, TimeSpan.FromSeconds(1));
         }
 
         [Fact]
@@ -25,8 +33,8 @@ namespace CrestCreates.EventBus.Tests
             entity.AddDomainEvent(domainEvent);
 
             // Assert
-            entity.DomainEvents.Should().Contain(domainEvent);
-            entity.DomainEvents.Count.Should().Be(1);
+            Assert.Contains(domainEvent, entity.DomainEvents);
+            Assert.Equal(1, entity.DomainEvents.Count);
         }
 
         [Fact]
@@ -41,8 +49,8 @@ namespace CrestCreates.EventBus.Tests
             entity.RemoveDomainEvent(domainEvent);
 
             // Assert
-            entity.DomainEvents.Should().NotContain(domainEvent);
-            entity.DomainEvents.Count.Should().Be(0);
+            Assert.DoesNotContain(domainEvent, entity.DomainEvents);
+            Assert.Empty(entity.DomainEvents);
         }
 
         [Fact]
@@ -59,7 +67,7 @@ namespace CrestCreates.EventBus.Tests
             entity.ClearDomainEvents();
 
             // Assert
-            entity.DomainEvents.Should().BeEmpty();
+            Assert.Empty(entity.DomainEvents);
         }
 
         [Fact]
@@ -67,46 +75,45 @@ namespace CrestCreates.EventBus.Tests
         {
             var entity = new TestEntity(Guid.NewGuid());
 
-            entity.Should().BeAssignableTo<IHasDomainEvents>();
+            Assert.IsAssignableFrom<IHasDomainEvents>(entity);
             entity.AddDomainEvent(new TestDomainEvent(Guid.NewGuid()));
 
             var hasDomainEvents = (IHasDomainEvents)entity;
 
-            hasDomainEvents.DomainEvents.Should().HaveCount(1);
+            Assert.Single(hasDomainEvents.DomainEvents);
 
             hasDomainEvents.ClearDomainEvents();
 
-            hasDomainEvents.DomainEvents.Should().BeEmpty();
+            Assert.Empty(hasDomainEvents.DomainEvents);
         }
 
         [Fact]
-        public async Task DomainEventPublisher_Should_Publish_Event()
+        public async Task DomainEventPublisher_Should_Delegate_To_Local_Bus()
         {
-            // Arrange
-            var mediatorMock = new Mock<IMediator>();
-            var domainEventPublisher = new DomainEventPublisher(mediatorMock.Object);
-            var domainEvent = new TestDomainEvent(Guid.NewGuid());
+            var handler = new TestDomainEventHandler();
+            using var provider = CreateServiceProvider(services =>
+            {
+                services.AddSingleton(handler);
+                services.AddSingleton<ILocalEventHandler<TestLocalEvent>>(sp => sp.GetRequiredService<TestDomainEventHandler>());
+            });
 
-            // Act
-            await domainEventPublisher.PublishAsync(domainEvent);
+            var publisher = provider.GetRequiredService<IDomainEventPublisher>();
+            var domainEvent = new TestLocalEvent(Guid.NewGuid());
 
-            // Assert
-            mediatorMock.Verify(m => m.Publish(domainEvent, default), Times.Once);
+            await publisher.PublishAsync(domainEvent);
+
+            Assert.True(handler.WasCalled);
+            Assert.Same(domainEvent, handler.ReceivedEvent);
         }
 
-        [Fact]
-        public async Task DomainEventPublisher_Should_Publish_Typed_Event()
+        private static ServiceProvider CreateServiceProvider(Action<IServiceCollection>? configure = null)
         {
-            // Arrange
-            var mediatorMock = new Mock<IMediator>();
-            var domainEventPublisher = new DomainEventPublisher(mediatorMock.Object);
-            var domainEvent = new TestDomainEvent(Guid.NewGuid());
-
-            // Act
-            await domainEventPublisher.PublishAsync(domainEvent);
-
-            // Assert
-            mediatorMock.Verify(m => m.Publish(domainEvent, default), Times.Once);
+            var services = new ServiceCollection();
+            services.AddSingleton<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
+            services.AddSingleton<ILocalEventBus, DefaultLocalEventBus>();
+            services.AddSingleton<IDomainEventPublisher, DomainEventPublisher>();
+            configure?.Invoke(services);
+            return services.BuildServiceProvider();
         }
     }
 

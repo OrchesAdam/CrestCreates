@@ -19,6 +19,7 @@ using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared;
 using CrestCreates.Domain.UnitOfWork;
+using CrestCreates.EventBus.Abstractions;
 using CrestCreates.EventBus.Local;
 using CrestCreates.Infrastructure.Authorization;
 using CrestCreates.Infrastructure.Localization;
@@ -37,7 +38,6 @@ using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.Settings;
 using CrestCreates.Data.EFCore.DataSeed;
-using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
@@ -129,12 +129,8 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
 
-        services.AddMediatR(configuration =>
-        {
-            configuration.RegisterServicesFromAssembly(typeof(CrestCreatesWebApplicationExtensions).Assembly);
-        });
-
-        services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, LocalEventBus>();
+        services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
+        services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
         services.AddScoped<CrestCreates.Domain.DomainEvents.IDomainEventPublisher, DomainEventPublisher>();
 
         services.AddMultiTenancy(options =>

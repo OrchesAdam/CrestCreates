@@ -1,183 +1,114 @@
 using System;
+using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
-using Xunit;
-using Moq;
-using FluentAssertions;
-using MediatR;
-using Microsoft.EntityFrameworkCore;
-using SqlSugar;
-using FreeSql;
+using CrestCreates.Data.Abstractions.UnitOfWorkBase;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Entities;
-using CrestCreates.Data.EFCore.UnitOfWork;
-using CrestCreates.Data.SqlSugar.UnitOfWork;
-using CrestCreates.Data.FreeSql.UnitOfWork;
+using CrestCreates.EventBus.Abstractions;
 using CrestCreates.EventBus.Local;
 using CrestCreates.EventBus.Tests.Events;
+using Xunit;
 
-namespace CrestCreates.EventBus.Tests
+namespace CrestCreates.EventBus.Tests;
+
+public class UnitOfWorkEventTests
 {
-    public class UnitOfWorkEventTests
+    [Fact]
+    public async Task SaveChangesWithEventsAsync_Should_Publish_DomainEvents_And_Clear_Them()
     {
-        [Fact]
-        public async Task EfCoreUnitOfWork_Should_Publish_DomainEvents()
+        var recordedBus = new RecordingLocalEventBus();
+        var domainEventPublisher = new DomainEventPublisher(recordedBus);
+        var unitOfWork = new TestUnitOfWork(domainEventPublisher);
+
+        var entity = new TestEntity(Guid.NewGuid());
+        var firstEvent = new TestDomainEvent(entity.Id);
+        var secondEvent = new TestDomainEvent(Guid.NewGuid());
+        entity.AddDomainEvent(firstEvent);
+        entity.AddDomainEvent(secondEvent);
+
+        var result = await unitOfWork.CommitAsync([entity]);
+
+        Assert.Equal(1, result);
+        Assert.Equal(new ILocalEvent[] { firstEvent, secondEvent }, recordedBus.PublishedEvents);
+        Assert.Empty(entity.DomainEvents);
+    }
+
+    [Fact]
+    public async Task SaveChangesWithEventsAsync_Should_Skip_Publishing_When_No_DomainEvents_Exist()
+    {
+        var recordedBus = new RecordingLocalEventBus();
+        var domainEventPublisher = new DomainEventPublisher(recordedBus);
+        var unitOfWork = new TestUnitOfWork(domainEventPublisher);
+
+        var entity = new TestEntity(Guid.NewGuid());
+
+        var result = await unitOfWork.CommitAsync([entity]);
+
+        Assert.Equal(1, result);
+        Assert.Empty(recordedBus.PublishedEvents);
+        Assert.Empty(entity.DomainEvents);
+    }
+
+    private sealed class TestUnitOfWork : UnitOfWorkWithEvents
+    {
+        public TestUnitOfWork(IDomainEventPublisher domainEventPublisher)
+            : base(domainEventPublisher)
         {
-            // Arrange
-            var options = new DbContextOptionsBuilder<TestDbContext>()
-                .UseInMemoryDatabase(databaseName: "TestDatabase")
-                .Options;
-
-            var dbContext = new TestDbContext(options);
-            var mediatorMock = new Mock<IMediator>();
-            var domainEventPublisher = new DomainEventPublisher(mediatorMock.Object);
-            var unitOfWork = new EfCoreUnitOfWork(dbContext, domainEventPublisher);
-
-            var entity = new TestEntity(Guid.NewGuid()) { Name = "Test Entity" };
-            var domainEvent = new TestDomainEvent(entity.Id);
-            entity.AddDomainEvent(domainEvent);
-
-            // Act
-            await unitOfWork.BeginTransactionAsync();
-            dbContext.Add(entity);
-            await unitOfWork.CommitTransactionAsync();
-
-            // Assert
-            mediatorMock.Verify(m => m.Publish(It.IsAny<IDomainEvent>(), default), Times.Once);
-            entity.DomainEvents.Should().BeEmpty();
         }
 
-        [Fact]
-        public async Task EfCoreUnitOfWork_Should_Not_Publish_DomainEvents_On_Rollback()
+        public Task<int> CommitAsync(IEnumerable<TestEntity> entities, CancellationToken cancellationToken = default)
         {
-            // Arrange
-            var options = new DbContextOptionsBuilder<TestDbContext>()
-                .UseInMemoryDatabase(databaseName: "TestDatabase_Rollback")
-                .Options;
-
-            var dbContext = new TestDbContext(options);
-            var mediatorMock = new Mock<IMediator>();
-            var domainEventPublisher = new DomainEventPublisher(mediatorMock.Object);
-            var unitOfWork = new EfCoreUnitOfWork(dbContext, domainEventPublisher);
-
-            var entity = new TestEntity(Guid.NewGuid()) { Name = "Test Entity" };
-            var domainEvent = new TestDomainEvent(entity.Id);
-            entity.AddDomainEvent(domainEvent);
-
-            // Act
-            await unitOfWork.BeginTransactionAsync();
-            dbContext.Add(entity);
-            await unitOfWork.RollbackTransactionAsync();
-
-            // Assert
-            mediatorMock.Verify(m => m.Publish(It.IsAny<object>(), default), Times.Never);
+            return SaveChangesWithEventsAsync<TestEntity, Guid>(entities, cancellationToken);
         }
 
-        [Fact]
-        public async Task EfCoreUnitOfWork_Should_Retry_Event_Publishing_On_Failure()
+        public override Task BeginTransactionAsync()
         {
-            // Arrange
-            var options = new DbContextOptionsBuilder<TestDbContext>()
-                .UseInMemoryDatabase(databaseName: "TestDatabase_Retry")
-                .Options;
-
-            var dbContext = new TestDbContext(options);
-            var mediatorMock = new Mock<IMediator>();
-            mediatorMock.Setup(m => m.Publish(It.IsAny<IDomainEvent>(), default))
-                .Throws(new Exception("Publishing failed"))
-                .Verifiable();
-            
-            var domainEventPublisher = new DomainEventPublisher(mediatorMock.Object);
-            var unitOfWork = new EfCoreUnitOfWork(dbContext, domainEventPublisher);
-
-            var entity = new TestEntity(Guid.NewGuid()) { Name = "Test Entity" };
-            var domainEvent = new TestDomainEvent(entity.Id);
-            entity.AddDomainEvent(domainEvent);
-
-            // Act & Assert
-            await unitOfWork.BeginTransactionAsync();
-            dbContext.Add(entity);
-            await unitOfWork.CommitTransactionAsync();
-
-            // Should retry 3 times
-            mediatorMock.Verify(m => m.Publish(It.IsAny<IDomainEvent>(), default), Times.Exactly(3));
+            return Task.CompletedTask;
         }
 
-        [Fact]
-        public async Task SqlSugarUnitOfWork_Should_Publish_DomainEvents()
+        public override Task CommitTransactionAsync()
         {
-            // Arrange
-            var connectionString = "Data Source=:memory:";
-            var sqlSugarClient = new SqlSugarClient(new ConnectionConfig
-            {
-                ConnectionString = connectionString,
-                DbType = DbType.Sqlite,
-                IsAutoCloseConnection = true
-            });
-
-            var mediatorMock = new Mock<IMediator>();
-            var domainEventPublisher = new DomainEventPublisher(mediatorMock.Object);
-            var unitOfWork = new SqlSugarUnitOfWork(sqlSugarClient, domainEventPublisher);
-
-            var entity = new TestEntity(Guid.NewGuid()) { Name = "Test Entity" };
-            var domainEvent = new TestDomainEvent(entity.Id);
-            entity.AddDomainEvent(domainEvent);
-
-            // Act
-            await unitOfWork.BeginTransactionAsync();
-            unitOfWork.TrackEntity<TestEntity, Guid>(entity);
-            await unitOfWork.CommitTransactionAsync();
-
-            // Assert
-            mediatorMock.Verify(m => m.Publish(It.IsAny<IDomainEvent>(), default), Times.Once);
-            entity.DomainEvents.Should().BeEmpty();
+            return Task.CompletedTask;
         }
 
-        [Fact]
-        public async Task FreeSqlUnitOfWork_Should_Publish_DomainEvents()
+        public override Task RollbackTransactionAsync()
         {
-            // Arrange
-            var connectionString = "Data Source=:memory:";
-            var freeSql = new FreeSqlBuilder()
-                .UseConnectionString(DataType.Sqlite, connectionString)
-                .UseAutoSyncStructure(true)
-                .Build();
+            return Task.CompletedTask;
+        }
 
-            var mediatorMock = new Mock<IMediator>();
-            var domainEventPublisher = new DomainEventPublisher(mediatorMock.Object);
-            var unitOfWorkManager = new FreeSqlUnitOfWorkManager(freeSql);
-            var unitOfWork = new FreeSqlUnitOfWork(unitOfWorkManager, domainEventPublisher);
+        public override Task<int> SaveChangesAsync()
+        {
+            return Task.FromResult(1);
+        }
 
-            var entity = new TestEntity(Guid.NewGuid()) { Name = "Test Entity" };
-            var domainEvent = new TestDomainEvent(entity.Id);
-            entity.AddDomainEvent(domainEvent);
-
-            // Act
-            await unitOfWork.BeginTransactionAsync();
-            unitOfWork.TrackEntity<TestEntity, Guid>(entity);
-            await unitOfWork.CommitTransactionAsync();
-
-            // Assert
-            mediatorMock.Verify(m => m.Publish(It.IsAny<IDomainEvent>(), default), Times.Once);
-            entity.DomainEvents.Should().BeEmpty();
+        public override void Dispose()
+        {
         }
     }
 
-    // 测试 DbContext
-    public class TestDbContext : Microsoft.EntityFrameworkCore.DbContext
+    private sealed class RecordingLocalEventBus : ILocalEventBus
     {
-        public TestDbContext(Microsoft.EntityFrameworkCore.DbContextOptions<TestDbContext> options) : base(options)
-        {}
+        public List<ILocalEvent> PublishedEvents { get; } = [];
 
-        public Microsoft.EntityFrameworkCore.DbSet<TestEntity> TestEntities { get; set; }
-
-        protected override void OnConfiguring(Microsoft.EntityFrameworkCore.DbContextOptionsBuilder optionsBuilder)
+        public Task PublishAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
         {
-            optionsBuilder.ConfigureWarnings(warnings => warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning));
+            PublishedEvents.Add(@event);
+            return Task.CompletedTask;
         }
 
-        protected override void OnModelCreating(Microsoft.EntityFrameworkCore.ModelBuilder modelBuilder)
+        public Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+            where TEvent : ILocalEvent
         {
-            modelBuilder.Entity<TestEntity>().HasKey(e => e.Id);
+            return PublishAsync((ILocalEvent)@event, cancellationToken);
+        }
+    }
+
+    private sealed class TestEntity : Entity<Guid>
+    {
+        public TestEntity(Guid id)
+        {
+            Id = id;
         }
     }
 }

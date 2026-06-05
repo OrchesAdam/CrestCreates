@@ -19,8 +19,8 @@ using CrestCreates.Logging.Extensions;
 using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.AspNetCore.Middlewares;
+using CrestCreates.EventBus.Abstractions;
 using CrestCreates.EventBus.Local;
-using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -67,7 +67,8 @@ builder.Services.AddTenantManagement();
 builder.Services.AddTenantBootstrapper();
 builder.Services.AddTenantManagementCore();
 
-builder.Services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, LocalEventBus>();
+builder.Services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
+builder.Services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
 builder.Services.AddScoped<IDomainEventPublisher, DomainEventPublisher>();
 builder.Services.AddMultiTenancy(options =>
 {

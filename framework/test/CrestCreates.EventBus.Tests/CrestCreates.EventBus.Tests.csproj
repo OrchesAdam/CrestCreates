@@ -5,34 +5,34 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <GenerateRuntimeConfigDevFile>true</GenerateRuntimeConfigDevFile>
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="FluentAssertions" />
-    <PackageReference Include="Moq" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
-    <PackageReference Include="MediatR" />
-    <PackageReference Include="SqlSugarCore" />
-    <PackageReference Include="FreeSql" />
-    <PackageReference Include="SQLitePCLRaw.bundle_green" />
+    <PackageReference Include="Azure.Core" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.EventBus.Abstractions\CrestCreates.EventBus.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Data.Abstractions\CrestCreates.Data.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Data.SqlSugar\CrestCreates.Data.SqlSugar.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Data.FreeSql\CrestCreates.Data.FreeSql.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.EventBus.Abstract\CrestCreates.EventBus.Abstract.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.EventBus.Local\CrestCreates.EventBus.Local.csproj" />
-    <ProjectReference Include="..\..\src\CrestCreates.EventBus.EventStore\CrestCreates.EventBus.EventStore.csproj" />
-    <ProjectReference Include="..\..\src\CrestCreates.EventBus.Kafka\CrestCreates.EventBus.Kafka.csproj" />
-    <ProjectReference Include="..\..\src\CrestCreates.EventBus.RabbitMQ\CrestCreates.EventBus.RabbitMQ.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.EventBus.Local.Channel\CrestCreates.EventBus.Local.Channel.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.EventBus.MediatorAdapter\CrestCreates.EventBus.MediatorAdapter.csproj" />
   </ItemGroup>
 
 </Project>
