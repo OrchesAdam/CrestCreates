@@ -34,9 +34,10 @@ public static class EfCoreDbContextServiceCollectionExtensions
         services.TryAddScoped<ITenantSchemaMigrator, EfCoreTenantSchemaMigrator>();
         services.TryAddScoped<ITenantInitializationStore, EfCoreTenantInitializationStore>();
 
-        // Provider-specific projects must register their own Func<string, DbContext> factory.
-        // No default factory is provided here since this project no longer references any
-        // specific database provider (SqlServer, Sqlite, etc.).
+        // ITenantSchemaMigrator requires a Func<string, DbContext> factory.
+        // Provider-specific projects register this factory via their own extension methods
+        // (e.g., AddCrestCreatesEfCoreSqlServer). If no provider registers one,
+        // resolving ITenantSchemaMigrator will fail at runtime.
 
         services.AddDbContext<CrestCreatesDbContext>((serviceProvider, optionsBuilder) =>
         {

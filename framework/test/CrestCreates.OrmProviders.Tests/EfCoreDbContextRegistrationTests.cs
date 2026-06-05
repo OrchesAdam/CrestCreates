@@ -17,6 +17,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
 
 namespace CrestCreates.OrmProviders.Tests;
@@ -33,6 +34,17 @@ public class EfCoreDbContextRegistrationTests
         services.AddSingleton<IEfCoreDbContextOptionsContributor>(
             new DelegateEfCoreDbContextOptionsContributor(options => options.UseSqlite("Data Source=:memory:")));
         services.AddCrestCreatesEfCoreDbContext();
+
+        // Register ITenantDatabaseProvisioner and Func<string, DbContext> factory
+        // (now provided by provider-specific projects; test uses Sqlite)
+        services.TryAddSingleton<Func<string, DbContext>>(_ =>
+        {
+            var opts = new DbContextOptionsBuilder<CrestCreatesDbContext>()
+                .UseSqlite("Data Source=:memory:")
+                .Options;
+            return new CrestCreatesDbContext(opts);
+        });
+        services.TryAddScoped<ITenantDatabaseProvisioner, SqlServerTenantDatabaseProvisioner>();
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
