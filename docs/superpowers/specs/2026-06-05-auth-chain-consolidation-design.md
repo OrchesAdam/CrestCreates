@@ -9,6 +9,7 @@ Close the authentication chain gaps identified in the Major TODO audit:
 1. Merge duplicate password hashing (IPasswordHasher vs ISecurityService)
 2. Remove dead code (ISecurityService/SecurityService with zero consumers)
 3. Remove OAuth empty stub project
+4. Relocate IIdentitySecurityLogWriter from Domain/Permission to Security.Abstractions
 
 ## Architecture
 
@@ -18,11 +19,13 @@ Close the authentication chain gaps identified in the Major TODO audit:
 framework/src/CrestCreates.Security.Abstractions/
   IPasswordHasher.cs
   ITokenGenerator.cs
+  IIdentitySecurityLogWriter.cs
   CrestCreates.Security.Abstractions.csproj
 ```
 
 - `IPasswordHasher` — migrated from `CrestCreates.Domain.Authorization.IPasswordHasher` (new namespace: `CrestCreates.Security.Abstractions`)
 - `ITokenGenerator` — extracted from `ISecurityService` (GenerateRandomToken, ValidateToken)
+- `IIdentitySecurityLogWriter` — migrated from `CrestCreates.Domain.Permission.IdentitySecurityLog` (与 Permission 无关，属于安全认证日志)
 - No external dependencies. Plain `Microsoft.NET.Sdk`.
 
 ### Deleted Projects
@@ -34,9 +37,9 @@ framework/src/CrestCreates.Security.Abstractions/
 | Project | Change |
 |---------|--------|
 | `CrestCreates.Security` | Add ref to `Security.Abstractions`; add `PasswordHasher` (PBKDF2 impl); add `TokenGenerator`; delete `SecurityService` + `ISecurityService`; remove `Microsoft.AspNetCore.Identity` package |
-| `CrestCreates.Domain` | Add ref to `Security.Abstractions`; delete `Authorization/IPasswordHasher.cs` |
+| `CrestCreates.Domain` | Add ref to `Security.Abstractions`; delete `Authorization/IPasswordHasher.cs`; delete `IIdentitySecurityLogWriter` from `Permission/IdentitySecurityLog.cs` (keep entity class) |
 | `CrestCreates.Infrastructure` | Add ref to `Security.Abstractions`; delete `Authorization/PasswordHasher.cs`; remove DI registration in `IdentityAuthenticationServiceCollectionExtensions` |
-| `CrestCreates.AspNetCore.Authentication.OpenIddict` | Add ref to `Security.Abstractions` (if not already transitive) |
+| `CrestCreates.AspNetCore.Authentication.OpenIddict` | Add ref to `Security.Abstractions`; `IdentitySecurityLogServiceImpl` uses new namespace; update DI registration for `IIdentitySecurityLogWriter` |
 | `CrestCreates.Application` | Add ref to `Security.Abstractions` (if not already transitive) |
 | `CrestCreates.Data.EFCore` | Add ref to `Security.Abstractions` (if not already transitive) |
 
@@ -81,6 +84,7 @@ services.TryAddSingleton<ITokenGenerator, TokenGenerator>();
 |----------|--------|
 | `CrestCreates.Domain.Authorization.IPasswordHasher` | Migrated to Security.Abstractions |
 | `CrestCreates.Domain.Authorization.IPasswordPolicyValidator` | Check if consumed; if not, delete |
+| `CrestCreates.Domain.Permission.IIdentitySecurityLogWriter` | Migrated to Security.Abstractions |
 | `CrestCreates.Infrastructure.Authorization.PasswordHasher` | Moved to Security |
 | `CrestCreates.Security.Services.ISecurityService` | Dead code, zero consumers |
 | `CrestCreates.Security.Services.SecurityService` | Dead code, zero consumers |
@@ -88,13 +92,17 @@ services.TryAddSingleton<ITokenGenerator, TokenGenerator>();
 
 ### Consumer Migration
 
-All consumers of `IPasswordHasher` change their using from:
+**IPasswordHasher** consumers change:
 - `using CrestCreates.Domain.Authorization;` → `using CrestCreates.Security.Abstractions;`
 
-Affected files (10 production + 5 test):
+**IIdentitySecurityLogWriter** consumers change:
+- `using CrestCreates.Domain.Permission;` → `using CrestCreates.Security.Abstractions;`
+
+Affected files (14 production + 5 test):
 - PasswordGrantHandler, RefreshTokenGrantHandler, UserAppService, RoleAppService, TenantBootstrapper
-- HostIdentityDataSeeder, SecurityModule, IdentityAuthenticationServiceCollectionExtensions
-- EfCoreOrmModule, WebApplicationFactory, test files
+- HostIdentityDataSeeder, IdentityAuthenticationServiceCollectionExtensions, IdentitySecurityLogServiceImpl
+- OpenIddictServiceCollectionExtensions, EfCoreOrmModule, WebApplicationFactory
+- 5 test files
 
 ## Risk Assessment
 
