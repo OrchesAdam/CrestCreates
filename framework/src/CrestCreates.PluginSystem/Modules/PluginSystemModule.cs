@@ -10,8 +10,6 @@ public class PluginSystemModule : ModuleBase
 {
     public override void OnConfigureServices(IServiceCollection services)
     {
-        base.OnConfigureServices(services);
-
         services.AddScoped<IPluginManager, PluginManager>();
     }
 }

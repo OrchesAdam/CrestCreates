@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using CrestCreates.Aop.Extensions;
 using CrestCreates.Modularity;
 using CrestCreates.Domain.Shared.Attributes;
@@ -14,7 +15,8 @@ public class AopModule : ModuleBase
         services.AddCrestAop();
     }
 
-    public override void OnApplicationInitialization(IHost host)
+    public override Task OnApplicationInitializationAsync(IHost host)
     {
+        return Task.CompletedTask;
     }
 }

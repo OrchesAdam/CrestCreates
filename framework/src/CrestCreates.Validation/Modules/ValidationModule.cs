@@ -15,8 +15,6 @@ namespace CrestCreates.Validation.Modules
     {
         public override void OnConfigureServices(IServiceCollection services)
         {
-            base.OnConfigureServices(services);
-
             // 注册FluentValidation
             services.AddValidatorsFromAssembly(typeof(ValidationModule).Assembly);
 

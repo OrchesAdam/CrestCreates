@@ -1,10 +1,11 @@
+using System.Globalization;
+using System.Threading.Tasks;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Localization;
 using Microsoft.Extensions.Hosting;
-using System.Globalization;
 using CrestCreates.Localization.Services;
 
 namespace CrestCreates.Localization.Modules;
@@ -18,10 +19,8 @@ public class LocalizationModule : ModuleBase
         services.AddSingleton<ILocalizationService, LocalizationService>();
     }
 
-    public override void OnApplicationInitialization(IHost host)
+    public override Task OnApplicationInitializationAsync(IHost host)
     {
-        base.OnApplicationInitialization(host);
-
         var app = host.Services.GetRequiredService<IApplicationBuilder>();
 
         var supportedCultures = new[]
@@ -37,5 +36,6 @@ public class LocalizationModule : ModuleBase
             SupportedCultures = supportedCultures,
             SupportedUICultures = supportedCultures
         });
+        return Task.CompletedTask;
     }
 }

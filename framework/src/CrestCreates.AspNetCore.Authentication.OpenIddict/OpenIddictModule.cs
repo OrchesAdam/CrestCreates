@@ -43,5 +43,6 @@ public class OpenIddictModule : ModuleBase
                 options.UseLocalServer();
                 options.UseAspNetCore();
             });
+
     }
 }

@@ -1,7 +1,7 @@
+using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using CrestCreates.Modularity;
 using CrestCreates.Domain.Shared.Attributes;
-using System.Reflection;
 
 namespace CrestCreates.EventBus.Local
 {

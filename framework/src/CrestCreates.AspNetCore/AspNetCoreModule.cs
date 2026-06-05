@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using CrestCreates.Modularity;
 using CrestCreates.Domain.Shared.Attributes;
 using System;
+using System.Threading.Tasks;
 
 namespace CrestCreates.AspNetCore
 {
@@ -13,19 +14,22 @@ namespace CrestCreates.AspNetCore
     {
         public override string Name => "AspNetCoreModule";
 
-        public override void OnPreInitialize()
+        public override Task OnPreInitializeAsync()
         {
             Console.WriteLine("[AspNetCoreModule] OnPreInitialize");
+            return Task.CompletedTask;
         }
 
-        public override void OnInitialize()
+        public override Task OnInitializeAsync()
         {
             Console.WriteLine("[AspNetCoreModule] OnInitialize");
+            return Task.CompletedTask;
         }
 
-        public override void OnPostInitialize()
+        public override Task OnPostInitializeAsync()
         {
             Console.WriteLine("[AspNetCoreModule] OnPostInitialize");
+            return Task.CompletedTask;
         }
 
         public override void OnConfigureServices(IServiceCollection services)
@@ -33,9 +37,10 @@ namespace CrestCreates.AspNetCore
             Console.WriteLine("[AspNetCoreModule] OnConfigureServices");
         }
 
-        public override void OnApplicationInitialization(IHost host)
+        public override Task OnApplicationInitializationAsync(IHost host)
         {
             Console.WriteLine("[AspNetCoreModule] OnApplicationInitialization");
+            return Task.CompletedTask;
         }
     }
 }

@@ -10,7 +10,6 @@ public class LoggingModule : ModuleBase
 {
     public override void OnConfigureServices(IServiceCollection services)
     {
-        base.OnConfigureServices(services);
         services.AddCrestLogging(_ => { });
     }
 }

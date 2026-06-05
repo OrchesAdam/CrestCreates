@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,11 +36,9 @@ public class SecurityModule : ModuleBase
     /// <param name="services">服务集合</param>
     public override void OnConfigureServices(IServiceCollection services)
     {
-        base.OnConfigureServices(services);
-        
         // 注册安全配置
         services.AddSingleton(_options);
-        
+
         // 配置CSRF保护
         services.AddAntiforgery(options =>
         {
@@ -48,7 +47,7 @@ public class SecurityModule : ModuleBase
             options.Cookie.HttpOnly = _options.Csrf.CookieHttpOnly;
             options.Cookie.SecurePolicy = _options.Csrf.CookieSecurePolicy;
         });
-        
+
         // 配置HSTS
         services.AddHsts(options =>
         {
@@ -56,19 +55,17 @@ public class SecurityModule : ModuleBase
             options.IncludeSubDomains = _options.Hsts.IncludeSubDomains;
             options.MaxAge = _options.Hsts.MaxAge;
         });
-        
+
         // 注册安全服务
         services.AddSingleton<ISecurityService, SecurityService>();
     }
-    
+
     /// <summary>
     /// 应用程序初始化
     /// </summary>
     /// <param name="host">主机对象</param>
-    public override void OnApplicationInitialization(Microsoft.Extensions.Hosting.IHost host)
+    public override async Task OnApplicationInitializationAsync(Microsoft.Extensions.Hosting.IHost host)
     {
-        base.OnApplicationInitialization(host);
-        
         var app = host.Services.GetRequiredService<IApplicationBuilder>();
         
         // 添加安全头中间件

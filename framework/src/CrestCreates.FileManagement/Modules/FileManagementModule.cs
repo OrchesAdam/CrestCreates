@@ -34,8 +34,6 @@ public class FileManagementModule : ModuleBase
     /// <param name="services">服务集合</param>
     public override void OnConfigureServices(IServiceCollection services)
     {
-        base.OnConfigureServices(services);
-        
         // 注册配置
         services.AddSingleton(_options);
         services.AddSingleton(_options.LocalFileSystem);
@@ -57,7 +55,7 @@ public class FileManagementModule : ModuleBase
                 services.AddSingleton<IFileStorageProvider, S3StorageProvider>();
                 break;
         }
-        
+
         // 注册文件URL服务
         services.AddSingleton<IFileUrlService, FileUrlService>();
 
