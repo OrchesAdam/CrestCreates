@@ -96,6 +96,9 @@ public static class OpenIddictServiceCollectionExtensions
         // so that OpenAPI schema generation works in AoT/trimming mode.
         services.AddSingleton<IOpenApiJsonTypeInfoContributor, OpenIddictJsonTypeInfoContributor>();
 
+        // Register host OpenIddict data seeder (scopes + client application)
+        services.AddScoped<CrestCreates.MultiTenancy.Abstract.IDataSeeder, HostOpenIddictDataSeeder>();
+
         return services;
     }
 
