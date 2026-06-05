@@ -101,7 +101,7 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddSingleton<HostMigrationAndSeedRunner>();
 
         // Register host identity data seeder
-        services.AddTransient<IDataSeeder, HostIdentityDataSeeder>();
+        services.AddScoped<IDataSeeder, HostIdentityDataSeeder>();
         services.AddScoped(typeof(CrestCreates.Domain.Repositories.IRepository<,>), typeof(DomainRepositoryAdapter<,>));
         services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
