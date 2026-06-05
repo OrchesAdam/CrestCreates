@@ -44,22 +44,22 @@ CrestCreates 当前重点是把框架主链收口，而不是继续堆模块名�
 
 ### Major TODO / 待增强
 
-| Feature | 优先级 | 要做的事 |
-|---------|--------|----------|
-| CRUD 主链增强 | P1 | 强化通用 CRUD 服务、复杂查询、排序过滤、权限映射和生成器输出，减少样板代码。 |
-| 映射生态覆盖 | P2 | 继续补充复杂业务样例、更多 converter 场景和文档示例；主链已完成，不再引入 AutoMapper 或运行时 mapper。 |
-| 多 ORM 一致性 | P1 | 对齐 EF Core / FreeSql / SqlSugar 在软删除、多租户、审计、事务、分页、并发上的行为和测试。 |
-| 后台作业平台化 | P1 | 统一一次性任务、延迟任务、周期任务、状态、历史、重试、取消、暂停和租户上下文传递。 |
-| 认证链路收口 | P1 | 继续统一 claims、current user、tenant 上下文和 token / refresh / 越权测试，清理重复认证逻辑。 |
-| 权限系统收口 | P1 | 统一权限授予、计算、缓存失效、错误输出和角色 / 用户 / 租户维度测试。 |
-| 组织架构权限 | P2 | 决定是否正式提供 OU / 组织树模块，并接入现有权限和数据过滤主链。 |
-| 本地化深化 | P2 | 把异常、验证、权限提示和多资源文件管理更完整地接入平台主链。 |
-| 缓存一致性 | P2 | 强化本地缓存与分布式缓存边界、统一 key 规范、跨实例失效和 Setting / Feature / Permission 变更同步。 |
-| 事件总线稳定性 | P2 | 补齐事件命名、订阅规则、本地/分布式边界、重试、死信、幂等和集成测试。 |
-| 分布式事务运维闭环 | P2 | 完善事务状态流转、失败恢复、补偿幂等、监控点和集成测试。 |
-| 模块诊断增强 | P2 | 增加循环依赖、缺依赖、加载顺序、初始化失败等诊断输出。 |
-| MongoDB Provider | P3 | 先确认真实需求；如果要做，单独提供文档数据库 Provider，不强行套关系型语义。 |
-| 插件化系统 | P3 | 设计外部程序集插件清单、装载、版本兼容、隔离和失败诊断。 |
+| Feature | 优先级 | 状态 | 要做的事 |
+|---------|--------|------|----------|
+| CRUD 主链增强 | P1 | **已完成** | ~ICrudAppService~ + ~CrestAppServiceBase~ + ~QueryExecutor~ + ~FilterBuilder/SortBuilder~ + ~CrudServiceSourceGenerator (DTO/服务/权限/Mapping/Endpoint 全生成)~。FreeSql/SqlSugar 仓储生成器为空桩，待补齐。 |
+| 映射生态覆盖 | P2 | **已完成** | ~ObjectMappingSourceGenerator~ 支持 9 种转换 (Enum↔String↔Int、Guid↔String、NumericCast) + `[MapConvert]` 自定义转换器 + 导航路径 + 受保护字段。映射文档示例待补充。 |
+| 多 ORM 一致性 | P1 | **部分完成** | EF Core 主链已完成（审计/软删除/多租户/并发/UoW/分页/领域事件）。FreeSql/SqlSugar 审计拦截器已实现，但软删除测试、多租户审计测试缺失；MongoDB 有基础仓储但无审计/并发/软删除/多租户。 |
+| 后台作业平台化 | P1 | **已完成** | ~ISchedulerService~ (一次性/延迟/Cron 周期任务) + ~Quartz 适配器~ + ~JobRecord 历史~ + ~IJobExecutionHandler 生命周期~ + ~IBackgroundJobRetryPolicy~ (指数退避/固定延迟/不重试) + ~租户上下文传递~ + 集成测试。EF Core IJobHistoryRepository 待实现。 |
+| 认证链路收口 | P1 | **部分完成** | ~OpenIddict 服务器~ (Password/RefreshToken/ClientCredentials/AuthorizationCode) + ~IdentityClaimsBuilder~ + ~CurrentUser~ + ~安全日志~ + ~跨租户拒绝测试~。`IIdentitySecurityLogWriter` 接口定义缺失；OAuth 项目为空壳；`SecurityService` 与 `Infrastructure.PasswordHasher` 存在密码哈希重复。 |
+| 权限系统收口 | P1 | **已完成** | ~IPermissionChecker~ + ~PermissionGrantManager~ (授予/撤销) + ~PermissionGrantCacheService~ (缓存+失效) + ~TenantPermissionScopeValidator~ (租户边界) + ~SuperAdmin 旁路~ + ~PermissionMoAttribute AOP 拦截器~ + 跨租户/角色/用户维度测试。分布式缓存失效事件待补齐。 |
+| 组织架构权限 | P2 | **部分完成** | ~Organization 实体~ + ~OrganizationHierarchyService~ + ~DataPermissionFilter~ (Self/Organization/OrganizationAndSub/Tenant/All) + 树形缓存。无 OrganizationAppService、无仓储实现、无 API 端点。 |
+| 本地化深化 | P2 | **部分完成** | ~ILocalizationService~ + ~异常消息本地化~ + ~en/zh-CN JSON 资源~ + ~ILocalizationResourceContributor~。验证错误本地化未接入；无可视化资源管理。 |
+| 缓存一致性 | P2 | **部分完成** | ~ICrestCacheService~ + ~Memory/Redis 双后端~ + ~SettingCacheInvalidator~ + ~FeatureCacheInvalidator~ + ~TenantCacheInvalidator~ + ~CacheMo AOP~。Redis 未独立成包；无跨实例 pub/sub 失效；无缓存击穿保护。 |
+| 事件总线稳定性 | P2 | **部分完成** | ~IEventBus~ + ~Local/RabbitMQ/Kafka 实现~ + ~IEventIdempotencyStore~ + ~EventRetryService~ + 单元测试。无 DLQ、无事件命名规范、无订阅规则、分布式幂等未接入、无集成测试。 |
+| 分布式事务运维闭环 | P2 | **部分完成** | ~CAP 集成~ + ~2PC (Prepare/Commit/Rollback)~ + ~PersistentTransactionCompensator~ (指数退避重试) + ~CompensationRetryBackgroundService~。无状态机校验、无崩溃恢复扫描、无补偿幂等、无 Saga 模式。 |
+| 模块诊断增强 | P2 | **部分完成** | ~编译期拓扑排序~ + ~循环依赖检测~ (构建期) + ~ConfigureServices 异常包装~ + ~TenantDiagnosticsAppService~。运行时依赖验证、初始化失败诊断 (非 ConfigureServices 阶段)、模块加载时序、Health Check 端点均缺失。 |
+| MongoDB Provider | P3 | **部分完成** | ~MongoRepositoryBase~ (CRUD/租户/并发/审计/软删除) + ~DI 扩展~ + 仓储测试。无 DbContext 抽象、无事务支持、无租户数据库初始化。 |
+| 插件化系统 | P3 | **部分完成** | ~PluginManager~ (发现/加载/初始化) + ~PluginManifest 模型~ + ~PluginAssemblyLoadContext~ (隔离) + ~依赖校验~。无版本兼容性检查、无热重载、无模块生命周期集成、无签名验证、无管理 UI。 |
 
 ## 快速开始
 
