@@ -2,7 +2,7 @@ using System;
 using CrestCreates.AspNetCore.Authentication.OpenIddict.Handlers;
 using CrestCreates.AspNetCore.Authentication.OpenIddict.Services;
 using CrestCreates.Domain.OpenIddict;
-using CrestCreates.Domain.Permission;
+using CrestCreates.Security.Abstractions;
 using CrestCreates.OpenApi;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;

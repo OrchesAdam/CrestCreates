@@ -2,7 +2,7 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using CrestCreates.Domain.Authorization;
+using CrestCreates.Security.Abstractions;
 using CrestCreates.Domain.Permission;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.EntityFrameworkCore;

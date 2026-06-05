@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Identity;
 using CrestCreates.Application.Identity;
+using CrestCreates.Security.Abstractions;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.MultiTenancy.Abstract;

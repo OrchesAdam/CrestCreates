@@ -2,12 +2,14 @@ using System.Threading.Tasks;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Http;
-using CrestCreates.Security.Services;
+using CrestCreates.Security.Abstractions;
 using CrestCreates.Security.Configuration;
+using CrestCreates.Security.Services;
 
 namespace CrestCreates.Security.Modules;
 
@@ -57,7 +59,8 @@ public class SecurityModule : ModuleBase
         });
 
         // 注册安全服务
-        services.AddSingleton<ISecurityService, SecurityService>();
+        services.TryAddScoped<IPasswordHasher, PasswordHasher>();
+        services.TryAddSingleton<ITokenGenerator, TokenGenerator>();
     }
 
     /// <summary>

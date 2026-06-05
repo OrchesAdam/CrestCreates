@@ -1,6 +1,6 @@
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Authorization.Abstractions;
-using CrestCreates.Domain.Authorization;
+using CrestCreates.Security.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -17,10 +17,9 @@ public static class IdentityAuthenticationServiceCollectionExtensions
         services.Configure<IdentityAuthenticationOptions>(
             configuration.GetSection(IdentityAuthenticationOptions.SectionName));
 
-        services.TryAddScoped<IPasswordHasher, PasswordHasher>();
         services.TryAddScoped<IPasswordPolicyValidator, PasswordPolicyValidator>();
         services.TryAddScoped<IIdentityClaimsBuilder, IdentityClaimsBuilder>();
-        
+
         return services;
     }
 }

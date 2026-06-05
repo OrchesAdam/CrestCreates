@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Identity;
 using CrestCreates.Application.Contracts.Interfaces;
-using CrestCreates.Domain.Authorization;
+using CrestCreates.Security.Abstractions;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;

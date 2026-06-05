@@ -9,11 +9,11 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Mvc.ViewFeatures" />
     <PackageReference Include="Microsoft.AspNetCore.Antiforgery" />
-    <PackageReference Include="Microsoft.AspNetCore.Identity" />
     <PackageReference Include="Microsoft.AspNetCore.HttpsPolicy" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.Security.Abstractions\CrestCreates.Security.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
     <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
   </ItemGroup>

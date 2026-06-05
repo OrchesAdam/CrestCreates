@@ -39,6 +39,7 @@
     <Project Path="framework/src/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
     <Project Path="framework/src/CrestCreates.Data.Abstractions/CrestCreates.Data.Abstractions.csproj" />
     <Project Path="framework/src/CrestCreates.Scheduling/CrestCreates.Scheduling.Abstractions.csproj" />
+    <Project Path="framework/src/CrestCreates.Security.Abstractions/CrestCreates.Security.Abstractions.csproj" />
     <Project Path="framework/src/CrestCreates.Security/CrestCreates.Security.csproj" />
       
     <Project Path="framework/src/CrestCreates.Testing/CrestCreates.Testing.csproj" />
@@ -48,7 +49,6 @@
   </Folder>
   <Folder Name="/src/modules/" />
   <Folder Name="/src/modules/Authentication/">
-    <Project Path="framework/src/CrestCreates.AspNetCore.Authentication.OAuth/CrestCreates.AspNetCore.Authentication.OAuth.csproj" />
     <Project Path="framework/src/CrestCreates.AspNetCore.Authentication.OpenIddict/CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
   </Folder>
   <Folder Name="/src/modules/Authorization/">

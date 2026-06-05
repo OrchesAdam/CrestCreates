@@ -3,7 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
-using CrestCreates.Domain.Authorization;
+using CrestCreates.Security.Abstractions;
 using CrestCreates.MultiTenancy.Abstract;
 using SaaSHelpdesk.Application.Contracts.DTOs;
 using SaaSHelpdesk.Application.Contracts.Interfaces;

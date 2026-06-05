@@ -3,7 +3,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.AspNetCore.Authentication.OpenIddict.Services;
-using CrestCreates.Domain.Authorization;
+using CrestCreates.Security.Abstractions;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using Microsoft.Extensions.Logging;

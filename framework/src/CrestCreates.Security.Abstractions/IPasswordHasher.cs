@@ -1,12 +1,7 @@
-namespace CrestCreates.Domain.Authorization;
+namespace CrestCreates.Security.Abstractions;
 
 public interface IPasswordHasher
 {
     string HashPassword(string password);
     bool VerifyPassword(string hashedPassword, string providedPassword);
-}
-
-public interface IPasswordPolicyValidator
-{
-    void Validate(string password);
 }

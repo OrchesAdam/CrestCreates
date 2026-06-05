@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.MultiTenancy.Abstract;
-using CrestCreates.Domain.Authorization;
+using CrestCreates.Security.Abstractions;
 using CrestCreates.MultiTenancy;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;

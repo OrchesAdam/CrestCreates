@@ -13,6 +13,7 @@
     <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
     <ProjectReference Include="..\CrestCreates.EventBus.Abstractions\CrestCreates.EventBus.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="..\CrestCreates.Security.Abstractions\CrestCreates.Security.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

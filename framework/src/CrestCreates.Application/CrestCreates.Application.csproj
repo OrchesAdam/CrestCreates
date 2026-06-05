@@ -18,6 +18,7 @@
     <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.MultiTenancy\CrestCreates.MultiTenancy.csproj" />
     <ProjectReference Include="..\CrestCreates.AuditLogging\CrestCreates.AuditLogging.csproj" />
+    <ProjectReference Include="..\CrestCreates.Security.Abstractions\CrestCreates.Security.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Tenants;
 using CrestCreates.MultiTenancy.Abstract;
-using CrestCreates.Domain.Authorization;
+using CrestCreates.Security.Abstractions;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared.Permissions;

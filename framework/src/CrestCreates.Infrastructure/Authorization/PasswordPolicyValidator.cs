@@ -1,6 +1,6 @@
 using System;
 using System.Linq;
-using CrestCreates.Domain.Authorization;
+using CrestCreates.Security.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace CrestCreates.Infrastructure.Authorization;

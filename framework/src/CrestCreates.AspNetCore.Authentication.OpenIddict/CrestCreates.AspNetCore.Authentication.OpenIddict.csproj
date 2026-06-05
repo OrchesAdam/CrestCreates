@@ -22,6 +22,7 @@
     <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.OpenApi\CrestCreates.OpenApi.csproj" />
+    <ProjectReference Include="..\CrestCreates.Security.Abstractions\CrestCreates.Security.Abstractions.csproj" />
   </ItemGroup>
 
 </Project>

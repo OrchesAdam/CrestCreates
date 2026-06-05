@@ -24,6 +24,7 @@
     <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\CrestCreates.Authorization.Abstractions\CrestCreates.Authorization.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Security.Abstractions\CrestCreates.Security.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>
