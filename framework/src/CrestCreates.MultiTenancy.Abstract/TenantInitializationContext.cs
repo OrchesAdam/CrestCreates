@@ -1,6 +1,6 @@
 using System;
 
-namespace CrestCreates.Application.Contracts.DTOs.Tenants;
+namespace CrestCreates.MultiTenancy.Abstract;
 
 public class TenantInitializationContext
 {

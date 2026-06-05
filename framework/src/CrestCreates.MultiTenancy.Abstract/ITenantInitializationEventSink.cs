@@ -1,9 +1,8 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using CrestCreates.Application.Contracts.DTOs.Tenants;
 
-namespace CrestCreates.Application.Contracts.Interfaces;
+namespace CrestCreates.MultiTenancy.Abstract;
 
 public interface ITenantInitializationEventSink
 {

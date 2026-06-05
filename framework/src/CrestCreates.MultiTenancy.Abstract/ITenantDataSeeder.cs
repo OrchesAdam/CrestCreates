@@ -1,6 +1,6 @@
 using System;
 
-namespace CrestCreates.Application.Contracts.Interfaces;
+namespace CrestCreates.MultiTenancy.Abstract;
 
 [Obsolete("Use ITenantDataSeedContributor instead.")]
 public interface ITenantDataSeeder : ITenantDataSeedContributor

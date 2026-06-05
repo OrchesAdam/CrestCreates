@@ -1,4 +1,4 @@
-namespace CrestCreates.Application.Contracts.Interfaces;
+namespace CrestCreates.MultiTenancy.Abstract;
 
 /// <summary>
 /// Non-generic marker interface so ExecutePhaseAsync can accept any phase result type.
