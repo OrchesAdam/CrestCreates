@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -14,21 +15,21 @@ namespace CrestCreates.Modularity
         /// 在模块初始化之前调用，可用于执行准备工作
         /// 按照模块依赖顺序执行
         /// </summary>
-        void OnPreInitialize();
+        Task OnPreInitializeAsync();
 
         /// <summary>
         /// 初始化阶段
         /// 模块的主要初始化逻辑
         /// 按照模块依赖顺序执行
         /// </summary>
-        void OnInitialize();
+        Task OnInitializeAsync();
 
         /// <summary>
         /// 后初始化阶段
         /// 在模块初始化之后调用，可用于执行收尾工作
         /// 按照模块依赖顺序执行
         /// </summary>
-        void OnPostInitialize();
+        Task OnPostInitializeAsync();
 
         /// <summary>
         /// 配置服务
@@ -44,8 +45,8 @@ namespace CrestCreates.Modularity
         /// 按照模块依赖顺序执行
         /// </summary>
         /// <param name="host">应用程序主机</param>
-        void OnApplicationInitialization(IHost host);
+        Task OnApplicationInitializationAsync(IHost host);
     }
 
-    
+
 }

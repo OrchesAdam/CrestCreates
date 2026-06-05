@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -60,21 +61,24 @@ namespace CrestCreates.Modularity
         public virtual string? Version => null;
 
         /// <inheritdoc />
-        public virtual void OnPreInitialize()
+        public virtual Task OnPreInitializeAsync()
         {
             // 默认空实现
+            return Task.CompletedTask;
         }
 
         /// <inheritdoc />
-        public virtual void OnInitialize()
+        public virtual Task OnInitializeAsync()
         {
             // 默认空实现
+            return Task.CompletedTask;
         }
 
         /// <inheritdoc />
-        public virtual void OnPostInitialize()
+        public virtual Task OnPostInitializeAsync()
         {
             // 默认空实现
+            return Task.CompletedTask;
         }
 
         /// <inheritdoc />
@@ -84,9 +88,10 @@ namespace CrestCreates.Modularity
         }
 
         /// <inheritdoc />
-        public virtual void OnApplicationInitialization(IHost host)
+        public virtual Task OnApplicationInitializationAsync(IHost host)
         {
             // 默认空实现
+            return Task.CompletedTask;
         }
     }
 }
