@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,25 +21,28 @@ namespace CrestCreates.CodeGenerator.Tests.Modules
         public override string Description => "提供核心功能的基础模块";
         public override string Version => "1.0.0";
 
-        public override void OnPreInitialize()
+        public override Task OnPreInitializeAsync()
         {
             // 模块预初始化
             // 此时 DI 容器还未完全配置，主要用于准备工作
             Console.WriteLine($"[{Name}] PreInitialize - 准备核心服务");
+            return Task.CompletedTask;
         }
 
-        public override void OnInitialize()
+        public override Task OnInitializeAsync()
         {
             // 模块初始化
             // 执行模块的主要初始化逻辑
             Console.WriteLine($"[{Name}] Initialize - 初始化核心组件");
+            return Task.CompletedTask;
         }
 
-        public override void OnPostInitialize()
+        public override Task OnPostInitializeAsync()
         {
             // 模块后初始化
             // 可以访问其他已初始化的模块
             Console.WriteLine($"[{Name}] PostInitialize - 完成初始化");
+            return Task.CompletedTask;
         }
 
         public override void OnConfigureServices(IServiceCollection services)
@@ -59,7 +63,7 @@ namespace CrestCreates.CodeGenerator.Tests.Modules
             });
         }
 
-        public override void OnApplicationInitialization(IHost host)
+        public override Task OnApplicationInitializationAsync(IHost host)
         {
             // 应用程序初始化
             // 在应用程序启动后执行，可以访问完整的 DI 容器
@@ -69,6 +73,7 @@ namespace CrestCreates.CodeGenerator.Tests.Modules
             // 可以在这里执行一些启动后的任务
             var coreService = host.Services.GetService<ICoreService>();
             coreService?.Initialize();
+            return Task.CompletedTask;
         }
     }
 

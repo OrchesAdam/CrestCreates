@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,19 +21,22 @@ namespace CrestCreates.CodeGenerator.Tests.Modules
         public override string Description => "提供数据库访问功能";
         public override string Version => "1.0.0";
 
-        public override void OnPreInitialize()
+        public override Task OnPreInitializeAsync()
         {
             Console.WriteLine($"[{Name}] PreInitialize - 准备数据库连接");
+            return Task.CompletedTask;
         }
 
-        public override void OnInitialize()
+        public override Task OnInitializeAsync()
         {
             Console.WriteLine($"[{Name}] Initialize - 初始化数据库上下文");
+            return Task.CompletedTask;
         }
 
-        public override void OnPostInitialize()
+        public override Task OnPostInitializeAsync()
         {
             Console.WriteLine($"[{Name}] PostInitialize - 验证数据库连接");
+            return Task.CompletedTask;
         }
 
         public override void OnConfigureServices(IServiceCollection services)
@@ -45,7 +49,7 @@ namespace CrestCreates.CodeGenerator.Tests.Modules
             services.AddScoped<IProductRepository, ProductRepository>();
         }
 
-        public override void OnApplicationInitialization(IHost host)
+        public override Task OnApplicationInitializationAsync(IHost host)
         {
             _logger = host.Services.GetService<ILogger<DatabaseModule>>();
             _logger?.LogInformation($"[{Name}] ApplicationInitialization");
@@ -60,6 +64,7 @@ namespace CrestCreates.CodeGenerator.Tests.Modules
             // 初始化数据库
             var dbContext = host.Services.GetService<IDatabaseContext>();
             dbContext?.Initialize();
+            return Task.CompletedTask;
         }
     }
 

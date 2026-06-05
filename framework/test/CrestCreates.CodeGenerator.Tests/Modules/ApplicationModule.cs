@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,19 +21,22 @@ namespace CrestCreates.CodeGenerator.Tests.Modules
         public override string Description => "应用程序主模块，提供业务逻辑";
         public override string Version => "1.0.0";
 
-        public override void OnPreInitialize()
+        public override Task OnPreInitializeAsync()
         {
             Console.WriteLine($"[{Name}] PreInitialize - 准备应用程序组件");
+            return Task.CompletedTask;
         }
 
-        public override void OnInitialize()
+        public override Task OnInitializeAsync()
         {
             Console.WriteLine($"[{Name}] Initialize - 初始化应用程序");
+            return Task.CompletedTask;
         }
 
-        public override void OnPostInitialize()
+        public override Task OnPostInitializeAsync()
         {
             Console.WriteLine($"[{Name}] PostInitialize - 应用程序就绪");
+            return Task.CompletedTask;
         }
 
         public override void OnConfigureServices(IServiceCollection services)
@@ -45,7 +49,7 @@ namespace CrestCreates.CodeGenerator.Tests.Modules
             services.AddSingleton<INotificationService, NotificationService>();
         }
 
-        public override void OnApplicationInitialization(IHost host)
+        public override Task OnApplicationInitializationAsync(IHost host)
         {
             _logger = host.Services.GetService<ILogger<ApplicationModule>>();
             _logger?.LogInformation($"[{Name}] ApplicationInitialization");
@@ -67,6 +71,7 @@ namespace CrestCreates.CodeGenerator.Tests.Modules
             // 启动通知服务
             var notificationService = host.Services.GetService<INotificationService>();
             notificationService?.Start();
+            return Task.CompletedTask;
         }
     }
 
