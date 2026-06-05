@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Tenants;
+using CrestCreates.MultiTenancy;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.MultiTenancy;

@@ -1,7 +1,7 @@
 using System;
 using System.Linq;
-using CrestCreates.Application.Contracts.Interfaces;
-using CrestCreates.Application.Tenants;
+using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.MultiTenancy;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.Interceptors;

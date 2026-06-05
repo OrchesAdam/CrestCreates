@@ -1,6 +1,7 @@
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Domain.Permission;
 using CrestCreates.MultiTenancy;
+using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 

@@ -11,7 +11,7 @@ public interface ITenantInitializationStore
         Guid tenantId, string correlationId, CancellationToken cancellationToken = default);
 
     Task<TenantInitializationRecord> ForceBeginInitializationAsync(
-        Guid tenantId, string correlationId, CancellationToken cancellationToken = default);
+        Guid tenantId, string correlationId, string reason, CancellationToken cancellationToken = default);
 
     Task<TenantInitializationRecord?> GetLatestAsync(
         Guid tenantId, CancellationToken cancellationToken = default);
@@ -20,7 +20,7 @@ public interface ITenantInitializationStore
         TenantInitializationRecord record, CancellationToken cancellationToken = default);
 
     Task ForceFailAsync(
-        Guid tenantId, TenantInitializationRecord record, string error, CancellationToken cancellationToken = default);
+        Guid tenantId, string correlationId, CancellationToken cancellationToken = default);
 
     Task CompleteInitializationAsync(
         Guid tenantId, TenantInitializationRecord record, CancellationToken cancellationToken = default);

@@ -4,11 +4,15 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
-using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared;
 using CrestCreates.Domain.Shared.Attributes;
+using CrestCreates.MultiTenancy;
+using CrestCreates.MultiTenancy.Abstract;
+using TenantInitResult = CrestCreates.Application.Contracts.DTOs.Tenants.TenantInitializationResult;
+using TenantInitStep = CrestCreates.Application.Contracts.DTOs.Tenants.TenantInitializationStep;
+using OrchestratorResult = CrestCreates.MultiTenancy.Abstract.TenantInitializationResult;
 
 namespace CrestCreates.Application.Tenants;
 
@@ -122,7 +126,7 @@ public class TenantAppService : ITenantAppService
             cancellationToken);
     }
 
-    public async Task<TenantInitializationResult> RetryInitializationAsync(
+    public async Task<TenantInitResult> RetryInitializationAsync(
         Guid tenantId,
         CancellationToken cancellationToken = default)
     {
@@ -154,10 +158,10 @@ public class TenantAppService : ITenantAppService
         else
             tenant.MarkInitializationFailed(result.Error ?? "Initialization failed");
 
-        return result;
+        return MapToInitResult(result);
     }
 
-    public async Task<TenantInitializationResult> GetInitializationStatusAsync(
+    public async Task<TenantInitResult> GetInitializationStatusAsync(
         Guid tenantId,
         CancellationToken cancellationToken = default)
     {
@@ -168,17 +172,17 @@ public class TenantAppService : ITenantAppService
 
         if (record is null)
         {
-            return new TenantInitializationResult
+            return new TenantInitResult
             {
                 Success = false,
                 Status = tenant.InitializationStatus,
                 Error = "No initialization record found.",
                 CorrelationId = string.Empty,
-                Steps = Array.Empty<TenantInitializationStep>()
+                Steps = Array.Empty<TenantInitStep>()
             };
         }
 
-        var steps = record.GetSteps().Select(s => new TenantInitializationStep
+        var steps = record.GetSteps().Select(s => new TenantInitStep
         {
             Name = s.Name,
             Status = s.Status,
@@ -187,7 +191,7 @@ public class TenantAppService : ITenantAppService
             Error = s.Error
         }).ToArray();
 
-        return new TenantInitializationResult
+        return new TenantInitResult
         {
             Success = record.Status == TenantInitializationStatus.Initialized,
             Status = record.Status,
@@ -197,7 +201,7 @@ public class TenantAppService : ITenantAppService
         };
     }
 
-    public async Task<TenantInitializationResult> ForceRetryInitializationAsync(
+    public async Task<TenantInitResult> ForceRetryInitializationAsync(
         Guid tenantId,
         CancellationToken cancellationToken = default)
     {
@@ -216,10 +220,10 @@ public class TenantAppService : ITenantAppService
 
         if (record is null)
         {
-            return TenantInitializationResult.Failed(
+            return TenantInitResult.Failed(
                 correlationId,
                 "Could not force begin initialization. Tenant may be in a conflicting state.",
-                Array.Empty<TenantInitializationStep>());
+                Array.Empty<TenantInitStep>());
         }
 
         var context = new TenantInitializationContext
@@ -239,7 +243,7 @@ public class TenantAppService : ITenantAppService
         else
             tenant.MarkInitializationFailed(result.Error ?? "Force retry initialization failed");
 
-        return result;
+        return MapToInitResult(result);
     }
 
     public async Task ForceFailInitializationAsync(
@@ -273,6 +277,27 @@ public class TenantAppService : ITenantAppService
             InitializationStatus = tenant.InitializationStatus,
             InitializedAt = tenant.InitializedAt,
             LastInitializationError = tenant.LastInitializationError
+        };
+    }
+
+    private static TenantInitResult MapToInitResult(OrchestratorResult result)
+    {
+        var steps = result.Steps.Select(s => new TenantInitStep
+        {
+            Name = s.Name,
+            Status = (CrestCreates.Domain.Shared.TenantInitializationStepStatus)s.Status,
+            StartedAt = s.StartedAt,
+            CompletedAt = s.CompletedAt,
+            Error = s.Error
+        }).ToArray();
+
+        return new TenantInitResult
+        {
+            Success = result.Success,
+            Status = result.Success ? TenantInitializationStatus.Initialized : TenantInitializationStatus.Failed,
+            Error = result.Error,
+            CorrelationId = result.CorrelationId,
+            Steps = steps
         };
     }
 

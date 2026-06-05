@@ -4,9 +4,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Contracts.Interfaces;
-using CrestCreates.Application.Tenants;
+using CrestCreates.MultiTenancy;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Shared;
+using TenantInitStepStatus = CrestCreates.MultiTenancy.Abstract.TenantInitializationStepStatus;
 using Microsoft.Extensions.Logging;
 using FluentAssertions;
 using Moq;
@@ -16,8 +18,8 @@ namespace CrestCreates.Application.Tests.Tenants;
 
 public class TenantInitializationOrchestratorTests
 {
-    private readonly Mock<ITenantDatabaseInitializer> _dbInitializerMock;
-    private readonly Mock<ITenantMigrationRunner> _migrationRunnerMock;
+    private readonly Mock<ITenantDatabaseProvisioner> _dbInitializerMock;
+    private readonly Mock<ITenantSchemaMigrator> _migrationRunnerMock;
     private readonly Mock<ITenantDataSeeder> _dataSeederMock;
     private readonly Mock<ITenantSettingDefaultsSeeder> _settingsSeederMock;
     private readonly Mock<ITenantFeatureDefaultsSeeder> _featuresSeederMock;
@@ -26,24 +28,22 @@ public class TenantInitializationOrchestratorTests
 
     public TenantInitializationOrchestratorTests()
     {
-        _dbInitializerMock = new Mock<ITenantDatabaseInitializer>();
-        _migrationRunnerMock = new Mock<ITenantMigrationRunner>();
+        _dbInitializerMock = new Mock<ITenantDatabaseProvisioner>();
+        _migrationRunnerMock = new Mock<ITenantSchemaMigrator>();
         _dataSeederMock = new Mock<ITenantDataSeeder>();
         _settingsSeederMock = new Mock<ITenantSettingDefaultsSeeder>();
         _featuresSeederMock = new Mock<ITenantFeatureDefaultsSeeder>();
         _storeMock = new Mock<ITenantInitializationStore>();
 
-        var loggerMock = new Mock<ILogger<TenantInitializationOrchestrator>>();
-
         _orchestrator = new TenantInitializationOrchestrator(
             _dbInitializerMock.Object,
             _migrationRunnerMock.Object,
-            _dataSeederMock.Object,
+            new[] { _dataSeederMock.Object },
             _settingsSeederMock.Object,
             _featuresSeederMock.Object,
             _storeMock.Object,
             Mock.Of<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(),
-            loggerMock.Object);
+            Mock.Of<CrestCreates.MultiTenancy.Abstract.ITenantInitializationEventSink>());
     }
 
     private static TenantInitializationContext CreateContext(string? connectionString)
@@ -126,15 +126,15 @@ public class TenantInitializationOrchestratorTests
         result.Success.Should().BeTrue();
         result.Steps.Should().HaveCount(5);
         result.Steps[0].Name.Should().Be("DatabaseInitialize");
-        result.Steps[0].Status.Should().Be(TenantInitializationStepStatus.Succeeded);
+        result.Steps[0].Status.Should().Be(TenantInitStepStatus.Succeeded);
         result.Steps[1].Name.Should().Be("Migration");
-        result.Steps[1].Status.Should().Be(TenantInitializationStepStatus.Succeeded);
+        result.Steps[1].Status.Should().Be(TenantInitStepStatus.Succeeded);
         result.Steps[2].Name.Should().Be("DataSeed");
-        result.Steps[2].Status.Should().Be(TenantInitializationStepStatus.Succeeded);
+        result.Steps[2].Status.Should().Be(TenantInitStepStatus.Succeeded);
         result.Steps[3].Name.Should().Be("SettingsDefaults");
-        result.Steps[3].Status.Should().Be(TenantInitializationStepStatus.Succeeded);
+        result.Steps[3].Status.Should().Be(TenantInitStepStatus.Succeeded);
         result.Steps[4].Name.Should().Be("FeatureDefaults");
-        result.Steps[4].Status.Should().Be(TenantInitializationStepStatus.Succeeded);
+        result.Steps[4].Status.Should().Be(TenantInitStepStatus.Succeeded);
 
         _dbInitializerMock.Verify(
             x => x.InitializeAsync(context, It.IsAny<CancellationToken>()), Times.Once);
@@ -173,11 +173,11 @@ public class TenantInitializationOrchestratorTests
         result.Success.Should().BeTrue();
         result.Steps.Should().HaveCount(3);
         result.Steps[0].Name.Should().Be("DataSeed");
-        result.Steps[0].Status.Should().Be(TenantInitializationStepStatus.Succeeded);
+        result.Steps[0].Status.Should().Be(TenantInitStepStatus.Succeeded);
         result.Steps[1].Name.Should().Be("SettingsDefaults");
-        result.Steps[1].Status.Should().Be(TenantInitializationStepStatus.Succeeded);
+        result.Steps[1].Status.Should().Be(TenantInitStepStatus.Succeeded);
         result.Steps[2].Name.Should().Be("FeatureDefaults");
-        result.Steps[2].Status.Should().Be(TenantInitializationStepStatus.Succeeded);
+        result.Steps[2].Status.Should().Be(TenantInitStepStatus.Succeeded);
 
         _dbInitializerMock.Verify(
             x => x.InitializeAsync(It.IsAny<TenantInitializationContext>(), It.IsAny<CancellationToken>()),
@@ -241,9 +241,9 @@ public class TenantInitializationOrchestratorTests
         result.Success.Should().BeFalse();
         result.Steps.Should().HaveCount(2);
         result.Steps[0].Name.Should().Be("DatabaseInitialize");
-        result.Steps[0].Status.Should().Be(TenantInitializationStepStatus.Succeeded);
+        result.Steps[0].Status.Should().Be(TenantInitStepStatus.Succeeded);
         result.Steps[1].Name.Should().Be("Migration");
-        result.Steps[1].Status.Should().Be(TenantInitializationStepStatus.Failed);
+        result.Steps[1].Status.Should().Be(TenantInitStepStatus.Failed);
         result.Steps[1].Error.Should().Be("Migration failed: timeout");
 
         _dataSeederMock.Verify(

@@ -2,7 +2,7 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using CrestCreates.Application.Tenants;
+using CrestCreates.MultiTenancy;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Shared;
 using Microsoft.EntityFrameworkCore;

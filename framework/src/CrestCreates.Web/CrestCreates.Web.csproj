@@ -23,6 +23,7 @@
     <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.MultiTenancy\CrestCreates.MultiTenancy.csproj" />
     <ProjectReference Include="..\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
+    <ProjectReference Include="..\CrestCreates.Data.EFCore.SqlServer\CrestCreates.Data.EFCore.SqlServer.csproj" />
     <ProjectReference Include="..\CrestCreates.EventBus.Abstract\CrestCreates.EventBus.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.EventBus.Local\CrestCreates.EventBus.Local.csproj" />
     <ProjectReference Include="..\CrestCreates.DataFilter\CrestCreates.DataFilter.csproj" />

@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Application.Tenants;
+using CrestCreates.MultiTenancy;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared;
@@ -16,8 +18,8 @@ namespace CrestCreates.Application.Tests.Tenants;
 
 public class TenantInitializationConcurrencyTests
 {
-    private readonly Mock<ITenantDatabaseInitializer> _dbInitializerMock;
-    private readonly Mock<ITenantMigrationRunner> _migrationRunnerMock;
+    private readonly Mock<ITenantDatabaseProvisioner> _dbInitializerMock;
+    private readonly Mock<ITenantSchemaMigrator> _migrationRunnerMock;
     private readonly Mock<ITenantDataSeeder> _dataSeederMock;
     private readonly Mock<ITenantSettingDefaultsSeeder> _settingsSeederMock;
     private readonly Mock<ITenantFeatureDefaultsSeeder> _featuresSeederMock;
@@ -27,8 +29,8 @@ public class TenantInitializationConcurrencyTests
 
     public TenantInitializationConcurrencyTests()
     {
-        _dbInitializerMock = new Mock<ITenantDatabaseInitializer>();
-        _migrationRunnerMock = new Mock<ITenantMigrationRunner>();
+        _dbInitializerMock = new Mock<ITenantDatabaseProvisioner>();
+        _migrationRunnerMock = new Mock<ITenantSchemaMigrator>();
         _dataSeederMock = new Mock<ITenantDataSeeder>();
         _settingsSeederMock = new Mock<ITenantSettingDefaultsSeeder>();
         _featuresSeederMock = new Mock<ITenantFeatureDefaultsSeeder>();
@@ -50,16 +52,15 @@ public class TenantInitializationConcurrencyTests
                 It.IsAny<Guid>(), It.IsAny<TenantInitializationRecord>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var loggerMock = new Mock<ILogger<TenantInitializationOrchestrator>>();
         _orchestrator = new TenantInitializationOrchestrator(
             _dbInitializerMock.Object,
             _migrationRunnerMock.Object,
-            _dataSeederMock.Object,
+            new[] { _dataSeederMock.Object },
             _settingsSeederMock.Object,
             _featuresSeederMock.Object,
             _storeMock.Object,
             Mock.Of<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(),
-            loggerMock.Object);
+            Mock.Of<CrestCreates.MultiTenancy.Abstract.ITenantInitializationEventSink>());
 
         _sharedContext = new TenantInitializationContext
         {

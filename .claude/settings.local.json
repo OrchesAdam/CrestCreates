@@ -33,6 +33,12 @@
       "Bash(find framework/test/CrestCreates.CodeGenerator.Tests/obj -name \"*.g.cs\" -path \"*DynamicApi*\")",
       "Bash(python -c ' *)",
       "Bash(docker info *)"
+    ],
+    "additionalDirectories": [      
+      "/home/orches/workspace/abp/",
+      "/home/orches/workspace/scalar",
+      "/home/orches/workspace/OpenAPI.NET",
+      "/home/orches/workspace/Mediator"
     ]
   }
 }

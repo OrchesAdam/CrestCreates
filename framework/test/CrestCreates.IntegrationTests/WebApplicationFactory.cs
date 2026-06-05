@@ -7,7 +7,8 @@ using System.Threading.Tasks;
 using CrestCreates.Application.AuditLog;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
-using CrestCreates.Application.Tenants;
+using CrestCreates.MultiTenancy;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.DbContextProvider.Abstract;
@@ -291,7 +292,6 @@ public sealed class LibraryManagementWebApplicationFactory
             services.RemoveAll<DbContextOptions<CrestCreatesDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<CrestCreatesDbContext>>();
             services.RemoveAll<CrestCreatesDbContext>();
-            services.RemoveAll<CrestCreatesDbContextFactory>();
             services.RemoveAll<DbContextOptions<OpenIddictDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<OpenIddictDbContext>>();
             services.RemoveAll<OpenIddictDbContext>();

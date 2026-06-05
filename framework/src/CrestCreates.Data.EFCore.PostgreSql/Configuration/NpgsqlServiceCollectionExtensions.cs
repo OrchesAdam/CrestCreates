@@ -1,7 +1,7 @@
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.Data.EFCore.Configuration;
 using CrestCreates.Data.EFCore.PostgreSql.DatabaseProviders.PostgreSQL;
-using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

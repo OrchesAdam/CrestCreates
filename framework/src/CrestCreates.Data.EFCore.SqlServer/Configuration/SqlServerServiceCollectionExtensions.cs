@@ -1,4 +1,4 @@
-using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Data.EFCore.SqlServer.DatabaseProviders.SqlServer;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;

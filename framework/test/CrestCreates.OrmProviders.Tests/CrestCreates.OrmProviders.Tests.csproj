@@ -14,6 +14,7 @@
     <ProjectReference Include="..\..\src\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Data.FreeSql\CrestCreates.Data.FreeSql.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Data.EFCore.SqlServer\CrestCreates.Data.EFCore.SqlServer.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Data.SqlSugar\CrestCreates.Data.SqlSugar.csproj" />
   </ItemGroup>
 
@@ -28,6 +29,7 @@
     <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="FreeSql.Provider.Sqlite" />
     <PackageReference Include="coverlet.collector">
       <PrivateAssets>all</PrivateAssets>

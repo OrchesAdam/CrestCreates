@@ -1,8 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using CrestCreates.Application.Contracts.DTOs.Tenants;
-using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 

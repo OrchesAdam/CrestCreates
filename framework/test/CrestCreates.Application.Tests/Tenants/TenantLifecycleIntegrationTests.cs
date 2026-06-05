@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Application.Tenants;
+using CrestCreates.MultiTenancy;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Authorization;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Caching;
@@ -57,8 +59,8 @@ public class TenantLifecycleIntegrationTests
             Mock.Of<ILogger<TenantBootstrapper>>());
 
         var storeMock = new Mock<ITenantInitializationStore>();
-        var dbInitializerMock = new Mock<ITenantDatabaseInitializer>();
-        var migrationRunnerMock = new Mock<ITenantMigrationRunner>();
+        var dbInitializerMock = new Mock<ITenantDatabaseProvisioner>();
+        var migrationRunnerMock = new Mock<ITenantSchemaMigrator>();
         var settingsSeederMock = new Mock<ITenantSettingDefaultsSeeder>();
         var featuresSeederMock = new Mock<ITenantFeatureDefaultsSeeder>();
 
@@ -78,12 +80,12 @@ public class TenantLifecycleIntegrationTests
         var orchestrator = new TenantInitializationOrchestrator(
             dbInitializerMock.Object,
             migrationRunnerMock.Object,
-            bootstrapper,
+            new[] { bootstrapper },
             settingsSeederMock.Object,
             featuresSeederMock.Object,
             storeMock.Object,
             Mock.Of<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(),
-            Mock.Of<ILogger<TenantInitializationOrchestrator>>());
+            Mock.Of<CrestCreates.MultiTenancy.Abstract.ITenantInitializationEventSink>());
 
         var tenantManager = new TenantManager(
             tenantRepositoryMock.Object,
@@ -144,8 +146,8 @@ public class TenantLifecycleIntegrationTests
         var tenantRepositoryMock = new Mock<ITenantRepository>();
 
         var storeMock = new Mock<ITenantInitializationStore>();
-        var dbInitializerMock = new Mock<ITenantDatabaseInitializer>();
-        var migrationRunnerMock = new Mock<ITenantMigrationRunner>();
+        var dbInitializerMock = new Mock<ITenantDatabaseProvisioner>();
+        var migrationRunnerMock = new Mock<ITenantSchemaMigrator>();
         var dataSeederMock = new Mock<ITenantDataSeeder>();
         var settingsSeederMock = new Mock<ITenantSettingDefaultsSeeder>();
         var featuresSeederMock = new Mock<ITenantFeatureDefaultsSeeder>();
@@ -157,12 +159,12 @@ public class TenantLifecycleIntegrationTests
         var orchestrator = new TenantInitializationOrchestrator(
             dbInitializerMock.Object,
             migrationRunnerMock.Object,
-            dataSeederMock.Object,
+            new[] { dataSeederMock.Object },
             settingsSeederMock.Object,
             featuresSeederMock.Object,
             storeMock.Object,
             Mock.Of<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(),
-            Mock.Of<ILogger<TenantInitializationOrchestrator>>());
+            Mock.Of<CrestCreates.MultiTenancy.Abstract.ITenantInitializationEventSink>());
 
         var tenantManager = new TenantManager(
             tenantRepositoryMock.Object,

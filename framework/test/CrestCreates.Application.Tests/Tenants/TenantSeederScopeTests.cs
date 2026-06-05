@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Tenants;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Settings;
 using CrestCreates.Domain.Shared.Features;

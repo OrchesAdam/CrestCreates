@@ -1,5 +1,5 @@
-using CrestCreates.Application.Contracts.Interfaces;
-using CrestCreates.Application.Tenants;
+using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.MultiTenancy;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Repositories.Permission;
@@ -75,7 +75,6 @@ public class EntityFrameworkCoreModule : ModuleBase
                 .Options;
             return new HelpdeskDbContext(options);
         });
-        services.Replace(ServiceDescriptor.Scoped<ITenantMigrationRunner, EfCoreTenantMigrationRunner>());
         services.TryAddScoped<ITenantSchemaMigrator, EfCoreTenantSchemaMigrator>();
         services.Replace(ServiceDescriptor.Scoped<ITenantInitializationStore, EfCoreTenantInitializationStore>());
 

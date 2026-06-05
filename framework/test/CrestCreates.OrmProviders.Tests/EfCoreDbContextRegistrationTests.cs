@@ -8,7 +8,7 @@ using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Permission;
 using CrestCreates.MultiTenancy.Abstract;
-using CrestCreates.Data.EFCore.DatabaseProviders.SqlServer;
+using CrestCreates.Data.EFCore.SqlServer.DatabaseProviders.SqlServer;
 using CrestCreates.Data.EFCore.Configuration;
 using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.Interceptors;

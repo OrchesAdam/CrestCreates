@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Application.Tenants;
+using CrestCreates.MultiTenancy;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared;
@@ -127,14 +129,14 @@ public class TenantAppServiceTests
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var dbInitMock = new Mock<ITenantDatabaseInitializer>();
+        var dbInitMock = new Mock<ITenantDatabaseProvisioner>();
         dbInitMock
             .Setup(d => d.InitializeAsync(
                 It.IsAny<TenantInitializationContext>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(TenantDatabaseInitializeResult.Succeeded());
 
-        var migrationMock = new Mock<ITenantMigrationRunner>();
+        var migrationMock = new Mock<ITenantSchemaMigrator>();
         migrationMock
             .Setup(m => m.RunAsync(
                 It.IsAny<TenantInitializationContext>(),
@@ -162,16 +164,14 @@ public class TenantAppServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(TenantFeatureDefaultsResult.Succeeded());
 
-        var loggerMock = new Mock<ILogger<TenantInitializationOrchestrator>>();
-
         return new TenantInitializationOrchestrator(
             dbInitMock.Object,
             migrationMock.Object,
-            seederMock.Object,
+            new[] { seederMock.Object },
             settingsMock.Object,
             featuresMock.Object,
             storeMock.Object,
             Mock.Of<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(),
-            loggerMock.Object);
+            Mock.Of<CrestCreates.MultiTenancy.Abstract.ITenantInitializationEventSink>());
     }
 }
