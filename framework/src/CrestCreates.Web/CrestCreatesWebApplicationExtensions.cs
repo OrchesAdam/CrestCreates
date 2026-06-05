@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using CrestCreates.Aop.Extensions;
 using CrestCreates.Application.AuditLog;
 using CrestCreates.Application.Identity;
@@ -30,10 +31,12 @@ using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.MultiTenancy.Providers;
 using CrestCreates.Data.Abstractions;
+using CrestCreates.Data.EFCore;
 using CrestCreates.Data.EFCore.Configuration;
 using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.Settings;
+using CrestCreates.Data.EFCore.DataSeed;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -85,6 +88,20 @@ public static class CrestCreatesWebApplicationExtensions
             }));
 
         services.AddCrestCreatesEfCoreDbContext();
+
+        // Register DbContext types that need migration at startup.
+        // OpenIddictDbContext is registered by the provider-specific extension
+        // (e.g., AddCrestCreatesEfCorePostgreSql / AddCrestCreatesEfCoreSqlServer).
+        // CrestCreatesDbContext is registered by AddCrestCreatesEfCoreDbContext above.
+        services.AddSingleton<IEnumerable<Type>>(_ => new List<Type>
+        {
+            typeof(CrestCreatesDbContext),
+            typeof(OpenIddictDbContext)
+        });
+        services.AddSingleton<HostMigrationAndSeedRunner>();
+
+        // Register host identity data seeder
+        services.AddTransient<IDataSeeder, HostIdentityDataSeeder>();
         services.AddScoped(typeof(CrestCreates.Domain.Repositories.IRepository<,>), typeof(DomainRepositoryAdapter<,>));
         services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
