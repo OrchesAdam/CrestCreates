@@ -1,9 +1,11 @@
+using System.Collections.Generic;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using CrestCreates.Data.Abstractions;
+using CrestCreates.Data.EFCore;
 using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.UnitOfWork;
@@ -20,10 +22,10 @@ namespace LibraryManagement.EntityFrameworkCore.Modules;
 [CrestModule(typeof(ApplicationModule), Order = -50)]
 public class EntityFrameworkCoreModule : ModuleBase
 {
-    
+
     public override void OnConfigureServices(IServiceCollection services)
     {
-        // 注册 DbContext
+        // Register DbContext
         services.AddDbContext<LibraryDbContext>((serviceProvider, options) =>
         {
             var configuration = serviceProvider.GetRequiredService<IConfiguration>();
@@ -45,7 +47,7 @@ public class EntityFrameworkCoreModule : ModuleBase
         services.AddScoped(typeof(global::CrestCreates.Domain.Repositories.IRepository<,>), typeof(DomainRepositoryAdapter<,>));
         services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
-        // 注册仓储
+        // Register repositories
         services.AddScoped<IBookRepository, BookRepository>();
         services.AddScoped<ICategoryRepository, CategoryRepository>();
         services.AddScoped<IMemberRepository, MemberRepository>();
@@ -59,5 +61,12 @@ public class EntityFrameworkCoreModule : ModuleBase
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
         services.AddSettingManagementEfCore();
+
+        // Register host migration and seeding runner
+        services.AddSingleton<IEnumerable<Type>>(_ => new List<Type>
+        {
+            typeof(LibraryDbContext),
+        });
+        services.AddSingleton<HostMigrationAndSeedRunner>();
     }
 }

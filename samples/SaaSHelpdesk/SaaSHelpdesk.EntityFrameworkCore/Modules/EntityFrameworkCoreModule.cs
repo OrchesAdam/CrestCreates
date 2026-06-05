@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.MultiTenancy;
 using CrestCreates.DbContextProvider.Abstract;
@@ -7,6 +8,8 @@ using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using CrestCreates.OpenApi;
 using CrestCreates.Data.Abstractions;
+using CrestCreates.AspNetCore.Authentication.OpenIddict;
+using CrestCreates.Data.EFCore;
 using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.MultiTenancy;
 using CrestCreates.Data.EFCore.PostgreSql.Configuration;
@@ -87,5 +90,16 @@ public class EntityFrameworkCoreModule : ModuleBase
         services.AddScoped<ITicketRepository, TicketRepository>();
 
         services.AddSettingManagementEfCore();
+
+        // Register host migration and seeding runner
+        services.AddSingleton<IEnumerable<Type>>(_ => new List<Type>
+        {
+            typeof(HelpdeskDbContext),
+            typeof(OpenIddictDbContext)
+        });
+        services.AddSingleton<HostMigrationAndSeedRunner>();
+
+        // Register demo data seeder
+        services.AddScoped<IDataSeeder, DemoDataSeeder>();
     }
 }
