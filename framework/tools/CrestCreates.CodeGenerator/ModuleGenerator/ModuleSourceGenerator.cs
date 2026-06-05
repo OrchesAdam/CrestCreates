@@ -118,6 +118,7 @@ public class ModuleSourceGenerator : IIncrementalGenerator
     {
         var sb = new StringBuilder();
         sb.AppendLine("#nullable enable");
+        sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
         sb.AppendLine("using Microsoft.Extensions.Hosting;");
         sb.AppendLine("using Microsoft.Extensions.Logging;");
@@ -193,28 +194,28 @@ public class ModuleSourceGenerator : IIncrementalGenerator
 
         // InitializeModules: resolve from DI and execute lifecycle hooks (PreInit onwards)
         // OnConfigureServices is called during RegisterModules (pre-Build)
-        sb.AppendLine("        public static IHost InitializeModules(this IHost host) {");
+        sb.AppendLine("        public static async Task<IHost> InitializeModulesAsync(this IHost host) {");
         sb.AppendLine("            var logger = host.Services.GetService<ILogger<IModule>>();");
         sb.AppendLine("            var descriptors = ModuleDescriptorRegistry.GetDescriptors();");
         sb.AppendLine();
         sb.AppendLine("            foreach (var descriptor in descriptors) {");
         sb.AppendLine("                try { logger?.LogInformation(\"[PreInit] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
-        sb.AppendLine("                try { ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnPreInitialize(); } catch (Exception ex) { logger?.LogError(ex, \"Error during PreInit phase\"); throw; }");
+        sb.AppendLine("                try { await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnPreInitializeAsync(); } catch (Exception ex) { logger?.LogError(ex, \"Error during PreInit phase\"); throw; }");
         sb.AppendLine("            }");
         sb.AppendLine();
         sb.AppendLine("            foreach (var descriptor in descriptors) {");
         sb.AppendLine("                try { logger?.LogInformation(\"[Init] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
-        sb.AppendLine("                try { ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnInitialize(); } catch (Exception ex) { logger?.LogError(ex, \"Error during Init phase\"); throw; }");
+        sb.AppendLine("                try { await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnInitializeAsync(); } catch (Exception ex) { logger?.LogError(ex, \"Error during Init phase\"); throw; }");
         sb.AppendLine("            }");
         sb.AppendLine();
         sb.AppendLine("            foreach (var descriptor in descriptors) {");
         sb.AppendLine("                try { logger?.LogInformation(\"[PostInit] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
-        sb.AppendLine("                try { ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnPostInitialize(); } catch (Exception ex) { logger?.LogError(ex, \"Error during PostInit phase\"); throw; }");
+        sb.AppendLine("                try { await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnPostInitializeAsync(); } catch (Exception ex) { logger?.LogError(ex, \"Error during PostInit phase\"); throw; }");
         sb.AppendLine("            }");
         sb.AppendLine();
         sb.AppendLine("            foreach (var descriptor in descriptors) {");
         sb.AppendLine("                try { logger?.LogInformation(\"[AppInit] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
-        sb.AppendLine("                try { ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnApplicationInitialization(host); } catch (Exception ex) { logger?.LogError(ex, \"Error during AppInit phase\"); throw; }");
+        sb.AppendLine("                try { await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnApplicationInitializationAsync(host); } catch (Exception ex) { logger?.LogError(ex, \"Error during AppInit phase\"); throw; }");
         sb.AppendLine("            }");
         sb.AppendLine();
         sb.AppendLine("            return host;");

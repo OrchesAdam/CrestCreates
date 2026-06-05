@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 
 namespace CrestCreates.BuildTasks;
 
@@ -76,7 +77,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         return sorted;
     }
 
-    private void Visit(ModuleManifest module, List<ModuleManifest> allModules, 
+    private void Visit(ModuleManifest module, List<ModuleManifest> allModules,
         HashSet<string> visited, HashSet<string> visiting, List<ModuleManifest> sorted)
     {
         if (visited.Contains(module.FullName)) return;
@@ -115,6 +116,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("using System;");
         sb.AppendLine("using System.Collections.Generic;");
         sb.AppendLine("using System.Linq;");
+        sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
         sb.AppendLine("using Microsoft.Extensions.Hosting;");
         sb.AppendLine("using CrestCreates.Modularity;");
@@ -180,14 +182,14 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
 
         sb.AppendLine("    public static IReadOnlyList<ModuleDescriptor> RegisteredModules => _registeredModules;");
         sb.AppendLine();
-        sb.AppendLine("    public static void InitializeAllModules(IServiceProvider serviceProvider)");
+        sb.AppendLine("    public static async Task InitializeAllModulesAsync(IServiceProvider serviceProvider)");
         sb.AppendLine("    {");
 
         for (var i = 0; i < modules.Count; i++)
         {
             var module = modules[i];
             sb.AppendLine($"        var module{i} = serviceProvider.GetService<{module.FullName}>();");
-            sb.AppendLine($"        module{i}?.OnPreInitialize();");
+            sb.AppendLine($"        if (module{i} != null) await module{i}.OnPreInitializeAsync();");
         }
 
         sb.AppendLine();
@@ -195,7 +197,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
 
         for (var i = 0; i < modules.Count; i++)
         {
-            sb.AppendLine($"        module{i}?.OnInitialize();");
+            sb.AppendLine($"        if (module{i} != null) await module{i}.OnInitializeAsync();");
         }
 
         sb.AppendLine();
@@ -203,20 +205,20 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("        {");
         sb.AppendLine("            if (serviceProvider.GetService(module.ModuleType) is IModule moduleInstance)");
         sb.AppendLine("            {");
-        sb.AppendLine("                moduleInstance.OnPostInitialize();");
+        sb.AppendLine("                await moduleInstance.OnPostInitializeAsync();");
         sb.AppendLine("            }");
         sb.AppendLine("        }");
         sb.AppendLine("    }");
         sb.AppendLine();
-        sb.AppendLine("    public static IHost InitializeModules(this IHost host)");
+        sb.AppendLine("    public static async Task<IHost> InitializeModulesAsync(this IHost host)");
         sb.AppendLine("    {");
-        sb.AppendLine("        InitializeAllModules(host.Services);");
+        sb.AppendLine("        await InitializeAllModulesAsync(host.Services);");
         sb.AppendLine();
         sb.AppendLine("        foreach (var module in _registeredModules.OrderBy(m => m.Order))");
         sb.AppendLine("        {");
         sb.AppendLine("            if (host.Services.GetService(module.ModuleType) is IModule moduleInstance)");
         sb.AppendLine("            {");
-        sb.AppendLine("                moduleInstance.OnApplicationInitialization(host);");
+        sb.AppendLine("                await moduleInstance.OnApplicationInitializationAsync(host);");
         sb.AppendLine("            }");
         sb.AppendLine("        }");
         sb.AppendLine();
