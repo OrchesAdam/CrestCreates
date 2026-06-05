@@ -67,6 +67,7 @@
     <Project Path="framework/src/CrestCreates.HealthCheck.Mvc/CrestCreates.HealthCheck.Mvc.csproj" />      
   </Folder>
   <Folder Name="/src/modules/Data/">
+    <Project Path="framework/src/CrestCreates.Data.Core/CrestCreates.Data.Core.csproj" />
     <Project Path="framework/src/CrestCreates.Data.EFCore/CrestCreates.Data.EFCore.csproj" />
     <Project Path="framework/src/CrestCreates.Data.FreeSqlProvider/CrestCreates.Data.FreeSqlProvider.csproj" />
     <Project Path="framework/src/CrestCreates.Data.SqlSugar/CrestCreates.Data.SqlSugar.csproj" />
