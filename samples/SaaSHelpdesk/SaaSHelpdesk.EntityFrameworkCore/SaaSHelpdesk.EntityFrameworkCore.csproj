@@ -18,8 +18,5 @@
     <ProjectReference Include="../SaaSHelpdesk.Domain/SaaSHelpdesk.Domain.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
-  </ItemGroup>
-
+  <!-- Npgsql comes transitively from CrestCreates.Data.EFCore.PostgreSql -->
 </Project>

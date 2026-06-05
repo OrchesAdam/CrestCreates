@@ -11,13 +11,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\framework\src\CrestCreates.AuditLogging\CrestCreates.AuditLogging.csproj" />
     <ProjectReference Include="..\..\..\framework\src\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
+    <ProjectReference Include="..\..\..\framework\src\CrestCreates.Data.EFCore.PostgreSql\CrestCreates.Data.EFCore.PostgreSql.csproj" />
     <ProjectReference Include="..\..\..\framework\src\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\LibraryManagement.Application\LibraryManagement.Application.csproj" />
     <ProjectReference Include="..\LibraryManagement.Domain\LibraryManagement.Domain.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
-  </ItemGroup>
-
+  <!-- Npgsql comes transitively from CrestCreates.Data.EFCore.PostgreSql -->
 </Project>
