@@ -73,7 +73,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
         public static readonly DiagnosticDescriptor ProtectedInputFieldWriteSkipped = new(
             id: "OM009",
             title: "Protected input field write skipped",
-            messageFormat: "Property '{0}' is a protected input field and will not be assigned by mapping.",
+            messageFormat: "Property '{0}' is a protected input field and will not be assigned by mapping",
             category: Category,
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
@@ -81,7 +81,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
         public static readonly DiagnosticDescriptor NullabilityMismatch = new(
             id: "OM005",
             title: "Nullability mismatch",
-            messageFormat: "Source property '{0}' is nullable but target is non-nullable.",
+            messageFormat: "Source property '{0}' is nullable but target is non-nullable",
             category: Category,
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);
@@ -89,7 +89,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
         public static readonly DiagnosticDescriptor NavigationPathInvalid = new(
             id: "OM008",
             title: "Navigation path invalid",
-            messageFormat: "Navigation path '{0}' for property '{1}' has invalid segment '{2}' on type '{3}'.",
+            messageFormat: "Navigation path '{0}' for property '{1}' has invalid segment '{2}' on type '{3}'",
             category: Category,
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true);

@@ -182,7 +182,7 @@ public static class DynamicApiGeneratedRuntime
         }
     }
 
-    public static async Task<T?> ExecuteAsync<T>(HttpContext context, bool requiresTransaction, Func<Task<T?>> action)
+    public static async Task<T?> ExecuteAsync<T>(HttpContext context, bool requiresTransaction, Func<Task<T>> action)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(action);

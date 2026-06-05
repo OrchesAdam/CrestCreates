@@ -15,12 +15,12 @@ public class SecurityService : ISecurityService
 
     public string HashPassword(string password)
     {
-        return _passwordHasher.HashPassword(null, password);
+        return _passwordHasher.HashPassword(null!, password);
     }
 
     public bool VerifyPassword(string password, string hashedPassword)
     {
-        var result = _passwordHasher.VerifyHashedPassword(null, hashedPassword, password);
+        var result = _passwordHasher.VerifyHashedPassword(null!, hashedPassword, password);
         return result == PasswordVerificationResult.Success;
     }
 

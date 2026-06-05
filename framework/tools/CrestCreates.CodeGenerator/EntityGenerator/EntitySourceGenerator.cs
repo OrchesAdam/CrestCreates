@@ -276,7 +276,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 sourceCode += "        // 基础仓库方法\n";
                 sourceCode += "        public async Task<" + entityName + "> GetByIdAsync(" + idType + " id, CancellationToken cancellationToken = default)\n";
                 sourceCode += "        {\n";
-                sourceCode += "            return await DbContext.Set<" + entityName + ">().FindAsync(new object[] { id }, cancellationToken);\n";
+                sourceCode += "            return (await DbContext.Set<" + entityName + ">().FindAsync(new object[] { id }, cancellationToken))!;\n";
                 sourceCode += "        }\n";
                 sourceCode += "\n";
                 sourceCode += "        public async Task<List<" + entityName + ">> GetAllAsync(CancellationToken cancellationToken = default)\n";
@@ -348,11 +348,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 {
                     sourceCode += "        public async Task SoftDeleteAsync(" + idType + " id, CancellationToken cancellationToken = default)\n";
                     sourceCode += "        {\n";
-                    sourceCode += "            var entity = await GetByIdAsync(id);\n";
-                    sourceCode += "            if (entity != null)\n";
-                    sourceCode += "            {\n";
-                    sourceCode += "                await DeleteAsync(entity);\n";
-                    sourceCode += "            }\n";
+                    sourceCode += "            await DeleteAsync(await GetByIdAsync(id));\n";
                     sourceCode += "        }\n";
                     sourceCode += "\n";
                     sourceCode += "        public async Task RestoreAsync(" + idType + " id, CancellationToken cancellationToken = default)\n";
@@ -460,11 +456,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 {
                     sourceCode += "        public async Task SoftDeleteAsync(" + idType + " id, CancellationToken cancellationToken = default)\n";
                     sourceCode += "        {\n";
-                    sourceCode += "            var entity = await GetByIdAsync(id);\n";
-                    sourceCode += "            if (entity != null)\n";
-                    sourceCode += "            {\n";
-                    sourceCode += "                await DeleteAsync(entity);\n";
-                    sourceCode += "            }\n";
+                    sourceCode += "            await DeleteAsync(await GetByIdAsync(id));\n";
                     sourceCode += "        }\n";
                     sourceCode += "\n";
                     sourceCode += "        public async Task RestoreAsync(" + idType + " id, CancellationToken cancellationToken = default)\n";
@@ -572,11 +564,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 {
                     sourceCode += "        public async Task SoftDeleteAsync(" + idType + " id, CancellationToken cancellationToken = default)\n";
                     sourceCode += "        {\n";
-                    sourceCode += "            var entity = await GetByIdAsync(id);\n";
-                    sourceCode += "            if (entity != null)\n";
-                    sourceCode += "            {\n";
-                    sourceCode += "                await DeleteAsync(entity);\n";
-                    sourceCode += "            }\n";
+                    sourceCode += "            await DeleteAsync(await GetByIdAsync(id));\n";
                     sourceCode += "        }\n";
                     sourceCode += "\n";
                     sourceCode += "        public async Task RestoreAsync(" + idType + " id, CancellationToken cancellationToken = default)\n";
@@ -1081,11 +1069,13 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 && !IsNavigationProperty(p)))
             {
                 var typeName = prop.Type.ToDisplayString();
-                if (prop.NullableAnnotation == NullableAnnotation.Annotated && !typeName.EndsWith("?"))
+                var isNullable = prop.NullableAnnotation == NullableAnnotation.Annotated;
+                if (isNullable && !typeName.EndsWith("?"))
                 {
                     typeName += "?";
                 }
-                builder.AppendLine($"        public {typeName} {prop.Name} {{ get; set; }}");
+                var initializer = GetPropertyInitializer(prop.Type, typeName, isNullable);
+                builder.AppendLine($"        public {typeName} {prop.Name} {{ get; set; }}{initializer}");
             }
 
             builder.AppendLine("    }");
@@ -1118,11 +1108,13 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             foreach (var prop in properties)
             {
                 var typeName = prop.Type.ToDisplayString();
-                if (prop.NullableAnnotation == NullableAnnotation.Annotated && !typeName.EndsWith("?"))
+                var isNullable = prop.NullableAnnotation == NullableAnnotation.Annotated;
+                if (isNullable && !typeName.EndsWith("?"))
                 {
                     typeName += "?";
                 }
-                builder.AppendLine($"        public {typeName} {prop.Name} {{ get; set; }}");
+                var initializer = GetPropertyInitializer(prop.Type, typeName, isNullable);
+                builder.AppendLine($"        public {typeName} {prop.Name} {{ get; set; }}{initializer}");
             }
 
             builder.AppendLine("    }");
@@ -1159,11 +1151,13 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             foreach (var prop in properties)
             {
                 var typeName = prop.Type.ToDisplayString();
-                if (prop.NullableAnnotation == NullableAnnotation.Annotated && !typeName.EndsWith("?"))
+                var isNullable = prop.NullableAnnotation == NullableAnnotation.Annotated;
+                if (isNullable && !typeName.EndsWith("?"))
                 {
                     typeName += "?";
                 }
-                builder.AppendLine($"        public {typeName} {prop.Name} {{ get; set; }}");
+                var initializer = GetPropertyInitializer(prop.Type, typeName, isNullable);
+                builder.AppendLine($"        public {typeName} {prop.Name} {{ get; set; }}{initializer}");
             }
 
             builder.AppendLine("    }");
@@ -1229,7 +1223,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             sourceCode += "        /// </summary>\n";
             sourceCode += "        public static " + entityName + " CloneWithoutId(this " + entityName + " entity)\n";
             sourceCode += "        {\n";
-            sourceCode += "            if (entity == null) return null;\n";
+            sourceCode += "            if (entity == null) return null!;\n";
             sourceCode += "            \n";
             sourceCode += "            // 这里可以根据实际需要实现深拷贝逻辑\n";
             sourceCode += "            throw new NotImplementedException(\"Clone method needs to be implemented manually\");\n";
@@ -1434,6 +1428,25 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
         private static string EscapeStringLiteral(string value)
         {
             return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        }
+
+        /// <summary>
+        /// Returns an initializer suffix for DTO properties to avoid CS8618.
+        /// </summary>
+        private static string GetPropertyInitializer(ITypeSymbol type, string typeName, bool isNullable)
+        {
+            if (isNullable)
+                return string.Empty;
+
+            // Value types (primitives, enums, structs) don't need initializers
+            if (type.IsValueType)
+                return string.Empty;
+
+            if (type.SpecialType == SpecialType.System_String)
+                return " = string.Empty;";
+
+            // Other reference types: use null! since they'll be set by model binding/serialization
+            return " = null!;";
         }
     }
 }

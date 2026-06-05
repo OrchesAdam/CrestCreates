@@ -258,7 +258,7 @@ namespace CrestCreates.DbContextProvider.Abstract
         /// <summary>
         /// 数据列表
         /// </summary>
-        public List<T> Items { get; set; }
+        public List<T> Items { get; set; } = new();
 
         /// <summary>
         /// 总记录数

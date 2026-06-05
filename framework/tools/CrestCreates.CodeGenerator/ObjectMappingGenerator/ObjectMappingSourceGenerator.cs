@@ -62,8 +62,8 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
 
                 declarations.Add(new MappingDeclaration
                 {
-                    SourceType = sourceType,
-                    TargetType = targetType,
+                    SourceType = sourceType!,
+                    TargetType = targetType!,
                     SourceTypeName = sourceTypeName,
                     TargetTypeName = targetTypeName,
                     SourceTypeResolved = sourceTypeResolved,

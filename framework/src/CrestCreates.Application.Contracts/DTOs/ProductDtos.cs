@@ -6,20 +6,20 @@ namespace CrestCreates.Application.Contracts.Examples.DTOs
     public class ProductDto
     {
         public Guid Id { get; set; }
-        public string Name { get; set; }
-        public string Description { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
         public decimal Price { get; set; }
-        public string Currency { get; set; }
+        public string Currency { get; set; } = "CNY";
         public ProductType Type { get; set; }
         public int StockCount { get; set; }
         public DateTime CreationTime { get; set; }
         public DateTime? LastModificationTime { get; set; }
     }
-    
+
     public class CreateProductDto
     {
-        public string Name { get; set; }
-        public string Description { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
         public decimal Price { get; set; }
         public string Currency { get; set; } = "CNY";
         public ProductType Type { get; set; }
@@ -28,8 +28,8 @@ namespace CrestCreates.Application.Contracts.Examples.DTOs
     public class UpdateProductDto
     {
         public Guid Id { get; set; }
-        public string Name { get; set; }
-        public string Description { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
     }
     
     public class UpdateProductPriceDto

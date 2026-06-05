@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -95,6 +96,8 @@ public class DefaultJobExecutionHandler : IJobExecutionHandler
         return _historyRepository.CreateAsync(record, ct);
     }
 
+    [UnconditionalSuppressMessage("AotAnalysis", "IL2026:RequiresUnreferencedCode",
+        Justification = "Job args types should be registered with source-generated JSON context in AoT builds.")]
     public Task HandleAsync(JobFailureContext context, CancellationToken ct = default)
     {
         var record = new JobRecord

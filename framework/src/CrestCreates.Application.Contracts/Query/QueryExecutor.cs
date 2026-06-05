@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Linq.Expressions;
 using CrestCreates.Application.Contracts.DTOs.Common;
@@ -8,6 +9,8 @@ namespace CrestCreates.Application.Contracts.Query;
 
 public static class QueryExecutor<T>
 {
+    [UnconditionalSuppressMessage("AotAnalysis", "IL2026:RequiresUnreferencedCode",
+        Justification = "Entity types are preserved by EF Core and won't be trimmed.")]
     public static IQueryable<T> ApplyFilters(IQueryable<T> query, List<FilterDescriptor> filters)
     {
         if (filters == null || !filters.Any())
@@ -23,6 +26,8 @@ public static class QueryExecutor<T>
         return query;
     }
 
+    [UnconditionalSuppressMessage("AotAnalysis", "IL2026:RequiresUnreferencedCode",
+        Justification = "Entity types are preserved by EF Core and won't be trimmed.")]
     public static IQueryable<T> ApplySorts(IQueryable<T> query, List<SortDescriptor> sorts)
     {
         if (sorts == null || !sorts.Any())
@@ -76,6 +81,8 @@ public static class QueryExecutor<T>
         return query;
     }
 
+    [UnconditionalSuppressMessage("AotAnalysis", "IL2026:RequiresUnreferencedCode",
+        Justification = "Entity types are preserved by EF Core and won't be trimmed.")]
     private static IQueryable<T> ApplyFilter(IQueryable<T> query, FilterDescriptor filter)
     {
         var parameter = Expression.Parameter(typeof(T), "x");
@@ -161,6 +168,8 @@ public static class QueryExecutor<T>
         return Expression.Call(property, method!, valueConstant);
     }
 
+    [UnconditionalSuppressMessage("AotAnalysis", "IL2060:MakeGenericMethod",
+        Justification = "Enumerable.Contains is a well-known BCL method that won't be trimmed.")]
     private static MethodCallExpression CreateInExpression(MemberExpression property, object? values)
     {
         var method = typeof(Enumerable).GetMethods()

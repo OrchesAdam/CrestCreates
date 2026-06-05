@@ -808,7 +808,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                     }
                 }
 
-                var callArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Name));
+                var callArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Source == ParameterSource.Body ? $"{parameter.Name}!" : parameter.Name));
                 if (action.ReturnModel.IsVoid)
                 {
                     if (action.RequiresUnitOfWork)
@@ -879,7 +879,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         return parameter.Source switch
         {
             ParameterSource.CancellationToken => $"                    var {parameter.Name} = context.RequestAborted;",
-            ParameterSource.Route => $"                    var {parameter.Name} = {GenerateParseExpression(parameter.TypeName, $"""context.Request.RouteValues["{parameter.Name}"]?.ToString()""", parameter.IsOptional)};",
+            ParameterSource.Route => $"                    var {parameter.Name} = {GenerateParseExpression(parameter.TypeName, $"""context.Request.RouteValues["{parameter.Name}"]?.ToString()!""", parameter.IsOptional)};",
             ParameterSource.Query when parameter.IsScalar => $"                    var {parameter.Name} = {GenerateParseExpression(parameter.TypeName, $"""context.Request.Query["{parameter.Name}"].ToString()""", parameter.IsOptional)};",
             ParameterSource.Query => GenerateQueryObjectBinding(parameter),
             ParameterSource.Body => GenerateBodyBinding(parameter),

@@ -49,8 +49,8 @@ public class CacheMoAttribute : AsyncMoAttribute
 
             var tenantId = context.GetService<ICurrentTenant>()?.Id;
             var cachedValue = string.IsNullOrWhiteSpace(tenantId)
-                ? await cache.GetAsync<object>(_prefix, context.Arguments)
-                : await cache.GetAsync<object>(_prefix, tenantId, context.Arguments);
+                ? await cache.GetAsync<object>(_prefix, context.Arguments!)
+                : await cache.GetAsync<object>(_prefix, tenantId, context.Arguments!);
             if (cachedValue != null)
             {
                 context.ReturnValue = cachedValue;
