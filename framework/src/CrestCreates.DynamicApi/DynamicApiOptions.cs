@@ -20,4 +20,20 @@ public sealed class DynamicApiOptions
     {
         AddApplicationServiceAssembly(typeof(TMarker).Assembly);
     }
+
+    private readonly List<Type> _endpointConventionTypes = new();
+
+    public IReadOnlyList<Type> EndpointConventionTypes => _endpointConventionTypes;
+
+    public DynamicApiOptions AddEndpointConvention<TConvention>()
+        where TConvention : class, IDynamicApiEndpointConvention
+    {
+        var conventionType = typeof(TConvention);
+        if (!_endpointConventionTypes.Contains(conventionType))
+        {
+            _endpointConventionTypes.Add(conventionType);
+        }
+
+        return this;
+    }
 }
