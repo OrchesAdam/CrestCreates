@@ -116,6 +116,8 @@ public class DynamicApiAotSourceGeneratorTests
 
         var result = await SourceGeneratorTestHelper.RunGeneratorAsync<DynamicApiAotSourceGenerator>(source, additionalSources: new[] { BuildDynamicApiStubs() });
 
+        result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
+
         result.GeneratedSources
             .First(s => s.FileName.Contains("GeneratedDynamicApiEndpoints.g.cs"))
             .SourceText
