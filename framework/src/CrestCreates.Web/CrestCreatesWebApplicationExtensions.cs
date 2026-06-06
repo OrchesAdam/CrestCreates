@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using CrestCreates.Aop.Extensions;
 using CrestCreates.Application.AuditLog;
 using CrestCreates.Application.Identity;
@@ -200,6 +201,14 @@ public static class CrestCreatesWebApplicationExtensions
         app.MapCrestOpenIddictEndpoints();
         app.MapCrestAspNetCoreDynamicApi();
         app.MapCrestOpenApi();
+        return app;
+    }
+
+    public static async Task<WebApplication> InitializeCrestAsync(this WebApplication app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+
+        await app.InitializeModulesAsync();
         return app;
     }
 

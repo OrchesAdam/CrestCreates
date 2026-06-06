@@ -1,3 +1,4 @@
+using System.Reflection;
 using CrestCreates.Web;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
@@ -29,5 +30,15 @@ public class CrestWebPresetTests
         });
 
         builder.Services.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void InitializeCrestAsync_ShouldBeExposedOnWebApplication()
+    {
+        var method = typeof(CrestCreatesWebApplicationExtensions)
+            .GetMethods()
+            .SingleOrDefault(method => method.Name == "InitializeCrestAsync");
+
+        method.Should().NotBeNull();
     }
 }
