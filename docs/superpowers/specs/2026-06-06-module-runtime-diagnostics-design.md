@@ -200,7 +200,7 @@ if (module0 != null) await module0.OnPreInitializeAsync();
 
 **Target** (with diagnostics):
 ```csharp
-// RegisterAllModules — ConfigureServices phase:
+// ModuleDiagnostics: WebModule → ConfigureServices
 var timer0 = ModulePhaseTimer.StartNew("WebModule", "ConfigureServices");
 try
 {
@@ -213,20 +213,25 @@ catch (Exception ex)
     throw;
 }
 
-// InitializeAllModulesAsync — PreInit/Init/PostInit/AppInit phases:
-// Each lifecycle call is wrapped with the same timer → record pattern.
-
-// After all modules initialized, output summary:
-var summary = _diagnostics.GetAll();
-foreach (var d in summary)
+// ModuleDiagnostics: WebModule → PreInit
+var timer1 = ModulePhaseTimer.StartNew("WebModule", "PreInit");
+try
 {
-    logger.LogInformation("[ModuleDiagnostics] {ModuleName}: {Status} ({Phase} {Elapsed}ms)", ...);
+    await module0.OnPreInitializeAsync();
+    _diagnostics.Record(timer1.Stop(ModulePhaseStatus.Success));
 }
+catch (Exception ex)
+{
+    _diagnostics.Record(timer1.StopFailed(ex));
+    throw;
+}
+// ... Init, PostInit, AppInit each with same pattern
 ```
 
 **Key rules for generated code:**
 - One method call per line. No chained calls as method arguments.
 - Timer, try/catch, Record, throw — each on its own line.
+- Each module-phase block is preceded by a comment: `// ModuleDiagnostics: {ModuleName} → {Phase}`
 - Summary log output is a simple foreach loop, one `LogInformation` per diagnostic record.
 
 ### SourceGenerator Path (`ModuleSourceGenerator.cs`)
