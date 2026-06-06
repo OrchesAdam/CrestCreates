@@ -38,6 +38,7 @@ using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.Settings;
 using CrestCreates.Data.EFCore.DataSeed;
+using CrestCreates.DynamicApi;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
@@ -51,6 +52,22 @@ namespace CrestCreates.Web;
 public static class CrestCreatesWebApplicationExtensions
 {
     public static WebApplicationBuilder AddCrestWeb(this WebApplicationBuilder builder)
+    {
+        return AddCrestWeb(builder, configure: null);
+    }
+
+    public static WebApplicationBuilder AddCrestWeb(
+        this WebApplicationBuilder builder,
+        Action<CrestWebOptions>? configure)
+    {
+        var options = new CrestWebOptions();
+        configure?.Invoke(options);
+        return AddCrestWeb(builder, options);
+    }
+
+    private static WebApplicationBuilder AddCrestWeb(
+        WebApplicationBuilder builder,
+        CrestWebOptions options)
     {
         builder.Host.UseCrestSerilog();
         builder.Host.UsePinnedScopeServiceProvider();
@@ -68,23 +85,26 @@ public static class CrestCreatesWebApplicationExtensions
 
         services.AddCrestOpenApi();
 
-        services.AddOpenIddictServer(options =>
+        if (options.EnableOpenIddict)
         {
-            options.EnablePasswordFlow = true;
-            options.EnableClientCredentialsFlow = true;
-            options.EnableRefreshTokenFlow = true;
-            options.AccessTokenLifetimeMinutes = 60;
-            options.RefreshTokenLifetimeDays = 14;
-        });
-        services.AddOpenIddictAuthentication();
+            services.AddOpenIddictServer(oidcOptions =>
+            {
+                oidcOptions.EnablePasswordFlow = true;
+                oidcOptions.EnableClientCredentialsFlow = true;
+                oidcOptions.EnableRefreshTokenFlow = true;
+                oidcOptions.AccessTokenLifetimeMinutes = 60;
+                oidcOptions.RefreshTokenLifetimeDays = 14;
+            });
+            services.AddOpenIddictAuthentication();
+        }
 
         services.AddSingleton<IEfCoreDbContextOptionsContributor>(_ =>
-            new DelegateEfCoreDbContextOptionsContributor((serviceProvider, options) =>
+            new DelegateEfCoreDbContextOptionsContributor((serviceProvider, dbOptions) =>
             {
                 var currentTenant = serviceProvider.GetService<ICurrentTenant>();
                 var connectionString = currentTenant?.Tenant?.ConnectionString
                                        ?? configuration.GetConnectionString("Default");
-                options.UseSqlServer(connectionString);
+                dbOptions.UseSqlServer(connectionString);
             }));
 
         services.AddCrestCreatesEfCoreDbContext();
@@ -133,9 +153,9 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
         services.AddScoped<CrestCreates.Domain.DomainEvents.IDomainEventPublisher, DomainEventPublisher>();
 
-        services.AddMultiTenancy(options =>
+        services.AddMultiTenancy(mtOptions =>
         {
-            options.ResolutionStrategy = TenantResolutionStrategy.Header;
+            mtOptions.ResolutionStrategy = TenantResolutionStrategy.Header;
         });
         services.AddTenantResolvers(TenantResolutionStrategy.Header);
         services.AddRepositoryTenantProvider();
@@ -143,7 +163,13 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddScoped<ILocalizationProvider, JsonResourceLocalizationProvider>(_ =>
             new JsonResourceLocalizationProvider("Localization/Resources"));
 
-        services.AddCrestAspNetCoreDynamicApi();
+        services.AddCrestAspNetCoreDynamicApi(dynamicApi =>
+        {
+            foreach (var markerType in options.GeneratedApi.ServiceMarkerTypes)
+            {
+                dynamicApi.AddApplicationServiceAssembly(markerType.Assembly);
+            }
+        });
         services.AddCrestExceptionHandling();
 
         LogRegisteredModules();
