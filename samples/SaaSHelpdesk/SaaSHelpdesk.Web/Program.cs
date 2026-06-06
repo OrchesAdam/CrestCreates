@@ -18,6 +18,7 @@ using CrestCreates.MultiTenancy;
 using CrestCreates.AspNetCore.Middlewares;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.EventBus.Local;
+using CrestCreates.Security.Modules;
 using CrestCreates.Application.Settings;
 using CrestCreates.Application.Features;
 using CrestCreates.Application.AuditLog;
@@ -69,9 +70,12 @@ builder.Services.AddTenantManagement();
 builder.Services.AddTenantBootstrapper();
 builder.Services.AddTenantManagementCore();
 
+builder.Services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
 builder.Services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
 builder.Services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
 builder.Services.AddScoped<IDomainEventPublisher, DomainEventPublisher>();
+// Manually invoke SecurityModule.OnConfigureServices since it's not auto-discovered
+new SecurityModule(builder.Configuration).OnConfigureServices(builder.Services);
 // Quartz Scheduling auto-registered via CrestCreates.Scheduling.Quartz module
 builder.Services.AddMultiTenancy(options =>
 {
