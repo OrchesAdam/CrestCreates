@@ -355,6 +355,8 @@ namespace CrestCreates.Domain.Shared.Attributes
             TryAddReference(references, "CrestCreates.Aop");
             TryAddReference(references, "Microsoft.AspNetCore.Routing");
             TryAddReference(references, "Microsoft.AspNetCore.Http.Abstractions");
+            TryAddReference(references, "Microsoft.Extensions.DependencyInjection");
+            TryAddReference(references, "Microsoft.Extensions.DependencyInjection.Abstractions");
 
             // 创建语法树
             var syntaxTrees = new List<SyntaxTree>();
