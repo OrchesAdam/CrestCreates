@@ -7,7 +7,9 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace CrestCreates.CodeGenerator.ControllerGenerator
 {
+    // Legacy generator retained only during migration to generated Minimal API endpoints.
     [Generator]
+    [Obsolete("MVC controller generation is legacy. Use GeneratedApiController with source-generated Minimal API endpoints.")]
     public sealed class CrudControllerSourceGenerator : IIncrementalGenerator
     {
         private const string CrudApiControllerAttributeName = "CrestCreates.Domain.Shared.Attributes.CrestCrudApiControllerAttribute";

@@ -10,7 +10,9 @@ using CrestCreates.CodeGenerator.Authorization;
 
 namespace CrestCreates.CodeGenerator.ControllerGenerator
 {
+    // Legacy generator retained only during migration to generated Minimal API endpoints.
     [Generator]
+    [Obsolete("MVC controller generation is legacy. Use GeneratedApiController with source-generated Minimal API endpoints.")]
     public class ControllerSourceGenerator : IIncrementalGenerator
     {
         public void Initialize(IncrementalGeneratorInitializationContext context)
