@@ -148,6 +148,8 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         sb.AppendLine("    internal static class ModuleAutoInitializer {");
 
         // Static initializer: register all module types with direct typeof() references (AOT-friendly)
+        sb.AppendLine("        private static readonly CrestCreates.ModuleDiagnostics.Stores.ModuleDiagnosticsStore _diagnostics = CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.Store;");
+        sb.AppendLine();
         sb.AppendLine("        static ModuleAutoInitializer() {");
         foreach (var module in sortedModules)
         {
@@ -170,7 +172,10 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         }
         sb.AppendLine();
         sb.AppendLine("                foreach (var descriptor in ModuleDescriptorRegistry.GetDescriptors().Where(d => d.AutoRegisterServices)) {");
-        sb.AppendLine("                    try {");
+        sb.AppendLine("                    // ModuleDiagnostics: descriptor.ModuleType.Name → ConfigureServices");
+        sb.AppendLine("                    var timer_cs = CrestCreates.ModuleDiagnostics.Timing.ModulePhaseTimer.StartNew(descriptor.ModuleType.Name, \"ConfigureServices\");");
+        sb.AppendLine("                    try");
+        sb.AppendLine("                    {");
         var instantiableModules = sortedModules.Where(m => m.HasParameterlessConstructor).ToList();
         if (instantiableModules.Count > 0)
         {
@@ -186,7 +191,13 @@ public class ModuleSourceGenerator : IIncrementalGenerator
             sb.AppendLine("                        else throw new NotSupportedException($\"Unknown module type: {descriptor.ModuleType.FullName}\");");
             sb.AppendLine("                        module.OnConfigureServices(services);");
         }
-        sb.AppendLine("                    } catch (Exception ex) { System.Console.Error.WriteLine($\"[ConfigureServices] {descriptor.ModuleType.Name}: {ex}\"); throw; }");
+        sb.AppendLine("                        _diagnostics.Record(timer_cs.Stop(CrestCreates.ModuleDiagnostics.Stores.ModulePhaseStatus.Success));");
+        sb.AppendLine("                    }");
+        sb.AppendLine("                    catch (Exception ex)");
+        sb.AppendLine("                    {");
+        sb.AppendLine("                        _diagnostics.Record(timer_cs.StopFailed(ex));");
+        sb.AppendLine("                        throw;");
+        sb.AppendLine("                    }");
         sb.AppendLine("                }");
         sb.AppendLine("            });");
         sb.AppendLine("        }");
@@ -198,26 +209,90 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         sb.AppendLine("            var logger = host.Services.GetService<ILogger<IModule>>();");
         sb.AppendLine("            var descriptors = ModuleDescriptorRegistry.GetDescriptors();");
         sb.AppendLine();
+
+        // PreInit
         sb.AppendLine("            foreach (var descriptor in descriptors) {");
-        sb.AppendLine("                try { logger?.LogInformation(\"[PreInit] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
-        sb.AppendLine("                try { await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnPreInitializeAsync(); } catch (Exception ex) { logger?.LogError(ex, \"Error during PreInit phase\"); throw; }");
+        sb.AppendLine("                // ModuleDiagnostics: descriptor.ModuleType.Name → PreInit");
+        sb.AppendLine("                var timer = CrestCreates.ModuleDiagnostics.Timing.ModulePhaseTimer.StartNew(descriptor.ModuleType.Name, \"PreInit\");");
+        sb.AppendLine("                try");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnPreInitializeAsync();");
+        sb.AppendLine("                    _diagnostics.Record(timer.Stop(CrestCreates.ModuleDiagnostics.Stores.ModulePhaseStatus.Success));");
+        sb.AppendLine("                }");
+        sb.AppendLine("                catch (Exception ex)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    _diagnostics.Record(timer.StopFailed(ex));");
+        sb.AppendLine("                    throw;");
+        sb.AppendLine("                }");
         sb.AppendLine("            }");
         sb.AppendLine();
+
+        // Init
         sb.AppendLine("            foreach (var descriptor in descriptors) {");
-        sb.AppendLine("                try { logger?.LogInformation(\"[Init] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
-        sb.AppendLine("                try { await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnInitializeAsync(); } catch (Exception ex) { logger?.LogError(ex, \"Error during Init phase\"); throw; }");
+        sb.AppendLine("                // ModuleDiagnostics: descriptor.ModuleType.Name → Init");
+        sb.AppendLine("                var timer = CrestCreates.ModuleDiagnostics.Timing.ModulePhaseTimer.StartNew(descriptor.ModuleType.Name, \"Init\");");
+        sb.AppendLine("                try");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnInitializeAsync();");
+        sb.AppendLine("                    _diagnostics.Record(timer.Stop(CrestCreates.ModuleDiagnostics.Stores.ModulePhaseStatus.Success));");
+        sb.AppendLine("                }");
+        sb.AppendLine("                catch (Exception ex)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    _diagnostics.Record(timer.StopFailed(ex));");
+        sb.AppendLine("                    throw;");
+        sb.AppendLine("                }");
         sb.AppendLine("            }");
         sb.AppendLine();
+
+        // PostInit
         sb.AppendLine("            foreach (var descriptor in descriptors) {");
-        sb.AppendLine("                try { logger?.LogInformation(\"[PostInit] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
-        sb.AppendLine("                try { await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnPostInitializeAsync(); } catch (Exception ex) { logger?.LogError(ex, \"Error during PostInit phase\"); throw; }");
+        sb.AppendLine("                // ModuleDiagnostics: descriptor.ModuleType.Name → PostInit");
+        sb.AppendLine("                var timer = CrestCreates.ModuleDiagnostics.Timing.ModulePhaseTimer.StartNew(descriptor.ModuleType.Name, \"PostInit\");");
+        sb.AppendLine("                try");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnPostInitializeAsync();");
+        sb.AppendLine("                    _diagnostics.Record(timer.Stop(CrestCreates.ModuleDiagnostics.Stores.ModulePhaseStatus.Success));");
+        sb.AppendLine("                }");
+        sb.AppendLine("                catch (Exception ex)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    _diagnostics.Record(timer.StopFailed(ex));");
+        sb.AppendLine("                    throw;");
+        sb.AppendLine("                }");
         sb.AppendLine("            }");
         sb.AppendLine();
+
+        // AppInit
         sb.AppendLine("            foreach (var descriptor in descriptors) {");
-        sb.AppendLine("                try { logger?.LogInformation(\"[AppInit] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
-        sb.AppendLine("                try { await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnApplicationInitializationAsync(host); } catch (Exception ex) { logger?.LogError(ex, \"Error during AppInit phase\"); throw; }");
+        sb.AppendLine("                // ModuleDiagnostics: descriptor.ModuleType.Name → AppInit");
+        sb.AppendLine("                var timer = CrestCreates.ModuleDiagnostics.Timing.ModulePhaseTimer.StartNew(descriptor.ModuleType.Name, \"AppInit\");");
+        sb.AppendLine("                try");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnApplicationInitializationAsync(host);");
+        sb.AppendLine("                    _diagnostics.Record(timer.Stop(CrestCreates.ModuleDiagnostics.Stores.ModulePhaseStatus.Success));");
+        sb.AppendLine("                }");
+        sb.AppendLine("                catch (Exception ex)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    _diagnostics.Record(timer.StopFailed(ex));");
+        sb.AppendLine("                    throw;");
+        sb.AppendLine("                }");
         sb.AppendLine("            }");
         sb.AppendLine();
+
+        // Summary log
+        sb.AppendLine("            var summary = _diagnostics.GetAll();");
+        sb.AppendLine("            foreach (var d in summary)");
+        sb.AppendLine("            {");
+        sb.AppendLine("                if (d.Status == CrestCreates.ModuleDiagnostics.Stores.ModulePhaseStatus.Failed)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    logger?.LogError(\"[ModuleDiagnostics] {ModuleName}: Failed ({Phase} {Elapsed}ms → {ErrorMessage})\", d.ModuleName, d.Phase, d.Elapsed.TotalMilliseconds, d.ErrorMessage);");
+        sb.AppendLine("                }");
+        sb.AppendLine("                else");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    logger?.LogInformation(\"[ModuleDiagnostics] {ModuleName}: Success ({Phase} {Elapsed}ms)\", d.ModuleName, d.Phase, d.Elapsed.TotalMilliseconds);");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine();
+
         sb.AppendLine("            return host;");
         sb.AppendLine("        }");
         sb.AppendLine("    }");

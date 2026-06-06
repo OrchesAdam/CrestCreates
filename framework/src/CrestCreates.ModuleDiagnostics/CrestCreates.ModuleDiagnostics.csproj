@@ -8,7 +8,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
-    <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -68,8 +68,7 @@
   </Folder>
   <Folder Name="/src/modules/HealthCheck/">
     <Project Path="framework/src/CrestCreates.HealthCheck.AspNetCore/CrestCreates.HealthCheck.AspNetCore.csproj" />
-    <Project Path="framework/src/CrestCreates.HealthCheck.Mvc/CrestCreates.HealthCheck.Mvc.csproj" />
-    <Project Path="framework/src/CrestCreates.ModuleDiagnostics/CrestCreates.ModuleDiagnostics.csproj" />      
+    <Project Path="framework/src/CrestCreates.HealthCheck.Mvc/CrestCreates.HealthCheck.Mvc.csproj" />      
   </Folder>
   <Folder Name="/src/modules/Data/">
     <Project Path="framework/src/CrestCreates.Data.Core/CrestCreates.Data.Core.csproj" />

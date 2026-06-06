@@ -1,13 +1,11 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.ModuleDiagnostics.Stores;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace CrestCreates.ModuleDiagnostics.HealthChecks;
 
-[HealthCheck(Name = "Modules", Tags = new[] { "modules" }, Description = "Check module initialization status")]
 public class ModuleHealthCheck : IHealthCheck
 {
     private readonly IModuleDiagnosticsStore _store;

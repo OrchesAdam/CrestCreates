@@ -44,4 +44,10 @@
                       Condition="$(MSBuildProjectName) != 'CrestCreates.CodeGenerator' and '$(CrestCreatesCodeGeneration)' != 'false'" />
   </ItemGroup>
 
+  <!-- Module diagnostics: required by generated ModuleAutoInitializer code -->
+  <ItemGroup>
+    <ProjectReference Include="$(MSBuildThisFileDirectory)framework\src\CrestCreates.ModuleDiagnostics\CrestCreates.ModuleDiagnostics.csproj"
+                      Condition="$(MSBuildProjectName) != 'CrestCreates.ModuleDiagnostics' and $(MSBuildProjectName) != 'CrestCreates.Modularity' and '$(TargetFramework)' != 'netstandard2.0'" />
+  </ItemGroup>
+
 </Project>

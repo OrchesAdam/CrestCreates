@@ -129,7 +129,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("    private static readonly object _lock = new();");
         sb.AppendLine("    private static bool _isInitialized;");
         sb.AppendLine();
-        sb.AppendLine("    private static readonly CrestCreates.ModuleDiagnostics.Stores.ModuleDiagnosticsStore _diagnostics = CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsModule.Store;");
+        sb.AppendLine("    private static readonly CrestCreates.ModuleDiagnostics.Stores.ModuleDiagnosticsStore _diagnostics = CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.Store;");
         sb.AppendLine();
 
         sb.AppendLine("    public static IHostBuilder RegisterModules(this IHostBuilder builder)");
