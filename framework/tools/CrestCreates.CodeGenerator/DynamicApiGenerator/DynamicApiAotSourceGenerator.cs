@@ -84,6 +84,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         var dynamicApiRouteAttribute = compilation.GetTypeByMetadataName("CrestCreates.Domain.Shared.Attributes.DynamicApiRouteAttribute");
         var unitOfWorkAttribute = compilation.GetTypeByMetadataName("CrestCreates.Aop.Interceptors.UnitOfWorkMoAttribute");
         var generatedApiControllerAttribute = compilation.GetTypeByMetadataName("CrestCreates.DynamicApi.GeneratedApiControllerAttribute");
+        var apiOverrideAttribute = compilation.GetTypeByMetadataName("CrestCreates.DynamicApi.ApiOverrideAttribute");
         var services = new List<ServiceModel>();
         var controllers = new List<GeneratedApiControllerModel>();
 
@@ -97,14 +98,32 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             if (generatedApiControllerAttribute is not null &&
                 IsGeneratedApiController(type, generatedApiControllerAttribute, dynamicApiIgnoreAttribute))
             {
-                controllers.Add(BuildGeneratedApiControllerModel(type, generatedApiControllerAttribute, dynamicApiIgnoreAttribute, unitOfWorkAttribute));
+                controllers.Add(BuildGeneratedApiControllerModel(type, generatedApiControllerAttribute, dynamicApiIgnoreAttribute, unitOfWorkAttribute, apiOverrideAttribute));
             }
         }
 
         return new GenerationContext(
             compilation.AssemblyName ?? "DynamicApiHost",
             services.OrderBy(service => service.RouteTemplate, StringComparer.Ordinal).ToImmutableArray(),
-            controllers.OrderBy(controller => controller.RouteTemplate, StringComparer.Ordinal).ToImmutableArray());
+            controllers.OrderBy(controller => controller.RouteTemplate, StringComparer.Ordinal).ToImmutableArray(),
+            BuildOverriddenActions(controllers));
+    }
+
+    private static HashSet<(string RouteTemplate, CrudAction Action)> BuildOverriddenActions(List<GeneratedApiControllerModel> controllers)
+    {
+        var overridden = new HashSet<(string RouteTemplate, CrudAction Action)>();
+        foreach (var controller in controllers)
+        {
+            foreach (var action in controller.Actions)
+            {
+                if (action.OverrideAction.HasValue)
+                {
+                    overridden.Add((controller.RouteTemplate, action.OverrideAction.Value));
+                }
+            }
+        }
+
+        return overridden;
     }
 
     private static IEnumerable<INamedTypeSymbol> EnumerateNamedTypes(IAssemblySymbol assembly)
@@ -216,7 +235,8 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         INamedTypeSymbol controllerType,
         INamedTypeSymbol generatedApiControllerAttribute,
         INamedTypeSymbol? dynamicApiIgnoreAttribute,
-        INamedTypeSymbol? unitOfWorkAttribute)
+        INamedTypeSymbol? unitOfWorkAttribute,
+        INamedTypeSymbol? apiOverrideAttribute)
     {
         var routeTemplate = ResolveGeneratedApiControllerRoute(controllerType, generatedApiControllerAttribute);
         var controllerName = TrimControllerName(controllerType.Name);
@@ -226,7 +246,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                              method.DeclaredAccessibility == Accessibility.Public &&
                              !method.IsStatic &&
                              (dynamicApiIgnoreAttribute is null || !HasAttribute(method, dynamicApiIgnoreAttribute)))
-            .Select(method => BuildGeneratedApiControllerAction(method, controllerName, routeTemplate, unitOfWorkAttribute))
+            .Select(method => BuildGeneratedApiControllerAction(method, controllerName, routeTemplate, unitOfWorkAttribute, apiOverrideAttribute))
             .Where(action => action is not null)
             .Cast<ActionModel>()
             .ToImmutableArray();
@@ -276,7 +296,8 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         IMethodSymbol method,
         string controllerName,
         string routeTemplate,
-        INamedTypeSymbol? unitOfWorkAttribute)
+        INamedTypeSymbol? unitOfWorkAttribute,
+        INamedTypeSymbol? apiOverrideAttribute)
     {
         var httpMethod = ResolveControllerMethodHttpMethod(method);
         var methodRoute = ResolveControllerMethodRoute(method);
@@ -285,6 +306,20 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         var parameters = ResolveParameters(method, relativeRoute, httpMethod).ToImmutableArray();
         var returnModel = ResolveReturnModel(method.ReturnType);
         var unitOfWork = ResolveUnitOfWork(method, method, method.ContainingType, method.ContainingType, unitOfWorkAttribute, httpMethod);
+
+        CrudAction? overrideAction = null;
+        if (apiOverrideAttribute is not null)
+        {
+            var overrideAttr = GetAttribute(method, apiOverrideAttribute);
+            if (overrideAttr is not null && overrideAttr.ConstructorArguments.Length > 0)
+            {
+                var arg = overrideAttr.ConstructorArguments[0];
+                if (arg.Value is int intValue && intValue >= 0 && intValue <= 4)
+                {
+                    overrideAction = (CrudAction)intValue;
+                }
+            }
+        }
 
         return new ActionModel(
             actionName,
@@ -298,7 +333,8 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             method.Name,
             method.ContainingType.ToDisplayString(FullyQualifiedFormat),
             unitOfWork.RequiresUnitOfWork,
-            unitOfWork.RequiresTransaction);
+            unitOfWork.RequiresTransaction,
+            overrideAction);
     }
 
     private static string ResolveControllerMethodHttpMethod(IMethodSymbol method)
@@ -748,6 +784,43 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         return $"{serviceName}.Search";
     }
 
+    private static CrudAction? MapServiceActionToCrudAction(ActionModel action)
+    {
+        var normalized = action.ActionName;
+        if (normalized == "Create")
+        {
+            return CrudAction.Create;
+        }
+
+        if (normalized == "GetList")
+        {
+            return CrudAction.GetList;
+        }
+
+        if (normalized == "Update")
+        {
+            return CrudAction.Update;
+        }
+
+        if (normalized == "Delete")
+        {
+            return CrudAction.Delete;
+        }
+
+        if (normalized == "GetById" || normalized == "Get" || normalized.StartsWith("GetBy", StringComparison.Ordinal))
+        {
+            return CrudAction.Get;
+        }
+
+        // "Get" with a route parameter like {id} maps to Get
+        if (normalized.StartsWith("Get", StringComparison.Ordinal) && action.Parameters.Any(p => p.Source == ParameterSource.Route))
+        {
+            return CrudAction.Get;
+        }
+
+        return null;
+    }
+
     private static bool IsScalar(ITypeSymbol typeSymbol)
     {
         if (typeSymbol is INamedTypeSymbol namedType &&
@@ -874,6 +947,19 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             for (var actionIndex = 0; actionIndex < service.Actions.Length; actionIndex++)
             {
                 var action = service.Actions[actionIndex];
+                // Skip if this service action is overridden by a generated controller
+                var serviceCrudAction = MapServiceActionToCrudAction(action);
+                if (serviceCrudAction.HasValue)
+                {
+                    var serviceEffectiveRoute = service.HasCustomRoute
+                        ? service.RouteTemplate
+                        : "api/" + service.RouteTemplate;
+                    if (context.OverriddenActions.Contains((serviceEffectiveRoute, serviceCrudAction.Value)))
+                    {
+                        continue;
+                    }
+                }
+
                 var routePattern = string.IsNullOrEmpty(action.RelativeRoute)
                     ? routePrefix
                     : $"{routePrefix}/{Escape(action.RelativeRoute)}";
@@ -942,6 +1028,19 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             for (var actionIndex = 0; actionIndex < service.Actions.Length; actionIndex++)
             {
                 var action = service.Actions[actionIndex];
+                // Skip if this service action is overridden by a generated controller
+                var serviceCrudAction = MapServiceActionToCrudAction(action);
+                if (serviceCrudAction.HasValue)
+                {
+                    var serviceEffectiveRoute = service.HasCustomRoute
+                        ? service.RouteTemplate
+                        : "api/" + service.RouteTemplate;
+                    if (context.OverriddenActions.Contains((serviceEffectiveRoute, serviceCrudAction.Value)))
+                    {
+                        continue;
+                    }
+                }
+
                 builder.AppendLine("                new DynamicApiActionDescriptor");
                 builder.AppendLine("                {");
                 builder.AppendLine($"                    ActionName = \"{Escape(action.ActionName)}\",");
@@ -1022,6 +1121,19 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             for (var actionIndex = 0; actionIndex < service.Actions.Length; actionIndex++)
             {
                 var action = service.Actions[actionIndex];
+                // Skip if this service action is overridden by a generated controller
+                var serviceCrudAction = MapServiceActionToCrudAction(action);
+                if (serviceCrudAction.HasValue)
+                {
+                    var serviceEffectiveRoute = service.HasCustomRoute
+                        ? service.RouteTemplate
+                        : "api/" + service.RouteTemplate;
+                    if (context.OverriddenActions.Contains((serviceEffectiveRoute, serviceCrudAction.Value)))
+                    {
+                        continue;
+                    }
+                }
+
                 var routeBuilderName = $"routeBuilder_{serviceIndex}_{actionIndex}";
                 var permissionName = $"permission_{serviceIndex}_{actionIndex}";
                 builder.AppendLine($"            var {permissionName} = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{Escape(action.PermissionName)}\" }}, RequireAll = false }};");
@@ -1338,7 +1450,11 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         return "null";
     }
 
-    private sealed record GenerationContext(string AssemblyName, ImmutableArray<ServiceModel> Services, ImmutableArray<GeneratedApiControllerModel> Controllers);
+    private sealed record GenerationContext(
+        string AssemblyName,
+        ImmutableArray<ServiceModel> Services,
+        ImmutableArray<GeneratedApiControllerModel> Controllers,
+        HashSet<(string RouteTemplate, CrudAction Action)> OverriddenActions);
 
     private sealed record GeneratedApiControllerModel(
         string ControllerName,
@@ -1366,7 +1482,8 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         string ServiceMethodName,
         string ServiceTypeName,
         bool RequiresUnitOfWork,
-        bool RequiresTransaction);
+        bool RequiresTransaction,
+        CrudAction? OverrideAction = null);
 
     private sealed record ParameterModel(
         string Name,
@@ -1393,5 +1510,14 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         Body,
         Header,
         CancellationToken
+    }
+
+    private enum CrudAction
+    {
+        Get = 0,
+        GetList = 1,
+        Create = 2,
+        Update = 3,
+        Delete = 4
     }
 }

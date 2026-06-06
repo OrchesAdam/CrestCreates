@@ -87,6 +87,54 @@ public class GeneratedApiControllerSourceGeneratorTests
             .And.Contain("Process");
     }
 
+    [Fact]
+    public async Task ShouldUseApiOverrideToReplaceDefaultGetListEndpoint()
+    {
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+            using CrestCreates.DynamicApi;
+            using System.Threading.Tasks;
+
+            namespace Sample;
+
+            public interface IBookAppService
+            {
+                Task<string> GetListAsync();
+            }
+
+            [CrestService]
+            public sealed class BookAppService : IBookAppService
+            {
+                public Task<string> GetListAsync() => Task.FromResult("default");
+            }
+
+            [GeneratedApiController("api/book")]
+            public partial class BookApi : CrestApiController
+            {
+                [ApiOverride(CrudAction.GetList)]
+                public Task<string> GetListAsync()
+                {
+                    return Task.FromResult("custom");
+                }
+            }
+            """;
+
+        var result = await SourceGeneratorTestHelper.RunGeneratorAsync<DynamicApiAotSourceGenerator>(
+            source,
+            additionalSources: new[] { DynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs(), BuildGeneratedApiControllerStubs() });
+
+        result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
+
+        var generated = result.GeneratedSources.First(s => s.FileName.Contains("GeneratedDynamicApiEndpoints.g.cs"));
+        generated.Should().NotBeNull();
+
+        generated.SourceText.Should().Contain("BookApi");
+        generated.SourceText.Should().Contain("GetListAsync()");
+        // The default service endpoint for the same CRUD action should NOT be generated
+        // (the controller's override suppresses it)
+        generated.SourceText.Should().NotContain("IBookAppService.GetList");
+    }
+
     private static string BuildGeneratedApiControllerStubs()
     {
         return """
@@ -102,6 +150,22 @@ public class GeneratedApiControllerSourceGeneratorTests
                     public GeneratedApiControllerAttribute() { }
                     public GeneratedApiControllerAttribute(string routeTemplate) { RouteTemplate = routeTemplate; }
                     public string? RouteTemplate { get; }
+                }
+
+                [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
+                public sealed class ApiOverrideAttribute : Attribute
+                {
+                    public ApiOverrideAttribute(CrudAction action) { Action = action; }
+                    public CrudAction Action { get; }
+                }
+
+                public enum CrudAction
+                {
+                    Get = 0,
+                    GetList = 1,
+                    Create = 2,
+                    Update = 3,
+                    Delete = 4
                 }
 
                 public abstract class CrestApiController
