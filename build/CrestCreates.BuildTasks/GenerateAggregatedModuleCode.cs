@@ -119,6 +119,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
         sb.AppendLine("using Microsoft.Extensions.Hosting;");
+        sb.AppendLine("using Microsoft.Extensions.Logging;");
         sb.AppendLine("using CrestCreates.Modularity;");
         sb.AppendLine();
 
@@ -127,6 +128,8 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("    private static readonly List<ModuleDescriptor> _registeredModules = new();");
         sb.AppendLine("    private static readonly object _lock = new();");
         sb.AppendLine("    private static bool _isInitialized;");
+        sb.AppendLine();
+        sb.AppendLine("    private static readonly CrestCreates.ModuleDiagnostics.Stores.ModuleDiagnosticsStore _diagnostics = CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsModule.Store;");
         sb.AppendLine();
 
         sb.AppendLine("    public static IHostBuilder RegisterModules(this IHostBuilder builder)");
@@ -153,9 +156,18 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
             var module = modules[i];
             if (module.AutoRegisterServices)
             {
-                sb.AppendLine($"        try {{");
+                sb.AppendLine($"        // ModuleDiagnostics: {module.FullName} → ConfigureServices");
+                sb.AppendLine($"        var timer_cs_{i} = CrestCreates.ModuleDiagnostics.Timing.ModulePhaseTimer.StartNew(\"{module.FullName}\", \"ConfigureServices\");");
+                sb.AppendLine($"        try");
+                sb.AppendLine($"        {{");
                 sb.AppendLine($"            new {module.FullName}().OnConfigureServices(services);");
-                sb.AppendLine($"        }} catch (System.Exception ex) {{ System.Console.Error.WriteLine($\"[ConfigureServices] {module.FullName}: {{ex}}\"); throw; }}");
+                sb.AppendLine($"            _diagnostics.Record(timer_cs_{i}.Stop(CrestCreates.ModuleDiagnostics.Stores.ModulePhaseStatus.Success));");
+                sb.AppendLine($"        }}");
+                sb.AppendLine($"        catch (System.Exception ex)");
+                sb.AppendLine($"        {{");
+                sb.AppendLine($"            _diagnostics.Record(timer_cs_{i}.StopFailed(ex));");
+                sb.AppendLine($"            throw;");
+                sb.AppendLine($"        }}");
             }
         }
 
@@ -185,43 +197,118 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("    public static async Task InitializeAllModulesAsync(IServiceProvider serviceProvider)");
         sb.AppendLine("    {");
 
+        // PreInit phase
         for (var i = 0; i < modules.Count; i++)
         {
             var module = modules[i];
-            sb.AppendLine($"        var module{i} = serviceProvider.GetService<{module.FullName}>();");
-            sb.AppendLine($"        if (module{i} != null) await module{i}.OnPreInitializeAsync();");
+            sb.AppendLine($"        // ModuleDiagnostics: {module.FullName} → PreInit");
+            sb.AppendLine($"        var timer_pi_{i} = CrestCreates.ModuleDiagnostics.Timing.ModulePhaseTimer.StartNew(\"{module.FullName}\", \"PreInit\");");
+            sb.AppendLine($"        try");
+            sb.AppendLine($"        {{");
+            sb.AppendLine($"            var module{i} = serviceProvider.GetService<{module.FullName}>();");
+            sb.AppendLine($"            if (module{i} != null) await module{i}.OnPreInitializeAsync();");
+            sb.AppendLine($"            _diagnostics.Record(timer_pi_{i}.Stop(CrestCreates.ModuleDiagnostics.Stores.ModulePhaseStatus.Success));");
+            sb.AppendLine($"        }}");
+            sb.AppendLine($"        catch (System.Exception ex)");
+            sb.AppendLine($"        {{");
+            sb.AppendLine($"            _diagnostics.Record(timer_pi_{i}.StopFailed(ex));");
+            sb.AppendLine($"            throw;");
+            sb.AppendLine($"        }}");
         }
 
         sb.AppendLine();
-        sb.AppendLine("        var sortedModules = _registeredModules.OrderBy(m => m.Order).ToList();");
 
+        // Init phase
         for (var i = 0; i < modules.Count; i++)
         {
-            sb.AppendLine($"        if (module{i} != null) await module{i}.OnInitializeAsync();");
+            var module = modules[i];
+            sb.AppendLine($"        // ModuleDiagnostics: {module.FullName} → Init");
+            sb.AppendLine($"        var timer_init_{i} = CrestCreates.ModuleDiagnostics.Timing.ModulePhaseTimer.StartNew(\"{module.FullName}\", \"Init\");");
+            sb.AppendLine($"        try");
+            sb.AppendLine($"        {{");
+            sb.AppendLine($"            var module{i} = serviceProvider.GetService<{module.FullName}>();");
+            sb.AppendLine($"            if (module{i} != null) await module{i}.OnInitializeAsync();");
+            sb.AppendLine($"            _diagnostics.Record(timer_init_{i}.Stop(CrestCreates.ModuleDiagnostics.Stores.ModulePhaseStatus.Success));");
+            sb.AppendLine($"        }}");
+            sb.AppendLine($"        catch (System.Exception ex)");
+            sb.AppendLine($"        {{");
+            sb.AppendLine($"            _diagnostics.Record(timer_init_{i}.StopFailed(ex));");
+            sb.AppendLine($"            throw;");
+            sb.AppendLine($"        }}");
         }
 
         sb.AppendLine();
-        sb.AppendLine("        foreach (var module in sortedModules)");
-        sb.AppendLine("        {");
-        sb.AppendLine("            if (serviceProvider.GetService(module.ModuleType) is IModule moduleInstance)");
-        sb.AppendLine("            {");
-        sb.AppendLine("                await moduleInstance.OnPostInitializeAsync();");
-        sb.AppendLine("            }");
-        sb.AppendLine("        }");
+
+        // PostInit phase
+        sb.AppendLine("        var sortedModules = _registeredModules.OrderBy(m => m.Order).ToList();");
+        sb.AppendLine();
+        for (var i = 0; i < modules.Count; i++)
+        {
+            var module = modules[i];
+            sb.AppendLine($"        // ModuleDiagnostics: {module.FullName} → PostInit");
+            sb.AppendLine($"        var timer_po_{i} = CrestCreates.ModuleDiagnostics.Timing.ModulePhaseTimer.StartNew(\"{module.FullName}\", \"PostInit\");");
+            sb.AppendLine($"        try");
+            sb.AppendLine($"        {{");
+            sb.AppendLine($"            if (serviceProvider.GetService(typeof({module.FullName})) is IModule moduleInstance{i})");
+            sb.AppendLine($"            {{");
+            sb.AppendLine($"                await moduleInstance{i}.OnPostInitializeAsync();");
+            sb.AppendLine($"            }}");
+            sb.AppendLine($"            _diagnostics.Record(timer_po_{i}.Stop(CrestCreates.ModuleDiagnostics.Stores.ModulePhaseStatus.Success));");
+            sb.AppendLine($"        }}");
+            sb.AppendLine($"        catch (System.Exception ex)");
+            sb.AppendLine($"        {{");
+            sb.AppendLine($"            _diagnostics.Record(timer_po_{i}.StopFailed(ex));");
+            sb.AppendLine($"            throw;");
+            sb.AppendLine($"        }}");
+        }
+
         sb.AppendLine("    }");
         sb.AppendLine();
         sb.AppendLine("    public static async Task<IHost> InitializeModulesAsync(this IHost host)");
         sb.AppendLine("    {");
         sb.AppendLine("        await InitializeAllModulesAsync(host.Services);");
         sb.AppendLine();
-        sb.AppendLine("        foreach (var module in _registeredModules.OrderBy(m => m.Order))");
+
+        sb.AppendLine("        var logger = host.Services.GetService<ILogger<IModule>>();");
+        sb.AppendLine();
+
+        // AppInit phase
+        sb.AppendLine("        foreach (var descriptor in _registeredModules.OrderBy(m => m.Order))");
         sb.AppendLine("        {");
-        sb.AppendLine("            if (host.Services.GetService(module.ModuleType) is IModule moduleInstance)");
+        sb.AppendLine("            // ModuleDiagnostics: descriptor.ModuleType.Name → AppInit");
+        sb.AppendLine("            var timer = CrestCreates.ModuleDiagnostics.Timing.ModulePhaseTimer.StartNew(descriptor.ModuleType.Name, \"AppInit\");");
+        sb.AppendLine("            try");
         sb.AppendLine("            {");
-        sb.AppendLine("                await moduleInstance.OnApplicationInitializationAsync(host);");
+        sb.AppendLine("                if (host.Services.GetService(descriptor.ModuleType) is IModule moduleInstance)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await moduleInstance.OnApplicationInitializationAsync(host);");
+        sb.AppendLine("                }");
+        sb.AppendLine("                _diagnostics.Record(timer.Stop(CrestCreates.ModuleDiagnostics.Stores.ModulePhaseStatus.Success));");
+        sb.AppendLine("            }");
+        sb.AppendLine("            catch (System.Exception ex)");
+        sb.AppendLine("            {");
+        sb.AppendLine("                _diagnostics.Record(timer.StopFailed(ex));");
+        sb.AppendLine("                throw;");
         sb.AppendLine("            }");
         sb.AppendLine("        }");
         sb.AppendLine();
+
+        // Summary log output
+        sb.AppendLine("        // ModuleDiagnostics summary log");
+        sb.AppendLine("        var summary = _diagnostics.GetAll();");
+        sb.AppendLine("        foreach (var d in summary)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            if (d.Status == CrestCreates.ModuleDiagnostics.Stores.ModulePhaseStatus.Failed)");
+        sb.AppendLine("            {");
+        sb.AppendLine("                logger?.LogError(\"[ModuleDiagnostics] {ModuleName}: Failed ({Phase} {Elapsed}ms → {ErrorMessage})\", d.ModuleName, d.Phase, d.Elapsed.TotalMilliseconds, d.ErrorMessage);");
+        sb.AppendLine("            }");
+        sb.AppendLine("            else");
+        sb.AppendLine("            {");
+        sb.AppendLine("                logger?.LogInformation(\"[ModuleDiagnostics] {ModuleName}: Success ({Phase} {Elapsed}ms)\", d.ModuleName, d.Phase, d.Elapsed.TotalMilliseconds);");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+
         sb.AppendLine("        return host;");
         sb.AppendLine("    }");
         sb.AppendLine("}");
