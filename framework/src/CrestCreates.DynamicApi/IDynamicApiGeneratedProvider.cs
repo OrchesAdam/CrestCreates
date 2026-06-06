@@ -6,6 +6,8 @@ public interface IDynamicApiGeneratedProvider
 {
     IReadOnlyCollection<System.Reflection.Assembly> ServiceAssemblies { get; }
 
+    IReadOnlyCollection<DynamicApiEndpointDescriptor> EndpointDescriptors { get; }
+
     DynamicApiRegistry CreateRegistry(DynamicApiOptions options);
 
     void MapEndpoints(IEndpointRouteBuilder endpoints, DynamicApiOptions options);

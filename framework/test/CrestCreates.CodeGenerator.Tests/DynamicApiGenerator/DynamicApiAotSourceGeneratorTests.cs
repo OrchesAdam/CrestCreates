@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using CrestCreates.CodeGenerator.DynamicApiGenerator;
 using CrestCreates.CodeGenerator.Tests.TestHelpers;
 using FluentAssertions;
@@ -56,6 +57,39 @@ public class DynamicApiAotSourceGeneratorTests
         registrySource.SourceText.Should().Contain("RelativeRoute = \"by-isbn/{isbn}\"");
         registrySource.SourceText.Should().Contain("HttpMethod = \"DELETE\"");
         registrySource.SourceText.Should().NotContain("InternalPing");
+    }
+
+    [Fact]
+    public async Task DynamicApiAotSourceGenerator_ShouldEmitEndpointDescriptors()
+    {
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+            using System.Threading.Tasks;
+
+            namespace Sample;
+
+            public interface IBookAppService
+            {
+                Task<string> GetAsync(System.Guid id);
+            }
+
+            [CrestService]
+            public sealed class BookAppService : IBookAppService
+            {
+                public Task<string> GetAsync(System.Guid id) => Task.FromResult("book");
+            }
+            """;
+
+        var result = await SourceGeneratorTestHelper.RunGeneratorAsync<DynamicApiAotSourceGenerator>(source, additionalSources: new[] { BuildDynamicApiStubs() });
+
+        result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
+
+        var registrySource = result.GetSourceByFileName("GeneratedDynamicApiRegistry.g.cs");
+        registrySource.Should().NotBeNull();
+        registrySource!.SourceText.Should().Contain("EndpointDescriptors");
+        registrySource.SourceText.Should().Contain("DynamicApiEndpointDescriptor(");
+        registrySource.SourceText.Should().Contain("\"Book\"");
+        registrySource.SourceText.Should().Contain("\"Get\"");
     }
 
     private static string BuildDynamicApiSource()
@@ -301,9 +335,21 @@ public class DynamicApiAotSourceGeneratorTests
                    public interface IDynamicApiGeneratedProvider
                    {
                        IReadOnlyCollection<Assembly> ServiceAssemblies { get; }
+                       IReadOnlyCollection<DynamicApiEndpointDescriptor> EndpointDescriptors { get; }
                        DynamicApiRegistry CreateRegistry(DynamicApiOptions options);
                        void MapEndpoints(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, DynamicApiOptions options);
                    }
+
+                   public sealed record DynamicApiEndpointDescriptor(
+                       string ServiceName,
+                       string ActionName,
+                       string HttpMethod,
+                       string RoutePattern,
+                       Type ServiceType,
+                       Type? RequestType,
+                       Type? ResponseType,
+                       IReadOnlyCollection<string> Permissions,
+                       bool RequiresTransaction);
 
                    public sealed class DynamicApiOptions
                    {

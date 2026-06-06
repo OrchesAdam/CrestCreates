@@ -40,6 +40,17 @@ public static class DynamicApiGeneratedRegistryStore
         return BuildRegistry(options) ?? throw CreateMissingGeneratedProviderException(options);
     }
 
+    public static IReadOnlyCollection<DynamicApiEndpointDescriptor> GetEndpointDescriptors(DynamicApiOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        return GetProviders()
+            .SelectMany(provider => provider.EndpointDescriptors)
+            .Where(descriptor => options.ServiceAssemblies.Count == 0 ||
+                                 options.ServiceAssemblies.Contains(descriptor.ServiceType.Assembly))
+            .ToArray();
+    }
+
     public static bool MapGeneratedEndpoints(IEndpointRouteBuilder endpoints, DynamicApiOptions options)
     {
         ArgumentNullException.ThrowIfNull(endpoints);

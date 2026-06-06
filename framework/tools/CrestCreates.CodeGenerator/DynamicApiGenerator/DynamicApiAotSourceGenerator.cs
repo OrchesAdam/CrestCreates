@@ -667,6 +667,42 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         builder.AppendLine();
         builder.AppendLine("    public System.Collections.Generic.IReadOnlyCollection<Assembly> ServiceAssemblies => Entries.Select(entry => entry.Assembly).Distinct().ToArray();");
         builder.AppendLine();
+        builder.AppendLine("    public System.Collections.Generic.IReadOnlyCollection<DynamicApiEndpointDescriptor> EndpointDescriptors { get; } =");
+        builder.AppendLine("        new DynamicApiEndpointDescriptor[]");
+        builder.AppendLine("        {");
+        for (var serviceIndex = 0; serviceIndex < context.Services.Length; serviceIndex++)
+        {
+            var service = context.Services[serviceIndex];
+            var routePrefix = service.HasCustomRoute
+                ? Escape(service.RouteTemplate)
+                : $"api/{Escape(service.RouteTemplate)}";
+            for (var actionIndex = 0; actionIndex < service.Actions.Length; actionIndex++)
+            {
+                var action = service.Actions[actionIndex];
+                var routePattern = string.IsNullOrEmpty(action.RelativeRoute)
+                    ? routePrefix
+                    : $"{routePrefix}/{Escape(action.RelativeRoute)}";
+                var requestType = ResolveRequestTypeFromAction(action);
+                var responseType = action.ReturnModel.PayloadTypeName is not null
+                    ? $"typeof({GetTypeOfTypeName(action.ReturnModel.PayloadTypeName)})"
+                    : "null";
+                var permissions = $"new[] {{ \"{Escape(action.PermissionName)}\" }}";
+                var requiresTransaction = ToBooleanLiteral(action.RequiresTransaction);
+                builder.AppendLine($"            new DynamicApiEndpointDescriptor(");
+                builder.AppendLine($"                \"{Escape(service.ServiceName)}\",");
+                builder.AppendLine($"                \"{Escape(action.ActionName)}\",");
+                builder.AppendLine($"                \"{action.HttpMethod}\",");
+                builder.AppendLine($"                \"{routePattern}\",");
+                builder.AppendLine($"                typeof({service.ServiceTypeName}),");
+                builder.AppendLine($"                {requestType},");
+                builder.AppendLine($"                {responseType},");
+                builder.AppendLine($"                {permissions},");
+                builder.AppendLine($"                {requiresTransaction}),");
+            }
+        }
+        builder.AppendLine("        };");
+        builder.AppendLine();
+        builder.AppendLine();
         builder.AppendLine("    public DynamicApiRegistry CreateRegistry(DynamicApiOptions options)");
         builder.AppendLine("    {");
         builder.AppendLine("        var services = Entries.Where(entry => MatchesAssembly(options, entry.Assembly)).Select(entry => entry.DescriptorFactory(options)).ToArray();");
@@ -966,6 +1002,19 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
     private static string ToBooleanLiteral(bool value)
     {
         return value ? "true" : "false";
+    }
+
+    private static string ResolveRequestTypeFromAction(ActionModel action)
+    {
+        foreach (var parameter in action.Parameters)
+        {
+            if (parameter.Source == ParameterSource.Body)
+            {
+                return $"typeof({GetTypeOfTypeName(parameter.TypeName)})";
+            }
+        }
+
+        return "null";
     }
 
     private sealed record GenerationContext(string AssemblyName, ImmutableArray<ServiceModel> Services);
