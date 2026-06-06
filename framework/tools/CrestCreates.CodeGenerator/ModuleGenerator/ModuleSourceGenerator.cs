@@ -118,14 +118,17 @@ public class ModuleSourceGenerator : IIncrementalGenerator
     {
         var sb = new StringBuilder();
         sb.AppendLine("#nullable enable");
+        sb.AppendLine("using System;");
+        sb.AppendLine("using System.Collections.Generic;");
+        sb.AppendLine("using System.Linq;");
         sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
         sb.AppendLine("using Microsoft.Extensions.Hosting;");
         sb.AppendLine("using Microsoft.Extensions.Logging;");
-        sb.AppendLine("using System;");
-        sb.AppendLine("using System.Collections.Generic;");
-        sb.AppendLine("using System.Linq;");
         sb.AppendLine("using CrestCreates.Modularity;");
+        sb.AppendLine("using CrestCreates.ModuleDiagnostics.Stores;");
+        sb.AppendLine("using CrestCreates.ModuleDiagnostics.Timing;");
+        sb.AppendLine("using CrestCreates.ModuleDiagnostics.Modules;");
         sb.AppendLine();
         sb.AppendLine("namespace CrestCreates.Modularity {");
         sb.AppendLine();
@@ -146,6 +149,9 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
         sb.AppendLine();
         sb.AppendLine("    internal static class ModuleAutoInitializer {");
+        sb.AppendLine();
+        sb.AppendLine("        private static readonly ModuleDiagnosticsStore _diagnostics = ModuleDiagnosticsServiceCollectionExtensions.Store;");
+        sb.AppendLine();
 
         // Static initializer: register all module types with direct typeof() references (AOT-friendly)
         sb.AppendLine("        static ModuleAutoInitializer() {");
@@ -161,7 +167,7 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         sb.AppendLine(" };");
         sb.AppendLine();
 
-        // RegisterModules: register module types as singletons, then call OnConfigureServices
+        // RegisterModules: register module types as singletons, then call ConfigureServices with diagnostics
         sb.AppendLine("        public static IHostBuilder RegisterModules(this IHostBuilder hostBuilder) {");
         sb.AppendLine("            return hostBuilder.ConfigureServices((context, services) => {");
         foreach (var module in sortedModules)
@@ -170,11 +176,12 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         }
         sb.AppendLine();
         sb.AppendLine("                foreach (var descriptor in ModuleDescriptorRegistry.GetDescriptors().Where(d => d.AutoRegisterServices)) {");
-        sb.AppendLine("                    try {");
         var instantiableModules = sortedModules.Where(m => m.HasParameterlessConstructor).ToList();
         if (instantiableModules.Count > 0)
         {
-            // AOT-friendly dispatch chain: if-else on known module types (only those with parameterless constructors)
+            sb.AppendLine("                    // ModuleDiagnostics: descriptor.ModuleType.Name → ConfigureServices");
+            sb.AppendLine("                    var _csTimer = ModulePhaseTimer.StartNew(descriptor.ModuleType.Name, \"ConfigureServices\");");
+            sb.AppendLine("                    try {");
             sb.AppendLine("                        IModule module;");
             for (int i = 0; i < instantiableModules.Count; i++)
             {
@@ -185,39 +192,100 @@ public class ModuleSourceGenerator : IIncrementalGenerator
             }
             sb.AppendLine("                        else throw new NotSupportedException($\"Unknown module type: {descriptor.ModuleType.FullName}\");");
             sb.AppendLine("                        module.OnConfigureServices(services);");
+            sb.AppendLine("                        _diagnostics.Record(_csTimer.Stop(ModulePhaseStatus.Success));");
+            sb.AppendLine("                    } catch (Exception ex) {");
+            sb.AppendLine("                        _diagnostics.Record(_csTimer.StopFailed(ex));");
+            sb.AppendLine("                        throw;");
+            sb.AppendLine("                    }");
         }
-        sb.AppendLine("                    } catch (Exception ex) { System.Console.Error.WriteLine($\"[ConfigureServices] {descriptor.ModuleType.Name}: {ex}\"); throw; }");
         sb.AppendLine("                }");
         sb.AppendLine("            });");
         sb.AppendLine("        }");
         sb.AppendLine();
 
-        // InitializeModules: resolve from DI and execute lifecycle hooks (PreInit onwards)
-        // OnConfigureServices is called during RegisterModules (pre-Build)
+        // InitializeModules: resolve from DI and execute lifecycle hooks with diagnostics
         sb.AppendLine("        public static async Task<IHost> InitializeModulesAsync(this IHost host) {");
         sb.AppendLine("            var logger = host.Services.GetService<ILogger<IModule>>();");
         sb.AppendLine("            var descriptors = ModuleDescriptorRegistry.GetDescriptors();");
         sb.AppendLine();
+
+        // PreInit
         sb.AppendLine("            foreach (var descriptor in descriptors) {");
-        sb.AppendLine("                try { logger?.LogInformation(\"[PreInit] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
-        sb.AppendLine("                try { await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnPreInitializeAsync(); } catch (Exception ex) { logger?.LogError(ex, \"Error during PreInit phase\"); throw; }");
+        sb.AppendLine("                // ModuleDiagnostics: descriptor.ModuleType.Name → PreInit");
+        sb.AppendLine("                var _preInitTimer = ModulePhaseTimer.StartNew(descriptor.ModuleType.Name, \"PreInit\");");
+        sb.AppendLine("                try {");
+        sb.AppendLine("                    await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnPreInitializeAsync();");
+        sb.AppendLine("                    _diagnostics.Record(_preInitTimer.Stop(ModulePhaseStatus.Success));");
+        sb.AppendLine("                } catch (Exception ex) {");
+        sb.AppendLine("                    _diagnostics.Record(_preInitTimer.StopFailed(ex));");
+        sb.AppendLine("                    throw;");
+        sb.AppendLine("                }");
         sb.AppendLine("            }");
         sb.AppendLine();
+
+        // Init
         sb.AppendLine("            foreach (var descriptor in descriptors) {");
-        sb.AppendLine("                try { logger?.LogInformation(\"[Init] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
-        sb.AppendLine("                try { await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnInitializeAsync(); } catch (Exception ex) { logger?.LogError(ex, \"Error during Init phase\"); throw; }");
+        sb.AppendLine("                // ModuleDiagnostics: descriptor.ModuleType.Name → Init");
+        sb.AppendLine("                var _initTimer = ModulePhaseTimer.StartNew(descriptor.ModuleType.Name, \"Init\");");
+        sb.AppendLine("                try {");
+        sb.AppendLine("                    await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnInitializeAsync();");
+        sb.AppendLine("                    _diagnostics.Record(_initTimer.Stop(ModulePhaseStatus.Success));");
+        sb.AppendLine("                } catch (Exception ex) {");
+        sb.AppendLine("                    _diagnostics.Record(_initTimer.StopFailed(ex));");
+        sb.AppendLine("                    throw;");
+        sb.AppendLine("                }");
         sb.AppendLine("            }");
         sb.AppendLine();
+
+        // PostInit
         sb.AppendLine("            foreach (var descriptor in descriptors) {");
-        sb.AppendLine("                try { logger?.LogInformation(\"[PostInit] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
-        sb.AppendLine("                try { await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnPostInitializeAsync(); } catch (Exception ex) { logger?.LogError(ex, \"Error during PostInit phase\"); throw; }");
+        sb.AppendLine("                // ModuleDiagnostics: descriptor.ModuleType.Name → PostInit");
+        sb.AppendLine("                var _postInitTimer = ModulePhaseTimer.StartNew(descriptor.ModuleType.Name, \"PostInit\");");
+        sb.AppendLine("                try {");
+        sb.AppendLine("                    await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnPostInitializeAsync();");
+        sb.AppendLine("                    _diagnostics.Record(_postInitTimer.Stop(ModulePhaseStatus.Success));");
+        sb.AppendLine("                } catch (Exception ex) {");
+        sb.AppendLine("                    _diagnostics.Record(_postInitTimer.StopFailed(ex));");
+        sb.AppendLine("                    throw;");
+        sb.AppendLine("                }");
         sb.AppendLine("            }");
         sb.AppendLine();
+
+        // AppInit
         sb.AppendLine("            foreach (var descriptor in descriptors) {");
-        sb.AppendLine("                try { logger?.LogInformation(\"[AppInit] {ModuleName}\", descriptor.ModuleType.Name); } catch { }");
-        sb.AppendLine("                try { await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnApplicationInitializationAsync(host); } catch (Exception ex) { logger?.LogError(ex, \"Error during AppInit phase\"); throw; }");
+        sb.AppendLine("                // ModuleDiagnostics: descriptor.ModuleType.Name → AppInit");
+        sb.AppendLine("                var _appInitTimer = ModulePhaseTimer.StartNew(descriptor.ModuleType.Name, \"AppInit\");");
+        sb.AppendLine("                try {");
+        sb.AppendLine("                    await ((IModule)host.Services.GetRequiredService(descriptor.ModuleType)).OnApplicationInitializationAsync(host);");
+        sb.AppendLine("                    _diagnostics.Record(_appInitTimer.Stop(ModulePhaseStatus.Success));");
+        sb.AppendLine("                } catch (Exception ex) {");
+        sb.AppendLine("                    _diagnostics.Record(_appInitTimer.StopFailed(ex));");
+        sb.AppendLine("                    throw;");
+        sb.AppendLine("                }");
         sb.AppendLine("            }");
         sb.AppendLine();
+
+        // Summary log output
+        sb.AppendLine("            // ModuleDiagnostics Summary");
+        sb.AppendLine("            if (logger != null)");
+        sb.AppendLine("            {");
+        sb.AppendLine("                foreach (var diag in _diagnostics.GetAll())");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    var status = diag.Status == ModulePhaseStatus.Success ? \"OK\" : \"FAILED\";");
+        sb.AppendLine("                    if (diag.Status == ModulePhaseStatus.Failed)");
+        sb.AppendLine("                    {");
+        sb.AppendLine("                        logger.LogError(\"[ModuleDiagnostics] {Module} → {Phase}: {Status} ({Elapsed}ms) Error: {Error}\",");
+        sb.AppendLine("                            diag.ModuleName, diag.Phase, status, diag.Elapsed.TotalMilliseconds.ToString(\"F2\"), diag.ErrorMessage);");
+        sb.AppendLine("                    }");
+        sb.AppendLine("                    else");
+        sb.AppendLine("                    {");
+        sb.AppendLine("                        logger.LogInformation(\"[ModuleDiagnostics] {Module} → {Phase}: {Status} ({Elapsed}ms)\",");
+        sb.AppendLine("                            diag.ModuleName, diag.Phase, status, diag.Elapsed.TotalMilliseconds.ToString(\"F2\"));");
+        sb.AppendLine("                    }");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine();
+
         sb.AppendLine("            return host;");
         sb.AppendLine("        }");
         sb.AppendLine("    }");

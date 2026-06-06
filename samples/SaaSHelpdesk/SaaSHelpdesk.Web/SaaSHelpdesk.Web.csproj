@@ -21,6 +21,7 @@
     <ProjectReference Include="../../../framework/src/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
     <ProjectReference Include="../../../framework/src/CrestCreates.Security/CrestCreates.Security.csproj" />
     <ProjectReference Include="../../../framework/src/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../../framework/src/CrestCreates.HealthCheck.AspNetCore/CrestCreates.HealthCheck.AspNetCore.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Domain.Shared/SaaSHelpdesk.Domain.Shared.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Domain/SaaSHelpdesk.Domain.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Application.Contracts/SaaSHelpdesk.Application.Contracts.csproj" />

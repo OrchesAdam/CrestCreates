@@ -20,7 +20,7 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
     public static IServiceCollection AddModuleDiagnostics(this IServiceCollection services)
     {
         services.AddSingleton<IModuleDiagnosticsStore>(Store);
-        services.AddSingleton<IHealthCheck, ModuleHealthCheck>();
+        services.AddHealthChecks().AddCheck<ModuleHealthCheck>("modules", tags: new[] { "modules" });
         return services;
     }
 }

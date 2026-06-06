@@ -119,7 +119,11 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
         sb.AppendLine("using Microsoft.Extensions.Hosting;");
+        sb.AppendLine("using Microsoft.Extensions.Logging;");
         sb.AppendLine("using CrestCreates.Modularity;");
+        sb.AppendLine("using CrestCreates.ModuleDiagnostics.Stores;");
+        sb.AppendLine("using CrestCreates.ModuleDiagnostics.Timing;");
+        sb.AppendLine("using CrestCreates.ModuleDiagnostics.Modules;");
         sb.AppendLine();
 
         sb.AppendLine("internal static partial class ModuleAutoInitializer");
@@ -127,6 +131,8 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("    private static readonly List<ModuleDescriptor> _registeredModules = new();");
         sb.AppendLine("    private static readonly object _lock = new();");
         sb.AppendLine("    private static bool _isInitialized;");
+        sb.AppendLine();
+        sb.AppendLine("    private static readonly ModuleDiagnosticsStore _diagnostics = ModuleDiagnosticsServiceCollectionExtensions.Store;");
         sb.AppendLine();
 
         sb.AppendLine("    public static IHostBuilder RegisterModules(this IHostBuilder builder)");
@@ -142,20 +148,33 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("    public static IServiceCollection RegisterAllModules(IServiceCollection services)");
         sb.AppendLine("    {");
 
+        // DI registration (no diagnostics needed — these are instantiated later)
         foreach (var module in modules)
         {
             sb.AppendLine($"        services.AddSingleton<{module.FullName}>();");
         }
 
         sb.AppendLine();
+
+        // ConfigureServices phase — wrapped with diagnostics
         for (var i = 0; i < modules.Count; i++)
         {
             var module = modules[i];
             if (module.AutoRegisterServices)
             {
-                sb.AppendLine($"        try {{");
-                sb.AppendLine($"            new {module.FullName}().OnConfigureServices(services);");
-                sb.AppendLine($"        }} catch (System.Exception ex) {{ System.Console.Error.WriteLine($\"[ConfigureServices] {module.FullName}: {{ex}}\"); throw; }}");
+                var moduleName = module.FullName;
+                sb.AppendLine($"        // ModuleDiagnostics: {moduleName} → ConfigureServices");
+                sb.AppendLine($"        var _csTimer{i} = ModulePhaseTimer.StartNew(\"{moduleName}\", \"ConfigureServices\");");
+                sb.AppendLine($"        try");
+                sb.AppendLine($"        {{");
+                sb.AppendLine($"            new {moduleName}().OnConfigureServices(services);");
+                sb.AppendLine($"            _diagnostics.Record(_csTimer{i}.Stop(ModulePhaseStatus.Success));");
+                sb.AppendLine($"        }}");
+                sb.AppendLine($"        catch (System.Exception ex)");
+                sb.AppendLine($"        {{");
+                sb.AppendLine($"            _diagnostics.Record(_csTimer{i}.StopFailed(ex));");
+                sb.AppendLine($"            throw;");
+                sb.AppendLine($"        }}");
             }
         }
 
@@ -185,43 +204,120 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine("    public static async Task InitializeAllModulesAsync(IServiceProvider serviceProvider)");
         sb.AppendLine("    {");
 
+        // PreInit phase — resolve from DI and call with diagnostics
         for (var i = 0; i < modules.Count; i++)
         {
             var module = modules[i];
-            sb.AppendLine($"        var module{i} = serviceProvider.GetService<{module.FullName}>();");
-            sb.AppendLine($"        if (module{i} != null) await module{i}.OnPreInitializeAsync();");
+            var moduleName = module.FullName;
+            sb.AppendLine($"        // ModuleDiagnostics: {moduleName} → PreInit");
+            sb.AppendLine($"        var _preInitTimer{i} = ModulePhaseTimer.StartNew(\"{moduleName}\", \"PreInit\");");
+            sb.AppendLine($"        var _preInitModule{i} = serviceProvider.GetService<{moduleName}>();");
+            sb.AppendLine($"        try");
+            sb.AppendLine($"        {{");
+            sb.AppendLine($"            if (_preInitModule{i} != null) await _preInitModule{i}.OnPreInitializeAsync();");
+            sb.AppendLine($"            _diagnostics.Record(_preInitTimer{i}.Stop(ModulePhaseStatus.Success));");
+            sb.AppendLine($"        }}");
+            sb.AppendLine($"        catch (System.Exception ex)");
+            sb.AppendLine($"        {{");
+            sb.AppendLine($"            _diagnostics.Record(_preInitTimer{i}.StopFailed(ex));");
+            sb.AppendLine($"            throw;");
+            sb.AppendLine($"        }}");
         }
 
         sb.AppendLine();
         sb.AppendLine("        var sortedModules = _registeredModules.OrderBy(m => m.Order).ToList();");
 
+        // Init phase
         for (var i = 0; i < modules.Count; i++)
         {
-            sb.AppendLine($"        if (module{i} != null) await module{i}.OnInitializeAsync();");
+            var module = modules[i];
+            var moduleName = module.FullName;
+            sb.AppendLine($"        // ModuleDiagnostics: {moduleName} → Init");
+            sb.AppendLine($"        var _initTimer{i} = ModulePhaseTimer.StartNew(\"{moduleName}\", \"Init\");");
+            sb.AppendLine($"        try");
+            sb.AppendLine($"        {{");
+            sb.AppendLine($"            if (_preInitModule{i} != null) await _preInitModule{i}.OnInitializeAsync();");
+            sb.AppendLine($"            _diagnostics.Record(_initTimer{i}.Stop(ModulePhaseStatus.Success));");
+            sb.AppendLine($"        }}");
+            sb.AppendLine($"        catch (System.Exception ex)");
+            sb.AppendLine($"        {{");
+            sb.AppendLine($"            _diagnostics.Record(_initTimer{i}.StopFailed(ex));");
+            sb.AppendLine($"            throw;");
+            sb.AppendLine($"        }}");
         }
 
         sb.AppendLine();
+
+        // PostInit phase — uses sortedModules
         sb.AppendLine("        foreach (var module in sortedModules)");
         sb.AppendLine("        {");
-        sb.AppendLine("            if (serviceProvider.GetService(module.ModuleType) is IModule moduleInstance)");
+        sb.AppendLine("            // ModuleDiagnostics: module.ModuleType.Name → PostInit");
+        sb.AppendLine("            var _postInitTimer = ModulePhaseTimer.StartNew(module.ModuleType.Name, \"PostInit\");");
+        sb.AppendLine("            try");
         sb.AppendLine("            {");
-        sb.AppendLine("                await moduleInstance.OnPostInitializeAsync();");
+        sb.AppendLine("                if (serviceProvider.GetService(module.ModuleType) is IModule moduleInstance)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await moduleInstance.OnPostInitializeAsync();");
+        sb.AppendLine("                }");
+        sb.AppendLine("                _diagnostics.Record(_postInitTimer.Stop(ModulePhaseStatus.Success));");
+        sb.AppendLine("            }");
+        sb.AppendLine("            catch (System.Exception ex)");
+        sb.AppendLine("            {");
+        sb.AppendLine("                _diagnostics.Record(_postInitTimer.StopFailed(ex));");
+        sb.AppendLine("                throw;");
         sb.AppendLine("            }");
         sb.AppendLine("        }");
         sb.AppendLine("    }");
         sb.AppendLine();
+
         sb.AppendLine("    public static async Task<IHost> InitializeModulesAsync(this IHost host)");
         sb.AppendLine("    {");
+        sb.AppendLine("        var logger = host.Services.GetService<ILogger<IModule>>();");
         sb.AppendLine("        await InitializeAllModulesAsync(host.Services);");
         sb.AppendLine();
+
+        // AppInit phase
         sb.AppendLine("        foreach (var module in _registeredModules.OrderBy(m => m.Order))");
         sb.AppendLine("        {");
-        sb.AppendLine("            if (host.Services.GetService(module.ModuleType) is IModule moduleInstance)");
+        sb.AppendLine("            // ModuleDiagnostics: module.ModuleType.Name → AppInit");
+        sb.AppendLine("            var _appInitTimer = ModulePhaseTimer.StartNew(module.ModuleType.Name, \"AppInit\");");
+        sb.AppendLine("            try");
         sb.AppendLine("            {");
-        sb.AppendLine("                await moduleInstance.OnApplicationInitializationAsync(host);");
+        sb.AppendLine("                if (host.Services.GetService(module.ModuleType) is IModule moduleInstance)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    await moduleInstance.OnApplicationInitializationAsync(host);");
+        sb.AppendLine("                }");
+        sb.AppendLine("                _diagnostics.Record(_appInitTimer.Stop(ModulePhaseStatus.Success));");
+        sb.AppendLine("            }");
+        sb.AppendLine("            catch (System.Exception ex)");
+        sb.AppendLine("            {");
+        sb.AppendLine("                _diagnostics.Record(_appInitTimer.StopFailed(ex));");
+        sb.AppendLine("                throw;");
         sb.AppendLine("            }");
         sb.AppendLine("        }");
         sb.AppendLine();
+
+        // Summary log output
+        sb.AppendLine("        // ModuleDiagnostics Summary");
+        sb.AppendLine("        if (logger != null)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            foreach (var diag in _diagnostics.GetAll())");
+        sb.AppendLine("            {");
+        sb.AppendLine("                var status = diag.Status == ModulePhaseStatus.Success ? \"OK\" : \"FAILED\";");
+        sb.AppendLine("                if (diag.Status == ModulePhaseStatus.Failed)");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    logger.LogError(\"[ModuleDiagnostics] {Module} → {Phase}: {Status} ({Elapsed}ms) Error: {Error}\",");
+        sb.AppendLine("                        diag.ModuleName, diag.Phase, status, diag.Elapsed.TotalMilliseconds.ToString(\"F2\"), diag.ErrorMessage);");
+        sb.AppendLine("                }");
+        sb.AppendLine("                else");
+        sb.AppendLine("                {");
+        sb.AppendLine("                    logger.LogInformation(\"[ModuleDiagnostics] {Module} → {Phase}: {Status} ({Elapsed}ms)\",");
+        sb.AppendLine("                        diag.ModuleName, diag.Phase, status, diag.Elapsed.TotalMilliseconds.ToString(\"F2\"));");
+        sb.AppendLine("                }");
+        sb.AppendLine("            }");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+
         sb.AppendLine("        return host;");
         sb.AppendLine("    }");
         sb.AppendLine("}");

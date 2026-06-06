@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.ModuleDiagnostics.Stores;
@@ -20,33 +21,53 @@ public class ModuleHealthCheck : IHealthCheck
         var allEntries = _store.GetAll();
         var failedEntries = _store.GetFailed();
 
+        var moduleNames = allEntries.Select(e => e.ModuleName).Distinct().ToList();
+        var failedModuleNames = failedEntries.Select(e => e.ModuleName).Distinct().ToList();
+
+        // Build per-module phase details
+        var modules = allEntries
+            .GroupBy(e => e.ModuleName)
+            .OrderBy(g => g.Key)
+            .Select(g => new Dictionary<string, object>
+            {
+                ["name"] = g.Key,
+                ["status"] = g.Any(e => e.Status == ModulePhaseStatus.Failed) ? "Failed" : "Success",
+                ["phases"] = g.Select(e => new Dictionary<string, object>
+                {
+                    ["phase"] = e.Phase,
+                    ["status"] = e.Status == ModulePhaseStatus.Success ? "Success" : "Failed",
+                    ["elapsedMs"] = e.Elapsed.TotalMilliseconds,
+                    ["error"] = e.ErrorMessage ?? ""
+                }).ToList<object>()
+            }).ToList<object>();
+
         var data = new Dictionary<string, object>
         {
+            { "totalModules", moduleNames.Count },
+            { "failedModules", failedModuleNames.Count },
             { "totalPhases", allEntries.Count },
-            { "failedPhases", failedEntries.Count }
+            { "failedPhases", failedEntries.Count },
+            { "modules", modules }
         };
 
         if (failedEntries.Count > 0)
         {
-            var failedDetails = new List<Dictionary<string, string>>();
-            foreach (var entry in failedEntries)
+            var failedDetails = failedEntries.Select(e => new Dictionary<string, string>
             {
-                failedDetails.Add(new Dictionary<string, string>
-                {
-                    { "module", entry.ModuleName },
-                    { "phase", entry.Phase },
-                    { "error", entry.ErrorMessage ?? "Unknown error" }
-                });
-            }
+                { "module", e.ModuleName },
+                { "phase", e.Phase },
+                { "error", e.ErrorMessage ?? "Unknown error" }
+            }).ToList<object>();
+
             data["failedDetails"] = failedDetails;
 
             return Task.FromResult(HealthCheckResult.Unhealthy(
-                $"Modules: {failedEntries.Count} phase(s) failed",
+                $"Modules: {failedModuleNames.Count} failed, {failedEntries.Count} phase(s) failed",
                 data: data));
         }
 
         return Task.FromResult(HealthCheckResult.Healthy(
-            $"Modules: all {allEntries.Count} phases healthy",
+            $"Modules: all {moduleNames.Count} modules healthy",
             data));
     }
 }

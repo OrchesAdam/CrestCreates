@@ -24,6 +24,7 @@ using CrestCreates.Application.Features;
 using CrestCreates.Application.AuditLog;
 using CrestCreates.Data.EFCore.Settings;
 using CrestCreates.Data.EFCore.Features;
+using CrestCreates.ModuleDiagnostics.Modules;
 using SaaSHelpdesk.Application.Services;
 using FluentValidation;
 
@@ -64,6 +65,7 @@ builder.Services.AddFeatureManagement();
 builder.Services.AddFeatureManagementEfCore();
 builder.Services.AddCrestExceptionHandling();
 builder.Services.AddHealthChecks();
+builder.Services.AddModuleDiagnostics();
 builder.Services.AddValidatorsFromAssemblyContaining<SaaSHelpdesk.Application.Validators.CreateTicketDtoValidator>();
 builder.Services.AddLocalization();
 builder.Services.AddTenantManagement();
@@ -113,7 +115,6 @@ app.UseAuthentication();
 app.UseTenantBoundary();
 app.UseAuthorization();
 app.MapCrestOpenIddictEndpoints();
-app.MapHealthChecks("/health");
 app.MapCrestAspNetCoreDynamicApi();
 app.MapCrestOpenApi();
 

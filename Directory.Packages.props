@@ -103,6 +103,7 @@
     <PackageVersion Include="StackExchange.Redis" Version="2.12.14" />
     <PackageVersion Include="System.Runtime.Caching" Version="8.0.0" />
     <PackageVersion Include="Castle.Core" Version="5.2.1" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="$(RuntimePackageVersion)" />
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions" Version="$(RuntimePackageVersion)" />
     <!-- 日志 -->
     <PackageVersion Include="Serilog" Version="4.3.1" />
