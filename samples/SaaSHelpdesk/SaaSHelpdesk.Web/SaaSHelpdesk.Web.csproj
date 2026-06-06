@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../../framework/src/CrestCreates.Web/CrestCreates.Web.csproj" />
     <ProjectReference Include="../../../framework/src/CrestCreates.AspNetCore/CrestCreates.AspNetCore.csproj" />
     <ProjectReference Include="../../../framework/src/CrestCreates.AspNetCore.Authentication.OpenIddict/CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
     <ProjectReference Include="../../../framework/src/CrestCreates.Application/CrestCreates.Application.csproj" />
