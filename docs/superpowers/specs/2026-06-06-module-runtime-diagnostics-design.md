@@ -278,13 +278,9 @@ Log level: `Information` for all-success modules, `Error` for failed modules.
 
 ### Health Check Endpoint Integration
 
-`ModuleHealthCheck` implements `IHealthCheck` directly (no `[HealthCheck]` attribute, to avoid a `CrestCreates.Domain.Shared` dependency that would create a circular reference). Registration is done manually by the application host:
+`ModuleHealthCheck` implements `IHealthCheck`, attributed with `[HealthCheck(Name = "Modules", Tags = new[] { "modules" })]`.
 
-```csharp
-services.AddSingleton<IHealthCheck, ModuleHealthCheck>();
-```
-
-Or via the `AddModuleDiagnostics()` extension method which registers both the store and the health check.
+The source generator `HealthCheckSourceGenerator` picks it up and generates `AddModuleHealthCheck` extension method.
 
 **Healthy response** (all modules passed):
 ```json

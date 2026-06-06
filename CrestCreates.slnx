@@ -35,7 +35,6 @@
     <Project Path="framework/src/CrestCreates.Localization/CrestCreates.Localization.csproj" />
     <Project Path="framework/src/CrestCreates.Logging/CrestCreates.Logging.csproj" />
     <Project Path="framework/src/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
-    <Project Path="framework/src/CrestCreates.ModuleDiagnostics/CrestCreates.ModuleDiagnostics.csproj" />
     <Project Path="framework/src/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
     <Project Path="framework/src/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
     <Project Path="framework/src/CrestCreates.Data.Abstractions/CrestCreates.Data.Abstractions.csproj" />
@@ -67,7 +66,7 @@
     <Project Path="framework/src/CrestCreates.EventBus.RabbitMQ/CrestCreates.EventBus.RabbitMQ.csproj" />      
   </Folder>
   <Folder Name="/src/modules/HealthCheck/">
-    <Project Path="framework/src/CrestCreates.HealthCheck.AspNetCore/CrestCreates.HealthCheck.AspNetCore.csproj" />
+    <Project Path="framework/src/CrestCreates.HealthCheck.AspNetCore/CrestCreates.HealthCheck.AspNetCore.csproj" />      
     <Project Path="framework/src/CrestCreates.HealthCheck.Mvc/CrestCreates.HealthCheck.Mvc.csproj" />      
   </Folder>
   <Folder Name="/src/modules/Data/">
@@ -112,7 +111,6 @@
     <Project Path="framework/test/CrestCreates.Infrastructure.Tests/CrestCreates.Infrastructure.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.IntegrationTests/CrestCreates.IntegrationTests.csproj" />
     <Project Path="framework/test/CrestCreates.Logging.Tests/CrestCreates.Logging.Tests.csproj" />
-    <Project Path="framework/test/CrestCreates.ModuleDiagnostics.Tests/CrestCreates.ModuleDiagnostics.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.OrmProviders.Tests/CrestCreates.OrmProviders.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Scheduling.IntegrationTests/CrestCreates.Scheduling.IntegrationTests.csproj" />
     <Project Path="framework/test/CrestCreates.Scheduling.Tests/CrestCreates.Scheduling.Tests.csproj" />      
