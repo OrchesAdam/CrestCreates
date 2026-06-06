@@ -45,12 +45,24 @@ public class DynamicApiEndpointConventionTests
 
         DynamicApiEndpointConventionRunner.Apply(provider, options, context);
 
-        TestEndpointConvention.AppliedActionName.Should().Be("GetList");
+        var convention = provider.GetRequiredService<TestEndpointConvention>();
+        convention.AppliedActionName.Should().Be("GetList");
+    }
+
+    [Fact]
+    public void AddEndpointConvention_ShouldNotDuplicate()
+    {
+        var options = new DynamicApiOptions();
+        options.AddEndpointConvention<TestEndpointConvention>();
+        options.AddEndpointConvention<TestEndpointConvention>();
+
+        options.EndpointConventionTypes.Should().ContainSingle()
+            .Which.Should().Be(typeof(TestEndpointConvention));
     }
 
     private sealed class TestEndpointConvention : IDynamicApiEndpointConvention
     {
-        public static string? AppliedActionName { get; private set; }
+        public string? AppliedActionName { get; private set; }
 
         public void Apply(DynamicApiEndpointConventionContext context)
         {
