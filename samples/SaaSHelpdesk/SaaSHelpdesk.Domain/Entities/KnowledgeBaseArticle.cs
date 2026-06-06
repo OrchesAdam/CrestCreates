@@ -6,8 +6,8 @@ namespace SaaSHelpdesk.Domain.Entities;
 [Entity]
 public class KnowledgeBaseArticle : AuditedEntity<Guid>
 {
-    public string Title { get; private set; }
-    public string Content { get; private set; }
+    public string Title { get; private set; } = string.Empty;
+    public string Content { get; private set; } = string.Empty;
     public Guid? CategoryId { get; private set; }
     public bool IsPublished { get; private set; }
     public DateTime? PublishedAt { get; private set; }

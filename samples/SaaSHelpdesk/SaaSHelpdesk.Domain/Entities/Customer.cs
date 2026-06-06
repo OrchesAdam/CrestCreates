@@ -6,8 +6,8 @@ namespace SaaSHelpdesk.Domain.Entities;
 [Entity]
 public class Customer : AuditedEntity<Guid>
 {
-    public string Name { get; private set; }
-    public string Email { get; private set; }
+    public string Name { get; private set; } = string.Empty;
+    public string Email { get; private set; } = string.Empty;
     public string? Phone { get; private set; }
     public string? Company { get; private set; }
     public Guid TenantId { get; private set; }

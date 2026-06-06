@@ -67,6 +67,8 @@ public class CustomerAppService : CrestAppServiceBase<Customer, Guid, CustomerDt
     public async Task<CustomerDto> ActivateAsync(Guid id)
     {
         var customer = await Repository.GetAsync(id);
+        if (customer == null)
+            throw new KeyNotFoundException($"Customer with id {id} not found.");
         if (customer.IsActive)
         {
             throw new InvalidOperationException($"Customer with id {id} is already active.");
@@ -79,6 +81,8 @@ public class CustomerAppService : CrestAppServiceBase<Customer, Guid, CustomerDt
     public async Task<CustomerDto> DeactivateAsync(Guid id)
     {
         var customer = await Repository.GetAsync(id);
+        if (customer == null)
+            throw new KeyNotFoundException($"Customer with id {id} not found.");
         if (!customer.IsActive)
         {
             throw new InvalidOperationException($"Customer with id {id} is already inactive.");

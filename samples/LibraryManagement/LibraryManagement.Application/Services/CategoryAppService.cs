@@ -41,7 +41,7 @@ public class CategoryAppService :CrestAppServiceBase<Category, Guid, CategoryDto
         if (category.ParentId.HasValue)
         {
             var parent = await _categoryRepository.GetAsync(category.ParentId.Value);
-            if (parent != null)
+            if (parent is not null)
             {
                 dto.ParentName = parent.Name;
             }

@@ -63,6 +63,8 @@ public class KnowledgeBaseAppService : CrestAppServiceBase<KnowledgeBaseArticle,
     public async Task<KnowledgeBaseArticleDto> PublishAsync(Guid id)
     {
         var article = await Repository.GetAsync(id);
+        if (article == null)
+            throw new KeyNotFoundException($"KnowledgeBaseArticle with id {id} not found.");
         article.Publish();
         await Repository.UpdateAsync(article);
         return MapToDto(article);
@@ -71,6 +73,8 @@ public class KnowledgeBaseAppService : CrestAppServiceBase<KnowledgeBaseArticle,
     public async Task<KnowledgeBaseArticleDto> UnpublishAsync(Guid id)
     {
         var article = await Repository.GetAsync(id);
+        if (article == null)
+            throw new KeyNotFoundException($"KnowledgeBaseArticle with id {id} not found.");
         article.Unpublish();
         await Repository.UpdateAsync(article);
         return MapToDto(article);
@@ -79,6 +83,8 @@ public class KnowledgeBaseAppService : CrestAppServiceBase<KnowledgeBaseArticle,
     public async Task<KnowledgeBaseArticleDto> IncrementViewCountAsync(Guid id)
     {
         var article = await Repository.GetAsync(id);
+        if (article == null)
+            throw new KeyNotFoundException($"KnowledgeBaseArticle with id {id} not found.");
         article.IncrementViewCount();
         await Repository.UpdateAsync(article);
         return MapToDto(article);

@@ -143,7 +143,7 @@ namespace CrestCreates.Web.Controllers
         /// <summary>
         /// 数据列表
         /// </summary>
-        public List<T> Items { get; set; }
+        public List<T> Items { get; set; } = null!;
 
         /// <summary>
         /// 总记录数
@@ -187,7 +187,7 @@ namespace CrestCreates.Web.Controllers
         /// 排序字段
         /// </summary>
         [FromQuery(Name = "sortBy")]
-        public string SortBy { get; set; }
+        public string SortBy { get; set; } = null!;
 
         /// <summary>
         /// 排序方向

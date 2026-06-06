@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using LibraryManagement.Domain.Entities;
 using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Permission;
@@ -10,6 +11,7 @@ using CrestCreates.Data.EFCore.Extensions;
 
 namespace LibraryManagement.EntityFrameworkCore;
 
+[UnconditionalSuppressMessage("Trimming", "IL2026:Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code", Justification = "EF Core DbContext is not fully trim-compatible")]
 public class LibraryDbContext : DbContext
 {
     public LibraryDbContext(DbContextOptions<LibraryDbContext> options) : base(options)
@@ -220,11 +222,13 @@ public class LibraryDbContext : DbContext
             entity.Property(e => e.CreationTime).IsRequired();
             entity.Property(e => e.ExtraProperties)
                 .HasConversion(
+#pragma warning disable IL2026
                     value => JsonSerializer.Serialize(value, (JsonSerializerOptions?)null),
                     value => string.IsNullOrWhiteSpace(value)
                         ? new Dictionary<string, object>()
                         : JsonSerializer.Deserialize<Dictionary<string, object>>(value, (JsonSerializerOptions?)null)
                             ?? new Dictionary<string, object>());
+#pragma warning restore IL2026
             entity.HasIndex(e => e.TenantId);
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.CreationTime);

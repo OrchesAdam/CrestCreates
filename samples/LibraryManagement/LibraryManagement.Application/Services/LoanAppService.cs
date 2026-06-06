@@ -161,7 +161,7 @@ public class LoanAppService : CrestAppServiceBase<Loan, Guid, LoanDto, CreateLoa
         if (loan.LateFee.HasValue && loan.LateFee.Value > 0)
         {
             var member = await _memberRepository.GetAsync(loan.MemberId);
-            if (member != null)
+            if (member is not null)
             {
                 member.AddToBalance(loan.LateFee.Value);
                 await _memberRepository.UpdateAsync(member);
@@ -203,14 +203,14 @@ public class LoanAppService : CrestAppServiceBase<Loan, Guid, LoanDto, CreateLoa
         var dto = loan.ToDto();
         
         var book = await _bookRepository.GetAsync(loan.BookId);
-        if (book != null)
+        if (book is not null)
         {
             dto.BookTitle = book.Title;
             dto.BookISBN = book.ISBN;
         }
 
         var member = await _memberRepository.GetAsync(loan.MemberId);
-        if (member != null)
+        if (member is not null)
         {
             dto.MemberName = member.Name;
             dto.MemberEmail = member.Email;

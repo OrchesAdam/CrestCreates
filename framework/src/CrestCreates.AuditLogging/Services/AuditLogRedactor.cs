@@ -50,7 +50,9 @@ public class AuditLogRedactor : IAuditLogRedactor
         {
             using var document = JsonDocument.Parse(raw);
             var sanitized = SanitizeElement(document.RootElement);
+#pragma warning disable IL2026
             return JsonSerializer.Serialize(sanitized);
+#pragma warning restore IL2026
         }
         catch (JsonException)
         {

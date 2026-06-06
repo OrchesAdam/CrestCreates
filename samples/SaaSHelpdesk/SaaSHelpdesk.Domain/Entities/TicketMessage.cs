@@ -8,7 +8,7 @@ namespace SaaSHelpdesk.Domain.Entities;
 public class TicketMessage : AuditedEntity<Guid>
 {
     public Guid TicketId { get; private set; }
-    public string Content { get; private set; }
+    public string Content { get; private set; } = string.Empty;
     public MessageSenderType SenderType { get; private set; }
     public Guid? SenderId { get; private set; }
     public string? SenderName { get; private set; }

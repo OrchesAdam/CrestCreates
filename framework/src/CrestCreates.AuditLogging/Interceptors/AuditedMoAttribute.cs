@@ -53,9 +53,11 @@ public class AuditedMoAttribute : AsyncMoAttribute
             {
                 try
                 {
+#pragma warning disable IL2026
                     auditContext.Parameters = context.Arguments.Length == 1
                         ? JsonSerializer.Serialize(context.Arguments[0])
                         : JsonSerializer.Serialize(context.Arguments);
+#pragma warning restore IL2026
                 }
                 catch
                 {
@@ -67,7 +69,9 @@ public class AuditedMoAttribute : AsyncMoAttribute
             {
                 try
                 {
+#pragma warning disable IL2026
                     auditContext.ReturnValue = JsonSerializer.Serialize(context.ReturnValue);
+#pragma warning restore IL2026
                 }
                 catch
                 {
@@ -113,9 +117,11 @@ public class AuditedMoAttribute : AsyncMoAttribute
             {
                 try
                 {
+#pragma warning disable IL2026
                     auditContext.Parameters = context.Arguments.Length == 1
                         ? JsonSerializer.Serialize(context.Arguments[0])
                         : JsonSerializer.Serialize(context.Arguments);
+#pragma warning restore IL2026
                 }
                 catch
                 {

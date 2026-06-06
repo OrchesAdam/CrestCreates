@@ -74,11 +74,13 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
     public async Task<TicketDto> AssignAsync(Guid id, Guid agentId)
     {
         var ticket = await Repository.GetAsync(id);
+        if (ticket == null)
+            throw new KeyNotFoundException($"Ticket with id {id} not found.");
         ticket.AssignTo(agentId);
 
         var activeSlaPolicy = _slaPolicyRepository.GetQueryable()
             .FirstOrDefault(p => p.IsActive);
-        if (activeSlaPolicy != null)
+        if (activeSlaPolicy is not null)
         {
             var responseMinutes = activeSlaPolicy.GetResponseMinutes(ticket.Priority);
             ticket.SetDueDate(DateTime.UtcNow.AddMinutes(responseMinutes));
@@ -91,6 +93,8 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
     public async Task<TicketDto> ResolveAsync(Guid id)
     {
         var ticket = await Repository.GetAsync(id);
+        if (ticket == null)
+            throw new KeyNotFoundException($"Ticket with id {id} not found.");
         if (ticket.Status == TicketStatus.Closed)
             throw new InvalidOperationException("Cannot resolve a ticket that is already closed.");
         ticket.Resolve();
@@ -101,6 +105,8 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
     public async Task<TicketDto> CloseAsync(Guid id)
     {
         var ticket = await Repository.GetAsync(id);
+        if (ticket == null)
+            throw new KeyNotFoundException($"Ticket with id {id} not found.");
         if (ticket.Status == TicketStatus.Closed)
             throw new InvalidOperationException("Cannot close a ticket that is already closed.");
         ticket.Close();

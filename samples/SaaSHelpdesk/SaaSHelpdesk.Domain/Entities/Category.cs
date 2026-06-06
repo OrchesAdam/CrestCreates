@@ -6,7 +6,7 @@ namespace SaaSHelpdesk.Domain.Entities;
 [Entity]
 public class Category : FullyAuditedEntity<Guid>
 {
-    public string Name { get; private set; }
+    public string Name { get; private set; } = string.Empty;
     public string? Description { get; private set; }
     public Guid? ParentId { get; private set; }
     public int SortOrder { get; private set; }

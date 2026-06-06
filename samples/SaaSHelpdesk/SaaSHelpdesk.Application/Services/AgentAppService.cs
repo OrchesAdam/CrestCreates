@@ -51,7 +51,7 @@ public class AgentAppService : IAgentAppService
         {
             var roles = await _roleRepository.GetListAsync(r => r.Name == input.Role && r.TenantId == tenantId);
             var role = roles.FirstOrDefault();
-            if (role != null)
+            if (role is not null)
             {
                 var userRole = new CrestCreates.Domain.Permission.UserRole(
                     Guid.NewGuid(), user.Id, role.Id, tenantId);

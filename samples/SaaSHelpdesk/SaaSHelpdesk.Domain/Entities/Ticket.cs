@@ -8,8 +8,8 @@ namespace SaaSHelpdesk.Domain.Entities;
 [Entity]
 public class Ticket : AuditedEntity<Guid>, IHasDomainEvents
 {
-    public string Title { get; private set; }
-    public string Description { get; private set; }
+    public string Title { get; private set; } = string.Empty;
+    public string Description { get; private set; } = string.Empty;
     public TicketStatus Status { get; private set; }
     public TicketPriority Priority { get; private set; }
     public TicketType Type { get; private set; }

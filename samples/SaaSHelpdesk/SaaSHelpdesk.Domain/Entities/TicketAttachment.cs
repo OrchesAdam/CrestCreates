@@ -8,11 +8,11 @@ public class TicketAttachment : AuditedEntity<Guid>
 {
     public Guid? TicketMessageId { get; private set; }
     public Guid? TicketId { get; private set; }
-    public string FileName { get; private set; }
-    public string ContentType { get; private set; }
+    public string FileName { get; private set; } = string.Empty;
+    public string ContentType { get; private set; } = string.Empty;
     public long FileSize { get; private set; }
-    public string FileHash { get; private set; }
-    public string StoragePath { get; private set; }
+    public string FileHash { get; private set; } = string.Empty;
+    public string StoragePath { get; private set; } = string.Empty;
 
     // Navigation
     public virtual TicketMessage? TicketMessage { get; private set; }

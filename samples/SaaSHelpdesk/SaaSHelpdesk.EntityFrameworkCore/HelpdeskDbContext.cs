@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Settings;
@@ -9,6 +10,7 @@ using SaaSHelpdesk.Domain.Entities;
 
 namespace SaaSHelpdesk.EntityFrameworkCore;
 
+[UnconditionalSuppressMessage("Trimming", "IL2026:Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code", Justification = "EF Core DbContext is not fully trim-compatible")]
 public class HelpdeskDbContext : DbContext
 {
     public HelpdeskDbContext(DbContextOptions<HelpdeskDbContext> options) : base(options) { }
