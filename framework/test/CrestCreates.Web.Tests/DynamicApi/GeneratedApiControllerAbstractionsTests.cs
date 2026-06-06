@@ -50,5 +50,6 @@ public class GeneratedApiControllerAbstractionsTests
 
     private sealed class TestApiController : CrestApiController
     {
+        public new IResult Ok<T>(T value) => base.Ok(value);
     }
 }

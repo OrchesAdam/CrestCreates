@@ -4,17 +4,17 @@ namespace CrestCreates.DynamicApi;
 
 public abstract class CrestApiController
 {
-    public IResult Ok<T>(T value)
+    protected IResult Ok<T>(T value)
     {
         return Results.Ok(value);
     }
 
-    public IResult NotFound()
+    protected IResult NotFound()
     {
         return Results.NotFound();
     }
 
-    public IResult NoContent()
+    protected IResult NoContent()
     {
         return Results.NoContent();
     }
