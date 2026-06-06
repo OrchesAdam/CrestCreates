@@ -3,7 +3,6 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace CrestCreates.Web.Tests.DynamicApi;
