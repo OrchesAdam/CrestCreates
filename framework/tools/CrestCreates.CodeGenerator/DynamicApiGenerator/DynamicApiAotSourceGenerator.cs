@@ -879,6 +879,24 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 builder.AppendLine($"            {routeBuilderName}.WithDisplayName(\"{Escape(action.DeclaringTypeName)}.{Escape(action.ActionName)}\");");
                 builder.AppendLine($"            {routeBuilderName}.WithMetadata({permissionName});");
                 builder.AppendLine($"            {routeBuilderName}.WithMetadata(new global::Microsoft.AspNetCore.Http.TagsAttribute(\"{Escape(service.ServiceName)}\"));");
+                builder.AppendLine();
+                builder.AppendLine($"            var descriptor_{serviceIndex}_{actionIndex} = new global::CrestCreates.DynamicApi.DynamicApiEndpointDescriptor(");
+                builder.AppendLine($"                \"{Escape(service.ServiceName)}\",");
+                builder.AppendLine($"                \"{Escape(action.ActionName)}\",");
+                builder.AppendLine($"                \"{action.HttpMethod}\",");
+                builder.AppendLine($"                BuildRoute(routePrefix_{serviceIndex}, \"{Escape(action.RelativeRoute)}\"),");
+                builder.AppendLine($"                typeof({action.ServiceTypeName}),");
+                builder.AppendLine($"                {ResolveRequestTypeFromAction(action)},");
+                builder.AppendLine($"                {(action.ReturnModel.PayloadTypeName is not null ? $"typeof({GetTypeOfTypeName(action.ReturnModel.PayloadTypeName)})" : "null")},");
+                builder.AppendLine($"                new[] {{ \"{Escape(action.PermissionName)}\" }},");
+                builder.AppendLine($"                {ToBooleanLiteral(action.RequiresTransaction)});");
+                builder.AppendLine();
+                builder.AppendLine($"            global::CrestCreates.DynamicApi.DynamicApiEndpointConventionRunner.Apply(");
+                builder.AppendLine($"                endpoints.ServiceProvider,");
+                builder.AppendLine($"                options,");
+                builder.AppendLine($"                new global::CrestCreates.DynamicApi.DynamicApiEndpointConventionContext(");
+                builder.AppendLine($"                    descriptor_{serviceIndex}_{actionIndex},");
+                builder.AppendLine($"                    {routeBuilderName}));");
             }
             builder.AppendLine("        }");
         }

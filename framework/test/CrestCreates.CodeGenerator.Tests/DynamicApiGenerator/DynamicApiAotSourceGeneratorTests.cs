@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using CrestCreates.CodeGenerator.DynamicApiGenerator;
 using CrestCreates.CodeGenerator.Tests.TestHelpers;
@@ -90,6 +91,36 @@ public class DynamicApiAotSourceGeneratorTests
         registrySource.SourceText.Should().Contain("DynamicApiEndpointDescriptor(");
         registrySource.SourceText.Should().Contain("\"Book\"");
         registrySource.SourceText.Should().Contain("\"Get\"");
+    }
+
+    [Fact]
+    public async Task DynamicApiAotSourceGenerator_ShouldApplyEndpointConventionsAfterMapping()
+    {
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+            using System.Threading.Tasks;
+
+            namespace Sample;
+
+            public interface IBookAppService
+            {
+                Task<string> GetListAsync();
+            }
+
+            [CrestService]
+            public sealed class BookAppService : IBookAppService
+            {
+                public Task<string> GetListAsync() => Task.FromResult("books");
+            }
+            """;
+
+        var result = await SourceGeneratorTestHelper.RunGeneratorAsync<DynamicApiAotSourceGenerator>(source, additionalSources: new[] { BuildDynamicApiStubs() });
+
+        result.GeneratedSources
+            .First(s => s.FileName.Contains("GeneratedDynamicApiEndpoints.g.cs"))
+            .SourceText
+            .Should().Contain("global::CrestCreates.DynamicApi.DynamicApiEndpointConventionRunner.Apply(")
+            .And.Contain("new global::CrestCreates.DynamicApi.DynamicApiEndpointConventionContext(");
     }
 
     private static string BuildDynamicApiSource()
@@ -196,6 +227,7 @@ public class DynamicApiAotSourceGeneratorTests
                {
                    public interface IEndpointRouteBuilder
                    {
+                       IServiceProvider ServiceProvider { get; }
                    }
 
                    public sealed class RouteHandlerBuilder : Microsoft.AspNetCore.Builder.IEndpointConventionBuilder
@@ -436,6 +468,36 @@ public class DynamicApiAotSourceGeneratorTests
                    public static class DynamicApiRouteConvention
                    {
                        public static bool IsScalar(Type type) => false;
+                   }
+
+                   public interface IDynamicApiEndpointConvention
+                   {
+                       void Apply(DynamicApiEndpointConventionContext context);
+                   }
+
+                   public sealed class DynamicApiEndpointConventionContext
+                   {
+                       public DynamicApiEndpointConventionContext(
+                           DynamicApiEndpointDescriptor descriptor,
+                           RouteHandlerBuilder builder)
+                       {
+                           Descriptor = descriptor;
+                           Builder = builder;
+                       }
+
+                       public DynamicApiEndpointDescriptor Descriptor { get; }
+
+                       public RouteHandlerBuilder Builder { get; }
+                   }
+
+                   public static class DynamicApiEndpointConventionRunner
+                   {
+                       public static void Apply(
+                           IServiceProvider serviceProvider,
+                           DynamicApiOptions options,
+                           DynamicApiEndpointConventionContext context)
+                       {
+                       }
                    }
 
                    public class DynamicApiResponse { }
