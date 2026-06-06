@@ -113,6 +113,7 @@
     <Project Path="framework/test/CrestCreates.Infrastructure.Tests/CrestCreates.Infrastructure.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.IntegrationTests/CrestCreates.IntegrationTests.csproj" />
     <Project Path="framework/test/CrestCreates.Logging.Tests/CrestCreates.Logging.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.ModuleDiagnostics.Tests/CrestCreates.ModuleDiagnostics.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.OrmProviders.Tests/CrestCreates.OrmProviders.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Scheduling.IntegrationTests/CrestCreates.Scheduling.IntegrationTests.csproj" />
     <Project Path="framework/test/CrestCreates.Scheduling.Tests/CrestCreates.Scheduling.Tests.csproj" />      
