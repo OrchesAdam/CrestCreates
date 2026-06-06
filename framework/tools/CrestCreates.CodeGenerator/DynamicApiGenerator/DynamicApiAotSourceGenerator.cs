@@ -808,7 +808,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                     }
                 }
 
-                var callArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Source == ParameterSource.Body ? $"{parameter.Name}!" : parameter.Name));
+                var callArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Name));
                 if (action.ReturnModel.IsVoid)
                 {
                     if (action.RequiresUnitOfWork)
@@ -842,7 +842,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 builder.AppendLine("                });");
                 builder.AppendLine($"            {routeBuilderName}.WithDisplayName(\"{Escape(action.DeclaringTypeName)}.{Escape(action.ActionName)}\");");
                 builder.AppendLine($"            {routeBuilderName}.WithMetadata({permissionName});");
-                builder.AppendLine($"            {routeBuilderName}.WithTags(\"{Escape(service.ServiceName)}\");");
+                builder.AppendLine($"            {routeBuilderName}.WithMetadata(new global::Microsoft.AspNetCore.Http.TagsAttribute(\"{Escape(service.ServiceName)}\"));");
             }
             builder.AppendLine("        }");
         }
@@ -913,13 +913,6 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
     private static string GenerateParseExpression(string typeName, string rawExpression, bool optional)
     {
         var normalizedType = typeName.EndsWith("?", StringComparison.Ordinal) ? typeName.Substring(0, typeName.Length - 1) : typeName;
-
-        // Handle nullable value types first — return default(T?) when the query string is empty
-        if (typeName.EndsWith("?", StringComparison.Ordinal) && normalizedType != typeName)
-        {
-            var inner = GenerateParseExpression(normalizedType, rawExpression, optional);
-            return $"string.IsNullOrWhiteSpace({rawExpression}) ? default({typeName}) : {inner}";
-        }
 
         return normalizedType switch
         {

@@ -179,6 +179,16 @@ public class DynamicApiAotSourceGeneratorTests
 
                namespace Microsoft.AspNetCore.Http
                {
+                   public sealed class TagsAttribute : Attribute
+                   {
+                       public TagsAttribute(params string[] tags)
+                       {
+                           Tags = tags;
+                       }
+
+                       public string[] Tags { get; }
+                   }
+
                    public delegate Task RequestDelegate(HttpContext context);
 
                    public class HttpContext
