@@ -1794,7 +1794,9 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         };
 
         return optional
-            ? $"string.IsNullOrWhiteSpace({rawExpression}) ? ({normalizedType}?)null : {parseExpression}"
+            ? typeName.EndsWith("?", StringComparison.Ordinal)
+                ? $"string.IsNullOrWhiteSpace({rawExpression}) ? ({normalizedType}?)null : {parseExpression}"
+                : $"string.IsNullOrWhiteSpace({rawExpression}) ? default({normalizedType}) : {parseExpression}"
             : parseExpression;
     }
 
