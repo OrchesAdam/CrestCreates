@@ -42,6 +42,7 @@ public static class DynamicApiGeneratedRegistryStore
 
         var serviceKeys = new HashSet<string>(StringComparer.Ordinal);
         var services = new List<DynamicApiServiceDescriptor>();
+        var hasMatchingProvider = false;
         foreach (var provider in GetProviders())
         {
             if (!TryGetMatchingGeneratedRegistry(provider, options, out var registry))
@@ -49,9 +50,11 @@ public static class DynamicApiGeneratedRegistryStore
                 continue;
             }
 
+            hasMatchingProvider = true;
+
             foreach (var service in registry.Services)
             {
-                var key = $"{service.ServiceType.Assembly.FullName}|{service.ServiceType.FullName}|{service.RoutePrefix}";
+                var key = $"{service.ServiceType.Assembly.GetName().Name}|{service.ServiceType.FullName}|{service.RoutePrefix}";
                 if (serviceKeys.Add(key))
                 {
                     services.Add(service);
@@ -59,7 +62,7 @@ public static class DynamicApiGeneratedRegistryStore
             }
         }
 
-        if (services.Count == 0)
+        if (!hasMatchingProvider)
         {
             return null;
         }

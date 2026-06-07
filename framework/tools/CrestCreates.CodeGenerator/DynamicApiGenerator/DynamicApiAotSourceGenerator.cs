@@ -633,7 +633,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 parameter.Name,
                 parameter.Type.ToDisplayString(FullyQualifiedFormat),
                 source,
-                parameter.IsOptional || parameter.HasExplicitDefaultValue || IsNullableType(parameter.Type),
+                parameter.IsOptional || parameter.HasExplicitDefaultValue || (source != ParameterSource.Body && IsNullableType(parameter.Type)),
                 IsScalar(parameter.Type),
                 source == ParameterSource.Query && !IsScalar(parameter.Type)
                     ? BuildQueryProperties(parameter.Type)
