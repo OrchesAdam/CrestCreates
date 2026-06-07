@@ -88,6 +88,64 @@ public class GeneratedApiControllerSourceGeneratorTests
     }
 
     [Fact]
+    public async Task ShouldGenerateMetadataForCommonApiControllerAttributes()
+    {
+        var source = """
+            using CrestCreates.DynamicApi;
+            using Microsoft.AspNetCore.Authorization;
+            using Microsoft.AspNetCore.Mvc;
+            using System.Threading.Tasks;
+
+            namespace Sample;
+
+            [GeneratedApiController]
+            [Authorize("Books.Read")]
+            [Route("api/[controller]")]
+            public partial class BookApi : CrestApiController
+            {
+                [HttpPost("publish/{id}")]
+                [ProducesResponseType(typeof(string), 200)]
+                [Produces("application/json")]
+                [Consumes("application/json")]
+                public Task<string> PublishAsync(string id, PublishBookDto input)
+                {
+                    return Task.FromResult(id);
+                }
+
+                [HttpGet("ping")]
+                [AllowAnonymous]
+                public Task<string> PingAsync()
+                {
+                    return Task.FromResult("pong");
+                }
+            }
+
+            public sealed class PublishBookDto
+            {
+                public string Name { get; set; } = string.Empty;
+            }
+            """;
+
+        var result = await SourceGeneratorTestHelper.RunGeneratorAsync<DynamicApiAotSourceGenerator>(
+            source,
+            additionalSources: new[] { DynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs(), BuildGeneratedApiControllerStubs() });
+
+        result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
+        var endpointsSource = result.GetSourceByContent("MapMethods");
+        endpointsSource.Should().NotBeNull();
+        endpointsSource!.SourceText.Should().Contain("api/book/publish/{id}");
+        endpointsSource.SourceText.Should().Contain("api/book/ping");
+        endpointsSource.SourceText.Should().Contain("new global::Microsoft.AspNetCore.Mvc.RouteAttribute(\"api/book/publish/{id}\")");
+        endpointsSource.SourceText.Should().Contain("new global::Microsoft.AspNetCore.Authorization.AuthorizeAttribute() { Policy = \"Books.Read\" }");
+        endpointsSource.SourceText.Should().Contain("new global::Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute(typeof(global::System.String), 200)");
+        endpointsSource.SourceText.Should().Contain("new global::Microsoft.AspNetCore.Mvc.ProducesAttribute(\"application/json\")");
+        endpointsSource.SourceText.Should().Contain("new global::Microsoft.AspNetCore.Mvc.ConsumesAttribute(\"application/json\")");
+        endpointsSource.SourceText.Should().Contain("new global::Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute()");
+        endpointsSource.SourceText.Should().Contain("await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, permission_controller_0_0.Permissions);");
+        endpointsSource.SourceText.Should().NotContain("await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, permission_controller_0_1.Permissions);");
+    }
+
+    [Fact]
     public async Task ShouldUseApiOverrideToReplaceDefaultGetAllEndpoint()
     {
         var source = """
@@ -224,6 +282,24 @@ public class GeneratedApiControllerSourceGeneratorTests
                 }
             }
 
+            namespace Microsoft.AspNetCore.Authorization
+            {
+                [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true, Inherited = true)]
+                public sealed class AuthorizeAttribute : Attribute
+                {
+                    public AuthorizeAttribute() { }
+                    public AuthorizeAttribute(string policy) { Policy = policy; }
+                    public string? Policy { get; set; }
+                    public string? Roles { get; set; }
+                    public string? AuthenticationSchemes { get; set; }
+                }
+
+                [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = false, Inherited = true)]
+                public sealed class AllowAnonymousAttribute : Attribute
+                {
+                }
+            }
+
             namespace Microsoft.AspNetCore.Mvc
             {
                 [AttributeUsage(AttributeTargets.Method, AllowMultiple = true, Inherited = true)]
@@ -256,6 +332,41 @@ public class GeneratedApiControllerSourceGeneratorTests
                     public HttpDeleteAttribute() { }
                     public HttpDeleteAttribute(string template) { Template = template; }
                     public string? Template { get; }
+                }
+
+                [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true, Inherited = true)]
+                public sealed class RouteAttribute : Attribute
+                {
+                    public RouteAttribute(string template) { Template = template; }
+                    public string Template { get; }
+                }
+
+                [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true, Inherited = true)]
+                public sealed class ProducesResponseTypeAttribute : Attribute
+                {
+                    public ProducesResponseTypeAttribute(int statusCode) { StatusCode = statusCode; }
+                    public ProducesResponseTypeAttribute(Type type, int statusCode)
+                    {
+                        Type = type;
+                        StatusCode = statusCode;
+                    }
+
+                    public Type? Type { get; }
+                    public int StatusCode { get; }
+                }
+
+                [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true, Inherited = true)]
+                public sealed class ProducesAttribute : Attribute
+                {
+                    public ProducesAttribute(params string[] contentTypes) { ContentTypes = contentTypes; }
+                    public string[] ContentTypes { get; }
+                }
+
+                [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true, Inherited = true)]
+                public sealed class ConsumesAttribute : Attribute
+                {
+                    public ConsumesAttribute(params string[] contentTypes) { ContentTypes = contentTypes; }
+                    public string[] ContentTypes { get; }
                 }
             }
             """;

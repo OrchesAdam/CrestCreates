@@ -90,9 +90,9 @@ public class MultiTenancyMiddlewareTests
 
     private sealed class StaticTenantResolver : ITenantResolver
     {
-        private readonly string? _tenantId;
+        private readonly string _tenantId;
 
-        public StaticTenantResolver(string? tenantId)
+        public StaticTenantResolver(string tenantId)
         {
             _tenantId = tenantId;
         }

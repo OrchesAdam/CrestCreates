@@ -3,6 +3,7 @@ using CrestCreates.Modularity;
 using CrestCreates.Security.Modules;
 using CrestCreates.Application.AuditLog;
 using CrestCreates.Application.Features;
+using CrestCreates.Application.Identity;
 using CrestCreates.Application.Settings;
 using SaaSHelpdesk.Application.Services;
 using FluentValidation;
@@ -25,6 +26,7 @@ builder.AddCrestWeb(options =>
         api.AddApplicationServiceAssembly<FeatureAppService>();
         api.AddApplicationServiceAssembly<AuditLogAppService>();
         api.AddApplicationServiceAssembly<AuditLogCleanupAppService>();
+        api.AddApplicationServiceAssembly<UserAppService>();
     });
 });
 

@@ -34,13 +34,83 @@ public class DynamicApiAotSourceGeneratorTests
         endpointSource.Should().NotBeNull();
         endpointSource!.SourceText.Should().Contain("BuildRoute(routePrefix_0, \"{id}\")");
         endpointSource.SourceText.Should().Contain("await DynamicApiGeneratedRuntime.EnsurePermissionAsync");
-        endpointSource.SourceText.Should().Contain("await DynamicApiGeneratedRuntime.ReadBodyAsync<global::TestContracts.CreateTestBookDto>(context, false)");
+        endpointSource.SourceText.Should().Contain("(await DynamicApiGeneratedRuntime.ReadBodyAsync<global::TestContracts.CreateTestBookDto>(context, false))!");
         endpointSource.SourceText.Should().Contain("await DynamicApiGeneratedRuntime.ValidateAsync");
         endpointSource.SourceText.Should().Contain("var input = new global::TestContracts.TestBookListRequestDto();");
         endpointSource.SourceText.Should().Contain("input.Keyword = string.IsNullOrWhiteSpace(context.Request.Query[\"Keyword\"].ToString()) ? null : context.Request.Query[\"Keyword\"].ToString()");
         endpointSource.SourceText.Should().Contain("await DynamicApiGeneratedRuntime.ExecuteAsync(context, false, () => service.UpdateAsync(id, input, context.RequestAborted))");
         endpointSource.SourceText.Should().Contain("return DynamicApiGeneratedRuntime.WrapGetResult(result);");
         endpointSource.SourceText.Should().Contain("return DynamicApiGeneratedRuntime.WrapResult(result);");
+    }
+
+    [Fact]
+    public async Task DynamicApiAotSourceGenerator_ShouldEmitNonNullBodyBindingForRequiredBodyParameter()
+    {
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+            using System.Threading.Tasks;
+
+            namespace Sample;
+
+            public interface IBookAppService
+            {
+                Task<string> CreateAsync(CreateBookDto input);
+            }
+
+            [CrestService]
+            public sealed class BookAppService : IBookAppService
+            {
+                public Task<string> CreateAsync(CreateBookDto input) => Task.FromResult(input.Name);
+            }
+
+            public sealed class CreateBookDto
+            {
+                public string Name { get; set; } = string.Empty;
+            }
+            """;
+
+        var result = await SourceGeneratorTestHelper.RunGeneratorAsync<DynamicApiAotSourceGenerator>(
+            source,
+            additionalSources: new[] { BuildDynamicApiStubs() });
+
+        result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
+
+        var endpointSource = result.GetSourceByFileName("GeneratedDynamicApiEndpoints.g.cs");
+        endpointSource.Should().NotBeNull();
+        endpointSource!.SourceText.Should().Contain("(await DynamicApiGeneratedRuntime.ReadBodyAsync<global::Sample.CreateBookDto>(context, false))!");
+    }
+
+    [Fact]
+    public async Task DynamicApiAotSourceGenerator_ShouldTreatEmptyOptionalQueryValueAsNull()
+    {
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+            using System;
+            using System.Threading.Tasks;
+
+            namespace Sample;
+
+            public interface ICategoryAppService
+            {
+                Task<string> MoveAsync(Guid id, Guid? newParentId);
+            }
+
+            [CrestService]
+            public sealed class CategoryAppService : ICategoryAppService
+            {
+                public Task<string> MoveAsync(Guid id, Guid? newParentId) => Task.FromResult("moved");
+            }
+            """;
+
+        var result = await SourceGeneratorTestHelper.RunGeneratorAsync<DynamicApiAotSourceGenerator>(
+            source,
+            additionalSources: new[] { BuildDynamicApiStubs() });
+
+        result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
+
+        var endpointSource = result.GetSourceByFileName("GeneratedDynamicApiEndpoints.g.cs");
+        endpointSource.Should().NotBeNull();
+        endpointSource!.SourceText.Should().Contain("var newParentId = string.IsNullOrWhiteSpace(context.Request.Query[\"newParentId\"].ToString()) ? (global::System.Guid?)null : Guid.Parse(context.Request.Query[\"newParentId\"].ToString());");
     }
 
     [Fact]

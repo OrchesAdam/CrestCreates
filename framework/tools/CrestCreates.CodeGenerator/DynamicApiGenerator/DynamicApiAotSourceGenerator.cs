@@ -81,10 +81,16 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         var unitOfWorkAttribute = compilation.GetTypeByMetadataName("CrestCreates.Aop.Interceptors.UnitOfWorkMoAttribute");
         var generatedApiControllerAttribute = compilation.GetTypeByMetadataName("CrestCreates.DynamicApi.GeneratedApiControllerAttribute");
         var apiOverrideAttribute = compilation.GetTypeByMetadataName("CrestCreates.DynamicApi.ApiOverrideAttribute");
+        var authorizeAttribute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Authorization.AuthorizeAttribute");
+        var allowAnonymousAttribute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute");
+        var routeAttribute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.RouteAttribute");
+        var producesResponseTypeAttribute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute");
+        var producesAttribute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ProducesAttribute");
+        var consumesAttribute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ConsumesAttribute");
         var services = new List<ServiceModel>();
         var controllers = new List<GeneratedApiControllerModel>();
 
-        foreach (var type in EnumerateNamedTypes(compilation.Assembly).Concat(compilation.SourceModule.ReferencedAssemblySymbols.SelectMany(EnumerateNamedTypes)))
+        foreach (var type in EnumerateNamedTypes(compilation.Assembly))
         {
             if (crestServiceAttribute is not null &&
                 IsDynamicApiImplementation(type, crestServiceAttribute, dynamicApiIgnoreAttribute))
@@ -95,7 +101,18 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             if (generatedApiControllerAttribute is not null &&
                 IsGeneratedApiController(type, generatedApiControllerAttribute, dynamicApiIgnoreAttribute))
             {
-                controllers.Add(BuildGeneratedApiControllerModel(type, generatedApiControllerAttribute, dynamicApiIgnoreAttribute, unitOfWorkAttribute, apiOverrideAttribute));
+                controllers.Add(BuildGeneratedApiControllerModel(
+                    type,
+                    generatedApiControllerAttribute,
+                    dynamicApiIgnoreAttribute,
+                    unitOfWorkAttribute,
+                    apiOverrideAttribute,
+                    authorizeAttribute,
+                    allowAnonymousAttribute,
+                    routeAttribute,
+                    producesResponseTypeAttribute,
+                    producesAttribute,
+                    consumesAttribute));
             }
         }
 
@@ -233,9 +250,15 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         INamedTypeSymbol generatedApiControllerAttribute,
         INamedTypeSymbol? dynamicApiIgnoreAttribute,
         INamedTypeSymbol? unitOfWorkAttribute,
-        INamedTypeSymbol? apiOverrideAttribute)
+        INamedTypeSymbol? apiOverrideAttribute,
+        INamedTypeSymbol? authorizeAttribute,
+        INamedTypeSymbol? allowAnonymousAttribute,
+        INamedTypeSymbol? routeAttribute,
+        INamedTypeSymbol? producesResponseTypeAttribute,
+        INamedTypeSymbol? producesAttribute,
+        INamedTypeSymbol? consumesAttribute)
     {
-        var routeTemplate = ResolveGeneratedApiControllerRoute(controllerType, generatedApiControllerAttribute);
+        var routeTemplate = ResolveGeneratedApiControllerRoute(controllerType, generatedApiControllerAttribute, routeAttribute);
         var controllerName = TrimControllerName(controllerType.Name);
         var actions = controllerType.GetMembers()
             .OfType<IMethodSymbol>()
@@ -243,7 +266,19 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                              method.DeclaredAccessibility == Accessibility.Public &&
                              !method.IsStatic &&
                              (dynamicApiIgnoreAttribute is null || !HasAttribute(method, dynamicApiIgnoreAttribute)))
-            .Select(method => BuildGeneratedApiControllerAction(method, controllerName, routeTemplate, unitOfWorkAttribute, apiOverrideAttribute))
+            .Select(method => BuildGeneratedApiControllerAction(
+                method,
+                controllerType,
+                controllerName,
+                routeTemplate,
+                unitOfWorkAttribute,
+                apiOverrideAttribute,
+                authorizeAttribute,
+                allowAnonymousAttribute,
+                routeAttribute,
+                producesResponseTypeAttribute,
+                producesAttribute,
+                consumesAttribute))
             .Where(action => action is not null)
             .Cast<ActionModel>()
             .ToImmutableArray();
@@ -257,7 +292,8 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
 
     private static string ResolveGeneratedApiControllerRoute(
         INamedTypeSymbol controllerType,
-        INamedTypeSymbol generatedApiControllerAttribute)
+        INamedTypeSymbol generatedApiControllerAttribute,
+        INamedTypeSymbol? routeAttribute)
     {
         var attributeData = controllerType.GetAttributes()
             .FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, generatedApiControllerAttribute));
@@ -268,6 +304,16 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             !string.IsNullOrWhiteSpace(template))
         {
             return template.Trim('/');
+        }
+
+        if (routeAttribute is not null)
+        {
+            var routeData = controllerType.GetAttributes()
+                .FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, routeAttribute));
+            if (TryGetRouteTemplate(routeData, out var routeTemplate))
+            {
+                return ReplaceRouteTokens(routeTemplate, controllerType, null).Trim('/');
+            }
         }
 
         var controllerName = TrimControllerName(controllerType.Name);
@@ -291,18 +337,39 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
 
     private static ActionModel? BuildGeneratedApiControllerAction(
         IMethodSymbol method,
+        INamedTypeSymbol controllerType,
         string controllerName,
         string routeTemplate,
         INamedTypeSymbol? unitOfWorkAttribute,
-        INamedTypeSymbol? apiOverrideAttribute)
+        INamedTypeSymbol? apiOverrideAttribute,
+        INamedTypeSymbol? authorizeAttribute,
+        INamedTypeSymbol? allowAnonymousAttribute,
+        INamedTypeSymbol? routeAttribute,
+        INamedTypeSymbol? producesResponseTypeAttribute,
+        INamedTypeSymbol? producesAttribute,
+        INamedTypeSymbol? consumesAttribute)
     {
         var httpMethod = ResolveControllerMethodHttpMethod(method);
-        var methodRoute = ResolveControllerMethodRoute(method);
+        var methodRoute = ResolveControllerMethodRoute(method, routeAttribute);
         var relativeRoute = CombineControllerRoute(routeTemplate, methodRoute);
         var actionName = TrimAsyncSuffix(method.Name);
         var parameters = ResolveParameters(method, relativeRoute, httpMethod).ToImmutableArray();
         var returnModel = ResolveReturnModel(method.ReturnType);
         var unitOfWork = ResolveUnitOfWork(method, method, method.ContainingType, method.ContainingType, unitOfWorkAttribute, httpMethod);
+        var allowAnonymous = allowAnonymousAttribute is not null &&
+            (HasAttribute(controllerType, allowAnonymousAttribute) || HasAttribute(method, allowAnonymousAttribute));
+        var metadataCalls = BuildGeneratedApiControllerMetadataCalls(
+            controllerType,
+            method,
+            relativeRoute,
+            returnModel,
+            parameters,
+            authorizeAttribute,
+            allowAnonymousAttribute,
+            routeAttribute,
+            producesResponseTypeAttribute,
+            producesAttribute,
+            consumesAttribute);
 
         CrudAction? overrideAction = null;
         if (apiOverrideAttribute is not null)
@@ -331,6 +398,8 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             method.ContainingType.ToDisplayString(FullyQualifiedFormat),
             unitOfWork.RequiresUnitOfWork,
             unitOfWork.RequiresTransaction,
+            metadataCalls,
+            allowAnonymous,
             overrideAction);
     }
 
@@ -371,7 +440,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         return "GET";
     }
 
-    private static string ResolveControllerMethodRoute(IMethodSymbol method)
+    private static string ResolveControllerMethodRoute(IMethodSymbol method, INamedTypeSymbol? routeAttribute)
     {
         var httpMethodAttributes = method.GetAttributes()
             .Where(attr =>
@@ -389,11 +458,57 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 attr.ConstructorArguments[0].Value is string template &&
                 !string.IsNullOrWhiteSpace(template))
             {
-                return template.Trim('/');
+                return ReplaceRouteTokens(template, method.ContainingType, method).Trim('/');
+            }
+        }
+
+        if (routeAttribute is not null)
+        {
+            var routeData = method.GetAttributes()
+                .FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, routeAttribute));
+            if (TryGetRouteTemplate(routeData, out var routeTemplate))
+            {
+                return ReplaceRouteTokens(routeTemplate, method.ContainingType, method).Trim('/');
             }
         }
 
         return string.Empty;
+    }
+
+    private static bool TryGetRouteTemplate(AttributeData? attribute, out string template)
+    {
+        if (attribute is not null &&
+            attribute.ConstructorArguments.Length > 0 &&
+            attribute.ConstructorArguments[0].Value is string value &&
+            !string.IsNullOrWhiteSpace(value))
+        {
+            template = value;
+            return true;
+        }
+
+        template = string.Empty;
+        return false;
+    }
+
+    private static string ReplaceRouteTokens(string template, INamedTypeSymbol controllerType, IMethodSymbol? method)
+    {
+        var controllerName = TrimControllerName(controllerType.Name);
+        var route = ReplaceRouteToken(template, "[controller]", ToKebabCase(controllerName));
+
+        if (method is not null)
+        {
+            route = ReplaceRouteToken(route, "[action]", ToKebabCase(TrimAsyncSuffix(method.Name)));
+        }
+
+        return route;
+    }
+
+    private static string ReplaceRouteToken(string template, string token, string value)
+    {
+        return template
+            .Replace(token, value)
+            .Replace(token.ToUpperInvariant(), value)
+            .Replace(token.ToLowerInvariant(), value);
     }
 
     private static string CombineControllerRoute(string controllerRouteTemplate, string methodRoute)
@@ -486,7 +601,9 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                     method.Name,
                     serviceType.ToDisplayString(FullyQualifiedFormat),
                     unitOfWork.RequiresUnitOfWork,
-                    unitOfWork.RequiresTransaction);
+                    unitOfWork.RequiresTransaction,
+                    ImmutableArray<string>.Empty,
+                    false);
             }
         }
     }
@@ -516,7 +633,7 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 parameter.Name,
                 parameter.Type.ToDisplayString(FullyQualifiedFormat),
                 source,
-                parameter.IsOptional || parameter.HasExplicitDefaultValue,
+                parameter.IsOptional || parameter.HasExplicitDefaultValue || IsNullableType(parameter.Type),
                 IsScalar(parameter.Type),
                 source == ParameterSource.Query && !IsScalar(parameter.Type)
                     ? BuildQueryProperties(parameter.Type)
@@ -541,9 +658,16 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 property.Name,
                 property.Type.ToDisplayString(FullyQualifiedFormat),
                 IsScalar(property.Type),
-                property.NullableAnnotation == NullableAnnotation.Annotated))
+                property.NullableAnnotation == NullableAnnotation.Annotated || IsNullableType(property.Type)))
             .Where(property => property.IsScalar)
             .ToImmutableArray();
+    }
+
+    private static bool IsNullableType(ITypeSymbol typeSymbol)
+    {
+        return typeSymbol is INamedTypeSymbol namedType &&
+               namedType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
+               namedType.TypeArguments.Length == 1;
     }
 
     private static ReturnModel ResolveReturnModel(ITypeSymbol returnType)
@@ -1168,11 +1292,14 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 builder.AppendLine($"                new[] {{ \"{action.HttpMethod}\" }},");
                 builder.AppendLine($"                async (HttpContext context, [FromServices] {action.ServiceTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
                 builder.AppendLine("                {");
-                builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, {permissionName}.Permissions);");
+                if (!action.AllowAnonymous)
+                {
+                    builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, {permissionName}.Permissions);");
+                }
                 foreach (var parameter in action.Parameters)
                 {
                     builder.AppendLine(GenerateParameterBinding(parameter));
-                    if (parameter.Source != ParameterSource.CancellationToken)
+                    if (parameter.Source != ParameterSource.CancellationToken && !parameter.IsScalar)
                     {
                         builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, {parameter.Name});");
                     }
@@ -1251,12 +1378,15 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 builder.AppendLine($"                new[] {{ \"{action.HttpMethod}\" }},");
                 builder.AppendLine($"                async (HttpContext context, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
                 builder.AppendLine("                {");
-                builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, {permissionName}.Permissions);");
+                if (!action.AllowAnonymous)
+                {
+                    builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, {permissionName}.Permissions);");
+                }
                 builder.AppendLine($"                    var controller = context.RequestServices.GetRequiredService<{action.ServiceTypeName}>();");
                 foreach (var parameter in action.Parameters)
                 {
                     builder.AppendLine(GenerateParameterBinding(parameter));
-                    if (parameter.Source != ParameterSource.CancellationToken)
+                    if (parameter.Source != ParameterSource.CancellationToken && !parameter.IsScalar)
                     {
                         builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, {parameter.Name});");
                     }
@@ -1297,6 +1427,10 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 builder.AppendLine($"            {routeBuilderName}.WithDisplayName(\"{Escape(action.DeclaringTypeName)}.{Escape(action.ActionName)}\");");
                 builder.AppendLine($"            {routeBuilderName}.WithMetadata({permissionName});");
                 builder.AppendLine($"            {routeBuilderName}.WithMetadata(new global::Microsoft.AspNetCore.Http.TagsAttribute(\"{Escape(controller.ControllerName)}\"));");
+                foreach (var metadataCall in action.MetadataCalls)
+                {
+                    builder.AppendLine($"            {routeBuilderName}{metadataCall};");
+                }
                 builder.AppendLine();
                 builder.AppendLine($"            var descriptor_controller_{controllerIndex}_{actionIndex} = new global::CrestCreates.DynamicApi.DynamicApiEndpointDescriptor(");
                 builder.AppendLine($"                \"{Escape(controller.ControllerName)}\",");
@@ -1407,19 +1541,243 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
     private static string GenerateBodyBinding(ParameterModel parameter)
     {
         var builder = new StringBuilder();
-        builder.AppendLine($"                    var {parameter.Name} = await DynamicApiGeneratedRuntime.ReadBodyAsync<{parameter.TypeName}>(context, {ToBooleanLiteral(parameter.IsOptional)});");
+        if (parameter.IsOptional)
+        {
+            builder.AppendLine($"                    var {parameter.Name} = await DynamicApiGeneratedRuntime.ReadBodyAsync<{parameter.TypeName}>(context, true);");
+        }
+        else
+        {
+            builder.AppendLine($"                    var {parameter.Name} = (await DynamicApiGeneratedRuntime.ReadBodyAsync<{parameter.TypeName}>(context, false))!;");
+        }
         return builder.ToString().TrimEnd();
+    }
+
+    private static ImmutableArray<string> BuildGeneratedApiControllerMetadataCalls(
+        INamedTypeSymbol controllerType,
+        IMethodSymbol method,
+        string relativeRoute,
+        ReturnModel returnModel,
+        ImmutableArray<ParameterModel> parameters,
+        INamedTypeSymbol? authorizeAttribute,
+        INamedTypeSymbol? allowAnonymousAttribute,
+        INamedTypeSymbol? routeAttribute,
+        INamedTypeSymbol? producesResponseTypeAttribute,
+        INamedTypeSymbol? producesAttribute,
+        INamedTypeSymbol? consumesAttribute)
+    {
+        var metadataCalls = ImmutableArray.CreateBuilder<string>();
+
+        if (routeAttribute is not null)
+        {
+            metadataCalls.Add($".WithMetadata(new global::Microsoft.AspNetCore.Mvc.RouteAttribute(\"{Escape(relativeRoute)}\"))");
+        }
+
+        if (allowAnonymousAttribute is not null &&
+            (HasAttribute(controllerType, allowAnonymousAttribute) || HasAttribute(method, allowAnonymousAttribute)))
+        {
+            metadataCalls.Add(".WithMetadata(new global::Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute())");
+        }
+        else if (authorizeAttribute is not null)
+        {
+            foreach (var attribute in GetAttributes(controllerType, authorizeAttribute))
+            {
+                metadataCalls.Add(BuildAuthorizeMetadataCall(attribute));
+            }
+
+            foreach (var attribute in GetAttributes(method, authorizeAttribute))
+            {
+                metadataCalls.Add(BuildAuthorizeMetadataCall(attribute));
+            }
+        }
+
+        if (producesResponseTypeAttribute is not null)
+        {
+            foreach (var attribute in GetAttributes(controllerType, producesResponseTypeAttribute))
+            {
+                var metadataCall = BuildProducesResponseTypeMetadataCall(attribute);
+                if (metadataCall is not null)
+                {
+                    metadataCalls.Add(metadataCall);
+                }
+            }
+
+            foreach (var attribute in GetAttributes(method, producesResponseTypeAttribute))
+            {
+                var metadataCall = BuildProducesResponseTypeMetadataCall(attribute);
+                if (metadataCall is not null)
+                {
+                    metadataCalls.Add(metadataCall);
+                }
+            }
+        }
+
+        if (producesAttribute is not null)
+        {
+            foreach (var attribute in GetAttributes(controllerType, producesAttribute))
+            {
+                var metadataCall = BuildStringArrayMetadataCall(attribute, "ProducesAttribute");
+                if (metadataCall is not null)
+                {
+                    metadataCalls.Add(metadataCall);
+                }
+            }
+
+            foreach (var attribute in GetAttributes(method, producesAttribute))
+            {
+                var metadataCall = BuildStringArrayMetadataCall(attribute, "ProducesAttribute");
+                if (metadataCall is not null)
+                {
+                    metadataCalls.Add(metadataCall);
+                }
+            }
+        }
+
+        if (consumesAttribute is not null && parameters.Any(parameter => parameter.Source == ParameterSource.Body))
+        {
+            foreach (var attribute in GetAttributes(controllerType, consumesAttribute))
+            {
+                var metadataCall = BuildStringArrayMetadataCall(attribute, "ConsumesAttribute");
+                if (metadataCall is not null)
+                {
+                    metadataCalls.Add(metadataCall);
+                }
+            }
+
+            foreach (var attribute in GetAttributes(method, consumesAttribute))
+            {
+                var metadataCall = BuildStringArrayMetadataCall(attribute, "ConsumesAttribute");
+                if (metadataCall is not null)
+                {
+                    metadataCalls.Add(metadataCall);
+                }
+            }
+        }
+
+        return metadataCalls.ToImmutable();
+    }
+
+    private static string? BuildProducesResponseTypeMetadataCall(AttributeData attribute)
+    {
+        if (attribute.ConstructorArguments.Length == 2 &&
+            attribute.ConstructorArguments[0].Value is ITypeSymbol responseType &&
+            attribute.ConstructorArguments[1].Value is int statusCode)
+        {
+            return $".WithMetadata(new global::Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute(typeof({responseType.ToDisplayString(FullyQualifiedFormat)}), {statusCode}))";
+        }
+
+        if (attribute.ConstructorArguments.Length == 1 &&
+            attribute.ConstructorArguments[0].Value is int statusCodeOnly)
+        {
+            return $".WithMetadata(new global::Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute({statusCodeOnly}))";
+        }
+
+        return null;
+    }
+
+    private static string? BuildStringArrayMetadataCall(AttributeData attribute, string attributeTypeName)
+    {
+        var contentTypes = new List<string>();
+        foreach (var argument in attribute.ConstructorArguments)
+        {
+            if (argument.Kind == TypedConstantKind.Array)
+            {
+                foreach (var value in argument.Values)
+                {
+                    if (value.Value is string contentType && !string.IsNullOrWhiteSpace(contentType))
+                    {
+                        contentTypes.Add($"\"{Escape(contentType)}\"");
+                    }
+                }
+                continue;
+            }
+
+            if (argument.Value is string contentTypeValue && !string.IsNullOrWhiteSpace(contentTypeValue))
+            {
+                contentTypes.Add($"\"{Escape(contentTypeValue)}\"");
+            }
+        }
+
+        if (contentTypes.Count == 0)
+        {
+            return null;
+        }
+
+        return $".WithMetadata(new global::Microsoft.AspNetCore.Mvc.{attributeTypeName}({string.Join(", ", contentTypes)}))";
+    }
+
+    private static string BuildAuthorizeMetadataCall(AttributeData attribute)
+    {
+        var initializers = new List<string>();
+
+        if (TryGetAuthorizePolicy(attribute, out var policy))
+        {
+            initializers.Add($"Policy = \"{Escape(policy)}\"");
+        }
+
+        if (TryGetAttributeStringValue(attribute, "Roles", out var roles))
+        {
+            initializers.Add($"Roles = \"{Escape(roles)}\"");
+        }
+
+        if (TryGetAttributeStringValue(attribute, "AuthenticationSchemes", out var schemes))
+        {
+            initializers.Add($"AuthenticationSchemes = \"{Escape(schemes)}\"");
+        }
+
+        return initializers.Count == 0
+            ? ".WithMetadata(new global::Microsoft.AspNetCore.Authorization.AuthorizeAttribute())"
+            : $".WithMetadata(new global::Microsoft.AspNetCore.Authorization.AuthorizeAttribute() {{ {string.Join(", ", initializers)} }})";
+    }
+
+    private static bool TryGetAuthorizePolicy(AttributeData attribute, out string policy)
+    {
+        if (attribute.ConstructorArguments.Length > 0 &&
+            attribute.ConstructorArguments[0].Value is string constructorPolicy &&
+            !string.IsNullOrWhiteSpace(constructorPolicy))
+        {
+            policy = constructorPolicy;
+            return true;
+        }
+
+        return TryGetAttributeStringValue(attribute, "Policy", out policy);
+    }
+
+    private static bool TryGetAttributeStringValue(AttributeData attribute, string propertyName, out string value)
+    {
+        foreach (var namedArgument in attribute.NamedArguments)
+        {
+            if (namedArgument.Key.Equals(propertyName, StringComparison.Ordinal) && namedArgument.Value.Value is string namedValue)
+            {
+                value = namedValue;
+                return true;
+            }
+        }
+
+        value = string.Empty;
+        return false;
+    }
+
+    private static IEnumerable<AttributeData> GetAttributes(ISymbol symbol, INamedTypeSymbol attributeSymbol)
+    {
+        return symbol.GetAttributes().Where(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, attributeSymbol));
     }
 
     private static string GenerateParseExpression(string typeName, string rawExpression, bool optional)
     {
         var normalizedType = typeName.EndsWith("?", StringComparison.Ordinal) ? typeName.Substring(0, typeName.Length - 1) : typeName;
 
-        return normalizedType switch
+        if ((normalizedType == "string" || normalizedType == "global::System.String") && optional)
         {
-            "string" or "global::System.String" => optional
-                ? $"string.IsNullOrWhiteSpace({rawExpression}) ? null : {rawExpression}"
-                : $"(!string.IsNullOrWhiteSpace({rawExpression}) ? {rawExpression} : throw new BadHttpRequestException(\"缺少参数\"))",
+            return $"string.IsNullOrWhiteSpace({rawExpression}) ? null : {rawExpression}";
+        }
+
+        if (normalizedType == "string" || normalizedType == "global::System.String")
+        {
+            return $"(!string.IsNullOrWhiteSpace({rawExpression}) ? {rawExpression} : throw new BadHttpRequestException(\"缺少参数\"))";
+        }
+
+        var parseExpression = normalizedType switch
+        {
             "bool" or "global::System.Boolean" => $"bool.Parse({rawExpression})",
             "int" or "global::System.Int32" => $"int.Parse({rawExpression}, CultureInfo.InvariantCulture)",
             "long" or "global::System.Int64" => $"long.Parse({rawExpression}, CultureInfo.InvariantCulture)",
@@ -1434,6 +1792,10 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             "global::System.TimeSpan" => $"TimeSpan.Parse({rawExpression}, CultureInfo.InvariantCulture)",
             _ => $"({normalizedType})Enum.Parse(typeof({normalizedType}), {rawExpression}, true)"
         };
+
+        return optional
+            ? $"string.IsNullOrWhiteSpace({rawExpression}) ? ({normalizedType}?)null : {parseExpression}"
+            : parseExpression;
     }
 
     private static string GetProviderTypeName(string assemblyName)
@@ -1515,6 +1877,8 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         string ServiceTypeName,
         bool RequiresUnitOfWork,
         bool RequiresTransaction,
+        ImmutableArray<string> MetadataCalls,
+        bool AllowAnonymous,
         CrudAction? OverrideAction = null);
 
     private sealed record ParameterModel(

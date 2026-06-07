@@ -19,6 +19,7 @@ using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Repositories.Permission;
+using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore.DbContexts;
@@ -56,10 +57,9 @@ namespace SaaSHelpdesk.Tests.Fixtures;
 /// and wires all required framework services inline.
 /// </summary>
 public sealed class HelpdeskWebApplicationFactory
-    : WebApplicationFactory<Program>, IAsyncLifetime
+    : WebApplicationFactory<global::Program>, IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
-        .WithImage("postgres:16-alpine")
+    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine")
         .WithDatabase("helpdesk_test")
         .WithUsername("test")
         .WithPassword("test")
@@ -307,7 +307,6 @@ public sealed class HelpdeskWebApplicationFactory
             services.RemoveAll<DbContextOptions<CrestCreatesDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<CrestCreatesDbContext>>();
             services.RemoveAll<CrestCreatesDbContext>();
-            services.RemoveAll<CrestCreatesDbContextFactory>();
             services.RemoveAll<DbContextOptions<OpenIddictDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<OpenIddictDbContext>>();
             services.RemoveAll<OpenIddictDbContext>();
@@ -387,22 +386,22 @@ public sealed class HelpdeskWebApplicationFactory
             services.AddScoped<ICustomerPortalAppService, CustomerPortalAppService>();
 
             // Tenant infrastructure — no-op stubs for PostgreSQL testing
-            services.AddScoped<ITenantDatabaseInitializer, NoOpTenantDatabaseInitializer>();
-            services.AddScoped<ITenantMigrationRunner, NoOpTenantMigrationRunner>();
+            services.AddScoped<ITenantDatabaseProvisioner, NoOpTenantDatabaseProvisioner>();
+            services.AddScoped<ITenantSchemaMigrator, NoOpTenantSchemaMigrator>();
             services.AddScoped<ITenantInitializationStore, NoOpTenantInitializationStore>();
         });
     }
 
     // ── No-op tenant infrastructure stubs ───────────────────────────
 
-    private sealed class NoOpTenantDatabaseInitializer : ITenantDatabaseInitializer
+    private sealed class NoOpTenantDatabaseProvisioner : ITenantDatabaseProvisioner
     {
         public Task<TenantDatabaseInitializeResult> InitializeAsync(
             TenantInitializationContext context, CancellationToken cancellationToken = default)
             => Task.FromResult(TenantDatabaseInitializeResult.Succeeded());
     }
 
-    private sealed class NoOpTenantMigrationRunner : ITenantMigrationRunner
+    private sealed class NoOpTenantSchemaMigrator : ITenantSchemaMigrator
     {
         public Task<TenantMigrationResult> RunAsync(
             TenantInitializationContext context, CancellationToken cancellationToken = default)
@@ -412,32 +411,32 @@ public sealed class HelpdeskWebApplicationFactory
     private sealed class NoOpTenantInitializationStore : ITenantInitializationStore
     {
         public Task<TenantInitializationRecord?> TryBeginInitializationAsync(
-            Guid tenantId, string correlationId, CancellationToken cancellationToken)
+            Guid tenantId, string correlationId, CancellationToken cancellationToken = default)
             => Task.FromResult<TenantInitializationRecord?>(
                 new TenantInitializationRecord(Guid.NewGuid(), tenantId, 1, correlationId));
 
-        public Task<TenantInitializationRecord?> ForceBeginInitializationAsync(
-            Guid tenantId, string correlationId, string reason, CancellationToken cancellationToken)
-            => Task.FromResult<TenantInitializationRecord?>(
+        public Task<TenantInitializationRecord> ForceBeginInitializationAsync(
+            Guid tenantId, string correlationId, string reason, CancellationToken cancellationToken = default)
+            => Task.FromResult(
                 new TenantInitializationRecord(Guid.NewGuid(), tenantId, 1, correlationId));
 
         public Task<TenantInitializationRecord?> GetLatestAsync(
-            Guid tenantId, CancellationToken cancellationToken)
+            Guid tenantId, CancellationToken cancellationToken = default)
             => Task.FromResult<TenantInitializationRecord?>(null);
 
-        public Task UpdateAsync(TenantInitializationRecord record, CancellationToken cancellationToken)
+        public Task UpdateAsync(TenantInitializationRecord record, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
         public Task ForceFailAsync(
-            Guid tenantId, string correlationId, CancellationToken cancellationToken)
+            Guid tenantId, string correlationId, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
         public Task CompleteInitializationAsync(
-            Guid tenantId, TenantInitializationRecord record, CancellationToken cancellationToken)
+            Guid tenantId, TenantInitializationRecord record, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
         public Task FailInitializationAsync(
-            Guid tenantId, TenantInitializationRecord record, string sanitizedError, CancellationToken cancellationToken)
+            Guid tenantId, TenantInitializationRecord record, string sanitizedError, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
     }
 }

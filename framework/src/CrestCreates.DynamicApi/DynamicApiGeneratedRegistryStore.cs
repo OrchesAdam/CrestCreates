@@ -40,7 +40,8 @@ public static class DynamicApiGeneratedRegistryStore
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var registries = new List<DynamicApiRegistry>();
+        var serviceKeys = new HashSet<string>(StringComparer.Ordinal);
+        var services = new List<DynamicApiServiceDescriptor>();
         foreach (var provider in GetProviders())
         {
             if (!TryGetMatchingGeneratedRegistry(provider, options, out var registry))
@@ -48,15 +49,22 @@ public static class DynamicApiGeneratedRegistryStore
                 continue;
             }
 
-            registries.Add(registry);
+            foreach (var service in registry.Services)
+            {
+                var key = $"{service.ServiceType.Assembly.FullName}|{service.ServiceType.FullName}|{service.RoutePrefix}";
+                if (serviceKeys.Add(key))
+                {
+                    services.Add(service);
+                }
+            }
         }
 
-        if (registries.Count == 0)
+        if (services.Count == 0)
         {
             return null;
         }
 
-        return new DynamicApiRegistry(registries.SelectMany(registry => registry.Services).ToArray());
+        return new DynamicApiRegistry(services);
     }
 
     public static DynamicApiRegistry BuildRequiredRegistry(DynamicApiOptions options)
@@ -68,10 +76,12 @@ public static class DynamicApiGeneratedRegistryStore
     {
         ArgumentNullException.ThrowIfNull(options);
 
+        var descriptorKeys = new HashSet<string>(StringComparer.Ordinal);
         return GetProviders()
             .SelectMany(provider => provider.EndpointDescriptors)
             .Where(descriptor => options.ServiceAssemblies.Count == 0 ||
                                  options.ServiceAssemblies.Contains(descriptor.ServiceType.Assembly))
+            .Where(descriptor => descriptorKeys.Add(CreateEndpointDescriptorKey(descriptor)))
             .ToArray();
     }
 
@@ -81,6 +91,7 @@ public static class DynamicApiGeneratedRegistryStore
         ArgumentNullException.ThrowIfNull(options);
 
         var mapped = false;
+        var mappedEndpointKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var provider in GetProviders())
         {
             if (!TryGetMatchingGeneratedRegistry(provider, options, out _))
@@ -88,11 +99,37 @@ public static class DynamicApiGeneratedRegistryStore
                 continue;
             }
 
+            var matchingEndpointKeys = provider.EndpointDescriptors
+                .Where(descriptor => options.ServiceAssemblies.Count == 0 ||
+                                     options.ServiceAssemblies.Contains(descriptor.ServiceType.Assembly))
+                .Select(CreateEndpointDescriptorKey)
+                .ToArray();
+            if (matchingEndpointKeys.Length > 0 &&
+                matchingEndpointKeys.All(key => mappedEndpointKeys.Contains(key)))
+            {
+                continue;
+            }
+
             provider.MapEndpoints(endpoints, options);
+            foreach (var key in matchingEndpointKeys)
+            {
+                mappedEndpointKeys.Add(key);
+            }
+
             mapped = true;
         }
 
         return mapped;
+    }
+
+    private static string CreateEndpointDescriptorKey(DynamicApiEndpointDescriptor descriptor)
+    {
+        return string.Join(
+            "|",
+            descriptor.ServiceType.Assembly.FullName,
+            descriptor.ServiceType.FullName,
+            descriptor.HttpMethod,
+            descriptor.RoutePattern);
     }
 
     private static bool TryGetMatchingGeneratedRegistry(

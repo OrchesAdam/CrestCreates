@@ -76,6 +76,8 @@ public static class CrestCreatesWebApplicationExtensions
         var services = builder.Services;
         var configuration = builder.Configuration;
 
+        services.AddSingleton(options);
+
         services.AddCrestLogging(configuration);
         services.Configure<AuditLoggingOptions>(configuration.GetSection(AuditLoggingOptions.SectionName));
         services.AddScoped<AuditLoggingMiddleware>();
@@ -150,6 +152,8 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
 
+        services.AddSingleton<LocalEventBusOptions>();
+        services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
         services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
         services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
         services.AddScoped<CrestCreates.Domain.DomainEvents.IDomainEventPublisher, DomainEventPublisher>();
@@ -198,7 +202,12 @@ public static class CrestCreatesWebApplicationExtensions
 
     public static WebApplication MapCrestWeb(this WebApplication app)
     {
-        app.MapCrestOpenIddictEndpoints();
+        var options = app.Services.GetRequiredService<CrestWebOptions>();
+        if (options.EnableOpenIddict)
+        {
+            app.MapCrestOpenIddictEndpoints();
+        }
+
         app.MapCrestAspNetCoreDynamicApi();
         app.MapCrestOpenApi();
         return app;
