@@ -87,6 +87,34 @@ public class DynamicApiExtensionsTests
     }
 
     [Fact]
+    public void ProviderFromUnrelatedAssembly_ShouldNotSatisfyConfiguredServiceAssemblies()
+    {
+        using var scope = new DynamicApiRegistryStoreSnapshot();
+
+        var provider = new UnrelatedAssemblyProvider();
+        DynamicApiGeneratedRegistryStore.Register(provider);
+
+        var options = new DynamicApiOptions();
+        options.AddApplicationServiceAssembly(typeof(string).Assembly);
+
+        var registry = DynamicApiGeneratedRegistryStore.BuildRegistry(options);
+        registry.Should().BeNull();
+
+        var services = new ServiceCollection();
+        services.AddRouting();
+        services.AddCrestDynamicApi(configure: dynamicApiOptions =>
+            dynamicApiOptions.AddApplicationServiceAssembly(typeof(string).Assembly));
+
+        using var serviceProvider = services.BuildServiceProvider();
+        var endpointRouteBuilder = new DefaultEndpointRouteBuilder(serviceProvider);
+
+        var action = () => endpointRouteBuilder.MapCrestDynamicApi();
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*编译期生成的 provider*");
+    }
+
+    [Fact]
     public void MapCrestDynamicApi_WithoutGeneratedProviderAndWithoutFallback_Throws()
     {
         using var scope = new DynamicApiRegistryStoreSnapshot();
@@ -187,6 +215,39 @@ public class DynamicApiExtensionsTests
     }
 
     private sealed class ControllerOnlyApi
+    {
+    }
+
+    private sealed class UnrelatedAssemblyProvider : IDynamicApiGeneratedProvider
+    {
+        public IReadOnlyCollection<System.Reflection.Assembly> ServiceAssemblies => Array.Empty<System.Reflection.Assembly>();
+
+        public IReadOnlyCollection<DynamicApiEndpointDescriptor> EndpointDescriptors { get; } =
+            new[]
+            {
+                new DynamicApiEndpointDescriptor(
+                    "Unrelated",
+                    "Get",
+                    "GET",
+                    string.Empty,
+                    typeof(UnrelatedApi),
+                    null,
+                    typeof(string),
+                    Array.Empty<string>(),
+                    false)
+            };
+
+        public DynamicApiRegistry CreateRegistry(DynamicApiOptions options)
+        {
+            return new DynamicApiRegistry(Array.Empty<DynamicApiServiceDescriptor>());
+        }
+
+        public void MapEndpoints(IEndpointRouteBuilder endpoints, DynamicApiOptions options)
+        {
+        }
+    }
+
+    private sealed class UnrelatedApi
     {
     }
 }

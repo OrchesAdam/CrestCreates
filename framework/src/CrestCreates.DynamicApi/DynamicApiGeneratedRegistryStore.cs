@@ -40,11 +40,18 @@ public static class DynamicApiGeneratedRegistryStore
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var registries = GetProviders()
-            .Select(provider => provider.CreateRegistry(options))
-            .ToArray();
+        var registries = new List<DynamicApiRegistry>();
+        foreach (var provider in GetProviders())
+        {
+            if (!TryGetMatchingGeneratedRegistry(provider, options, out var registry))
+            {
+                continue;
+            }
 
-        if (registries.Length == 0)
+            registries.Add(registry);
+        }
+
+        if (registries.Count == 0)
         {
             return null;
         }
@@ -76,12 +83,32 @@ public static class DynamicApiGeneratedRegistryStore
         var mapped = false;
         foreach (var provider in GetProviders())
         {
-            _ = provider.CreateRegistry(options);
+            if (!TryGetMatchingGeneratedRegistry(provider, options, out _))
+            {
+                continue;
+            }
+
             provider.MapEndpoints(endpoints, options);
             mapped = true;
         }
 
         return mapped;
+    }
+
+    private static bool TryGetMatchingGeneratedRegistry(
+        IDynamicApiGeneratedProvider provider,
+        DynamicApiOptions options,
+        out DynamicApiRegistry registry)
+    {
+        registry = provider.CreateRegistry(options);
+        if (registry.Services.Count > 0)
+        {
+            return true;
+        }
+
+        return provider.EndpointDescriptors.Any(descriptor =>
+            options.ServiceAssemblies.Count == 0 ||
+            options.ServiceAssemblies.Contains(descriptor.ServiceType.Assembly));
     }
 
     public static InvalidOperationException CreateMissingGeneratedProviderException(DynamicApiOptions options)
