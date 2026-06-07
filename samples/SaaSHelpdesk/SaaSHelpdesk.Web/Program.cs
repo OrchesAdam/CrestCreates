@@ -46,3 +46,5 @@ app.MapCrestWeb();
 await app.InitializeCrestAsync();
 
 app.Run();
+
+public partial class Program;

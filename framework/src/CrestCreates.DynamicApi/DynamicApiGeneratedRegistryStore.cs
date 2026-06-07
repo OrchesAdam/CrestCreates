@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.DynamicApi;
 
@@ -7,10 +8,27 @@ public static class DynamicApiGeneratedRegistryStore
 {
     private static readonly ConcurrentDictionary<string, IDynamicApiGeneratedProvider> Providers = new(StringComparer.Ordinal);
 
+    private static readonly ConcurrentBag<Action<IServiceCollection>> ControllerRegistrationCallbacks = new();
+
     public static void Register(IDynamicApiGeneratedProvider provider)
     {
         ArgumentNullException.ThrowIfNull(provider);
         Providers.TryAdd(provider.GetType().FullName ?? provider.GetType().Name, provider);
+    }
+
+    public static void RegisterControllerConfigurator(Action<IServiceCollection> configurator)
+    {
+        ArgumentNullException.ThrowIfNull(configurator);
+        ControllerRegistrationCallbacks.Add(configurator);
+    }
+
+    public static void ApplyControllerRegistrations(IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        foreach (var callback in ControllerRegistrationCallbacks)
+        {
+            callback(services);
+        }
     }
 
     public static IReadOnlyCollection<IDynamicApiGeneratedProvider> GetProviders()

@@ -31,6 +31,8 @@ public static class DynamicApiExtensions
             throw DynamicApiGeneratedRegistryStore.CreateMissingGeneratedProviderException(dynamicApiOptions);
         });
 
+        DynamicApiGeneratedRegistryStore.ApplyControllerRegistrations(services);
+
         return services;
     }
 

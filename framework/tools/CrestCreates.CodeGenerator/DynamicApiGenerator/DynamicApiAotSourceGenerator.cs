@@ -1332,6 +1332,12 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         builder.AppendLine();
         builder.AppendLine("internal static class GeneratedDynamicApiControllerRegistrations");
         builder.AppendLine("{");
+        builder.AppendLine("    [System.Runtime.CompilerServices.ModuleInitializer]");
+        builder.AppendLine("    internal static void AutoRegister()");
+        builder.AppendLine("    {");
+        builder.AppendLine("        CrestCreates.DynamicApi.DynamicApiGeneratedRegistryStore.RegisterControllerConfigurator(RegisterControllers);");
+        builder.AppendLine("    }");
+        builder.AppendLine();
         builder.AppendLine("    public static void RegisterControllers(IServiceCollection services)");
         builder.AppendLine("    {");
         foreach (var controller in context.Controllers)

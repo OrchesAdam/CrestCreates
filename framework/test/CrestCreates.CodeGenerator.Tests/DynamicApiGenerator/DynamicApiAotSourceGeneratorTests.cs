@@ -204,6 +204,7 @@ public class DynamicApiAotSourceGeneratorTests
                using System.Threading.Tasks;
                using Microsoft.AspNetCore.Http;
                using Microsoft.AspNetCore.Routing;
+               using Microsoft.Extensions.DependencyInjection;
                using CrestCreates.Authorization.Abstractions;
                using CrestCreates.Validation.Modules;
 
@@ -453,6 +454,8 @@ public class DynamicApiAotSourceGeneratorTests
                        public static DynamicApiRegistry? BuildRegistry(DynamicApiOptions options) => null;
                        public static DynamicApiRegistry BuildRequiredRegistry(DynamicApiOptions options) => new(Array.Empty<DynamicApiServiceDescriptor>());
                        public static bool MapGeneratedEndpoints(IEndpointRouteBuilder endpoints, DynamicApiOptions options) => false;
+                       public static void RegisterControllerConfigurator(Action<IServiceCollection> configurator) { }
+                       public static void ApplyControllerRegistrations(IServiceCollection services) { }
                    }
 
                    public static class DynamicApiGeneratedRuntime
