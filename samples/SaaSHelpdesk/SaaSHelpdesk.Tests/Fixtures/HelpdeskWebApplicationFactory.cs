@@ -22,6 +22,7 @@ using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Data.Abstractions;
+using CrestCreates.Data.EFCore;
 using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.Data.EFCore.Repositories;
@@ -41,6 +42,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 using OpenIddict.Abstractions;
 using OpenIddict.EntityFrameworkCore;
@@ -72,6 +74,21 @@ public sealed class HelpdeskWebApplicationFactory
     private bool _seedCompleted;
 
     internal NpgsqlConnection SharedConnection => _sharedConnection;
+
+    /// <summary>
+    /// Migration/seed call counter for verifying single-ownership startup side effects.
+    /// Resolved lazily from the application Services container.
+    /// </summary>
+    public MigrationSeedCallCounter MigrationSeedCounter
+    {
+        get
+        {
+            _migrationSeedCounter ??= Services.GetRequiredService<MigrationSeedCallCounter>();
+            return _migrationSeedCounter;
+        }
+    }
+
+    private MigrationSeedCallCounter? _migrationSeedCounter;
 
     /// <summary>
     /// Full connection string with schema search path for the isolated test schema.
@@ -296,6 +313,14 @@ public sealed class HelpdeskWebApplicationFactory
         {
             // Module system resolves IServiceCollection post-build for OnConfigureServices
             services.AddSingleton<IServiceCollection>(services);
+
+            // Migration/seed call counter and counted runner to verify single-ownership startup
+            services.AddSingleton<MigrationSeedCallCounter>();
+            services.RemoveAll<HostMigrationAndSeedRunner>();
+            services.AddSingleton<HostMigrationAndSeedRunner>(sp => new CountedHostMigrationAndSeedRunner(
+                sp.GetRequiredService<IEnumerable<Type>>(),
+                sp.GetRequiredService<ILogger<HostMigrationAndSeedRunner>>(),
+                sp.GetRequiredService<MigrationSeedCallCounter>()));
 
             // Data filter state — enables tenant-filter on queries
             services.AddScoped<DataFilterState>();

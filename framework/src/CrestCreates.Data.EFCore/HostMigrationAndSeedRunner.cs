@@ -30,7 +30,7 @@ public class HostMigrationAndSeedRunner
         _logger = logger;
     }
 
-    public async Task RunAsync(IServiceProvider serviceProvider, CancellationToken cancellationToken = default)
+    public virtual async Task RunAsync(IServiceProvider serviceProvider, CancellationToken cancellationToken = default)
     {
         await RunMigrationsAsync(serviceProvider, cancellationToken);
         await RunDataSeedersAsync(serviceProvider, cancellationToken);
