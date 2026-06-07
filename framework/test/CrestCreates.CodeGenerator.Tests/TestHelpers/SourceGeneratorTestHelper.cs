@@ -353,10 +353,16 @@ namespace CrestCreates.Domain.Shared.Attributes
 
             TryAddReference(references, "CrestCreates.DynamicApi");
             TryAddReference(references, "CrestCreates.Aop");
+            TryAddReference(references, "CrestCreates.Web");
             TryAddReference(references, "Microsoft.AspNetCore.Routing");
             TryAddReference(references, "Microsoft.AspNetCore.Http.Abstractions");
             TryAddReference(references, "Microsoft.Extensions.DependencyInjection");
             TryAddReference(references, "Microsoft.Extensions.DependencyInjection.Abstractions");
+            TryAddReference(references, "Microsoft.Extensions.Hosting");
+            TryAddReference(references, "Microsoft.Extensions.Hosting.Abstractions");
+
+            // For tests that need WebApplication, load Microsoft.AspNetCore from the ASP.NET Core ref pack
+            AddAspNetCoreReference(references);
 
             // 创建语法树
             var syntaxTrees = new List<SyntaxTree>();
@@ -407,6 +413,45 @@ namespace CrestCreates.Domain.Shared.Attributes
             catch
             {
                 // 忽略加载失败的程序集
+            }
+        }
+
+        /// <summary>
+        /// Add Microsoft.AspNetCore reference assembly so that source generators
+        /// can detect WebApplication type availability.
+        /// </summary>
+        private static void AddAspNetCoreReference(List<MetadataReference> references)
+        {
+            try
+            {
+                var assembly = System.Reflection.Assembly.Load("Microsoft.AspNetCore");
+                references.Add(MetadataReference.CreateFromFile(assembly.Location));
+            }
+            catch
+            {
+                // Fallback: locate the reference assembly from the .NET SDK packs directory
+                try
+                {
+                    var runtimeDir = System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory();
+                    var packsDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(runtimeDir, "..", "..", "packs"));
+                    if (System.IO.Directory.Exists(packsDir))
+                    {
+                        var refDirs = System.IO.Directory.GetDirectories(packsDir, "Microsoft.AspNetCore.App.Ref");
+                        if (refDirs.Length > 0)
+                        {
+                            var latestRef = refDirs.OrderDescending().First();
+                            var dllPath = System.IO.Path.Combine(latestRef, "ref", "net10.0", "Microsoft.AspNetCore.dll");
+                            if (System.IO.File.Exists(dllPath))
+                            {
+                                references.Add(MetadataReference.CreateFromFile(dllPath));
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // 忽略加载失败
+                }
             }
         }
 

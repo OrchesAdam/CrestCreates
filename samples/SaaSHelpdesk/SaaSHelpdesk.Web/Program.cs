@@ -45,7 +45,7 @@ var app = builder.Build();
 app.UseCrestWeb();
 app.MapCrestWeb();
 
-await app.InitializeModulesAsync();
+await app.InitializeCrestApplicationAsync();
 
 app.Run();
 

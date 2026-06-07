@@ -23,7 +23,9 @@ public class ModuleSourceGenerator : IIncrementalGenerator
                 transform: static (ctx, _) => GetModuleInfo(ctx))
             .Where(static m => m is not null);
 
-        context.RegisterSourceOutput(modulesProvider.Collect(), GenerateModuleCode);
+        var modulesAndCompilation = modulesProvider.Collect().Combine(context.CompilationProvider);
+
+        context.RegisterSourceOutput(modulesAndCompilation, GenerateModuleCode);
     }
 
     private static ModuleInfo? GetModuleInfo(GeneratorSyntaxContext context)
@@ -95,12 +97,24 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         return new ModuleInfo(symbol.Name, symbol.ContainingNamespace.ToDisplayString(), dependsOn, order, autoRegister, hasParameterlessCtor);
     }
 
-    private static void GenerateModuleCode(SourceProductionContext context, ImmutableArray<ModuleInfo?> modules)
+    private static void GenerateModuleCode(SourceProductionContext context, (ImmutableArray<ModuleInfo?>, Compilation) combined)
     {
+        var (modules, compilation) = combined;
         var validModules = modules.Where(m => m is not null).Cast<ModuleInfo>().ToList();
         if (validModules.Count == 0) return;
 
         GenerateModuleExtensions(context, validModules);
+
+        // Emit app-local application initializer only when the project is a web app
+        // that has the BuildTasks-generated ModuleAutoInitializer with InitializeModulesAsync.
+        // We check for CrestCreates.Web.Module.WebModule as a proxy for "this is a real web app,
+        // not a test/framework library project that happens to have WebApplication available."
+        var webApplicationType = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Builder.WebApplication");
+        var webModuleType = compilation.GetTypeByMetadataName("CrestCreates.Web.Module.WebModule");
+        if (webApplicationType is not null && webModuleType is not null)
+        {
+            GenerateAppLocalApplicationInitializer(context);
+        }
     }
 
     private static void GenerateModuleExtensions(SourceProductionContext context, List<ModuleInfo> modules)
@@ -112,6 +126,25 @@ public class ModuleSourceGenerator : IIncrementalGenerator
             var extensionCode = GenerateSingleModuleExtension(module);
             context.AddSource($"{module.Name}Extensions.g.cs", SourceText.From(extensionCode, Encoding.UTF8));
         }
+    }
+
+    private static void GenerateAppLocalApplicationInitializer(SourceProductionContext context)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("#nullable enable");
+        sb.AppendLine("using System.Threading.Tasks;");
+        sb.AppendLine("using CrestCreates.Modularity;");
+        sb.AppendLine();
+        sb.AppendLine("namespace Microsoft.AspNetCore.Builder;");
+        sb.AppendLine();
+        sb.AppendLine("public static partial class CrestGeneratedApplicationInitializationExtensions");
+        sb.AppendLine("{");
+        sb.AppendLine("    public static Task InitializeCrestApplicationAsync(this WebApplication app)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        return app.InitializeModulesAsync();");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        context.AddSource("CrestApplicationInitialization.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
     }
 
     private static void GenerateAutoModuleRegistration(SourceProductionContext context, List<ModuleInfo> sortedModules)
