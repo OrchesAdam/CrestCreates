@@ -88,31 +88,33 @@ public class GeneratedApiControllerSourceGeneratorTests
     }
 
     [Fact]
-    public async Task ShouldUseApiOverrideToReplaceDefaultGetListEndpoint()
+    public async Task ShouldUseApiOverrideToReplaceDefaultGetAllEndpoint()
     {
         var source = """
             using CrestCreates.Domain.Shared.Attributes;
             using CrestCreates.DynamicApi;
+            using Microsoft.AspNetCore.Mvc;
             using System.Threading.Tasks;
 
             namespace Sample;
 
             public interface IBookAppService
             {
-                Task<string> GetListAsync();
+                Task<string> GetAllAsync();
             }
 
             [CrestService]
             public sealed class BookAppService : IBookAppService
             {
-                public Task<string> GetListAsync() => Task.FromResult("default");
+                public Task<string> GetAllAsync() => Task.FromResult("default");
             }
 
             [GeneratedApiController("api/book")]
             public partial class BookApi : CrestApiController
             {
+                [HttpGet("all")]
                 [ApiOverride(CrudAction.GetList)]
-                public Task<string> GetListAsync()
+                public Task<string> GetAllAsync()
                 {
                     return Task.FromResult("custom");
                 }
@@ -129,10 +131,57 @@ public class GeneratedApiControllerSourceGeneratorTests
         generated.Should().NotBeNull();
 
         generated.SourceText.Should().Contain("BookApi");
-        generated.SourceText.Should().Contain("GetListAsync()");
+        generated.SourceText.Should().Contain("GetAllAsync()");
+        generated.SourceText.Should().Contain("api/book/all");
         // The default service endpoint for the same CRUD action should NOT be generated
         // (the controller's override suppresses it)
-        generated.SourceText.Should().NotContain("IBookAppService.GetList");
+        generated.SourceText.Should().NotContain("IBookAppService.GetAll");
+    }
+
+    [Fact]
+    public async Task ShouldGenerateControllerOnlyEndpointsWithoutCrestService()
+    {
+        var source = """
+            using CrestCreates.DynamicApi;
+            using Microsoft.AspNetCore.Mvc;
+            using System.Threading.Tasks;
+
+            namespace Sample;
+
+            [GeneratedApiController("api/ping")]
+            public partial class PingApi : CrestApiController
+            {
+                [HttpGet]
+                public Task<string> GetAsync()
+                {
+                    return Task.FromResult("pong");
+                }
+            }
+            """;
+
+        var result = await SourceGeneratorTestHelper.RunGeneratorAsync<DynamicApiAotSourceGenerator>(
+            source,
+            additionalSources: new[] { DynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs(), BuildGeneratedApiControllerStubs() });
+
+        result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
+
+        result.ContainsFile("GeneratedDynamicApiRegistry.g.cs").Should().BeTrue();
+        result.ContainsFile("GeneratedDynamicApiEndpoints.g.cs").Should().BeTrue();
+        result.ContainsFile("GeneratedDynamicApiControllerRegistrations.g.cs").Should().BeTrue();
+
+        var registrySource = result.GetSourceByFileName("GeneratedDynamicApiRegistry.g.cs");
+        registrySource.Should().NotBeNull();
+        registrySource!.SourceText
+            .Should().Contain("EndpointDescriptors")
+            .And.Contain("\"Ping\"")
+            .And.Contain("\"Get\"");
+
+        var endpointsSource = result.GetSourceByFileName("GeneratedDynamicApiEndpoints.g.cs");
+        endpointsSource.Should().NotBeNull();
+        endpointsSource!.SourceText
+            .Should().Contain("MapMethods")
+            .And.Contain("api/ping")
+            .And.Contain("GetRequiredService<global::Sample.PingApi>()");
     }
 
     private static string BuildGeneratedApiControllerStubs()

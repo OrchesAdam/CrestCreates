@@ -75,10 +75,6 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
         }
 
         var crestServiceAttribute = compilation.GetTypeByMetadataName("CrestCreates.Domain.Shared.Attributes.CrestServiceAttribute");
-        if (crestServiceAttribute is null)
-        {
-            return null;
-        }
 
         var dynamicApiIgnoreAttribute = compilation.GetTypeByMetadataName("CrestCreates.Domain.Shared.Attributes.DynamicApiIgnoreAttribute");
         var dynamicApiRouteAttribute = compilation.GetTypeByMetadataName("CrestCreates.Domain.Shared.Attributes.DynamicApiRouteAttribute");
@@ -90,7 +86,8 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
 
         foreach (var type in EnumerateNamedTypes(compilation.Assembly).Concat(compilation.SourceModule.ReferencedAssemblySymbols.SelectMany(EnumerateNamedTypes)))
         {
-            if (IsDynamicApiImplementation(type, crestServiceAttribute, dynamicApiIgnoreAttribute))
+            if (crestServiceAttribute is not null &&
+                IsDynamicApiImplementation(type, crestServiceAttribute, dynamicApiIgnoreAttribute))
             {
                 services.AddRange(BuildServiceModels(type, dynamicApiIgnoreAttribute, dynamicApiRouteAttribute, unitOfWorkAttribute));
             }
@@ -797,6 +794,11 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
             return CrudAction.GetList;
         }
 
+        if (normalized == "GetAll")
+        {
+            return CrudAction.GetList;
+        }
+
         if (normalized == "Update")
         {
             return CrudAction.Update;
@@ -975,6 +977,30 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 builder.AppendLine($"                \"{action.HttpMethod}\",");
                 builder.AppendLine($"                \"{routePattern}\",");
                 builder.AppendLine($"                typeof({service.ServiceTypeName}),");
+                builder.AppendLine($"                {requestType},");
+                builder.AppendLine($"                {responseType},");
+                builder.AppendLine($"                {permissions},");
+                builder.AppendLine($"                {requiresTransaction}),");
+            }
+        }
+        for (var controllerIndex = 0; controllerIndex < context.Controllers.Length; controllerIndex++)
+        {
+            var controller = context.Controllers[controllerIndex];
+            for (var actionIndex = 0; actionIndex < controller.Actions.Length; actionIndex++)
+            {
+                var action = controller.Actions[actionIndex];
+                var requestType = ResolveRequestTypeFromAction(action);
+                var responseType = action.ReturnModel.PayloadTypeName is not null
+                    ? $"typeof({GetTypeOfTypeName(action.ReturnModel.PayloadTypeName)})"
+                    : "null";
+                var permissions = $"new[] {{ \"{Escape(action.PermissionName)}\" }}";
+                var requiresTransaction = ToBooleanLiteral(action.RequiresTransaction);
+                builder.AppendLine($"            new DynamicApiEndpointDescriptor(");
+                builder.AppendLine($"                \"{Escape(controller.ControllerName)}\",");
+                builder.AppendLine($"                \"{Escape(action.ActionName)}\",");
+                builder.AppendLine($"                \"{action.HttpMethod}\",");
+                builder.AppendLine($"                \"{Escape(action.RelativeRoute)}\",");
+                builder.AppendLine($"                typeof({action.ServiceTypeName}),");
                 builder.AppendLine($"                {requestType},");
                 builder.AppendLine($"                {responseType},");
                 builder.AppendLine($"                {permissions},");

@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using CrestCreates.DynamicApi;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
@@ -13,6 +15,7 @@ public class DynamicApiExtensionsTests
     [Fact]
     public void AddCrestDynamicApi_WithoutGeneratedProvider_ThrowsWhenResolvingRegistry()
     {
+        using var scope = new DynamicApiRegistryStoreSnapshot();
         var services = new ServiceCollection();
 
         services.AddCrestDynamicApi(options => options.AddApplicationServiceAssembly(typeof(string).Assembly));
@@ -35,6 +38,7 @@ public class DynamicApiExtensionsTests
     [Fact]
     public void AddCrestDynamicApi_WithoutGeneratedProvider_ErrorShouldNotMentionRuntimeFallback()
     {
+        using var scope = new DynamicApiRegistryStoreSnapshot();
         var services = new ServiceCollection();
 
         services.AddCrestDynamicApi(options => options.AddApplicationServiceAssembly(typeof(string).Assembly));
@@ -51,8 +55,41 @@ public class DynamicApiExtensionsTests
     }
 
     [Fact]
+    public void ControllerOnlyProvider_ShouldBuildRegistryAndMapEndpoints()
+    {
+        using var scope = new DynamicApiRegistryStoreSnapshot();
+
+        var provider = new ControllerOnlyProvider();
+        DynamicApiGeneratedRegistryStore.Register(provider);
+
+        var options = new DynamicApiOptions();
+
+        var registry = DynamicApiGeneratedRegistryStore.BuildRegistry(options);
+        registry.Should().NotBeNull();
+        registry!.Services.Should().BeEmpty();
+
+        var descriptors = DynamicApiGeneratedRegistryStore.GetEndpointDescriptors(options);
+        descriptors.Should().ContainSingle(descriptor =>
+            descriptor.ServiceName == "Ping" &&
+            descriptor.ActionName == "Get" &&
+            descriptor.ServiceType == typeof(ControllerOnlyApi) &&
+            descriptor.RoutePattern == string.Empty);
+
+        var services = new ServiceCollection();
+        services.AddRouting();
+        using var serviceProvider = services.BuildServiceProvider();
+        var endpointRouteBuilder = new DefaultEndpointRouteBuilder(serviceProvider);
+
+        var mapped = DynamicApiGeneratedRegistryStore.MapGeneratedEndpoints(endpointRouteBuilder, options);
+
+        mapped.Should().BeTrue();
+        provider.MapCalled.Should().BeTrue();
+    }
+
+    [Fact]
     public void MapCrestDynamicApi_WithoutGeneratedProviderAndWithoutFallback_Throws()
     {
+        using var scope = new DynamicApiRegistryStoreSnapshot();
         var services = new ServiceCollection();
         services.AddRouting();
         services.AddCrestDynamicApi(options => options.AddApplicationServiceAssembly(typeof(string).Assembly));
@@ -82,5 +119,74 @@ public class DynamicApiExtensionsTests
         {
             throw new NotSupportedException();
         }
+    }
+
+    private sealed class DynamicApiRegistryStoreSnapshot : IDisposable
+    {
+        private static readonly FieldInfo ProvidersField =
+            typeof(DynamicApiGeneratedRegistryStore).GetField("Providers", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("Providers field not found.");
+
+        private readonly (string Key, IDynamicApiGeneratedProvider Provider)[] _providers;
+
+        public DynamicApiRegistryStoreSnapshot()
+        {
+            var providers = (IEnumerable<KeyValuePair<string, IDynamicApiGeneratedProvider>>)ProvidersField.GetValue(null)!;
+            _providers = providers.ToArray().Select(pair => (pair.Key, pair.Value)).ToArray();
+
+            ClearStore();
+        }
+
+        public void Dispose()
+        {
+            ClearStore();
+
+            var providers = (ICollection<KeyValuePair<string, IDynamicApiGeneratedProvider>>)ProvidersField.GetValue(null)!;
+            foreach (var (key, provider) in _providers)
+            {
+                providers.Add(new KeyValuePair<string, IDynamicApiGeneratedProvider>(key, provider));
+            }
+        }
+
+        private static void ClearStore()
+        {
+            ((ICollection<KeyValuePair<string, IDynamicApiGeneratedProvider>>)ProvidersField.GetValue(null)!).Clear();
+        }
+    }
+
+    private sealed class ControllerOnlyProvider : IDynamicApiGeneratedProvider
+    {
+        public bool MapCalled { get; private set; }
+
+        public IReadOnlyCollection<System.Reflection.Assembly> ServiceAssemblies => Array.Empty<System.Reflection.Assembly>();
+
+        public IReadOnlyCollection<DynamicApiEndpointDescriptor> EndpointDescriptors { get; } =
+            new[]
+            {
+                new DynamicApiEndpointDescriptor(
+                    "Ping",
+                    "Get",
+                    "GET",
+                    string.Empty,
+                    typeof(ControllerOnlyApi),
+                    null,
+                    typeof(string),
+                    Array.Empty<string>(),
+                    false)
+            };
+
+        public DynamicApiRegistry CreateRegistry(DynamicApiOptions options)
+        {
+            return new DynamicApiRegistry(Array.Empty<DynamicApiServiceDescriptor>());
+        }
+
+        public void MapEndpoints(IEndpointRouteBuilder endpoints, DynamicApiOptions options)
+        {
+            MapCalled = true;
+        }
+    }
+
+    private sealed class ControllerOnlyApi
+    {
     }
 }

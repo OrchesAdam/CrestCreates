@@ -1,6 +1,7 @@
 using CrestCreates.DynamicApi;
 using SaaSHelpdesk.Application.Contracts.DTOs;
 using SaaSHelpdesk.Application.Contracts.Interfaces;
+using Microsoft.AspNetCore.Mvc;
 
 namespace SaaSHelpdesk.Application.GeneratedApi;
 
@@ -14,6 +15,7 @@ public partial class TicketApi : CrestApiController
         _ticketAppService = ticketAppService;
     }
 
+    [HttpGet("all")]
     [ApiOverride(CrudAction.GetList)]
     public Task<IReadOnlyList<TicketDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {

@@ -42,7 +42,6 @@ public static class DynamicApiGeneratedRegistryStore
 
         var registries = GetProviders()
             .Select(provider => provider.CreateRegistry(options))
-            .Where(registry => registry.Services.Count > 0)
             .ToArray();
 
         if (registries.Length == 0)
@@ -77,12 +76,7 @@ public static class DynamicApiGeneratedRegistryStore
         var mapped = false;
         foreach (var provider in GetProviders())
         {
-            var registry = provider.CreateRegistry(options);
-            if (registry.Services.Count == 0)
-            {
-                continue;
-            }
-
+            _ = provider.CreateRegistry(options);
             provider.MapEndpoints(endpoints, options);
             mapped = true;
         }
