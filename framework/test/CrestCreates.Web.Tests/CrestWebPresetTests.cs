@@ -1,10 +1,15 @@
 using System.Reflection;
 using CrestCreates.DynamicApi;
+using CrestCreates.ModuleDiagnostics.Modules;
+using CrestCreates.ModuleDiagnostics.Stores;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Web;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace CrestCreates.Web.Tests;
@@ -47,8 +52,8 @@ public class CrestWebPresetTests
 
         app.MapCrestWeb();
 
-        var routeEndpoints = app.Services.GetRequiredService<EndpointDataSource>()
-            .Endpoints
+        var routeEndpoints = ((IEndpointRouteBuilder)app).DataSources
+            .SelectMany(dataSource => dataSource.Endpoints)
             .OfType<RouteEndpoint>()
             .Select(endpoint => endpoint.RoutePattern.RawText)
             .Where(route => !string.IsNullOrWhiteSpace(route))
@@ -58,6 +63,56 @@ public class CrestWebPresetTests
         routeEndpoints.Should().NotContain("/connect/token");
         routeEndpoints.Should().NotContain("/connect/userinfo");
         routeEndpoints.Should().NotContain("/connect/logout");
+    }
+
+    [Fact]
+    public void MapCrestWeb_ShouldMapHealthEndpoint()
+    {
+        using var snapshot = new DynamicApiRegistryStoreSnapshot();
+        DynamicApiGeneratedRegistryStore.Register(new TestDynamicApiProvider());
+
+        var builder = WebApplication.CreateBuilder();
+        builder.AddCrestWeb(options => options.UseOpenIddict(false));
+
+        var app = builder.Build();
+
+        app.MapCrestWeb();
+
+        var routeEndpoints = ((IEndpointRouteBuilder)app).DataSources
+            .SelectMany(dataSource => dataSource.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Where(endpoint => !string.IsNullOrWhiteSpace(endpoint.RoutePattern.RawText))
+            .ToArray();
+
+        routeEndpoints.Select(endpoint => endpoint.RoutePattern.RawText).Should().Contain("/health");
+        routeEndpoints.Single(endpoint => endpoint.RoutePattern.RawText == "/health")
+            .Metadata
+            .GetMetadata<SkipTenantResolutionMetadata>()
+            .Should()
+            .NotBeNull();
+    }
+
+    [Fact]
+    public void AddCrestWeb_ShouldRegisterModuleDiagnostics()
+    {
+        using var snapshot = new DynamicApiRegistryStoreSnapshot();
+        DynamicApiGeneratedRegistryStore.Register(new TestDynamicApiProvider());
+
+        var builder = WebApplication.CreateBuilder();
+        builder.AddCrestWeb(options => options.UseOpenIddict(false));
+
+        using var serviceProvider = builder.Services.BuildServiceProvider();
+
+        serviceProvider.GetRequiredService<IModuleDiagnosticsStore>()
+            .Should()
+            .BeSameAs(ModuleDiagnosticsServiceCollectionExtensions.Store);
+
+        var registrations = serviceProvider
+            .GetRequiredService<IOptions<HealthCheckServiceOptions>>()
+            .Value
+            .Registrations;
+
+        registrations.Select(registration => registration.Name).Should().Contain("modules");
     }
 
     [Fact]

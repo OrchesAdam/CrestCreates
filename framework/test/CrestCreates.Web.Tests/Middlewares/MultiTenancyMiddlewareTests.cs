@@ -66,6 +66,34 @@ public class MultiTenancyMiddlewareTests
     }
 
     [Fact]
+    public async Task InvokeAsync_WithSkipMetadata_SkipsTenantResolution()
+    {
+        var nextCalled = false;
+        var middleware = new MultiTenancyMiddleware(
+            _ =>
+            {
+                nextCalled = true;
+                return Task.CompletedTask;
+            },
+            NullLogger<MultiTenancyMiddleware>.Instance);
+        var currentTenant = new FakeCurrentTenant("tenant-a");
+        var context = new DefaultHttpContext
+        {
+            TraceIdentifier = "trace-skip-tenant-resolution"
+        };
+        context.Response.Body = new MemoryStream();
+        context.SetEndpoint(new Endpoint(
+            _ => Task.CompletedTask,
+            new EndpointMetadataCollection(new SkipTenantResolutionMetadata()),
+            "health"));
+
+        await middleware.InvokeAsync(context, currentTenant, new ThrowingTenantResolver());
+
+        nextCalled.Should().BeTrue();
+        context.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
+    }
+
+    [Fact]
     public async Task InvokeAsync_WithTenantMismatchAfterAuthentication_ReturnsForbidden()
     {
         var middleware = new TenantBoundaryMiddleware(
@@ -144,6 +172,14 @@ public class MultiTenancyMiddlewareTests
         public Task<ITenantInfo> GetTenantAsync(string tenantId, System.Threading.CancellationToken cancellationToken = default)
         {
             return Task.FromResult<ITenantInfo>(null!);
+        }
+    }
+
+    private sealed class ThrowingTenantResolver : ITenantResolver
+    {
+        public Task<TenantResolutionResult> ResolveAsync(HttpContext httpContext)
+        {
+            throw new InvalidOperationException("Tenant resolution should have been skipped.");
         }
     }
 

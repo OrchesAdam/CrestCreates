@@ -22,12 +22,14 @@ using CrestCreates.Domain.Shared;
 using CrestCreates.Domain.UnitOfWork;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.EventBus.Local;
+using CrestCreates.HealthCheck.AspNetCore;
 using CrestCreates.Infrastructure.Authorization;
 using CrestCreates.Infrastructure.Localization;
 using CrestCreates.Infrastructure.Permission;
 using CrestCreates.Infrastructure.Settings;
 using CrestCreates.Infrastructure.UnitOfWork;
 using CrestCreates.Logging.Extensions;
+using CrestCreates.ModuleDiagnostics.Modules;
 using CrestCreates.Modularity;
 using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
@@ -87,6 +89,7 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddAuditLogging();
 
         services.AddCrestOpenApi();
+        services.AddModuleDiagnostics();
 
         if (options.EnableOpenIddict)
         {
@@ -208,6 +211,7 @@ public static class CrestCreatesWebApplicationExtensions
             app.MapCrestOpenIddictEndpoints();
         }
 
+        app.MapCrestHealthChecks();
         app.MapCrestAspNetCoreDynamicApi();
         app.MapCrestOpenApi();
         return app;

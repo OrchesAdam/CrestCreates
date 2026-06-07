@@ -21,6 +21,8 @@
     <ProjectReference Include="..\CrestCreates.AuditLogging\CrestCreates.AuditLogging.csproj" />
     <ProjectReference Include="..\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="..\CrestCreates.HealthCheck.AspNetCore\CrestCreates.HealthCheck.AspNetCore.csproj" />
+    <ProjectReference Include="..\CrestCreates.ModuleDiagnostics\CrestCreates.ModuleDiagnostics.csproj" />
     <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.MultiTenancy\CrestCreates.MultiTenancy.csproj" />
     <ProjectReference Include="..\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
@@ -31,9 +33,9 @@
     <ProjectReference Include="..\CrestCreates.Aop\CrestCreates.Aop.csproj" />
   </ItemGroup>
 
-<ItemGroup>
+  <ItemGroup>
     <PackageReference Include="DependencyInjection.StaticAccessor.Hosting" />
     <ProjectReference Include="..\CrestCreates.OpenApi\CrestCreates.OpenApi.csproj" />
-      </ItemGroup>
+  </ItemGroup>
 
 </Project>

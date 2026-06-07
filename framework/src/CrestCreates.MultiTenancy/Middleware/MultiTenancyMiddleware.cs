@@ -1,10 +1,10 @@
 using System;
-using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.MultiTenancy.Middleware
@@ -27,6 +27,13 @@ namespace CrestCreates.MultiTenancy.Middleware
             ICurrentTenant currentTenant,
             ITenantResolver tenantResolver)
         {
+            if (ShouldSkipTenantResolution(context))
+            {
+                _logger.LogDebug("Tenant resolution skipped for endpoint {Path}", context.Request.Path);
+                await _next(context);
+                return;
+            }
+
             var resolutionResult = await tenantResolver.ResolveAsync(context);
 
             if (resolutionResult.IsResolved && !string.IsNullOrEmpty(resolutionResult.TenantId))
@@ -76,6 +83,16 @@ namespace CrestCreates.MultiTenancy.Middleware
                 _logger.LogDebug("No tenant resolved, continuing without tenant context");
                 await _next(context);
             }
+        }
+
+        private static bool ShouldSkipTenantResolution(HttpContext context)
+        {
+            if (context.Features.Get<IEndpointFeature>()?.Endpoint?.Metadata.GetMetadata<SkipTenantResolutionMetadata>() is not null)
+            {
+                return true;
+            }
+
+            return string.Equals(context.Request.Path.Value, "/health", StringComparison.OrdinalIgnoreCase);
         }
     }
 
