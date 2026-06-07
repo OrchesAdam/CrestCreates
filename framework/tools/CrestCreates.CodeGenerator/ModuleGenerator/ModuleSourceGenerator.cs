@@ -137,7 +137,7 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine("namespace Microsoft.AspNetCore.Builder;");
         sb.AppendLine();
-        sb.AppendLine("public static partial class CrestGeneratedApplicationInitializationExtensions");
+        sb.AppendLine("internal static partial class CrestGeneratedApplicationInitializationExtensions");
         sb.AppendLine("{");
         sb.AppendLine("    public static Task InitializeCrestApplicationAsync(this WebApplication app)");
         sb.AppendLine("    {");

@@ -162,7 +162,7 @@ namespace CrestCreates.Modularity
             Assert.NotNull(generatedText);
             Assert.Contains("return app.InitializeModulesAsync();", generatedText);
             Assert.Contains("namespace Microsoft.AspNetCore.Builder;", generatedText);
-            Assert.Contains("public static partial class CrestGeneratedApplicationInitializationExtensions", generatedText);
+            Assert.Contains("internal static partial class CrestGeneratedApplicationInitializationExtensions", generatedText);
         }
     }
 }
