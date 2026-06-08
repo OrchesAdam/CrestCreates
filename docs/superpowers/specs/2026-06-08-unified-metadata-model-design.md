@@ -25,19 +25,22 @@ ApplicationService → Agent → ToolSchema
 
 Result: 4-5 parallel, incompatible descriptor systems, each with its own notion of "what data looks like" and "what the system can do."
 
-The goal: converge on three core abstractions — **Schema**, **Capability**, **Workflow** — and make everything else a consumer or projection of these three.
+The goal: converge on four core abstractions — **Schema**, **Capability**, **Event**, **Workflow** — and make everything else a consumer or projection of these four.
 
 ---
 
-## 2. Core Abstraction: The Three Pillars
+## 2. Core Abstraction: The Four Pillars
 
 | Pillar | Answers | Descriptor |
 |--------|---------|------------|
 | **Schema** | "What does the data look like?" | `SchemaDescriptor` |
 | **Capability** | "What can the system do?" | `CapabilityDescriptor` |
+| **Event** | "What happened?" | `EventDescriptor` |
 | **Workflow** | "How are capabilities orchestrated?" | `WorkflowDescriptor` |
 
-Everything else — Form, HumanTask, DynamicAPI, AgentTool, MCP Tool — is a **consumer** or **projection view** of these three.
+Event is the bridge between Capability execution and downstream consumers. Workflow is fundamentally an event-driven state machine — Workflow steps advance when Capability events arrive. Agent tool results are Capability events. Saga compensation is triggered by CapabilityFailed events. Audit, Outbox, and real-time notifications all consume the Capability event stream.
+
+Everything else — Form, HumanTask, DynamicAPI, AgentTool, MCP Tool — is a **consumer** or **projection view** of these four.
 
 ---
 
@@ -178,16 +181,16 @@ Plus a minimal set of execution metadata:
 | DynamicAPI route/HTTP method | DynamicAPI is a consumer of Capability |
 | Invocation of other Capabilities | Capability is atomic — composition must use Workflow |
 
-#### CapabilityName: Global Uniqueness
+#### CapabilityName: Id is Primary, Name is Alias
 
-`CapabilityName` is a **global primary key**. There is no namespace or module-scoped alternative.
+`CapabilityDescriptor.Id` is the **primary identity**. `CapabilityDescriptor.Name` is a **human-stable alias**.
 
-- `crm.customer.create` — exactly one definition across the entire system.
-- `erp.customer.create` — a different capability, also globally unique.
-- The recommended naming convention is `<module>.<aggregate>.<action>` (three-segment, fully qualified). This is a convention, not a namespace — every name is still globally unique.
-- Module-level capability name conflicts are **compile-time errors** detected by the source generator.
+- Internal references (WorkflowStep targets, Audit records, Draft references) use `(Id, Version)` via `VersionedDescriptorRef<CapabilityDescriptor>` — never `Name`.
+- `Name` is globally unique and follows the `<module>.<aggregate>.<action>` convention (e.g., `crm.customer.create`).
+- If a Capability is renamed (e.g., `crm.customer.create` → `crm.customer.register`), the `Id` remains unchanged. All existing references survive. The old name is retired; the new name is registered.
+- `Name` is a human-readable alias, not a storage key. The distinction prevents Audit history, Workflow references, and Draft references from breaking on rename.
 
-Rationale: Workflow, Agent, MCP, Audit, Tracing, and Permission systems all reference `CapabilityName` as a stable identifier. Introducing namespace/version/module into the key would force every consumer to carry a composite key through their entire data model. The fully qualified naming convention gives enough disambiguation without introducing a composite key.
+Name uniqueness is still enforced: no two capabilities can share the same `Name` at the same time. But `Name` is mutable (with appropriate tooling), while `Id` is immutable.
 
 #### Capability Atomicity: No Composition
 
@@ -450,18 +453,99 @@ EntityDescriptor → SchemaDescriptor
 | **NOT: Permissions** | entity-level permissions are Capability concern |
 | **NOT: API exposure** | DynamicAPI exposes Capabilities, not Entities |
 
-### 4.7 IDescriptor — The Common Descriptor Base
+### 4.7 EventDescriptor — "What happened?"
 
-All descriptors share a common base interface. This enables unified registry implementations, generic tooling, and consistent lifecycle management.
+Event is the fourth pillar. It bridges Capability execution and downstream consumers. Every Capability lifecycle event, domain event, and integration event is described by an `EventDescriptor` with a defined payload schema.
 
 ```csharp
+public sealed class EventDescriptor : IVersionedDescriptor
+{
+    // IDescriptor
+    public DescriptorKind Kind => DescriptorKind.Event;
+    public string Id { get; }
+    public string Name { get; }             // e.g., "crm.customer.created", "CapabilitySucceeded"
+    public string DefinitionHash { get; }
+
+    // IVersionedDescriptor
+    public int Version { get; }
+
+    // Event-specific
+    public VersionedDescriptorRef<SchemaDescriptor> PayloadSchema { get; }
+    public EventCategory Category { get; }   // Capability | Domain | Integration
+    public SchemaChangeKind ChangeKind { get; } // Additive / Breaking (for schema evolution)
+}
+```
+
+```csharp
+public enum EventCategory
+{
+    Capability,    // Capability lifecycle event (Executing, Succeeded, Failed, Compensated)
+    Domain,        // Domain event (business state change: CustomerCreated, TicketAssigned)
+    Integration    // Integration event (cross-boundary: published to EventBus)
+}
+```
+
+**Event ↔ Schema relationship:**
+
+Every event has a `PayloadSchema`. This closes the loop:
+
+```text
+Schema ← Capability (Input/Output schema)
+Schema ← Event (Payload schema)
+Schema ← Workflow (Variable schema)
+```
+
+Events use the same `SchemaDescriptor` as Capabilities and Workflows. There is no separate "EventSchema" type.
+
+**Event ↔ Capability relationship:**
+
+```text
+Capability execution
+    │
+    ├── CapabilitySucceeded(crm.customer.create)
+    │       Payload: { customerId, timestamp, initiator }
+    │
+    ├── Domain Events collected during handler execution:
+    │       CustomerCreatedDomainEvent
+    │           Payload: { customerId, name, email, tenantId }
+    │
+    └── Integration Events emitted to EventBus:
+            CustomerCreatedIntegrationEvent
+                Payload: { customerId, name, tenantId }
+```
+
+Three categories of events, all described by `EventDescriptor`, all referencing the same `SchemaDescriptor` system.
+
+### 4.8 IDescriptor — The Common Descriptor Base
+
+All descriptors share a common base interface. This enables unified registry implementations, generic tooling, consistent serialization, and lifecycle management.
+
+```csharp
+public enum DescriptorKind
+{
+    Schema,
+    Capability,
+    Event,
+    Workflow,
+    Form,
+    HumanTask
+}
+
 public interface IDescriptor
 {
-    string Id { get; }              // Stable unique identifier (GUID/ULID)
-    string Name { get; }            // Human-readable name
+    DescriptorKind Kind { get; }    // What type of descriptor this is
+    string Id { get; }              // Stable unique identifier (GUID/ULID) — the primary key
+    string Name { get; }            // Human-readable, human-stable alias (e.g., "crm.customer.create")
     string DefinitionHash { get; }  // Stable hash of the entire descriptor
 }
 ```
+
+`Id` is the **primary identity**. `Name` is a **human-stable alias**. All internal references (WorkflowStep targets, HumanTask Form refs, Capability Schema refs, Audit records) use `Id` — never `Name`. Name changes do not break references.
+
+`DescriptorKind` enables:
+- Registry serialization/deserialization without type inspection.
+- Audit records that identify *what kind* of descriptor was executed.
+- Generic tooling that switches behavior by kind.
 
 Not all descriptors need versioning. A separate interface marks versioned descriptors:
 
@@ -477,12 +561,13 @@ Concrete descriptor implementations:
 ```csharp
 SchemaDescriptor      : IVersionedDescriptor   // schema evolution requires versioning
 CapabilityDescriptor  : IVersionedDescriptor   // capability re-definition requires versioning
+EventDescriptor       : IVersionedDescriptor   // event schema evolution requires versioning
+FormDescriptor        : IVersionedDescriptor   // form changes must not break running HumanTasks
+HumanTaskDescriptor   : IVersionedDescriptor   // task definition changes must not break running instances
 WorkflowDescriptor    : IVersionedDescriptor   // workflow definition changes require versioning
-FormDescriptor        : IDescriptor            // form changes produce a new form; no version history
-HumanTaskDescriptor   : IDescriptor            // task definition changes produce a new task
 ```
 
-This keeps `FormDescriptor` and `HumanTaskDescriptor` simple — they are replaced, not versioned. `SchemaDescriptor`, `CapabilityDescriptor`, and `WorkflowDescriptor` are versioned because running instances must pin to a specific version.
+All five descriptors are versioned. Running instances (Workflow instances, HumanTask instances) pin to a specific descriptor version. Form and HumanTask versioning prevents running tasks from breaking when their UI definitions change — the same protection Workflow and Schema already provide.
 
 **Version naming convention:** All versioned descriptors use the single `Version` property from `IVersionedDescriptor`. There is no `SchemaVersion`, `CapabilityVersion`, or `WorkflowVersion` as separate fields — the type system distinguishes them. In documentation and human-readable contexts, the qualified form ("Schema version 3", "Capability version 2") is used, but the property is always `.Version`. This keeps registries generic and prevents `switch(descriptorType) { case Schema: use SchemaVersion; case Capability: use CapabilityVersion; ... }` anti-patterns.
 
@@ -509,9 +594,10 @@ With concrete registries:
 ```csharp
 SchemaRegistry       : IVersionedDescriptorRegistry<SchemaDescriptor>
 CapabilityRegistry   : IVersionedDescriptorRegistry<CapabilityDescriptor>
+EventRegistry        : IVersionedDescriptorRegistry<EventDescriptor>
+FormRegistry         : IVersionedDescriptorRegistry<FormDescriptor>
+HumanTaskRegistry    : IVersionedDescriptorRegistry<HumanTaskDescriptor>
 WorkflowRegistry     : IVersionedDescriptorRegistry<WorkflowDescriptor>
-FormRegistry         : IDescriptorRegistry<FormDescriptor>
-HumanTaskRegistry    : IDescriptorRegistry<HumanTaskDescriptor>
 ```
 
 Each registry is populated by compile-time source generators — no runtime scanning.
@@ -574,8 +660,8 @@ Usage:
 public VersionedDescriptorRef<SchemaDescriptor> InputSchema { get; }
 public VersionedDescriptorRef<SchemaDescriptor> OutputSchema { get; }
 
-// HumanTaskDescriptor — Form is NOT versioned
-public DescriptorRef<FormDescriptor> Form { get; }
+// HumanTaskDescriptor — Form is versioned
+public VersionedDescriptorRef<FormDescriptor> Form { get; }
 
 // WorkflowDescriptor — VariableSchema is versioned
 public VersionedDescriptorRef<SchemaDescriptor> VariableSchema { get; }
@@ -583,17 +669,14 @@ public VersionedDescriptorRef<SchemaDescriptor> VariableSchema { get; }
 // WorkflowStep → CapabilityTarget — Capability is versioned
 public VersionedDescriptorRef<CapabilityDescriptor> Capability { get; }
 
-// WorkflowStep → HumanTaskTarget — HumanTask is NOT versioned
-public DescriptorRef<HumanTaskDescriptor> HumanTask { get; }
+// WorkflowStep → HumanTaskTarget — HumanTask is versioned
+public VersionedDescriptorRef<HumanTaskDescriptor> HumanTask { get; }
 
 // WorkflowStep → SubWorkflowTarget — Workflow is versioned
 public VersionedDescriptorRef<WorkflowDescriptor> SubWorkflow { get; }
 ```
 
-This replaces ad-hoc `InputSchemaId` + `InputSchemaVersion` field pairs with a single typed reference. The type system prevents:
-- Adding a version to a non-versioned descriptor ref.
-- Forgetting the version on a versioned descriptor ref.
-- Mixing ref types (e.g., passing `DescriptorRef<FormDescriptor>` where `VersionedDescriptorRef<SchemaDescriptor>` is expected).
+All descriptor-to-descriptor references use `VersionedDescriptorRef<T>` — every descriptor type is now versioned. `DescriptorRef<T>` (Id-only) remains available for scenarios where version pinning is not required, but all structural references between descriptors use the versioned form.
 
 ---
 
@@ -989,27 +1072,30 @@ Phase 4: Introduce AgentToolDescriptor and MCPToolDescriptor as additional Capab
 | 3 | CapabilityDescriptor answers only three core questions: What? Input? Output? — plus Kind, Permission, RiskLevel |
 | 4 | CapabilityKind is limited to Query, Draft, Command — Workflow and HumanTask are NOT CapabilityKinds |
 | 5 | Capability is always atomic — Capability must not invoke other Capabilities; composition requires Workflow |
-| 6 | CapabilityName is globally unique using `<module>.<aggregate>.<action>` convention — no namespace scoping |
+| 6 | `CapabilityDescriptor.Id` is the primary identity; `Name` is a human-stable alias (mutable, globally unique) |
 | 7 | Schema evolution is governed by SchemaVersion + ChangeKind (Additive/Breaking); consumers pin schema versions |
 | 8 | CapabilityDescriptor is pure metadata; execution logic lives in ICapabilityHandler<TInput, TOutput> |
-| 9 | All descriptors implement `IDescriptor` (Id, Name, DefinitionHash); versioned descriptors add `IVersionedDescriptor` (Version) |
-| 10 | `DefinitionHash` = canonical JSON (fields sorted alphabetically) → SHA256; field declaration order does NOT affect the hash |
-| 11 | `DescriptorRef<T>` (Id only) and `VersionedDescriptorRef<T>` (Id + Version) are separate types; the `where` constraint prevents misuse |
-| 12 | All versioned descriptors use the single `.Version` property (no `SchemaVersion`/`CapabilityVersion`/`WorkflowVersion` field duplication) |
-| 13 | WorkflowStep `Id` is a globally unique GUID/ULID that survives reorder, insert, and rename across Workflow versions |
-| 14 | Descriptors have a defined lifecycle: Discovery → Generation → Registration → Resolution → Execution → Versioning → Deprecation → Removal |
-| 15 | Descriptors are immutable once registered; versioned descriptors create new entries; running instances pin their version |
-| 16 | Capability execution produces structured lifecycle events (Executing/Succeeded/Failed/Compensated) — the semantic backbone for Workflow, Agent, Outbox, Saga, Audit |
-| 17 | Domain Events ≠ Capability Events — domain events carry business semantics, capability events carry execution proof |
-| 18 | FormDescriptor = Schema + UI metadata — pure presentation concern, not a business action |
-| 19 | HumanTaskDescriptor is the business action for human interaction — Form is its UI delegate |
-| 20 | WorkflowDescriptor has WorkflowVersion; running instances are pinned at instantiation time, not "latest" |
-| 21 | Workflow variables have defined scopes (Global/Workflow/SubWorkflow/Step); sub-workflow variables do NOT leak to parent |
-| 22 | WorkflowStep binds to InteractionTarget (Capability | HumanTask | SubWorkflow), never to ApplicationService or Form directly |
-| 23 | DynamicApiDescriptor, AgentToolDescriptor, MCPToolDescriptor are projection views of CapabilityDescriptor |
-| 24 | Every Capability invocation enters the unified Capability Execution Pipeline regardless of trigger source |
-| 25 | Entity is a Schema source, not a participant in the Capability/Workflow chain |
-| 26 | Entity → Form, Entity → Workflow, Entity → Capability are all forbidden dependencies |
+| 9 | All descriptors implement `IDescriptor` (Kind, Id, Name, DefinitionHash); `DescriptorKind` identifies type for serialization/audit |
+| 10 | All five descriptor types are `IVersionedDescriptor` — Form and HumanTask are versioned to protect running instances |
+| 11 | `DefinitionHash` = canonical JSON (fields sorted alphabetically) → SHA256; field declaration order does NOT affect the hash |
+| 12 | `DescriptorRef<T>` (Id only) and `VersionedDescriptorRef<T>` (Id + Version) are separate types; the `where` constraint prevents misuse |
+| 13 | All versioned descriptors use the single `.Version` property (no SchemaVersion/CapabilityVersion/WorkflowVersion field duplication) |
+| 14 | WorkflowStep `Id` is a globally unique GUID/ULID that survives reorder, insert, and rename across Workflow versions |
+| 15 | The system has four pillars: Schema, Capability, Event, Workflow — Event is the bridge between Capability execution and downstream consumers |
+| 16 | `EventDescriptor` carries PayloadSchema (ref to SchemaDescriptor), EventCategory (Capability/Domain/Integration), and schema evolution rules |
+| 17 | Descriptors have a defined lifecycle: Discovery → Generation → Registration → Resolution → Execution → Versioning → Deprecation → Removal |
+| 18 | Descriptors are immutable once registered; versioned descriptors create new entries; running instances pin their version |
+| 19 | Capability execution produces structured lifecycle events (Executing/Succeeded/Failed/Compensated) — the semantic backbone for Workflow, Agent, Outbox, Saga, Audit |
+| 20 | Domain Events ≠ Capability Events — domain events carry business semantics, capability events carry execution proof |
+| 21 | FormDescriptor = Schema + UI metadata — pure presentation concern, not a business action |
+| 22 | HumanTaskDescriptor is the business action for human interaction — Form is its UI delegate |
+| 23 | WorkflowDescriptor has WorkflowVersion; running instances are pinned at instantiation time, not "latest" |
+| 24 | Workflow variables have defined scopes (Global/Workflow/SubWorkflow/Step); sub-workflow variables do NOT leak to parent |
+| 25 | WorkflowStep binds to InteractionTarget (Capability | HumanTask | SubWorkflow), never to ApplicationService or Form directly |
+| 26 | DynamicApiDescriptor, AgentToolDescriptor, MCPToolDescriptor are projection views of CapabilityDescriptor |
+| 27 | Every Capability invocation enters the unified Capability Execution Pipeline regardless of trigger source |
+| 28 | Entity is a Schema source, not a participant in the Capability/Workflow chain |
+| 29 | Entity → Form, Entity → Workflow, Entity → Capability are all forbidden dependencies |
 
 ---
 
@@ -1024,3 +1110,6 @@ Phase 4: Introduce AgentToolDescriptor and MCPToolDescriptor as additional Capab
 - **CapabilityName registry**: A centralized, compile-time generated registry of all `CapabilityName` values in the system — enables cross-module conflict detection, IDE navigation, and global refactoring.
 - **DescriptorRef resolution tooling**: Because `DescriptorRef<T>` and `VersionedDescriptorRef<T>` unify all cross-descriptor references, build-time tooling can validate that every ref resolves to an existing descriptor — catching broken references before runtime.
 - **Capability Event Semantic Model (next spec)**: The Capability lifecycle events (Executing/Succeeded/Failed/Compensated) defined in Section 7 form the foundation. The next spec should formalize: `EventDescriptor`, `EventEnvelope`, `EventRegistry`, event schema evolution, and the integration between Capability events and the existing `CrestCreates.EventBus` system. This is the bridge between the metadata layer and the runtime event propagation layer.
+- **Workflow instance migration**: When a Workflow definition is upgraded (v1 → v2), thousands of running instances may be pinned to v1. A migration strategy (`IWorkflowInstanceMigrationStrategy`) allows instances to transition to the new version at defined safe points (step boundaries, after human task completion). This is a future concern — the version pinning model ensures correctness without migration, but operational pressure will eventually demand it.
+- **Event → Schema closed loop**: `EventDescriptor.PayloadSchema` references `SchemaDescriptor`, closing the loop between the four pillars. Future tooling should enable: "given a Schema change, which Events, Capabilities, and Workflows are affected?" — a cross-pillar impact analysis.
+- **Workflow = Event-Driven State Machine formalization**: The relationship between `WorkflowDescriptor` and `EventDescriptor` should be formalized as a first-class binding: "WorkflowStep X advances on Event Y." This makes the Workflow engine a pure event consumer and eliminates polling or timer-based step transitions.
