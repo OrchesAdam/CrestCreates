@@ -17,7 +17,7 @@ public class LocalEventBusIdempotencyTests
     {
         var services = new ServiceCollection();
         services.AddSingleton<LocalEventBusOptions>();
-        services.AddSingleton<LocalDeadLetterOptions>();
+        services.Configure<LocalDeadLetterOptions>(_ => { });
         services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
@@ -30,12 +30,17 @@ public class LocalEventBusIdempotencyTests
 
         await eventBus.PublishAsync(testEvent);
         await eventBus.PublishAsync(testEvent);
+
+        var handler = provider.GetRequiredService<ILocalEventHandler<IdempotentTestEvent>>()
+            as IdempotentTestEventHandler;
+        handler!.CallCount.Should().Be(2);
     }
 
     [Fact]
     public async Task DLQStore_EnqueueSameMessageId_Twice_OnlyStoredOnce()
     {
-        var store = new InMemoryDeadLetterStore();
+        var store = new InMemoryDeadLetterStore(
+            Microsoft.Extensions.Options.Options.Create(new LocalDeadLetterOptions()));
         var payload = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
             new IdempotentTestEvent(), typeof(IdempotentTestEvent));
 

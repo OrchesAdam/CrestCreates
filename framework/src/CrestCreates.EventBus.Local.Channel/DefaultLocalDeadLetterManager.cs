@@ -101,15 +101,9 @@ public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
             take: int.MaxValue,
             cancellationToken: cancellationToken);
 
-        var archived = await _store.ListAsync(
-            status: DeadLetterStatus.Archived,
-            take: int.MaxValue,
-            cancellationToken: cancellationToken);
-
-        var allMessages = pending.Concat(archived).ToList();
         var results = new List<DeadLetterRetryResult>();
 
-        foreach (var message in allMessages)
+        foreach (var message in pending)
         {
             if (cancellationToken.IsCancellationRequested)
                 break;

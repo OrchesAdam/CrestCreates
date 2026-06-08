@@ -20,7 +20,7 @@ public class LocalDeadLetterQueueTests
     {
         var services = new ServiceCollection();
         services.AddSingleton<LocalEventBusOptions>();
-        services.AddSingleton<LocalDeadLetterOptions>();
+        services.Configure<LocalDeadLetterOptions>(_ => { });
         services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
@@ -48,7 +48,7 @@ public class LocalDeadLetterQueueTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<LocalEventBusOptions>();
-        services.AddSingleton<LocalDeadLetterOptions>();
+        services.Configure<LocalDeadLetterOptions>(_ => { });
         services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
@@ -84,7 +84,7 @@ public class LocalDeadLetterQueueTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<LocalEventBusOptions>();
-        services.AddSingleton<LocalDeadLetterOptions>();
+        services.Configure<LocalDeadLetterOptions>(_ => { });
         services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
@@ -121,7 +121,7 @@ public class LocalDeadLetterQueueTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<LocalEventBusOptions>();
-        services.AddSingleton<LocalDeadLetterOptions>();
+        services.Configure<LocalDeadLetterOptions>(_ => { });
         services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
@@ -156,7 +156,7 @@ public class LocalDeadLetterQueueTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<LocalEventBusOptions>();
-        services.AddSingleton<LocalDeadLetterOptions>();
+        services.Configure<LocalDeadLetterOptions>(_ => { });
         services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
@@ -191,7 +191,7 @@ public class LocalDeadLetterQueueTests
     [Fact]
     public async Task ClearByEventType_RemovesMatchingMessages()
     {
-        var store = new InMemoryDeadLetterStore();
+        var store = new InMemoryDeadLetterStore(Microsoft.Extensions.Options.Options.Create(new LocalDeadLetterOptions()));
         var payload = JsonSerializer.SerializeToUtf8Bytes(new RetryTestEvent(), typeof(RetryTestEvent));
 
         var msg1 = new DeadLetterMessage("1", typeof(RetryTestEvent).AssemblyQualifiedName!,
@@ -210,7 +210,7 @@ public class LocalDeadLetterQueueTests
     [Fact]
     public async Task ListWithFilter_SupportsPagingAndTypeFilter()
     {
-        var store = new InMemoryDeadLetterStore();
+        var store = new InMemoryDeadLetterStore(Microsoft.Extensions.Options.Options.Create(new LocalDeadLetterOptions()));
         var payload = JsonSerializer.SerializeToUtf8Bytes(new RetryTestEvent(), typeof(RetryTestEvent));
 
         for (int i = 0; i < 5; i++)
@@ -231,7 +231,7 @@ public class LocalDeadLetterQueueTests
     [Fact]
     public async Task IdempotencyWithDLQ_DuplicateEvent_NoDuplicateProcessing()
     {
-        var store = new InMemoryDeadLetterStore();
+        var store = new InMemoryDeadLetterStore(Microsoft.Extensions.Options.Options.Create(new LocalDeadLetterOptions()));
         var payload = JsonSerializer.SerializeToUtf8Bytes(new CountingTestEvent(), typeof(CountingTestEvent));
 
         var msg = new DeadLetterMessage("dup-1", typeof(CountingTestEvent).AssemblyQualifiedName!,
@@ -246,7 +246,7 @@ public class LocalDeadLetterQueueTests
     [Fact]
     public async Task ConcurrentEnqueue_MultipleThreads_DataConsistent()
     {
-        var store = new InMemoryDeadLetterStore();
+        var store = new InMemoryDeadLetterStore(Microsoft.Extensions.Options.Options.Create(new LocalDeadLetterOptions()));
         var payload = JsonSerializer.SerializeToUtf8Bytes(new RetryTestEvent(), typeof(RetryTestEvent));
         var tasks = new List<Task>();
 
@@ -269,7 +269,7 @@ public class LocalDeadLetterQueueTests
     [Fact]
     public async Task DeadLetterStats_ReturnsCorrectCounts()
     {
-        var store = new InMemoryDeadLetterStore();
+        var store = new InMemoryDeadLetterStore(Microsoft.Extensions.Options.Options.Create(new LocalDeadLetterOptions()));
         var payload = JsonSerializer.SerializeToUtf8Bytes(new RetryTestEvent(), typeof(RetryTestEvent));
 
         await store.EnqueueAsync(new DeadLetterMessage("1", typeof(RetryTestEvent).AssemblyQualifiedName!,
@@ -291,9 +291,11 @@ public class LocalDeadLetterQueueTests
     }
 
     [Fact]
-    public async Task MaxQueueSizeProtection_StoreDoesNotEnforceLimit()
+    public async Task MaxQueueSizeProtection_EnqueueRespectsLimit()
     {
-        var store = new InMemoryDeadLetterStore();
+        var options = Microsoft.Extensions.Options.Options.Create(
+            new LocalDeadLetterOptions { MaxQueueSize = 500 });
+        var store = new InMemoryDeadLetterStore(options);
         var payload = JsonSerializer.SerializeToUtf8Bytes(new RetryTestEvent(), typeof(RetryTestEvent));
 
         for (int i = 0; i < 1000; i++)
@@ -304,7 +306,7 @@ public class LocalDeadLetterQueueTests
         }
 
         var count = await store.CountAsync();
-        count.Should().Be(1000);
+        count.Should().Be(500);
     }
 
     private sealed class FailingTestEvent : DomainEvent { }

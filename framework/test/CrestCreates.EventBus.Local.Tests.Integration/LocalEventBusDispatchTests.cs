@@ -17,7 +17,7 @@ public class LocalEventBusDispatchTests
     {
         var services = new ServiceCollection();
         services.AddSingleton<LocalEventBusOptions>();
-        services.AddSingleton<LocalDeadLetterOptions>();
+        services.Configure<LocalDeadLetterOptions>(_ => { });
         services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
@@ -40,7 +40,7 @@ public class LocalEventBusDispatchTests
     {
         var services = new ServiceCollection();
         services.AddSingleton<LocalEventBusOptions>();
-        services.AddSingleton<LocalDeadLetterOptions>();
+        services.Configure<LocalDeadLetterOptions>(_ => { });
         services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();

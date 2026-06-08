@@ -5,15 +5,25 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.EventBus.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace CrestCreates.EventBus.Local.Channel;
 
 public class InMemoryDeadLetterStore : ILocalDeadLetterStore
 {
     private readonly ConcurrentDictionary<string, DeadLetterMessage> _messages = new();
+    private readonly LocalDeadLetterOptions _options;
+
+    public InMemoryDeadLetterStore(IOptions<LocalDeadLetterOptions> options)
+    {
+        _options = options.Value;
+    }
 
     public Task EnqueueAsync(DeadLetterMessage message, CancellationToken cancellationToken = default)
     {
+        if (_messages.Count >= _options.MaxQueueSize)
+            return Task.CompletedTask;
+
         _messages[message.MessageId] = message;
         return Task.CompletedTask;
     }
