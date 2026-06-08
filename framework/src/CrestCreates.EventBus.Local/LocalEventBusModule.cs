@@ -13,6 +13,8 @@ public class LocalEventBusModule : ModuleBase
     {
         services.AddSingleton<LocalEventBusOptions>();
         services.Configure<LocalDeadLetterOptions>(_ => { });
+        services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
+        services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
         services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
         services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();

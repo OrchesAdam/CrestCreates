@@ -63,7 +63,7 @@ public sealed class LocalDeadLetterBackgroundService : BackgroundService
 
                     try
                     {
-                        using var scope = _scopeFactory.CreateScope();
+                        await using var scope = _scopeFactory.CreateAsyncScope();
                         var dispatcher = scope.ServiceProvider.GetRequiredService<ILocalEventDispatcher>();
 
                         var eventType = Type.GetType(message.EventType);

@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using CrestCreates.EventBus.Abstractions;
 using Microsoft.Extensions.Options;
 
-namespace CrestCreates.EventBus.Local.Channel;
+namespace CrestCreates.EventBus.Local;
 
 public class InMemoryDeadLetterStore : ILocalDeadLetterStore
 {
@@ -21,6 +21,8 @@ public class InMemoryDeadLetterStore : ILocalDeadLetterStore
 
     public Task EnqueueAsync(DeadLetterMessage message, CancellationToken cancellationToken = default)
     {
+        // Silently drop when the queue is full — the store has no ILogger,
+        // and callers are expected to handle capacity planning externally.
         if (_messages.Count >= _options.MaxQueueSize)
             return Task.CompletedTask;
 

@@ -8,7 +8,7 @@ using CrestCreates.EventBus.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace CrestCreates.EventBus.Local.Channel;
+namespace CrestCreates.EventBus.Local;
 
 public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
 {
@@ -49,7 +49,7 @@ public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
 
         try
         {
-            using var scope = _scopeFactory.CreateScope();
+            await using var scope = _scopeFactory.CreateAsyncScope();
             var dispatcher = scope.ServiceProvider.GetRequiredService<ILocalEventDispatcher>();
 
             var eventType = Type.GetType(message.EventType);
