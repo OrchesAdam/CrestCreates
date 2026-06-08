@@ -160,7 +160,7 @@ Plus a minimal set of execution metadata:
 |---|---|
 | `Id` | stable unique identifier (GUID/ULID — survives renames) |
 | `Name` | **globally unique** business capability name (recommended: `<module>.<aggregate>.<action>`, e.g. `crm.customer.create`) |
-| `Kind` | `Query` / `Draft` / `Command` |
+| `Kind` | `Query` / `Command` |
 | `InputSchema` | `VersionedDescriptorRef<SchemaDescriptor>` |
 | `OutputSchema` | `VersionedDescriptorRef<SchemaDescriptor>` |
 | `Version` | from `IVersionedDescriptor` — the Capability's own version |
@@ -245,12 +245,13 @@ This separation prevents Capability from becoming a metadata + runtime hybrid.
 public enum CapabilityKind
 {
     Query,    // Read-only, no side effects
-    Draft,    // Write with no side effects (save draft, validate only)
     Command   // Write with side effects
 }
 ```
 
-Draft belongs in Capability because it still follows the Input → Output pattern — it just carries the semantic guarantee of "no side effects beyond the draft store." This is not the same as HumanTask or Workflow, which are fundamentally different interaction models.
+A Capability is either a read or a write. There is no `Draft` kind — draft is not a behavior type, it is a runtime data concern. A "save draft" operation is a regular `Command` Capability that happens to write to a draft store. See Section 12 for the Draft Infrastructure model.
+
+This is not the same as HumanTask or Workflow, which are fundamentally different interaction models.
 
 **What about `IdempotencyMode`, `TransactionMode`, `Timeout`, `Compensation`?**
 
@@ -625,6 +626,8 @@ FormDescriptor        : IVersionedDescriptor   // form changes must not break ru
 HumanTaskDescriptor   : IVersionedDescriptor   // task definition changes must not break running instances
 WorkflowDescriptor    : IVersionedDescriptor   // workflow definition changes require versioning
 ```
+
+All six descriptor types are versioned. `SchemaDescriptor`, `CapabilityDescriptor`, `EventDescriptor`, and `WorkflowDescriptor` are the four pillars (Definition Layer). `FormDescriptor` and `HumanTaskDescriptor` are Instance Infrastructure — state and presentation concerns that reference the pillars.
 
 All five descriptors are versioned. Running instances (Workflow instances, HumanTask instances) pin to a specific descriptor version. Form and HumanTask versioning prevents running tasks from breaking when their UI definitions change — the same protection Workflow and Schema already provide.
 
@@ -1295,7 +1298,7 @@ DynamicApiDescriptor is a **projection view** of CapabilityDescriptor. It adds:
 | Field | Detail |
 |---|---|
 | `CapabilityName` | ref to CapabilityDescriptor |
-| `HttpMethod` | GET (Query), POST (Draft/Command) |
+| `HttpMethod` | GET (Query), POST (Command) |
 | `RoutePattern` | derived from capability name |
 | `ResponseEnvelope` | standard CrestCreates response wrapper |
 
@@ -1324,7 +1327,7 @@ Same pattern as AgentToolDescriptor, for MCP (Model Context Protocol) exposure.
 
 | Anti-Pattern | How this model prevents it |
 |---|---|
-| `CapabilityKind.Workflow` | Workflow is a separate descriptor; CapabilityKind is only Query/Draft/Command |
+| `CapabilityKind.Workflow` | Workflow is a separate descriptor; CapabilityKind is only Query/Command |
 | `CapabilityKind.HumanTask` | HumanTask is a separate descriptor delegating to Form |
 | `ApproveTaskCapability` | Approval is a HumanTask, not a Capability |
 | `StartWorkflowCapability` | Sub-workflows use `SubWorkflowTarget`, not a special Capability |
@@ -1382,7 +1385,7 @@ Phase 4: Introduce AgentToolDescriptor and MCPToolDescriptor as additional Capab
 | 1 | SchemaDescriptor is the single source of truth for data shape — no FormSchema, WorkflowSchema, ApiSchema, ToolSchema |
 | 2 | Every Schema has a stable `Id` (GUID/ULID) + `SchemaVersion` — Id survives renames, Version pins consumers |
 | 3 | CapabilityDescriptor answers only three core questions: What? Input? Output? — plus Kind, Permission, RiskLevel |
-| 4 | CapabilityKind is limited to Query, Draft, Command — Workflow and HumanTask are NOT CapabilityKinds |
+| 4 | CapabilityKind is limited to Query, Command — Workflow and HumanTask are separate descriptors; Draft is Runtime Data |
 | 5 | Capability is always atomic — Capability must not invoke other Capabilities; composition requires Workflow |
 | 6 | `CapabilityDescriptor.Id` is the primary identity; `Name` is a human-stable alias (mutable, globally unique) |
 | 7 | Schema evolution is governed by SchemaVersion + ChangeKind (Additive/Breaking); consumers pin schema versions |
@@ -1402,26 +1405,170 @@ Phase 4: Introduce AgentToolDescriptor and MCPToolDescriptor as additional Capab
 | 21 | Descriptors are organized by `DescriptorPackage` (module-level grouping with PackageId, Name, Version) |
 | 22 | `DescriptorManifest` is a lightweight module-level index of all descriptors — generated alongside registry code |
 | 23 | `DescriptorSnapshot` captures a point-in-time set of descriptor refs for running instances (Workflow, Draft, Agent session) |
-| 24 | `CapabilityDescriptor.Name` supports `Aliases` — historical names retained after rename for backward compatibility |
-| 25 | Descriptors have a defined lifecycle: Discovery → Generation → Registration → Resolution → Execution → Versioning → Deprecation → Removal |
-| 26 | Descriptors are immutable once registered; versioned descriptors create new entries; running instances pin their version |
-| 27 | Capability execution produces structured lifecycle events (Executing/Succeeded/Failed/Compensated) — the semantic backbone for Workflow, Agent, Outbox, Saga, Audit |
-| 28 | Domain Events ≠ Capability Events — domain events carry business semantics, capability events carry execution proof |
-| 29 | FormDescriptor = Schema + UI metadata — pure presentation concern, not a business action |
-| 30 | HumanTaskDescriptor is the business action for human interaction — Form is its UI delegate |
-| 31 | WorkflowDescriptor has WorkflowVersion; running instances are pinned at instantiation time, not "latest" |
-| 32 | Workflow variables have defined scopes (Global/Workflow/SubWorkflow/Step); sub-workflow variables do NOT leak to parent |
-| 33 | WorkflowStep binds to InteractionTarget (Capability | HumanTask | SubWorkflow), never to ApplicationService or Form directly |
-| 34 | DynamicApiDescriptor, AgentToolDescriptor, MCPToolDescriptor are projection views of CapabilityDescriptor |
-| 35 | Every Capability invocation enters the unified Capability Execution Pipeline regardless of trigger source |
-| 36 | Entity is a Schema source, not a participant in the Capability/Workflow chain |
-| 37 | Entity → Form, Entity → Workflow, Entity → Capability are all forbidden dependencies |
-| 31 | Entity is a Schema source, not a participant in the Capability/Workflow chain |
-| 32 | Entity → Form, Entity → Workflow, Entity → Capability are all forbidden dependencies |
+| 24 | Draft is Runtime Data, not Metadata — `Draft` references only `SchemaDescriptor`, not Capability or Workflow |
+| 25 | `IDraftStore` is a shared platform service — Workflow, Agent, DynamicAPI, and HumanTask all use the same draft infrastructure |
+| 26 | Draft submission validates Schema version compatibility (Additive → forward-compatible, Breaking → RequiresMigration) |
+| 27 | `WorkflowDraftPolicy` governs checkpoint behavior (EnableCheckpointing, SaveInterval, SaveBeforeHumanTask, SaveBeforeSubWorkflow) |
+| 28 | `CapabilityDescriptor.Name` supports `Aliases` — historical names retained after rename for backward compatibility |
+| 29 | Descriptors have a defined lifecycle: Discovery → Generation → Registration → Resolution → Execution → Versioning → Deprecation → Removal |
+| 30 | Descriptors are immutable once registered; versioned descriptors create new entries; running instances pin their version |
+| 31 | Capability execution produces structured lifecycle events (Executing/Succeeded/Failed/Compensated) — the semantic backbone for Workflow, Agent, Outbox, Saga, Audit |
+| 32 | Domain Events ≠ Capability Events — domain events carry business semantics, capability events carry execution proof |
+| 33 | FormDescriptor = Schema + UI metadata — pure presentation concern, not a business action |
+| 34 | HumanTaskDescriptor is the business action for human interaction — Form is its UI delegate |
+| 35 | WorkflowDescriptor has WorkflowVersion; running instances are pinned at instantiation time, not "latest" |
+| 36 | Workflow variables have defined scopes (Global/Workflow/SubWorkflow/Step); sub-workflow variables do NOT leak to parent |
+| 37 | WorkflowStep binds to InteractionTarget (Capability | HumanTask | SubWorkflow), never to ApplicationService or Form directly |
+| 38 | DynamicApiDescriptor, AgentToolDescriptor, MCPToolDescriptor are projection views of CapabilityDescriptor |
+| 39 | Every Capability invocation enters the unified Capability Execution Pipeline regardless of trigger source |
+| 40 | Entity is a Schema source, not a participant in the Capability/Workflow chain |
+| 41 | Entity → Form, Entity → Workflow, Entity → Capability are all forbidden dependencies |
 
 ---
 
-## 12. Future Considerations
+## 12. Draft Infrastructure — Runtime Data, Not Metadata
+
+Draft is **not a Descriptor**. It is not a Pillar. It is Runtime Data — a point-in-time snapshot of work-in-progress data captured against a Schema.
+
+```text
+Descriptor Layer (Metadata)          Runtime Layer (Data)
+───────────────────────────          ─────────────────────
+SchemaDescriptor                     Draft
+CapabilityDescriptor                 CapabilityExecution
+EventDescriptor                      WorkflowInstance
+WorkflowDescriptor                   HumanTaskInstance
+FormDescriptor
+HumanTaskDescriptor
+```
+
+### 12.1 Draft Model
+
+```csharp
+public sealed class Draft
+{
+    public string DraftId { get; }                              // Unique draft identifier
+    public string OwnerId { get; }                              // Who owns this draft (UserId, AgentSessionId, WorkflowInstanceId)
+    public string TenantId { get; }                             // Tenant isolation
+    public VersionedDescriptorRef<SchemaDescriptor> Schema { get; } // Schema this data conforms to
+    public JsonDocument Payload { get; }                        // The actual draft data
+    public DraftStatus Status { get; }
+    public DateTimeOffset CreatedAt { get; }
+    public DateTimeOffset UpdatedAt { get; }
+    public DateTimeOffset? ExpiresAt { get; }
+}
+```
+
+```csharp
+public enum DraftStatus
+{
+    Active,              // Being actively worked on
+    Submitted,           // Submitted to a Capability — retained for audit
+    Archived,            // Explicitly archived by the user
+    Expired,             // Past retention period
+    RequiresMigration    // Schema changed incompatibly — needs user action
+}
+```
+
+### 12.2 Draft Knows Schema, Not Capability
+
+A Draft references only a `SchemaDescriptor`. It does NOT reference a `CapabilityDescriptor`.
+
+**Why:** The same Schema can be the input to multiple Capabilities:
+
+```text
+CustomerSchema
+    ├── crm.customer.create
+    ├── crm.customer.import
+    └── crm.customer.validate
+```
+
+A Draft captured against `CustomerSchema` doesn't know which Capability will eventually consume it. The consumer is determined at submission time — by the user, the Agent, or the Workflow step.
+
+```text
+// Correct:
+Draft → SchemaDescriptor
+Draft ✗→ CapabilityDescriptor  // Draft doesn't know its future consumer
+
+// At submission time:
+DynamicAPI: Load Draft → Validate Schema → Execute Capability
+Agent:      Load Draft → LLM modifies → Save Draft
+Workflow:   Load Draft → Execute Capability → Update Draft
+```
+
+### 12.3 Draft Store
+
+Draft persistence is an independent infrastructure concern:
+
+```csharp
+public interface IDraftStore
+{
+    Task<Draft> SaveAsync(Draft draft, CancellationToken ct);
+    Task<Draft?> GetAsync(string draftId, CancellationToken ct);
+    Task DeleteAsync(string draftId, CancellationToken ct);
+    Task<IReadOnlyList<Draft>> QueryAsync(DraftQuery query, CancellationToken ct);
+}
+```
+
+Backed by any storage (SQL, MongoDB, Redis, S3). The store is a platform service — Workflow, Agent, DynamicAPI, and HumanTask all share the same `IDraftStore`.
+
+### 12.4 Draft and Schema Versioning
+
+When a Draft is submitted:
+
+```text
+Draft.Schema.Version == Current Schema Version
+    → Direct submission. No migration needed.
+
+Draft.Schema.Version < Current Schema Version
+    → Check Schema ChangeKind:
+        Additive → Draft data is forward-compatible. Submit.
+        Breaking → Draft enters RequiresMigration status.
+```
+
+This is the same version pinning model used by Workflow instances and Agent caches. The Draft stores the `SchemaVersion` at capture time and validates against it at submission time.
+
+### 12.5 Draft and Workflow
+
+Workflow checkpoints use Draft as the persistence mechanism:
+
+```csharp
+public sealed class WorkflowDraftPolicy
+{
+    public bool EnableCheckpointing { get; }
+    public TimeSpan SaveInterval { get; }
+    public bool SaveBeforeHumanTask { get; }
+    public bool SaveBeforeSubWorkflow { get; }
+}
+```
+
+When a Workflow checkpoints, it saves a `Draft` with `OwnerId = workflowInstanceId` and `Schema = WorkflowVariableSchema`. On resume, the Workflow engine loads the Draft, restores the `DescriptorSnapshot`, and continues from the saved step.
+
+Workflow does **not** own Draft. Draft does **not** reference Workflow. The relationship is:
+
+```text
+WorkflowInstance ──references──→ Draft (by DraftId)
+Draft            ──references──→ SchemaDescriptor (by VersionedDescriptorRef)
+```
+
+### 12.6 Draft and Agent
+
+Agent sessions use `IDraftStore` to persist LLM state. The Agent Runtime saves drafts between tool calls and restores them on session resume. The Agent does not need to know about `CapabilityKind` — saving a draft is just calling `IDraftStore.SaveAsync()` behind a regular Command Capability handler.
+
+### 12.7 Dependency Rules for Draft
+
+| From → To | Allowed? | Reason |
+|---|---|---|
+| `Draft` → `SchemaDescriptor` | ✅ | Draft captures data against a schema |
+| `Draft` → `CapabilityDescriptor` | ❌ | Draft doesn't know which capability will consume it |
+| `Draft` → `WorkflowDescriptor` | ❌ | Draft doesn't own orchestration |
+| `Draft` → `HumanTaskDescriptor` | ❌ | Draft doesn't own task lifecycle |
+| `WorkflowInstance` → `Draft` (by Id) | ✅ | Workflow checkpoints via draft |
+| `AgentRuntime` → `IDraftStore` | ✅ | Agent persists LLM state |
+| `HumanTask` → `IDraftStore` | ✅ | Human task auto-save |
+
+---
+
+## 13. Future Considerations
 
 - **Low-code form builder**: Because Form depends only on Schema, a low-code form builder only needs SchemaDescriptor + FormDescriptor — it does not need to know about Capability, Workflow, or Entity.
 - **Workflow engine integration (e.g., Elsa)**: The WorkflowDescriptor and InteractionTarget abstractions serve as the CrestCreates-native workflow model. External engines can be adapted behind these abstractions.
