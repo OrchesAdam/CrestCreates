@@ -23,7 +23,7 @@ public class KafkaEventBus : DistributedEventBusBase
     {
         ArgumentNullException.ThrowIfNull(@event);
 
-        var topic = EventNamingConvention.GetTopic(@event.GetType());
+        var topic = _options.DefaultTopic;
         var key = EventNamingConvention.GetRoutingKey(@event.GetType());
         await _publisher.PublishAsync(topic, @event, key: key, headers: null, cancellationToken: cancellationToken);
     }
@@ -32,7 +32,7 @@ public class KafkaEventBus : DistributedEventBusBase
     {
         ArgumentNullException.ThrowIfNull(@event);
 
-        var topic = EventNamingConvention.GetTopic<TEvent>();
+        var topic = _options.DefaultTopic;
         var key = EventNamingConvention.GetRoutingKey<TEvent>();
         await _publisher.PublishAsync(topic, @event, key: key, headers: null, cancellationToken: cancellationToken);
     }

@@ -61,10 +61,11 @@ public static class EventNamingConvention
         return $"{topic}.dlq";
     }
 
+    private static readonly Regex PascalCaseRegex = new("([a-z])([A-Z])", RegexOptions.Compiled);
+
     private static string PascalToLowerUnderscore(string pascalCase)
     {
-        return Regex.Replace(pascalCase, "([a-z])([A-Z])", "$1_$2")
-            .ToLowerInvariant();
+        return PascalCaseRegex.Replace(pascalCase, "$1_$2").ToLowerInvariant();
     }
 
     private static string ToLowerKebab(string input)
