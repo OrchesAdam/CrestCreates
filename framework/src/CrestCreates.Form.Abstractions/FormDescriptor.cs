@@ -1,0 +1,20 @@
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Schema.Abstractions;
+
+namespace CrestCreates.Form.Abstractions;
+
+public sealed class FormDescriptor : IVersionedDescriptor
+{
+    public DescriptorKind Kind => DescriptorKind.Form;
+    public string Id { get; init; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
+    public DescriptorState State { get; init; } = DescriptorState.Active;
+    public string? SupersededById { get; init; }
+    public string ContractHash { get; init; } = string.Empty;
+    public string DefinitionHash { get; init; } = string.Empty;
+    public int Version { get; init; }
+
+    public VersionedDescriptorRef<SchemaDescriptor> Schema { get; init; }
+    public IReadOnlyList<FormFieldDescriptor> Fields { get; init; } = Array.Empty<FormFieldDescriptor>();
+    public string? LayoutColumns { get; init; }
+}

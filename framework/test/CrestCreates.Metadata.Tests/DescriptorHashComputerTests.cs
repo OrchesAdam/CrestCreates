@@ -1,3 +1,4 @@
+using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -138,5 +139,100 @@ public class DescriptorHashComputerTests
         var hash2 = DescriptorHashComputer.ComputeContractHash(cap2);
 
         hash1.Should().Be(hash2);
+    }
+
+    [Fact]
+    public void EventDescriptor_Same_Content_Produces_Same_ContractHash()
+    {
+        var evt1 = new Event.Abstractions.EventDescriptor
+        {
+            Id = "evt_01", Name = "crm.customer.created", Version = 1,
+            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema_01", 1),
+            Category = Event.Abstractions.EventCategory.Domain,
+            Semantic = Event.Abstractions.EventSemantic.Fact,
+            Importance = Event.Abstractions.EventImportance.Critical
+        };
+        var evt2 = new Event.Abstractions.EventDescriptor
+        {
+            Id = "evt_01", Name = "crm.customer.created", Version = 1,
+            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema_01", 1),
+            Category = Event.Abstractions.EventCategory.Domain,
+            Semantic = Event.Abstractions.EventSemantic.Fact,
+            Importance = Event.Abstractions.EventImportance.Critical
+        };
+
+        var h1 = DescriptorHashComputer.ComputeContractHash(evt1);
+        var h2 = DescriptorHashComputer.ComputeContractHash(evt2);
+
+        h1.Should().Be(h2);
+    }
+
+    [Fact]
+    public void WorkflowStep_ContractHash_Includes_Step_Id_Not_Name()
+    {
+        var wf1 = new Workflow.Abstractions.WorkflowDescriptor
+        {
+            Id = "wf_01", Name = "test.wf", Version = 1,
+            Steps = new[]
+            {
+                new Workflow.Abstractions.WorkflowStep
+                {
+                    Id = "step_01", Name = "Step A",
+                    Target = new Workflow.Abstractions.CapabilityTarget
+                    {
+                        Capability = new VersionedDescriptorRef<Capability.Abstractions.CapabilityDescriptor>("cap_01", 1)
+                    }
+                }
+            }
+        };
+        var wf2 = new Workflow.Abstractions.WorkflowDescriptor
+        {
+            Id = "wf_01", Name = "test.wf", Version = 1,
+            Steps = new[]
+            {
+                new Workflow.Abstractions.WorkflowStep
+                {
+                    Id = "step_01", Name = "Renamed Step",
+                    Target = new Workflow.Abstractions.CapabilityTarget
+                    {
+                        Capability = new VersionedDescriptorRef<Capability.Abstractions.CapabilityDescriptor>("cap_01", 1)
+                    }
+                }
+            }
+        };
+
+        var h1 = DescriptorHashComputer.ComputeContractHash(wf1);
+        var h2 = DescriptorHashComputer.ComputeContractHash(wf2);
+
+        h1.Should().Be(h2);
+    }
+
+    [Fact]
+    public void FormDescriptor_ContractHash_Excludes_UI_Cosmetic_Fields()
+    {
+        var form1 = new Form.Abstractions.FormDescriptor
+        {
+            Id = "form_01", Name = "CustomerForm", Version = 1,
+            Schema = new VersionedDescriptorRef<SchemaDescriptor>("schema_01", 1),
+            Fields = new[]
+            {
+                new Form.Abstractions.FormFieldDescriptor { SchemaFieldName = "Email", Label = "Email", Order = 0 }
+            }
+        };
+        var form2 = new Form.Abstractions.FormDescriptor
+        {
+            Id = "form_01", Name = "CustomerForm", Version = 1,
+            Schema = new VersionedDescriptorRef<SchemaDescriptor>("schema_01", 1),
+            Fields = new[]
+            {
+                new Form.Abstractions.FormFieldDescriptor { SchemaFieldName = "Email", Label = "Email Address", Order = 0 }
+            }
+        };
+
+        var h1 = DescriptorHashComputer.ComputeContractHash(form1);
+        var h2 = DescriptorHashComputer.ComputeContractHash(form2);
+
+        // Label is cosmetic — same structural contract
+        h1.Should().Be(h2);
     }
 }

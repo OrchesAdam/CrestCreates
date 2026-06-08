@@ -30,15 +30,53 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
             .Where(static x => x is not null)
             .Collect();
 
+        var eventProviders = context.SyntaxProvider
+            .CreateSyntaxProvider(
+                predicate: static (node, _) => node is ClassDeclarationSyntax,
+                transform: static (ctx, ct) => GetEventProviderInfo(ctx))
+            .Where(static x => x is not null)
+            .Collect();
+
+        var formProviders = context.SyntaxProvider
+            .CreateSyntaxProvider(
+                predicate: static (node, _) => node is ClassDeclarationSyntax,
+                transform: static (ctx, ct) => GetFormProviderInfo(ctx))
+            .Where(static x => x is not null)
+            .Collect();
+
+        var humanTaskProviders = context.SyntaxProvider
+            .CreateSyntaxProvider(
+                predicate: static (node, _) => node is ClassDeclarationSyntax,
+                transform: static (ctx, ct) => GetHumanTaskProviderInfo(ctx))
+            .Where(static x => x is not null)
+            .Collect();
+
+        var workflowProviders = context.SyntaxProvider
+            .CreateSyntaxProvider(
+                predicate: static (node, _) => node is ClassDeclarationSyntax,
+                transform: static (ctx, ct) => GetWorkflowProviderInfo(ctx))
+            .Where(static x => x is not null)
+            .Collect();
+
         var compilationProvider = context.CompilationProvider;
 
         context.RegisterSourceOutput(
-            entityClasses.Combine(serviceClasses).Combine(compilationProvider),
+            entityClasses.Combine(serviceClasses)
+                .Combine(eventProviders)
+                .Combine(formProviders)
+                .Combine(humanTaskProviders)
+                .Combine(workflowProviders)
+                .Combine(compilationProvider),
             static (spc, source) =>
             {
-                var combined = source.Left;
                 var compilation = source.Right;
-                GenerateRegistries(spc, combined.Left, combined.Right, compilation);
+                var workflowList = source.Left.Right;
+                var humanTaskList = source.Left.Left.Right;
+                var formList = source.Left.Left.Left.Right;
+                var eventList = source.Left.Left.Left.Left.Right;
+                var entityAndCapability = source.Left.Left.Left.Left.Left;
+                GenerateRegistries(spc, entityAndCapability.Left, entityAndCapability.Right,
+                    eventList, formList, humanTaskList, workflowList, compilation);
             });
     }
 
@@ -116,20 +154,123 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
         };
     }
 
+    private static EventDescriptorInfo? GetEventProviderInfo(GeneratorSyntaxContext ctx)
+    {
+        var classDecl = (ClassDeclarationSyntax)ctx.Node;
+        var symbol = ctx.SemanticModel.GetDeclaredSymbol(classDecl) as INamedTypeSymbol;
+        if (symbol == null) return null;
+
+        var eventProviderType = ctx.SemanticModel.Compilation
+            .GetTypeByMetadataName("CrestCreates.Event.Abstractions.IEventDescriptorProvider");
+        if (eventProviderType == null) return null;
+
+        var implements = symbol.AllInterfaces.Any(i =>
+            SymbolEqualityComparer.Default.Equals(i, eventProviderType));
+        if (!implements) return null;
+
+        return new EventDescriptorInfo
+        {
+            Id = $"evt_{Guid.NewGuid():N}",
+            Name = symbol.ContainingNamespace?.ToDisplayString() + "." + symbol.Name
+        };
+    }
+
+    private static FormDescriptorInfo? GetFormProviderInfo(GeneratorSyntaxContext ctx)
+    {
+        var classDecl = (ClassDeclarationSyntax)ctx.Node;
+        var symbol = ctx.SemanticModel.GetDeclaredSymbol(classDecl) as INamedTypeSymbol;
+        if (symbol == null) return null;
+
+        var formProviderType = ctx.SemanticModel.Compilation
+            .GetTypeByMetadataName("CrestCreates.Form.Abstractions.IFormDescriptorProvider");
+        if (formProviderType == null) return null;
+
+        var implements = symbol.AllInterfaces.Any(i =>
+            SymbolEqualityComparer.Default.Equals(i, formProviderType));
+        if (!implements) return null;
+
+        return new FormDescriptorInfo
+        {
+            Id = $"form_{Guid.NewGuid():N}",
+            Name = symbol.ContainingNamespace?.ToDisplayString() + "." + symbol.Name
+        };
+    }
+
+    private static HumanTaskDescriptorInfo? GetHumanTaskProviderInfo(GeneratorSyntaxContext ctx)
+    {
+        var classDecl = (ClassDeclarationSyntax)ctx.Node;
+        var symbol = ctx.SemanticModel.GetDeclaredSymbol(classDecl) as INamedTypeSymbol;
+        if (symbol == null) return null;
+
+        var humanTaskProviderType = ctx.SemanticModel.Compilation
+            .GetTypeByMetadataName("CrestCreates.HumanTask.Abstractions.IHumanTaskDescriptorProvider");
+        if (humanTaskProviderType == null) return null;
+
+        var implements = symbol.AllInterfaces.Any(i =>
+            SymbolEqualityComparer.Default.Equals(i, humanTaskProviderType));
+        if (!implements) return null;
+
+        return new HumanTaskDescriptorInfo
+        {
+            Id = $"ht_{Guid.NewGuid():N}",
+            Name = symbol.ContainingNamespace?.ToDisplayString() + "." + symbol.Name
+        };
+    }
+
+    private static WorkflowDescriptorInfo? GetWorkflowProviderInfo(GeneratorSyntaxContext ctx)
+    {
+        var classDecl = (ClassDeclarationSyntax)ctx.Node;
+        var symbol = ctx.SemanticModel.GetDeclaredSymbol(classDecl) as INamedTypeSymbol;
+        if (symbol == null) return null;
+
+        var workflowProviderType = ctx.SemanticModel.Compilation
+            .GetTypeByMetadataName("CrestCreates.Workflow.Abstractions.IWorkflowDescriptorProvider");
+        if (workflowProviderType == null) return null;
+
+        var implements = symbol.AllInterfaces.Any(i =>
+            SymbolEqualityComparer.Default.Equals(i, workflowProviderType));
+        if (!implements) return null;
+
+        return new WorkflowDescriptorInfo
+        {
+            Id = $"wf_{Guid.NewGuid():N}",
+            Name = symbol.ContainingNamespace?.ToDisplayString() + "." + symbol.Name
+        };
+    }
+
     private static void GenerateRegistries(
         SourceProductionContext spc,
         ImmutableArray<SchemaDescriptorInfo?> schemas,
         ImmutableArray<CapabilityDescriptorInfo?> capabilities,
+        ImmutableArray<EventDescriptorInfo?> events,
+        ImmutableArray<FormDescriptorInfo?> forms,
+        ImmutableArray<HumanTaskDescriptorInfo?> humanTasks,
+        ImmutableArray<WorkflowDescriptorInfo?> workflows,
         Compilation compilation)
     {
-        if (schemas.All(s => s == null) && capabilities.All(c => c == null))
+        var hasSchema = compilation.ReferencedAssemblyNames
+            .Any(a => a.Name == "CrestCreates.Schema.Abstractions");
+        if (!hasSchema)
             return;
 
-        // Only generate if the project references the required assemblies
-        var hasSchemaAbstractions = compilation.ReferencedAssemblyNames
-            .Any(a => a.Name == "CrestCreates.Schema.Abstractions");
-        if (!hasSchemaAbstractions)
+        var hasAny = schemas.Any(s => s != null)
+            || capabilities.Any(c => c != null)
+            || events.Any(e => e != null)
+            || forms.Any(f => f != null)
+            || humanTasks.Any(h => h != null)
+            || workflows.Any(w => w != null);
+
+        if (!hasAny)
             return;
+
+        var hasEvent = compilation.ReferencedAssemblyNames
+            .Any(a => a.Name == "CrestCreates.Event.Abstractions");
+        var hasForm = compilation.ReferencedAssemblyNames
+            .Any(a => a.Name == "CrestCreates.Form.Abstractions");
+        var hasHumanTask = compilation.ReferencedAssemblyNames
+            .Any(a => a.Name == "CrestCreates.HumanTask.Abstractions");
+        var hasWorkflow = compilation.ReferencedAssemblyNames
+            .Any(a => a.Name == "CrestCreates.Workflow.Abstractions");
 
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated />");
@@ -138,6 +279,26 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
         sb.AppendLine("using CrestCreates.Schema;");
         sb.AppendLine("using CrestCreates.Capability.Abstractions;");
         sb.AppendLine("using CrestCreates.Capability;");
+        if (hasEvent)
+        {
+            sb.AppendLine("using CrestCreates.Event.Abstractions;");
+            sb.AppendLine("using CrestCreates.Event;");
+        }
+        if (hasForm)
+        {
+            sb.AppendLine("using CrestCreates.Form.Abstractions;");
+            sb.AppendLine("using CrestCreates.Form;");
+        }
+        if (hasHumanTask)
+        {
+            sb.AppendLine("using CrestCreates.HumanTask.Abstractions;");
+            sb.AppendLine("using CrestCreates.HumanTask;");
+        }
+        if (hasWorkflow)
+        {
+            sb.AppendLine("using CrestCreates.Workflow.Abstractions;");
+            sb.AppendLine("using CrestCreates.Workflow;");
+        }
         sb.AppendLine("using CrestCreates.Metadata.Abstractions;");
         sb.AppendLine("using System.Runtime.CompilerServices;");
         sb.AppendLine();
@@ -187,6 +348,59 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
             sb.AppendLine($"            CapabilityKind = CapabilityKind.{cap.CapabilityKind},");
             sb.AppendLine($"            Permission = \"{cap.Permission}\",");
             sb.AppendLine($"            SemanticTags = new List<string> {{ {tagsStr} }},");
+            sb.AppendLine("        });");
+            sb.AppendLine();
+        }
+
+        foreach (var evt in events)
+        {
+            if (evt == null) continue;
+            sb.AppendLine($"        EventRegistryProvider.Register(new EventDescriptor");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            Id = \"{evt.Id}\",");
+            sb.AppendLine($"            Name = \"{evt.Name}\",");
+            sb.AppendLine($"            Version = {evt.Version},");
+            sb.AppendLine($"            Category = EventCategory.{evt.Category},");
+            sb.AppendLine($"            Semantic = EventSemantic.{evt.Semantic},");
+            sb.AppendLine($"            Importance = EventImportance.{evt.Importance},");
+            sb.AppendLine($"            ChangeKind = SchemaChangeKind.{evt.ChangeKind},");
+            sb.AppendLine("        });");
+            sb.AppendLine();
+        }
+
+        foreach (var form in forms)
+        {
+            if (form == null) continue;
+            sb.AppendLine($"        FormRegistryProvider.Register(new FormDescriptor");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            Id = \"{form.Id}\",");
+            sb.AppendLine($"            Name = \"{form.Name}\",");
+            sb.AppendLine($"            Version = {form.Version},");
+            sb.AppendLine("        });");
+            sb.AppendLine();
+        }
+
+        foreach (var ht in humanTasks)
+        {
+            if (ht == null) continue;
+            sb.AppendLine($"        HumanTaskRegistryProvider.Register(new HumanTaskDescriptor");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            Id = \"{ht.Id}\",");
+            sb.AppendLine($"            Name = \"{ht.Name}\",");
+            sb.AppendLine($"            Version = {ht.Version},");
+            sb.AppendLine($"            AssigneeStrategy = AssigneeStrategy.{ht.AssigneeStrategy},");
+            sb.AppendLine("        });");
+            sb.AppendLine();
+        }
+
+        foreach (var wf in workflows)
+        {
+            if (wf == null) continue;
+            sb.AppendLine($"        WorkflowRegistryProvider.Register(new WorkflowDescriptor");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            Id = \"{wf.Id}\",");
+            sb.AppendLine($"            Name = \"{wf.Name}\",");
+            sb.AppendLine($"            Version = {wf.Version},");
             sb.AppendLine("        });");
             sb.AppendLine();
         }
