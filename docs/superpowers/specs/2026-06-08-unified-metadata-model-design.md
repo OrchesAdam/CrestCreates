@@ -92,6 +92,8 @@ DynamicAPI Agent MCP  │    (post-completion
 | Relations | references to other SchemaDescriptors |
 | Validation rules | per-field and cross-field validation expressions |
 | Default values | static or computed defaults |
+| `SchemaVersion` | monotonically incrementing version number |
+| `ChangeKind` | `Additive` / `Breaking` — declared at each version increment |
 | **NOT: UI layout** | belongs to FormDescriptor |
 | **NOT: permissions** | belongs to CapabilityDescriptor or HumanTaskDescriptor |
 | **NOT: field visibility** | belongs to FormDescriptor |
@@ -106,24 +108,56 @@ Schema variants used across the system:
 - `WorkflowVariableSchema` — variables carried across Workflow steps.
 - These are all the same `SchemaDescriptor` type — no separate subclasses needed.
 
+#### Schema Versioning and Evolution
+
+Schema evolves. Consumers (Capability, Form, Workflow, Agent cache, Draft storage) must handle version changes without breaking at a distance.
+
+**Version rules:**
+
+| Change | `ChangeKind` | Compatible? |
+|---|---|---|
+| Add a new optional field | `Additive` | ✅ existing consumers work unchanged |
+| Add a new required field with default | `Additive` | ✅ default fills the gap |
+| Remove a field no longer referenced | `Additive` | ✅ no consumer breaks |
+| Add a new required field (no default) | `Breaking` | ❌ existing payloads fail validation |
+| Remove a field still referenced | `Breaking` | ❌ consumers referencing it break |
+| Rename a field | `Breaking` | ❌ all consumers must update |
+| Change a field type | `Breaking` | ❌ type mismatch |
+| Narrow a constraint (e.g. max: 100 → max: 50) | `Breaking` | ❌ previously-valid data now invalid |
+
+**How consumers pin schema versions:**
+
+- `CapabilityDescriptor` stores `InputSchemaVersion` and `OutputSchemaVersion` — these are **pinned at definition time**. The Capability always validates against the version it was defined with.
+- A Capability can be re-defined to use a newer Schema version — this is a Capability definition change (new `DefinitionHash`).
+- Workflow variables use `WorkflowVariableSchema` with a pinned version. A running Workflow instance continues with the version it was instantiated with.
+- Agent Tool caching: when a Capability's schema version changes, the Agent runtime detects the `DefinitionHash` change and invalidates the cached tool schema.
+- Draft storage: a Draft saves the `SchemaVersion` it was created with. On submit, if the current Schema version is different, the pipeline applies the compatibility rules:
+  - `Additive` change → Draft data is forward-compatible, proceed.
+  - `Breaking` change → Draft requires migration or user re-validation before submit.
+
+This ensures that a Schema upgrade never silently corrupts running Workflow instances, cached Agent tool definitions, or saved Drafts.
+
 ### 4.2 CapabilityDescriptor — "What can the system do?"
 
 Capability is an **atomic business action**. It answers exactly three questions:
 
 1. **What?** — `Name` (e.g., `employee.create`)
-2. **Input?** — `InputSchema` (ref to SchemaDescriptor)
-3. **Output?** — `OutputSchema` (ref to SchemaDescriptor)
+2. **Input?** — `InputSchema` (ref to SchemaDescriptor, with version)
+3. **Output?** — `OutputSchema` (ref to SchemaDescriptor, with version)
 
 Plus a minimal set of execution metadata:
 
 | Field | Detail |
 |---|---|
-| `Name` | stable business capability name (kebab-case convention) |
+| `Name` | **globally unique** business capability name (dot-separated convention, e.g. `employee.create`) |
 | `Kind` | `Query` / `Draft` / `Command` |
 | `InputSchema` | ref to SchemaDescriptor |
+| `InputSchemaVersion` | pinned schema version at definition time |
 | `OutputSchema` | ref to SchemaDescriptor |
+| `OutputSchemaVersion` | pinned schema version at definition time |
 | `Permission` | required permission to invoke |
 | `RiskLevel` | `Low` / `Medium` / `High` / `Critical` |
+| `DefinitionHash` | stable hash of the entire descriptor (for audit/trace correlation) |
 
 **Explicitly NOT in CapabilityDescriptor:**
 
@@ -136,6 +170,51 @@ Plus a minimal set of execution metadata:
 | Outbox/Retry/Cache config | Infrastructure concerns, applied by the execution pipeline |
 | Agent metadata | Agent is a consumer of Capability, not a property of it |
 | DynamicAPI route/HTTP method | DynamicAPI is a consumer of Capability |
+| Invocation of other Capabilities | Capability is atomic — composition must use Workflow |
+
+#### CapabilityName: Global Uniqueness
+
+`CapabilityName` is a **global primary key**. There is no namespace or module-scoped alternative.
+
+- `employee.create` — exactly one definition across the entire system.
+- `HR.employee.create` and `ERP.employee.create` — **not allowed** as separate capabilities.
+- If two modules need the same business concept, they either share the capability or define capabilities with distinct names (e.g., `hr.employee.create` vs `erp.employee.create` — both are globally unique, the prefix is naming convention, not namespace).
+- Module-level capability name conflicts are **compile-time errors** detected by the source generator.
+
+Rationale: Workflow, Agent, MCP, Audit, Tracing, and Permission systems all reference `CapabilityName` as a stable identifier. Introducing namespace/version/module into the key would force every consumer to carry a composite key through their entire data model.
+
+#### Capability Atomicity: No Composition
+
+A Capability is **always atomic**. It must not invoke other Capabilities.
+
+- ✅ `employee.create` — single handler, single transaction scope.
+- ✅ `employee.sync` — single handler, triggered by BackgroundJob.
+- ❌ `employee.onboarding` that internally calls `employee.create` → `role.assign` → `mail.send` → `asset.create` — this is a Workflow, not a Capability.
+
+If you need to compose multiple capabilities, you MUST define a Workflow. There is no "Composite Capability" concept. This prevents a parallel, implicit Workflow system from growing inside the Capability layer.
+
+#### CapabilityHandler: Separating Metadata from Execution
+
+CapabilityDescriptor is **pure metadata**. It describes *what* the capability is. It does not contain the execution logic.
+
+The execution logic lives in a separate interface:
+
+```csharp
+public interface ICapabilityHandler
+{
+}
+
+public interface ICapabilityHandler<TInput, TOutput> : ICapabilityHandler
+{
+    Task<TOutput> ExecuteAsync(TInput input, CapabilityExecutionContext context);
+}
+```
+
+- `CapabilityDescriptor` — metadata: name, kind, schema refs, permission, risk level, definition hash.
+- `ICapabilityHandler<TInput, TOutput>` — runtime: the actual implementation.
+- The Capability Execution Pipeline resolves the handler from the DI container by `CapabilityName`, then invokes it through the unified pipeline.
+
+This separation prevents Capability from becoming a metadata + runtime hybrid.
 
 **CapabilityKind rationale:**
 
@@ -315,6 +394,7 @@ EntityDescriptor → SchemaDescriptor
 | `EntityDescriptor` → `FormDescriptor` | Both consume Schema independently |
 | `EntityDescriptor` → `WorkflowDescriptor` | No direct dependency |
 | `EntityDescriptor` → `CapabilityDescriptor` | Entity doesn't know callers |
+| `CapabilityDescriptor` → `CapabilityDescriptor` | Capability is atomic — composition must use Workflow |
 | `CapabilityDescriptor` → `WorkflowDescriptor` | Capability doesn't own orchestration |
 | `CapabilityDescriptor` → `FormDescriptor` | Capability has no UI |
 | `CapabilityDescriptor` → `HumanTaskDescriptor` | Separate concerns |
@@ -418,10 +498,13 @@ Same pattern as AgentToolDescriptor, for MCP (Model Context Protocol) exposure.
 | `CapabilityKind.HumanTask` | HumanTask is a separate descriptor delegating to Form |
 | `ApproveTaskCapability` | Approval is a HumanTask, not a Capability |
 | `StartWorkflowCapability` | Sub-workflows use `SubWorkflowTarget`, not a special Capability |
+| Composite Capability (Capability calling Capability) | Capability is atomic; composition requires Workflow |
 | `FormTarget` in WorkflowStep | WorkflowStep binds to HumanTask, not Form directly |
 | `AgentToolKind.Form` | Agent tools are always Capability projections; human interaction goes through HumanTask |
 | Direct `ApplicationService` call from Workflow | Must go through Capability |
 | 4-5 parallel schema systems | SchemaDescriptor is the single source of truth for data shape |
+| `CapabilityName` with namespace/module scope | CapabilityName is globally unique; no `HR.employee.create` vs `ERP.employee.create` |
+| Silent schema breaking changes | SchemaVersion + ChangeKind + consumer pinning prevents silent corruption |
 
 ---
 
@@ -469,13 +552,17 @@ Phase 4: Introduce AgentToolDescriptor and MCPToolDescriptor as additional Capab
 | 1 | SchemaDescriptor is the single source of truth for data shape — no FormSchema, WorkflowSchema, ApiSchema, ToolSchema |
 | 2 | CapabilityDescriptor answers only three core questions: What? Input? Output? — plus Kind, Permission, RiskLevel |
 | 3 | CapabilityKind is limited to Query, Draft, Command — Workflow and HumanTask are NOT CapabilityKinds |
-| 4 | FormDescriptor = Schema + UI metadata — pure presentation concern, not a business action |
-| 5 | HumanTaskDescriptor is the business action for human interaction — Form is its UI delegate |
-| 6 | WorkflowStep binds to InteractionTarget (Capability | HumanTask | SubWorkflow), never to ApplicationService or Form directly |
-| 7 | DynamicApiDescriptor, AgentToolDescriptor, MCPToolDescriptor are projection views of CapabilityDescriptor |
-| 8 | Every Capability invocation enters the unified Capability Execution Pipeline regardless of trigger source |
-| 9 | Entity is a Schema source, not a participant in the Capability/Workflow chain |
-| 10 | Entity → Form, Entity → Workflow, Entity → Capability are all forbidden dependencies |
+| 4 | Capability is always atomic — Capability must not invoke other Capabilities; composition requires Workflow |
+| 5 | CapabilityName is globally unique — no namespace/module-scoped names; name conflicts are compile-time errors |
+| 6 | SchemaDescriptor carries SchemaVersion and ChangeKind (Additive/Breaking); consumers pin schema versions |
+| 7 | CapabilityDescriptor is pure metadata; execution logic lives in ICapabilityHandler<TInput, TOutput> |
+| 8 | FormDescriptor = Schema + UI metadata — pure presentation concern, not a business action |
+| 9 | HumanTaskDescriptor is the business action for human interaction — Form is its UI delegate |
+| 10 | WorkflowStep binds to InteractionTarget (Capability | HumanTask | SubWorkflow), never to ApplicationService or Form directly |
+| 11 | DynamicApiDescriptor, AgentToolDescriptor, MCPToolDescriptor are projection views of CapabilityDescriptor |
+| 12 | Every Capability invocation enters the unified Capability Execution Pipeline regardless of trigger source |
+| 13 | Entity is a Schema source, not a participant in the Capability/Workflow chain |
+| 14 | Entity → Form, Entity → Workflow, Entity → Capability are all forbidden dependencies |
 
 ---
 
@@ -485,3 +572,5 @@ Phase 4: Introduce AgentToolDescriptor and MCPToolDescriptor as additional Capab
 - **Workflow engine integration (e.g., Elsa)**: The WorkflowDescriptor and InteractionTarget abstractions serve as the CrestCreates-native workflow model. External engines can be adapted behind these abstractions.
 - **Approval flow complexity**: HumanTaskDescriptor can evolve to support multi-level approval, co-sign, countersign, and delegation patterns without affecting Capability or Workflow.
 - **Observability**: The unified Capability Pipeline provides a single point for metrics, tracing, and auditing — every business action, regardless of trigger, is observable through the same mechanism.
+- **Schema evolution tooling**: Schema version diffing, compatibility checks, and migration helpers should be build-time tools that detect breaking changes before they reach production. Draft migration and Workflow instance schema reconciliation are runtime concerns that build on the version pinning model.
+- **CapabilityName registry**: A centralized, compile-time generated registry of all `CapabilityName` values in the system — enables cross-module conflict detection, IDE navigation, and global refactoring.
