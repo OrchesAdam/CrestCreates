@@ -158,10 +158,8 @@ Plus a minimal set of execution metadata:
 | `Id` | stable unique identifier (GUID/ULID — survives renames) |
 | `Name` | **globally unique** business capability name (recommended: `<module>.<aggregate>.<action>`, e.g. `crm.customer.create`) |
 | `Kind` | `Query` / `Draft` / `Command` |
-| `InputSchemaId` | ref to SchemaDescriptor by Id |
-| `InputSchemaVersion` | pinned schema version at definition time |
-| `OutputSchemaId` | ref to SchemaDescriptor by Id |
-| `OutputSchemaVersion` | pinned schema version at definition time |
+| `InputSchema` | `DescriptorRef<SchemaDescriptor>` |
+| `OutputSchema` | `DescriptorRef<SchemaDescriptor>` |
 | `Permission` | required permission to invoke |
 | `RiskLevel` | `Low` / `Medium` / `High` / `Critical` |
 | `DefinitionHash` | stable hash of the entire descriptor (for audit/trace correlation) |
@@ -334,6 +332,56 @@ A Workflow instance is **pinned to the WorkflowVersion at instantiation time**. 
 - This prevents in-flight instances from breaking when the Workflow definition changes mid-execution.
 - WorkflowVersion changes are `Breaking` by default — a new version may add, remove, reorder steps, or change variable schemas.
 
+#### Workflow Variable Scope
+
+Workflow variables have defined visibility scopes. This is critical for sub-workflows and parallel branches where variable leakage can cause non-deterministic behavior.
+
+```csharp
+public enum WorkflowVariableScope
+{
+    Global,       // Visible to all steps and all sub-workflows (use sparingly)
+    Workflow,     // Visible to all steps within this workflow, NOT leaked to parent or sub-workflows
+    SubWorkflow,  // Visible only within the sub-workflow and its descendants
+    Step          // Visible only within a single step
+}
+```
+
+**Scope rules:**
+
+| Rule | Detail |
+|---|---|
+| Default scope | `Workflow` — variables are scoped to the defining workflow |
+| Parent → Child | Parent workflow variables are NOT visible inside a SubWorkflow unless explicitly mapped via `InputMapping` |
+| Child → Parent | SubWorkflow variables do NOT leak to the parent. Only the SubWorkflow's declared output (via `OutputMapping`) is returned |
+| Parallel branches | Each parallel branch has its own variable scope. Variables declared in one branch are invisible to sibling branches |
+| Global scope | `Global` variables are shared across the entire workflow tree. Use only for cross-cutting concerns (CorrelationId, TenantId, InitiatorId) — never for business data |
+| Step scope | `Step` variables exist only for the duration of a single step. Useful for intermediate computation that should not pollute the workflow state |
+
+**Example — correct scoping:**
+
+```text
+Workflow: employee.onboarding (scope: Workflow)
+  ├── Variables: employeeId, departmentId
+  │
+  ├── StepA: crm.customer.create
+  │     InputMapping: employeeId → customer.employeeId
+  │
+  ├── SubWorkflow: it.account.provision (scope: SubWorkflow)
+  │     InputMapping: employeeId → it.employeeId
+  │     ├── Variables: vpnAccountId (scope: SubWorkflow — NOT visible to parent)
+  │     └── OutputMapping: vpnAccountId → parent.provisionResult
+  │
+  └── StepB: notification.mail.send
+        InputMapping: employeeId, provisionResult
+```
+
+**Anti-patterns prevented:**
+
+- ❌ SubWorkflow reading parent variables without explicit `InputMapping`.
+- ❌ SubWorkflow mutating parent variables as a side effect.
+- ❌ Parallel branches sharing mutable state through a common variable.
+- ❌ Using `Global` scope for business data that should be scoped to a workflow.
+
 #### WorkflowStep
 
 A WorkflowStep is a container for:
@@ -390,22 +438,32 @@ All descriptors share a common base interface. This enables unified registry imp
 ```csharp
 public interface IDescriptor
 {
-    string Id { get; }        // Stable unique identifier (GUID/ULID)
-    string Name { get; }      // Human-readable name
-    int Version { get; }      // Monotonically incrementing version
-    string DefinitionHash { get; } // Stable hash of the entire descriptor
+    string Id { get; }              // Stable unique identifier (GUID/ULID)
+    string Name { get; }            // Human-readable name
+    string DefinitionHash { get; }  // Stable hash of the entire descriptor
 }
 ```
 
-Concrete descriptors implement `IDescriptor`:
+Not all descriptors need versioning. A separate interface marks versioned descriptors:
 
 ```csharp
-SchemaDescriptor      : IDescriptor
-CapabilityDescriptor  : IDescriptor
-FormDescriptor        : IDescriptor
-HumanTaskDescriptor   : IDescriptor
-WorkflowDescriptor    : IDescriptor
+public interface IVersionedDescriptor : IDescriptor
+{
+    int Version { get; }  // Monotonically incrementing version
+}
 ```
+
+Concrete descriptor implementations:
+
+```csharp
+SchemaDescriptor      : IVersionedDescriptor   // schema evolution requires versioning
+CapabilityDescriptor  : IVersionedDescriptor   // capability re-definition requires versioning
+WorkflowDescriptor    : IVersionedDescriptor   // workflow definition changes require versioning
+FormDescriptor        : IDescriptor            // form changes produce a new form; no version history
+HumanTaskDescriptor   : IDescriptor            // task definition changes produce a new task
+```
+
+This keeps `FormDescriptor` and `HumanTaskDescriptor` simple — they are replaced, not versioned. `SchemaDescriptor`, `CapabilityDescriptor`, and `WorkflowDescriptor` are versioned because running instances must pin to a specific version.
 
 This enables:
 
@@ -414,8 +472,13 @@ public interface IDescriptorRegistry<TDescriptor> where TDescriptor : IDescripto
 {
     TDescriptor? GetById(string id);
     TDescriptor? GetByName(string name);
-    TDescriptor? GetByNameAndVersion(string name, int version);
     IReadOnlyList<TDescriptor> GetAll();
+}
+
+public interface IVersionedDescriptorRegistry<TDescriptor> : IDescriptorRegistry<TDescriptor>
+    where TDescriptor : IVersionedDescriptor
+{
+    TDescriptor? GetByNameAndVersion(string name, int version);
     IReadOnlyList<TDescriptor> GetAllByName(string name); // all versions
 }
 ```
@@ -423,12 +486,84 @@ public interface IDescriptorRegistry<TDescriptor> where TDescriptor : IDescripto
 With concrete registries:
 
 ```csharp
-SchemaRegistry       : IDescriptorRegistry<SchemaDescriptor>
-CapabilityRegistry   : IDescriptorRegistry<CapabilityDescriptor>
-WorkflowRegistry     : IDescriptorRegistry<WorkflowDescriptor>
+SchemaRegistry       : IVersionedDescriptorRegistry<SchemaDescriptor>
+CapabilityRegistry   : IVersionedDescriptorRegistry<CapabilityDescriptor>
+WorkflowRegistry     : IVersionedDescriptorRegistry<WorkflowDescriptor>
+FormRegistry         : IDescriptorRegistry<FormDescriptor>
+HumanTaskRegistry    : IDescriptorRegistry<HumanTaskDescriptor>
 ```
 
 Each registry is populated by compile-time source generators — no runtime scanning.
+
+#### DefinitionHash Calculation Rule
+
+`DefinitionHash` is computed as:
+
+```text
+Canonical JSON serialization of all descriptor fields → SHA256
+```
+
+**Canonicalization rules:**
+
+| Rule | Detail |
+|---|---|
+| Field order | Fields are sorted alphabetically by name before serialization — field declaration order does NOT affect the hash |
+| Nested objects | Recursively canonicalized (nested fields also sorted) |
+| Collections | Sorted by the natural order of their elements (strings alphabetically, refs by Id) |
+| Null vs absent | `null` and absent are treated identically — both omitted from the canonical form |
+| Whitespace | No insignificant whitespace in canonical form |
+| Numeric values | Represented without locale-specific formatting (invariant culture) |
+| Enums | Serialized as their string name, not integer value |
+
+This ensures that different generator versions, compilers, and operating systems produce identical hashes for identical descriptor content. The hash is stable across the build pipeline.
+
+**What the hash covers:**
+
+- All descriptor fields declared in the descriptor type.
+- Referenced sub-objects that are owned by the descriptor (e.g., WorkflowSteps within a WorkflowDescriptor).
+- Referenced descriptors are hashed by `(Id, Version)` only — not by their full content. This prevents hash cascading: changing a Schema's hash should not change every Capability that references it.
+
+Example: `CapabilityDescriptor.DefinitionHash` covers `(Name, Kind, InputSchema.Id, InputSchema.Version, OutputSchema.Id, OutputSchema.Version, Permission, RiskLevel)`. It does NOT include the full `SchemaDescriptor` content of InputSchema — only the ref `(Id, Version)`.
+
+This is critical because Audit records store `CapabilityDefinitionHash` at execution time. The hash must remain stable and reproducible for the lifetime of the descriptor version.
+
+#### DescriptorRef<T> — Unified Descriptor References
+
+Across the system, descriptors reference each other by `(Id, Version)`. A unified value type eliminates repetitive ref types:
+
+```csharp
+public readonly record struct DescriptorRef<TDescriptor>(
+    string Id,
+    int Version
+) where TDescriptor : IDescriptor;
+```
+
+Usage:
+
+```csharp
+// CapabilityDescriptor
+public DescriptorRef<SchemaDescriptor> InputSchema { get; }
+public DescriptorRef<SchemaDescriptor> OutputSchema { get; }
+
+// HumanTaskDescriptor
+public DescriptorRef<FormDescriptor> Form { get; }
+
+// WorkflowDescriptor
+public DescriptorRef<SchemaDescriptor> VariableSchema { get; }
+
+// WorkflowStep → CapabilityTarget
+public DescriptorRef<CapabilityDescriptor> Capability { get; }
+
+// WorkflowStep → HumanTaskTarget
+public DescriptorRef<HumanTaskDescriptor> HumanTask { get; }
+
+// WorkflowStep → SubWorkflowTarget
+public DescriptorRef<WorkflowDescriptor> SubWorkflow { get; }
+```
+
+This replaces ad-hoc `InputSchemaId` + `InputSchemaVersion` field pairs with a single typed reference, eliminating the proliferation of `SchemaRef`, `WorkflowRef`, `CapabilityRef`, `FormRef` across the codebase.
+
+Non-versioned descriptors (Form, HumanTask) use `DescriptorRef<T>` with `Version = 0` — or a separate non-versioned ref type if `Version = 0` is semantically ambiguous. This is an implementation detail to resolve at coding time.
 
 ---
 
@@ -706,17 +841,20 @@ Phase 4: Introduce AgentToolDescriptor and MCPToolDescriptor as additional Capab
 | 6 | CapabilityName is globally unique using `<module>.<aggregate>.<action>` convention — no namespace scoping |
 | 7 | Schema evolution is governed by SchemaVersion + ChangeKind (Additive/Breaking); consumers pin schema versions |
 | 8 | CapabilityDescriptor is pure metadata; execution logic lives in ICapabilityHandler<TInput, TOutput> |
-| 9 | All descriptors implement `IDescriptor` (Id, Name, Version, DefinitionHash) enabling unified registries |
-| 10 | Descriptors have a defined lifecycle: Discovery → Generation → Registration → Resolution → Execution → Deprecation → Removal |
-| 11 | Descriptors are immutable once registered; versioning creates new entries; running instances pin their version |
-| 12 | FormDescriptor = Schema + UI metadata — pure presentation concern, not a business action |
-| 13 | HumanTaskDescriptor is the business action for human interaction — Form is its UI delegate |
-| 14 | WorkflowDescriptor has WorkflowVersion; running instances are pinned at instantiation time, not "latest" |
-| 15 | WorkflowStep binds to InteractionTarget (Capability | HumanTask | SubWorkflow), never to ApplicationService or Form directly |
-| 16 | DynamicApiDescriptor, AgentToolDescriptor, MCPToolDescriptor are projection views of CapabilityDescriptor |
-| 17 | Every Capability invocation enters the unified Capability Execution Pipeline regardless of trigger source |
-| 18 | Entity is a Schema source, not a participant in the Capability/Workflow chain |
-| 19 | Entity → Form, Entity → Workflow, Entity → Capability are all forbidden dependencies |
+| 9 | All descriptors implement `IDescriptor` (Id, Name, DefinitionHash); versioned descriptors add `IVersionedDescriptor` (Version) |
+| 10 | `DefinitionHash` = canonical JSON (fields sorted alphabetically) → SHA256; field declaration order does NOT affect the hash |
+| 11 | `DescriptorRef<T>` is the unified typed reference for all descriptor-to-descriptor links (replaces ad-hoc Id+Version pairs) |
+| 12 | Descriptors have a defined lifecycle: Discovery → Generation → Registration → Resolution → Execution → Versioning → Deprecation → Removal |
+| 13 | Descriptors are immutable once registered; versioned descriptors create new entries; running instances pin their version |
+| 14 | FormDescriptor = Schema + UI metadata — pure presentation concern, not a business action |
+| 15 | HumanTaskDescriptor is the business action for human interaction — Form is its UI delegate |
+| 16 | WorkflowDescriptor has WorkflowVersion; running instances are pinned at instantiation time, not "latest" |
+| 17 | Workflow variables have defined scopes (Global/Workflow/SubWorkflow/Step); sub-workflow variables do NOT leak to parent |
+| 18 | WorkflowStep binds to InteractionTarget (Capability | HumanTask | SubWorkflow), never to ApplicationService or Form directly |
+| 19 | DynamicApiDescriptor, AgentToolDescriptor, MCPToolDescriptor are projection views of CapabilityDescriptor |
+| 20 | Every Capability invocation enters the unified Capability Execution Pipeline regardless of trigger source |
+| 21 | Entity is a Schema source, not a participant in the Capability/Workflow chain |
+| 22 | Entity → Form, Entity → Workflow, Entity → Capability are all forbidden dependencies |
 
 ---
 
@@ -727,4 +865,6 @@ Phase 4: Introduce AgentToolDescriptor and MCPToolDescriptor as additional Capab
 - **Approval flow complexity**: HumanTaskDescriptor can evolve to support multi-level approval, co-sign, countersign, and delegation patterns without affecting Capability or Workflow.
 - **Observability**: The unified Capability Pipeline provides a single point for metrics, tracing, and auditing — every business action, regardless of trigger, is observable through the same mechanism.
 - **Schema evolution tooling**: Schema version diffing, compatibility checks, and migration helpers should be build-time tools that detect breaking changes before they reach production. Draft migration and Workflow instance schema reconciliation are runtime concerns that build on the version pinning model.
+- **Workflow variable scope enforcement**: The `WorkflowVariableScope` model (Global/Workflow/SubWorkflow/Step) defines isolation rules that the Workflow engine must enforce at runtime. Build-time tooling can detect statically knowable violations (e.g., a step referencing a SubWorkflow-scoped variable from outside). Parallel gateway variable isolation requires runtime enforcement.
 - **CapabilityName registry**: A centralized, compile-time generated registry of all `CapabilityName` values in the system — enables cross-module conflict detection, IDE navigation, and global refactoring.
+- **DescriptorRef resolution tooling**: Because `DescriptorRef<T>` unifies all cross-descriptor references, build-time tooling can validate that every ref resolves to an existing descriptor — catching broken references before runtime.
