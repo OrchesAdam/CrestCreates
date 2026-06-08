@@ -8,15 +8,18 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ICapabilityRegistry _registry;
+    private readonly ICapabilityHandlerResolver _handlerResolver;
     private readonly CapabilityPipelineBuilder _builder;
 
     public CapabilityPipeline(
         IServiceProvider serviceProvider,
         ICapabilityRegistry registry,
+        ICapabilityHandlerResolver handlerResolver,
         CapabilityPipelineBuilder builder)
     {
         _serviceProvider = serviceProvider;
         _registry = registry;
+        _handlerResolver = handlerResolver;
         _builder = builder;
     }
 
@@ -53,31 +56,20 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
         {
             CapabilityPipelineDelegate handler = async (ctx) =>
             {
-                if (ctx.Items.TryGetValue("__handler", out var h) && h is ICapabilityHandler marker)
+                var invoker = _handlerResolver.Resolve(capabilityName);
+                if (invoker == null)
                 {
-                    var handlerInterface = marker.GetType().GetInterfaces()
-                        .FirstOrDefault(i => i.IsGenericType
-                            && i.GetGenericTypeDefinition() == typeof(ICapabilityHandler<,>));
-
-                    if (handlerInterface != null)
-                    {
-                        var inputArg = ctx.Input;
-                        var method = handlerInterface.GetMethod("ExecuteAsync")!;
-                        var task = (Task)method.Invoke(marker, new[] { inputArg, ctx.CancellationToken })!;
-                        await task.ConfigureAwait(false);
-
-                        var resultProp = task.GetType().GetProperty("Result");
-                        var output = resultProp?.GetValue(task);
-
-                        return CapabilityExecutionResult.Success(
-                            output,
-                            DateTimeOffset.UtcNow - startedAt);
-                    }
+                    return CapabilityExecutionResult.Failure(
+                        "HANDLER_NOT_FOUND",
+                        $"No handler registered for capability '{capabilityName}'.",
+                        DateTimeOffset.UtcNow - startedAt);
                 }
 
-                return CapabilityExecutionResult.Failure(
-                    "HANDLER_NOT_FOUND",
-                    $"No handler found for capability '{capabilityName}'.",
+                var output = await invoker.InvokeAsync(ctx.Input, ctx.CancellationToken)
+                    .ConfigureAwait(false);
+
+                return CapabilityExecutionResult.Success(
+                    output,
                     DateTimeOffset.UtcNow - startedAt);
             };
 
