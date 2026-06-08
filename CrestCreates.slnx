@@ -32,6 +32,7 @@
     <Project Path="framework/src/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
     <Project Path="framework/src/CrestCreates.Event.Abstractions/CrestCreates.Event.Abstractions.csproj" />
     <Project Path="framework/src/CrestCreates.Event/CrestCreates.Event.csproj" />
+    <Project Path="framework/src/CrestCreates.Exposure.Abstractions/CrestCreates.Exposure.Abstractions.csproj" />
     <Project Path="framework/src/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
     <Project Path="framework/src/CrestCreates.EventBus.Abstract/CrestCreates.EventBus.Abstract.csproj" />
     <Project Path="framework/src/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
@@ -127,6 +128,7 @@
     <Project Path="framework/test/CrestCreates.Domain.Tests/CrestCreates.Domain.Tests.csproj" />         
     <Project Path="framework/test/CrestCreates.EventBus.Tests/CrestCreates.EventBus.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Event.Tests/CrestCreates.Event.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.Exposure.Tests/CrestCreates.Exposure.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.EventBus.Local.Tests.Integration/CrestCreates.EventBus.Local.Tests.Integration.csproj" />
     <Project Path="framework/test/CrestCreates.EventBus.RabbitMQ.Tests/CrestCreates.EventBus.RabbitMQ.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.EventBus.RabbitMQ.Tests.Integration/CrestCreates.EventBus.RabbitMQ.Tests.Integration.csproj" />

@@ -24,6 +24,8 @@
     <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\CrestCreates.Data.Abstractions\CrestCreates.Data.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Validation\CrestCreates.Validation.csproj" />
+    <ProjectReference Include="..\CrestCreates.Capability.Abstractions\CrestCreates.Capability.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Metadata.Abstractions\CrestCreates.Metadata.Abstractions.csproj" />
   </ItemGroup>
 
 </Project>
