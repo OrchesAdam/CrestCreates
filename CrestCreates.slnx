@@ -107,7 +107,12 @@
     <Project Path="framework/test/CrestCreates.Database.Migrations.Tests/CrestCreates.Database.Migrations.Tests.csproj" />      
     <Project Path="framework/test/CrestCreates.DistributedTransaction.Tests/CrestCreates.DistributedTransaction.Tests.csproj" />       
     <Project Path="framework/test/CrestCreates.Domain.Tests/CrestCreates.Domain.Tests.csproj" />         
-    <Project Path="framework/test/CrestCreates.EventBus.Tests/CrestCreates.EventBus.Tests.csproj" />       
+    <Project Path="framework/test/CrestCreates.EventBus.Tests/CrestCreates.EventBus.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.EventBus.Local.Tests.Integration/CrestCreates.EventBus.Local.Tests.Integration.csproj" />
+    <Project Path="framework/test/CrestCreates.EventBus.RabbitMQ.Tests/CrestCreates.EventBus.RabbitMQ.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.EventBus.RabbitMQ.Tests.Integration/CrestCreates.EventBus.RabbitMQ.Tests.Integration.csproj" />
+    <Project Path="framework/test/CrestCreates.EventBus.Kafka.Tests/CrestCreates.EventBus.Kafka.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.EventBus.Kafka.Tests.Integration/CrestCreates.EventBus.Kafka.Tests.Integration.csproj" />       
     <Project Path="framework/test/CrestCreates.Infrastructure.Tests/CrestCreates.Infrastructure.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.IntegrationTests/CrestCreates.IntegrationTests.csproj" />
     <Project Path="framework/test/CrestCreates.Logging.Tests/CrestCreates.Logging.Tests.csproj" />
