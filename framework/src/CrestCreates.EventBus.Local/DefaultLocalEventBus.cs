@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.EventBus.Abstract;
 using CrestCreates.EventBus.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace CrestCreates.EventBus.Local;
 
@@ -12,11 +13,13 @@ public class DefaultLocalEventBus : ILocalEventBus, IEventBus
 {
     private readonly ILocalEventDispatcher _dispatcher;
     private readonly ILocalDeadLetterStore? _deadLetterStore;
+    private readonly LocalDeadLetterOptions _deadLetterOptions;
 
-    public DefaultLocalEventBus(ILocalEventDispatcher dispatcher, ILocalDeadLetterStore? deadLetterStore = null)
+    public DefaultLocalEventBus(ILocalEventDispatcher dispatcher, ILocalDeadLetterStore? deadLetterStore = null, IOptions<LocalDeadLetterOptions>? deadLetterOptions = null)
     {
         _dispatcher = dispatcher;
         _deadLetterStore = deadLetterStore;
+        _deadLetterOptions = deadLetterOptions?.Value ?? new LocalDeadLetterOptions();
     }
 
     public async Task PublishAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
@@ -78,7 +81,7 @@ public class DefaultLocalEventBus : ILocalEventBus, IEventBus
             ErrorMessage: ex.Message,
             FailedAt: DateTime.UtcNow,
             RetryCount: 0,
-            MaxRetries: 3,
+            MaxRetries: _deadLetterOptions.MaxRetries,
             Status: DeadLetterStatus.Pending);
 
         await _deadLetterStore.EnqueueAsync(message, cancellationToken);

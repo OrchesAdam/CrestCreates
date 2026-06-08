@@ -12,7 +12,7 @@ public class LocalChannelEventBusModule : ModuleBase
     public override void OnConfigureServices(IServiceCollection services)
     {
         services.AddSingleton<LocalEventBusOptions>();
-        services.AddSingleton<LocalDeadLetterOptions>();
+        services.Configure<LocalDeadLetterOptions>(_ => { });
         services.AddSingleton<ChannelLocalEventQueue>();
         services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();

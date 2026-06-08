@@ -6,6 +6,7 @@ using CrestCreates.EventBus.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace CrestCreates.EventBus.Local.Channel;
 
@@ -14,15 +15,18 @@ public sealed class BackgroundChannelLocalEventBusConsumer : BackgroundService
     private readonly ChannelLocalEventQueue _queue;
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly ILogger<BackgroundChannelLocalEventBusConsumer> _logger;
+    private readonly LocalDeadLetterOptions _deadLetterOptions;
 
     public BackgroundChannelLocalEventBusConsumer(
         ChannelLocalEventQueue queue,
         IServiceScopeFactory serviceScopeFactory,
-        ILogger<BackgroundChannelLocalEventBusConsumer> logger)
+        ILogger<BackgroundChannelLocalEventBusConsumer> logger,
+        IOptions<LocalDeadLetterOptions> deadLetterOptions)
     {
         _queue = queue;
         _serviceScopeFactory = serviceScopeFactory;
         _logger = logger;
+        _deadLetterOptions = deadLetterOptions.Value;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -68,7 +72,7 @@ public sealed class BackgroundChannelLocalEventBusConsumer : BackgroundService
                         ErrorMessage: ex.Message,
                         FailedAt: DateTime.UtcNow,
                         RetryCount: 0,
-                        MaxRetries: 3,
+                        MaxRetries: _deadLetterOptions.MaxRetries,
                         Status: DeadLetterStatus.Pending);
 
                     await deadLetterStore.EnqueueAsync(message, cancellationToken);
