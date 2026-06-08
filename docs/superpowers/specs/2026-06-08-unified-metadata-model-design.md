@@ -137,9 +137,9 @@ Schema evolves. Consumers (Capability, Form, Workflow, Agent cache, Draft storag
 **How consumers pin schema versions:**
 
 - `CapabilityDescriptor` stores `InputSchemaVersion` and `OutputSchemaVersion` — these are **pinned at definition time**. The Capability always validates against the version it was defined with.
-- A Capability can be re-defined to use a newer Schema version — this is a Capability definition change (new `DefinitionHash` and potentially new `ContractHash`).
+- A Capability can be re-defined to use a newer Schema version — this is a Capability definition change (new `ContentHash` and potentially new `CompatibilityHash`).
 - Workflow variables use `WorkflowVariableSchema` with a pinned version. A running Workflow instance continues with the version it was instantiated with.
-- Agent Tool caching: when a Capability's schema version changes, the Agent runtime detects the `ContractHash` change and invalidates the cached tool schema.
+- Agent Tool caching: when a Capability's schema version changes, the Agent runtime detects the `CompatibilityHash` change and invalidates the cached tool schema.
 - Draft storage: a Draft saves the `SchemaVersion` it was created with. On submit, if the current Schema version is different, the pipeline applies the compatibility rules:
   - `Additive` change → Draft data is forward-compatible, proceed.
   - `Breaking` change → Draft requires migration or user re-validation before submit.
@@ -166,38 +166,8 @@ Plus a minimal set of execution metadata:
 | `Version` | from `IVersionedDescriptor` — the Capability's own version |
 | `Permission` | required permission to invoke |
 | `RiskLevel` | `Low` / `Medium` / `High` / `Critical` |
-| `SemanticTags` | `IReadOnlyList<string>` — e.g., `["customer", "crm", "create"]` for discovery and search |
-| `DefinitionHash` | full content fingerprint (all fields) |
-| `ContractHash` | structural compatibility fingerprint (excludes cosmetic fields) |
-
-**SemanticTags — Discovery and search:**
-
-`SemanticTags` are a low-cost, high-value metadata layer for Capability discovery. They do not affect execution, compatibility, or contracts — they are purely for search and categorization.
-
-```csharp
-// Capability: crm.customer.create
-SemanticTags = ["customer", "crm", "create"]
-
-// Capability: hr.employee.onboard
-SemanticTags = ["employee", "hr", "onboarding"]
-```
-
-**Consumers of SemanticTags:**
-
-| Consumer | Use |
-|---|---|
-| **Agent Tool Selection** | LLM searches tags to find relevant tools: "I need customer-related capabilities" → filter by tag `customer` |
-| **Workflow Designer** | Browse capabilities by tag category |
-| **Low-code Builder** | Auto-suggest capabilities based on form context |
-| **IDE/CLI** | `crest cap list --tag customer` |
-| **Admin UI** | Group capabilities by domain |
-
-SemanticTags are NOT used for:
-- Contract comparison (`ContractHash` handles that)
-- Audit identification (`DefinitionHash` handles that)
-- Permission resolution (the `Permission` field handles that)
-
-Tags are additive only — removing a tag should not break anything. They are declared by the capability author and can be augmented by tooling.
+| `ContentHash` | full content fingerprint (all fields) |
+| `CompatibilityHash` | structural compatibility fingerprint (excludes cosmetic fields) |
 
 **Explicitly NOT in CapabilityDescriptor:**
 
@@ -540,8 +510,8 @@ public sealed class EventDescriptor : IVersionedDescriptor
     public DescriptorKind Kind => DescriptorKind.Event;
     public string Id { get; }
     public string Name { get; }
-    public string DefinitionHash { get; }
-    public string ContractHash { get; }
+    public string ContentHash { get; }
+    public string CompatibilityHash { get; }
 
     // IVersionedDescriptor
     public int Version { get; }
@@ -550,7 +520,6 @@ public sealed class EventDescriptor : IVersionedDescriptor
     public VersionedDescriptorRef<SchemaDescriptor> PayloadSchema { get; }
     public EventCategory Category { get; }   // What domain produced this event
     public EventSemantic Semantic { get; }   // What this event means in the system
-    public EventImportance Importance { get; } // Infrastructure policy for this event
     public SchemaChangeKind ChangeKind { get; } // Additive / Breaking (for schema evolution)
 }
 ```
@@ -569,35 +538,15 @@ public enum EventSemantic
     StateTransition,// "State changed from X to Y" — drives state machines (TicketAssigned, WorkflowAdvanced)
     Notification    // "Something worth knowing" — fire-and-forget, no consumer obligation (EmailSent)
 }
-
-public enum EventImportance
-{
-    Critical,     // Must be preserved for the lifetime of the system (compliance, legal, financial audit)
-    Business,     // Important business record — retained per data retention policy (customer operations)
-    Operational,  // Day-to-day operational data — retained for operational window (diagnostics, metrics)
-    Ephemeral     // Transient — can be discarded after consumption (cache invalidation, health checks)
-}
 ```
 
-`EventImportance` drives infrastructure policy:
+**Two-dimensional classification:**
 
-| Importance | Retention | Storage | Transport |
-|---|---|---|---|
-| `Critical` | Permanent (years/indefinite) | Immutable event store | Guaranteed delivery + persistence |
-| `Business` | Per retention policy (months) | Event store | Guaranteed delivery |
-| `Operational` | Short window (days) | Log-based | At-least-once |
-| `Ephemeral` | Consumption only (minutes) | In-memory channel | Best-effort |
-
-This prevents treating all events identically — `CustomerCreated` (Critical) and `EmailOpened` (Ephemeral) have fundamentally different storage and delivery requirements even though both are `EventSemantic.Fact`.
-
-Three-dimensional classification:
-
-| Event | Category | Semantic | Importance |
-|---|---|---|---|
-| `CustomerCreatedDomainEvent` | Domain | Fact | Critical |
-| `TicketAssignedDomainEvent` | Domain | StateTransition | Business |
-| `EmailSentIntegrationEvent` | Integration | Notification | Operational |
-| `CapabilitySucceeded(cache.invalidate)` | Capability | Fact | Ephemeral |
+| Event | Category | Semantic |
+|---|---|---|
+| `CapabilitySucceeded(crm.customer.create)` | Capability | Fact |
+| `CustomerCreatedDomainEvent` | Domain | Fact |
+| `TicketAssignedDomainEvent` | Domain | StateTransition |
 | `WorkflowStepAdvanced` | Capability | StateTransition |
 | `EmailSentIntegrationEvent` | Integration | Notification |
 
@@ -677,8 +626,8 @@ public interface IDescriptor
     DescriptorKind Kind { get; }        // What type of descriptor this is
     string Id { get; }                  // Stable unique identifier (GUID/ULID) — the primary key
     string Name { get; }                // Human-readable, human-stable alias
-    string DefinitionHash { get; }         // Full content fingerprint (all fields)
-    string ContractHash { get; }   // Structural compatibility fingerprint (excludes cosmetic fields)
+    string ContentHash { get; }         // Full content fingerprint (all fields)
+    string CompatibilityHash { get; }   // Structural compatibility fingerprint (excludes cosmetic fields)
 }
 ```
 
@@ -933,55 +882,49 @@ The dependency graph is **built at compile time** by the source generator. It is
 - IDE tooling (navigate from a WorkflowStep to its Capability definition with the edge kind shown).
 - Graph visualization (color-coded by `DescriptorDependencyKind` — Uses=blue, Produces=green, Triggers=red, References=gray, Consumes=orange).
 
-#### ContractHash and DefinitionHash
+#### ContentHash and CompatibilityHash
 
-Two distinct hashes serve two different purposes:
+`DefinitionHash` serves two distinct purposes that should be separated:
 
 ```csharp
 public interface IDescriptor
 {
     // ...
-    string ContractHash { get; }     // Structural contract fingerprint — determines compatibility
-    string DefinitionHash { get; }   // Full definition fingerprint — determines exact identity
+    string ContentHash { get; }         // Full content fingerprint — every field
+    string CompatibilityHash { get; }   // Compatibility fingerprint — structural fields only
 }
 ```
 
-| Hash | Covers | Excludes | Purpose |
-|---|---|---|---|
-| `ContractHash` | Contract fields: field names, types, constraints, schema refs (Id, Version), permission, risk level, semantic tags | Cosmetic fields: Description, DisplayName, HelpText, UI metadata, deprecation message | Compatibility detection |
-| `DefinitionHash` | All descriptor fields — everything | Nothing — complete fingerprint | Audit and exact identity |
+| Hash | Covers | Excludes |
+|---|---|---|
+| `ContentHash` | All descriptor fields | Nothing — complete fingerprint |
+| `CompatibilityHash` | Structural fields: field names, types, constraints, schema refs (Id, Version), permission, risk level | Cosmetic fields: Description, DisplayName, HelpText, Tags, deprecation message |
 
 **Why the split matters:**
 
-| Scenario | ContractHash changes? | DefinitionHash changes? | Effect |
+| Scenario | ContentHash changes? | CompatibilityHash changes? | Cache invalidated? |
 |---|---|---|---|
-| Add `Description` to a Schema field | ❌ No | ✅ Yes | Audit records new hash; caches NOT invalidated |
-| Add a new required field | ✅ Yes | ✅ Yes | Contract changed — caches invalidated, Workflow drift flagged |
-| Change Form label from "Name" to "Full Name" | ❌ No | ✅ Yes | UI-only change — no contract impact |
-| Change `RiskLevel` from Low to High | ✅ Yes | ✅ Yes | Behavioral contract changed |
-| Add a `SemanticTag` | ❌ No (not in ContractHash) | ✅ Yes | Discovery metadata only — no contract impact |
-| Rename a Capability's `DisplayName` | ❌ No | ✅ Yes | Cosmetic only |
+| Add `Description` to a Schema field | ✅ Yes | ❌ No | No — cosmetic change only |
+| Add a new required field to Schema | ✅ Yes | ✅ Yes | Yes — structural change |
+| Rename a Capability's `DisplayName` | ✅ Yes | ❌ No | No — cosmetic change only |
+| Change `RiskLevel` from Low to High | ✅ Yes | ✅ Yes | Yes — behavioral change |
+| Update `DeprecationMessage` | ✅ Yes | ❌ No | No — informational change |
 
 **Consumers use the appropriate hash:**
 
 | Consumer | Uses | Reason |
 |---|---|---|
-| **Audit snapshot** | `DefinitionHash` | Need exact proof of what was executed — every bit matters |
-| **Agent cache invalidation** | `ContractHash` | Only invalidate when the tool's interface or behavior changes |
-| **Workflow drift detection** | `ContractHash` | Only flag drift when structural compatibility is at risk |
-| **Tool/CLI cache** | `ContractHash` | Avoid cache churn from cosmetic updates |
-| **Descriptor integrity check** | `DefinitionHash` | Verify no tampering at the bit level |
-| **Schema compatibility gate** | `ContractHash` | Gate deployments: if ContractHash unchanged, downstream consumers are safe |
-
-Both hashes use the same canonical JSON → SHA256 algorithm. The difference is which fields are included in the canonical form before hashing.
-| **Tool/CLI cache** | `ContractHash` | Avoid cache churn from cosmetic updates |
-| **Descriptor integrity check** | `DefinitionHash` | Verify no tampering at the bit level |
+| **Audit snapshot** | `ContentHash` | Need exact proof of what was executed |
+| **Agent cache invalidation** | `CompatibilityHash` | Only invalidate when the tool's interface or behavior changes |
+| **Workflow drift detection** | `CompatibilityHash` | Only flag drift when structural compatibility is at risk |
+| **Tool/CLI cache** | `CompatibilityHash` | Avoid cache churn from cosmetic updates |
+| **Descriptor integrity check** | `ContentHash` | Verify no tampering at the bit level |
 
 Both hashes use the same canonical JSON → SHA256 algorithm. The difference is which fields are included in the canonical form before hashing.
 
 #### DefinitionHash Calculation Rule
 
-`DefinitionHash` and `ContractHash` are both computed as:
+`ContentHash` and `CompatibilityHash` are both computed as:
 
 ```text
 Canonical JSON serialization of included fields → SHA256
@@ -1003,13 +946,13 @@ This ensures that different generator versions, compilers, and operating systems
 
 **What the hash covers:**
 
-- All descriptor fields declared in the descriptor type (DefinitionHash) or structural fields only (ContractHash).
+- All descriptor fields declared in the descriptor type (ContentHash) or structural fields only (CompatibilityHash).
 - Referenced sub-objects that are owned by the descriptor (e.g., WorkflowSteps within a WorkflowDescriptor).
 - Referenced descriptors are hashed by `(Id, Version)` only — not by their full content. This prevents hash cascading: changing a Schema's hash should not change every Capability that references it.
 
-Example: `CapabilityDescriptor.ContractHash` covers `(Name, Kind, InputSchema.Id, InputSchema.Version, OutputSchema.Id, OutputSchema.Version, Permission, RiskLevel)`. It does NOT include `Description`, `DisplayName`, or `Tags`. `DefinitionHash` covers everything.
+Example: `CapabilityDescriptor.CompatibilityHash` covers `(Name, Kind, InputSchema.Id, InputSchema.Version, OutputSchema.Id, OutputSchema.Version, Permission, RiskLevel)`. It does NOT include `Description`, `DisplayName`, or `Tags`. `ContentHash` covers everything.
 
-The third use case (drift detection) is future-facing. It implies that `VersionedDescriptorRef<T>` may optionally carry an `ExpectedContractHash` for runtime consistency checks — not required for the initial implementation, but the hash model is designed to support it.
+The third use case (drift detection) is future-facing. It implies that `VersionedDescriptorRef<T>` may optionally carry an `ExpectedCompatibilityHash` for runtime consistency checks — not required for the initial implementation, but the hash model is designed to support it.
 
 #### DescriptorRef and VersionedDescriptorRef — Unified Typed References
 
@@ -1107,7 +1050,7 @@ Discovery → Generation → Registration → Resolution → Execution
 | **Resolution** | Consumers resolve descriptors by Id, Name, or Name+Version from the registry | Registry (runtime, AoT-safe) |
 | **Execution** | The Capability Execution Pipeline resolves a `CapabilityDescriptor`, locates its `ICapabilityHandler`, and invokes it | Capability Pipeline |
 | **Versioning** | A new descriptor version is generated (e.g., Schema v2, Capability re-defined with new InputSchemaVersion). Old versions remain in the registry for running instances. | Source Generator + Registry |
-| **Deprecation** | A descriptor is marked as deprecated (`State = Deprecated`, `SupersededById`). New consumers are warned at compile time. Existing running instances are unaffected. | Developer annotation → Source Generator |
+| **Deprecation** | A descriptor is marked as deprecated (`IsDeprecated = true`, `DeprecationMessage`, `SupersededById`). New consumers are warned at compile time. Existing running instances are unaffected. | Developer annotation → Source Generator |
 | **Removal** | A descriptor version is removed from the registry when no running instances reference it. Removal is a build-time decision, not runtime. | Build validation + manual cleanup |
 
 ### 5.2 Versioning Rules
@@ -1118,74 +1061,25 @@ Discovery → Generation → Registration → Resolution → Execution
 | Running instances pin their version | Workflow instances, Drafts, and Agent sessions reference a specific descriptor version, not "latest" |
 | Old versions are removed only when safe | No running instances, no pending drafts, no cached references |
 | Name changes create a new descriptor | The old descriptor is deprecated with `SupersededById` pointing to the new one |
-| `ContractHash` changes on structural field change | Consumers use the hash to detect drift between definition time and execution time |
+| `CompatibilityHash` changes on structural field change | Consumers use the hash to detect drift between definition time and execution time |
 
-### 5.3 DescriptorState
-
-A descriptor's lifecycle is governed by an explicit state machine:
-
-```csharp
-public enum DescriptorState
-{
-    Draft,       // Generated but not yet published — visible only in development
-    Active,      // Published and available for resolution
-    Deprecated,  // Still functional, but new consumers should migrate
-    Removed      // No longer registered; historical records only
-}
-```
+### 5.3 Deprecation
 
 ```csharp
 public interface IDescriptor
 {
-    DescriptorState State { get; }
-    // ...
+    // ... existing fields
+    bool IsDeprecated { get; }
+    string? DeprecationMessage { get; }
+    string? SupersededById { get; }  // Id of the replacement descriptor
 }
 ```
-
-**State transitions:**
-
-```text
-Draft ──→ Active ──→ Deprecated ──→ Removed
-  │                                    ↑
-  └────────────────────────────────────┘
-         (can be removed directly if never published)
-```
-
-| Transition | Trigger | Effect |
-|---|---|---|
-| Draft → Active | Module publish / deployment | Descriptor becomes resolvable by all consumers |
-| Active → Deprecated | Author marks as deprecated | New resolutions warned at compile time; existing instances unaffected |
-| Deprecated → Removed | No running instances reference it | Removed from registry; historical audit records retain the descriptor ref |
-| Draft → Removed | Descriptor deleted before publish | Clean removal; no history to preserve |
-
-**Registry resolution by state:**
-
-```csharp
-GetActiveVersion(name)     // Latest Active version — for new consumers
-GetLatestVersion(name)     // Latest version regardless of state (including Draft, for development)
-GetDeprecatedVersions(name) // All Deprecated versions — for migration tooling
-```
-
-This replaces the ad-hoc `IsDeprecated` boolean. A descriptor with `Version = 5, State = Draft` is unambiguous — it exists in the registry but is not yet published for consumption. Without explicit state, this would require inferring "Draft" from the absence of a publish marker or comparing against some external release list.
-
-### 5.4 Deprecation
-
-Deprecation is a state, not just a flag. The `DescriptorState.Deprecated` drives behavior:
 
 - Source generators emit compile-time warnings when generated code references a deprecated descriptor.
 - At runtime, the registry includes deprecated descriptors (for running instances) but new resolutions prefer non-deprecated versions.
-- `SupersededById` provides the migration path to the replacement descriptor.
 - Deprecation is a signal to migrate, not a breaking change.
 
-```csharp
-public interface IDescriptor
-{
-    // ...
-    string? SupersededById { get; }   // Id of the replacement descriptor (only meaningful when Deprecated)
-}
-```
-
-### 5.5 Registration Model
+### 5.4 Registration Model
 
 All registries are **compile-time generated** and **AoT-safe**:
 
@@ -1278,7 +1172,7 @@ Build ExecutionContext:
     ├── IdempotencyKey
     ├── CapabilityName
     ├── CapabilityVersion
-    ├── CapabilityContractHash
+    ├── CapabilityCompatibilityHash
     ├── Input payload
     └── StartedAt
     │
@@ -1332,7 +1226,7 @@ public sealed class CapabilityEvent
     public CapabilityEventType EventType { get; }
     public string CapabilityName { get; }
     public int CapabilityVersion { get; }
-    public string CapabilityContractHash { get; }
+    public string CapabilityCompatibilityHash { get; }
     public string CorrelationId { get; }
     public string CausationId { get; }          // Points to the parent event that triggered this invocation
     public string TenantId { get; }
@@ -1527,15 +1421,15 @@ Phase 4: Introduce AgentToolDescriptor and MCPToolDescriptor as additional Capab
 | 6 | `CapabilityDescriptor.Id` is the primary identity; `Name` is a human-stable alias (mutable, globally unique) |
 | 7 | Schema evolution is governed by SchemaVersion + ChangeKind (Additive/Breaking); consumers pin schema versions |
 | 8 | CapabilityDescriptor is pure metadata; execution logic lives in ICapabilityHandler<TInput, TOutput> |
-| 9 | All descriptors implement `IDescriptor` (Kind, Id, Name, State, ContractHash, DefinitionHash); `DescriptorState` governs lifecycle |
+| 9 | All descriptors implement `IDescriptor` (Kind, Id, Name, ContentHash, CompatibilityHash); `DescriptorKind` identifies type for serialization/audit |
 | 10 | All six descriptor types are `IVersionedDescriptor` — Form and HumanTask are versioned to protect running instances |
-| 11 | `ContractHash` (structural contract) and `DefinitionHash` (full identity) are split — cosmetic changes don't break contracts |
+| 11 | `ContentHash` (full fingerprint) and `CompatibilityHash` (structural only) are split — cosmetic changes don't invalidate caches |
 | 12 | Hash = canonical JSON (fields sorted alphabetically) → SHA256; field declaration order does NOT affect the hash |
 | 13 | `DescriptorRef<T>` (Id only) and `VersionedDescriptorRef<T>` (Id + Version) with `VersionSelectionMode` (Exact/Latest/Compatible) |
 | 14 | All versioned descriptors use the single `.Version` property (no SchemaVersion/CapabilityVersion/WorkflowVersion field duplication) |
 | 15 | WorkflowStep `Id` is a globally unique GUID/ULID that survives reorder, insert, and rename across Workflow versions |
 | 16 | The system has four pillars: Schema, Capability, Event, Workflow — Event is the bridge between Capability execution and downstream consumers |
-| 17 | `EventDescriptor` carries PayloadSchema, EventCategory (Capability/Domain/Integration), EventSemantic (Fact/StateTransition/Notification), EventImportance (Critical/Business/Operational/Ephemeral) |
+| 17 | `EventDescriptor` carries PayloadSchema, EventCategory (Capability/Domain/Integration), EventSemantic (Fact/StateTransition/Notification) |
 | 18 | System events (CapabilityExecuting/Succeeded/Failed/Compensated) are regular EventDescriptors — no separate Capability Event Registry |
 | 19 | `IDescriptorDependencyGraph` with `DescriptorDependencyKind` (Uses/Produces/References/Triggers/Consumes) — compile-time built |
 | 20 | `IGlobalDescriptorRegistry` provides a universal view across all typed registries by `DescriptorKind` and `DescriptorPackage` |
@@ -1547,21 +1441,19 @@ Phase 4: Introduce AgentToolDescriptor and MCPToolDescriptor as additional Capab
 | 26 | Draft submission validates Schema version compatibility (Additive → forward-compatible, Breaking → RequiresMigration) |
 | 27 | `WorkflowDraftPolicy` governs checkpoint behavior (EnableCheckpointing, SaveInterval, SaveBeforeHumanTask, SaveBeforeSubWorkflow) |
 | 28 | `CapabilityDescriptor.Name` supports `Aliases` — historical names retained after rename for backward compatibility |
-| 29 | `CapabilityDescriptor.SemanticTags` enable Agent tool selection, Workflow search, and low-code discovery |
-| 30 | `EventImportance` drives infrastructure policy — Critical events stored permanently, Ephemeral events discarded after consumption |
-| 31 | Descriptors have a defined lifecycle (Draft → Active → Deprecated → Removed) governed by `DescriptorState` |
-| 32 | Descriptors are immutable once registered; versioned descriptors create new entries; running instances pin their version |
-| 33 | Capability execution produces structured lifecycle events (Executing/Succeeded/Failed/Compensated) — the semantic backbone for Workflow, Agent, Outbox, Saga, Audit |
-| 34 | Domain Events ≠ Capability Events — domain events carry business semantics, capability events carry execution proof |
-| 35 | FormDescriptor = Schema + UI metadata — pure presentation concern, not a business action |
-| 36 | HumanTaskDescriptor is the business action for human interaction — Form is its UI delegate |
-| 37 | WorkflowDescriptor has WorkflowVersion; running instances are pinned at instantiation time, not "latest" |
-| 38 | Workflow variables have defined scopes (Global/Workflow/SubWorkflow/Step); sub-workflow variables do NOT leak to parent |
-| 39 | WorkflowStep binds to InteractionTarget (Capability | HumanTask | SubWorkflow), never to ApplicationService or Form directly |
-| 40 | DynamicApiDescriptor, AgentToolDescriptor, MCPToolDescriptor are projection views of CapabilityDescriptor |
-| 41 | Every Capability invocation enters the unified Capability Execution Pipeline regardless of trigger source |
-| 42 | Entity is a Schema source, not a participant in the Capability/Workflow chain |
-| 43 | Entity → Form, Entity → Workflow, Entity → Capability are all forbidden dependencies |
+| 29 | Descriptors have a defined lifecycle: Discovery → Generation → Registration → Resolution → Execution → Versioning → Deprecation → Removal |
+| 30 | Descriptors are immutable once registered; versioned descriptors create new entries; running instances pin their version |
+| 31 | Capability execution produces structured lifecycle events (Executing/Succeeded/Failed/Compensated) — the semantic backbone for Workflow, Agent, Outbox, Saga, Audit |
+| 32 | Domain Events ≠ Capability Events — domain events carry business semantics, capability events carry execution proof |
+| 33 | FormDescriptor = Schema + UI metadata — pure presentation concern, not a business action |
+| 34 | HumanTaskDescriptor is the business action for human interaction — Form is its UI delegate |
+| 35 | WorkflowDescriptor has WorkflowVersion; running instances are pinned at instantiation time, not "latest" |
+| 36 | Workflow variables have defined scopes (Global/Workflow/SubWorkflow/Step); sub-workflow variables do NOT leak to parent |
+| 37 | WorkflowStep binds to InteractionTarget (Capability | HumanTask | SubWorkflow), never to ApplicationService or Form directly |
+| 38 | DynamicApiDescriptor, AgentToolDescriptor, MCPToolDescriptor are projection views of CapabilityDescriptor |
+| 39 | Every Capability invocation enters the unified Capability Execution Pipeline regardless of trigger source |
+| 40 | Entity is a Schema source, not a participant in the Capability/Workflow chain |
+| 41 | Entity → Form, Entity → Workflow, Entity → Capability are all forbidden dependencies |
 
 ---
 
