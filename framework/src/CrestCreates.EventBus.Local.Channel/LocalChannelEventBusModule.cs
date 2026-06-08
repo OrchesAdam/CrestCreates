@@ -12,11 +12,15 @@ public class LocalChannelEventBusModule : ModuleBase
     public override void OnConfigureServices(IServiceCollection services)
     {
         services.AddSingleton<LocalEventBusOptions>();
+        services.AddSingleton<LocalDeadLetterOptions>();
         services.AddSingleton<ChannelLocalEventQueue>();
+        services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
+        services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
         services.AddScoped<ILocalEventBus, BackgroundChannelLocalEventBus>();
         services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, BackgroundChannelLocalEventBus>();
         services.AddScoped<CrestCreates.Domain.DomainEvents.IDomainEventPublisher, DomainEventPublisher>();
         services.AddHostedService<BackgroundChannelLocalEventBusConsumer>();
+        services.AddHostedService<LocalDeadLetterBackgroundService>();
     }
 }

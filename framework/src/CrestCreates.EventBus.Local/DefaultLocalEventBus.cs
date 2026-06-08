@@ -1,3 +1,5 @@
+using System;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.DomainEvents;
@@ -9,21 +11,39 @@ namespace CrestCreates.EventBus.Local;
 public class DefaultLocalEventBus : ILocalEventBus, IEventBus
 {
     private readonly ILocalEventDispatcher _dispatcher;
+    private readonly ILocalDeadLetterStore? _deadLetterStore;
 
-    public DefaultLocalEventBus(ILocalEventDispatcher dispatcher)
+    public DefaultLocalEventBus(ILocalEventDispatcher dispatcher, ILocalDeadLetterStore? deadLetterStore = null)
     {
         _dispatcher = dispatcher;
+        _deadLetterStore = deadLetterStore;
     }
 
-    public Task PublishAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
+    public async Task PublishAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
     {
-        return _dispatcher.DispatchAsync(@event, cancellationToken);
+        try
+        {
+            await _dispatcher.DispatchAsync(@event, cancellationToken);
+        }
+        catch (Exception ex) when (_deadLetterStore is not null)
+        {
+            await EnqueueToDeadLetterAsync(@event, ex, cancellationToken);
+            throw;
+        }
     }
 
-    public Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+    public async Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
         where TEvent : ILocalEvent
     {
-        return _dispatcher.DispatchAsync(@event, cancellationToken);
+        try
+        {
+            await _dispatcher.DispatchAsync(@event, cancellationToken);
+        }
+        catch (Exception ex) when (_deadLetterStore is not null)
+        {
+            await EnqueueToDeadLetterAsync(@event, ex, cancellationToken);
+            throw;
+        }
     }
 
     Task IEventBus.PublishAsync(IDomainEvent @event, CancellationToken cancellationToken)
@@ -42,5 +62,25 @@ public class DefaultLocalEventBus : ILocalEventBus, IEventBus
 
     void IEventBus.Unsubscribe<TEvent, THandler>()
     {
+    }
+
+    private async Task EnqueueToDeadLetterAsync(ILocalEvent @event, Exception ex, CancellationToken cancellationToken)
+    {
+        if (_deadLetterStore is null) return;
+
+        var eventType = @event.GetType();
+        var payload = JsonSerializer.SerializeToUtf8Bytes(@event, eventType);
+
+        var message = new DeadLetterMessage(
+            MessageId: Guid.NewGuid().ToString("N"),
+            EventType: eventType.AssemblyQualifiedName!,
+            Payload: payload,
+            ErrorMessage: ex.Message,
+            FailedAt: DateTime.UtcNow,
+            RetryCount: 0,
+            MaxRetries: 3,
+            Status: DeadLetterStatus.Pending);
+
+        await _deadLetterStore.EnqueueAsync(message, cancellationToken);
     }
 }

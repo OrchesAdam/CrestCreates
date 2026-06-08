@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.EventBus.Abstractions;
@@ -30,20 +31,53 @@ public sealed class BackgroundChannelLocalEventBusConsumer : BackgroundService
         {
             await foreach (var @event in _queue.ReadAllAsync(stoppingToken).ConfigureAwait(false))
             {
-                try
-                {
-                    using var scope = _serviceScopeFactory.CreateScope();
-                    var dispatcher = scope.ServiceProvider.GetRequiredService<ILocalEventDispatcher>();
-                    await dispatcher.DispatchAsync(@event, stoppingToken).ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    _logger.LogError(exception, "Failed to dispatch local event {EventType}.", @event.GetType().FullName);
-                }
+                await ProcessEventAsync(@event, stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
+        }
+    }
+
+    private async Task ProcessEventAsync(ILocalEvent @event, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = _serviceScopeFactory.CreateAsyncScope();
+            var dispatcher = scope.ServiceProvider.GetRequiredService<ILocalEventDispatcher>();
+            await dispatcher.DispatchAsync(@event, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing local event of type {EventType}", @event.GetType().Name);
+
+            // Try to enqueue to DLQ if available
+            try
+            {
+                await using var scope = _serviceScopeFactory.CreateAsyncScope();
+                var deadLetterStore = scope.ServiceProvider.GetService<ILocalDeadLetterStore>();
+                if (deadLetterStore is not null)
+                {
+                    var eventType = @event.GetType();
+                    var payload = JsonSerializer.SerializeToUtf8Bytes(@event, eventType);
+
+                    var message = new DeadLetterMessage(
+                        MessageId: Guid.NewGuid().ToString("N"),
+                        EventType: eventType.AssemblyQualifiedName!,
+                        Payload: payload,
+                        ErrorMessage: ex.Message,
+                        FailedAt: DateTime.UtcNow,
+                        RetryCount: 0,
+                        MaxRetries: 3,
+                        Status: DeadLetterStatus.Pending);
+
+                    await deadLetterStore.EnqueueAsync(message, cancellationToken);
+                }
+            }
+            catch (Exception dlqEx)
+            {
+                _logger.LogError(dlqEx, "Failed to enqueue event to dead letter store");
+            }
         }
     }
 }
