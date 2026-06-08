@@ -249,7 +249,38 @@ public enum CapabilityKind
 }
 ```
 
-A Capability is either a read or a write. There is no `Draft` kind — draft is not a behavior type, it is a runtime data concern. A "save draft" operation is a regular `Command` Capability that happens to write to a draft store. See Section 12 for the Draft Infrastructure model.
+A Capability is either a read or a write.
+
+**Draft is NOT a CapabilityKind.** Draft is a runtime persistence concern — it persists intermediate business data without producing business side effects. A "save draft" operation (e.g., `crm.customer.saveDraft`) is a regular `Command` Capability whose handler writes to a draft store. The draft storage is an infrastructure concern behind the handler, not a distinct execution mode.
+
+### 4.2.1 Draft Infrastructure
+
+Draft is a **runtime persistence concern**, not a Descriptor type.
+
+Draft data is stored as `DraftRecord`s referencing a `SchemaDescriptor` version. Draft does not introduce a new Descriptor type — `SchemaDescriptor` remains the single source of truth for Draft payload structure.
+
+Draft records are **runtime resources**, in the same category as `WorkflowInstance` and `HumanTaskInstance`:
+
+```text
+Descriptor Layer (Metadata)          Runtime Layer (Data)
+───────────────────────────          ─────────────────────
+SchemaDescriptor                     DraftRecord
+CapabilityDescriptor                 CapabilityExecution
+EventDescriptor                      WorkflowInstance
+WorkflowDescriptor                   HumanTaskInstance
+FormDescriptor
+HumanTaskDescriptor
+```
+
+Draft depends only on `SchemaDescriptor`:
+
+```text
+DraftRecord → SchemaDescriptor (by VersionedDescriptorRef)
+DraftRecord ✗→ CapabilityDescriptor   // Draft doesn't know its future consumer
+DraftRecord ✗→ WorkflowDescriptor     // Draft doesn't own orchestration
+```
+
+For the full Draft model (DraftRecord, DraftStatus, IDraftStore, schema version compatibility, WorkflowDraftPolicy), see Section 12.
 
 This is not the same as HumanTask or Workflow, which are fundamentally different interaction models.
 
