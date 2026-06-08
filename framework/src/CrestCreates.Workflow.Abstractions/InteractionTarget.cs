@@ -6,7 +6,7 @@ namespace CrestCreates.Workflow.Abstractions;
 
 public abstract record InteractionTarget
 {
-    private protected InteractionTarget() { }
+    protected InteractionTarget() { }
 }
 
 public sealed record CapabilityTarget : InteractionTarget
