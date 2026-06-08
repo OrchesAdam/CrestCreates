@@ -54,6 +54,8 @@ public sealed class LocalDeadLetterBackgroundService : BackgroundService
                         _logger.LogWarning(
                             "Dead letter message {MessageId} of type {EventType} has reached max retries ({RetryCount}/{MaxRetries}), archiving",
                             message.MessageId, message.EventType, message.RetryCount, _options.MaxRetries);
+                        var archived = message with { Status = DeadLetterStatus.Archived };
+                        await _store.EnqueueAsync(archived, stoppingToken);
                         continue;
                     }
 

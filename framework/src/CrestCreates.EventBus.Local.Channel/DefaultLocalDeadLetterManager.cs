@@ -79,7 +79,9 @@ public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
             var updatedMessage = message with
             {
                 RetryCount = newRetryCount,
-                Status = DeadLetterStatus.Pending,
+                Status = newRetryCount >= message.MaxRetries
+                    ? DeadLetterStatus.Archived
+                    : DeadLetterStatus.Pending,
                 ErrorMessage = ex.Message
             };
             await _store.EnqueueAsync(updatedMessage, cancellationToken);
