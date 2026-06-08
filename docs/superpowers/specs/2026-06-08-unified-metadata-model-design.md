@@ -764,6 +764,43 @@ Typed registries register themselves with the global registry at startup. Consum
 
 This prevents the anti-pattern of iterating `GetAllSchemas() + GetAllCapabilities() + GetAllWorkflows() + ...` to get a complete view of the system.
 
+#### Descriptor Catalog
+
+`IGlobalDescriptorRegistry` answers "what descriptors exist." But tools increasingly need to ask richer questions that span registries:
+
+```csharp
+public interface IDescriptorCatalog
+{
+    IDescriptor? Get(string id);
+
+    IEnumerable<IDescriptor> GetAll();
+
+    IEnumerable<IDescriptor> FindByKind(DescriptorKind kind);
+
+    IEnumerable<IDescriptor> FindByPackage(string packageId);
+
+    IEnumerable<IDescriptor> FindDependents(string descriptorId);
+
+    IEnumerable<IDescriptor> FindDependencies(string descriptorId);
+
+    ImpactReport AnalyzeImpact(string descriptorId, int fromVersion, int toVersion);
+}
+```
+
+`IDescriptorCatalog` wraps all typed registries, the global registry, and the dependency graph into a single query surface. It is the entry point for:
+
+| Tool | Query |
+|---|---|
+| **IDE Navigation** | `FindDependents(id)` — "go to usages" across all descriptor types |
+| **Impact Analysis** | `AnalyzeImpact(id, v3, v4)` — cross-pillar change radius |
+| **Agent Discovery** | `FindByKind(Capability).Where(c => c.SemanticTags.Contains("customer"))` |
+| **Admin UI** | `GetAll()` — unified descriptor explorer |
+| **Graph Viewer** | `FindDependencies(id)` + `FindDependents(id)` — full neighborhood |
+
+The catalog is a **read-only aggregation layer** over the registries. It does not own data — it delegates to the typed registries and the dependency graph. The catalog is registered at startup after all typed registries have populated.
+
+This is an evolution of the registry infrastructure — registries provide typed access, the global registry provides a unified view, and the catalog provides cross-cutting queries. All three coexist.
+
 #### Descriptor Package
 
 Descriptors don't exist in a flat global namespace — they come from modules. A `DescriptorPackage` groups descriptors by their source module:
@@ -1485,6 +1522,44 @@ public sealed class EventEnvelope
 
 This is the same envelope used by the existing `CrestCreates.EventBus` system. Capability events are a new event *source*, not a new event *transport*.
 
+### 8.5 Capability Profile
+
+`CapabilityDescriptor` is immutable metadata. But runtime behavior varies by environment, tenant, and deployment context. A `CapabilityProfile` layers environment-specific configuration on top of a stable descriptor.
+
+```csharp
+public sealed class CapabilityProfile
+{
+    public VersionedDescriptorRef<CapabilityDescriptor> Capability { get; }
+    public string Scope { get; }          // "Global", "Tenant:{id}", "Environment:{name}"
+    public TimeSpan? Timeout { get; }     // Override default timeout
+    public RetryPolicy? Retry { get; }    // Override retry behavior
+    public bool? RequireApproval { get; } // Override approval requirement
+    public int? RateLimit { get; }        // Max invocations per minute
+}
+```
+
+**Profile scoping:**
+
+```text
+CapabilityDescriptor: crm.customer.create  (Timeout: 30s default)
+
+    Profile: Global-Dev     → Timeout: 60s   (dev environment, more generous)
+    Profile: Global-Prod    → Timeout: 10s   (production, tight SLA)
+    Profile: Tenant:VIP     → Timeout: 5s    (VIP tenant, fastest response)
+```
+
+Resolution order: `Tenant → Environment → Global → Descriptor default`. The first matching profile wins. Profiles do NOT modify the descriptor — they produce an effective configuration at resolution time.
+
+**Why Profile is separate from Descriptor:**
+
+| If this were in Descriptor | The problem |
+|---|---|
+| `Timeout` | Changing a dev timeout would change the `ContractHash` — invalidating caches and audit references |
+| `RetryPolicy` | Production retry behavior differs from dev — the descriptor shouldn't know about deployment context |
+| `RateLimit` | Tenant-specific limits are operational policy, not capability definition |
+
+Profiles keep the descriptor stable while allowing operational flexibility. They are stored separately, resolved at invocation time, and do not affect descriptor versioning or hashing.
+
 ---
 
 ## 9. Exposure Layer
@@ -1796,3 +1871,5 @@ Agent sessions use `IDraftStore` to persist LLM state. The Agent Runtime saves d
 - **Workflow instance migration**: When a Workflow definition is upgraded (v1 → v2), thousands of running instances may be pinned to v1. A migration strategy (`IWorkflowInstanceMigrationStrategy`) allows instances to transition to the new version at defined safe points (step boundaries, after human task completion). This is a future concern — the version pinning model ensures correctness without migration, but operational pressure will eventually demand it.
 - **Event → Schema closed loop**: `EventDescriptor.PayloadSchema` references `SchemaDescriptor`, closing the loop between the four pillars. Future tooling should enable: "given a Schema change, which Events, Capabilities, and Workflows are affected?" — a cross-pillar impact analysis.
 - **Workflow = Event-Driven State Machine formalization**: The relationship between `WorkflowDescriptor` and `EventDescriptor` should be formalized as a first-class binding: "WorkflowStep X advances on Event Y." This makes the Workflow engine a pure event consumer and eliminates polling or timer-based step transitions.
+- **HumanTask interaction beyond Form — Conversation**: In the Agent era, human interaction is not always form-based. An Agent proposing a salary increase, a manager negotiating via chat, and a final approval — no form, only conversation. Future evolution should introduce `IInteractionDescriptor` as the HumanTask binding target, with `FormDescriptor` and `ConversationDescriptor` as implementations. HumanTask references `IInteractionDescriptor`, not `FormDescriptor` directly. This enables chat approval, negotiation, and review workflows without retrofitting forms onto conversational interactions.
+- **Workflow definition vs execution model split**: Currently `WorkflowDescriptor` carries steps, transitions, gateways, and variables together. When external engines (BPMN, Elsa, Temporal, DurableTask) are integrated, a separation between `WorkflowDefinition` (structural model) and `WorkflowExecutionModel` (runtime behavior) may be needed. This is a V3 concern — the current model is sufficient for the native workflow engine.
