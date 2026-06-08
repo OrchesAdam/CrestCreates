@@ -25,6 +25,8 @@
     <Project Path="framework/src/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj" />
     <Project Path="framework/src/CrestCreates.DbContextProvider.Abstract/CrestCreates.DbContextProvider.Abstract.csproj" />
     <Project Path="framework/src/CrestCreates.DistributedTransaction/CrestCreates.DistributedTransaction.csproj" />
+    <Project Path="framework/src/CrestCreates.Draft.Abstractions/CrestCreates.Draft.Abstractions.csproj" />
+    <Project Path="framework/src/CrestCreates.Draft/CrestCreates.Draft.csproj" />
     <Project Path="framework/src/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
     <Project Path="framework/src/CrestCreates.Domain/CrestCreates.Domain.csproj" />
     <Project Path="framework/src/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
@@ -37,6 +39,7 @@
     <Project Path="framework/src/CrestCreates.Localization/CrestCreates.Localization.csproj" />
     <Project Path="framework/src/CrestCreates.Logging/CrestCreates.Logging.csproj" />
     <Project Path="framework/src/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
+    <Project Path="framework/src/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
     <Project Path="framework/src/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
     <Project Path="framework/src/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
     <Project Path="framework/src/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
@@ -111,7 +114,8 @@
     <Project Path="framework/test/CrestCreates.Capability.Tests/CrestCreates.Capability.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.CodeGenerator.Tests/CrestCreates.CodeGenerator.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Database.Migrations.Tests/CrestCreates.Database.Migrations.Tests.csproj" />      
-    <Project Path="framework/test/CrestCreates.DistributedTransaction.Tests/CrestCreates.DistributedTransaction.Tests.csproj" />       
+    <Project Path="framework/test/CrestCreates.DistributedTransaction.Tests/CrestCreates.DistributedTransaction.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.Draft.Tests/CrestCreates.Draft.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Domain.Tests/CrestCreates.Domain.Tests.csproj" />         
     <Project Path="framework/test/CrestCreates.EventBus.Tests/CrestCreates.EventBus.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.EventBus.Local.Tests.Integration/CrestCreates.EventBus.Local.Tests.Integration.csproj" />

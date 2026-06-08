@@ -1,6 +1,4 @@
-using CrestCreates.Draft.Abstractions;
-
-namespace CrestCreates.Draft;
+namespace CrestCreates.Draft.Abstractions;
 
 public sealed class DraftQuery
 {
