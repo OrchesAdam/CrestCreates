@@ -1580,22 +1580,36 @@ FormDescriptor
 HumanTaskDescriptor
 ```
 
-### 12.1 Draft Model
+### 12.1 DraftRecord
 
 ```csharp
-public sealed class Draft
+public sealed class DraftRecord
 {
-    public string DraftId { get; }                              // Unique draft identifier
-    public string OwnerId { get; }                              // Who owns this draft (UserId, AgentSessionId, WorkflowInstanceId)
-    public string TenantId { get; }                             // Tenant isolation
-    public VersionedDescriptorRef<SchemaDescriptor> Schema { get; } // Schema this data conforms to
-    public JsonDocument Payload { get; }                        // The actual draft data
-    public DraftStatus Status { get; }
-    public DateTimeOffset CreatedAt { get; }
-    public DateTimeOffset UpdatedAt { get; }
-    public DateTimeOffset? ExpiresAt { get; }
+    public string DraftId { get; init; }                           // Unique draft identifier
+    public string DraftType { get; init; }                         // Classification tag (not a Descriptor)
+    public VersionedDescriptorRef<SchemaDescriptor> Schema { get; init; } // Schema this data conforms to
+    public string TenantId { get; init; }                          // Tenant isolation
+    public string? OwnerId { get; init; }                          // UserId, AgentSessionId, WorkflowInstanceId
+    public string PayloadJson { get; init; }                       // Raw JSON — not deserialized
+    public DraftStatus Status { get; init; }
+    public DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset UpdatedAt { get; init; }
+    public DateTimeOffset? ExpiresAt { get; init; }
 }
 ```
+
+**`DraftType` — Classification, not a Descriptor:**
+
+`DraftType` is a free-form classification string. It is NOT a `DescriptorKind` and does NOT introduce a new descriptor type. It exists purely for querying and lifecycle management.
+
+```text
+agent.plan              // Agent session draft
+employee.create         // User draft for employee creation
+workflow.request        // Workflow checkpoint draft
+customer.onboarding     // User draft for customer onboarding
+```
+
+The same `SchemaDescriptor` can have drafts of multiple types. `DraftType` partitions the draft space without creating descriptor-level coupling.
 
 ```csharp
 public enum DraftStatus
@@ -1629,9 +1643,9 @@ Draft → SchemaDescriptor
 Draft ✗→ CapabilityDescriptor  // Draft doesn't know its future consumer
 
 // At submission time:
-DynamicAPI: Load Draft → Validate Schema → Execute Capability
-Agent:      Load Draft → LLM modifies → Save Draft
-Workflow:   Load Draft → Execute Capability → Update Draft
+DynamicAPI: Load DraftRecord → Validate Schema → Execute Capability
+Agent:      Load DraftRecord → LLM modifies → Save DraftRecord
+Workflow:   Load DraftRecord → Execute Capability → Update DraftRecord
 ```
 
 ### 12.3 Draft Store
@@ -1641,34 +1655,34 @@ Draft persistence is an independent infrastructure concern:
 ```csharp
 public interface IDraftStore
 {
-    Task<Draft> SaveAsync(Draft draft, CancellationToken ct);
-    Task<Draft?> GetAsync(string draftId, CancellationToken ct);
+    Task<DraftRecord> SaveAsync(DraftRecord draft, CancellationToken ct);
+    Task<DraftRecord?> GetAsync(string draftId, CancellationToken ct);
     Task DeleteAsync(string draftId, CancellationToken ct);
-    Task<IReadOnlyList<Draft>> QueryAsync(DraftQuery query, CancellationToken ct);
+    Task<IReadOnlyList<DraftRecord>> QueryAsync(DraftQuery query, CancellationToken ct);
 }
 ```
 
 Backed by any storage (SQL, MongoDB, Redis, S3). The store is a platform service — Workflow, Agent, DynamicAPI, and HumanTask all share the same `IDraftStore`.
 
-### 12.4 Draft and Schema Versioning
+### 12.4 DraftRecord and Schema Versioning
 
-When a Draft is submitted:
+When a DraftRecord is submitted:
 
 ```text
-Draft.Schema.Version == Current Schema Version
+DraftRecord.Schema.Version == Current Schema Version
     → Direct submission. No migration needed.
 
-Draft.Schema.Version < Current Schema Version
+DraftRecord.Schema.Version < Current Schema Version
     → Check Schema ChangeKind:
-        Additive → Draft data is forward-compatible. Submit.
-        Breaking → Draft enters RequiresMigration status.
+        Additive → DraftRecord data is forward-compatible. Submit.
+        Breaking → DraftRecord enters RequiresMigration status.
 ```
 
-This is the same version pinning model used by Workflow instances and Agent caches. The Draft stores the `SchemaVersion` at capture time and validates against it at submission time.
+This is the same version pinning model used by Workflow instances and Agent caches. The DraftRecord stores the `SchemaVersion` at capture time and validates against it at submission time.
 
-### 12.5 Draft and Workflow
+### 12.5 DraftRecord and Workflow
 
-Workflow checkpoints use Draft as the persistence mechanism:
+Workflow checkpoints use DraftRecord as the persistence mechanism:
 
 ```csharp
 public sealed class WorkflowDraftPolicy
@@ -1680,28 +1694,28 @@ public sealed class WorkflowDraftPolicy
 }
 ```
 
-When a Workflow checkpoints, it saves a `Draft` with `OwnerId = workflowInstanceId` and `Schema = WorkflowVariableSchema`. On resume, the Workflow engine loads the Draft, restores the `DescriptorSnapshot`, and continues from the saved step.
+When a Workflow checkpoints, it saves a `DraftRecord` with `OwnerId = workflowInstanceId` and `Schema = WorkflowVariableSchema`. On resume, the Workflow engine loads the DraftRecord, restores the `DescriptorSnapshot`, and continues from the saved step.
 
-Workflow does **not** own Draft. Draft does **not** reference Workflow. The relationship is:
+Workflow does **not** own DraftRecord. DraftRecord does **not** reference Workflow. The relationship is:
 
 ```text
-WorkflowInstance ──references──→ Draft (by DraftId)
-Draft            ──references──→ SchemaDescriptor (by VersionedDescriptorRef)
+WorkflowInstance ──references──→ DraftRecord (by DraftId)
+DraftRecord      ──references──→ SchemaDescriptor (by VersionedDescriptorRef)
 ```
 
-### 12.6 Draft and Agent
+### 12.6 DraftRecord and Agent
 
 Agent sessions use `IDraftStore` to persist LLM state. The Agent Runtime saves drafts between tool calls and restores them on session resume. The Agent does not need to know about `CapabilityKind` — saving a draft is just calling `IDraftStore.SaveAsync()` behind a regular Command Capability handler.
 
-### 12.7 Dependency Rules for Draft
+### 12.7 Dependency Rules for DraftRecord
 
 | From → To | Allowed? | Reason |
 |---|---|---|
-| `Draft` → `SchemaDescriptor` | ✅ | Draft captures data against a schema |
-| `Draft` → `CapabilityDescriptor` | ❌ | Draft doesn't know which capability will consume it |
-| `Draft` → `WorkflowDescriptor` | ❌ | Draft doesn't own orchestration |
-| `Draft` → `HumanTaskDescriptor` | ❌ | Draft doesn't own task lifecycle |
-| `WorkflowInstance` → `Draft` (by Id) | ✅ | Workflow checkpoints via draft |
+| `DraftRecord` → `SchemaDescriptor` | ✅ | DraftRecord captures data against a schema |
+| `DraftRecord` → `CapabilityDescriptor` | ❌ | DraftRecord doesn't know which capability will consume it |
+| `DraftRecord` → `WorkflowDescriptor` | ❌ | DraftRecord doesn't own orchestration |
+| `DraftRecord` → `HumanTaskDescriptor` | ❌ | DraftRecord doesn't own task lifecycle |
+| `WorkflowInstance` → `DraftRecord` (by Id) | ✅ | Workflow checkpoints via draft |
 | `AgentRuntime` → `IDraftStore` | ✅ | Agent persists LLM state |
 | `HumanTask` → `IDraftStore` | ✅ | Human task auto-save |
 
