@@ -2,7 +2,11 @@
 
 ## Date: 2026-06-08
 
-## Status: Draft
+## Status: Approved
+
+## Architecture Maturity: High
+
+## Implementation Ready: YES
 
 ---
 
@@ -92,6 +96,8 @@ DynamicAPI Agent MCP  │    (post-completion
 | Relations | references to other SchemaDescriptors |
 | Validation rules | per-field and cross-field validation expressions |
 | Default values | static or computed defaults |
+| `Id` | stable unique identifier (GUID/ULID — survives renames) |
+| `Name` | human-readable name |
 | `SchemaVersion` | monotonically incrementing version number |
 | `ChangeKind` | `Additive` / `Breaking` — declared at each version increment |
 | **NOT: UI layout** | belongs to FormDescriptor |
@@ -149,11 +155,12 @@ Plus a minimal set of execution metadata:
 
 | Field | Detail |
 |---|---|
-| `Name` | **globally unique** business capability name (dot-separated convention, e.g. `employee.create`) |
+| `Id` | stable unique identifier (GUID/ULID — survives renames) |
+| `Name` | **globally unique** business capability name (recommended: `<module>.<aggregate>.<action>`, e.g. `crm.customer.create`) |
 | `Kind` | `Query` / `Draft` / `Command` |
-| `InputSchema` | ref to SchemaDescriptor |
+| `InputSchemaId` | ref to SchemaDescriptor by Id |
 | `InputSchemaVersion` | pinned schema version at definition time |
-| `OutputSchema` | ref to SchemaDescriptor |
+| `OutputSchemaId` | ref to SchemaDescriptor by Id |
 | `OutputSchemaVersion` | pinned schema version at definition time |
 | `Permission` | required permission to invoke |
 | `RiskLevel` | `Low` / `Medium` / `High` / `Critical` |
@@ -176,20 +183,20 @@ Plus a minimal set of execution metadata:
 
 `CapabilityName` is a **global primary key**. There is no namespace or module-scoped alternative.
 
-- `employee.create` — exactly one definition across the entire system.
-- `HR.employee.create` and `ERP.employee.create` — **not allowed** as separate capabilities.
-- If two modules need the same business concept, they either share the capability or define capabilities with distinct names (e.g., `hr.employee.create` vs `erp.employee.create` — both are globally unique, the prefix is naming convention, not namespace).
+- `crm.customer.create` — exactly one definition across the entire system.
+- `erp.customer.create` — a different capability, also globally unique.
+- The recommended naming convention is `<module>.<aggregate>.<action>` (three-segment, fully qualified). This is a convention, not a namespace — every name is still globally unique.
 - Module-level capability name conflicts are **compile-time errors** detected by the source generator.
 
-Rationale: Workflow, Agent, MCP, Audit, Tracing, and Permission systems all reference `CapabilityName` as a stable identifier. Introducing namespace/version/module into the key would force every consumer to carry a composite key through their entire data model.
+Rationale: Workflow, Agent, MCP, Audit, Tracing, and Permission systems all reference `CapabilityName` as a stable identifier. Introducing namespace/version/module into the key would force every consumer to carry a composite key through their entire data model. The fully qualified naming convention gives enough disambiguation without introducing a composite key.
 
 #### Capability Atomicity: No Composition
 
 A Capability is **always atomic**. It must not invoke other Capabilities.
 
-- ✅ `employee.create` — single handler, single transaction scope.
-- ✅ `employee.sync` — single handler, triggered by BackgroundJob.
-- ❌ `employee.onboarding` that internally calls `employee.create` → `role.assign` → `mail.send` → `asset.create` — this is a Workflow, not a Capability.
+- ✅ `crm.customer.create` — single handler, single transaction scope.
+- ✅ `hr.employee.sync` — single handler, triggered by BackgroundJob.
+- ❌ `hr.employee.onboarding` that internally calls `crm.customer.create` → `iam.role.assign` → `notification.mail.send` → `asset.equipment.create` — this is a Workflow, not a Capability.
 
 If you need to compose multiple capabilities, you MUST define a Workflow. There is no "Composite Capability" concept. This prevents a parallel, implicit Workflow system from growing inside the Capability layer.
 
@@ -307,14 +314,25 @@ WorkflowStep.Target = new HumanTaskTarget
 
 | Responsibility | Detail |
 |---|---|
+| `Id` | stable unique identifier (GUID/ULID) |
+| `Name` | human-readable workflow name |
+| `WorkflowVersion` | monotonically incrementing version number |
 | Steps | ordered list of WorkflowSteps |
 | Variables | `WorkflowVariableSchema` — data carried between steps |
 | Gateways | exclusive, parallel, inclusive branching |
 | Error handling | per-step retry, compensation, fallback |
-| Version | workflow definition version |
 | **NOT: business execution** | delegates to Capability (via InteractionTarget) |
 | **NOT: human interaction** | delegates to HumanTask (via InteractionTarget) |
 | **NOT: UI rendering** | delegates to HumanTask → Form |
+
+#### Workflow Versioning
+
+A Workflow instance is **pinned to the WorkflowVersion at instantiation time**. It does NOT automatically follow the latest definition.
+
+- A running instance continues executing with the version it was started with — even if a new WorkflowVersion is deployed.
+- New instances pick up the latest version.
+- This prevents in-flight instances from breaking when the Workflow definition changes mid-execution.
+- WorkflowVersion changes are `Breaking` by default — a new version may add, remove, reorder steps, or change variable schemas.
 
 #### WorkflowStep
 
@@ -365,9 +383,140 @@ EntityDescriptor → SchemaDescriptor
 | **NOT: Permissions** | entity-level permissions are Capability concern |
 | **NOT: API exposure** | DynamicAPI exposes Capabilities, not Entities |
 
+### 4.7 IDescriptor — The Common Descriptor Base
+
+All descriptors share a common base interface. This enables unified registry implementations, generic tooling, and consistent lifecycle management.
+
+```csharp
+public interface IDescriptor
+{
+    string Id { get; }        // Stable unique identifier (GUID/ULID)
+    string Name { get; }      // Human-readable name
+    int Version { get; }      // Monotonically incrementing version
+    string DefinitionHash { get; } // Stable hash of the entire descriptor
+}
+```
+
+Concrete descriptors implement `IDescriptor`:
+
+```csharp
+SchemaDescriptor      : IDescriptor
+CapabilityDescriptor  : IDescriptor
+FormDescriptor        : IDescriptor
+HumanTaskDescriptor   : IDescriptor
+WorkflowDescriptor    : IDescriptor
+```
+
+This enables:
+
+```csharp
+public interface IDescriptorRegistry<TDescriptor> where TDescriptor : IDescriptor
+{
+    TDescriptor? GetById(string id);
+    TDescriptor? GetByName(string name);
+    TDescriptor? GetByNameAndVersion(string name, int version);
+    IReadOnlyList<TDescriptor> GetAll();
+    IReadOnlyList<TDescriptor> GetAllByName(string name); // all versions
+}
+```
+
+With concrete registries:
+
+```csharp
+SchemaRegistry       : IDescriptorRegistry<SchemaDescriptor>
+CapabilityRegistry   : IDescriptorRegistry<CapabilityDescriptor>
+WorkflowRegistry     : IDescriptorRegistry<WorkflowDescriptor>
+```
+
+Each registry is populated by compile-time source generators — no runtime scanning.
+
 ---
 
-## 5. Dependency Rules (Definitive)
+## 5. Descriptor Lifecycle
+
+Descriptors are not static files. They have a defined lifecycle from discovery to removal.
+
+### 5.1 Lifecycle Stages
+
+```text
+Discovery → Generation → Registration → Resolution → Execution
+                                                      │
+                                              ┌───────┴───────┐
+                                              │               │
+                                         Versioning      Deprecation
+                                                              │
+                                                          Removal
+```
+
+| Stage | What happens | Who is responsible |
+|---|---|---|
+| **Discovery** | Source types are identified: `[Entity]` classes, `[CrestService]` methods, explicit `ISchemaProvider` / `ICapabilityProvider` implementations | Source Generator (compile-time) |
+| **Generation** | `SchemaDescriptor`, `CapabilityDescriptor`, etc. are emitted as generated C# code into `obj/generated/` | Source Generator |
+| **Registration** | Generated descriptors register themselves with their respective `IDescriptorRegistry<T>` via module initializers | Generated code (startup) |
+| **Resolution** | Consumers resolve descriptors by Id, Name, or Name+Version from the registry | Registry (runtime, AoT-safe) |
+| **Execution** | The Capability Execution Pipeline resolves a `CapabilityDescriptor`, locates its `ICapabilityHandler`, and invokes it | Capability Pipeline |
+| **Versioning** | A new descriptor version is generated (e.g., Schema v2, Capability re-defined with new InputSchemaVersion). Old versions remain in the registry for running instances. | Source Generator + Registry |
+| **Deprecation** | A descriptor is marked as deprecated (`IsDeprecated = true`, `DeprecationMessage`, `SupersededById`). New consumers are warned at compile time. Existing running instances are unaffected. | Developer annotation → Source Generator |
+| **Removal** | A descriptor version is removed from the registry when no running instances reference it. Removal is a build-time decision, not runtime. | Build validation + manual cleanup |
+
+### 5.2 Versioning Rules
+
+| Rule | Detail |
+|---|---|
+| Descriptors are immutable once registered | A new version creates a new descriptor entry; old versions persist |
+| Running instances pin their version | Workflow instances, Drafts, and Agent sessions reference a specific descriptor version, not "latest" |
+| Old versions are removed only when safe | No running instances, no pending drafts, no cached references |
+| Name changes create a new descriptor | The old descriptor is deprecated with `SupersededById` pointing to the new one |
+| `DefinitionHash` changes on any field change | Consumers use the hash to detect drift between definition time and execution time |
+
+### 5.3 Deprecation
+
+```csharp
+public interface IDescriptor
+{
+    // ... existing fields
+    bool IsDeprecated { get; }
+    string? DeprecationMessage { get; }
+    string? SupersededById { get; }  // Id of the replacement descriptor
+}
+```
+
+- Source generators emit compile-time warnings when generated code references a deprecated descriptor.
+- At runtime, the registry includes deprecated descriptors (for running instances) but new resolutions prefer non-deprecated versions.
+- Deprecation is a signal to migrate, not a breaking change.
+
+### 5.4 Registration Model
+
+All registries are **compile-time generated** and **AoT-safe**:
+
+```csharp
+// Generated code — not hand-written
+[ModuleInitializer]
+internal static void Register()
+{
+    SchemaRegistry.Register(new SchemaDescriptor(
+        Id: "schema_01JMXZ8K3T...",
+        Name: "CustomerInput",
+        Version: 1,
+        // ...
+    ));
+
+    CapabilityRegistry.Register(new CapabilityDescriptor(
+        Id: "cap_01JMXZ8K4V...",
+        Name: "crm.customer.create",
+        Kind: CapabilityKind.Command,
+        InputSchemaId: "schema_01JMXZ8K3T...",
+        InputSchemaVersion: 1,
+        // ...
+    ));
+}
+```
+
+No runtime assembly scanning. No reflection-based discovery. The registry is a flat list of strongly-typed descriptor instances generated at compile time.
+
+---
+
+## 6. Dependency Rules (Definitive)
 
 ### ALLOWED
 
@@ -410,7 +559,7 @@ EntityDescriptor → SchemaDescriptor
 
 ---
 
-## 6. Capability Execution Pipeline (The Event Semantics Layer)
+## 7. Capability Execution Pipeline (The Event Semantics Layer)
 
 Every Capability invocation — regardless of trigger source (HTTP, Workflow, Agent, BackgroundJob) — enters a unified pipeline:
 
@@ -456,9 +605,9 @@ Return ExecutionResult:
 
 ---
 
-## 7. Exposure Layer
+## 8. Exposure Layer
 
-### 7.1 DynamicApiDescriptor (Capability → HTTP)
+### 8.1 DynamicApiDescriptor (Capability → HTTP)
 
 DynamicApiDescriptor is a **projection view** of CapabilityDescriptor. It adds:
 
@@ -471,7 +620,7 @@ DynamicApiDescriptor is a **projection view** of CapabilityDescriptor. It adds:
 
 DynamicAPI does NOT define its own Input/Output schema — it inherits from Capability.
 
-### 7.2 AgentToolDescriptor (Capability → LLM Tool)
+### 8.2 AgentToolDescriptor (Capability → LLM Tool)
 
 AgentToolDescriptor is a **projection view** of CapabilityDescriptor. It adds:
 
@@ -484,13 +633,13 @@ AgentToolDescriptor is a **projection view** of CapabilityDescriptor. It adds:
 
 AgentToolDescriptor does NOT define its own Input/Output schema — it inherits from Capability.
 
-### 7.3 MCPToolDescriptor (Capability → MCP Tool)
+### 8.3 MCPToolDescriptor (Capability → MCP Tool)
 
 Same pattern as AgentToolDescriptor, for MCP (Model Context Protocol) exposure.
 
 ---
 
-## 8. What This Model Prevents
+## 9. What This Model Prevents
 
 | Anti-Pattern | How this model prevents it |
 |---|---|
@@ -508,9 +657,9 @@ Same pattern as AgentToolDescriptor, for MCP (Model Context Protocol) exposure.
 
 ---
 
-## 9. Existing Code Impact
+## 10. Existing Code Impact
 
-### 9.1 What already exists
+### 10.1 What already exists
 
 - `DynamicApiDescriptors.cs` — `DynamicApiServiceDescriptor`, `DynamicApiActionDescriptor`, `DynamicApiParameterDescriptor`, `DynamicApiReturnDescriptor`, `DynamicApiPermissionMetadata`, `DynamicApiRegistry`.
 - `DynamicApiEndpointDescriptor` (record) — describes a single endpoint.
@@ -519,7 +668,7 @@ Same pattern as AgentToolDescriptor, for MCP (Model Context Protocol) exposure.
 - Permission system: `IPermissionChecker`, `PermissionDefinition`, `IEntityPermissions`.
 - Build-time MSBuild tasks for module scanning and code generation.
 
-### 9.2 What changes
+### 10.2 What changes
 
 - **New projects to add:**
   - `CrestCreates.Schema.Abstractions` / `CrestCreates.Schema` — SchemaDescriptor and schema registry.
@@ -533,7 +682,7 @@ Same pattern as AgentToolDescriptor, for MCP (Model Context Protocol) exposure.
   - `CrestCreates.DynamicApi` — refactor `DynamicApiDescriptors` to reference `CapabilityDescriptor` rather than duplicating metadata. The existing descriptor classes become Capability projections.
   - `CrestCreates.CodeGenerator` / `CrestCreates.BuildTasks` — add source generators for SchemaDescriptor (from Entity), CapabilityDescriptor (from `[CrestService]` methods), and FormDescriptor.
 
-### 9.3 Migration path
+### 10.3 Migration path
 
 Phase 1: Introduce SchemaDescriptor and CapabilityDescriptor as new abstractions. Existing DynamicApiDescriptors continue to work — they are internally mapped to CapabilityDescriptors.
 
@@ -545,28 +694,33 @@ Phase 4: Introduce AgentToolDescriptor and MCPToolDescriptor as additional Capab
 
 ---
 
-## 10. Design Decisions Summary
+## 11. Design Decisions Summary
 
 | # | Decision |
 |---|---|
 | 1 | SchemaDescriptor is the single source of truth for data shape — no FormSchema, WorkflowSchema, ApiSchema, ToolSchema |
-| 2 | CapabilityDescriptor answers only three core questions: What? Input? Output? — plus Kind, Permission, RiskLevel |
-| 3 | CapabilityKind is limited to Query, Draft, Command — Workflow and HumanTask are NOT CapabilityKinds |
-| 4 | Capability is always atomic — Capability must not invoke other Capabilities; composition requires Workflow |
-| 5 | CapabilityName is globally unique — no namespace/module-scoped names; name conflicts are compile-time errors |
-| 6 | SchemaDescriptor carries SchemaVersion and ChangeKind (Additive/Breaking); consumers pin schema versions |
-| 7 | CapabilityDescriptor is pure metadata; execution logic lives in ICapabilityHandler<TInput, TOutput> |
-| 8 | FormDescriptor = Schema + UI metadata — pure presentation concern, not a business action |
-| 9 | HumanTaskDescriptor is the business action for human interaction — Form is its UI delegate |
-| 10 | WorkflowStep binds to InteractionTarget (Capability | HumanTask | SubWorkflow), never to ApplicationService or Form directly |
-| 11 | DynamicApiDescriptor, AgentToolDescriptor, MCPToolDescriptor are projection views of CapabilityDescriptor |
-| 12 | Every Capability invocation enters the unified Capability Execution Pipeline regardless of trigger source |
-| 13 | Entity is a Schema source, not a participant in the Capability/Workflow chain |
-| 14 | Entity → Form, Entity → Workflow, Entity → Capability are all forbidden dependencies |
+| 2 | Every Schema has a stable `Id` (GUID/ULID) + `SchemaVersion` — Id survives renames, Version pins consumers |
+| 3 | CapabilityDescriptor answers only three core questions: What? Input? Output? — plus Kind, Permission, RiskLevel |
+| 4 | CapabilityKind is limited to Query, Draft, Command — Workflow and HumanTask are NOT CapabilityKinds |
+| 5 | Capability is always atomic — Capability must not invoke other Capabilities; composition requires Workflow |
+| 6 | CapabilityName is globally unique using `<module>.<aggregate>.<action>` convention — no namespace scoping |
+| 7 | Schema evolution is governed by SchemaVersion + ChangeKind (Additive/Breaking); consumers pin schema versions |
+| 8 | CapabilityDescriptor is pure metadata; execution logic lives in ICapabilityHandler<TInput, TOutput> |
+| 9 | All descriptors implement `IDescriptor` (Id, Name, Version, DefinitionHash) enabling unified registries |
+| 10 | Descriptors have a defined lifecycle: Discovery → Generation → Registration → Resolution → Execution → Deprecation → Removal |
+| 11 | Descriptors are immutable once registered; versioning creates new entries; running instances pin their version |
+| 12 | FormDescriptor = Schema + UI metadata — pure presentation concern, not a business action |
+| 13 | HumanTaskDescriptor is the business action for human interaction — Form is its UI delegate |
+| 14 | WorkflowDescriptor has WorkflowVersion; running instances are pinned at instantiation time, not "latest" |
+| 15 | WorkflowStep binds to InteractionTarget (Capability | HumanTask | SubWorkflow), never to ApplicationService or Form directly |
+| 16 | DynamicApiDescriptor, AgentToolDescriptor, MCPToolDescriptor are projection views of CapabilityDescriptor |
+| 17 | Every Capability invocation enters the unified Capability Execution Pipeline regardless of trigger source |
+| 18 | Entity is a Schema source, not a participant in the Capability/Workflow chain |
+| 19 | Entity → Form, Entity → Workflow, Entity → Capability are all forbidden dependencies |
 
 ---
 
-## 11. Future Considerations
+## 12. Future Considerations
 
 - **Low-code form builder**: Because Form depends only on Schema, a low-code form builder only needs SchemaDescriptor + FormDescriptor — it does not need to know about Capability, Workflow, or Entity.
 - **Workflow engine integration (e.g., Elsa)**: The WorkflowDescriptor and InteractionTarget abstractions serve as the CrestCreates-native workflow model. External engines can be adapted behind these abstractions.
