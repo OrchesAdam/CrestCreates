@@ -1216,7 +1216,68 @@ No runtime assembly scanning. No reflection-based discovery. The registry is a f
 
 ---
 
-## 6. Dependency Rules (Definitive)
+## 6. Descriptor vs Instance — The Iron Law
+
+The system has two layers with a non-negotiable boundary. Crossing it is the root cause of most framework decay.
+
+### The Law
+
+```text
+Descriptor = What can exist       (Stateless — always)
+Instance   = What is happening    (Stateful — always)
+```
+
+A Descriptor is a **definition**. It has no runtime state. It describes structure, constraints, and capabilities. An Instance is an **occurrence**. It has lifecycle state, a timeline, and a relationship to a specific execution context.
+
+```text
+Descriptor Layer (Metadata)          Instance Layer (Runtime)
+────────────────────────────         ─────────────────────────
+SchemaDescriptor                     DraftRecord
+CapabilityDescriptor                 CapabilityExecution
+EventDescriptor                      WorkflowInstance
+WorkflowDescriptor                   HumanTaskInstance
+FormDescriptor
+HumanTaskDescriptor
+```
+
+### Mapping Table
+
+| Descriptor | Instance(s) | Instance State |
+|---|---|---|
+| `SchemaDescriptor` | `DraftRecord` | `DraftStatus` (Active, Submitted, Archived, Expired, RequiresMigration) |
+| `CapabilityDescriptor` | `CapabilityExecution` | Execution status (Pending, Running, Succeeded, Failed, TimedOut) |
+| `WorkflowDescriptor` | `WorkflowInstance` | Instance status + current step + variable snapshot |
+| `HumanTaskDescriptor` | `HumanTaskInstance` | Assignment + completion status + outcome |
+| `EventDescriptor` | Published events | Delivered, acknowledged, stored |
+| `FormDescriptor` | Rendered form instances | Field values, validation state |
+
+### Rules
+
+| Rule | Detail |
+|---|---|
+| Descriptors are always stateless | A `CapabilityDescriptor` does not know if it's "currently executing." That's `CapabilityExecution`. |
+| Instances always reference a Descriptor | A `WorkflowInstance` references `(WorkflowId, WorkflowVersion)`. An instance cannot exist without a definition. |
+| Instances pin their Descriptor version | A running `WorkflowInstance` stays on the version it was started with. Descriptor upgrades do not affect running instances. |
+| Descriptors never reference Instances | A `SchemaDescriptor` does not know how many `DraftRecord`s exist against it. A `CapabilityDescriptor` does not know its execution history. |
+| Descriptors survive Instance deletion | Deleting all `WorkflowInstance`s does not remove the `WorkflowDescriptor`. |
+| Instance state is transient | `CapabilityExecution` records may be archived or pruned. The `CapabilityDescriptor` remains. |
+
+### Why This Boundary Matters
+
+Without it, these anti-patterns emerge:
+
+| Anti-Pattern | Consequence |
+|---|---|
+| `CapabilityDescriptor.CurrentExecutionCount` | Descriptor becomes stateful — can't be cached, can't be immutable |
+| `WorkflowDescriptor.RunningInstances` | Descriptor references instances — circular dependency, serialization hell |
+| "Just store state in the Descriptor for now" | Conflates definition with runtime — every consumer becomes state-aware |
+| Mutating a Descriptor mid-execution | Running instances see partial changes — non-deterministic behavior |
+
+The boundary is simple: **if it changes during execution, it's an Instance. If it defines what can execute, it's a Descriptor.** No exceptions.
+
+---
+
+## 7. Dependency Rules (Definitive)
 
 ### ALLOWED
 
@@ -1259,7 +1320,7 @@ No runtime assembly scanning. No reflection-based discovery. The registry is a f
 
 ---
 
-## 7. Capability Execution Pipeline (The Event Semantics Layer)
+## 8. Capability Execution Pipeline (The Event Semantics Layer)
 
 Every Capability invocation — regardless of trigger source (HTTP, Workflow, Agent, BackgroundJob) — enters a unified pipeline:
 
@@ -1426,7 +1487,7 @@ This is the same envelope used by the existing `CrestCreates.EventBus` system. C
 
 ---
 
-## 8. Exposure Layer
+## 9. Exposure Layer
 
 ### 8.1 DynamicApiDescriptor (Capability → HTTP)
 
@@ -1460,7 +1521,7 @@ Same pattern as AgentToolDescriptor, for MCP (Model Context Protocol) exposure.
 
 ---
 
-## 9. What This Model Prevents
+## 10. What This Model Prevents
 
 | Anti-Pattern | How this model prevents it |
 |---|---|
@@ -1478,7 +1539,7 @@ Same pattern as AgentToolDescriptor, for MCP (Model Context Protocol) exposure.
 
 ---
 
-## 10. Existing Code Impact
+## 11. Existing Code Impact
 
 ### 10.1 What already exists
 
@@ -1515,7 +1576,7 @@ Phase 4: Introduce AgentToolDescriptor and MCPToolDescriptor as additional Capab
 
 ---
 
-## 11. Design Decisions Summary
+## 12. Design Decisions Summary
 
 | # | Decision |
 |---|---|
@@ -1565,7 +1626,7 @@ Phase 4: Introduce AgentToolDescriptor and MCPToolDescriptor as additional Capab
 
 ---
 
-## 12. Draft Infrastructure — Runtime Data, Not Metadata
+## 13. Draft Infrastructure — Runtime Data, Not Metadata
 
 Draft is **not a Descriptor**. It is not a Pillar. It is Runtime Data — a point-in-time snapshot of work-in-progress data captured against a Schema.
 
@@ -1721,7 +1782,7 @@ Agent sessions use `IDraftStore` to persist LLM state. The Agent Runtime saves d
 
 ---
 
-## 13. Future Considerations
+## 14. Future Considerations
 
 - **Low-code form builder**: Because Form depends only on Schema, a low-code form builder only needs SchemaDescriptor + FormDescriptor — it does not need to know about Capability, Workflow, or Entity.
 - **Workflow engine integration (e.g., Elsa)**: The WorkflowDescriptor and InteractionTarget abstractions serve as the CrestCreates-native workflow model. External engines can be adapted behind these abstractions.
