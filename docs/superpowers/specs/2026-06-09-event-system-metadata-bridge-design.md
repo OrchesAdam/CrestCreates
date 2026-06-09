@@ -78,51 +78,91 @@ Six orthogonal dimensions, each answering a distinct question:
 
 ### The Model
 
-```csharp
-// CrestCreates.Event.Abstractions/EventDescriptor.cs (revised)
+### Descriptor Hierarchy
 
-public sealed record EventDescriptor : IVersionedDescriptor
+Two distinct descriptor types share a common interface, reflecting their fundamentally different contracts:
+
+```csharp
+// CrestCreates.Event.Abstractions/IEventDescriptor.cs
+
+public interface IEventDescriptor
+{
+    string Id { get; }
+    string Name { get; }
+    EventScope Scope { get; }
+    EventDirection Direction { get; }
+    EventImportance Importance { get; }
+    bool IsAuditable { get; }
+    bool IsReplayable { get; }
+    bool IsPublic { get; }
+    string? Description { get; }
+}
+
+// CrestCreates.Event.Abstractions/GeneratedEventDescriptor.cs
+
+public sealed record GeneratedEventDescriptor : IEventDescriptor, IVersionedDescriptor
 {
     // ── 1. Identity ──
-    public string Id { get; init; }                 // SHA256(Name + ":" + Version). Survives type renames; does NOT survive name renames.
-    public string Name { get; init; }              // e.g. "capability.succeeded"
+    public string Id { get; init; }                 // SHA256(Name + ":" + Version). Stable across CLR type renames; name change = new identity.
+    public string Name { get; init; }
     public int Version { get; init; }
     public DescriptorState State { get; init; }
     public string? Description { get; init; }
 
-    // ── 2. Payload ──
-    public Type PayloadType { get; init; }          // Dev-time / generator helper
-    public VersionedDescriptorRef<SchemaDescriptor> PayloadSchemaRef { get; init; }  // Authoritative at runtime
+    // ── 2. Payload (versioned, schema-backed) ──
+    public Type PayloadType { get; init; }
+    public VersionedDescriptorRef<SchemaDescriptor> PayloadSchemaRef { get; init; }
 
-    // ── 3. Scope (transmission boundary) ──
-    public EventScope Scope { get; init; }          // Local | Domain | Integration
+    // ── 3. Scope ──
+    public EventScope Scope { get; init; }
 
-    // ── 4. Reliability (contract; future strategy driver) ──
-    public EventReliability Reliability { get; init; }  // BestEffort | AtLeastOnce | Idempotent
+    // ── 4. Reliability ──
+    public EventReliability Reliability { get; init; }
 
-    // ── 5. Direction (topology metadata, not a runtime constraint) ──
-    public EventDirection Direction { get; init; }      // Internal | Incoming | Outgoing
+    // ── 5. Direction ──
+    public EventDirection Direction { get; init; }
 
     // ── 6. Ownership ──
     public VersionedDescriptorRef<CapabilityDescriptor>? CapabilityRef { get; init; }
-    public string? CreatedBy { get; init; }          // e.g. "CapabilityRuntime", "WorkflowRuntime"
+    public string? CreatedBy { get; init; }
 
     // ── Classification ──
-    public EventImportance Importance { get; init; }    // Low | Normal | High | Critical
+    public EventImportance Importance { get; init; }
 
     // ── Operational flags ──
     public bool IsAuditable { get; init; }
     public bool IsReplayable { get; init; }
-    public bool IsPublic { get; init; }             // Exposed via Dynamic API / metadata endpoint
+    public bool IsPublic { get; init; }
 
     // ── Compatibility ──
     public SchemaChangeKind ChangeKind { get; init; }
 
-    // ── Topology (reserved, Phase 3+) ──
+    // ── Topology (reserved) ──
     public IReadOnlyList<string> Producers { get; init; } = [];
     public IReadOnlyList<string> Consumers { get; init; } = [];
 }
+
+// CrestCreates.Event.Abstractions/DynamicEventDescriptor.cs
+
+public sealed record DynamicEventDescriptor : IEventDescriptor
+{
+    public string Id { get; init; }                     // SHA256(Name + ":1") — always Version=1
+    public string Name { get; init; }
+    public EventScope Scope { get; init; }
+    public EventDirection Direction { get; init; } = EventDirection.Internal;
+    public EventImportance Importance { get; init; } = EventImportance.Normal;
+    public bool IsAuditable { get; init; }
+    public bool IsReplayable { get; init; }
+    public bool IsPublic { get; init; }
+    public string? Description { get; init; }
+    public Type PayloadType { get; init; }               // Dev-time only, no schema
+
+    // No: Version, State, Reliability, CapabilityRef, ChangeKind, PayloadSchemaRef
+    // Dynamic events are unversioned, have no schema evolution, and no descriptor lifecycle
+}
 ```
+
+**Key distinction:** `GeneratedEventDescriptor` is versioned, schema-backed, and source-generated. `DynamicEventDescriptor` is tenant-defined, always Version=1, has no schema evolution, and no descriptor lifecycle (State, ChangeKind). The registry stores both as `IEventDescriptor`, but they have fundamentally different contracts. No deferred migration needed.
 
 ### New Enums
 
@@ -135,7 +175,7 @@ public enum EventImportance { Low, Normal, High, Critical }
 
 ### Publish Resolution Rule
 
-`PublishAsync(string eventName, payload)` always resolves to the highest Active version. Deprecated events cannot be published — callers must use the current version's name. There is no API to publish a specific deprecated version.
+`PublishAsync(eventName, payload)` always resolves to the highest Active version. Version selection is a registry concern, not a caller concern — callers never specify event versions. There is no API to publish a specific version or a deprecated version.
 
 ### Runtime Constraints (enforced by IEventValidator)
 
@@ -208,7 +248,7 @@ public sealed record CapabilitySucceeded(
 
 public interface IEventDescriptorProvider
 {
-    IReadOnlyList<EventDescriptor> GetDescriptors();
+    IReadOnlyList<GeneratedEventDescriptor> GetDescriptors();
 }
 ```
 
@@ -219,8 +259,8 @@ public interface IEventDescriptorProvider
 
 public sealed class GeneratedEventDescriptorProvider : IEventDescriptorProvider
 {
-    public IReadOnlyList<EventDescriptor> GetDescriptors() => [
-        new EventDescriptor
+    public IReadOnlyList<GeneratedEventDescriptor> GetDescriptors() => [
+        new GeneratedEventDescriptor
         {
             Id = GeneratedEventDescriptorProvider.GenerateId("capability.succeeded", 1),
             // = SHA256("capability.succeeded:1") → "evt_A3F8C2D1..."
@@ -260,7 +300,7 @@ services.TryAddEnumerable(
 
 ### Manual Escape Hatch
 
-`EventRegistry.RegisterDynamic(EventDescriptor)` remains available for dynamically-defined events (e.g., tenant-custom events loaded from configuration at runtime). These are stored separately from generated descriptors but participate in all queries. **Phase 2a dynamic descriptors are always Version=1.** Versioned dynamic descriptors are not supported — generated events handle schema evolution. > Phase 3 should consider a distinct `DynamicEventDescriptor` type rather than reusing `EventDescriptor`, since generated (versioned) and dynamic (unversioned) events are semantically different.
+`EventRegistry.RegisterDynamic(EventDescriptor)` remains available for dynamically-defined events (e.g., tenant-custom events loaded from configuration at runtime). These are stored separately from generated descriptors but participate in all queries. **Phase 2a dynamic descriptors are always Version=1, using the `DynamicEventDescriptor` type.** No version evolution, no schema backing, no descriptor lifecycle. Generated and dynamic events have separate types, not separate phases.
 
 ---
 
@@ -279,8 +319,9 @@ Generated descriptors (produced by source generators) and dynamically registered
 
 public sealed class EventRegistry : IEventRegistry
 {
-    private readonly ConcurrentDictionary<string, EventDescriptor> _generatedById = new();
-    private readonly ConcurrentDictionary<string, EventDescriptor> _dynamicById = new();
+    private readonly ConcurrentDictionary<string, GeneratedEventDescriptor> _generatedById = new();
+    private readonly ConcurrentDictionary<string, DynamicEventDescriptor> _dynamicById = new();
+    private readonly ConcurrentDictionary<Type, GeneratedEventDescriptor> _byPayloadType = new();
     // ... (shared indexes by name, category, etc.)
     public RegistryState State { get; private set; } = RegistryState.Created;
 
@@ -325,7 +366,7 @@ public sealed class EventRegistry : IEventRegistry
             throw new InvalidOperationException(
                 $"Cannot register dynamic events while registry state is {State}. " +
                 "Dynamic registration is only allowed after Build() completes.");
-        var descriptor = new EventDescriptor
+        var descriptor = new DynamicEventDescriptor
         {
             Id = GenerateId(name, version: 1),  // SHA256(Name + ":" + Version)
             Name = name,
@@ -345,11 +386,15 @@ public sealed class EventRegistry : IEventRegistry
         return true;
     }
 
-    private void RegisterGenerated(EventDescriptor descriptor)
+    private void RegisterGenerated(GeneratedEventDescriptor descriptor)
     {
         _generatedById[descriptor.Id] = descriptor;
+        _byPayloadType[descriptor.PayloadType] = descriptor;
         // ... (populate shared indexes)
     }
+
+    public GeneratedEventDescriptor? GetByPayloadType(Type payloadType)
+        => _byPayloadType.TryGetValue(payloadType, out var d) ? d : null;
 ```
 
 ### Name → Version Resolution
@@ -358,19 +403,19 @@ When multiple versions of an event exist, `GetByName` returns the active version
 
 ```csharp
 // Returns the active descriptor with the highest version, or null
-public EventDescriptor? GetByName(string name)
+public GeneratedEventDescriptor? GetByName(string name)
     => _byName.TryGetValue(name, out var versions)
         ? versions.Where(v => v.State == DescriptorState.Active).MaxBy(v => v.Version)
         : null;
 
 // Returns the highest-version descriptor regardless of state, or null
-public EventDescriptor? GetLatestVersion(string name)
+public GeneratedEventDescriptor? GetLatestVersion(string name)
     => _byName.TryGetValue(name, out var versions)
         ? versions.MaxBy(v => v.Version)
         : null;
 
 // Exact version lookup
-public EventDescriptor? GetByNameAndVersion(string name, int version)
+public GeneratedEventDescriptor? GetByNameAndVersion(string name, int version)
     => _byName.TryGetValue(name, out var versions)
         ? versions.FirstOrDefault(v => v.Version == version)
         : null;
@@ -390,7 +435,7 @@ This ensures "v1 Deprecated + v2 Deprecated" returns `Deprecated`, not `NotRegis
 
 **Single Active Version rule:** At most one version of an event may be `Active` at any time. When v2 is registered as Active, v1 must be Deprecated. If v1 is Active and a new v1 is registered (same name + version), it's a duplicate and fails. If v2 is registered as Active while v1 is still Active, `Build()` throws — the module must explicitly deprecate v1 first. This guarantees the validator's `GetLatestVersion()` → Active branch always resolves to a single unambiguous descriptor.
 
-    private static void ValidateNoDuplicateNameVersions(List<EventDescriptor> descriptors)
+    private static void ValidateNoDuplicateNameVersions(List<GeneratedEventDescriptor> descriptors)
     {
         var duplicates = descriptors
             .GroupBy(d => (d.Name, d.Version))
@@ -483,7 +528,7 @@ public interface IEventValidator
 public sealed record ValidationResult(
     bool IsValid,
     EventValidationError ErrorCode,
-    EventDescriptor? Descriptor);
+    IEventDescriptor? Descriptor);
 
 public enum EventValidationError
 {
@@ -553,7 +598,7 @@ public sealed class RegistryEventValidator : IEventValidator
 
 ```csharp
 // DistributedEventBusBase
-protected void ValidateScope(EventDescriptor descriptor)
+protected void ValidateScope(IEventDescriptor descriptor)
 {
     if (descriptor.Scope == EventScope.Local)
         throw new EventValidationException(
@@ -623,8 +668,9 @@ public sealed record DeadLetterMessage(
     byte[] Payload,
     string ErrorMessage,
     string? ExceptionType,         // typeof(TimeoutException).FullName
-    DateTime OccurredAt,           // ← added: when the original event was created
+    DateTime OccurredAt,           // when the original event was created
     DateTime FailedAt,             // when the handler failed
+    string? DescriptorSnapshotJson // ← added: JSON snapshot of the descriptor at failure time (forensic)
     int RetryCount,
     int MaxRetries,
     DeadLetterStatus Status        // Pending | Retrying | Retried | Archived
@@ -648,14 +694,9 @@ Pending ──► Retrying ──► Retried
 
 ### Future Enhancement (Phase 3)
 
-| Add `DescriptorSnapshotJson` to `DeadLetterMessage` | Phase 3 |
 | Add `PayloadSchemaRef` to `DeadLetterMessage` | Phase 3 |
 
-> **Descriptor Snapshot rationale:** If an event descriptor is renamed or removed years later, DLQ entries referencing it become uninterpretable. Storing a JSON snapshot of the descriptor at failure time preserves forensic context indefinitely.
-
-> **Dynamic descriptor isolation:** Phase 3 should introduce `DynamicEventDescriptor` distinct from `EventDescriptor`, since generated (versioned, schema-backed) and dynamic (unversioned, schema-less) events have fundamentally different contracts.
-
-> **EventTypeMap → IEventTypeResolver:** The Phase 2a `EventTypeMap` (typeof → event name) is a generated static map. Phase 3 should extract a general `IEventTypeResolver` interface to unify Type↔Descriptor mapping across Event, Capability, Workflow, and HumanTask registries. This becomes core Metadata infrastructure, not Event-specific.
+> **EventTypeMap → IEventTypeResolver:** The Phase 2a `EventTypeMap` (typeof → event name) is backed by `Registry.GetByPayloadType()`. Phase 3 should extract a general `IEventTypeResolver` interface to unify Type↔Descriptor mapping across Event, Capability, Workflow, and HumanTask registries. This becomes core Metadata infrastructure, not Event-specific.
 
 > **RegistryBase<TDescriptor>:** Phase 3 should extract a generic `RegistryBase<TDescriptor>` to unify Event, Capability, Workflow, and HumanTask registries. All share the same lifecycle (Created→Building→Built→Failed), the same Build/Register pattern, and the same name+version indexing.
 
