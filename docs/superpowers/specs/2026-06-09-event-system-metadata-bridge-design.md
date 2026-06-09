@@ -146,7 +146,7 @@ public sealed record GeneratedEventDescriptor : IEventDescriptor, IVersionedDesc
 
 public sealed record DynamicEventDescriptor : IEventDescriptor
 {
-    public string Id { get; init; }                     // SHA256(Name + ":1") — always Version=1
+    public string Id { get; init; }                     // SHA256(Name) — unversioned
     public string Name { get; init; }
     public EventScope Scope { get; init; }
     public EventDirection Direction { get; init; } = EventDirection.Internal;
@@ -300,15 +300,43 @@ services.TryAddEnumerable(
 
 ### Manual Escape Hatch
 
-`EventRegistry.RegisterDynamic(EventDescriptor)` remains available for dynamically-defined events (e.g., tenant-custom events loaded from configuration at runtime). These are stored separately from generated descriptors but participate in all queries. **Phase 2a dynamic descriptors are always Version=1, using the `DynamicEventDescriptor` type.** No version evolution, no schema backing, no descriptor lifecycle. Generated and dynamic events have separate types, not separate phases.
+`IDynamicEventRegistry.Register(name, payloadType, scope)` adds dynamic events at runtime (tenant-custom, configuration-driven). Dynamic events are stored separately from generated descriptors. `IEventResolver` unifies query access — generated wins on name conflict. **Dynamic descriptors are unversioned, use `DynamicEventDescriptor` type, and have no schema backing or descriptor lifecycle.**
 
 ---
 
 ## Design Section 3: EventRegistry — Build, Validate, Freeze
 
-### Two-Category Model: Generated vs Dynamic
+### Three-Interface Model: Registry + Dynamic Registry + Resolver
 
-Generated descriptors (produced by source generators) and dynamically registered descriptors are distinct categories. Source-generator-produced descriptors are validated and frozen during `Build()`. Dynamically registered descriptors remain supported for tenant-defined or configuration-driven events and are stored separately from generated descriptors. Registry queries operate over the union of both sets.
+Generated and dynamic descriptors have separate registries. A resolver unifies query access:
+
+```csharp
+// Generated only — frozen after Build()
+public interface IEventRegistry
+{
+    RegistryState State { get; }
+    void Build(IEnumerable<IEventDescriptorProvider> providers);
+    GeneratedEventDescriptor? GetByName(string name);
+    GeneratedEventDescriptor? GetByPayloadType(Type payloadType);
+    // ... (name, version, category queries)
+}
+
+// Dynamic only — mutable after Build()
+public interface IDynamicEventRegistry
+{
+    bool Register(string name, Type payloadType, EventScope scope);
+    DynamicEventDescriptor? GetByName(string name);
+}
+
+// Union resolver — generated first, dynamic fallback
+public interface IEventResolver
+{
+    IEventDescriptor? GetByName(string name);
+    IEventDescriptor? GetByPayloadType(Type type);
+}
+```
+
+`IEventValidator` takes `IEventResolver` — it doesn't care which registry the descriptor came from. Generated wins on name conflict. `IDynamicEventRegistry` is not used during `Build()`.
 
 ### One-Shot Build
 
@@ -319,82 +347,74 @@ Generated descriptors (produced by source generators) and dynamically registered
 
 public sealed class EventRegistry : IEventRegistry
 {
-    private readonly ConcurrentDictionary<string, GeneratedEventDescriptor> _generatedById = new();
-    private readonly ConcurrentDictionary<string, DynamicEventDescriptor> _dynamicById = new();
+    private readonly ConcurrentDictionary<string, GeneratedEventDescriptor> _byId = new();
     private readonly ConcurrentDictionary<Type, GeneratedEventDescriptor> _byPayloadType = new();
-    // ... (shared indexes by name, category, etc.)
     public RegistryState State { get; private set; } = RegistryState.Created;
 
-    // Called by EventRegistryHostedService at startup.
-    // Idempotent: returns silently if already Built (supports integration tests, WebApplicationFactory).
-    // Throws: if previously Failed (process must restart).
     public void Build(IEnumerable<IEventDescriptorProvider> providers)
     {
-        if (State == RegistryState.Built)
-            return;  // Idempotent — safe for multiple host builds
+        if (State == RegistryState.Built) return;
         if (State == RegistryState.Failed)
-            throw new InvalidOperationException(
-                "EventRegistry.Build() previously failed. The process must be restarted.");
-
+            throw new InvalidOperationException("Build previously failed. Restart required.");
         State = RegistryState.Building;
-
         var descriptors = providers.SelectMany(p => p.GetDescriptors()).ToList();
-
         try
         {
             ValidateNoDuplicateNameVersions(descriptors);
             ValidateSingleActiveVersion(descriptors);
-            // Future: ValidateCapabilityRefs(descriptors);  // Phase 3
-
-            foreach (var descriptor in descriptors)
-                RegisterGenerated(descriptor);
-
+            foreach (var d in descriptors) RegisterGenerated(d);
             State = RegistryState.Built;
         }
-        catch
-        {
-            State = RegistryState.Failed;
-            throw;
-        }
+        catch { State = RegistryState.Failed; throw; }
     }
 
-    // Runtime: dynamic/tenant-custom events (not frozen, always Version=1)
-    // Only allowed after Build() completes — rejects during Building or Failed states
-    public bool RegisterDynamic(string name, Type payloadType, EventScope scope = EventScope.Integration)
+    public GeneratedEventDescriptor? GetByName(string name) { /* highest Active */ }
+    public GeneratedEventDescriptor? GetByPayloadType(Type t) => _byPayloadType.TryGetValue(t, out var d) ? d : null;
+    public GeneratedEventDescriptor? GetLatestVersion(string name) { /* ... */ }
+    public GeneratedEventDescriptor? GetByNameAndVersion(string name, int version) { /* ... */ }
+
+    private void RegisterGenerated(GeneratedEventDescriptor d)
     {
-        if (State != RegistryState.Built)
-            throw new InvalidOperationException(
-                $"Cannot register dynamic events while registry state is {State}. " +
-                "Dynamic registration is only allowed after Build() completes.");
-        var descriptor = new DynamicEventDescriptor
+        _byId[d.Id] = d;
+        _byPayloadType[d.PayloadType] = d;
+    }
+}
+
+// Separate class — dynamic only; no Build, no State, no Version
+public sealed class DynamicEventRegistry : IDynamicEventRegistry
+{
+    private readonly ConcurrentDictionary<string, DynamicEventDescriptor> _byName = new();
+    private readonly IEventRegistry _generated;
+
+    public DynamicEventRegistry(IEventRegistry generated) => _generated = generated;
+
+    public bool Register(string name, Type payloadType, EventScope scope)
+    {
+        if (_generated.State != RegistryState.Built)
+            throw new InvalidOperationException("Cannot register dynamic events before Build completes.");
+        if (_generated.GetByName(name) is not null) return false;  // generated wins
+        _byName[name] = new DynamicEventDescriptor
         {
-            Id = GenerateId(name, version: 1),  // SHA256(Name + ":" + Version)
-            Name = name,
-            Version = 1,   // Locked — no version evolution for dynamic events
-            State = DescriptorState.Active,
-            PayloadType = payloadType,
-            Scope = scope,
-            Direction = EventDirection.Internal,
-            Importance = EventImportance.Normal
+            Id = DynamicEventDescriptor.GenerateId(name),
+            Name = name, PayloadType = payloadType, Scope = scope
         };
-
-        // Generated wins on conflict (checked by name + version, not Id)
-        if (_generatedByNameVersion.ContainsKey((descriptor.Name, descriptor.Version)))
-            return false;
-
-        _dynamicById[descriptor.Id] = descriptor;
         return true;
     }
 
-    private void RegisterGenerated(GeneratedEventDescriptor descriptor)
-    {
-        _generatedById[descriptor.Id] = descriptor;
-        _byPayloadType[descriptor.PayloadType] = descriptor;
-        // ... (populate shared indexes)
-    }
+    public DynamicEventDescriptor? GetByName(string name) => _byName.TryGetValue(name, out var d) ? d : null;
+}
 
-    public GeneratedEventDescriptor? GetByPayloadType(Type payloadType)
-        => _byPayloadType.TryGetValue(payloadType, out var d) ? d : null;
+// Union resolver — IEventValidator depends on this
+public sealed class EventResolver : IEventResolver
+{
+    private readonly IEventRegistry _generated;
+    private readonly IDynamicEventRegistry _dynamic;
+
+    public EventResolver(IEventRegistry g, IDynamicEventRegistry d) { _generated = g; _dynamic = d; }
+    public IEventDescriptor? GetByName(string name)
+        => (IEventDescriptor?)_generated.GetByName(name) ?? _dynamic.GetByName(name);
+    public IEventDescriptor? GetByPayloadType(Type type) => _generated.GetByPayloadType(type);
+}
 ```
 
 ### Name → Version Resolution
@@ -463,16 +483,12 @@ Future registries (Capability, Workflow, HumanTask) follow the same state model.
 ### Lifecycle
 
 ```
-                        ┌── dynamic Only ──► RegisterDynamic() (requires State == Built)
-                        │
-Created ──► Building ──► Built (Generated Frozen)
-               │
-               └── Failed (no recovery; process must restart)
+  EventRegistry (generated):                 DynamicEventRegistry (separate class):
+  Created → Building → Built (frozen)         Register() anytime — no Build, no State
+               ↓ Failed (restart)
 ```
 
-Generated descriptors are frozen at startup. Dynamic descriptors can be added at runtime. Both are queryable through the same `IEventRegistry` interface.
-
-**Precedence rule:** If a dynamic descriptor conflicts with a generated descriptor (same name + version), the generated descriptor wins — `RegisterDynamic()` returns `false` and the conflict is logged.
+Generated descriptors (`EventRegistry`) are frozen at startup. Dynamic descriptors (`DynamicEventRegistry`) can be added at runtime. `IEventResolver` queries both — generated wins on name conflict.
 
 Error at build time, not at runtime.
 
@@ -492,7 +508,7 @@ public sealed class EventRegistryHostedService : IHostedService
         EventRegistry registry,
         IEnumerable<IEventDescriptorProvider> providers)
     {
-        _registry = registry;
+        _resolver = resolver;
         _providers = providers;
     }
 
@@ -548,21 +564,21 @@ public enum EventValidationError
 ```csharp
 public sealed class RegistryEventValidator : IEventValidator
 {
-    private readonly IEventRegistry _registry;
+    private readonly IEventResolver _resolver;
 
-    public RegistryEventValidator(IEventRegistry registry)
+    public RegistryEventValidator(IEventResolver resolver)
     {
-        _registry = registry;
+        _resolver = resolver;
     }
 
     public void ValidateOrThrow(string eventName, object? payload)
     {
-        if (_registry.State != RegistryState.Built)
+        if (_resolver is EventRegistry reg ? reg.State != RegistryState.Built)
             throw new InvalidOperationException(
                 "EventRegistry has not been built yet. Publish cannot occur before Build completes.");
 
         // Defensive: multiple Active versions indicate registry corruption
-        var activeCount = _registry.GetAllByName(eventName)
+        var activeCount = ((EventRegistry)_resolver).GetAllByName(eventName)
             .Count(d => d.State == DescriptorState.Active);
         if (activeCount > 1)
             throw new InvalidOperationException(
@@ -570,12 +586,12 @@ public sealed class RegistryEventValidator : IEventValidator
                 "Only one Active version is permitted per event name.");
 
         // Publish path: highest Active version (what will actually be dispatched)
-        var active = _registry.GetByName(eventName);
+        var active = _resolver.GetByName(eventName);
         if (active is not null)
             return;  // OK — at least one Active version exists
 
         // Diagnostic path: determine why no Active version exists
-        var latest = _registry.GetLatestVersion(eventName);
+        var latest = ((EventRegistry)_resolver).GetLatestVersion(eventName);
         if (latest is null)
             throw new EventValidationException(
                 $"Event '{eventName}' is not registered. " +
@@ -670,7 +686,6 @@ public sealed record DeadLetterMessage(
     string? ExceptionType,         // typeof(TimeoutException).FullName
     DateTime OccurredAt,           // when the original event was created
     DateTime FailedAt,             // when the handler failed
-    string? DescriptorSnapshotJson // ← added: JSON snapshot of the descriptor at failure time (forensic)
     int RetryCount,
     int MaxRetries,
     DeadLetterStatus Status        // Pending | Retrying | Retried | Archived
@@ -694,6 +709,7 @@ Pending ──► Retrying ──► Retried
 
 ### Future Enhancement (Phase 3)
 
+| Add `DescriptorSnapshotJson` to `DeadLetterMessage` | Phase 3 |
 | Add `PayloadSchemaRef` to `DeadLetterMessage` | Phase 3 |
 
 > **EventTypeMap → IEventTypeResolver:** The Phase 2a `EventTypeMap` (typeof → event name) is backed by `Registry.GetByPayloadType()`. Phase 3 should extract a general `IEventTypeResolver` interface to unify Type↔Descriptor mapping across Event, Capability, Workflow, and HumanTask registries. This becomes core Metadata infrastructure, not Event-specific.
@@ -805,7 +821,7 @@ Extend existing test projects — no new test projects needed:
 | `PayloadSchemaRef` in `DeadLetterMessage` | Phase 3 |
 | AoT optimization (`FrozenDictionary`, `switch`-based lookup) | Phase 4 |
 
-> **Phase 2b forward reference:** `EventReliability` is metadata only in Phase 2a. Phase 2b will introduce `DeliveryStrategy` resolution that maps `EventReliability` to transport behavior — `BestEffort` → fire-and-forget, `AtLeastOnce` → Outbox + retry, `Idempotent` → Outbox + idempotency check. The `EventReliability` enum is designed to accommodate this without schema changes.
+> **Phase 2b forward reference:** `EventReliability` is metadata only in Phase 2a. Phase 2b will introduce `DeliveryStrategy` resolution that maps `EventReliability` to transport behavior — `BestEffort` → fire-and-forget, `AtLeastOnce` → Outbox + retry, `Idempotent` → Outbox + idempotency check. Note: `Idempotent` is a consumer-side guarantee (AtLeastOnce + dedup), not a true exactly-once delivery semantic. This naming may be refined in Phase 2b.
 
 > **Phase 2a — typed publish:** The source generator also emits an `EventTypeMap` (typeof → event name). `IEventBus.PublishAsync<TEvent>(TEvent evt)` resolves the event name from the map at zero runtime cost, then delegates to the string-based path. This eliminates magic strings for all `[CrestEvent]`-annotated types immediately. The string-based `PublishAsync(string, payload)` remains as the low-level API for dynamic events, but generated events use the typed overload by default.
 
