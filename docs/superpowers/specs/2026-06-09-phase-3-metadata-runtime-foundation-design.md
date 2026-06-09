@@ -80,11 +80,11 @@ public abstract class RegistryBase<TDescriptor>
     protected readonly object _buildLock = new();
     public RegistryState State { get; protected set; } = RegistryState.Created;
 
-    private readonly IEnumerable<IRegistryValidator<TDescriptor>> _validators;
+    private readonly IRegistryValidationEngine _validationEngine;
 
-    protected RegistryBase(IEnumerable<IRegistryValidator<TDescriptor>> validators)
+    protected RegistryBase(IRegistryValidationEngine validationEngine)
     {
-        _validators = validators;
+        _validationEngine = validationEngine;
     }
 
     /// <summary>
@@ -108,17 +108,12 @@ public abstract class RegistryBase<TDescriptor>
 
         try
         {
-            // 执行验证管道 —— 收集所有错误，一次性报告
-            var allIssues = new List<ValidationIssue>();
-            foreach (var validator in _validators.OrderBy(v => v.Order))
-            {
-                var report = validator.Validate(descriptors);
-                allIssues.AddRange(report.Issues);
-            }
+            // 执行验证管道 —— 通过 ValidationEngine 收集所有错误，一次性报告
+            var report = _validationEngine.Validate(descriptors);
 
-            if (allIssues.Any(i => i.Severity == ValidationSeverity.Error))
+            if (report.HasErrors)
             {
-                throw new RegistryValidationException(allIssues);
+                throw new RegistryValidationException(report.Issues);
             }
 
             _snapshot = BuildSnapshot(descriptors);
@@ -204,6 +199,16 @@ public enum ValidationSeverity
 }
 
 /// <summary>
+/// 验证引擎。负责协调所有验证器，收集并汇总验证结果。
+/// 独立于 RegistryBase，可被 CLI、AI Explorer、Registry 等复用。
+/// </summary>
+public interface IRegistryValidationEngine
+{
+    ValidationReport Validate<TDescriptor>(IReadOnlyList<TDescriptor> descriptors)
+        where TDescriptor : IDescriptor;
+}
+
+/// <summary>
 /// 注册表验证器。可插拔，每个 Registry 可以挂载不同的验证器组合。
 /// </summary>
 public interface IRegistryValidator<TDescriptor>
@@ -258,26 +263,34 @@ public sealed class DuplicateNameVersionValidator : IRegistryValidator<IVersione
 
 ```csharp
 /// <summary>
+/// 描述符引用接口。所有强类型引用（EventRef/CapabilityRef/WorkflowRef）都实现此接口。
+/// 使 Resolver 可以统一处理所有引用类型。
+/// </summary>
+public interface IDescriptorRef
+{
+    string Id { get; }
+    int? Version { get; }
+}
+
+/// <summary>
 /// 底层引用抽象。Version = null 表示引用最新稳定版本。
 /// </summary>
-public readonly record struct DescriptorRef(
-    string Id,
-    int? Version = null);
+public readonly record struct DescriptorRef(string Id, int? Version = null) : IDescriptorRef;
 
 /// <summary>
 /// 事件引用。业务层强类型，防止误用。
 /// </summary>
-public readonly record struct EventRef(string Id, int? Version = null);
+public readonly record struct EventRef(string Id, int? Version = null) : IDescriptorRef;
 
 /// <summary>
 /// 能力引用。
 /// </summary>
-public readonly record struct CapabilityRef(string Id, int? Version = null);
+public readonly record struct CapabilityRef(string Id, int? Version = null) : IDescriptorRef;
 
 /// <summary>
 /// 工作流引用。
 /// </summary>
-public readonly record struct WorkflowRef(string Id, int? Version = null);
+public readonly record struct WorkflowRef(string Id, int? Version = null) : IDescriptorRef;
 ```
 
 ### 2.5 解析器运行时
@@ -300,7 +313,7 @@ public interface IDescriptorResolver
     /// Metadata Authoring — 通过精确引用获取指定版本。
     /// 需要明确版本时使用。
     /// </summary>
-    TDescriptor? Resolve<TDescriptor>(DescriptorRef reference)
+    TDescriptor? Resolve<TDescriptor>(IDescriptorRef reference)
         where TDescriptor : IDescriptor;
 }
 ```
@@ -346,7 +359,7 @@ public sealed class BootstrapCoordinator : IHostedService
         _logger = logger;
     }
 
-    public Task StartAsync(CancellationToken ct)
+    public async Task StartAsync(CancellationToken ct)
     {
         // 拓扑排序
         var sorted = TopologicalSort(_tasks);
@@ -354,10 +367,8 @@ public sealed class BootstrapCoordinator : IHostedService
         foreach (var task in sorted)
         {
             _logger.LogInformation("Bootstrapping {TaskType}...", task.ServiceType.Name);
-            task.ExecuteAsync(/* ... */, ct).GetAwaiter().GetResult();
+            await task.ExecuteAsync(/* ... */, ct);
         }
-
-        return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
@@ -524,7 +535,6 @@ public sealed class CapabilityDescriptor : IVersionedDescriptor
     // Capability 特定 Metadata 字段
     public CapabilityKind CapabilityKind { get; init; }
     public IReadOnlyList<EventRef> Events { get; init; } = Array.Empty<EventRef>();
-    public IReadOnlyList<WorkflowRef> Workflows { get; init; } = Array.Empty<WorkflowRef>();
     public IReadOnlyList<string> SemanticTags { get; init; } = Array.Empty<string>();
 }
 
@@ -682,3 +692,20 @@ public sealed class CapabilityRegistry : RegistryBase<CapabilityDescriptor>
 - ✅ 更通用，支持非 Registry 启动任务
 - ✅ 统一启动协调
 - ❌ 需要额外抽象层
+
+#### ADR-004: Registry Snapshot Immutability
+
+**状态：** 已接受
+
+**上下文：** RegistryBase 构建完成后，Snapshot 应该是不可变的。但未来可能出现 Hot Reload、Plugin Unload 等需求。
+
+**决策：**
+- RegistryBase.Build() 构建完成后，Snapshot 不可变
+- 动态注册走 DynamicRegistry，不走 RegistryBase.Upsert()
+- RegistryBase 不提供运行时更新 API
+
+**后果：**
+- ✅ 保证线程安全
+- ✅ 简化并发模型
+- ✅ 明确区分静态注册表和动态注册表
+- ❌ 需要额外设计 DynamicRegistry
