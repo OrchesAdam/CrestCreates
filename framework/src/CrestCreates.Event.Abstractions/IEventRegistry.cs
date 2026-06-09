@@ -2,7 +2,7 @@ namespace CrestCreates.Event.Abstractions;
 
 public interface IEventRegistry
 {
-    RegistryState State { get; }
+    CrestCreates.Metadata.Abstractions.RegistryState State { get; }
     void Build(IEnumerable<IEventDescriptorProvider> providers);
     GeneratedEventDescriptor? GetByName(string name);
     GeneratedEventDescriptor? GetByPayloadType(Type payloadType);

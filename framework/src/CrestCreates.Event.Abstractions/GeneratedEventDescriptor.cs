@@ -45,7 +45,7 @@ public sealed record GeneratedEventDescriptor : IEventDescriptor, IVersionedDesc
     public IReadOnlyList<string> Consumers { get; init; } = Array.Empty<string>();
 
     // ── IVersionedDescriptor ──
-    string IDescriptor.Namespace => "event";
+    public string Namespace { get; init; } = "event";
     DescriptorKind IDescriptor.Kind => DescriptorKind.Event;
     string IDescriptor.ContractHash => string.Empty;
     string IDescriptor.DefinitionHash => string.Empty;

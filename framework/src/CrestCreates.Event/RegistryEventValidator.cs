@@ -1,4 +1,5 @@
 using CrestCreates.Event.Abstractions;
+using RegistryState = CrestCreates.Metadata.Abstractions.RegistryState;
 
 namespace CrestCreates.Event;
 

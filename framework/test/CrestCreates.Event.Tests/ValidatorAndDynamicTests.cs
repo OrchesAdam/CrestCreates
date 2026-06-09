@@ -3,6 +3,7 @@ using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
 using Moq;
 using Xunit;
+using RegistryState = CrestCreates.Metadata.Abstractions.RegistryState;
 
 namespace CrestCreates.Event.Tests;
 

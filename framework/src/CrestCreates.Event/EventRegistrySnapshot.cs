@@ -1,10 +1,6 @@
-using System.Collections.Frozen;
-using System.Collections.Immutable;
-using CrestCreates.Event.Abstractions;
+using System;
 
 namespace CrestCreates.Event;
 
-public sealed record EventRegistrySnapshot(
-    FrozenDictionary<string, ImmutableArray<GeneratedEventDescriptor>> ByName,
-    FrozenDictionary<Type, GeneratedEventDescriptor> ByPayloadType,
-    ImmutableArray<GeneratedEventDescriptor> AllDescriptors);
+[Obsolete("Use CrestCreates.Metadata.RegistrySnapshot<T> instead. Will be removed in v1.0.")]
+public sealed record EventRegistrySnapshot;

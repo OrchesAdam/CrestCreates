@@ -1,6 +1,7 @@
+using CrestCreates.Metadata.Abstractions;
+
 namespace CrestCreates.Event.Abstractions;
 
-public interface IEventDescriptorProvider
+public interface IEventDescriptorProvider : IDescriptorProvider<GeneratedEventDescriptor>
 {
-    IReadOnlyList<GeneratedEventDescriptor> GetDescriptors();
 }

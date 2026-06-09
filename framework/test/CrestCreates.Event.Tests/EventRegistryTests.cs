@@ -1,7 +1,9 @@
 using CrestCreates.Event.Abstractions;
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
 using Xunit;
+using RegistryState = CrestCreates.Metadata.Abstractions.RegistryState;
 
 namespace CrestCreates.Event.Tests;
 
@@ -27,10 +29,22 @@ public class EventRegistryTests
         public IReadOnlyList<GeneratedEventDescriptor> GetDescriptors() => descriptors;
     }
 
+    private static EventRegistry CreateRegistry()
+    {
+        var validators = new IRegistryValidator<GeneratedEventDescriptor>[]
+        {
+            new DuplicateNameVersionValidator(),
+            new EventVersionChainValidator(),
+            new UniquePayloadTypeValidator()
+        };
+        var engine = new RegistryValidationEngine<GeneratedEventDescriptor>(validators);
+        return new EventRegistry(engine);
+    }
+
     [Fact]
     public void Build_single_descriptor_succeeds()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([CreateDescriptor("test.event", 1)]);
 
         registry.Build([provider]);
@@ -41,7 +55,7 @@ public class EventRegistryTests
     [Fact]
     public void Build_is_idempotent()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([CreateDescriptor("test.event", 1)]);
 
         registry.Build([provider]);
@@ -53,62 +67,62 @@ public class EventRegistryTests
     [Fact]
     public void Build_throws_on_duplicate_name_version()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([
             CreateDescriptor("test.event", 1),
             CreateDescriptor("test.event", 1)
         ]);
 
         Action act = () => registry.Build([provider]);
-        act.Should().Throw<EventRegistryBuildException>()
+        act.Should().Throw<RegistryValidationException>()
             .WithMessage("*Duplicate*");
     }
 
     [Fact]
     public void Build_throws_when_no_active_version()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([
             CreateDescriptor("test.event", 1, DescriptorState.Deprecated)
         ]);
 
         Action act = () => registry.Build([provider]);
-        act.Should().Throw<EventRegistryBuildException>()
+        act.Should().Throw<RegistryValidationException>()
             .WithMessage("*no Active version*");
     }
 
     [Fact]
     public void Build_throws_when_multiple_active_versions()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([
             CreateDescriptor("test.event", 1, DescriptorState.Active),
             CreateDescriptor("test.event", 2, DescriptorState.Active)
         ]);
 
         Action act = () => registry.Build([provider]);
-        act.Should().Throw<EventRegistryBuildException>()
+        act.Should().Throw<RegistryValidationException>()
             .WithMessage("*Active versions*");
     }
 
     [Fact]
     public void Build_throws_when_highest_is_not_active()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([
             CreateDescriptor("test.event", 1, DescriptorState.Active),
             CreateDescriptor("test.event", 2, DescriptorState.Deprecated)
         ]);
 
         Action act = () => registry.Build([provider]);
-        act.Should().Throw<EventRegistryBuildException>()
+        act.Should().Throw<RegistryValidationException>()
             .WithMessage("*highest version*");
     }
 
     [Fact]
     public void Build_succeeds_for_upgrade_scenario()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([
             CreateDescriptor("test.event", 1, DescriptorState.Deprecated),
             CreateDescriptor("test.event", 2, DescriptorState.Active)
@@ -122,7 +136,7 @@ public class EventRegistryTests
     [Fact]
     public void GetByName_returns_highest_active()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([
             CreateDescriptor("test.event", 1, DescriptorState.Deprecated),
             CreateDescriptor("test.event", 2, DescriptorState.Active)
@@ -138,7 +152,7 @@ public class EventRegistryTests
     [Fact]
     public void GetByNameAndVersion_returns_exact_version()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([
             CreateDescriptor("test.event", 1, DescriptorState.Deprecated),
             CreateDescriptor("test.event", 2, DescriptorState.Active)
@@ -156,7 +170,7 @@ public class EventRegistryTests
     [Fact]
     public void GetLatestVersion_returns_highest_regardless_of_state()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([
             CreateDescriptor("test.event", 1, DescriptorState.Removed),
             CreateDescriptor("test.event", 2, DescriptorState.Active)
@@ -172,7 +186,7 @@ public class EventRegistryTests
     [Fact]
     public void GetAllVersions_returns_all()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([
             CreateDescriptor("test.event", 1, DescriptorState.Deprecated),
             CreateDescriptor("test.event", 2, DescriptorState.Active)
@@ -188,7 +202,7 @@ public class EventRegistryTests
     public void GetByPayloadType_resolves_typed_publish()
     {
         var payloadType = typeof(string);
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([
             CreateDescriptor("test.event", 1, payloadType: payloadType)
         ]);
@@ -203,7 +217,7 @@ public class EventRegistryTests
     [Fact]
     public void Build_marks_state_failed_on_exception()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([
             CreateDescriptor("test.event", 1, DescriptorState.Deprecated)
         ]);
@@ -216,7 +230,7 @@ public class EventRegistryTests
     [Fact]
     public void Build_after_failed_throws()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([CreateDescriptor("test.event", 1, DescriptorState.Deprecated)]);
         try { registry.Build([provider]); } catch { }
 
@@ -230,7 +244,7 @@ public class EventRegistryTests
     [Fact]
     public void GetAll_returns_all_descriptors()
     {
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([
             CreateDescriptor("evt.a", 1, payloadType: typeof(string)),
             CreateDescriptor("evt.b", 1, payloadType: typeof(int))
@@ -246,14 +260,14 @@ public class EventRegistryTests
     public void Build_throws_on_payload_type_conflict()
     {
         var sharedType = typeof(string);
-        var registry = new EventRegistry();
+        var registry = CreateRegistry();
         var provider = new TestProvider([
             CreateDescriptor("evt.a", 1, payloadType: sharedType),
             CreateDescriptor("evt.b", 1, payloadType: sharedType)  // same type, different name
         ]);
 
         Action act = () => registry.Build([provider]);
-        act.Should().Throw<EventRegistryBuildException>()
+        act.Should().Throw<RegistryValidationException>()
             .WithMessage("*PayloadType*");
     }
 }
