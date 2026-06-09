@@ -84,7 +84,7 @@ Six orthogonal dimensions, each answering a distinct question:
 public sealed record EventDescriptor : IVersionedDescriptor
 {
     // ── 1. Identity ──
-    public string Id { get; init; }
+    public string Id { get; init; }                 // Deterministic: SHA256(FullTypeName + ":" + Version)
     public string Name { get; init; }              // e.g. "capability.succeeded"
     public int Version { get; init; }
     public DescriptorState State { get; init; }
@@ -98,7 +98,7 @@ public sealed record EventDescriptor : IVersionedDescriptor
     public EventScope Scope { get; init; }          // Local | Domain | Integration
 
     // ── 4. Reliability (contract; future strategy driver) ──
-    public EventReliability Reliability { get; init; }  // AtMostOnce | AtLeastOnce | ExactlyOnce
+    public EventReliability Reliability { get; init; }  // BestEffort | AtLeastOnce | Idempotent
 
     // ── 5. Direction (topology metadata, not a runtime constraint) ──
     public EventDirection Direction { get; init; }      // Internal | Incoming | Outgoing
@@ -129,7 +129,7 @@ public sealed record EventDescriptor : IVersionedDescriptor
 ```csharp
 public enum EventScope      { Local, Domain, Integration }
 public enum EventDirection  { Internal, Incoming, Outgoing }
-public enum EventReliability { AtMostOnce, AtLeastOnce, ExactlyOnce }
+public enum EventReliability { BestEffort, AtLeastOnce, Idempotent }  // Idempotent = AtLeastOnce + dedup
 public enum EventImportance { Low, Normal, High, Critical }
 ```
 
@@ -183,7 +183,7 @@ public sealed class CrestEventAttribute : Attribute
 [CrestEvent(
     Name = "capability.succeeded",
     Scope = EventScope.Integration,
-    Reliability = EventReliability.AtLeastOnce,
+    Reliability = EventReliability.Idempotent,
     Direction = EventDirection.Outgoing,
     Importance = EventImportance.High,
     IsAuditable = true,
@@ -225,7 +225,7 @@ public sealed class GeneratedEventDescriptorProvider : IEventDescriptorProvider
             PayloadType = typeof(CapabilitySucceeded),
             PayloadSchemaRef = null,  // Phase 3: SchemaRegistry.Resolve<CapabilitySucceeded>()
             Scope = EventScope.Integration,
-            Reliability = EventReliability.AtLeastOnce,
+            Reliability = EventReliability.Idempotent,
             Direction = EventDirection.Outgoing,
             Importance = EventImportance.High,
             CapabilityRef = new VersionedDescriptorRef<CapabilityDescriptor>("cap-runtime", 1),
@@ -294,11 +294,27 @@ public sealed class EventRegistry : IEventRegistry
         IsBuilt = true;
     }
 
-    // Runtime: dynamic/tenant-custom events (not frozen)
-    public void RegisterDynamic(EventDescriptor descriptor)
+    // Runtime: dynamic/tenant-custom events (not frozen, always Version=1)
+    public bool RegisterDynamic(string name, Type payloadType, EventScope scope = EventScope.Integration)
     {
+        var descriptor = new EventDescriptor
+        {
+            Id = GenerateId(payloadType, version: 1),
+            Name = name,
+            Version = 1,   // Locked — no version evolution for dynamic events
+            State = DescriptorState.Active,
+            PayloadType = payloadType,
+            Scope = scope,
+            Direction = EventDirection.Internal,
+            Importance = EventImportance.Normal
+        };
+
+        // Generated wins on conflict
+        if (_generatedById.ContainsKey(descriptor.Id))
+            return false;
+
         _dynamicById[descriptor.Id] = descriptor;
-        // ... (populate shared indexes)
+        return true;
     }
 
     private void RegisterGenerated(EventDescriptor descriptor)
@@ -460,22 +476,27 @@ public sealed class RegistryEventValidator : IEventValidator
 
     public void ValidateOrThrow(string eventName, object? payload)
     {
-        var descriptor = _registry.GetByName(eventName)
-            ?? throw new EventValidationException(
+        var latest = _registry.GetLatestVersion(eventName);
+        if (latest is null)
+            throw new EventValidationException(
                 $"Event '{eventName}' is not registered. " +
                 "Apply [CrestEvent] to the event class or register via EventRegistryProvider.");
 
-        if (descriptor.State is DescriptorState.Deprecated or DescriptorState.Removed)
+        if (latest.State == DescriptorState.Deprecated)
             throw new EventValidationException(
-                $"Event '{eventName}' is {descriptor.State}. " +
-                $"Use '{descriptor.SupersededById}' instead.");
+                $"Event '{eventName}' is deprecated. " +
+                $"Use '{latest.SupersededById}' instead.");
 
-        // Scope boundary enforcement
-        if (descriptor.Scope == EventScope.Local && _busKind == BusKind.Distributed)
+        if (latest.State == DescriptorState.Removed)
+            throw new EventValidationException(
+                $"Event '{eventName}' has been removed.");
+
+        // Scope boundary enforcement (uses latest version)
+        if (latest.Scope == EventScope.Local && _busKind == BusKind.Distributed)
             throw new EventValidationException(
                 $"Event '{eventName}' has Scope.Local — cannot publish to a distributed bus.");
 
-        if (descriptor.Scope == EventScope.Domain && _busKind == BusKind.Distributed)
+        if (latest.Scope == EventScope.Domain && _busKind == BusKind.Distributed)
             throw new EventValidationException(
                 $"Event '{eventName}' has Scope.Domain — cannot publish cross-process.");
 
@@ -541,7 +562,8 @@ public sealed record DeadLetterMessage(
     byte[] Payload,
     string ErrorMessage,
     string? ExceptionType,         // typeof(TimeoutException).FullName
-    DateTime FailedAt,
+    DateTime OccurredAt,           // ← added: when the original event was created
+    DateTime FailedAt,             // when the handler failed
     int RetryCount,
     int MaxRetries,
     DeadLetterStatus Status        // Pending | Retrying | Retried | Archived
@@ -670,4 +692,8 @@ Extend existing test projects — no new test projects needed:
 | `PayloadSchemaRef` in `DeadLetterMessage` | Phase 3 |
 | AoT optimization (`FrozenDictionary`, `switch`-based lookup) | Phase 4 |
 
-> **Phase 2b forward reference:** `EventReliability` is metadata only in Phase 2a. Phase 2b will introduce `DeliveryStrategy` resolution that maps `EventReliability` to transport behavior — `AtMostOnce` → fire-and-forget, `AtLeastOnce` → Outbox + retry, `ExactlyOnce` → Outbox + idempotency check. The `EventReliability` enum is designed to accommodate this without schema changes.
+> **Phase 2b forward reference:** `EventReliability` is metadata only in Phase 2a. Phase 2b will introduce `DeliveryStrategy` resolution that maps `EventReliability` to transport behavior — `BestEffort` → fire-and-forget, `AtLeastOnce` → Outbox + retry, `Idempotent` → Outbox + idempotency check. The `EventReliability` enum is designed to accommodate this without schema changes.
+
+> **Phase 3 forward reference — typed publish:** `EventPublishingMiddleware` currently uses bare strings (`"capability.succeeded"`). The validator catches unregistered names at runtime, but Phase 3 should introduce `Publish<TEvent>(TEvent evt)` with compile-time resolution from the EventRegistry. Bare-string `Publish(string, payload)` becomes `[Obsolete]` at that point.
+
+> **HostedService note:** `EventRegistryHostedService` uses `IHostedService` for Phase 2a simplicity. As registry count grows (Capability, Workflow, HumanTask), this will migrate to a `ModuleBootstrapper.Initialize()` pipeline with explicit dependency ordering. The spec does not mandate a specific boot mechanism for future registries.
