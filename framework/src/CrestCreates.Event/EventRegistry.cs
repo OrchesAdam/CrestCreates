@@ -1,68 +1,144 @@
-using System.Collections.Concurrent;
-using CrestCreates.Metadata.Abstractions;
+using System.Collections.Frozen;
+using System.Collections.Immutable;
 using CrestCreates.Event.Abstractions;
 
 namespace CrestCreates.Event;
 
-public sealed class EventRegistry : IEventRegistry
+public sealed class EventRegistry : IEventRegistry, IEventMetadataProvider
 {
-    private readonly ConcurrentDictionary<string, EventDescriptor> _byId = new();
-    private readonly ConcurrentDictionary<string, List<EventDescriptor>> _byName = new();
-    private readonly ConcurrentDictionary<EventCategory, List<EventDescriptor>> _byCategory = new();
-    private readonly ConcurrentDictionary<EventSemantic, List<EventDescriptor>> _bySemantic = new();
-    private readonly ConcurrentDictionary<EventImportance, List<EventDescriptor>> _byImportance = new();
+    private EventRegistrySnapshot? _snapshot;
+    private readonly object _buildLock = new();
+    public RegistryState State { get; private set; } = RegistryState.Created;
 
-    public void Register(EventDescriptor descriptor)
+    public void Build(IEnumerable<IEventDescriptorProvider> providers)
     {
-        _byId[descriptor.Id] = descriptor;
-        _byName.GetOrAdd(descriptor.Name, _ => new()).Add(descriptor);
-        _byCategory.GetOrAdd(descriptor.Category, _ => new()).Add(descriptor);
-        _bySemantic.GetOrAdd(descriptor.Semantic, _ => new()).Add(descriptor);
-        _byImportance.GetOrAdd(descriptor.Importance, _ => new()).Add(descriptor);
+        if (State == RegistryState.Built) return;
+        lock (_buildLock)
+        {
+            if (State == RegistryState.Built) return;
+            if (State == RegistryState.Failed)
+                throw new InvalidOperationException(
+                    "EventRegistry.Build() previously failed. Restart required.");
+            State = RegistryState.Building;
+        }
+
+        var descriptors = providers.SelectMany(p => p.GetDescriptors()).ToList();
+        try
+        {
+            ValidateNoDuplicateNameVersions(descriptors);
+            ValidateVersionChain(descriptors);
+            ValidateUniquePayloadType(descriptors);
+            _snapshot = BuildSnapshot(descriptors);
+            State = RegistryState.Built;
+        }
+        catch
+        {
+            State = RegistryState.Failed;
+            throw;
+        }
     }
 
-    public EventDescriptor? GetById(string id) =>
-        _byId.TryGetValue(id, out var d) ? d : null;
-
-    public EventDescriptor? GetByName(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.FirstOrDefault(v => v.State == DescriptorState.Active)
+    public GeneratedEventDescriptor? GetByName(string name)
+        => _snapshot?.ByName.TryGetValue(name, out var versions) == true
+            ? versions.Where(v => v.State == Metadata.Abstractions.DescriptorState.Active)
+                       .MaxBy(v => v.Version)
             : null;
 
-    public EventDescriptor? GetByNameAndVersion(string name, int version) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.FirstOrDefault(v => v.Version == version)
-            : null;
+    public GeneratedEventDescriptor? GetByPayloadType(Type t)
+        => _snapshot?.ByPayloadType.TryGetValue(t, out var d) == true ? d : null;
 
-    public EventDescriptor? GetActiveVersion(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.Where(v => v.State == DescriptorState.Active).MaxBy(v => v.Version)
-            : null;
-
-    public EventDescriptor? GetLatestVersion(string name) =>
-        _byName.TryGetValue(name, out var versions)
+    public GeneratedEventDescriptor? GetLatestVersion(string name)
+        => _snapshot?.ByName.TryGetValue(name, out var versions) == true
             ? versions.MaxBy(v => v.Version)
             : null;
 
-    public IReadOnlyList<EventDescriptor> GetAllByName(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.AsReadOnly()
-            : Array.Empty<EventDescriptor>();
+    public GeneratedEventDescriptor? GetByNameAndVersion(string name, int version)
+        => _snapshot?.ByName.TryGetValue(name, out var versions) == true
+            ? versions.FirstOrDefault(v => v.Version == version)
+            : null;
 
-    public IReadOnlyList<EventDescriptor> GetDeprecatedVersions(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.Where(v => v.State == DescriptorState.Deprecated).ToList().AsReadOnly()
-            : Array.Empty<EventDescriptor>();
+    public IReadOnlyList<GeneratedEventDescriptor> GetAllVersions(string name)
+    {
+        if (_snapshot?.ByName.TryGetValue(name, out var versions) == true)
+            return versions;
+        return Array.Empty<GeneratedEventDescriptor>();
+    }
 
-    public IReadOnlyList<EventDescriptor> GetAll() =>
-        _byId.Values.ToList().AsReadOnly();
+    public IReadOnlyList<GeneratedEventDescriptor> GetAll()
+    {
+        if (_snapshot is null) return Array.Empty<GeneratedEventDescriptor>();
+        return _snapshot.ByName.Values.SelectMany(v => v).ToList().AsReadOnly();
+    }
 
-    public IReadOnlyList<EventDescriptor> GetByCategory(EventCategory category) =>
-        _byCategory.TryGetValue(category, out var list) ? list.AsReadOnly() : Array.Empty<EventDescriptor>();
+    private static EventRegistrySnapshot BuildSnapshot(List<GeneratedEventDescriptor> descriptors)
+    {
+        var byName = descriptors
+            .GroupBy(d => d.Name)
+            .ToFrozenDictionary(g => g.Key, g => g.ToImmutableArray());
+        var byPayload = descriptors
+            .GroupBy(d => d.PayloadType)
+            .ToFrozenDictionary(g => g.Key, g => g.OrderByDescending(d => d.Version).First());
+        return new EventRegistrySnapshot(byName, byPayload);
+    }
 
-    public IReadOnlyList<EventDescriptor> GetBySemantic(EventSemantic semantic) =>
-        _bySemantic.TryGetValue(semantic, out var list) ? list.AsReadOnly() : Array.Empty<EventDescriptor>();
+    // ── Build-time validations ──
 
-    public IReadOnlyList<EventDescriptor> GetByImportance(EventImportance importance) =>
-        _byImportance.TryGetValue(importance, out var list) ? list.AsReadOnly() : Array.Empty<EventDescriptor>();
+    private static void ValidateNoDuplicateNameVersions(List<GeneratedEventDescriptor> descriptors)
+    {
+        var duplicates = descriptors
+            .GroupBy(d => (d.Name, d.Version))
+            .Where(g => g.Count() > 1)
+            .Select(g => $"{g.Key.Name} v{g.Key.Version}")
+            .ToList();
+
+        if (duplicates.Count > 0)
+            throw new EventRegistryBuildException(
+                $"Duplicate (name, version) pairs detected: {string.Join(", ", duplicates)}. " +
+                "Each (name, version) pair must be declared by exactly one module. " +
+                "Use a new Version to evolve an existing event name.");
+    }
+
+    private static void ValidateVersionChain(List<GeneratedEventDescriptor> descriptors)
+    {
+        foreach (var group in descriptors.GroupBy(d => d.Name))
+        {
+            var active = group.Where(d => d.State == Metadata.Abstractions.DescriptorState.Active).ToList();
+
+            if (active.Count == 0)
+                throw new EventRegistryBuildException(
+                    $"Event '{group.Key}' has no Active version. " +
+                    "At least one version must be Active.");
+
+            if (active.Count > 1)
+                throw new EventRegistryBuildException(
+                    $"Event '{group.Key}' has {active.Count} Active versions: " +
+                    $"{string.Join(", ", active.Select(a => $"v{a.Version}"))}. " +
+                    "Exactly one version must be Active at any time.");
+
+            var highest = group.MaxBy(d => d.Version)!;
+            if (active[0].Version != highest.Version)
+                throw new EventRegistryBuildException(
+                    $"Event '{group.Key}': the highest version (v{highest.Version}) is {highest.State}, " +
+                    $"but v{active[0].Version} is Active. The highest version must be Active.");
+        }
+    }
+
+    private static void ValidateUniquePayloadType(List<GeneratedEventDescriptor> descriptors)
+    {
+        var violations = descriptors
+            .GroupBy(d => d.PayloadType)
+            .Where(g => g.Count(d => d.State == Metadata.Abstractions.DescriptorState.Active) > 1)
+            .ToList();
+
+        if (violations.Count > 0)
+            throw new EventRegistryBuildException(
+                "PayloadType uniqueness violation: one CLR type maps to multiple Active events. " +
+                "A payload type may map to at most one Active event descriptor. " +
+                "If you need multiple events with the same payload shape, use distinct CLR types.");
+    }
+}
+
+public sealed class EventRegistryBuildException : Exception
+{
+    public EventRegistryBuildException(string message) : base(message) { }
 }
