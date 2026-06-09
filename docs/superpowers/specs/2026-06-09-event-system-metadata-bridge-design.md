@@ -209,6 +209,7 @@ public enum EventImportance { Low, Normal, High, Critical }
 public sealed class CrestEventAttribute : Attribute
 {
     public string Name { get; init; }                   // "capability.succeeded"
+    public int Version { get; init; } = 1;              // defaults to 1; explicit for v2+
     public EventScope Scope { get; init; }              // required, no default
     public EventReliability Reliability { get; init; }  // AtLeastOnce (default)
     public EventDirection Direction { get; init; }      // Internal (default)
@@ -226,6 +227,7 @@ public sealed class CrestEventAttribute : Attribute
 ```csharp
 [CrestEvent(
     Name = "capability.succeeded",
+    Version = 2,                                        // explicit — generator uses this
     Scope = EventScope.Integration,
     Reliability = EventReliability.Idempotent,
     Direction = EventDirection.Outgoing,
@@ -262,12 +264,11 @@ public sealed class GeneratedEventDescriptorProvider : IEventDescriptorProvider
     public IReadOnlyList<GeneratedEventDescriptor> GetDescriptors() => [
         new GeneratedEventDescriptor
         {
-            Id = GeneratedEventDescriptorProvider.GenerateId("capability.succeeded", 1),
-            // = SHA256("capability.succeeded:1") → "evt_A3F8C2D1..."
-            // SHA256("capability.succeeded:1") → "evt_A3F8C2D1..."
-            // Stable across type renames; name change = new identity
+            Id = GeneratedEventDescriptorProvider.GenerateId(
+                "capability.succeeded", attribute.Version),
+            // Id = SHA256("capability.succeeded:2") → stable across type renames
             Name = "capability.succeeded",
-            Version = 1,
+            Version = attribute.Version,           // from [CrestEvent(Version = 2)]
             State = DescriptorState.Active,
             PayloadType = typeof(CapabilitySucceeded),
             PayloadSchemaRef = null,  // Phase 3: SchemaRegistry.Resolve<CapabilitySucceeded>()
@@ -300,15 +301,17 @@ services.TryAddEnumerable(
 
 ### Manual Escape Hatch
 
-`IDynamicEventRegistry.Register(name, payloadType, scope)` adds dynamic events at runtime (tenant-custom, configuration-driven). Dynamic events are stored separately from generated descriptors. `IEventResolver` unifies query access — generated wins on name conflict. **Dynamic descriptors are unversioned, use `DynamicEventDescriptor` type, and have no schema backing or descriptor lifecycle.**
+`IDynamicEventRegistry.Register(name, payloadType, scope)` adds dynamic events at runtime (tenant-custom, configuration-driven). Dynamic events are stored separately from generated descriptors. `IEventResolver` unifies query access — generated wins on name conflict. **Dynamic descriptors are unversioned, use `DynamicEventDescriptor` type, have no schema backing or descriptor lifecycle, and are restricted to `Scope.Local` only.** This prevents dynamic events from leaking into distributed contracts (Kafka topics, RabbitMQ exchanges), preserving registry governance.
+
+Dynamic events serve internal extensibility — tenant workflows, form scripts, notification rules — where compile-time registration is impractical. They cannot become cross-service contracts.
 
 ---
 
 ## Design Section 3: EventRegistry — Build, Validate, Freeze
 
-### Three-Interface Model: Registry + Dynamic Registry + Resolver
+### Four-Interface Model: Registry + Dynamic Registry + Resolver + Metadata Provider
 
-Generated and dynamic descriptors have separate registries. A resolver unifies query access:
+Generated and dynamic descriptors have separate registries. A resolver unifies query access, and a metadata provider exposes build state and diagnostic queries without coupling consumers to `EventRegistry`:
 
 ```csharp
 // Generated only — frozen after Build()
@@ -334,9 +337,19 @@ public interface IEventResolver
     IEventDescriptor? GetByName(string name);
     IEventDescriptor? GetByPayloadType(Type type);
 }
+
+// Metadata provider — build state + diagnostic-only queries
+// NOT on IEventResolver because GetAllVersions/GetLatestVersion are
+// GeneratedEventDescriptor-specific (DynamicEventDescriptors are unversioned)
+public interface IEventMetadataProvider
+{
+    RegistryState State { get; }
+    IReadOnlyList<GeneratedEventDescriptor> GetAllVersions(string name);
+    GeneratedEventDescriptor? GetLatestVersion(string name);
+}
 ```
 
-`IEventValidator` takes `IEventResolver` — it doesn't care which registry the descriptor came from. Generated wins on name conflict. `IDynamicEventRegistry` is not used during `Build()`.
+`EventRegistry` implements both `IEventRegistry` and `IEventMetadataProvider`. `IEventValidator` takes `IEventResolver` + `IEventMetadataProvider` — it never casts to `EventRegistry`. Generated wins on name conflict in the resolver. `IDynamicEventRegistry` is not used during `Build()`.
 
 ### One-Shot Build
 
@@ -345,7 +358,7 @@ public interface IEventResolver
 ```csharp
 // CrestCreates.Event/EventRegistry.cs (revised)
 
-public sealed class EventRegistry : IEventRegistry
+public sealed class EventRegistry : IEventRegistry, IEventMetadataProvider
 {
     private readonly ConcurrentDictionary<string, GeneratedEventDescriptor> _byId = new();
     private readonly ConcurrentDictionary<Type, GeneratedEventDescriptor> _byPayloadType = new();
@@ -362,6 +375,7 @@ public sealed class EventRegistry : IEventRegistry
         {
             ValidateNoDuplicateNameVersions(descriptors);
             ValidateSingleActiveVersion(descriptors);
+            ValidateVersionOrdering(descriptors);
             foreach (var d in descriptors) RegisterGenerated(d);
             State = RegistryState.Built;
         }
@@ -370,7 +384,8 @@ public sealed class EventRegistry : IEventRegistry
 
     public GeneratedEventDescriptor? GetByName(string name) { /* highest Active */ }
     public GeneratedEventDescriptor? GetByPayloadType(Type t) => _byPayloadType.TryGetValue(t, out var d) ? d : null;
-    public GeneratedEventDescriptor? GetLatestVersion(string name) { /* ... */ }
+    public IReadOnlyList<GeneratedEventDescriptor> GetAllVersions(string name) { /* all versions regardless of state */ }
+    public GeneratedEventDescriptor? GetLatestVersion(string name) { /* highest version regardless of state */ }
     public GeneratedEventDescriptor? GetByNameAndVersion(string name, int version) { /* ... */ }
 
     private void RegisterGenerated(GeneratedEventDescriptor d)
@@ -390,6 +405,10 @@ public sealed class DynamicEventRegistry : IDynamicEventRegistry
 
     public bool Register(string name, Type payloadType, EventScope scope)
     {
+        if (scope != EventScope.Local)
+            throw new ArgumentException(
+                $"Dynamic events are restricted to Scope.Local. " +
+                $"Requested: {scope}. Use [CrestEvent] for Domain/Integration events.");
         if (_generated.State != RegistryState.Built)
             throw new InvalidOperationException("Cannot register dynamic events before Build completes.");
         if (_generated.GetByName(name) is not null) return false;  // generated wins
@@ -455,6 +474,21 @@ This ensures "v1 Deprecated + v2 Deprecated" returns `Deprecated`, not `NotRegis
 
 **Single Active Version rule:** At most one version of an event may be `Active` at any time. When v2 is registered as Active, v1 must be Deprecated. If v1 is Active and a new v1 is registered (same name + version), it's a duplicate and fails. If v2 is registered as Active while v1 is still Active, `Build()` throws — the module must explicitly deprecate v1 first. This guarantees the validator's `GetLatestVersion()` → Active branch always resolves to a single unambiguous descriptor.
 
+**Version Ordering rule:** The highest version of an event must be `Active`. This prevents a hidden lifecycle fork where `GetByName()` returns v1 (Active) but `GetLatestVersion()` returns v2 (Deprecated):
+
+```
+// Allowed
+v1 Active                          (single version)
+v1 Deprecated, v2 Active           (upgrade)
+v1 Removed, v2 Active              (replacement)
+
+// FORBIDDEN
+v1 Active, v2 Deprecated           (fork — highest version is not Active)
+v1 Removed, v2 Deprecated          (no Active at all — caught by Single Active Version)
+```
+
+Without this rule, `GetByName()` and `GetLatestVersion()` diverge, and the lifecycle becomes non-deterministic.
+
     private static void ValidateNoDuplicateNameVersions(List<GeneratedEventDescriptor> descriptors)
     {
         var duplicates = descriptors
@@ -468,6 +502,27 @@ This ensures "v1 Deprecated + v2 Deprecated" returns `Deprecated`, not `NotRegis
                 $"Duplicate (name, version) pairs detected: {string.Join(", ", duplicates)}. " +
                 "Each (name, version) pair must be declared by exactly one module. " +
                 "Use a new Version to evolve an existing event name.");
+    }
+
+    private static void ValidateVersionOrdering(List<GeneratedEventDescriptor> descriptors)
+    {
+        var violations = descriptors
+            .GroupBy(d => d.Name)
+            .Select(g => new
+            {
+                Name = g.Key,
+                Highest = g.MaxBy(d => d.Version)!,
+                HasActive = g.Any(d => d.State == DescriptorState.Active)
+            })
+            .Where(g => g.HasActive && g.Highest.State != DescriptorState.Active)
+            .ToList();
+
+        if (violations.Count > 0)
+            throw new EventRegistryBuildException(
+                $"Version ordering violation: the highest version of an event must be Active. " +
+                $"Violations: {string.Join(", ", violations.Select(v =>
+                    $"{v.Name} (highest=v{v.Highest.Version} is {v.Highest.State})"))}. " +
+                "Set the highest version to Active, or add a higher Active version.");
     }
 }
 ```
@@ -492,39 +547,50 @@ Generated descriptors (`EventRegistry`) are frozen at startup. Dynamic descripto
 
 Error at build time, not at runtime.
 
-### Hosted Service
+### Registry Bootstrapper
 
-`EventRegistry` is built by a hosted service at application start, ensuring fail-fast before any requests are served:
+All registries (Event, Capability, Workflow, HumanTask) share the same bootstrap pattern. The interface is defined now so the DI API is stable from day one:
 
 ```csharp
-// CrestCreates.Event/EventRegistryHostedService.cs
+// CrestCreates.Abstractions/IRegistryBootstrapper.cs
 
-public sealed class EventRegistryHostedService : IHostedService
+public interface IRegistryBootstrapper
+{
+    Task BootstrapAsync(CancellationToken ct);
+}
+```
+
+`EventRegistryHostedService` is the Phase 2a implementation — a `BackgroundService` that calls `registry.Build(providers)`. Future registries add their own bootstrappers. Phase 3 will introduce `IRegistryBootstrapper` ordering and dependency graph resolution so registries initialize in the correct sequence (Event → Capability → Workflow → HumanTask).
+
+```csharp
+// CrestCreates.Event/EventRegistryBootstrapper.cs
+
+public sealed class EventRegistryBootstrapper : BackgroundService
 {
     private readonly EventRegistry _registry;
     private readonly IEnumerable<IEventDescriptorProvider> _providers;
 
-    public EventRegistryHostedService(
+    public EventRegistryBootstrapper(
         EventRegistry registry,
         IEnumerable<IEventDescriptorProvider> providers)
     {
-        _resolver = resolver;
+        _registry = registry;
         _providers = providers;
     }
 
-    public Task StartAsync(CancellationToken ct)
+    protected override Task ExecuteAsync(CancellationToken ct)
     {
         _registry.Build(_providers);  // Fail-fast on collision
         return Task.CompletedTask;
     }
-
-    public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
 }
 ```
 
-Registration: `services.AddHostedService<EventRegistryHostedService>()` in `EventModule`.
+Registration: `services.AddHostedService<EventRegistryBootstrapper>()` in `EventModule`.
 
-> **HostedService is transitional.** `IHostedService` works for Phase 2a's single registry, but does not guarantee ordering across multiple registries. Phase 3 will introduce `IRegistryBootstrapper` or `ModuleBootstrapper` with explicit dependency ordering. `EventRegistry` is the root registry — all others depend on it directly or transitively.
+> **`BackgroundService` over `IHostedService`:** `BackgroundService` guarantees `ExecuteAsync` completes before `StartAsync` returns to the host, meaning no requests are served before `Build()` finishes. This is the correct behavior for a fail-fast registry bootstrap.
+
+> **Transitional:** The concrete `BackgroundService` wrapping `EventRegistry` works for Phase 2a's single registry. When Phase 3 introduces multiple registries with dependency ordering, the `IRegistryBootstrapper` interface is already defined and the DI registration surface does not change — only the implementation behind it evolves.
 
 ---
 
@@ -565,20 +631,23 @@ public enum EventValidationError
 public sealed class RegistryEventValidator : IEventValidator
 {
     private readonly IEventResolver _resolver;
+    private readonly IEventMetadataProvider _metadata;
 
-    public RegistryEventValidator(IEventResolver resolver)
+    public RegistryEventValidator(IEventResolver resolver, IEventMetadataProvider metadata)
     {
         _resolver = resolver;
+        _metadata = metadata;
     }
 
     public void ValidateOrThrow(string eventName, object? payload)
     {
-        if (_resolver is EventRegistry reg ? reg.State != RegistryState.Built)
+        if (_metadata.State != RegistryState.Built)
             throw new InvalidOperationException(
                 "EventRegistry has not been built yet. Publish cannot occur before Build completes.");
 
         // Defensive: multiple Active versions indicate registry corruption
-        var activeCount = ((EventRegistry)_resolver).GetAllByName(eventName)
+        // (should be impossible after Build validation, but double-check)
+        var activeCount = _metadata.GetAllVersions(eventName)
             .Count(d => d.State == DescriptorState.Active);
         if (activeCount > 1)
             throw new InvalidOperationException(
@@ -591,7 +660,7 @@ public sealed class RegistryEventValidator : IEventValidator
             return;  // OK — at least one Active version exists
 
         // Diagnostic path: determine why no Active version exists
-        var latest = ((EventRegistry)_resolver).GetLatestVersion(eventName);
+        var latest = _metadata.GetLatestVersion(eventName);
         if (latest is null)
             throw new EventValidationException(
                 $"Event '{eventName}' is not registered. " +
@@ -677,6 +746,7 @@ public sealed record DeadLetterMessage(
     string MessageId,
     string EventName,              // "capability.succeeded" (registry-defined name)
     int EventVersion,              // ← added: event version number
+    string DescriptorVersionKey,   // "capability.succeeded:v2" — monitoring aggregation key
     string? EventDescriptorId,     // "evt_6A9D8F..." (stable descriptor id)
     string? CorrelationId,         // correlation id for distributed tracing
     EventScope Scope,
@@ -770,7 +840,7 @@ Steps 1–5 (metadata foundation) are independent of 6–11 (DLQ). Steps 6–7 m
 |------|-------|
 | `EventRegistry` | Register, GetByName, GetActiveVersion, State lifecycle (Created→Building→Built), duplicate Build is idempotent |
 | `RegistryState` guard | Publish before Build → throws InvalidOperationException; Publish after Build → succeeds |
-| `EventRegistry.Build()` validation | Duplicate (name, version) → throws; same name + different versions → succeeds; single registration succeeds |
+| `EventRegistry.Build()` validation | Duplicate (name, version) → throws; same name + different versions → succeeds; single registration succeeds; v1 Active + v2 Deprecated → throws (highest must be Active) |
 | `EventRegistry` version resolution | v1 Deprecated + v2 Active → GetByName returns v2; GetByNameAndVersion("name", 1) returns v1 |
 | `RegistryEventValidator` | Registered event → valid; unregistered → throws; Deprecated → throws with SupersededById message; Local scope on distributed bus → throws |
 | `InMemoryDeadLetterStore` | Full lifecycle: Enqueue → GetPending → MarkRetrying → MarkRetried; MarkArchived after max retries |
@@ -784,6 +854,7 @@ Steps 1–5 (metadata foundation) are independent of 6–11 (DLQ). Steps 6–7 m
 | Full compilation chain | `[CrestEvent]` → generator → provider → registry.Build() → validator.ValidateOrThrow() → pass |
 | Publish before Build | Publish before `Build()` completes → throws; ensures registry is ready before any events flow |
 | Duplicate (name, version) detection | Two modules declare `"capability.succeeded"` v1 → `Build()` throws `EventRegistryBuildException` |
+| Version ordering violation | `"capability.succeeded"` v1 Active + v2 Deprecated → `Build()` throws (highest version must be Active) |
 | Version upgrade resolution | v1 Deprecated + v2 Active → `GetByName()` returns v2; validator accepts v2, rejects v1 |
 | Scope enforcement | Publish `Scope.Local` event via RabbitMQ → throws |
 | DLQ metadata | Handler throws → `IDeadLetterStore` receives `DeadLetterMessage` with EventName, EventVersion, CorrelationId, OccurredAt, Scope, ExceptionType populated |
