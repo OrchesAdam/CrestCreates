@@ -73,8 +73,9 @@ Six orthogonal dimensions, each answering a distinct question:
 | Payload | What does it carry? |
 | Scope | How far can it travel? |
 | Reliability | Can it be lost? |
-| Direction | Who sends, who receives? |
 | Ownership | Who is responsible for it? |
+
+> **Direction is deferred to Phase 3 Topology Graph.** `Producers[]` and `Consumers[]` already express direction. A single event is often both Incoming and Outgoing (e.g., Workflow publishes → Capability consumes → Capability publishes → Workflow consumes), making `EventDirection` a graph property, not a descriptor property.
 
 ### The Model
 
@@ -90,7 +91,6 @@ public interface IEventDescriptor
     string Id { get; }
     string Name { get; }
     EventScope Scope { get; }
-    EventDirection Direction { get; }
     EventImportance Importance { get; }
     bool IsAuditable { get; }
     bool IsReplayable { get; }
@@ -103,7 +103,7 @@ public interface IEventDescriptor
 public sealed record GeneratedEventDescriptor : IEventDescriptor, IVersionedDescriptor
 {
     // ── 1. Identity ──
-    public string Id { get; init; }                 // SHA256(Name) — stable event family identity across all versions. Name change = new identity.
+    public string Id { get; init; }                 // Explicit stable identity from [CrestEvent(Id=...)]. Name changes do not break audit/DLQ/monitoring.
     public string Name { get; init; }
     public int Version { get; init; }               // separate from Id — the composite unique key is (Name, Version), not Id
     public DescriptorState State { get; init; }
@@ -120,10 +120,7 @@ public sealed record GeneratedEventDescriptor : IEventDescriptor, IVersionedDesc
     public EventReliability Reliability { get; init; }
     public bool RequiresIdempotency { get; init; }  // consumer-side dedup (AtLeastOnce + IdempotencyStore → effectively-once)
 
-    // ── 5. Direction ──
-    public EventDirection Direction { get; init; }
-
-    // ── 6. Ownership ──
+    // ── 5. Ownership ──
     public VersionedDescriptorRef<CapabilityDescriptor>? CapabilityRef { get; init; }
     public string? CreatedBy { get; init; }
 
@@ -150,7 +147,6 @@ public sealed record DynamicEventDescriptor : IEventDescriptor
     public string Id { get; init; }                     // SHA256(Name) — unversioned
     public string Name { get; init; }
     public EventScope Scope { get; init; }
-    public EventDirection Direction { get; init; } = EventDirection.Internal;
     public EventImportance Importance { get; init; } = EventImportance.Normal;
     public bool IsAuditable { get; init; }
     public bool IsReplayable { get; init; }
@@ -169,7 +165,6 @@ public sealed record DynamicEventDescriptor : IEventDescriptor
 
 ```csharp
 public enum EventScope      { Local, Domain, Integration }
-public enum EventDirection  { Internal, Incoming, Outgoing }
 public enum EventReliability { BestEffort, AtLeastOnce }  // Delivery semantic only
 
 // Consumer-side dedup is a separate concern:
@@ -192,8 +187,6 @@ public enum EventImportance { Low, Normal, High, Critical }
 | `State.Deprecated` or `State.Removed` | Rejected; error message includes `SupersededById` |
 | Unregistered event name | Rejected; error message guides to `[CrestEvent]` |
 
-`Direction` is **documentation/topology metadata only** — it does not constrain publishing. Publishing constraints come from Scope.
-
 ### Deferred from Phase 2a
 
 - `EventCategory` and `EventSemantic` — removed from the model. If stable categories emerge from Capability Runtime usage, they can be added later without breaking the contract.
@@ -213,12 +206,12 @@ public enum EventImportance { Low, Normal, High, Critical }
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
 public sealed class CrestEventAttribute : Attribute
 {
-    public string Name { get; init; }                   // "capability.succeeded"
+    public string? Id { get; init; }                     // Explicit stable identity. Default: SHA256(Name). Survives name changes.
+    public string Name { get; init; }                   // "capability.succeeded" — name can evolve; Id is the stable key
     public int Version { get; init; } = 1;              // defaults to 1; explicit for v2+
     public EventScope Scope { get; init; }              // required, no default
     public EventReliability Reliability { get; init; }  // AtLeastOnce (default)
     public bool RequiresIdempotency { get; init; }      // consumer-side dedup
-    public EventDirection Direction { get; init; }      // Internal (default)
     public EventImportance Importance { get; init; }    // Normal (default)
     public string? Description { get; init; }
     public bool IsAuditable { get; init; }
@@ -232,12 +225,12 @@ public sealed class CrestEventAttribute : Attribute
 
 ```csharp
 [CrestEvent(
+    Id = "evt_capability_succeeded",                   // stable identity — survives name changes
     Name = "capability.succeeded",
     Version = 2,                                        // explicit — generator uses this
     Scope = EventScope.Integration,
     Reliability = EventReliability.AtLeastOnce,
     RequiresIdempotency = true,                         // consumer-side dedup
-    Direction = EventDirection.Outgoing,
     Importance = EventImportance.High,
     IsAuditable = true,
     IsReplayable = true,
@@ -271,8 +264,7 @@ public sealed class GeneratedEventDescriptorProvider : IEventDescriptorProvider
     public IReadOnlyList<GeneratedEventDescriptor> GetDescriptors() => [
         new GeneratedEventDescriptor
         {
-            Id = GeneratedEventDescriptorProvider.GenerateId("capability.succeeded"),
-            // Id = SHA256("capability.succeeded") → stable family identity across all versions
+            Id = "evt_capability_succeeded",        // from attribute, or SHA256(Name) if not specified
             Name = "capability.succeeded",
             Version = attribute.Version,           // from [CrestEvent(Version = 2)]
             State = DescriptorState.Active,
@@ -281,7 +273,6 @@ public sealed class GeneratedEventDescriptorProvider : IEventDescriptorProvider
             Scope = EventScope.Integration,
             Reliability = EventReliability.AtLeastOnce,
             RequiresIdempotency = true,     // consumer-side dedup
-            Direction = EventDirection.Outgoing,
             Importance = EventImportance.High,
             CapabilityRef = new VersionedDescriptorRef<CapabilityDescriptor>("cap-runtime", 1),
             IsAuditable = true,
@@ -352,6 +343,7 @@ public interface IEventMetadataProvider
     RegistryState State { get; }
     IReadOnlyList<GeneratedEventDescriptor> GetAllVersions(string name);
     GeneratedEventDescriptor? GetLatestVersion(string name);
+    IReadOnlyList<GeneratedEventDescriptor> GetAll();   // entry point for AI Metadata Explorer
 }
 ```
 
@@ -362,13 +354,17 @@ public interface IEventMetadataProvider
 `Build()` succeeds exactly once for the generated category. After building, generated descriptors are immutable.
 
 ```csharp
-// CrestCreates.Event/EventRegistry.cs (revised)
+// CrestCreates.Event/EventRegistrySnapshot.cs — immutable, FrozenDictionary-backed
+
+public sealed record EventRegistrySnapshot(
+    FrozenDictionary<string, FrozenList<GeneratedEventDescriptor>> ByName,
+    FrozenDictionary<Type, GeneratedEventDescriptor> ByPayloadType);
+
+// CrestCreates.Event/EventRegistry.cs — Build() produces a Snapshot
 
 public sealed class EventRegistry : IEventRegistry, IEventMetadataProvider
 {
-    // (Name, Version) is the composite unique key. Id is SHA256(Name) — stable family identity.
-    private readonly ConcurrentDictionary<string, List<GeneratedEventDescriptor>> _byName = new();
-    private readonly ConcurrentDictionary<Type, GeneratedEventDescriptor> _byPayloadType = new();
+    private EventRegistrySnapshot? _snapshot;
     private readonly object _buildLock = new();
     public RegistryState State { get; private set; } = RegistryState.Created;
 
@@ -387,25 +383,47 @@ public sealed class EventRegistry : IEventRegistry, IEventMetadataProvider
         {
             ValidateNoDuplicateNameVersions(descriptors);
             ValidateVersionChain(descriptors);
-            foreach (var d in descriptors) RegisterGenerated(d);
+            ValidateUniquePayloadType(descriptors);
+            _snapshot = BuildSnapshot(descriptors);
             State = RegistryState.Built;
         }
         catch { State = RegistryState.Failed; throw; }
     }
 
-    public GeneratedEventDescriptor? GetByName(string name) { /* highest Active */ }
-    public GeneratedEventDescriptor? GetByPayloadType(Type t) => _byPayloadType.TryGetValue(t, out var d) ? d : null;
-    public IReadOnlyList<GeneratedEventDescriptor> GetAllVersions(string name) { /* all versions regardless of state */ }
-    public GeneratedEventDescriptor? GetLatestVersion(string name) { /* highest version regardless of state */ }
-    public GeneratedEventDescriptor? GetByNameAndVersion(string name, int version) { /* ... */ }
+    public GeneratedEventDescriptor? GetByName(string name)
+        => _snapshot?.ByName.TryGetValue(name, out var versions) == true
+            ? versions.Where(v => v.State == DescriptorState.Active).MaxBy(v => v.Version)
+            : null;
 
-    private void RegisterGenerated(GeneratedEventDescriptor d)
+    public GeneratedEventDescriptor? GetByPayloadType(Type t)
+        => _snapshot?.ByPayloadType.TryGetValue(t, out var d) == true ? d : null;
+
+    public IReadOnlyList<GeneratedEventDescriptor> GetAllVersions(string name)
+        => _snapshot?.ByName.TryGetValue(name, out var versions) == true
+            ? versions : Array.Empty<GeneratedEventDescriptor>();
+
+    public GeneratedEventDescriptor? GetLatestVersion(string name)
+        => _snapshot?.ByName.TryGetValue(name, out var versions) == true
+            ? versions.MaxBy(v => v.Version)
+            : null;
+
+    public GeneratedEventDescriptor? GetByNameAndVersion(string name, int version)
+        => _snapshot?.ByName.TryGetValue(name, out var versions) == true
+            ? versions.FirstOrDefault(v => v.Version == version)
+            : null;
+
+    public IReadOnlyList<GeneratedEventDescriptor> GetAll()
+        => _snapshot?.ByName.Values.SelectMany(v => v).ToList().AsReadOnly()
+            ?? Array.Empty<GeneratedEventDescriptor>();
+
+    private static EventRegistrySnapshot BuildSnapshot(List<GeneratedEventDescriptor> descriptors)
     {
-        _byName.AddOrUpdate(d.Name,
-            _ => new List<GeneratedEventDescriptor> { d },
-            (_, list) => { list.Add(d); return list; });
-        // Latest version wins in _byPayloadType — PublishAsync<T>() resolves to the newest
-        _byPayloadType[d.PayloadType] = d;
+        var byName = descriptors.GroupBy(d => d.Name)
+            .ToFrozenDictionary(g => g.Key, g => g.ToFrozenList());
+        var byPayload = descriptors
+            .GroupBy(d => d.PayloadType)
+            .ToFrozenDictionary(g => g.Key, g => g.OrderByDescending(d => d.Version).First());
+        return new EventRegistrySnapshot(byName, byPayload);
     }
 }
 
@@ -549,6 +567,25 @@ These rules are validated together because they are logically coupled — splitt
                     $"but v{active[0].Version} is Active. The highest version must be Active. " +
                     "Set the highest version to Active to resolve.");
         }
+    }
+
+    private static void ValidateUniquePayloadType(List<GeneratedEventDescriptor> descriptors)
+    {
+        // A CLR payload type may map to at most one Active event descriptor.
+        // PublishAsync<T>() resolves via GetByPayloadType(typeof(T)) — if one Type
+        // mapped to multiple Active events, the resolution would be ambiguous.
+        var violations = descriptors
+            .GroupBy(d => d.PayloadType)
+            .Where(g => g.Count(d => d.State == Metadata.Abstractions.DescriptorState.Active) > 1)
+            .Select(g => $"{g.Key.Name} → [{string.Join(", ", g.Where(d => d.State == Metadata.Abstractions.DescriptorState.Active).Select(d => d.Name + " v" + d.Version))}]")
+            .ToList();
+
+        if (violations.Count > 0)
+            throw new EventRegistryBuildException(
+                $"PayloadType uniqueness violation: one CLR type maps to multiple Active events. " +
+                $"Violations: {string.Join("; ", violations)}. " +
+                "A payload type may map to at most one Active event descriptor. " +
+                "If you need multiple events with the same payload shape, use distinct CLR types.");
     }
 
     private static void ValidateNoDuplicateNameVersions(List<GeneratedEventDescriptor> descriptors)
@@ -792,6 +829,7 @@ public sealed record DeadLetterMessage(
     int EventVersion,              // ← added: event version number
     string? EventDescriptorId,     // "evt_6A9D8F..." (stable descriptor id)
     string? CorrelationId,         // correlation id for distributed tracing
+    string? TenantId,              // multi-tenant DLQ dashboard: which tenant failed?
     EventScope Scope,
     string PayloadTypeFullName,    // "MyApp.Events.CapabilitySucceeded" (not AQN — survives assembly version changes)
     byte[] Payload,
