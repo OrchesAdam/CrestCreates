@@ -296,4 +296,119 @@ public class WorkflowEngineTests
         instance.Status.Should().Be(WorkflowInstanceStatus.Failed);
         instance.StepResults.Should().HaveCount(1);
     }
+
+    [Fact]
+    public async Task ResumeAsync_NoDraftStore_Throws()
+    {
+        var registry = new WorkflowRegistry();
+        registry.Register(CreateWorkflow("wf_01", "test.wf", 1));
+        var engine = new WorkflowEngine(registry, draftStore: null);
+
+        await engine.Invoking(e => e.ResumeAsync("instance_01"))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*IDraftStore*");
+    }
+
+    [Fact]
+    public async Task ResumeAsync_NoCheckpoint_Throws()
+    {
+        var registry = new WorkflowRegistry();
+        registry.Register(CreateWorkflow("wf_01", "test.wf", 1));
+        var draftStore = new Draft.InMemoryDraftStore();
+        var engine = new WorkflowEngine(registry, draftStore: draftStore);
+
+        await engine.Invoking(e => e.ResumeAsync("instance_01"))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*checkpoint*");
+    }
+
+    [Fact]
+    public async Task ResumeAsync_ValidCheckpoint_ContinuesExecution()
+    {
+        var registry = new WorkflowRegistry();
+        registry.Register(new WorkflowDescriptor
+        {
+            Id = "wf_01", Name = "resume.wf", Version = 1, State = DescriptorState.Active,
+            Steps = new List<WorkflowStep>
+            {
+                new()
+                {
+                    Id = "step_01", Name = "Already Done",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht_01", 1)
+                    }
+                },
+                new()
+                {
+                    Id = "step_02", Name = "Resume Here",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht_01", 1)
+                    }
+                }
+            }
+        });
+
+        var draftStore = new Draft.InMemoryDraftStore();
+        var checkpointJson = System.Text.Json.JsonSerializer.Serialize(
+            new WorkflowEngine.CheckpointState
+            {
+                InstanceId = "instance_01",
+                WorkflowId = "wf_01",
+                WorkflowVersion = 1,
+                StepIndex = 1,
+                CurrentStepId = "step_02"
+            });
+
+        await draftStore.SaveAsync(new Draft.Abstractions.DraftRecord
+        {
+            DraftId = "wf_ckpt_instance_01",
+            DraftType = "workflow.checkpoint",
+            Schema = new Schema.Abstractions.VersionedDescriptorRef<Schema.Abstractions.SchemaDescriptor>("s", 1),
+            TenantId = null,
+            OwnerId = "instance_01",
+            PayloadJson = checkpointJson
+        });
+
+        var engine = new WorkflowEngine(registry, draftStore: draftStore);
+        var instance = await engine.ResumeAsync("instance_01");
+
+        instance.Status.Should().Be(WorkflowInstanceStatus.Completed);
+        instance.StepResults.Should().HaveCount(1);
+        instance.StepResults[0].StepId.Should().Be("step_02");
+    }
+
+    [Fact]
+    public async Task ResumeThenExecute_HasCorrectInstanceId()
+    {
+        var registry = new WorkflowRegistry();
+        registry.Register(CreateWorkflow("wf_01", "resume2.wf", 1));
+        var draftStore = new Draft.InMemoryDraftStore();
+        var checkpointJson = System.Text.Json.JsonSerializer.Serialize(
+            new WorkflowEngine.CheckpointState
+            {
+                InstanceId = "instance_02",
+                WorkflowId = "wf_01",
+                WorkflowVersion = 1,
+                StepIndex = 0,
+                CurrentStepId = null
+            });
+
+        await draftStore.SaveAsync(new Draft.Abstractions.DraftRecord
+        {
+            DraftId = "wf_ckpt_instance_02",
+            DraftType = "workflow.checkpoint",
+            Schema = new Schema.Abstractions.VersionedDescriptorRef<Schema.Abstractions.SchemaDescriptor>("s", 1),
+            TenantId = null,
+            OwnerId = "instance_02",
+            PayloadJson = checkpointJson
+        });
+
+        var engine = new WorkflowEngine(registry, draftStore: draftStore);
+        var instance = await engine.ResumeAsync("instance_02");
+
+        instance.InstanceId.Should().Be("instance_02");
+        instance.Status.Should().Be(WorkflowInstanceStatus.Completed);
+    }
 }

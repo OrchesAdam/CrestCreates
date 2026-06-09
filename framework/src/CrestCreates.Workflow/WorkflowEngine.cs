@@ -50,10 +50,43 @@ public sealed class WorkflowEngine : IWorkflowEngine
         return await ExecuteStepsAsync(instance, descriptor, ct).ConfigureAwait(false);
     }
 
-    public Task<WorkflowInstance> ResumeAsync(string instanceId, CancellationToken ct = default)
+    public async Task<WorkflowInstance> ResumeAsync(string instanceId, CancellationToken ct = default)
     {
-        throw new NotImplementedException(
-            "Resume requires DraftRecord checkpoint loading — future phase.");
+        if (_draftStore == null)
+            throw new InvalidOperationException("No IDraftStore registered — cannot resume workflows.");
+
+        var checkpointId = $"wf_ckpt_{instanceId}";
+        var checkpoint = await _draftStore.GetAsync(checkpointId, ct).ConfigureAwait(false);
+
+        if (checkpoint == null)
+            throw new InvalidOperationException($"No checkpoint found for instance '{instanceId}'.");
+
+        var state = JsonSerializer.Deserialize<CheckpointState>(checkpoint.PayloadJson)
+            ?? throw new InvalidOperationException("Corrupted checkpoint payload.");
+
+        var descriptor = _registry.GetById(state.WorkflowId)
+            ?? throw new InvalidOperationException($"Workflow '{state.WorkflowId}' not found.");
+
+        var instance = new WorkflowInstance
+        {
+            InstanceId = state.InstanceId,
+            Workflow = new VersionedDescriptorRef<WorkflowDescriptor>(state.WorkflowId, state.WorkflowVersion),
+            StepIndex = state.StepIndex,
+            CurrentStepId = state.CurrentStepId,
+            Variables = state.Variables ?? new Dictionary<string, object?>()
+        };
+
+        return await ExecuteStepsAsync(instance, descriptor, ct).ConfigureAwait(false);
+    }
+
+    public sealed class CheckpointState
+    {
+        public string InstanceId { get; set; } = string.Empty;
+        public string WorkflowId { get; set; } = string.Empty;
+        public int WorkflowVersion { get; set; }
+        public int StepIndex { get; set; }
+        public string? CurrentStepId { get; set; }
+        public Dictionary<string, object?>? Variables { get; set; }
     }
 
     private async Task<WorkflowInstance> ExecuteStepsAsync(

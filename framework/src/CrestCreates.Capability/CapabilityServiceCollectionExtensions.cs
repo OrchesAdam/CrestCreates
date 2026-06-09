@@ -15,6 +15,7 @@ public static class CapabilityServiceCollectionExtensions
 
         builder.Use<AuthorizationMiddleware>();
         builder.Use<ValidationMiddleware>();
+        builder.Use<IdempotencyMiddleware>();
         builder.Use<EventPublishingMiddleware>();
 
         configure?.Invoke(builder);
@@ -25,6 +26,7 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddSingleton<ICapabilityPipeline, CapabilityPipeline>();
         services.TryAddTransient<AuthorizationMiddleware>();
         services.TryAddTransient<ValidationMiddleware>();
+        services.TryAddTransient<IdempotencyMiddleware>();
         services.TryAddTransient<EventPublishingMiddleware>();
 
         return services;

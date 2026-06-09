@@ -18,6 +18,9 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\CrestCreates.Workflow\CrestCreates.Workflow.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Draft\CrestCreates.Draft.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Metadata.Abstractions\CrestCreates.Metadata.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Schema.Abstractions\CrestCreates.Schema.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.TestBase\CrestCreates.TestBase.csproj" />
   </ItemGroup>
 </Project>
