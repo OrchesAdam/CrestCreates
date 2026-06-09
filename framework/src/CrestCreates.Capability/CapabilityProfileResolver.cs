@@ -26,12 +26,13 @@ public static class CapabilityProfileResolver
 
         foreach (var profile in ordered)
         {
+            // Higher priority profiles win — only fill gaps with lower priority values
             result = new EffectiveProfile
             {
-                Timeout = profile.Timeout ?? result.Timeout,
-                RetryPolicy = profile.RetryPolicy ?? result.RetryPolicy,
-                RequireApproval = profile.RequireApproval ?? result.RequireApproval,
-                RateLimit = profile.RateLimit ?? result.RateLimit
+                Timeout = result.Timeout ?? profile.Timeout,
+                RetryPolicy = result.RetryPolicy ?? profile.RetryPolicy,
+                RequireApproval = result.RequireApproval ?? profile.RequireApproval,
+                RateLimit = result.RateLimit ?? profile.RateLimit
             };
         }
 

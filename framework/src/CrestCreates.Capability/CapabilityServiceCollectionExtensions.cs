@@ -36,52 +36,18 @@ public static class CapabilityServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddCapabilityHandler<THandler>(
+    /// <summary>
+    /// Registers a handler invoker for a capability name using a DelegateHandlerInvoker.
+    /// Prefer using the source generator (HandlerInvokerSourceGenerator) which emits
+    /// strongly-typed wrapper classes at compile time with zero reflection.
+    /// </summary>
+    public static IServiceCollection AddHandlerInvoker(
         this IServiceCollection services,
-        string capabilityName)
-        where THandler : class, ICapabilityHandler
+        string capabilityName,
+        Func<object?, CancellationToken, Task<object?>> handler)
     {
-        services.TryAddTransient<THandler>();
-        services.AddTransient<ICapabilityHandlerInvoker>(sp =>
-        {
-            var handler = sp.GetRequiredService<THandler>();
-            var handlerType = typeof(THandler);
-
-            var handlerInterface = handlerType.GetInterfaces()
-                .FirstOrDefault(i => i.IsGenericType
-                    && i.GetGenericTypeDefinition() == typeof(ICapabilityHandler<,>));
-
-            if (handlerInterface != null)
-            {
-                var method = handlerInterface.GetMethod("ExecuteAsync")!;
-                return new TypedHandlerInvoker(handler, method);
-            }
-
-            throw new InvalidOperationException(
-                $"Handler type '{handlerType.Name}' must implement ICapabilityHandler<TInput, TOutput>.");
-        });
-
+        var invoker = new DelegateHandlerInvoker(handler);
+        services.AddSingleton<ICapabilityHandlerInvoker>(invoker);
         return services;
-    }
-}
-
-internal sealed class TypedHandlerInvoker : ICapabilityHandlerInvoker
-{
-    private readonly object _handler;
-    private readonly System.Reflection.MethodInfo _method;
-
-    public TypedHandlerInvoker(object handler, System.Reflection.MethodInfo method)
-    {
-        _handler = handler;
-        _method = method;
-    }
-
-    public async Task<object?> InvokeAsync(object? input, CancellationToken ct)
-    {
-        var task = (Task)_method.Invoke(_handler, new[] { input, ct })!;
-        await task.ConfigureAwait(false);
-
-        var resultProp = task.GetType().GetProperty("Result");
-        return resultProp?.GetValue(task);
     }
 }
