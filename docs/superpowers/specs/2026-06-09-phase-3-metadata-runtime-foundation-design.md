@@ -80,9 +80,9 @@ public abstract class RegistryBase<TDescriptor>
     protected readonly object _buildLock = new();
     public RegistryState State { get; protected set; } = RegistryState.Created;
 
-    private readonly IRegistryValidationEngine _validationEngine;
+    private readonly IRegistryValidationEngine<TDescriptor> _validationEngine;
 
-    protected RegistryBase(IRegistryValidationEngine validationEngine)
+    protected RegistryBase(IRegistryValidationEngine<TDescriptor> validationEngine)
     {
         _validationEngine = validationEngine;
     }
@@ -202,10 +202,13 @@ public enum ValidationSeverity
 /// 验证引擎。负责协调所有验证器，收集并汇总验证结果。
 /// 独立于 RegistryBase，可被 CLI、AI Explorer、Registry 等复用。
 /// </summary>
-public interface IRegistryValidationEngine
+public interface IRegistryValidationEngine<TDescriptor>
+    where TDescriptor : IDescriptor
 {
-    ValidationReport Validate<TDescriptor>(IReadOnlyList<TDescriptor> descriptors)
-        where TDescriptor : IDescriptor;
+    /// <summary>
+    /// 执行验证。收集所有验证器的问题，一次性报告。
+    /// </summary>
+    ValidationReport Validate(IReadOnlyList<TDescriptor> descriptors);
 }
 
 /// <summary>
@@ -335,6 +338,11 @@ public interface IBootstrapTask
     /// 依赖的其他 BootstrapTask 类型。
     /// </summary>
     IReadOnlyList<Type> Dependencies { get; }
+
+    /// <summary>
+    /// 是否必需。如果为 true，失败时终止启动；如果为 false，失败时记录警告继续。
+    /// </summary>
+    bool IsRequired { get; }
 
     /// <summary>
     /// 执行 Bootstrap。
@@ -534,7 +542,8 @@ public sealed class CapabilityDescriptor : IVersionedDescriptor
 
     // Capability 特定 Metadata 字段
     public CapabilityKind CapabilityKind { get; init; }
-    public IReadOnlyList<EventRef> Events { get; init; } = Array.Empty<EventRef>();
+    public IReadOnlyList<EventRef> Produces { get; init; } = Array.Empty<EventRef>();
+    public IReadOnlyList<EventRef> Consumes { get; init; } = Array.Empty<EventRef>();
     public IReadOnlyList<string> SemanticTags { get; init; } = Array.Empty<string>();
 }
 
@@ -709,3 +718,61 @@ public sealed class CapabilityRegistry : RegistryBase<CapabilityDescriptor>
 - ✅ 简化并发模型
 - ✅ 明确区分静态注册表和动态注册表
 - ❌ 需要额外设计 DynamicRegistry
+
+#### ADR-005: ById = Canonical Descriptor
+
+**状态：** 已接受
+
+**上下文：** RegistrySnapshot.ById 的语义不明确。无版本 Registry 中 ById 是唯一实例，有版本 Registry 中 ById 是最新 Active 版本。
+
+**决策：**
+- ById 永远表示 Canonical Descriptor
+- 无版本 Registry：ById 指向唯一实例
+- 有版本 Registry：ById 指向最新 Active 版本
+- 精确版本查询使用 ByVersion 索引
+
+**后果：**
+- ✅ Resolver 语义统一
+- ✅ 避免歧义
+- ❌ 需要文档明确
+
+#### ADR-006: DescriptorRef vs DescriptorKey
+
+**状态：** 已接受
+
+**上下文：** DescriptorRef 允许 Version 为 null（逻辑引用），DescriptorKey 要求 Version 必须存在（物理定位）。
+
+**决策：**
+- DescriptorRef：逻辑引用，Version = null 表示 Latest Stable
+- DescriptorKey：物理定位，必须提供精确 Version
+- 不允许 new DescriptorKey(id, null)
+
+**后果：**
+- ✅ 区分逻辑引用和物理定位
+- ✅ 防止误用
+- ❌ 需要额外类型
+
+#### ADR-007: DynamicRegistry Future Hook
+
+**状态：** 已接受
+
+**上下文：** ADR-004 明确 RegistryBase 不可变，但 Phase 2a 已有 DynamicEventRegistry。
+
+**决策：**
+- RegistryBase：静态注册表，Build 后不可变
+- IDynamicRegistry<TDescriptor>：动态注册表，支持运行时注册/注销
+- 两者共存，不合并
+
+```csharp
+public interface IDynamicRegistry<TDescriptor>
+    where TDescriptor : IDescriptor
+{
+    bool TryRegister(TDescriptor descriptor);
+    bool TryUnregister(string id);
+}
+```
+
+**后果：**
+- ✅ 明确区分静态和动态注册表
+- ✅ 为 Hot Reload 预留扩展点
+- ❌ 需要维护两套 API
