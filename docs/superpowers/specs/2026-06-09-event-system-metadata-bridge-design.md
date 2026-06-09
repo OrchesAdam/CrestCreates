@@ -84,7 +84,7 @@ Six orthogonal dimensions, each answering a distinct question:
 public sealed record EventDescriptor : IVersionedDescriptor
 {
     // ── 1. Identity ──
-    public string Id { get; init; }                 // Deterministic: SHA256(Name + ":" + Version). Survives type renames.
+    public string Id { get; init; }                 // SHA256(Name + ":" + Version). Survives type renames; does NOT survive name renames.
     public string Name { get; init; }              // e.g. "capability.succeeded"
     public int Version { get; init; }
     public DescriptorState State { get; init; }
@@ -224,7 +224,8 @@ public sealed class GeneratedEventDescriptorProvider : IEventDescriptorProvider
         {
             Id = GeneratedEventDescriptorProvider.GenerateId("capability.succeeded", 1),
             // = SHA256("capability.succeeded:1") → "evt_A3F8C2D1..."
-            // Derived from (Name, Version) — stable across type renames
+            // SHA256("capability.succeeded:1") → "evt_A3F8C2D1..."
+            // Stable across type renames; name change = new identity
             Name = "capability.succeeded",
             Version = 1,
             State = DescriptorState.Active,
@@ -283,13 +284,13 @@ public sealed class EventRegistry : IEventRegistry
     // ... (shared indexes by name, category, etc.)
     public RegistryState State { get; private set; } = RegistryState.Created;
 
-    // Called exactly once by EventRegistryHostedService at startup.
-    // Throws if called a second time — generated descriptors are immutable after Build.
+    // Called by EventRegistryHostedService at startup.
+    // Idempotent: returns silently if already Built (supports integration tests, WebApplicationFactory).
+    // Throws: if previously Failed (process must restart).
     public void Build(IEnumerable<IEventDescriptorProvider> providers)
     {
         if (State == RegistryState.Built)
-            throw new InvalidOperationException(
-                "EventRegistry.Build() has already completed. Generated descriptors are frozen.");
+            return;  // Idempotent — safe for multiple host builds
         if (State == RegistryState.Failed)
             throw new InvalidOperationException(
                 "EventRegistry.Build() previously failed. The process must be restarted.");
@@ -523,6 +524,12 @@ public sealed class RegistryEventValidator : IEventValidator
                 $"Registry corruption: event '{eventName}' has {activeCount} Active versions. " +
                 "Only one Active version is permitted per event name.");
 
+        // Publish path: highest Active version (what will actually be dispatched)
+        var active = _registry.GetByName(eventName);
+        if (active is not null)
+            return;  // OK — at least one Active version exists
+
+        // Diagnostic path: determine why no Active version exists
         var latest = _registry.GetLatestVersion(eventName);
         if (latest is null)
             throw new EventValidationException(
@@ -531,8 +538,7 @@ public sealed class RegistryEventValidator : IEventValidator
 
         if (latest.State == DescriptorState.Deprecated)
             throw new EventValidationException(
-                $"Event '{eventName}' is deprecated. " +
-                $"Use '{latest.SupersededById}' instead.");
+                $"Event '{eventName}' is deprecated. All versions are deprecated.");
 
         if (latest.State == DescriptorState.Removed)
             throw new EventValidationException(
@@ -579,7 +585,7 @@ public abstract class DistributedEventBusBase : IEventBus
 
 Local bus implementations inject `IEventValidator` directly.
 
-**IEventValidator is optional in DI.** If not registered, validation degrades gracefully for minimal projects. Documentation notes that validation-disabled mode is for development/single-node only — production clusters must enable it.
+**`IEventValidator` is always present in DI.** A `PassThroughEventValidator` (no-op) is registered by default. Real validation requires `AddEventRegistry()` which replaces it with `RegistryEventValidator`. Bus code calls `_validator.ValidateOrThrow()` unconditionally — no null check. This eliminates the "validates in prod but not in dev" split.
 
 ---
 
@@ -642,7 +648,16 @@ Pending ──► Retrying ──► Retried
 
 ### Future Enhancement (Phase 3)
 
-Add `PayloadSchemaRef` to `DeadLetterMessage` so the DLQ can reconstruct and display payloads using the Schema Registry. `byte[] Payload` is sufficient for Phase 2a.
+| Add `DescriptorSnapshotJson` to `DeadLetterMessage` | Phase 3 |
+| Add `PayloadSchemaRef` to `DeadLetterMessage` | Phase 3 |
+
+> **Descriptor Snapshot rationale:** If an event descriptor is renamed or removed years later, DLQ entries referencing it become uninterpretable. Storing a JSON snapshot of the descriptor at failure time preserves forensic context indefinitely.
+
+> **Dynamic descriptor isolation:** Phase 3 should introduce `DynamicEventDescriptor` distinct from `EventDescriptor`, since generated (versioned, schema-backed) and dynamic (unversioned, schema-less) events have fundamentally different contracts.
+
+> **EventTypeMap → IEventTypeResolver:** The Phase 2a `EventTypeMap` (typeof → event name) is a generated static map. Phase 3 should extract a general `IEventTypeResolver` interface to unify Type↔Descriptor mapping across Event, Capability, Workflow, and HumanTask registries. This becomes core Metadata infrastructure, not Event-specific.
+
+> **RegistryBase<TDescriptor>:** Phase 3 should extract a generic `RegistryBase<TDescriptor>` to unify Event, Capability, Workflow, and HumanTask registries. All share the same lifecycle (Created→Building→Built→Failed), the same Build/Register pattern, and the same name+version indexing.
 
 ---
 
