@@ -10,6 +10,11 @@ public abstract class RegistryBase<TDescriptor>
     protected readonly object _buildLock = new();
     public RegistryState State { get; protected set; } = RegistryState.Created;
 
+    /// <summary>
+    /// Registry domain namespace. Subclasses must provide this.
+    /// </summary>
+    protected abstract string RegistryNamespace { get; }
+
     private readonly IRegistryValidationEngine<TDescriptor> _validationEngine;
     private readonly IEnumerable<IRegistryIndexBuilder<TDescriptor, IRegistryIndex>>? _indexBuilders;
 
@@ -65,7 +70,7 @@ public abstract class RegistryBase<TDescriptor>
         => _snapshot?.All ?? ImmutableArray<TDescriptor>.Empty;
 
     public TDescriptor? GetByVersion(string id, int version)
-        => _snapshot?.ByVersion.TryGetValue(new DescriptorKey("?", id, version), out var d) == true ? d : null;
+        => _snapshot?.ByVersion.TryGetValue(new DescriptorKey(RegistryNamespace, id, version), out var d) == true ? d : null;
 
     protected abstract RegistrySnapshot<TDescriptor> BuildSnapshot(List<TDescriptor> descriptors);
 }

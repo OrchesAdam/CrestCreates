@@ -29,6 +29,8 @@ public class RegistryBaseTests
 
     private class TestRegistry : RegistryBase<TestDescriptor>
     {
+        protected override string RegistryNamespace => "test";
+
         public TestRegistry(IRegistryValidationEngine<TestDescriptor> engine) : base(engine) { }
 
         protected override RegistrySnapshot<TestDescriptor> BuildSnapshot(List<TestDescriptor> descriptors)
@@ -36,8 +38,10 @@ public class RegistryBaseTests
             var byId = descriptors.ToFrozenDictionary(d => d.Id, d => d);
             var byName = descriptors.GroupBy(d => d.Name)
                 .ToFrozenDictionary(g => g.Key, g => g.ToImmutableArray());
+            var byVersion = descriptors
+                .ToFrozenDictionary(d => new DescriptorKey(d.Namespace, d.Id, 1));
             return new RegistrySnapshot<TestDescriptor>(byId, byName,
-                FrozenDictionary<DescriptorKey, TestDescriptor>.Empty,
+                byVersion,
                 descriptors.ToImmutableArray(),
                 ImmutableDictionary<Type, IRegistryIndex>.Empty);
         }
@@ -132,6 +136,18 @@ public class RegistryBaseTests
         try { registry.Build([provider]); } catch { }
         var act = () => registry.Build([provider]);
         act.Should().Throw<InvalidOperationException>().WithMessage("*previously failed*");
+    }
+
+    [Fact]
+    public void GetByVersion_returns_specific_version()
+    {
+        var engine = new RegistryValidationEngine<TestDescriptor>(Array.Empty<IRegistryValidator<TestDescriptor>>());
+        var registry = new TestRegistry(engine);
+        var provider = new TestProvider([
+            new TestDescriptor { Id = "a", Name = "A" }
+        ]);
+        registry.Build([provider]);
+        registry.GetByVersion("a", 1).Should().NotBeNull();
     }
 
     [Fact]
