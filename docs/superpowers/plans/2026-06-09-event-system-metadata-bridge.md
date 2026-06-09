@@ -22,7 +22,6 @@
 | `GeneratedEventDescriptor.cs` | `CrestCreates.Event.Abstractions` | Compile-time versioned descriptor |
 | `DynamicEventDescriptor.cs` | `CrestCreates.Event.Abstractions` | Runtime script-message descriptor |
 | `EventScope.cs` | `CrestCreates.Event.Abstractions` | Local/Domain/Integration enum |
-| `EventDirection.cs` | `CrestCreates.Event.Abstractions` | Internal/Incoming/Outgoing enum |
 | `EventReliability.cs` | `CrestCreates.Event.Abstractions` | BestEffort/AtLeastOnce enum |
 | `CrestEventAttribute.cs` | `CrestCreates.Event.Abstractions` | DSL attribute for compile-time registration |
 | `IEventValidator.cs` | `CrestCreates.Event.Abstractions` | Validation interface + result types |
@@ -66,7 +65,6 @@
 
 **Files:**
 - Create: `framework/src/CrestCreates.Event.Abstractions/EventScope.cs`
-- Create: `framework/src/CrestCreates.Event.Abstractions/EventDirection.cs`
 - Create: `framework/src/CrestCreates.Event.Abstractions/EventReliability.cs`
 - Create: `framework/src/CrestCreates.Event.Abstractions/IEventDescriptor.cs`
 - Create: `framework/src/CrestCreates.Event.Abstractions/RegistryState.cs`
@@ -78,13 +76,6 @@
 namespace CrestCreates.Event.Abstractions;
 
 public enum EventScope { Local, Domain, Integration }
-```
-
-```csharp
-// framework/src/CrestCreates.Event.Abstractions/EventDirection.cs
-namespace CrestCreates.Event.Abstractions;
-
-public enum EventDirection { Internal, Incoming, Outgoing }
 ```
 
 ```csharp
@@ -113,7 +104,6 @@ public interface IEventDescriptor
     string Id { get; }
     string Name { get; }
     EventScope Scope { get; }
-    EventDirection Direction { get; }
     EventImportance Importance { get; }
     bool IsAuditable { get; }
     bool IsReplayable { get; }
@@ -131,7 +121,6 @@ Expected: Build succeeds (zero errors, zero warnings)
 
 ```bash
 git add framework/src/CrestCreates.Event.Abstractions/EventScope.cs \
-        framework/src/CrestCreates.Event.Abstractions/EventDirection.cs \
         framework/src/CrestCreates.Event.Abstractions/EventReliability.cs \
         framework/src/CrestCreates.Event.Abstractions/IEventDescriptor.cs \
         framework/src/CrestCreates.Event.Abstractions/RegistryState.cs
@@ -176,10 +165,7 @@ public sealed record GeneratedEventDescriptor : IEventDescriptor, IVersionedDesc
     public EventReliability Reliability { get; init; }
     public bool RequiresIdempotency { get; init; }
 
-    // ── 5. Direction ──
-    public EventDirection Direction { get; init; }
-
-    // ── 6. Ownership ──
+    // ── 5. Ownership ──
     public VersionedDescriptorRef<Capability.Abstractions.CapabilityDescriptor>? CapabilityRef { get; init; }
     public string? CreatedBy { get; init; }
 
@@ -226,7 +212,6 @@ public sealed record DynamicEventDescriptor : IEventDescriptor
     public string Id { get; init; } = string.Empty;        // SHA256(Name) — unversioned
     public string Name { get; init; } = string.Empty;
     public EventScope Scope { get; init; }
-    public EventDirection Direction { get; init; } = EventDirection.Internal;
     public EventImportance Importance { get; init; } = EventImportance.Normal;
     public bool IsAuditable { get; init; }
     public bool IsReplayable { get; init; }
@@ -272,12 +257,12 @@ namespace CrestCreates.Event.Abstractions;
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
 public sealed class CrestEventAttribute : Attribute
 {
+    public string? Id { get; init; }                     // Explicit stable identity. Default: SHA256(Name).
     public string Name { get; init; } = string.Empty;
     public int Version { get; init; } = 1;
     public EventScope Scope { get; init; }              // required — no default
     public EventReliability Reliability { get; init; }  // AtLeastOnce
     public bool RequiresIdempotency { get; init; }
-    public EventDirection Direction { get; init; }      // Internal
     public EventImportance Importance { get; init; }    // Normal
     public string? Description { get; init; }
     public bool IsAuditable { get; init; }
@@ -347,6 +332,7 @@ public interface IEventMetadataProvider
     RegistryState State { get; }
     IReadOnlyList<GeneratedEventDescriptor> GetAllVersions(string name);
     GeneratedEventDescriptor? GetLatestVersion(string name);
+    IReadOnlyList<GeneratedEventDescriptor> GetAll();
 }
 ```
 
@@ -484,76 +470,77 @@ git commit -m "feat: add IEventValidator + ValidationResult + PassThroughEventVa
 
 ```csharp
 // framework/src/CrestCreates.Event/EventRegistry.cs
-using System.Collections.Concurrent;
+using System.Collections.Frozen;
+using System.Collections.Immutable;
 using CrestCreates.Event.Abstractions;
 
 namespace CrestCreates.Event;
 
+public sealed record EventRegistrySnapshot(
+    FrozenDictionary<string, ImmutableArray<GeneratedEventDescriptor>> ByName,
+    FrozenDictionary<Type, GeneratedEventDescriptor> ByPayloadType);
+
 public sealed class EventRegistry : IEventRegistry, IEventMetadataProvider
 {
-    private readonly ConcurrentDictionary<string, List<GeneratedEventDescriptor>> _byName = new();
-    private readonly ConcurrentDictionary<Type, GeneratedEventDescriptor> _byPayloadType = new();
+    private EventRegistrySnapshot? _snapshot;
     private readonly object _buildLock = new();
     public RegistryState State { get; private set; } = RegistryState.Created;
 
     public void Build(IEnumerable<IEventDescriptorProvider> providers)
     {
-        // Double-check locking — fast path for already-built
         if (State == RegistryState.Built) return;
         lock (_buildLock)
         {
             if (State == RegistryState.Built) return;
             if (State == RegistryState.Failed)
-                throw new InvalidOperationException(
-                    "EventRegistry.Build() previously failed. Restart required.");
+                throw new InvalidOperationException("Build previously failed. Restart required.");
             State = RegistryState.Building;
         }
-
         var descriptors = providers.SelectMany(p => p.GetDescriptors()).ToList();
         try
         {
             ValidateNoDuplicateNameVersions(descriptors);
             ValidateVersionChain(descriptors);
-            foreach (var d in descriptors) RegisterGenerated(d);
+            ValidateUniquePayloadType(descriptors);
+            _snapshot = BuildSnapshot(descriptors);
             State = RegistryState.Built;
         }
-        catch
-        {
-            State = RegistryState.Failed;
-            throw;
-        }
+        catch { State = RegistryState.Failed; throw; }
     }
 
     public GeneratedEventDescriptor? GetByName(string name)
-        => _byName.TryGetValue(name, out var versions)
+        => _snapshot?.ByName.TryGetValue(name, out var versions) == true
             ? versions.Where(v => v.State == Metadata.Abstractions.DescriptorState.Active)
                        .MaxBy(v => v.Version)
             : null;
 
     public GeneratedEventDescriptor? GetByPayloadType(Type t)
-        => _byPayloadType.TryGetValue(t, out var d) ? d : null;
+        => _snapshot?.ByPayloadType.TryGetValue(t, out var d) == true ? d : null;
 
     public GeneratedEventDescriptor? GetLatestVersion(string name)
-        => _byName.TryGetValue(name, out var versions)
-            ? versions.MaxBy(v => v.Version)
-            : null;
+        => _snapshot?.ByName.TryGetValue(name, out var versions) == true
+            ? versions.MaxBy(v => v.Version) : null;
 
     public GeneratedEventDescriptor? GetByNameAndVersion(string name, int version)
-        => _byName.TryGetValue(name, out var versions)
-            ? versions.FirstOrDefault(v => v.Version == version)
-            : null;
+        => _snapshot?.ByName.TryGetValue(name, out var versions) == true
+            ? versions.FirstOrDefault(v => v.Version == version) : null;
 
     public IReadOnlyList<GeneratedEventDescriptor> GetAllVersions(string name)
-        => _byName.TryGetValue(name, out var versions)
-            ? versions.AsReadOnly()
-            : Array.Empty<GeneratedEventDescriptor>();
+        => _snapshot?.ByName.TryGetValue(name, out var versions) == true
+            ? versions : Array.Empty<GeneratedEventDescriptor>();
 
-    private void RegisterGenerated(GeneratedEventDescriptor d)
+    public IReadOnlyList<GeneratedEventDescriptor> GetAll()
+        => _snapshot?.ByName.Values.SelectMany(v => v).ToList().AsReadOnly()
+            ?? Array.Empty<GeneratedEventDescriptor>();
+
+    private static EventRegistrySnapshot BuildSnapshot(List<GeneratedEventDescriptor> descriptors)
     {
-        _byName.AddOrUpdate(d.Name,
-            _ => new List<GeneratedEventDescriptor> { d },
-            (_, list) => { list.Add(d); return list; });
-        _byPayloadType[d.PayloadType] = d;  // latest version wins for typed PublishAsync<T>()
+        var byName = descriptors.GroupBy(d => d.Name)
+            .ToFrozenDictionary(g => g.Key, g => g.ToImmutableArray());
+        var byPayload = descriptors
+            .GroupBy(d => d.PayloadType)
+            .ToFrozenDictionary(g => g.Key, g => g.OrderByDescending(d => d.Version).First());
+        return new EventRegistrySnapshot(byName, byPayload);
     }
 
     // ── Build-time validations ──
@@ -599,6 +586,21 @@ public sealed class EventRegistry : IEventRegistry, IEventMetadataProvider
                     $"Event '{group.Key}': the highest version (v{highest.Version}) is {highest.State}, " +
                     $"but v{active[0].Version} is Active. The highest version must be Active.");
         }
+    }
+}
+
+    private static void ValidateUniquePayloadType(List<GeneratedEventDescriptor> descriptors)
+    {
+        var violations = descriptors
+            .GroupBy(d => d.PayloadType)
+            .Where(g => g.Count(d => d.State == Metadata.Abstractions.DescriptorState.Active) > 1)
+            .ToList();
+
+        if (violations.Count > 0)
+            throw new EventRegistryBuildException(
+                $"PayloadType uniqueness violation: one CLR type maps to multiple Active events. " +
+                "A payload type may map to at most one Active event descriptor. " +
+                "If you need multiple events with the same payload shape, use distinct CLR types.");
     }
 }
 
@@ -870,7 +872,6 @@ public class EventRegistryTests
             PayloadType = payloadType ?? typeof(object),
             Scope = EventScope.Local,
             Reliability = EventReliability.AtLeastOnce,
-            Direction = EventDirection.Internal,
             Importance = EventImportance.Normal
         };
 
@@ -1348,6 +1349,7 @@ public sealed record DeadLetterMessage(
     int EventVersion,              // event version number from registry
     string? EventDescriptorId,     // "evt_A3F8C2D1..." — stable descriptor id
     string? CorrelationId,         // distributed tracing correlation id
+    string? TenantId,              // multi-tenant DLQ dashboard
     EventScope Scope,
     string PayloadTypeFullName,    // "MyApp.Events.CapabilitySucceeded" — survives assembly version changes
     byte[] Payload,
@@ -1685,12 +1687,12 @@ public sealed class EventDescriptorSourceGenerator : IIncrementalGenerator
         return new EventDescriptorInfo
         {
             EventName = name,
+            ExplicitId = GetNamedArgument(attr, "Id") as string,
             Version = (int)(GetNamedArgument(attr, "Version") ?? 1),
             PayloadTypeFullName = symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             Scope = GetNamedArgument(attr, "Scope")?.ToString() ?? "Local",
             Reliability = GetNamedArgument(attr, "Reliability")?.ToString() ?? "AtLeastOnce",
             RequiresIdempotency = (bool)(GetNamedArgument(attr, "RequiresIdempotency") ?? false),
-            Direction = GetNamedArgument(attr, "Direction")?.ToString() ?? "Internal",
             Importance = GetNamedArgument(attr, "Importance")?.ToString() ?? "Normal",
             Description = GetNamedArgument(attr, "Description") as string,
             IsAuditable = (bool)(GetNamedArgument(attr, "IsAuditable") ?? false),
@@ -1723,7 +1725,7 @@ public sealed class EventDescriptorSourceGenerator : IIncrementalGenerator
         {
             sb.AppendLine($"        new GeneratedEventDescriptor");
             sb.AppendLine($"        {{");
-            sb.AppendLine($"            Id = GeneratedEventDescriptor.GenerateId(\"{info.EventName}\"),");
+            sb.AppendLine($"            Id = {(info.ExplicitId is not null ? $"\"{info.ExplicitId}\"" : $"GeneratedEventDescriptor.GenerateId(\"{info.EventName}\")")},");
             sb.AppendLine($"            Name = \"{info.EventName}\",");
             sb.AppendLine($"            Version = {info.Version},");
             sb.AppendLine($"            State = DescriptorState.Active,");
@@ -1732,7 +1734,6 @@ public sealed class EventDescriptorSourceGenerator : IIncrementalGenerator
             sb.AppendLine($"            Scope = EventScope.{info.Scope},");
             sb.AppendLine($"            Reliability = EventReliability.{info.Reliability},");
             sb.AppendLine($"            RequiresIdempotency = {info.RequiresIdempotency.ToString().ToLowerInvariant()},");
-            sb.AppendLine($"            Direction = EventDirection.{info.Direction},");
             sb.AppendLine($"            Importance = EventImportance.{info.Importance},");
             sb.AppendLine($"            Description = {ToLiteral(info.Description)},");
             sb.AppendLine($"            IsAuditable = {info.IsAuditable.ToString().ToLowerInvariant()},");
@@ -1755,12 +1756,12 @@ public sealed class EventDescriptorSourceGenerator : IIncrementalGenerator
 internal sealed class EventDescriptorInfo
 {
     public string EventName { get; set; } = string.Empty;
+    public string? ExplicitId { get; set; }
     public int Version { get; set; } = 1;
     public string PayloadTypeFullName { get; set; } = string.Empty;
     public string Scope { get; set; } = "Local";
     public string Reliability { get; set; } = "AtLeastOnce";
     public bool RequiresIdempotency { get; set; }
-    public string Direction { get; set; } = "Internal";
     public string Importance { get; set; } = "Normal";
     public string? Description { get; set; }
     public bool IsAuditable { get; set; }
@@ -1851,6 +1852,7 @@ public sealed class EfCoreDeadLetterStore : IDeadLetterStore
             EventVersion = message.EventVersion,
             EventDescriptorId = message.EventDescriptorId,
             CorrelationId = message.CorrelationId,
+            TenantId = message.TenantId,
             Scope = message.Scope.ToString(),
             PayloadTypeFullName = message.PayloadTypeFullName,
             Payload = message.Payload,
@@ -1925,6 +1927,7 @@ public sealed class EfCoreDeadLetterStore : IDeadLetterStore
             e.EventVersion,
             e.EventDescriptorId,
             e.CorrelationId,
+            e.TenantId,
             Enum.Parse<EventScope>(e.Scope),
             e.PayloadTypeFullName,
             e.Payload,
@@ -1944,6 +1947,7 @@ public sealed class DeadLetterEntity
     public int EventVersion { get; set; }
     public string? EventDescriptorId { get; set; }
     public string? CorrelationId { get; set; }
+    public string? TenantId { get; set; }
     public string Scope { get; set; } = "Local";
     public string PayloadTypeFullName { get; set; } = string.Empty;
     public byte[] Payload { get; set; } = Array.Empty<byte>();
@@ -2249,7 +2253,6 @@ public class FullChainCompilationTests
                 Scope = EventScope.Integration,
                 Reliability = EventReliability.AtLeastOnce,
                 RequiresIdempotency = true,
-                Direction = EventDirection.Outgoing,
                 Importance = EventImportance.High,
                 IsAuditable = true,
                 IsReplayable = true
