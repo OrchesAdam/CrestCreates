@@ -19,6 +19,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\CrestCreates.Capability\CrestCreates.Capability.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.TestBase\CrestCreates.TestBase.csproj" />
   </ItemGroup>
 </Project>

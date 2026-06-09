@@ -25,6 +25,8 @@
     <ProjectReference Include="..\..\src\CrestCreates.Form.Abstractions\CrestCreates.Form.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.HumanTask.Abstractions\CrestCreates.HumanTask.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Workflow.Abstractions\CrestCreates.Workflow.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Schema\CrestCreates.Schema.csproj" />
     <ProjectReference Include="..\CrestCreates.TestBase\CrestCreates.TestBase.csproj" />
   </ItemGroup>
 </Project>

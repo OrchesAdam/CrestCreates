@@ -12,5 +12,6 @@
     <ProjectReference Include="..\CrestCreates.Event\CrestCreates.Event.csproj" />
     <ProjectReference Include="..\CrestCreates.Schema.Abstractions\CrestCreates.Schema.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.EventBus.Abstractions\CrestCreates.EventBus.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
   </ItemGroup>
 </Project>

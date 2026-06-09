@@ -13,6 +13,7 @@ public static class CapabilityServiceCollectionExtensions
     {
         var builder = new CapabilityPipelineBuilder();
 
+        builder.Use<TenantMiddleware>();
         builder.Use<AuthorizationMiddleware>();
         builder.Use<ValidationMiddleware>();
         builder.Use<IdempotencyMiddleware>();
@@ -24,6 +25,7 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddSingleton<CapabilityHandlerResolver>();
         services.TryAddSingleton<ICapabilityHandlerResolver>(sp => sp.GetRequiredService<CapabilityHandlerResolver>());
         services.TryAddSingleton<ICapabilityPipeline, CapabilityPipeline>();
+        services.TryAddTransient<TenantMiddleware>();
         services.TryAddTransient<AuthorizationMiddleware>();
         services.TryAddTransient<ValidationMiddleware>();
         services.TryAddTransient<IdempotencyMiddleware>();
