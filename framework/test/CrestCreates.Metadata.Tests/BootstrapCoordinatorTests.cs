@@ -19,7 +19,7 @@ public class BootstrapCoordinatorTests
             new TestTask("C", ["A", "B"], () => order.Add("C"))
         };
 
-        var coordinator = new BootstrapCoordinator(tasks, Mock.Of<ILogger<BootstrapCoordinator>>());
+        var coordinator = new BootstrapCoordinator(tasks, Mock.Of<IServiceProvider>(), Mock.Of<ILogger<BootstrapCoordinator>>());
         await coordinator.StartAsync(CancellationToken.None);
 
         order.Should().ContainInOrder("A", "B", "C");
@@ -34,7 +34,7 @@ public class BootstrapCoordinatorTests
             new TestTask("B", ["A"], () => { })
         };
 
-        var coordinator = new BootstrapCoordinator(tasks, Mock.Of<ILogger<BootstrapCoordinator>>());
+        var coordinator = new BootstrapCoordinator(tasks, Mock.Of<IServiceProvider>(), Mock.Of<ILogger<BootstrapCoordinator>>());
 
         var act = () => coordinator.StartAsync(CancellationToken.None);
 
@@ -53,7 +53,7 @@ public class BootstrapCoordinatorTests
             new TestTask("C", ["A"], () => order.Add("C"))
         };
 
-        var coordinator = new BootstrapCoordinator(tasks, Mock.Of<ILogger<BootstrapCoordinator>>());
+        var coordinator = new BootstrapCoordinator(tasks, Mock.Of<IServiceProvider>(), Mock.Of<ILogger<BootstrapCoordinator>>());
         await coordinator.StartAsync(CancellationToken.None);
 
         order.Should().Contain("A");
@@ -68,7 +68,7 @@ public class BootstrapCoordinatorTests
             new FailingTask("A", [], isRequired: true)
         };
 
-        var coordinator = new BootstrapCoordinator(tasks, Mock.Of<ILogger<BootstrapCoordinator>>());
+        var coordinator = new BootstrapCoordinator(tasks, Mock.Of<IServiceProvider>(), Mock.Of<ILogger<BootstrapCoordinator>>());
 
         var act = () => coordinator.StartAsync(CancellationToken.None);
 

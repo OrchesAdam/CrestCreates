@@ -7,13 +7,16 @@ namespace CrestCreates.Metadata;
 public sealed class BootstrapCoordinator : IHostedService
 {
     private readonly IEnumerable<IBootstrapTask> _tasks;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<BootstrapCoordinator> _logger;
 
     public BootstrapCoordinator(
         IEnumerable<IBootstrapTask> tasks,
+        IServiceProvider serviceProvider,
         ILogger<BootstrapCoordinator> logger)
     {
         _tasks = tasks;
+        _serviceProvider = serviceProvider;
         _logger = logger;
     }
 
@@ -27,7 +30,7 @@ public sealed class BootstrapCoordinator : IHostedService
             _logger.LogInformation("Bootstrapping {TaskId} ({TaskType})...", task.TaskId, task.ServiceType.Name);
             try
             {
-                await task.ExecuteAsync(null!, ct);
+                await task.ExecuteAsync(_serviceProvider, ct);
             }
             catch (Exception ex) when (!task.IsRequired)
             {

@@ -35,6 +35,8 @@ public abstract class RegistryBase<TDescriptor>
             if (State == RegistryState.Built) return;
             if (State == RegistryState.Failed)
                 throw new InvalidOperationException("Registry.Build() previously failed. Restart required.");
+            if (State == RegistryState.Building)
+                throw new InvalidOperationException("Registry.Build() is already in progress.");
             State = RegistryState.Building;
         }
 
