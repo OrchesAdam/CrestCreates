@@ -133,6 +133,10 @@ public enum EventReliability { BestEffort, AtLeastOnce, Idempotent }  // Idempot
 public enum EventImportance { Low, Normal, High, Critical }
 ```
 
+### Publish Resolution Rule
+
+`PublishAsync(string eventName, payload)` always resolves to the highest Active version. Deprecated events cannot be published — callers must use the current version's name. There is no API to publish a specific deprecated version.
+
 ### Runtime Constraints (enforced by IEventValidator)
 
 | Rule | Check |
@@ -218,7 +222,9 @@ public sealed class GeneratedEventDescriptorProvider : IEventDescriptorProvider
     public IReadOnlyList<EventDescriptor> GetDescriptors() => [
         new EventDescriptor
         {
-            Id = "evt_6A9D8F3C...",  // Stable deterministic ID (not derived from Name)
+            Id = GeneratedEventDescriptorProvider.GenerateId("capability.succeeded", 1),
+            // = SHA256("capability.succeeded:1") → "evt_A3F8C2D1..."
+            // Derived from (Name, Version) — stable across type renames
             Name = "capability.succeeded",
             Version = 1,
             State = DescriptorState.Active,
@@ -277,11 +283,16 @@ public sealed class EventRegistry : IEventRegistry
     // ... (shared indexes by name, category, etc.)
     public RegistryState State { get; private set; } = RegistryState.Created;
 
-    // Called once at startup for generated descriptors
+    // Called exactly once by EventRegistryHostedService at startup.
+    // Throws if called a second time — generated descriptors are immutable after Build.
     public void Build(IEnumerable<IEventDescriptorProvider> providers)
     {
         if (State == RegistryState.Built)
-            return;  // Idempotent — multiple modules may trigger Build()
+            throw new InvalidOperationException(
+                "EventRegistry.Build() has already completed. Generated descriptors are frozen.");
+        if (State == RegistryState.Failed)
+            throw new InvalidOperationException(
+                "EventRegistry.Build() previously failed. The process must be restarted.");
 
         State = RegistryState.Building;
 
@@ -492,12 +503,10 @@ public enum EventValidationError
 public sealed class RegistryEventValidator : IEventValidator
 {
     private readonly IEventRegistry _registry;
-    private readonly BusKind _busKind;  // injected: Local | Distributed
 
-    public RegistryEventValidator(IEventRegistry registry, BusKind busKind)
+    public RegistryEventValidator(IEventRegistry registry)
     {
         _registry = registry;
-        _busKind = busKind;
     }
 
     public void ValidateOrThrow(string eventName, object? payload)
@@ -529,21 +538,28 @@ public sealed class RegistryEventValidator : IEventValidator
             throw new EventValidationException(
                 $"Event '{eventName}' has been removed.");
 
-        // Scope boundary enforcement (uses latest version)
-        if (latest.Scope == EventScope.Local && _busKind == BusKind.Distributed)
-            throw new EventValidationException(
-                $"Event '{eventName}' has Scope.Local — cannot publish to a distributed bus.");
-
-        if (latest.Scope == EventScope.Domain && _busKind == BusKind.Distributed)
-            throw new EventValidationException(
-                $"Event '{eventName}' has Scope.Domain — cannot publish cross-process.");
-
         // Schema validation deferred to Phase 3
     }
 }
-
-public enum BusKind { Local, Distributed }
 ```
+
+**Scope enforcement is transport-layer, not validator-layer.** Distributed bus base classes check scope independently:
+
+```csharp
+// DistributedEventBusBase
+protected void ValidateScope(EventDescriptor descriptor)
+{
+    if (descriptor.Scope == EventScope.Local)
+        throw new EventValidationException(
+            $"Event '{descriptor.Name}' has Scope.Local — cannot publish to a distributed bus.");
+
+    if (descriptor.Scope == EventScope.Domain)
+        throw new EventValidationException(
+            $"Event '{descriptor.Name}' has Scope.Domain — cannot publish cross-process.");
+}
+```
+
+`IEventValidator` is metadata-only (registered? active? deprecated?). Transport scope checks live where the transport decision is made. This keeps `BusKind` out of the validator and prevents coupling as transports grow (RabbitMQ, Kafka, Azure Service Bus, NATS, Redis Streams).
 
 ### Wired Into Bus Base Classes
 
@@ -666,7 +682,7 @@ Add `PayloadSchemaRef` to `DeadLetterMessage` so the DLQ can reconstruct and dis
 6. **`IDeadLetterStore` + enhanced `DeadLetterMessage`** — EventBus.Abstractions
 7. **`InMemoryDeadLetterStore` → `IDeadLetterStore` refactor** — EventBus.Local
 8. **Source generator for `[CrestEvent]`** — CodeGenerator
-9. **Wire `IEventValidator` into bus base classes** — EventBus.Local/Channel/RabbitMQ/Kafka
+9. **Wire `IEventValidator` + scope enforcement into buses** — EventBus.Local/Channel/RabbitMQ/Kafka. Validator handles metadata checks; scope enforcement (Local/Domain vs Distributed) lives in DistributedEventBusBase
 10. **`EfCoreDeadLetterStore`** — EventBus.DeadLetter.EFCore (new project)
 11. **Integration tests** — validate the full chain
 
@@ -735,5 +751,5 @@ Extend existing test projects — no new test projects needed:
 
 > **Phase 2b forward reference:** `EventReliability` is metadata only in Phase 2a. Phase 2b will introduce `DeliveryStrategy` resolution that maps `EventReliability` to transport behavior — `BestEffort` → fire-and-forget, `AtLeastOnce` → Outbox + retry, `Idempotent` → Outbox + idempotency check. The `EventReliability` enum is designed to accommodate this without schema changes.
 
-> **Phase 3 forward reference — typed publish:** `EventPublishingMiddleware` currently uses bare strings (`"capability.succeeded"`). The validator catches unregistered names at runtime, but Phase 3 should introduce `Publish<TEvent>(TEvent evt)` with compile-time resolution from the EventRegistry. Bare-string `Publish(string, payload)` becomes `[Obsolete]` at that point. The `IEventBus` interface already reserves the generic overload: `Task PublishAsync<TEvent>(TEvent evt)` where `TEvent : IDomainEvent`. Phase 2a implementations throw `NotSupportedException`; Phase 3 will resolve `TEvent` → `EventDescriptor` via the registry.
+> **Phase 2a — typed publish:** The source generator also emits an `EventTypeMap` (typeof → event name). `IEventBus.PublishAsync<TEvent>(TEvent evt)` resolves the event name from the map at zero runtime cost, then delegates to the string-based path. This eliminates magic strings for all `[CrestEvent]`-annotated types immediately. The string-based `PublishAsync(string, payload)` remains as the low-level API for dynamic events, but generated events use the typed overload by default.
 
