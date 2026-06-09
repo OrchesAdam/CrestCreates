@@ -105,6 +105,7 @@ public sealed record EventDescriptor : IVersionedDescriptor
 
     // ── 6. Ownership ──
     public VersionedDescriptorRef<CapabilityDescriptor>? CapabilityRef { get; init; }
+    public string? CreatedBy { get; init; }          // e.g. "CapabilityRuntime", "WorkflowRuntime"
 
     // ── Classification ──
     public EventImportance Importance { get; init; }    // Low | Normal | High | Critical
@@ -284,8 +285,7 @@ public sealed class EventRegistry : IEventRegistry
 
         var descriptors = providers.SelectMany(p => p.GetDescriptors()).ToList();
 
-        ValidateNoDuplicateNames(descriptors);
-        ValidateNoDuplicateVersions(descriptors);
+        ValidateNoDuplicateNameVersions(descriptors);
         // Future: ValidateCapabilityRefs(descriptors);  // Phase 3
 
         foreach (var descriptor in descriptors)
@@ -330,21 +330,7 @@ This guarantees the validator always checks against the active (highest-version,
 
 ### Build-Time Validation
 
-    private static void ValidateNoDuplicateNames(List<EventDescriptor> descriptors)
-    {
-        var duplicates = descriptors
-            .GroupBy(d => d.Name)
-            .Where(g => g.Count() > 1)
-            .Select(g => g.Key)
-            .ToList();
-
-        if (duplicates.Count > 0)
-            throw new EventRegistryBuildException(
-                $"Duplicate event names detected: {string.Join(", ", duplicates)}. " +
-                "Each event name must be declared by exactly one module.");
-    }
-
-    private static void ValidateNoDuplicateVersions(List<EventDescriptor> descriptors)
+    private static void ValidateNoDuplicateNameVersions(List<EventDescriptor> descriptors)
     {
         var duplicates = descriptors
             .GroupBy(d => (d.Name, d.Version))
@@ -354,7 +340,9 @@ This guarantees the validator always checks against the active (highest-version,
 
         if (duplicates.Count > 0)
             throw new EventRegistryBuildException(
-                $"Duplicate event versions detected: {string.Join(", ", duplicates)}.");
+                $"Duplicate (name, version) pairs detected: {string.Join(", ", duplicates)}. " +
+                "Each (name, version) pair must be declared by exactly one module. " +
+                "Use a new Version to evolve an existing event name.");
     }
 }
 ```
@@ -371,7 +359,49 @@ Created ──► Build ──► Generated Frozen
 
 Generated descriptors are frozen at startup. Dynamic descriptors can be added at runtime. Both are queryable through the same `IEventRegistry` interface.
 
+**Precedence rule:** If a dynamic descriptor conflicts with a generated descriptor (same name + version), the generated descriptor wins — `RegisterDynamic()` returns `false` and the conflict is logged.
+
 Error at build time, not at runtime.
+
+### Hosted Service
+
+`EventRegistry` is built by a hosted service at application start, ensuring fail-fast before any requests are served:
+
+```csharp
+// CrestCreates.Event/EventRegistryHostedService.cs
+
+public sealed class EventRegistryHostedService : IHostedService
+{
+    private readonly EventRegistry _registry;
+    private readonly IEnumerable<IEventDescriptorProvider> _providers;
+
+    public EventRegistryHostedService(
+        EventRegistry registry,
+        IEnumerable<IEventDescriptorProvider> providers)
+    {
+        _registry = registry;
+        _providers = providers;
+    }
+
+    public Task StartAsync(CancellationToken ct)
+    {
+        _registry.Build(_providers);  // Fail-fast on collision
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+}
+```
+
+Registration: `services.AddHostedService<EventRegistryHostedService>()` in `EventModule`.
+
+Startup ordering (future):
+```
+EventRegistryHostedService.Build()
+  → CapabilityRegistryHostedService.Build()
+    → WorkflowRegistryHostedService.Build()
+      → App Ready
+```
 
 ---
 
@@ -391,7 +421,6 @@ public interface IEventValidator
 public sealed record ValidationResult(
     bool IsValid,
     EventValidationError ErrorCode,
-    string? Error,
     EventDescriptor? Descriptor);
 
 public enum EventValidationError
@@ -582,7 +611,7 @@ Steps 1–5 (metadata foundation) are independent of 6–11 (DLQ). Steps 6–7 m
 | Area | Tests |
 |------|-------|
 | `EventRegistry` | Register, GetByName, GetActiveVersion, IsBuilt flag, duplicate Build is idempotent |
-| `EventRegistry.Build()` validation | Duplicate event name → throws; duplicate (name, version) → throws; single registration succeeds |
+| `EventRegistry.Build()` validation | Duplicate (name, version) → throws; same name + different versions → succeeds; single registration succeeds |
 | `EventRegistry` version resolution | v1 Deprecated + v2 Active → GetByName returns v2; GetByNameAndVersion("name", 1) returns v1 |
 | `RegistryEventValidator` | Registered event → valid; unregistered → throws; Deprecated → throws with SupersededById message; Local scope on distributed bus → throws |
 | `InMemoryDeadLetterStore` | Full lifecycle: Enqueue → GetPending → MarkRetrying → MarkRetried; MarkArchived after max retries |
@@ -594,7 +623,7 @@ Steps 1–5 (metadata foundation) are independent of 6–11 (DLQ). Steps 6–7 m
 | Test | Verifies |
 |------|----------|
 | Full compilation chain | `[CrestEvent]` → generator → provider → registry.Build() → validator.ValidateOrThrow() → pass |
-| Duplicate event detection | Two modules declare `"capability.succeeded"` → `Build()` throws `EventRegistryBuildException` |
+| Duplicate (name, version) detection | Two modules declare `"capability.succeeded"` v1 → `Build()` throws `EventRegistryBuildException` |
 | Version upgrade resolution | v1 Deprecated + v2 Active → `GetByName()` returns v2; validator accepts v2, rejects v1 |
 | Scope enforcement | Publish `Scope.Local` event via RabbitMQ → throws |
 | DLQ metadata | Handler throws → `IDeadLetterStore` receives `DeadLetterMessage` with EventName, Scope, ExceptionType populated |
@@ -629,5 +658,7 @@ Extend existing test projects — no new test projects needed:
 | `CapabilityRef` runtime resolution via Capability Registry | Phase 3 |
 | `PayloadSchema` auto-generation from `PayloadType` | Phase 3 |
 | `EventReliability` driving bus behavior (AtLeastOnce → Outbox) | Phase 2b (Outbox) |
+
+> **Phase 2b forward reference:** `EventReliability` is metadata only in Phase 2a. Phase 2b will introduce `DeliveryStrategy` resolution that maps `EventReliability` to transport behavior — `AtMostOnce` → fire-and-forget, `AtLeastOnce` → Outbox + retry, `ExactlyOnce` → Outbox + idempotency check. The `EventReliability` enum is designed to accommodate this without schema changes.
 | `PayloadSchemaRef` in `DeadLetterMessage` | Phase 3 |
 | AoT optimization (`FrozenDictionary`, `switch`-based lookup) | Phase 4 |
