@@ -18,6 +18,7 @@ public static class CapabilityServiceCollectionExtensions
         builder.Use<ValidationMiddleware>();
         builder.Use<IdempotencyMiddleware>();
         builder.Use<EventPublishingMiddleware>();
+        builder.Use<MetricsMiddleware>();
 
         configure?.Invoke(builder);
 
@@ -30,6 +31,7 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddTransient<ValidationMiddleware>();
         services.TryAddTransient<IdempotencyMiddleware>();
         services.TryAddTransient<EventPublishingMiddleware>();
+        services.TryAddTransient<MetricsMiddleware>();
 
         return services;
     }

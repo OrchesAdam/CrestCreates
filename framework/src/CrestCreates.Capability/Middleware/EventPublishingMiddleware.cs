@@ -34,9 +34,12 @@ public sealed class EventPublishingMiddleware : ICapabilityPipelineMiddleware
             capabilityName = context.CapabilityName,
             capabilityVersion = context.CapabilityVersion,
             correlationId = context.CorrelationId,
+            tenantId = context.TenantId,
+            userId = context.UserId,
             status = result.Status.ToString(),
             errorCode = result.ErrorCode,
-            durationMs = result.Duration.TotalMilliseconds
+            durationMs = result.Duration.TotalMilliseconds,
+            timestamp = DateTimeOffset.UtcNow
         }, context.CancellationToken).ConfigureAwait(false);
 
         return result;
