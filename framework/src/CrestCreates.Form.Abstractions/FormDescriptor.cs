@@ -3,7 +3,7 @@ using CrestCreates.Schema.Abstractions;
 
 namespace CrestCreates.Form.Abstractions;
 
-public sealed class FormDescriptor : IVersionedDescriptor
+public sealed class FormDescriptor : IInteractionDescriptor
 {
     public DescriptorKind Kind => DescriptorKind.Form;
     public string Id { get; init; } = string.Empty;

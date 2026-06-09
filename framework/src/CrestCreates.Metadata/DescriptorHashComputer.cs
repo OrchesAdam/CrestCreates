@@ -111,7 +111,7 @@ public static class DescriptorHashComputer
                 h.Version,
                 h.State,
                 h.SupersededById,
-                Form = new { h.Form.Id, h.Form.Version },
+                Interaction = new { h.Interaction.Id, h.Interaction.Version },
                 InputSchema = h.InputSchema == null ? null : new { h.InputSchema.Value.Id, h.InputSchema.Value.Version },
                 OutputSchema = h.OutputSchema == null ? null : new { h.OutputSchema.Value.Id, h.OutputSchema.Value.Version },
                 h.AssigneeStrategy,

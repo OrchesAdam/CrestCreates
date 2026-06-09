@@ -1,4 +1,3 @@
-using CrestCreates.Form.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 
@@ -15,7 +14,7 @@ public sealed class HumanTaskDescriptor : IVersionedDescriptor
     public string DefinitionHash { get; init; } = string.Empty;
     public int Version { get; init; }
 
-    public VersionedDescriptorRef<FormDescriptor> Form { get; init; }
+    public VersionedDescriptorRef<IInteractionDescriptor> Interaction { get; init; }
     public VersionedDescriptorRef<SchemaDescriptor>? InputSchema { get; init; }
     public VersionedDescriptorRef<SchemaDescriptor>? OutputSchema { get; init; }
     public AssigneeStrategy AssigneeStrategy { get; init; }

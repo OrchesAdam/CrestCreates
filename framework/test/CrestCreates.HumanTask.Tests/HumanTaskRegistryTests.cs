@@ -1,4 +1,3 @@
-using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
@@ -15,7 +14,7 @@ public class HumanTaskRegistryTests
             Id = id,
             Name = name,
             Version = version,
-            Form = new VersionedDescriptorRef<FormDescriptor>("form_01", 1)
+            Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("form_01", 1)
         };
     }
 

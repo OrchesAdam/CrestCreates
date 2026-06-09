@@ -6,7 +6,7 @@ using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 
-namespace CrestCreates.Metadata.Abstractions;
+namespace CrestCreates.Metadata;
 
 [JsonSerializable(typeof(DescriptorManifest))]
 [JsonSerializable(typeof(DescriptorSnapshot))]

@@ -42,6 +42,19 @@ public sealed class EventPublishingMiddleware : ICapabilityPipelineMiddleware
             timestamp = DateTimeOffset.UtcNow
         }, context.CancellationToken).ConfigureAwait(false);
 
+        // Publish domain events collected during handler execution
+        if (context.Items.TryGetValue("__domainEvents", out var val)
+            && val is System.Collections.IEnumerable domainEvents)
+        {
+            foreach (var domainEvent in domainEvents)
+            {
+                await _publisher.PublishAsync(
+                    domainEvent.GetType().Name,
+                    domainEvent,
+                    context.CancellationToken).ConfigureAwait(false);
+            }
+        }
+
         return result;
     }
 }

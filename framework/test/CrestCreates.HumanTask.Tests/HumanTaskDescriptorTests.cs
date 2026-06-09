@@ -1,5 +1,4 @@
 using CrestCreates.Capability.Abstractions;
-using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
@@ -17,25 +16,25 @@ public class HumanTaskDescriptorTests
             Id = "ht_01",
             Name = "manager.approval",
             Version = 1,
-            Form = new VersionedDescriptorRef<FormDescriptor>("form_01", 1)
+            Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("form_01", 1)
         };
 
         task.Kind.Should().Be(DescriptorKind.HumanTask);
     }
 
     [Fact]
-    public void HumanTaskDescriptor_References_Form_By_VersionedRef()
+    public void HumanTaskDescriptor_References_Interaction_By_VersionedRef()
     {
         var task = new HumanTaskDescriptor
         {
             Id = "ht_01",
             Name = "manager.approval",
             Version = 1,
-            Form = new VersionedDescriptorRef<FormDescriptor>("form_01", 3)
+            Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("form_01", 3)
         };
 
-        task.Form.Id.Should().Be("form_01");
-        task.Form.Version.Should().Be(3);
+        task.Interaction.Id.Should().Be("form_01");
+        task.Interaction.Version.Should().Be(3);
     }
 
     [Fact]
@@ -46,7 +45,7 @@ public class HumanTaskDescriptorTests
             Id = "ht_01",
             Name = "simple.task",
             Version = 1,
-            Form = new VersionedDescriptorRef<FormDescriptor>("form_01", 1)
+            Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("form_01", 1)
         };
 
         task.InputSchema.Should().BeNull();
@@ -60,7 +59,7 @@ public class HumanTaskDescriptorTests
             Id = "ht_01",
             Name = "manager.approval",
             Version = 1,
-            Form = new VersionedDescriptorRef<FormDescriptor>("form_01", 1),
+            Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("form_01", 1),
             Outcomes = new[]
             {
                 new CompletionOutcome
@@ -89,7 +88,7 @@ public class HumanTaskDescriptorTests
             Id = "ht_01",
             Name = "simple.task",
             Version = 1,
-            Form = new VersionedDescriptorRef<FormDescriptor>("form_01", 1),
+            Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("form_01", 1),
             AssigneeStrategy = AssigneeStrategy.CandidateGroup
         };
 
@@ -104,7 +103,7 @@ public class HumanTaskDescriptorTests
             Id = "ht_01",
             Name = "urgent.task",
             Version = 1,
-            Form = new VersionedDescriptorRef<FormDescriptor>("form_01", 1),
+            Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("form_01", 1),
             Timeout = TimeSpan.FromHours(24)
         };
 

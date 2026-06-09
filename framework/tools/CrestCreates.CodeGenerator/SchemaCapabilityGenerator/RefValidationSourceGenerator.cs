@@ -48,6 +48,9 @@ public sealed class RefValidationSourceGenerator : IIncrementalGenerator
         var idValue = ctx.SemanticModel.GetConstantValue(idArg.Expression);
         if (!idValue.HasValue || idValue.Value is not string id) return null;
 
+        // Skip short IDs (test data like "cap_01") — only validate UUID-length descriptor IDs
+        if (id.Length < 12) return null;
+
         var versionArg = creation.ArgumentList!.Arguments.Skip(1).FirstOrDefault();
         int? version = null;
         if (versionArg != null)
@@ -122,12 +125,15 @@ public sealed class RefValidationSourceGenerator : IIncrementalGenerator
 
     private static bool IsDescriptorId(string value)
     {
-        return value.StartsWith("schema_")
+        // Descriptor IDs follow the pattern: prefix_ + hex chars
+        // Minimum: 12 chars (e.g., "schema_a1b2c3") — filters out test data like "cap_01"
+        if (value.Length < 12) return false;
+        return (value.StartsWith("schema_")
             || value.StartsWith("cap_")
             || value.StartsWith("evt_")
             || value.StartsWith("form_")
             || value.StartsWith("ht_")
-            || value.StartsWith("wf_");
+            || value.StartsWith("wf_"));
     }
 }
 

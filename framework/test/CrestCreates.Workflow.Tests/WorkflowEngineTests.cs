@@ -365,7 +365,7 @@ public class WorkflowEngineTests
         {
             DraftId = "wf_ckpt_instance_01",
             DraftType = "workflow.checkpoint",
-            Schema = new Schema.Abstractions.VersionedDescriptorRef<Schema.Abstractions.SchemaDescriptor>("s", 1),
+            Schema = new VersionedDescriptorRef<Schema.Abstractions.SchemaDescriptor>("s", 1),
             TenantId = null,
             OwnerId = "instance_01",
             PayloadJson = checkpointJson
@@ -399,7 +399,7 @@ public class WorkflowEngineTests
         {
             DraftId = "wf_ckpt_instance_02",
             DraftType = "workflow.checkpoint",
-            Schema = new Schema.Abstractions.VersionedDescriptorRef<Schema.Abstractions.SchemaDescriptor>("s", 1),
+            Schema = new VersionedDescriptorRef<Schema.Abstractions.SchemaDescriptor>("s", 1),
             TenantId = null,
             OwnerId = "instance_02",
             PayloadJson = checkpointJson
@@ -410,5 +410,105 @@ public class WorkflowEngineTests
 
         instance.InstanceId.Should().Be("instance_02");
         instance.Status.Should().Be(WorkflowInstanceStatus.Completed);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_HumanTaskTarget_SuspendsInstance()
+    {
+        var registry = new WorkflowRegistry();
+        registry.Register(CreateWorkflow("wf_01", "suspend.wf", 1,
+            new WorkflowStep
+            {
+                Id = "step_01", Name = "Human Step",
+                Target = new HumanTaskTarget
+                {
+                    HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht_01", 1)
+                }
+            }));
+        var engine = new WorkflowEngine(registry);
+
+        var instance = await engine.ExecuteAsync("suspend.wf");
+
+        instance.Status.Should().Be(WorkflowInstanceStatus.Suspended);
+        instance.CurrentStepId.Should().BeNull();
+        instance.StepResults.Should().HaveCount(1);
+        instance.StepResults[0].IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_StepsAfterHumanTask_NotExecuted()
+    {
+        var registry = new WorkflowRegistry();
+        registry.Register(new WorkflowDescriptor
+        {
+            Id = "wf_01", Name = "suspend2.wf", Version = 1, State = DescriptorState.Active,
+            Steps = new List<WorkflowStep>
+            {
+                new()
+                {
+                    Id = "step_01", Name = "Human Step",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht_01", 1)
+                    }
+                },
+                new()
+                {
+                    Id = "step_02", Name = "Never Executed",
+                    Target = new CapabilityTarget
+                    {
+                        Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1)
+                    }
+                }
+            }
+        });
+        var engine = new WorkflowEngine(registry);
+
+        var instance = await engine.ExecuteAsync("suspend2.wf");
+
+        instance.Status.Should().Be(WorkflowInstanceStatus.Suspended);
+        instance.StepResults.Should().HaveCount(1);
+        instance.StepResults[0].StepId.Should().Be("step_01");
+    }
+
+    [Fact]
+    public async Task ResumeAsync_AfterSuspend_ContinuesFromNextStep()
+    {
+        var registry = new WorkflowRegistry();
+        registry.Register(new WorkflowDescriptor
+        {
+            Id = "wf_01", Name = "resume.wf", Version = 1, State = DescriptorState.Active,
+            Steps = new List<WorkflowStep>
+            {
+                new()
+                {
+                    Id = "step_01", Name = "Human Step",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht_01", 1)
+                    }
+                },
+                new()
+                {
+                    Id = "step_02", Name = "Next Step",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht_01", 1)
+                    }
+                }
+            }
+        });
+
+        var draftStore = new Draft.InMemoryDraftStore();
+        var engine = new WorkflowEngine(registry, draftStore: draftStore);
+
+        var instance = await engine.ExecuteAsync("resume.wf");
+        instance.Status.Should().Be(WorkflowInstanceStatus.Suspended);
+
+        var resumed = await engine.ResumeAsync(instance.InstanceId);
+
+        resumed.Status.Should().Be(WorkflowInstanceStatus.Suspended);
+        resumed.StepResults.Should().HaveCount(2);
+        resumed.StepResults[1].StepId.Should().Be("step_02");
     }
 }

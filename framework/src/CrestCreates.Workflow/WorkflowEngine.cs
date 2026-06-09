@@ -137,6 +137,12 @@ public sealed class WorkflowEngine : IWorkflowEngine
 
             instance.StepResults.Add(result);
 
+            if (instance.Status == WorkflowInstanceStatus.Suspended)
+            {
+                instance.CurrentStepId = null;
+                return instance;
+            }
+
             if (!result.IsSuccess)
             {
                 var (handled, shouldRetry) = HandleStepError(step, ref retryCount);
@@ -193,12 +199,8 @@ public sealed class WorkflowEngine : IWorkflowEngine
             CapabilityTarget capTarget => await ExecuteCapabilityTarget(
                 instance, capTarget, ct).ConfigureAwait(false),
 
-            HumanTaskTarget => new WorkflowStepResult
-            {
-                StepId = step.Id,
-                IsSuccess = true,
-                Duration = DateTimeOffset.UtcNow - startedAt
-            },
+            HumanTaskTarget => await SuspendInstance(
+                instance, step, descriptor, ct, startedAt).ConfigureAwait(false),
 
             SubWorkflowTarget subTarget => await ExecuteSubWorkflowTarget(
                 instance, subTarget, ct).ConfigureAwait(false),
@@ -326,6 +328,26 @@ public sealed class WorkflowEngine : IWorkflowEngine
                 (handled: false, shouldRetry: false),
 
             _ => (handled: false, shouldRetry: false)
+        };
+    }
+
+    private async Task<WorkflowStepResult> SuspendInstance(
+        WorkflowInstance instance,
+        WorkflowStep step,
+        WorkflowDescriptor descriptor,
+        CancellationToken ct,
+        DateTimeOffset startedAt)
+    {
+        instance.Status = WorkflowInstanceStatus.Suspended;
+        await CheckpointAsync(instance, descriptor, ct).ConfigureAwait(false);
+        instance.CompletedAt = DateTimeOffset.UtcNow;
+
+        return new WorkflowStepResult
+        {
+            StepId = step.Id,
+            StepName = step.Name,
+            IsSuccess = true,
+            Duration = DateTimeOffset.UtcNow - startedAt
         };
     }
 
