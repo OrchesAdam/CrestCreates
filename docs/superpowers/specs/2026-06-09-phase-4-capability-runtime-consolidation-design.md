@@ -64,7 +64,7 @@ Phase 4 **不实现**：
 🆕 统一 CapabilityDescriptor（Metadata 版本吸收运行时属性）
 🆕 统一 CapabilityRegistry（删除 ConcurrentDictionary 版本）
 🆕 ICapabilityDispatcher（Facade 层）
-🆕 ICapabilityDescriptorResolver（外部唯一解析入口）
+🆕 ICapabilityResolver（外部唯一解析入口）
 🆕 ICapabilityCatalog（浏览/发现接口）
 🆕 ICapabilityAuditStore + AuditMiddleware
 🆕 CapabilityHandlerValidator + CapabilitySchemaValidator
@@ -284,28 +284,30 @@ public interface ICapabilityRegistry
 ### 5.1 架构约束
 
 ```text
-ICapabilityDescriptorResolver 是外部唯一解析入口。
+ICapabilityResolver 是外部唯一解析入口。
 Resolver 是 Registry 的只读适配器。
 
 CapabilityRegistry (source of truth)
       ↑
       │
- ICapabilityDescriptorResolver
+ ICapabilityResolver
  (单个解析：name → descriptor)
 ```
 
 Alias 解析不属于 Resolver，属于 Dispatcher/Gateway/HTTP/MCP 层。
 
-### 5.2 ICapabilityDescriptorResolver
+### 5.2 ICapabilityResolver
 
 外部唯一解析入口。所有 Runtime（Workflow, Agent, HTTP, MCP）必须通过此接口解析 Capability，禁止直接查 Registry。
 
+名称不含 "Descriptor"：返回类型已在签名中体现，避免 `IWorkflowDescriptorResolver` / `ISchemaDescriptorResolver` 等命名爆炸。
+
 ```csharp
-// Capability.Abstractions/ICapabilityDescriptorResolver.cs
-public interface ICapabilityDescriptorResolver
+// Capability.Abstractions/ICapabilityResolver.cs
+public interface ICapabilityResolver
 {
     /// <summary>
-    /// 解析能力名称或版本，返回完整 CapabilityDescriptor。
+    /// 解析 Logical Capability Id + 版本选择，返回完整 CapabilityDescriptor。
     ///
     /// 输入格式：
     ///   "customer.create"     → 最新 Active 版本
@@ -317,7 +319,7 @@ public interface ICapabilityDescriptorResolver
     ///
     /// 找不到 → 抛出 CapabilityNotFoundException
     /// </summary>
-    CapabilityDescriptor Resolve(string capabilityNameOrVersion);
+    CapabilityDescriptor Resolve(string capabilityIdOrVersion);
 }
 ```
 
@@ -335,7 +337,7 @@ internal interface ICapabilityVersionResolver
 }
 ```
 
-**DefaultCapabilityDescriptorResolver** 内部使用 `ICapabilityVersionResolver`。
+**DefaultCapabilityResolver** 内部使用 `ICapabilityVersionResolver`。
 
 ---
 
@@ -377,7 +379,7 @@ public interface ICapabilityDispatcher
 // Capability/CapabilityDispatcher.cs
 internal sealed class CapabilityDispatcher : ICapabilityDispatcher
 {
-    private readonly ICapabilityDescriptorResolver _descriptorResolver;
+    private readonly ICapabilityResolver _descriptorResolver;
     private readonly ICapabilityPipeline _pipeline;
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUser _currentUser;
@@ -566,11 +568,17 @@ internal sealed class AuditMiddleware : ICapabilityPipelineMiddleware
         var sw = Stopwatch.StartNew();
         CapabilityExecutionResult? result = null;
         Exception? unhandledException = null;
+        bool cancelled = false;
 
         try
         {
             result = await next(context);
             return result;
+        }
+        catch (OperationCanceledException)
+        {
+            cancelled = true;
+            throw;
         }
         catch (Exception ex)
         {
@@ -584,6 +592,11 @@ internal sealed class AuditMiddleware : ICapabilityPipelineMiddleware
             // Audit 失败不影响业务执行
             try
             {
+                var errorCode = cancelled
+                    ? "CANCELLED"
+                    : result?.ErrorCode
+                      ?? (unhandledException is not null ? "UNHANDLED_EXCEPTION" : null);
+
                 await _auditStore.RecordAsync(new CapabilityExecutionRecord
                 {
                     ExecutionId = executionId,
@@ -595,7 +608,7 @@ internal sealed class AuditMiddleware : ICapabilityPipelineMiddleware
                     CorrelationId = context.CorrelationId,
                     Source = context.InvocationSource,
                     IsSuccess = result?.IsSuccess ?? false,
-                    ErrorCode = result?.ErrorCode ?? (unhandledException is not null ? "UNHANDLED_EXCEPTION" : null),
+                    ErrorCode = errorCode,
                     Duration = sw.Elapsed,
                     Timestamp = DateTimeOffset.UtcNow
                 });
@@ -637,7 +650,7 @@ public interface ICapabilityHandlerRegistry
     IReadOnlyDictionary<string, Type> GetHandlerMappings();
 }
 
-// Metadata/CapabilityHandlerValidator.cs
+// Capability/Bootstrap/CapabilityHandlerValidator.cs
 public sealed class CapabilityHandlerValidator : IRegistryValidator<CapabilityDescriptor>
 {
     private readonly ICapabilityHandlerRegistry _handlerRegistry;
@@ -755,7 +768,7 @@ public static IServiceCollection AddCapabilityRuntime(
 
     // 新增
     services.TryAddSingleton<ICapabilityDispatcher, CapabilityDispatcher>();
-    services.TryAddSingleton<ICapabilityDescriptorResolver, DefaultCapabilityDescriptorResolver>();
+    services.TryAddSingleton<ICapabilityResolver, DefaultCapabilityResolver>();
 
     // 内部组件
     services.TryAddSingleton<ICapabilityVersionResolver, DefaultCapabilityVersionResolver>();
@@ -779,9 +792,10 @@ public static IServiceCollection AddCapabilityRuntime(
 }
 
 // 开发环境显式开启 InMemory 审计
+// 使用 Replace 确保覆盖 NullCapabilityAuditStore，避免 IEnumerable 出现多个实现
 public static IServiceCollection AddInMemoryCapabilityAudit(this IServiceCollection services)
 {
-    services.AddSingleton<ICapabilityAuditStore, InMemoryCapabilityAuditStore>();
+    services.Replace(ServiceDescriptor.Singleton<ICapabilityAuditStore, InMemoryCapabilityAuditStore>());
     return services;
 }
 ```
@@ -790,40 +804,60 @@ public static IServiceCollection AddInMemoryCapabilityAudit(this IServiceCollect
 
 ## 12. Execution Flow
 
-### 12.1 完整调用链
+### 12.1 调用路径
+
+**Path A**：Caller 已持有 Descriptor（Workflow/Agent 等推荐路径）
 
 ```text
-External Caller (HTTP / Agent / Workflow / HumanTask)
+Caller
+  ↓
+ICapabilityResolver.Resolve(id)        ← 可选，Caller 自行决定何时 Resolve
+  ↓
+CapabilityDescriptor
+  ↓
+ICapabilityDispatcher.DispatchAsync(descriptor, input, configureContext)
+  ↓
+Pipeline
+```
+
+**Path B**：Caller 只有 Id（简单场景）
+
+```text
+Caller
+  ↓
+ICapabilityDispatcher.DispatchAsync(id, input, configureContext)
+  ↓
+ICapabilityResolver.Resolve(id)        ← Dispatcher 内部自动 Resolve
+  ↓
+Pipeline
+```
+
+### 12.2 Pipeline 内部
+
+```text
+┌──────────────────────────────────────────────────────┐
+│  AuditMiddleware             ← try/finally，最外层    │
+│    ↓                                                  │
+│  RateLimitMiddleware                                 │
+│    ↓                                                  │
+│  TenantMiddleware                                    │
+│    ↓                                                  │
+│  AuthorizationMiddleware    ← Permissions            │
+│    ↓                                                  │
+│  ValidationMiddleware       ← InputSchema            │
+│    ↓                                                  │
+│  IdempotencyMiddleware                               │
+│    ↓                                                  │
+│  MetricsMiddleware            ← 包裹 Handler         │
+│    ↓                                                  │
+│  EventPublishingMiddleware                           │
+│    ↓                                                  │
+│  Handler (ICapabilityHandlerInvoker)                 │
+└──────────────────────────────────────────────────────┘
          ↓
-    ICapabilityDescriptorResolver.Resolve(name)
+CapabilityExecutionResult
          ↓
-    CapabilityDescriptor (完整，含版本/Schema/Permissions)
-         ↓
-    ICapabilityDispatcher.DispatchAsync(name, input, configureContext)
-         ↓
-    ┌──────────────────────────────────────────────────────┐
-    │  AuditMiddleware             ← try/finally，最外层    │
-    │    ↓                                                  │
-    │  RateLimitMiddleware                                 │
-    │    ↓                                                  │
-    │  TenantMiddleware                                    │
-    │    ↓                                                  │
-    │  AuthorizationMiddleware    ← Permissions            │
-    │    ↓                                                  │
-    │  ValidationMiddleware       ← InputSchema            │
-    │    ↓                                                  │
-    │  IdempotencyMiddleware                               │
-    │    ↓                                                  │
-    │  MetricsMiddleware            ← 包裹 Handler         │
-    │    ↓                                                  │
-    │  EventPublishingMiddleware                           │
-    │    ↓                                                  │
-    │  Handler (ICapabilityHandlerInvoker)                 │
-    └──────────────────────────────────────────────────────┘
-         ↓
-    CapabilityExecutionResult
-         ↓
-    ICapabilityAuditStore.RecordAsync(record)
+ICapabilityAuditStore.RecordAsync(record)
 ```
 
 ---
@@ -838,7 +872,7 @@ External Caller (HTTP / Agent / Workflow / HumanTask)
 | `Capability.Abstractions/ICapabilityDispatcher.cs` | Dispatcher 接口 |
 | `Capability.Abstractions/ICapabilityAuditStore.cs` | Audit 接口 |
 | `Capability.Abstractions/CapabilityExecutionRecord.cs` | Audit 记录 |
-| `Capability.Abstractions/ICapabilityDescriptorResolver.cs` | 外部唯一解析入口 |
+| `Capability.Abstractions/ICapabilityResolver.cs` | 外部唯一解析入口（原 ICapabilityDescriptorResolver） |
 | `Capability.Abstractions/CapabilityNotFoundException.cs` | 解析失败异常 |
 | `Metadata.Abstractions/ICapabilityHandlerRegistry.cs` | Source Generator handler 注册表接口 |
 | `Metadata.Abstractions/IDescriptorLookup.cs` | Bootstrap 阶段只读查询接口 |
@@ -847,11 +881,11 @@ External Caller (HTTP / Agent / Workflow / HumanTask)
 | `Capability/CapabilityDispatcher.cs` | Dispatcher 实现 |
 | `Capability/InMemoryCapabilityAuditStore.cs` | InMemory Audit（开发环境） |
 | `Capability/NullCapabilityAuditStore.cs` | NoOp 默认实现 |
-| `Capability/DefaultCapabilityDescriptorResolver.cs` | 解析实现 |
+| `Capability/DefaultCapabilityResolver.cs` | 解析实现 |
 | `Capability/Middleware/AuditMiddleware.cs` | 最外层 Audit |
 | `Metadata.Abstractions/CapabilityKind.cs` | 枚举迁移 |
 | `Metadata.Abstractions/CapabilityRiskLevel.cs` | 枚举迁移 |
-| `Metadata/CapabilityHandlerValidator.cs` | Bootstrap 验证 |
+| `Capability/Bootstrap/CapabilityHandlerValidator.cs` | Bootstrap 验证（Runtime 层） |
 | `Metadata/CapabilitySchemaValidator.cs` | Bootstrap 验证 |
 
 ### 13.2 Modified Files
@@ -882,11 +916,12 @@ External Caller (HTTP / Agent / Workflow / HumanTask)
 | CapabilityDescriptorTests | 统一 Descriptor 属性、合并后完整性 |
 | CapabilityRegistryTests | RegistryBase + ICapabilityRegistry |
 | CapabilityDispatcherTests | 双重载（Descriptor/Id）、Context 注入（Id+Name）、避免重复 Resolve |
-| CapabilityDescriptorResolverTests | Resolve by name、Resolve by name:version |
-| CapabilityHandlerValidatorTests | Handler 存在性验证 |
-| CapabilitySchemaValidatorTests | Schema 引用验证 |
+| CapabilityResolverTests | Resolve by id、Resolve by id:version |
+| CapabilityHandlerValidatorTests | Handler 存在性验证（by Id） |
+| CapabilitySchemaValidatorTests | Schema 引用验证（IDescriptorLookup） |
 | InMemoryCapabilityAuditStoreTests | RecordAsync 存储 |
-| AuditMiddlewareTests | try/finally 记录、异常记录 |
+| NullCapabilityAuditStoreTests | NoOp 行为 |
+| AuditMiddlewareTests | try/finally 记录、异常记录、Cancellation 区分 |
 | InvocationSourceTests | 枚举值、Context 字段 |
 
 ### 14.2 Integration Tests
@@ -912,7 +947,7 @@ External Caller (HTTP / Agent / Workflow / HumanTask)
 | 49 | ICapabilityRegistry 保留在 Capability.Abstractions | 领域特化接口，不污染 Metadata.Abstractions |
 | 50 | 不新增 ICapabilityCatalog | Registry 本身就是 Metadata Query Surface，避免命名爆炸 |
 | 51 | Resolver 是 Registry 的只读适配器 | 不解析 Alias，Alias 属于 Dispatcher/Gateway 层 |
-| 52 | ICapabilityVersionResolver 内部化 | 外部唯一入口是 ICapabilityDescriptorResolver |
+| 52 | ICapabilityVersionResolver 内部化 | 外部唯一入口是 ICapabilityResolver（原 ICapabilityDescriptorResolver） |
 | 53 | 无 DispatchManyAsync | 批量执行是 Workflow Runtime 的责任 |
 | 54 | InvocationSource 为强类型字段 | 避免魔法字符串 |
 | 55 | AuditRecord 含 ExecutionId | 区分同 CorrelationId 的多次执行 |
@@ -933,3 +968,7 @@ External Caller (HTTP / Agent / Workflow / HumanTask)
 | 70 | Dispatcher 注入 CapabilityName | Context 同时有 Id 和 Name，审计/UI 各取所需 |
 | 71 | 删除 EnableAudit | AuditMiddleware 始终存在，AuditStore 决定是否落盘 |
 | 72 | InvocationSource 预留 Event/Mcp/BackgroundJob | 一次到位，避免后续阶段改枚举 |
+| 73 | ICapabilityDescriptorResolver → ICapabilityResolver | 返回类型已在签名中体现，避免 IWorkflowDescriptorResolver 等命名爆炸 |
+| 74 | CapabilityHandlerValidator 归属 Capability/Bootstrap | Metadata 不反向依赖 Runtime 语义，边界更干净 |
+| 75 | AuditMiddleware 区分 Cancellation | OperationCanceledException → "CANCELLED"，非 "UNHANDLED_EXCEPTION"。Workflow Suspend/Resume 依赖此区别 |
+| 76 | AddInMemoryCapabilityAudit 使用 Replace | 避免 IEnumerable 出现多个 ICapabilityAuditStore 实现 |
