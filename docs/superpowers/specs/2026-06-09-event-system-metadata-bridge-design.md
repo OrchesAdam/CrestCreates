@@ -84,7 +84,7 @@ Six orthogonal dimensions, each answering a distinct question:
 public sealed record EventDescriptor : IVersionedDescriptor
 {
     // ── 1. Identity ──
-    public string Id { get; init; }                 // Deterministic: SHA256(FullTypeName + ":" + Version)
+    public string Id { get; init; }                 // Deterministic: SHA256(Name + ":" + Version). Survives type renames.
     public string Name { get; init; }              // e.g. "capability.succeeded"
     public int Version { get; init; }
     public DescriptorState State { get; init; }
@@ -275,23 +275,26 @@ public sealed class EventRegistry : IEventRegistry
     private readonly ConcurrentDictionary<string, EventDescriptor> _generatedById = new();
     private readonly ConcurrentDictionary<string, EventDescriptor> _dynamicById = new();
     // ... (shared indexes by name, category, etc.)
-    public bool IsBuilt { get; private set; }
+    public RegistryState State { get; private set; } = RegistryState.Created;
 
     // Called once at startup for generated descriptors
     public void Build(IEnumerable<IEventDescriptorProvider> providers)
     {
-        if (IsBuilt)
+        if (State == RegistryState.Built)
             return;  // Idempotent — multiple modules may trigger Build()
+
+        State = RegistryState.Building;
 
         var descriptors = providers.SelectMany(p => p.GetDescriptors()).ToList();
 
         ValidateNoDuplicateNameVersions(descriptors);
+        ValidateSingleActiveVersion(descriptors);
         // Future: ValidateCapabilityRefs(descriptors);  // Phase 3
 
         foreach (var descriptor in descriptors)
             RegisterGenerated(descriptor);
 
-        IsBuilt = true;
+        State = RegistryState.Built;
     }
 
     // Runtime: dynamic/tenant-custom events (not frozen, always Version=1)
@@ -309,8 +312,8 @@ public sealed class EventRegistry : IEventRegistry
             Importance = EventImportance.Normal
         };
 
-        // Generated wins on conflict
-        if (_generatedById.ContainsKey(descriptor.Id))
+        // Generated wins on conflict (checked by name + version, not Id)
+        if (_generatedByNameVersion.ContainsKey((descriptor.Name, descriptor.Version)))
             return false;
 
         _dynamicById[descriptor.Id] = descriptor;
@@ -360,6 +363,8 @@ This ensures "v1 Deprecated + v2 Deprecated" returns `Deprecated`, not `NotRegis
 
 ### Build-Time Validation
 
+**Single Active Version rule:** At most one version of an event may be `Active` at any time. When v2 is registered as Active, v1 must be Deprecated. If v1 is Active and a new v1 is registered (same name + version), it's a duplicate and fails. If v2 is registered as Active while v1 is still Active, `Build()` throws — the module must explicitly deprecate v1 first. This guarantees the validator's `GetLatestVersion()` → Active branch always resolves to a single unambiguous descriptor.
+
     private static void ValidateNoDuplicateNameVersions(List<EventDescriptor> descriptors)
     {
         var duplicates = descriptors
@@ -377,12 +382,20 @@ This ensures "v1 Deprecated + v2 Deprecated" returns `Deprecated`, not `NotRegis
 }
 ```
 
+### RegistryState
+
+```csharp
+public enum RegistryState { Created, Building, Built }
+```
+
+Future registries (Capability, Workflow, HumanTask) follow the same state model.
+
 ### Lifecycle
 
 ```
-                        ┌── dynamic Only ──► RegisterDynamic() (anytime)
+                        ┌── dynamic Only ──► RegisterDynamic() (anytime, requires State == Built)
                         │
-Created ──► Build ──► Generated Frozen
+Created ──► Building ──► Built (Generated Frozen)
                │
                └── Fail-Fast on collision
 ```
@@ -476,6 +489,10 @@ public sealed class RegistryEventValidator : IEventValidator
 
     public void ValidateOrThrow(string eventName, object? payload)
     {
+        if (_registry.State != RegistryState.Built)
+            throw new InvalidOperationException(
+                "EventRegistry has not been built yet. Publish cannot occur before Build completes.");
+
         var latest = _registry.GetLatestVersion(eventName);
         if (latest is null)
             throw new EventValidationException(
@@ -641,7 +658,8 @@ Steps 1–5 (metadata foundation) are independent of 6–11 (DLQ). Steps 6–7 m
 
 | Area | Tests |
 |------|-------|
-| `EventRegistry` | Register, GetByName, GetActiveVersion, IsBuilt flag, duplicate Build is idempotent |
+| `EventRegistry` | Register, GetByName, GetActiveVersion, State lifecycle (Created→Building→Built), duplicate Build is idempotent |
+| `RegistryState` guard | Publish before Build → throws InvalidOperationException; Publish after Build → succeeds |
 | `EventRegistry.Build()` validation | Duplicate (name, version) → throws; same name + different versions → succeeds; single registration succeeds |
 | `EventRegistry` version resolution | v1 Deprecated + v2 Active → GetByName returns v2; GetByNameAndVersion("name", 1) returns v1 |
 | `RegistryEventValidator` | Registered event → valid; unregistered → throws; Deprecated → throws with SupersededById message; Local scope on distributed bus → throws |
@@ -654,6 +672,7 @@ Steps 1–5 (metadata foundation) are independent of 6–11 (DLQ). Steps 6–7 m
 | Test | Verifies |
 |------|----------|
 | Full compilation chain | `[CrestEvent]` → generator → provider → registry.Build() → validator.ValidateOrThrow() → pass |
+| Publish before Build | Publish before `Build()` completes → throws; ensures registry is ready before any events flow |
 | Duplicate (name, version) detection | Two modules declare `"capability.succeeded"` v1 → `Build()` throws `EventRegistryBuildException` |
 | Version upgrade resolution | v1 Deprecated + v2 Active → `GetByName()` returns v2; validator accepts v2, rejects v1 |
 | Scope enforcement | Publish `Scope.Local` event via RabbitMQ → throws |
