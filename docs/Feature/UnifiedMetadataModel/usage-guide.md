@@ -321,22 +321,84 @@ resolver.Register("crm.customer.create",
 
 ## 8. 直接使用 Registry
 
+### 8.1 通用 RegistryBase API
+
+所有 Registry（Event、Capability、Workflow 等）共享 `RegistryBase<T>` 的通用 API：
+
 ```csharp
-// 查询 Capability
-var cap = capabilityRegistry.GetByName("crm.customer.create");
-var activeVersion = capabilityRegistry.GetActiveVersion("crm.customer.create");
-var commandCaps = capabilityRegistry.GetByKind(CapabilityKind.Command);
-var customerCaps = capabilityRegistry.GetByTag("customer");
+// 通用查询（所有 Registry 都支持）
+var cap = capabilityRegistry.GetById("cap_create_customer");
+var caps = capabilityRegistry.GetByName("crm.customer.create");
+var all = capabilityRegistry.GetAll();
+var specific = capabilityRegistry.GetByVersion("cap_create_customer", 2);
+```
 
-// 查询 Event
-var domainEvents = eventRegistry.GetByCategory(EventCategory.Domain);
-var criticalEvents = eventRegistry.GetByImportance(EventImportance.Critical);
+### 8.2 Registry 构建
 
-// 全局查询
-var everything = globalRegistry.GetAll();
-var allSchemas = globalRegistry.GetByKind(DescriptorKind.Schema);
+Registry 通过 `IBootstrapTask` + `BootstrapCoordinator` 在启动时自动构建：
 
-// 依赖分析
+```csharp
+// EventRegistryBootstrapper 已实现 IBootstrapTask
+// BootstrapCoordinator 自动拓扑排序启动
+
+// 手动构建（不推荐，通常由 BootstrapCoordinator 自动完成）
+eventRegistry.Build(providers);
+capabilityRegistry.Build(providers);
+```
+
+### 8.3 验证管道
+
+```csharp
+// 验证器自动执行，收集所有错误
+var engine = new RegistryValidationEngine<EventDescriptor>([
+    new EventVersionChainValidator(),
+    new DuplicateNameVersionValidator(),
+    new UniquePayloadTypeValidator()
+]);
+
+// Build 时自动验证，失败抛出 RegistryValidationException
+try
+{
+    registry.Build(providers);
+}
+catch (RegistryValidationException ex)
+{
+    foreach (var issue in ex.Issues)
+        Console.WriteLine($"{issue.Severity}: {issue.Message}");
+}
+```
+
+### 8.4 EventRegistry 特定查询
+
+```csharp
+// EventRegistry 保留了 IEventMetadataProvider 的特定查询
+var activeVersion = eventRegistry.GetByName("crm.customer.created");  // Active only
+var latest = eventRegistry.GetLatestVersion("crm.customer.created");
+var allVersions = eventRegistry.GetAllVersions("crm.customer.created");
+var byPayload = eventRegistry.GetByPayloadType(typeof(CustomerCreated));
+```
+
+### 8.5 统一解析器
+
+```csharp
+// 通过 IDescriptorResolver 统一解析，避免注入多个 Registry
+var resolver = serviceProvider.GetRequiredService<IDescriptorResolver>();
+
+var event = resolver.Resolve<GeneratedEventDescriptor>("user.created");
+var cap = resolver.Resolve<CapabilityDescriptor>(new DescriptorRef("capability", "approval"));
+
+// Phase 5~7: 高级查询
+var results = resolver.Query<CapabilityDescriptor>(new DescriptorQuery
+{
+    Categories = ["HumanTask"],
+    SemanticTags = ["approval"]
+});
+```
+
+### 8.6 依赖分析
+
+```csharp
+// 依赖分析（CrestCreates.Metadata）
 var dependents = catalog.FindDependents("schema_customer");
 var impact = catalog.AnalyzeImpact("schema_customer", fromVersion: 1, toVersion: 2);
 ```
@@ -394,11 +456,71 @@ var endpoint = new CapabilityEndpointDescriptor
 
 ---
 
-## 11. 参考
+## 11. 创建自定义 Registry
+
+使用 `RegistryBase<T>` 创建新的 Registry：
+
+```csharp
+// 1. 定义 Descriptor
+public sealed class MyDescriptor : IDescriptor, IVersionedDescriptor
+{
+    public string Namespace { get; init; } = "my";
+    public string Id { get; init; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
+    public int Version { get; init; }
+    // 自定义字段...
+}
+
+// 2. 创建 Registry
+public sealed class MyRegistry : RegistryBase<MyDescriptor>
+{
+    protected override string RegistryNamespace => "my";
+
+    public MyRegistry(IRegistryValidationEngine<MyDescriptor> validationEngine)
+        : base(validationEngine) { }
+
+    protected override RegistrySnapshot<MyDescriptor> BuildSnapshot(List<MyDescriptor> descriptors)
+    {
+        var byId = descriptors.ToFrozenDictionary(d => d.Id, d => d);
+        var byName = descriptors.GroupBy(d => d.Name)
+            .ToFrozenDictionary(g => g.Key, g => g.ToImmutableArray());
+        var byVersion = descriptors
+            .ToFrozenDictionary(d => new DescriptorKey(d.Namespace, d.Id, d.Version), d => d);
+
+        return new RegistrySnapshot<MyDescriptor>(
+            byId, byName, byVersion,
+            descriptors.ToImmutableArray(),
+            ImmutableDictionary<Type, IRegistryIndex>.Empty);
+    }
+}
+
+// 3. 创建验证器（可选）
+public sealed class MyValidator : IRegistryValidator<MyDescriptor>
+{
+    public int Order => 100;
+    public ValidationReport Validate(IReadOnlyList<MyDescriptor> descriptors)
+    {
+        var issues = new List<ValidationIssue>();
+        // 验证逻辑...
+        return new ValidationReport(issues);
+    }
+}
+
+// 4. DI 注册
+services.AddSingleton<IRegistryValidator<MyDescriptor>, MyValidator>();
+services.AddSingleton<IRegistryValidationEngine<MyDescriptor>, RegistryValidationEngine<MyDescriptor>>();
+services.AddSingleton<MyRegistry>();
+```
+
+---
+
+## 12. 参考
 
 | 文档 | 位置 |
 |------|------|
 | 设计规格书 | `docs/superpowers/specs/2026-06-08-unified-metadata-model-design.md` |
+| Phase 3 设计规格书 | `docs/superpowers/specs/2026-06-09-phase-3-metadata-runtime-foundation-design.md` |
+| Phase 3 实现计划 | `docs/superpowers/plans/2026-06-09-phase-3-metadata-runtime-foundation.md` |
 | 架构总结 | `docs/Feature/UnifiedMetadataModel/2026-06-09-unified-metadata-model-architecture-summary.md` |
 | Phase 1-13 计划 | `docs/superpowers/plans/2026-06-08-*` / `2026-06-09-*` |
 
@@ -406,6 +528,19 @@ var endpoint = new CapabilityEndpointDescriptor
 
 | 接口 | 用途 |
 |------|------|
+| `IDescriptor` | 所有描述符基础接口 (Namespace, Id, FullId, Name) |
+| `IVersionedDescriptor` | 版本化描述符 (+ Version) |
+| `IHasContractIdentity` | 兼容性身份 (ContractHash, DefinitionHash) |
+| `IRelationshipAwareDescriptor` | 自描述关系 |
+| `RegistryBase<T>` | 通用注册表基类 |
+| `RegistrySnapshot<T>` | 不可变快照 (ById, ByName, ByVersion) |
+| `IRegistryValidator<T>` | 可插拔验证器 |
+| `IRegistryValidationEngine<T>` | 验证引擎 |
+| `IDescriptorProvider<T>` | 描述符提供者 |
+| `IDescriptorResolver` | 统一解析器 |
+| `IBootstrapTask` | 启动任务接口 |
+| `BootstrapCoordinator` | 拓扑排序启动协调器 |
+| `IDynamicRegistry<T>` | 动态注册表 |
 | `ISchemaDescriptorProvider` | 声明 Schema |
 | `ICapabilityProvider` | 声明 Capability |
 | `ICapabilityHandler<TIn,TOut>` | 实现业务逻辑 |

@@ -1,6 +1,6 @@
 # 统一元数据模型 — 架构总结文档
 
-> **日期:** 2026-06-09 | **状态:** 完成 | **13 个 Phase, 14 个 Commits, ~196 个测试**
+> **日期:** 2026-06-09 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 完成**
 
 ---
 
@@ -17,20 +17,51 @@
 
 加两个 Instance Infrastructure descriptors：**Form**（Schema + UI metadata）和 **HumanTask**（人工交互的业务操作）。
 
+### Phase 3: Metadata Runtime Foundation
+
+Phase 3 将 EventRegistry 的模式提炼为通用注册表基类 `RegistryBase<T>`，建立 Crest Metadata Kernel：
+
+| 组件 | 说明 |
+|------|------|
+| `RegistryBase<T>` | 通用注册表基类，FrozenDictionary 不可变快照 |
+| `RegistrySnapshot<T>` | ById/ByName/ByVersion 三索引快照 |
+| `RegistryValidationEngine<T>` | 可插拔验证管道，批量错误报告 |
+| `BootstrapCoordinator` | 拓扑排序启动协调器，循环依赖检测 |
+| `DescriptorResolver` | 统一描述符解析器 |
+| `IBootstrapTask` | 通用启动任务接口 |
+| `IDynamicRegistry<T>` | 动态注册表 Future Hook |
+| `IHasContractIdentity` | 兼容性身份接口（ContractHash/DefinitionHash） |
+| `IRelationshipAwareDescriptor` | 自描述关系接口 |
+| `CapabilityRegistry` | 第一个基于 RegistryBase 的非 Event 注册表 |
+
 ---
 
 ## 2. 项目结构
 
 ```
 framework/src/
-├── CrestCreates.Metadata.Abstractions/     # IDescriptor, IVersionedDescriptor, DescriptorRef, VersionedDescriptorRef
-├── CrestCreates.Metadata/                   # GlobalRegistry, Catalog, DependencyGraph, HashComputer
+├── CrestCreates.Metadata.Abstractions/     # IDescriptor, IVersionedDescriptor, IHasContractIdentity,
+│                                           # IRelationshipAwareDescriptor, IDescriptorRef, DescriptorRef,
+│                                           # DescriptorKey, ValidationIssue/Report, IRegistryValidator,
+│                                           # IRegistryValidationEngine, IRegistryIndex, IDescriptorProvider,
+│                                           # IDescriptorResolver, DescriptorQuery, IBootstrapTask,
+│                                           # BootstrapDependencyException, IDynamicRegistry, RegistryState
+├── CrestCreates.Metadata/                  # RegistryBase<T>, RegistrySnapshot<T>, RegistryValidationEngine<T>,
+│                                           # BootstrapCoordinator, DescriptorResolver, CapabilityDescriptor,
+│                                           # CapabilityRegistry, EventVersionChainValidator,
+│                                           # DuplicateNameVersionValidator, UniquePayloadTypeValidator,
+│                                           # GlobalRegistry, Catalog, DependencyGraph, HashComputer
 ├── CrestCreates.Schema.Abstractions/        # SchemaDescriptor, SchemaFieldDescriptor, ISchemaRegistry, ISchemaValidator
 ├── CrestCreates.Schema/                     # SchemaRegistry, SchemaValidator
-├── CrestCreates.Capability.Abstractions/    # CapabilityDescriptor, ICapabilityPipeline, ExecutionContext, ICapabilityHandlerInvoker
-├── CrestCreates.Capability/                 # CapabilityRegistry, CapabilityPipeline, middleware chain (8个)
-├── CrestCreates.Event.Abstractions/         # EventDescriptor, EventCategory, EventSemantic, EventImportance
-├── CrestCreates.Event/                      # EventRegistry
+├── CrestCreates.Capability.Abstractions/    # CapabilityDescriptor (legacy), ICapabilityPipeline, ExecutionContext
+├── CrestCreates.Capability/                 # CapabilityRegistry (legacy), CapabilityPipeline, middleware chain (8个)
+├── CrestCreates.Event.Abstractions/         # GeneratedEventDescriptor, DynamicEventDescriptor, EventCategory,
+│                                           # EventSemantic, EventImportance, CrestEventAttribute,
+│                                           # IEventDescriptorProvider, IEventRegistry, IEventMetadataProvider,
+│                                           # IEventResolver, IDynamicEventRegistry, IEventValidator
+├── CrestCreates.Event/                      # EventRegistry (inherits RegistryBase), EventResolver,
+│                                           # DynamicEventRegistry, RegistryEventValidator,
+│                                           # PassThroughEventValidator, EventRegistryBootstrapper
 ├── CrestCreates.Form.Abstractions/          # FormDescriptor, FormFieldDescriptor
 ├── CrestCreates.Form/                       # FormRegistry
 ├── CrestCreates.HumanTask.Abstractions/     # HumanTaskDescriptor, CompletionOutcome, AssigneeStrategy
@@ -44,10 +75,10 @@ framework/src/
 
 framework/test/
 ├── CrestCreates.Schema.Tests/               (19)
-├── CrestCreates.Metadata.Tests/             (33)
+├── CrestCreates.Metadata.Tests/             (73)  ← Phase 3 新增: RegistryBase, Validators, Bootstrap, Resolver, CapabilityRegistry
 ├── CrestCreates.Capability.Tests/           (59)
 ├── CrestCreates.Draft.Tests/               (13)
-├── CrestCreates.Event.Tests/               (11)
+├── CrestCreates.Event.Tests/               (32)  ← Phase 2a 新增: EventRegistry, Validator, DynamicRegistry
 ├── CrestCreates.Exposure.Tests/            (12)
 ├── CrestCreates.Form.Tests/                (8)
 ├── CrestCreates.HumanTask.Tests/           (8)
@@ -101,21 +132,107 @@ Draft → Capability/Workflow/HumanTask (Draft 只引用 Schema)
 ### 3.3 IDescriptor 基础接口
 
 ```csharp
+/// <summary>
+/// 所有描述符的底层接口。
+/// Namespace + Id = Global Identity
+/// </summary>
 public interface IDescriptor
 {
-    DescriptorKind Kind { get; }        // Schema, Capability, Event, Workflow, Form, HumanTask
-    string Id { get; }                  // 主键 (GUID/ULID, 重命名不改)
-    string Name { get; }                // 人类可读别名 (全球唯一, 可改名)
-    DescriptorState State { get; }      // Draft → Active → Deprecated → Removed
-    string? SupersededById { get; }
+    string Namespace { get; }           // Registry domain: "event", "capability", "workflow"
+    string Id { get; }                  // Domain-local identity: "user.created"
+    string FullId => $"{Namespace}.{Id}";  // Global identity: "event.user.created"
+    string Name { get; }                // 人类可读名称
+}
+
+/// <summary>
+/// 版本化描述符。EventDescriptor、CapabilityDescriptor 等有版本概念。
+/// </summary>
+public interface IVersionedDescriptor : IDescriptor
+{
+    int Version { get; }
+}
+
+/// <summary>
+/// 具有兼容性身份的描述符。
+/// 用于版本兼容性判断、拓扑分析、AI推理。
+/// </summary>
+public interface IHasContractIdentity
+{
     string ContractHash { get; }        // 结构性兼容性指纹
     string DefinitionHash { get; }      // 完整内容指纹 (审计)
 }
 
-public interface IVersionedDescriptor : IDescriptor
+/// <summary>
+/// 关系感知描述符。描述符自身提供关系信息，供 Topology Engine 消费。
+/// </summary>
+public interface IRelationshipAwareDescriptor
 {
-    int Version { get; }  // 单调递增, 所有6个类型都有版本
+    IEnumerable<DescriptorRelationship> GetRelationships();
 }
+```
+
+### 3.3.1 RegistryBase<T> — 通用注册表基类
+
+```csharp
+/// <summary>
+/// 通用注册表基类。所有 Registry 的母体。
+/// Build-once, FrozenDictionary 不可变快照, 可插拔验证。
+/// </summary>
+public abstract class RegistryBase<TDescriptor> where TDescriptor : class, IDescriptor
+{
+    protected abstract string RegistryNamespace { get; }
+
+    public void Build(IEnumerable<IDescriptorProvider<TDescriptor>> providers) { }
+    public TDescriptor? GetById(string id) { }
+    public IReadOnlyList<TDescriptor> GetByName(string name) { }
+    public IReadOnlyList<TDescriptor> GetAll() { }
+    public TDescriptor? GetByVersion(string id, int version) { }
+
+    protected abstract RegistrySnapshot<TDescriptor> BuildSnapshot(List<TDescriptor> descriptors);
+}
+```
+
+### 3.3.2 RegistrySnapshot<T> — 不可变快照
+
+```csharp
+public sealed record RegistrySnapshot<TDescriptor>(
+    FrozenDictionary<string, TDescriptor> ById,              // Canonical (latest)
+    FrozenDictionary<string, ImmutableArray<TDescriptor>> ByName,  // All versions
+    FrozenDictionary<DescriptorKey, TDescriptor> ByVersion,  // Exact version
+    ImmutableArray<TDescriptor> All,
+    ImmutableDictionary<Type, IRegistryIndex> CustomIndexes);  // Extensible
+```
+
+### 3.3.3 验证管道
+
+```csharp
+// 可插拔验证器
+public interface IRegistryValidator<TDescriptor>
+{
+    int Order { get; }
+    ValidationReport Validate(IReadOnlyList<TDescriptor> descriptors);
+}
+
+// 验证引擎 — 协调所有验证器，收集所有错误
+public interface IRegistryValidationEngine<TDescriptor>
+{
+    ValidationReport Validate(IReadOnlyList<TDescriptor> descriptors);
+}
+```
+
+### 3.3.4 Bootstrap 协调器
+
+```csharp
+public interface IBootstrapTask
+{
+    string TaskId { get; }                    // "event-registry", "capability-registry"
+    Type ServiceType { get; }
+    IReadOnlyList<string> Dependencies { get; }
+    bool IsRequired { get; }                  // true = Fatal, false = Warning
+    Task ExecuteAsync(IServiceProvider sp, CancellationToken ct);
+}
+
+// BootstrapCoordinator: 拓扑排序 + 循环依赖检测
 ```
 
 ### 3.4 VersionedDescriptorRef<T> — 统一的类型化引用
@@ -261,15 +378,15 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 测试项目 | 测试数 | 覆盖范围 |
 |----------|--------|---------|
 | Schema.Tests | 19 | Descriptor 创建, Registry CRUD + 版本, Validator(10) |
-| Metadata.Tests | 33 | DescriptorRef, HashComputer(8), DependencyGraph(4), GlobalRegistry(3), Catalog(2), Snapshot(1), Manifest(1), TenantScoped(4), RefValidator(5) |
+| Metadata.Tests | 73 | **Phase 3 新增:** RegistryBase(9), EventValidators(6), BootstrapCoordinator(4), DescriptorResolver(5), CapabilityRegistry(4), DescriptorIdentity(4), DescriptorRef(12), ValidationReport(2), + 原有 27 |
 | Capability.Tests | 59 | Descriptor(4), Registry(4), Profile(2), Pipeline(6), Builder(3), ExecutionContext(5), ExecutionResult(4), SystemEvents(6), Idempotency(5), EventPublisher(4), Metrics(7), Tenant(2), RateLimit(5), DelegateHandler(3) |
 | Draft.Tests | 13 | DraftRecord(4), InMemoryStore(5), TenantIsolated(4) |
-| Event.Tests | 11 | Descriptor(5), Registry(6) |
+| Event.Tests | 32 | **Phase 2a 新增:** EventRegistry(16), Validator(4), DynamicRegistry(7), Descriptor(5) |
 | Exposure.Tests | 12 | AgentTool(5), MCPTool(3), CapabilityEndpoint(4) |
 | Form.Tests | 8 | Descriptor(5), Registry(3) |
 | HumanTask.Tests | 8 | Descriptor(6), Registry(2) |
 | Workflow.Tests | 28 | Descriptor(6), Registry(3), InteractionTarget(4), Engine(11), Resume(4) |
-| **Total** | **~196** | |
+| **Total** | **~252** | |
 
 ---
 
@@ -320,3 +437,18 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 41 | 所有 Capability 调用进入统一流水线 | ✅ |
 | 42 | Entity 是 Schema 源，不在 Capability 链中 | ✅ |
 | 43 | Entity→Form/Workflow/Capability 是禁止的依赖 | ✅ |
+| 44 | RegistryBase<T> 是所有 Registry 的母体 | ✅ Phase 3 |
+| 45 | IDescriptor.Namespace + Id = Global Identity | ✅ Phase 3 |
+| 46 | IHasContractIdentity 与 IDescriptor 解耦 | ✅ Phase 3 |
+| 47 | RegistrySnapshot 使用 FrozenDictionary 不可变快照 | ✅ Phase 3 |
+| 48 | IRegistryValidator<T> 可插拔验证管道 | ✅ Phase 3 |
+| 49 | IRegistryValidationEngine<T> 协调验证器 | ✅ Phase 3 |
+| 50 | BootstrapCoordinator 拓扑排序 + 循环依赖检测 | ✅ Phase 3 |
+| 51 | IBootstrapTask.TaskId 字符串标识替代 Type | ✅ Phase 3 |
+| 52 | IDescriptorResolver 统一解析入口 | ✅ Phase 3 |
+| 53 | IDynamicRegistry<T> 动态注册表 Future Hook | ✅ Phase 3 |
+| 54 | CapabilityDescriptor 使用 Categories 替代 CapabilityKind | ✅ Phase 3 |
+| 55 | EventRef/CapabilityRef/WorkflowRef 强类型引用 | ✅ Phase 3 |
+| 56 | DescriptorRef.Version = null 表示 Latest Stable | ✅ Phase 3 |
+| 57 | DescriptorKey 与 DescriptorRef 语义分离 | ✅ Phase 3 |
+| 58 | EventRegistry 内部迁移到 RegistryBase，API 不变 | ✅ Phase 3 |
