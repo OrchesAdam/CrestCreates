@@ -76,6 +76,7 @@
   </Folder>
   <Folder Name="/src/modules/EventBus/">
     <Project Path="framework/src/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj" />
+    <Project Path="framework/src/CrestCreates.EventBus.DeadLetter.EFCore/CrestCreates.EventBus.DeadLetter.EFCore.csproj" />
     <Project Path="framework/src/CrestCreates.EventBus.Local.Channel/CrestCreates.EventBus.Local.Channel.csproj" />
     <Project Path="framework/src/CrestCreates.EventBus.Kafka/CrestCreates.EventBus.Kafka.csproj" />      
     <Project Path="framework/src/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />      
