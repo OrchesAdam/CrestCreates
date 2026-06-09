@@ -12,26 +12,36 @@ public sealed class EfCoreDeadLetterStore : IDeadLetterStore
 
     public async Task EnqueueAsync(DeadLetterMessage message, CancellationToken ct)
     {
-        _db.DeadLetters.Add(new DeadLetterEntity
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        try
         {
-            MessageId = message.MessageId,
-            EventName = message.EventName,
-            EventVersion = message.EventVersion,
-            EventDescriptorId = message.EventDescriptorId,
-            CorrelationId = message.CorrelationId,
-            TenantId = message.TenantId,
-            Scope = message.Scope.ToString(),
-            PayloadTypeFullName = message.PayloadTypeFullName,
-            Payload = message.Payload,
-            ErrorMessage = message.ErrorMessage,
-            ExceptionType = message.ExceptionType,
-            OccurredAt = message.OccurredAt,
-            FailedAt = message.FailedAt,
-            RetryCount = message.RetryCount,
-            MaxRetries = message.MaxRetries,
-            Status = message.Status.ToString()
-        });
-        await _db.SaveChangesAsync(ct);
+            _db.DeadLetters.Add(new DeadLetterEntity
+            {
+                MessageId = message.MessageId,
+                EventName = message.EventName,
+                EventVersion = message.EventVersion,
+                EventDescriptorId = message.EventDescriptorId,
+                CorrelationId = message.CorrelationId,
+                TenantId = message.TenantId,
+                Scope = message.Scope.ToString(),
+                PayloadTypeFullName = message.PayloadTypeFullName,
+                Payload = message.Payload,
+                ErrorMessage = message.ErrorMessage,
+                ExceptionType = message.ExceptionType,
+                OccurredAt = message.OccurredAt,
+                FailedAt = message.FailedAt,
+                RetryCount = message.RetryCount,
+                MaxRetries = message.MaxRetries,
+                Status = message.Status.ToString()
+            });
+            await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(ct);
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<DeadLetterMessage>> GetPendingAsync(int skip, int take, CancellationToken ct)
@@ -80,11 +90,21 @@ public sealed class EfCoreDeadLetterStore : IDeadLetterStore
 
     private async Task UpdateStatus(string messageId, DeadLetterStatus status, CancellationToken ct)
     {
-        var entity = await _db.DeadLetters.FindAsync([messageId], ct);
-        if (entity is not null)
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        try
         {
-            entity.Status = status.ToString();
-            await _db.SaveChangesAsync(ct);
+            var entity = await _db.DeadLetters.FindAsync([messageId], ct);
+            if (entity is not null)
+            {
+                entity.Status = status.ToString();
+                await _db.SaveChangesAsync(ct);
+            }
+            await transaction.CommitAsync(ct);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(ct);
+            throw;
         }
     }
 

@@ -44,9 +44,14 @@ public sealed class RegistryEventValidator : IEventValidator
             ValidateOrThrow(eventName, payload);
             return new ValidationResult(true, EventValidationError.None, _resolver.GetByName(eventName));
         }
-        catch (EventValidationException)
+        catch (EventValidationException ex)
         {
-            return new ValidationResult(false, EventValidationError.NotRegistered, null);
+            var errorCode = ex.Message.Contains("deprecated", StringComparison.OrdinalIgnoreCase)
+                ? EventValidationError.Deprecated
+                : ex.Message.Contains("removed", StringComparison.OrdinalIgnoreCase)
+                    ? EventValidationError.Removed
+                    : EventValidationError.NotRegistered;
+            return new ValidationResult(false, errorCode, null);
         }
         catch (InvalidOperationException)
         {

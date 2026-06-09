@@ -341,62 +341,25 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
             sb.AppendLine();
         }
 
-        foreach (var cap in capabilities)
-        {
-            if (cap == null) continue;
-            var tagsStr = string.Join(", ", cap.SemanticTags.Select(t => $"\"{t}\""));
-            sb.AppendLine($"        CapabilityRegistryProvider.Register(new CapabilityDescriptor");
-            sb.AppendLine("        {");
-            sb.AppendLine($"            Id = \"{cap.Id}\",");
-            sb.AppendLine($"            Name = \"{cap.Name}\",");
-            sb.AppendLine($"            Version = {cap.Version},");
-            sb.AppendLine($"            CapabilityKind = CapabilityKind.{cap.CapabilityKind},");
-            sb.AppendLine($"            Permission = \"{cap.Permission}\",");
-            sb.AppendLine($"            SemanticTags = new List<string> {{ {tagsStr} }},");
-            sb.AppendLine("        });");
-            sb.AppendLine();
-        }
+//         foreach (var cap in capabilities)
+//         {
+//             if (cap == null) continue;
+//             var tagsStr = string.Join(", ", cap.SemanticTags.Select(t => $"\"{t}\""));
+//             sb.AppendLine($"        CapabilityRegistryProvider.Register(new CapabilityDescriptor");
+//             sb.AppendLine("        {");
+//             sb.AppendLine($"            Id = \"{cap.Id}\",");
+//             sb.AppendLine($"            Name = \"{cap.Name}\",");
+//             sb.AppendLine($"            Version = {cap.Version},");
+//             sb.AppendLine($"            CapabilityKind = CapabilityKind.{cap.CapabilityKind},");
+//             sb.AppendLine($"            Permission = \"{cap.Permission}\",");
+//             sb.AppendLine($"            SemanticTags = new List<string> {{ {tagsStr} }},");
+//             sb.AppendLine("        });");
+//             sb.AppendLine();
+//         }
 
         // Phase 2a: events are registered via IEventDescriptorProvider, not EventRegistryProvider.
         // GeneratedCapabilityEventDescriptorProvider is emitted separately below.
         // EventDescriptor model no longer has Category/Semantic fields.
-
-        foreach (var form in forms)
-        {
-            if (form == null) continue;
-            sb.AppendLine($"        FormRegistryProvider.Register(new FormDescriptor");
-            sb.AppendLine("        {");
-            sb.AppendLine($"            Id = \"{form.Id}\",");
-            sb.AppendLine($"            Name = \"{form.Name}\",");
-            sb.AppendLine($"            Version = {form.Version},");
-            sb.AppendLine("        });");
-            sb.AppendLine();
-        }
-
-        foreach (var ht in humanTasks)
-        {
-            if (ht == null) continue;
-            sb.AppendLine($"        HumanTaskRegistryProvider.Register(new HumanTaskDescriptor");
-            sb.AppendLine("        {");
-            sb.AppendLine($"            Id = \"{ht.Id}\",");
-            sb.AppendLine($"            Name = \"{ht.Name}\",");
-            sb.AppendLine($"            Version = {ht.Version},");
-            sb.AppendLine($"            AssigneeStrategy = AssigneeStrategy.{ht.AssigneeStrategy},");
-            sb.AppendLine("        });");
-            sb.AppendLine();
-        }
-
-        foreach (var wf in workflows)
-        {
-            if (wf == null) continue;
-            sb.AppendLine($"        WorkflowRegistryProvider.Register(new WorkflowDescriptor");
-            sb.AppendLine("        {");
-            sb.AppendLine($"            Id = \"{wf.Id}\",");
-            sb.AppendLine($"            Name = \"{wf.Name}\",");
-            sb.AppendLine($"            Version = {wf.Version},");
-            sb.AppendLine("        });");
-            sb.AppendLine();
-        }
 
         sb.AppendLine("    }");
         sb.AppendLine("}");

@@ -8,7 +8,7 @@ public sealed record DynamicEventDescriptor : IEventDescriptor
     public string Id { get; init; } = string.Empty;        // SHA256(Name) — unversioned
     public string Name { get; init; } = string.Empty;
     public EventScope Scope { get; init; }
-    public EventImportance Importance { get; init; } = EventImportance.Business;
+    public EventImportance Importance { get; init; } = EventImportance.Operational;
     public bool IsAuditable { get; init; }
     public bool IsReplayable { get; init; }
     public bool IsPublic { get; init; }

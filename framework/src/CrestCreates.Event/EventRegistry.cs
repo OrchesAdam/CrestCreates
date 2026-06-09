@@ -67,7 +67,7 @@ public sealed class EventRegistry : IEventRegistry, IEventMetadataProvider
     public IReadOnlyList<GeneratedEventDescriptor> GetAll()
     {
         if (_snapshot is null) return Array.Empty<GeneratedEventDescriptor>();
-        return _snapshot.ByName.Values.SelectMany(v => v).ToList().AsReadOnly();
+        return _snapshot.AllDescriptors;
     }
 
     private static EventRegistrySnapshot BuildSnapshot(List<GeneratedEventDescriptor> descriptors)
@@ -78,7 +78,8 @@ public sealed class EventRegistry : IEventRegistry, IEventMetadataProvider
         var byPayload = descriptors
             .GroupBy(d => d.PayloadType)
             .ToFrozenDictionary(g => g.Key, g => g.OrderByDescending(d => d.Version).First());
-        return new EventRegistrySnapshot(byName, byPayload);
+        var allDescriptors = descriptors.ToImmutableArray();
+        return new EventRegistrySnapshot(byName, byPayload, allDescriptors);
     }
 
     // ── Build-time validations ──

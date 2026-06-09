@@ -6,4 +6,5 @@ namespace CrestCreates.Event;
 
 public sealed record EventRegistrySnapshot(
     FrozenDictionary<string, ImmutableArray<GeneratedEventDescriptor>> ByName,
-    FrozenDictionary<Type, GeneratedEventDescriptor> ByPayloadType);
+    FrozenDictionary<Type, GeneratedEventDescriptor> ByPayloadType,
+    ImmutableArray<GeneratedEventDescriptor> AllDescriptors);

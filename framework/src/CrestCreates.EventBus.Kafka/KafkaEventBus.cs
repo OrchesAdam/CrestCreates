@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.DomainEvents;
+using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstract;
 using CrestCreates.EventBus.Kafka.Options;
 using CrestCreates.EventBus.Kafka.Publishing;
@@ -13,7 +14,10 @@ public class KafkaEventBus : DistributedEventBusBase
     private readonly KafkaPublisher _publisher;
     private readonly KafkaOptions _options;
 
-    public KafkaEventBus(KafkaPublisher publisher, Microsoft.Extensions.Options.IOptions<KafkaOptions> options)
+    public KafkaEventBus(
+        KafkaPublisher publisher,
+        Microsoft.Extensions.Options.IOptions<KafkaOptions> options,
+        IEventValidator validator) : base(validator)
     {
         _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
         _options = options.Value;
@@ -23,6 +27,9 @@ public class KafkaEventBus : DistributedEventBusBase
     {
         ArgumentNullException.ThrowIfNull(@event);
 
+        var eventName = EventNamingConvention.GetRoutingKey(@event.GetType());
+        ValidateEvent(eventName, @event);
+
         var topic = _options.DefaultTopic;
         var key = EventNamingConvention.GetRoutingKey(@event.GetType());
         await _publisher.PublishAsync(topic, @event, key: key, headers: null, cancellationToken: cancellationToken);
@@ -31,6 +38,9 @@ public class KafkaEventBus : DistributedEventBusBase
     public override async Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(@event);
+
+        var eventName = EventNamingConvention.GetRoutingKey<TEvent>();
+        ValidateEvent(eventName, @event);
 
         var topic = _options.DefaultTopic;
         var key = EventNamingConvention.GetRoutingKey<TEvent>();

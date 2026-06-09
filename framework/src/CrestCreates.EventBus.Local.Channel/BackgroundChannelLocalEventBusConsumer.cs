@@ -59,7 +59,7 @@ public sealed class BackgroundChannelLocalEventBusConsumer : BackgroundService
             try
             {
                 await using var scope = _serviceScopeFactory.CreateAsyncScope();
-                var deadLetterStore = scope.ServiceProvider.GetService<ILocalDeadLetterStore>();
+                var deadLetterStore = scope.ServiceProvider.GetService<IDeadLetterStore>();
                 if (deadLetterStore is not null)
                 {
                     var eventType = @event.GetType();

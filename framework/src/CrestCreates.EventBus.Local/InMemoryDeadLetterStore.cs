@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -21,7 +22,9 @@ public class InMemoryDeadLetterStore : IDeadLetterStore
     public Task EnqueueAsync(DeadLetterMessage message, CancellationToken ct)
     {
         if (_messages.Count >= _options.MaxQueueSize)
-            return Task.CompletedTask;
+            throw new InvalidOperationException(
+                $"Dead letter queue is full (max size: {_options.MaxQueueSize}). " +
+                "Message cannot be enqueued. Consider increasing MaxQueueSize or clearing processed messages.");
 
         _messages[message.MessageId] = message;
         return Task.CompletedTask;
