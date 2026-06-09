@@ -218,7 +218,7 @@ public sealed class GeneratedEventDescriptorProvider : IEventDescriptorProvider
     public IReadOnlyList<EventDescriptor> GetDescriptors() => [
         new EventDescriptor
         {
-            Id = "evt_capability.succeeded_v1",
+            Id = "evt_6A9D8F3C...",  // Stable deterministic ID (not derived from Name)
             Name = "capability.succeeded",
             Version = 1,
             State = DescriptorState.Active,
@@ -253,7 +253,7 @@ services.TryAddEnumerable(
 
 ### Manual Escape Hatch
 
-`EventRegistry.RegisterDynamic(EventDescriptor)` remains available for dynamically-defined events (e.g., tenant-custom events loaded from configuration at runtime). These are stored separately from generated descriptors but participate in all queries.
+`EventRegistry.RegisterDynamic(EventDescriptor)` remains available for dynamically-defined events (e.g., tenant-custom events loaded from configuration at runtime). These are stored separately from generated descriptors but participate in all queries. **Phase 2a dynamic descriptors are always Version=1.** Versioned dynamic descriptors are not supported — generated events handle schema evolution.
 
 ---
 
@@ -310,13 +310,19 @@ public sealed class EventRegistry : IEventRegistry
 
 ### Name → Version Resolution
 
-When multiple versions of an event exist, `GetByName` returns the active version with the highest version number:
+When multiple versions of an event exist, `GetByName` returns the active version with the highest version number. `GetLatestVersion` returns the highest version regardless of state — used by the validator to distinguish "not registered" from "all versions deprecated":
 
 ```csharp
-// Returns v2 if v1 is Deprecated and v2 is Active
+// Returns the active descriptor with the highest version, or null
 public EventDescriptor? GetByName(string name)
     => _byName.TryGetValue(name, out var versions)
         ? versions.Where(v => v.State == DescriptorState.Active).MaxBy(v => v.Version)
+        : null;
+
+// Returns the highest-version descriptor regardless of state, or null
+public EventDescriptor? GetLatestVersion(string name)
+    => _byName.TryGetValue(name, out var versions)
+        ? versions.MaxBy(v => v.Version)
         : null;
 
 // Exact version lookup
@@ -326,7 +332,15 @@ public EventDescriptor? GetByNameAndVersion(string name, int version)
         : null;
 ```
 
-This guarantees the validator always checks against the active (highest-version, non-deprecated) descriptor.
+**Validator state resolution:**
+```
+GetLatestVersion(name) == null     → NotRegistered
+GetLatestVersion(name).State == Deprecated → Deprecated
+GetLatestVersion(name).State == Removed    → Removed
+GetLatestVersion(name).State == Active     → OK (accept)
+```
+
+This ensures "v1 Deprecated + v2 Deprecated" returns `Deprecated`, not `NotRegistered`. The validator always checks against the latest version's state, while `GetByName()` returns the active version for consumers.
 
 ### Build-Time Validation
 
@@ -395,13 +409,7 @@ public sealed class EventRegistryHostedService : IHostedService
 
 Registration: `services.AddHostedService<EventRegistryHostedService>()` in `EventModule`.
 
-Startup ordering (future):
-```
-EventRegistryHostedService.Build()
-  → CapabilityRegistryHostedService.Build()
-    → WorkflowRegistryHostedService.Build()
-      → App Ready
-```
+Startup ordering (future): Registries build during host startup. Ordering is determined by the module dependency graph (e.g., CapabilityRegistry depends on EventRegistry, so EventRegistry builds first). No hardcoded chain in the spec.
 
 ---
 
@@ -526,12 +534,13 @@ public interface IDeadLetterStore
 public sealed record DeadLetterMessage(
     string MessageId,
     string EventName,              // "capability.succeeded" (registry-defined name)
-    string? EventDescriptorId,     // ← added: "evt_capability.succeeded_v1" (stable reference)
-    EventScope Scope,              // ← added
+    string? EventDescriptorId,     // "evt_6A9D8F..." (stable descriptor id, not name-derived)
+    string? CorrelationId,         // ← added: correlation id for distributed tracing
+    EventScope Scope,
     string EventType,              // Assembly-qualified type name
     byte[] Payload,
     string ErrorMessage,
-    string? ExceptionType,         // ← added: typeof(TimeoutException).FullName
+    string? ExceptionType,         // typeof(TimeoutException).FullName
     DateTime FailedAt,
     int RetryCount,
     int MaxRetries,
@@ -657,8 +666,8 @@ Extend existing test projects — no new test projects needed:
 | `Producers`/`Consumers` as `DescriptorRef` | Phase 3 |
 | `CapabilityRef` runtime resolution via Capability Registry | Phase 3 |
 | `PayloadSchema` auto-generation from `PayloadType` | Phase 3 |
-| `EventReliability` driving bus behavior (AtLeastOnce → Outbox) | Phase 2b (Outbox) |
-
-> **Phase 2b forward reference:** `EventReliability` is metadata only in Phase 2a. Phase 2b will introduce `DeliveryStrategy` resolution that maps `EventReliability` to transport behavior — `AtMostOnce` → fire-and-forget, `AtLeastOnce` → Outbox + retry, `ExactlyOnce` → Outbox + idempotency check. The `EventReliability` enum is designed to accommodate this without schema changes.
+| `EventReliability` driving bus behavior (AtLeastOnce → Outbox) | Phase 2b (see note below) |
 | `PayloadSchemaRef` in `DeadLetterMessage` | Phase 3 |
 | AoT optimization (`FrozenDictionary`, `switch`-based lookup) | Phase 4 |
+
+> **Phase 2b forward reference:** `EventReliability` is metadata only in Phase 2a. Phase 2b will introduce `DeliveryStrategy` resolution that maps `EventReliability` to transport behavior — `AtMostOnce` → fire-and-forget, `AtLeastOnce` → Outbox + retry, `ExactlyOnce` → Outbox + idempotency check. The `EventReliability` enum is designed to accommodate this without schema changes.
