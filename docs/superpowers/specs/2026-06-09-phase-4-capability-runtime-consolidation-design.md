@@ -378,7 +378,8 @@ internal sealed class CapabilityDispatcher : ICapabilityDispatcher
         var descriptor = _descriptorResolver.Resolve(capabilityName);
 
         // 2. 委托 Pipeline 执行，自动注入上下文
-        return await _pipeline.ExecuteAsync(descriptor.Name, input, ctx =>
+        // 使用 descriptor.Id（稳定标识），不使用 Name（可读名称）
+        return await _pipeline.ExecuteAsync(descriptor.Id, input, ctx =>
         {
             ctx.CapabilityId = descriptor.Id;                  // 稳定标识
             ctx.CapabilityVersion = descriptor.Version;
@@ -524,6 +525,7 @@ Handler
 internal sealed class AuditMiddleware : ICapabilityPipelineMiddleware
 {
     private readonly ICapabilityAuditStore _auditStore;
+    private readonly ILogger<AuditMiddleware> _logger;
 
     public async Task<CapabilityExecutionResult> InvokeAsync(
         CapabilityExecutionContext context,
@@ -531,51 +533,46 @@ internal sealed class AuditMiddleware : ICapabilityPipelineMiddleware
     {
         var executionId = Guid.NewGuid().ToString("N");
         var sw = Stopwatch.StartNew();
+        CapabilityExecutionResult? result = null;
+        Exception? unhandledException = null;
 
         try
         {
-            var result = await next(context);
-            sw.Stop();
-
-            await _auditStore.RecordAsync(new CapabilityExecutionRecord
-            {
-                ExecutionId = executionId,
-                CapabilityId = context.CapabilityId,     // 由 Dispatcher 设置为 descriptor.Id
-                CapabilityName = context.CapabilityName,
-                CapabilityVersion = context.CapabilityVersion,
-                TenantId = context.TenantId,
-                UserId = context.UserId,
-                CorrelationId = context.CorrelationId,
-                Source = context.InvocationSource,
-                IsSuccess = result.IsSuccess,
-                ErrorCode = result.ErrorCode,
-                Duration = sw.Elapsed,
-                Timestamp = DateTimeOffset.UtcNow
-            });
-
+            result = await next(context);
             return result;
         }
         catch (Exception ex)
         {
+            unhandledException = ex;
+            throw;
+        }
+        finally
+        {
             sw.Stop();
 
-            await _auditStore.RecordAsync(new CapabilityExecutionRecord
+            // Audit 失败不影响业务执行
+            try
             {
-                ExecutionId = executionId,
-                CapabilityId = context.CapabilityId,
-                CapabilityName = context.CapabilityName,
-                CapabilityVersion = context.CapabilityVersion,
-                TenantId = context.TenantId,
-                UserId = context.UserId,
-                CorrelationId = context.CorrelationId,
-                Source = context.InvocationSource,
-                IsSuccess = false,
-                ErrorCode = "UNHANDLED_EXCEPTION",
-                Duration = sw.Elapsed,
-                Timestamp = DateTimeOffset.UtcNow
-            });
-
-            throw;
+                await _auditStore.RecordAsync(new CapabilityExecutionRecord
+                {
+                    ExecutionId = executionId,
+                    CapabilityId = context.CapabilityId,
+                    CapabilityName = context.CapabilityName,
+                    CapabilityVersion = context.CapabilityVersion,
+                    TenantId = context.TenantId,
+                    UserId = context.UserId,
+                    CorrelationId = context.CorrelationId,
+                    Source = context.InvocationSource,
+                    IsSuccess = result?.IsSuccess ?? false,
+                    ErrorCode = result?.ErrorCode ?? (unhandledException is not null ? "UNHANDLED_EXCEPTION" : null),
+                    Duration = sw.Elapsed,
+                    Timestamp = DateTimeOffset.UtcNow
+                });
+            }
+            catch (Exception auditEx)
+            {
+                _logger.LogError(auditEx, "Failed to record audit for capability '{CapabilityId}'", context.CapabilityId);
+            }
         }
     }
 }
@@ -588,6 +585,7 @@ internal sealed class AuditMiddleware : ICapabilityPipelineMiddleware
 | Audit 在最外层 | 确保所有结果（含 Authorization/Validation 失败）都被记录 |
 | Metrics 在 Handler 之上 | 统计包含 Handler 真实执行时间 |
 | try/finally 模式 | 异常/取消也能记录 |
+| Audit 失败隔离 | AuditStore 异常不影响业务执行，仅记录日志 |
 
 ---
 
@@ -601,7 +599,8 @@ Source Generator 生成一个静态注册表 `GeneratedCapabilityHandlerRegistry
 
 ```csharp
 // Metadata.Abstractions/ICapabilityHandlerRegistry.cs
-// Source Generator 实现此接口，提供 capability name → handler type 的静态映射
+// Source Generator 实现此接口，提供 capability id → handler type 的静态映射
+// key = CapabilityId（稳定标识），不是 Name（可读名称）
 public interface ICapabilityHandlerRegistry
 {
     IReadOnlyDictionary<string, Type> GetHandlerMappings();
@@ -625,12 +624,13 @@ public sealed class CapabilityHandlerValidator : IRegistryValidator<CapabilityDe
         var mappings = _handlerRegistry.GetHandlerMappings();
 
         // 检查每个 Descriptor 在 Source Generator 注册表中有对应 Handler
+        // 映射 key = CapabilityId（稳定标识），不使用 Name（可读名称）
         foreach (var descriptor in descriptors)
         {
-            if (!mappings.ContainsKey(descriptor.Name))
+            if (!mappings.ContainsKey(descriptor.Id))
             {
                 issues.Add(ValidationIssue.Error(
-                    $"Capability '{descriptor.Name}' has no registered handler. " +
+                    $"Capability '{descriptor.Id}' (Name: '{descriptor.Name}') has no registered handler. " +
                     $"Add [GenerateCapabilityHandler] or register manually."));
             }
         }
@@ -642,18 +642,51 @@ public sealed class CapabilityHandlerValidator : IRegistryValidator<CapabilityDe
 
 ### 10.2 CapabilitySchemaValidator
 
+直接依赖 `SchemaRegistry`（RegistryBase），不走 Resolver（Resolver 是 Runtime 组件，Validator 是 Bootstrap 组件）。
+
 ```csharp
 // Metadata/CapabilitySchemaValidator.cs
 public sealed class CapabilitySchemaValidator : IRegistryValidator<CapabilityDescriptor>
 {
+    private readonly SchemaRegistry _schemaRegistry;
+
+    public CapabilitySchemaValidator(SchemaRegistry schemaRegistry)
+    {
+        _schemaRegistry = schemaRegistry;
+    }
+
     public int Order => 200;
 
     public ValidationReport Validate(IReadOnlyList<CapabilityDescriptor> descriptors)
     {
         var issues = new List<ValidationIssue>();
 
-        // 验证 InputSchema/OutputSchema 引用的 SchemaDescriptor 存在
-        // 通过 DescriptorResolver.Resolve(ref) 检查
+        foreach (var descriptor in descriptors)
+        {
+            // 验证 InputSchema 引用的 SchemaDescriptor 存在
+            if (descriptor.InputSchema.HasValue)
+            {
+                var schemaRef = descriptor.InputSchema.Value;
+                var key = new DescriptorKey(schemaRef.Namespace, schemaRef.Id, schemaRef.Version);
+                if (_schemaRegistry.GetById(key) is null)
+                {
+                    issues.Add(ValidationIssue.Error(
+                        $"Capability '{descriptor.Id}' references InputSchema '{schemaRef.Id}' (v{schemaRef.Version}) which does not exist in SchemaRegistry."));
+                }
+            }
+
+            // 验证 OutputSchema 引用的 SchemaDescriptor 存在
+            if (descriptor.OutputSchema.HasValue)
+            {
+                var schemaRef = descriptor.OutputSchema.Value;
+                var key = new DescriptorKey(schemaRef.Namespace, schemaRef.Id, schemaRef.Version);
+                if (_schemaRegistry.GetById(key) is null)
+                {
+                    issues.Add(ValidationIssue.Error(
+                        $"Capability '{descriptor.Id}' references OutputSchema '{schemaRef.Id}' (v{schemaRef.Version}) which does not exist in SchemaRegistry."));
+                }
+            }
+        }
 
         return ValidationReport.FromIssues(issues);
     }
@@ -686,7 +719,6 @@ public static IServiceCollection AddCapabilityRuntime(
 
     // 新增
     services.TryAddSingleton<ICapabilityDispatcher, CapabilityDispatcher>();
-    services.TryAddSingleton<ICapabilityAuditStore, InMemoryCapabilityAuditStore>();
     services.TryAddSingleton<ICapabilityDescriptorResolver, DefaultCapabilityDescriptorResolver>();
 
     // 内部组件
@@ -694,6 +726,11 @@ public static IServiceCollection AddCapabilityRuntime(
 
     // ICapabilityHandlerRegistry 由 Source Generator 注册（GeneratedCapabilityHandlerRegistry）
     // 无需在此手动注册
+
+    // 默认 NoOp AuditStore（不记录审计）
+    // 开发环境：services.AddInMemoryCapabilityAudit() 显式开启
+    // 生产环境：替换为真实实现（SQL/Mongo/Elastic）
+    services.TryAddSingleton<ICapabilityAuditStore, NullCapabilityAuditStore>();
 
     // Validators
     services.AddSingleton<IRegistryValidator<CapabilityDescriptor>, CapabilityHandlerValidator>();
@@ -706,6 +743,13 @@ public static IServiceCollection AddCapabilityRuntime(
     if (configure is not null)
         services.Configure(configure);
 
+    return services;
+}
+
+// 开发环境显式开启 InMemory 审计
+public static IServiceCollection AddInMemoryCapabilityAudit(this IServiceCollection services)
+{
+    services.AddSingleton<ICapabilityAuditStore, InMemoryCapabilityAuditStore>();
     return services;
 }
 ```
@@ -778,7 +822,8 @@ External Caller (HTTP / Agent / Workflow / HumanTask)
 | `Capability/Internal/ICapabilityVersionResolver.cs` | 内部版本解析 |
 | `Capability/Internal/DefaultCapabilityVersionResolver.cs` | 版本解析实现 |
 | `Capability/CapabilityDispatcher.cs` | Dispatcher 实现 |
-| `Capability/InMemoryCapabilityAuditStore.cs` | InMemory Audit |
+| `Capability/InMemoryCapabilityAuditStore.cs` | InMemory Audit（开发环境） |
+| `Capability/NullCapabilityAuditStore.cs` | NoOp 默认实现 |
 | `Capability/DefaultCapabilityDescriptorResolver.cs` | 解析实现 |
 | `Capability/Middleware/AuditMiddleware.cs` | 最外层 Audit |
 | `Metadata.Abstractions/CapabilityKind.cs` | 枚举迁移 |
@@ -856,3 +901,8 @@ External Caller (HTTP / Agent / Workflow / HumanTask)
 | 61 | Validator 验证 Source Generator 输出 | 不依赖运行时 DI |
 | 62 | 不引入 ICapabilityProfileResolver | Profile 容易变成万能配置垃圾桶，等 Phase 7+ Execution Policy |
 | 63 | Id = 稳定唯一标识，Name = 可读显示名 | 明确语义，避免 Workflow UI/Agent Planner/Audit 混乱 |
+| 64 | Handler Mapping key = CapabilityId | 不使用 Name，Rename 不影响 Handler 映射 |
+| 65 | Pipeline Execute 使用 Id | 执行链基于稳定标识，不基于可读名称 |
+| 66 | SchemaValidator 直接依赖 SchemaRegistry | Bootstrap 组件不依赖 Runtime Resolver |
+| 67 | Audit 失败隔离 | AuditStore 异常不影响业务执行 |
+| 68 | 默认 NoOpAuditStore | 防止生产环境误以为有审计。开发环境显式 AddInMemoryCapabilityAudit() |
