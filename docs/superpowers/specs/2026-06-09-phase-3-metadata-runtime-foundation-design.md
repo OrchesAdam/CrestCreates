@@ -48,11 +48,35 @@ HumanTaskRegistry    → Build/Snapshot/Validation/Resolver
 /// <summary>
 /// 所有描述符的底层接口。
 /// 不假设 Version 存在 —— FormDescriptor、HumanTaskDescriptor 等可能无版本。
+/// Namespace + Id = Global Identity
 /// </summary>
 public interface IDescriptor
 {
+    /// <summary>
+    /// 命名空间。用于区分不同 Registry 中的同名描述符。
+    /// 例如："event", "capability", "workflow"
+    /// </summary>
+    string Namespace { get; }
+
+    /// <summary>
+    /// 全局唯一标识符。格式：{Namespace}.{Name}
+    /// </summary>
     string Id { get; }
+
+    /// <summary>
+    /// 人类可读名称。
+    /// </summary>
     string Name { get; }
+
+    /// <summary>
+    /// 兼容性哈希。用于判断两个描述符版本是否兼容。
+    /// </summary>
+    string ContractHash { get; }
+
+    /// <summary>
+    /// 实现哈希。用于判断描述符内容是否变化。
+    /// </summary>
+    string DefinitionHash { get; }
 }
 
 /// <summary>
@@ -81,10 +105,14 @@ public abstract class RegistryBase<TDescriptor>
     public RegistryState State { get; protected set; } = RegistryState.Created;
 
     private readonly IRegistryValidationEngine<TDescriptor> _validationEngine;
+    private readonly IEnumerable<IRegistryIndexBuilder<TDescriptor>> _indexBuilders;
 
-    protected RegistryBase(IRegistryValidationEngine<TDescriptor> validationEngine)
+    protected RegistryBase(
+        IRegistryValidationEngine<TDescriptor> validationEngine,
+        IEnumerable<IRegistryIndexBuilder<TDescriptor>>? indexBuilders = null)
     {
         _validationEngine = validationEngine;
+        _indexBuilders = indexBuilders ?? Array.Empty<IRegistryIndexBuilder<TDescriptor>>();
     }
 
     /// <summary>
@@ -152,16 +180,28 @@ public abstract class RegistryBase<TDescriptor>
 ```csharp
 /// <summary>
 /// 通用注册表快照。支持三种索引方式：
-/// - ById: 最新版本（用于运行时查询）
+/// - ById: Canonical Descriptor（无版本=唯一实例，有版本=最新 Active）
 /// - ByName: 所有版本（用于版本链分析）
 /// - ByVersion: 精确版本（用于 Metadata Authoring）
+/// - CustomIndexes: 额外索引（ContractHash、DefinitionHash 等）
 /// </summary>
 public sealed record RegistrySnapshot<TDescriptor>(
     FrozenDictionary<string, TDescriptor> ById,
     FrozenDictionary<string, ImmutableArray<TDescriptor>> ByName,
     FrozenDictionary<DescriptorKey, TDescriptor> ByVersion,
-    ImmutableArray<TDescriptor> All)
+    ImmutableArray<TDescriptor> All,
+    FrozenDictionary<string, IReadOnlyList<TDescriptor>> CustomIndexes)
     where TDescriptor : IDescriptor;
+
+/// <summary>
+/// 索引构建器。允许 Registry 构建额外索引（如 ContractHash、DefinitionHash）。
+/// </summary>
+public interface IRegistryIndexBuilder<TDescriptor>
+    where TDescriptor : IDescriptor
+{
+    string IndexName { get; }
+    FrozenDictionary<string, IReadOnlyList<TDescriptor>> BuildIndex(IReadOnlyList<TDescriptor> descriptors);
+}
 
 /// <summary>
 /// 描述符的精确版本键。
@@ -409,12 +449,26 @@ public sealed class BootstrapDependencyException : Exception
 }
 ```
 
-### 2.7 关系提供者（Future Hook）
+### 2.7 关系感知描述符
+
+```csharp
+/// <summary>
+/// 关系感知描述符。描述符自身提供关系信息，供 Topology Engine 消费。
+/// 避免 Descriptor 和 RelationshipProvider 两套信息源。
+/// </summary>
+public interface IRelationshipAwareDescriptor
+{
+    IEnumerable<DescriptorRelationship> GetRelationships();
+}
+```
+
+### 2.8 关系提供者（Future Hook）
 
 ```csharp
 /// <summary>
 /// 描述符关系提供者。
 /// 为未来的 Topology Engine 提供数据。
+/// 如果描述符实现了 IRelationshipAwareDescriptor，优先从描述符自身获取关系。
 /// </summary>
 public interface IDescriptorRelationshipProvider
 {
@@ -532,6 +586,7 @@ public sealed class CapabilityDescriptor : IVersionedDescriptor
 {
     // IDescriptor 通用字段
     public DescriptorKind Kind => DescriptorKind.Capability;
+    public string Namespace { get; init; } = "capability";
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
     public int Version { get; init; }
@@ -541,7 +596,7 @@ public sealed class CapabilityDescriptor : IVersionedDescriptor
     public string? SupersededById { get; init; }
 
     // Capability 特定 Metadata 字段
-    public CapabilityKind CapabilityKind { get; init; }
+    public IReadOnlyList<string> Categories { get; init; } = Array.Empty<string>();
     public IReadOnlyList<EventRef> Produces { get; init; } = Array.Empty<EventRef>();
     public IReadOnlyList<EventRef> Consumes { get; init; } = Array.Empty<EventRef>();
     public IReadOnlyList<string> SemanticTags { get; init; } = Array.Empty<string>();
@@ -561,8 +616,10 @@ public enum CapabilityKind
 ```csharp
 public sealed class CapabilityRegistry : RegistryBase<CapabilityDescriptor>
 {
-    public CapabilityRegistry(IEnumerable<IRegistryValidator<CapabilityDescriptor>> validators)
-        : base(validators)
+    public CapabilityRegistry(
+        IRegistryValidationEngine<CapabilityDescriptor> validationEngine,
+        IEnumerable<IRegistryIndexBuilder<CapabilityDescriptor>>? indexBuilders = null)
+        : base(validationEngine, indexBuilders)
     {
     }
 
@@ -776,3 +833,43 @@ public interface IDynamicRegistry<TDescriptor>
 - ✅ 明确区分静态和动态注册表
 - ✅ 为 Hot Reload 预留扩展点
 - ❌ 需要维护两套 API
+
+#### ADR-008: Descriptor Identity Model
+
+**状态：** 已接受
+
+**上下文：** 随着 Registry 类型增多（Event/Capability/Workflow/HumanTask/Form/Entity），不同 Registry 可能出现同名描述符。需要统一的身份模型。
+
+**决策：**
+- Namespace + Id = Global Identity
+- ContractHash = Compatibility Identity（用于判断兼容性）
+- DefinitionHash = Implementation Identity（用于判断内容变化）
+
+```
+Identity Model:
+  Namespace + Id           → Global Identity
+  ContractHash             → Compatibility Identity
+  DefinitionHash           → Implementation Identity
+```
+
+**后果：**
+- ✅ 避免跨 Registry 命名冲突
+- ✅ 支持兼容性判断和版本迁移
+- ✅ 为 AI Runtime 提供身份基础
+- ❌ 需要所有描述符实现 Namespace
+
+#### ADR-009: RegistryBase 与 ValidationEngine 绑定
+
+**状态：** 已接受
+
+**上下文：** RegistryBase 需要验证描述符，但验证器是强类型的（IRegistryValidator<TDescriptor>）。
+
+**决策：**
+- RegistryBase 构造函数接收 IRegistryValidationEngine<TDescriptor>
+- ValidationEngine 内部持有 IRegistryValidator<TDescriptor> 集合
+- 避免 RegistryBase 直接依赖验证器集合
+
+**后果：**
+- ✅ 验证逻辑可复用（CLI、AI Explorer、Registry）
+- ✅ RegistryBase 只依赖抽象接口
+- ❌ 需要额外实现 ValidationEngine
