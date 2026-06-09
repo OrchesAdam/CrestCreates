@@ -1,10 +1,10 @@
-using CrestCreates.Metadata.Abstractions;
-
 namespace CrestCreates.Event.Abstractions;
 
-public interface IEventRegistry : IVersionedDescriptorRegistry<EventDescriptor>
+public interface IEventRegistry
 {
-    IReadOnlyList<EventDescriptor> GetByCategory(EventCategory category);
-    IReadOnlyList<EventDescriptor> GetBySemantic(EventSemantic semantic);
-    IReadOnlyList<EventDescriptor> GetByImportance(EventImportance importance);
+    RegistryState State { get; }
+    void Build(IEnumerable<IEventDescriptorProvider> providers);
+    GeneratedEventDescriptor? GetByName(string name);
+    GeneratedEventDescriptor? GetByPayloadType(Type payloadType);
+    GeneratedEventDescriptor? GetByNameAndVersion(string name, int version);
 }
