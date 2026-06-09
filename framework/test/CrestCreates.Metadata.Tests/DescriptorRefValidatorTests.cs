@@ -106,7 +106,7 @@ public class DescriptorRefValidatorTests
         var ht = new HumanTask.Abstractions.HumanTaskDescriptor
         {
             Id = "ht_01", Name = "task", Version = 1, State = DescriptorState.Active,
-            Form = new VersionedDescriptorRef<Form.Abstractions.FormDescriptor>("form_01", 1),
+            Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("form_01", 1),
             Outcomes = new List<HumanTask.Abstractions.CompletionOutcome>
             {
                 new()

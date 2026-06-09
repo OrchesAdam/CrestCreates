@@ -3,6 +3,7 @@ using CrestCreates.Capability.Abstractions;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 

@@ -5,6 +5,7 @@ namespace CrestCreates.HumanTask.Abstractions;
 
 public sealed class HumanTaskDescriptor : IVersionedDescriptor
 {
+    public string Namespace => "humantask";
     public DescriptorKind Kind => DescriptorKind.HumanTask;
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;

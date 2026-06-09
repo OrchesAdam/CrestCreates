@@ -5,6 +5,7 @@ namespace CrestCreates.Form.Abstractions;
 
 public sealed class FormDescriptor : IInteractionDescriptor
 {
+    public string Namespace => "form";
     public DescriptorKind Kind => DescriptorKind.Form;
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;

@@ -5,6 +5,7 @@ namespace CrestCreates.Event.Abstractions;
 
 public sealed class EventDescriptor : IVersionedDescriptor
 {
+    public string Namespace => "event";
     public DescriptorKind Kind => DescriptorKind.Event;
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;

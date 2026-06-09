@@ -5,6 +5,7 @@ namespace CrestCreates.Capability.Abstractions;
 
 public sealed class CapabilityDescriptor : IVersionedDescriptor
 {
+    public string Namespace => "capability";
     public DescriptorKind Kind => DescriptorKind.Capability;
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;

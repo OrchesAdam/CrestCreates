@@ -5,6 +5,7 @@ namespace CrestCreates.Workflow.Abstractions;
 
 public sealed class WorkflowDescriptor : IVersionedDescriptor
 {
+    public string Namespace => "workflow";
     public DescriptorKind Kind => DescriptorKind.Workflow;
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;

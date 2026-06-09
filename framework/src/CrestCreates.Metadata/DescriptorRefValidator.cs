@@ -38,7 +38,7 @@ public static class DescriptorRefValidator
                 break;
 
             case HumanTaskDescriptor h:
-                ValidateRef(h.Form, registry, errors, $"{h.Name}.Form");
+                ValidateRef(h.Interaction, registry, errors, $"{h.Name}.Interaction");
                 if (h.InputSchema != null)
                     ValidateRef(h.InputSchema.Value, registry, errors, $"{h.Name}.InputSchema");
                 if (h.OutputSchema != null)

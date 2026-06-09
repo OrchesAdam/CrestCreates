@@ -4,6 +4,7 @@ namespace CrestCreates.Schema.Abstractions;
 
 public sealed class SchemaDescriptor : IVersionedDescriptor
 {
+    public string Namespace => "schema";
     public DescriptorKind Kind => DescriptorKind.Schema;
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
