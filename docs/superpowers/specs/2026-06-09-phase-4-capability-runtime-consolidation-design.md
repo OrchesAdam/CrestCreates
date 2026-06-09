@@ -171,7 +171,19 @@ public sealed class CapabilityDescriptor
 }
 ```
 
-### 3.2 枚举迁移
+### 3.2 Id vs Name 语义
+
+| 属性 | 语义 | 示例 |
+|---|---|---|
+| `Id` | 稳定唯一标识，程序化使用，不可变 | `customer.create` |
+| `Name` | 可读显示名，UI/日志/展示用 | `Create Customer` |
+
+- `Id` 是 Capability 的全局唯一标识，用于 Registry 查找、Audit 记录、Handler 映射
+- `Name` 是人类可读的显示名，用于 Workflow UI、Agent Planner、Audit 报表
+- `Id` 不可变（Rename 不影响），`Name` 可以变更
+- 如果没有显示名需求，`Name` 可以等于 `Id`
+
+### 3.3 枚举迁移
 
 从 `Capability.Abstractions` 迁移到 `Metadata.Abstractions`：
 
@@ -226,7 +238,7 @@ Metadata.CapabilityRegistry          Metadata.CapabilityRegistry
 ```csharp
 // Metadata/CapabilityRegistry.cs
 public sealed class CapabilityRegistry
-    : RegistryBase<CapabilityDescriptor>, ICapabilityRegistry, ICapabilityCatalog
+    : RegistryBase<CapabilityDescriptor>, ICapabilityRegistry
 {
     public override string RegistryNamespace => "capability";
 
@@ -240,9 +252,6 @@ public sealed class CapabilityRegistry
     {
         return GetAll().Where(d => d.SemanticTags.Contains(tag)).ToList();
     }
-
-    // ICapabilityCatalog 浏览方法（直接委托 RegistryBase）
-    // GetByKind, GetByTag, GetAll 已由上述实现覆盖
 }
 ```
 
@@ -259,43 +268,33 @@ public interface ICapabilityRegistry
 }
 ```
 
-### 4.4 ICapabilityCatalog 接口
-
-```csharp
-// Capability.Abstractions/ICapabilityCatalog.cs
-public interface ICapabilityCatalog
-{
-    IReadOnlyList<CapabilityDescriptor> GetByKind(CapabilityKind kind);
-    IReadOnlyList<CapabilityDescriptor> GetByTag(string tag);
-    IReadOnlyList<CapabilityDescriptor> GetAll();
-}
-```
-
-### 4.5 设计决策
+### 4.4 设计决策
 
 | 决策 | 理由 |
 |---|---|
 | ICapabilityRegistry 保留在 Capability.Abstractions | 领域特化接口，Metadata.Abstractions 只知道 RegistryBase<T> |
-| CapabilityRegistry 直接实现 ICapabilityCatalog | 不新增 DefaultCapabilityCatalog，避免每个领域复制 Catalog 实现 |
+| 不新增 ICapabilityCatalog | Registry 本身就是 Metadata Query Surface，Lookup/Browse/Discover 是 Registry 的职责。避免命名爆炸（Registry/Catalog/Locator/Provider/Manager） |
 | GetByKind 返回 IReadOnlyList | Kind 不是唯一键，可能有多个同 Kind 的 Capability |
 | IDynamicRegistry<T> 延迟 | Phase 4 统一到快照模式，运行时注册后续阶段实现 |
 
 ---
 
-## 5. Resolver 与 Catalog 边界
+## 5. Resolver 设计
 
 ### 5.1 架构约束
 
 ```text
-Resolver 与 Catalog 均为 Registry 的只读适配器。
-二者不得互相依赖。
+ICapabilityDescriptorResolver 是外部唯一解析入口。
+Resolver 是 Registry 的只读适配器。
 
 CapabilityRegistry (source of truth)
-      ↑                ↑
-      │                │
- ICapabilityDescriptorResolver  ICapabilityCatalog
- (单个解析)                       (浏览/发现)
+      ↑
+      │
+ ICapabilityDescriptorResolver
+ (单个解析：name → descriptor)
 ```
+
+Alias 解析不属于 Resolver，属于 Dispatcher/Gateway/HTTP/MCP 层。
 
 ### 5.2 ICapabilityDescriptorResolver
 
@@ -306,7 +305,7 @@ CapabilityRegistry (source of truth)
 public interface ICapabilityDescriptorResolver
 {
     /// <summary>
-    /// 解析能力名称，返回完整 CapabilityDescriptor。
+    /// 解析能力名称或版本，返回完整 CapabilityDescriptor。
     ///
     /// 输入格式：
     ///   "customer.create"     → 最新 Active 版本
@@ -314,9 +313,11 @@ public interface ICapabilityDescriptorResolver
     ///
     /// Latest Active 定义：State == Active
     ///
+    /// 不支持 Alias（Alias 解析属于 Dispatcher/Gateway 层）
+    ///
     /// 找不到 → 抛出 CapabilityNotFoundException
     /// </summary>
-    CapabilityDescriptor Resolve(string capabilityNameOrAlias);
+    CapabilityDescriptor Resolve(string capabilityNameOrVersion);
 }
 ```
 
@@ -330,7 +331,7 @@ namespace CrestCreates.Capability.Internal;
 
 internal interface ICapabilityVersionResolver
 {
-    CapabilityDescriptor Resolve(string capabilityNameOrAlias);
+    CapabilityDescriptor Resolve(string capabilityNameOrVersion);
 }
 ```
 
@@ -364,7 +365,6 @@ internal sealed class CapabilityDispatcher : ICapabilityDispatcher
 {
     private readonly ICapabilityDescriptorResolver _descriptorResolver;
     private readonly ICapabilityPipeline _pipeline;
-    private readonly ICapabilityProfileResolver _profileResolver;
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUser _currentUser;
 
@@ -377,10 +377,7 @@ internal sealed class CapabilityDispatcher : ICapabilityDispatcher
         // 1. 解析 Descriptor（一步到位，含版本解析）
         var descriptor = _descriptorResolver.Resolve(capabilityName);
 
-        // 2. 加载 Profile，自动配置
-        var profile = await _profileResolver.ResolveAsync(descriptor);
-
-        // 3. 委托 Pipeline 执行，自动注入上下文
+        // 2. 委托 Pipeline 执行，自动注入上下文
         return await _pipeline.ExecuteAsync(descriptor.Name, input, ctx =>
         {
             ctx.CapabilityId = descriptor.Id;                  // 稳定标识
@@ -390,10 +387,6 @@ internal sealed class CapabilityDispatcher : ICapabilityDispatcher
             // 自动注入
             ctx.TenantId = _tenantContext.TenantId;
             ctx.UserId = _currentUser.UserId;
-
-            // Profile 配置
-            if (profile?.Timeout is { } timeout)
-                ctx.Items["__timeout"] = timeout;
 
             configureContext?.Invoke(ctx);
         }, ct);
@@ -409,6 +402,7 @@ internal sealed class CapabilityDispatcher : ICapabilityDispatcher
 | InvocationSource 为强类型字段 | 避免 Context.Items["__callerSource"] 魔法字符串 |
 | 使用 ICapabilityDescriptorResolver | 一步到位解析，避免二次查询 Registry |
 | 自动注入 TenantId/UserId | Dispatcher 是上下文注入的正确位置 |
+| 不引入 ICapabilityProfileResolver | Profile 容易变成万能配置垃圾桶，等 Phase 7+ Execution Policy 再做 |
 
 ---
 
@@ -603,6 +597,8 @@ internal sealed class AuditMiddleware : ICapabilityPipelineMiddleware
 
 Source Generator 生成一个静态注册表 `GeneratedCapabilityHandlerRegistry`，实现 `ICapabilityHandlerRegistry` 接口。Validator 通过此接口检查映射，不依赖运行时 DI。
 
+**重复映射检测**：不在 Runtime Validator 中做。Source Generator 在编译阶段直接报错（Compile Error），不留到运行时。
+
 ```csharp
 // Metadata.Abstractions/ICapabilityHandlerRegistry.cs
 // Source Generator 实现此接口，提供 capability name → handler type 的静态映射
@@ -628,7 +624,7 @@ public sealed class CapabilityHandlerValidator : IRegistryValidator<CapabilityDe
         var issues = new List<ValidationIssue>();
         var mappings = _handlerRegistry.GetHandlerMappings();
 
-        // 1. 检查每个 Descriptor 在 Source Generator 注册表中有对应 Handler
+        // 检查每个 Descriptor 在 Source Generator 注册表中有对应 Handler
         foreach (var descriptor in descriptors)
         {
             if (!mappings.ContainsKey(descriptor.Name))
@@ -637,19 +633,6 @@ public sealed class CapabilityHandlerValidator : IRegistryValidator<CapabilityDe
                     $"Capability '{descriptor.Name}' has no registered handler. " +
                     $"Add [GenerateCapabilityHandler] or register manually."));
             }
-        }
-
-        // 2. 检查没有重复映射（1 Descriptor ↔ 1 Handler）
-        var duplicates = mappings
-            .GroupBy(kv => kv.Key)
-            .Where(g => g.Count() > 1);
-
-        foreach (var dup in duplicates)
-        {
-            issues.Add(ValidationIssue.Error(
-                $"Capability '{dup.Key}' maps to multiple handlers: " +
-                $"{string.Join(", ", dup.Select(d => d.Value.Name))}. " +
-                $"Each capability must have exactly one handler."));
         }
 
         return ValidationReport.FromIssues(issues);
@@ -682,7 +665,7 @@ public sealed class CapabilitySchemaValidator : IRegistryValidator<CapabilityDes
 | 决策 | 理由 |
 |---|---|
 | 验证 Source Generator 输出 | 不依赖运行时 DI，Bootstrap 阶段安全 |
-| 1:1 映射约束 | 防止"哪个 Handler 才是真的？"歧义 |
+| 只检查 Handler 存在性 | 重复映射由 Source Generator 编译时检测，不留到 Runtime |
 | SchemaValidator 检查引用 | 防止运行时 Schema 解析失败 |
 
 ---
@@ -705,7 +688,6 @@ public static IServiceCollection AddCapabilityRuntime(
     services.TryAddSingleton<ICapabilityDispatcher, CapabilityDispatcher>();
     services.TryAddSingleton<ICapabilityAuditStore, InMemoryCapabilityAuditStore>();
     services.TryAddSingleton<ICapabilityDescriptorResolver, DefaultCapabilityDescriptorResolver>();
-    services.TryAddSingleton<ICapabilityProfileResolver, DefaultCapabilityProfileResolver>();
 
     // 内部组件
     services.TryAddSingleton<ICapabilityVersionResolver, DefaultCapabilityVersionResolver>();
@@ -792,7 +774,6 @@ External Caller (HTTP / Agent / Workflow / HumanTask)
 | `Capability.Abstractions/CapabilityExecutionRecord.cs` | Audit 记录 |
 | `Capability.Abstractions/ICapabilityDescriptorResolver.cs` | 外部唯一解析入口 |
 | `Capability.Abstractions/CapabilityNotFoundException.cs` | 解析失败异常 |
-| `Capability.Abstractions/ICapabilityCatalog.cs` | 浏览/发现接口 |
 | `Metadata.Abstractions/ICapabilityHandlerRegistry.cs` | Source Generator handler 注册表接口 |
 | `Capability/Internal/ICapabilityVersionResolver.cs` | 内部版本解析 |
 | `Capability/Internal/DefaultCapabilityVersionResolver.cs` | 版本解析实现 |
@@ -810,7 +791,7 @@ External Caller (HTTP / Agent / Workflow / HumanTask)
 | File | Change |
 |---|---|
 | `Metadata/CapabilityDescriptor.cs` | 合并运行时属性 |
-| `Metadata/CapabilityRegistry.cs` | 实现 ICapabilityRegistry + ICapabilityCatalog |
+| `Metadata/CapabilityRegistry.cs` | 实现 ICapabilityRegistry |
 | `Capability.Abstractions/CapabilityExecutionContext.cs` | 新增 InvocationSource 字段 |
 | `Capability/CapabilityServiceCollectionExtensions.cs` | 新增 AddCapabilityRuntime() |
 | `Capability/CapabilityPipeline.cs` | middleware 顺序调整 |
@@ -831,10 +812,10 @@ External Caller (HTTP / Agent / Workflow / HumanTask)
 | Test Class | Coverage |
 |---|---|
 | CapabilityDescriptorTests | 统一 Descriptor 属性、合并后完整性 |
-| CapabilityRegistryTests | RegistryBase + ICapabilityRegistry + ICapabilityCatalog |
-| CapabilityDispatcherTests | 版本解析、Profile 配置、Context 注入 |
+| CapabilityRegistryTests | RegistryBase + ICapabilityRegistry |
+| CapabilityDispatcherTests | 版本解析、Context 注入 |
 | CapabilityDescriptorResolverTests | Resolve by name、Resolve by name:version |
-| CapabilityHandlerValidatorTests | 1:1 映射验证、缺失/重复检测 |
+| CapabilityHandlerValidatorTests | Handler 存在性验证 |
 | CapabilitySchemaValidatorTests | Schema 引用验证 |
 | InMemoryCapabilityAuditStoreTests | RecordAsync 存储 |
 | AuditMiddlewareTests | try/finally 记录、异常记录 |
@@ -858,11 +839,11 @@ External Caller (HTTP / Agent / Workflow / HumanTask)
 | 44 | 统一到 Metadata CapabilityDescriptor | 单一来源，消除双轨 |
 | 45 | InputSchema/OutputSchema 保留 VersionedDescriptorRef | Schema 是版本化资源 |
 | 46 | Permissions 使用 IReadOnlyList<string> | 为 AND/OR/Policy 预留空间 |
-| 47 | Aliases 不放在 Descriptor | 路由关注点，属于 Dispatcher 层 |
+| 47 | Aliases 不放在 Descriptor | 路由关注点，属于 Dispatcher/Gateway/HTTP/MCP 层 |
 | 48 | IsDeprecated 依赖 DescriptorState | 不新增属性，VersionResolver 规范明确 State == Active |
 | 49 | ICapabilityRegistry 保留在 Capability.Abstractions | 领域特化接口，不污染 Metadata.Abstractions |
-| 50 | CapabilityRegistry 直接实现 ICapabilityCatalog | 不新增 DefaultCapabilityCatalog |
-| 51 | Resolver 与 Catalog 均为 Registry 只读适配器 | 二者不得互相依赖 |
+| 50 | 不新增 ICapabilityCatalog | Registry 本身就是 Metadata Query Surface，避免命名爆炸 |
+| 51 | Resolver 是 Registry 的只读适配器 | 不解析 Alias，Alias 属于 Dispatcher/Gateway 层 |
 | 52 | ICapabilityVersionResolver 内部化 | 外部唯一入口是 ICapabilityDescriptorResolver |
 | 53 | 无 DispatchManyAsync | 批量执行是 Workflow Runtime 的责任 |
 | 54 | InvocationSource 为强类型字段 | 避免魔法字符串 |
@@ -871,6 +852,7 @@ External Caller (HTTP / Agent / Workflow / HumanTask)
 | 57 | AuditStore 无 QueryAsync | 查询属于未来 Audit Repository 阶段 |
 | 58 | AuditMiddleware 最外层 | 确保所有结果（含失败）都被记录 |
 | 59 | MetricsMiddleware 包裹 Handler | 统计真实执行时间 |
-| 60 | CapabilityHandlerValidator 验证 1:1 映射 | 防止 Handler 歧义 |
+| 60 | CapabilityHandlerValidator 只检查 Handler 存在性 | 重复映射由 Source Generator 编译时检测 |
 | 61 | Validator 验证 Source Generator 输出 | 不依赖运行时 DI |
-| 62 | CapabilityQuery 延迟到 Phase 6 | Phase 4 是 Execution Runtime，不是 Discovery Runtime |
+| 62 | 不引入 ICapabilityProfileResolver | Profile 容易变成万能配置垃圾桶，等 Phase 7+ Execution Policy |
+| 63 | Id = 稳定唯一标识，Name = 可读显示名 | 明确语义，避免 Workflow UI/Agent Planner/Audit 混乱 |
