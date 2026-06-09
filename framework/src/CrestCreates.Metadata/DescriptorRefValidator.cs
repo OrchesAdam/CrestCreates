@@ -1,4 +1,3 @@
-using CrestCreates.Capability.Abstractions;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -24,7 +23,7 @@ public static class DescriptorRefValidator
 
         switch (descriptor)
         {
-            case CapabilityDescriptor c:
+            case CrestCreates.Capability.Abstractions.CapabilityDescriptor c:
                 ValidateRef(c.InputSchema, registry, errors, $"{c.Name}.InputSchema");
                 ValidateRef(c.OutputSchema, registry, errors, $"{c.Name}.OutputSchema");
                 break;

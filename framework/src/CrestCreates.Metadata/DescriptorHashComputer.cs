@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using CrestCreates.Capability.Abstractions;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -61,7 +60,7 @@ public static class DescriptorHashComputer
                 }).OrderBy(f => f.Name).ToArray(),
                 References = s.References.Select(r => new { r.Id, r.Version }).OrderBy(r => r.Id).ToArray()
             },
-            CapabilityDescriptor c => new
+            CrestCreates.Capability.Abstractions.CapabilityDescriptor c => new
             {
                 c.Id,
                 c.Name,

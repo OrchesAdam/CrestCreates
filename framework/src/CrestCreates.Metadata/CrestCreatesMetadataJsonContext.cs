@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using CrestCreates.Capability.Abstractions;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -12,7 +11,7 @@ namespace CrestCreates.Metadata;
 [JsonSerializable(typeof(DescriptorManifest))]
 [JsonSerializable(typeof(DescriptorSnapshot))]
 [JsonSerializable(typeof(SchemaDescriptor))]
-[JsonSerializable(typeof(CapabilityDescriptor))]
+[JsonSerializable(typeof(CrestCreates.Capability.Abstractions.CapabilityDescriptor))]
 [JsonSerializable(typeof(EventDescriptor))]
 [JsonSerializable(typeof(FormDescriptor))]
 [JsonSerializable(typeof(HumanTaskDescriptor))]
