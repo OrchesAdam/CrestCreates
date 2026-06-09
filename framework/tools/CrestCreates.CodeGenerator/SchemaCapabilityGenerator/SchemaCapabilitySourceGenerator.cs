@@ -352,21 +352,9 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
             sb.AppendLine();
         }
 
-        foreach (var evt in events)
-        {
-            if (evt == null) continue;
-            sb.AppendLine($"        EventRegistryProvider.Register(new EventDescriptor");
-            sb.AppendLine("        {");
-            sb.AppendLine($"            Id = \"{evt.Id}\",");
-            sb.AppendLine($"            Name = \"{evt.Name}\",");
-            sb.AppendLine($"            Version = {evt.Version},");
-            sb.AppendLine($"            Category = EventCategory.{evt.Category},");
-            sb.AppendLine($"            Semantic = EventSemantic.{evt.Semantic},");
-            sb.AppendLine($"            Importance = EventImportance.{evt.Importance},");
-            sb.AppendLine($"            ChangeKind = SchemaChangeKind.{evt.ChangeKind},");
-            sb.AppendLine("        });");
-            sb.AppendLine();
-        }
+        // Phase 2a: events are registered via IEventDescriptorProvider, not EventRegistryProvider.
+        // GeneratedCapabilityEventDescriptorProvider is emitted separately below.
+        // EventDescriptor model no longer has Category/Semantic fields.
 
         foreach (var form in forms)
         {
@@ -407,6 +395,33 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
 
         sb.AppendLine("    }");
         sb.AppendLine("}");
+
+        // Phase 2a: emit IEventDescriptorProvider for capability events
+        if (events.Any(e => e != null))
+        {
+            sb.AppendLine();
+            sb.AppendLine("public sealed class GeneratedCapabilityEventDescriptorProvider : IEventDescriptorProvider");
+            sb.AppendLine("{");
+            sb.AppendLine("    public IReadOnlyList<GeneratedEventDescriptor> GetDescriptors() => [");
+            foreach (var evt in events)
+            {
+                if (evt == null) continue;
+                sb.AppendLine($"        new GeneratedEventDescriptor");
+                sb.AppendLine("        {");
+                sb.AppendLine($"            Id = \"{evt.Id}\",");
+                sb.AppendLine($"            Name = \"{evt.Name}\",");
+                sb.AppendLine($"            Version = {evt.Version},");
+                sb.AppendLine($"            State = DescriptorState.Active,");
+                sb.AppendLine($"            PayloadType = typeof(object),");
+                sb.AppendLine($"            Scope = EventScope.Integration,");
+                sb.AppendLine($"            Reliability = EventReliability.AtLeastOnce,");
+                sb.AppendLine($"            Importance = EventImportance.{evt.Importance},");
+                sb.AppendLine($"            ChangeKind = SchemaChangeKind.{evt.ChangeKind},");
+                sb.AppendLine("        },");
+            }
+            sb.AppendLine("    ];");
+            sb.AppendLine("}");
+        }
 
         spc.AddSource("GeneratedDescriptorRegistry.g.cs", sb.ToString());
     }

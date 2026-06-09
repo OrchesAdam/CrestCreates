@@ -12,12 +12,12 @@ namespace CrestCreates.EventBus.Local;
 
 public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
 {
-    private readonly ILocalDeadLetterStore _store;
+    private readonly IDeadLetterStore _store;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DefaultLocalDeadLetterManager> _logger;
 
     public DefaultLocalDeadLetterManager(
-        ILocalDeadLetterStore store,
+        IDeadLetterStore store,
         IServiceScopeFactory scopeFactory,
         ILogger<DefaultLocalDeadLetterManager> logger)
     {
@@ -26,20 +26,24 @@ public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
         _logger = logger;
     }
 
-    public Task<IReadOnlyList<DeadLetterMessage>> ListAsync(
+    public async Task<IReadOnlyList<DeadLetterMessage>> ListAsync(
         string? eventType = null,
         DeadLetterStatus? status = null,
         int skip = 0,
         int take = 50,
         CancellationToken cancellationToken = default)
     {
-        return _store.ListAsync(eventType, status, skip, take, cancellationToken);
+        if (eventType is not null)
+            return await _store.GetByEventNameAsync(eventType, skip, take, cancellationToken);
+        if (status == DeadLetterStatus.Pending)
+            return await _store.GetPendingAsync(skip, take, cancellationToken);
+        return Array.Empty<DeadLetterMessage>();
     }
 
     public async Task<DeadLetterRetryResult> RetryAsync(
         string messageId, CancellationToken cancellationToken = default)
     {
-        var message = await _store.GetAsync(messageId, cancellationToken);
+        var message = await _store.GetByIdAsync(messageId, cancellationToken);
         if (message is null)
         {
             return new DeadLetterRetryResult(messageId, false, "Message not found");
@@ -52,11 +56,11 @@ public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
             await using var scope = _scopeFactory.CreateAsyncScope();
             var dispatcher = scope.ServiceProvider.GetRequiredService<ILocalEventDispatcher>();
 
-            var eventType = Type.GetType(message.EventType);
+            var eventType = Type.GetType(message.PayloadTypeFullName);
             if (eventType is null)
             {
                 return new DeadLetterRetryResult(messageId, false,
-                    $"Cannot resolve event type: {message.EventType}");
+                    $"Cannot resolve event type: {message.PayloadTypeFullName}");
             }
 
             var eventData = JsonSerializer.Deserialize(
@@ -82,7 +86,8 @@ public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
                 Status = newRetryCount >= message.MaxRetries
                     ? DeadLetterStatus.Archived
                     : DeadLetterStatus.Pending,
-                ErrorMessage = ex.Message
+                ErrorMessage = ex.Message,
+                ExceptionType = ex.GetType().FullName
             };
             await _store.EnqueueAsync(updatedMessage, cancellationToken);
 
@@ -96,10 +101,7 @@ public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
     public async Task<IReadOnlyList<DeadLetterRetryResult>> RetryAllAsync(
         CancellationToken cancellationToken = default)
     {
-        var pending = await _store.ListAsync(
-            status: DeadLetterStatus.Pending,
-            take: int.MaxValue,
-            cancellationToken: cancellationToken);
+        var pending = await _store.GetPendingAsync(0, int.MaxValue, cancellationToken);
 
         var results = new List<DeadLetterRetryResult>();
 
@@ -118,22 +120,16 @@ public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
     public async Task<int> ClearAsync(
         string? eventType = null, CancellationToken cancellationToken = default)
     {
-        var retried = await _store.ListAsync(
-            eventType: eventType,
-            status: DeadLetterStatus.Retried,
-            take: int.MaxValue,
-            cancellationToken: cancellationToken);
+        var retried = await _store.GetByEventNameAsync(
+            eventType ?? "", 0, int.MaxValue, cancellationToken);
+        // Mark all retried/archived messages — for the InMemory store, we just count
+        var toRemove = retried
+            .Where(m => m.Status is DeadLetterStatus.Retried or DeadLetterStatus.Archived)
+            .ToList();
 
-        var archived = await _store.ListAsync(
-            eventType: eventType,
-            status: DeadLetterStatus.Archived,
-            take: int.MaxValue,
-            cancellationToken: cancellationToken);
-
-        var toRemove = retried.Concat(archived).ToList();
         foreach (var message in toRemove)
         {
-            await _store.RemoveAsync(message.MessageId, cancellationToken);
+            await _store.MarkArchivedAsync(message.MessageId, cancellationToken);
         }
 
         _logger.LogInformation(
@@ -145,11 +141,11 @@ public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
 
     public async Task<DeadLetterStats> GetStatsAsync(CancellationToken cancellationToken = default)
     {
-        var total = await _store.CountAsync(cancellationToken: cancellationToken);
-        var pending = await _store.CountAsync(status: DeadLetterStatus.Pending, cancellationToken: cancellationToken);
-        var retrying = await _store.CountAsync(status: DeadLetterStatus.Retrying, cancellationToken: cancellationToken);
-        var retried = await _store.CountAsync(status: DeadLetterStatus.Retried, cancellationToken: cancellationToken);
-        var archived = await _store.CountAsync(status: DeadLetterStatus.Archived, cancellationToken: cancellationToken);
+        var total = await _store.CountAsync(null, cancellationToken);
+        var pending = await _store.CountAsync(DeadLetterStatus.Pending, cancellationToken);
+        var retrying = await _store.CountAsync(DeadLetterStatus.Retrying, cancellationToken);
+        var retried = await _store.CountAsync(DeadLetterStatus.Retried, cancellationToken);
+        var archived = await _store.CountAsync(DeadLetterStatus.Archived, cancellationToken);
 
         return new DeadLetterStats(total, pending, retrying, retried, archived);
     }

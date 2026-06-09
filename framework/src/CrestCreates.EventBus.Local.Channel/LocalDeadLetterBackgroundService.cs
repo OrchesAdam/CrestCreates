@@ -12,13 +12,13 @@ namespace CrestCreates.EventBus.Local.Channel;
 
 public sealed class LocalDeadLetterBackgroundService : BackgroundService
 {
-    private readonly ILocalDeadLetterStore _store;
+    private readonly IDeadLetterStore _store;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<LocalDeadLetterBackgroundService> _logger;
     private readonly LocalDeadLetterOptions _options;
 
     public LocalDeadLetterBackgroundService(
-        ILocalDeadLetterStore store,
+        IDeadLetterStore store,
         IServiceScopeFactory scopeFactory,
         ILogger<LocalDeadLetterBackgroundService> logger,
         IOptions<LocalDeadLetterOptions> options)
@@ -39,10 +39,7 @@ public sealed class LocalDeadLetterBackgroundService : BackgroundService
                     TimeSpan.FromSeconds(_options.RetryIntervalSeconds),
                     stoppingToken);
 
-                var pending = await _store.ListAsync(
-                    status: DeadLetterStatus.Pending,
-                    take: 100,
-                    cancellationToken: stoppingToken);
+                var pending = await _store.GetPendingAsync(0, 100, stoppingToken);
 
                 foreach (var message in pending)
                 {
@@ -52,8 +49,8 @@ public sealed class LocalDeadLetterBackgroundService : BackgroundService
                     if (message.RetryCount >= _options.MaxRetries)
                     {
                         _logger.LogWarning(
-                            "Dead letter message {MessageId} of type {EventType} has reached max retries ({RetryCount}/{MaxRetries}), archiving",
-                            message.MessageId, message.EventType, message.RetryCount, _options.MaxRetries);
+                            "Dead letter message {MessageId} ({EventName}:v{EventVersion}) has reached max retries ({RetryCount}/{MaxRetries}), archiving",
+                            message.MessageId, message.EventName, message.EventVersion, message.RetryCount, _options.MaxRetries);
                         var archived = message with { Status = DeadLetterStatus.Archived };
                         await _store.EnqueueAsync(archived, stoppingToken);
                         continue;
@@ -66,12 +63,12 @@ public sealed class LocalDeadLetterBackgroundService : BackgroundService
                         await using var scope = _scopeFactory.CreateAsyncScope();
                         var dispatcher = scope.ServiceProvider.GetRequiredService<ILocalEventDispatcher>();
 
-                        var eventType = Type.GetType(message.EventType);
+                        var eventType = Type.GetType(message.PayloadTypeFullName);
                         if (eventType is null)
                         {
                             _logger.LogError(
-                                "Cannot resolve event type {EventType} for dead letter message {MessageId}",
-                                message.EventType, message.MessageId);
+                                "Cannot resolve event type {PayloadTypeFullName} for dead letter message {MessageId}",
+                                message.PayloadTypeFullName, message.MessageId);
                             continue;
                         }
 
@@ -85,15 +82,15 @@ public sealed class LocalDeadLetterBackgroundService : BackgroundService
 
                         await _store.MarkRetriedAsync(message.MessageId, stoppingToken);
                         _logger.LogInformation(
-                            "Successfully retried dead letter message {MessageId} of type {EventType}",
-                            message.MessageId, message.EventType);
+                            "Successfully retried dead letter message {MessageId} ({EventName}:v{EventVersion})",
+                            message.MessageId, message.EventName, message.EventVersion);
                     }
                     catch (Exception ex)
                     {
                         var newRetryCount = message.RetryCount + 1;
                         _logger.LogError(ex,
-                            "Retry {RetryCount}/{MaxRetries} failed for dead letter message {MessageId} of type {EventType}",
-                            newRetryCount, _options.MaxRetries, message.MessageId, message.EventType);
+                            "Retry {RetryCount}/{MaxRetries} failed for dead letter message {MessageId} ({EventName}:v{EventVersion})",
+                            newRetryCount, _options.MaxRetries, message.MessageId, message.EventName, message.EventVersion);
 
                         var updatedMessage = message with
                         {

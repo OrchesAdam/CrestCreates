@@ -67,9 +67,17 @@ public sealed class BackgroundChannelLocalEventBusConsumer : BackgroundService
 
                     var message = new DeadLetterMessage(
                         MessageId: Guid.NewGuid().ToString("N"),
-                        EventType: eventType.AssemblyQualifiedName!,
+                        EventName: eventType.Name,
+                        EventVersion: 1,
+                        EventDescriptorId: null,
+                        CorrelationId: null,
+                        TenantId: null,
+                        Scope: CrestCreates.Event.Abstractions.EventScope.Local,
+                        PayloadTypeFullName: eventType.AssemblyQualifiedName!,
                         Payload: payload,
                         ErrorMessage: ex.Message,
+                        ExceptionType: ex.GetType().FullName,
+                        OccurredAt: DateTime.UtcNow,
                         FailedAt: DateTime.UtcNow,
                         RetryCount: 0,
                         MaxRetries: _deadLetterOptions.MaxRetries,

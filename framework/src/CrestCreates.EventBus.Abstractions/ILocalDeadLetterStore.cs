@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 
 namespace CrestCreates.EventBus.Abstractions;
 
+[System.Obsolete("Use IDeadLetterStore instead. ILocalDeadLetterStore will be removed in v1.0.")]
 public interface ILocalDeadLetterStore
 {
     Task EnqueueAsync(DeadLetterMessage message, CancellationToken cancellationToken = default);

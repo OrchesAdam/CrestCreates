@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,7 +8,7 @@ using Microsoft.Extensions.Options;
 
 namespace CrestCreates.EventBus.Local;
 
-public class InMemoryDeadLetterStore : ILocalDeadLetterStore
+public class InMemoryDeadLetterStore : IDeadLetterStore
 {
     private readonly ConcurrentDictionary<string, DeadLetterMessage> _messages = new();
     private readonly LocalDeadLetterOptions _options;
@@ -19,10 +18,8 @@ public class InMemoryDeadLetterStore : ILocalDeadLetterStore
         _options = options.Value;
     }
 
-    public Task EnqueueAsync(DeadLetterMessage message, CancellationToken cancellationToken = default)
+    public Task EnqueueAsync(DeadLetterMessage message, CancellationToken ct)
     {
-        // Silently drop when the queue is full — the store has no ILogger,
-        // and callers are expected to handle capacity planning externally.
         if (_messages.Count >= _options.MaxQueueSize)
             return Task.CompletedTask;
 
@@ -30,80 +27,67 @@ public class InMemoryDeadLetterStore : ILocalDeadLetterStore
         return Task.CompletedTask;
     }
 
-    public Task<DeadLetterMessage?> GetAsync(string messageId, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<DeadLetterMessage>> GetPendingAsync(int skip, int take, CancellationToken ct)
+    {
+        var pending = _messages.Values
+            .Where(m => m.Status == DeadLetterStatus.Pending)
+            .OrderBy(m => m.FailedAt)
+            .Skip(skip)
+            .Take(take)
+            .ToList();
+        return Task.FromResult<IReadOnlyList<DeadLetterMessage>>(pending);
+    }
+
+    public Task<DeadLetterMessage?> GetByIdAsync(string messageId, CancellationToken ct)
     {
         _messages.TryGetValue(messageId, out var message);
         return Task.FromResult(message);
     }
 
-    public Task<IReadOnlyList<DeadLetterMessage>> ListAsync(
-        string? eventType = null,
-        DeadLetterStatus? status = null,
-        int skip = 0,
-        int take = 50,
-        CancellationToken cancellationToken = default)
+    public Task MarkRetryingAsync(string messageId, CancellationToken ct)
     {
-        var query = _messages.Values.AsEnumerable();
-
-        if (eventType is not null)
-            query = query.Where(m => m.EventType == eventType);
-
-        if (status.HasValue)
-            query = query.Where(m => m.Status == status.Value);
-
-        var result = query
-            .OrderByDescending(m => m.FailedAt)
-            .Skip(skip)
-            .Take(take)
-            .ToList()
-            .AsReadOnly();
-
-        return Task.FromResult<IReadOnlyList<DeadLetterMessage>>(result);
-    }
-
-    public Task MarkRetryingAsync(string messageId, CancellationToken cancellationToken = default)
-    {
-        _messages.TryGetValue(messageId, out var existing);
-        if (existing is not null)
-        {
+        if (_messages.TryGetValue(messageId, out var existing))
             _messages.TryUpdate(messageId,
                 existing with { Status = DeadLetterStatus.Retrying },
                 existing);
-        }
         return Task.CompletedTask;
     }
 
-    public Task MarkRetriedAsync(string messageId, CancellationToken cancellationToken = default)
+    public Task MarkRetriedAsync(string messageId, CancellationToken ct)
     {
-        _messages.TryGetValue(messageId, out var existing);
-        if (existing is not null)
-        {
+        if (_messages.TryGetValue(messageId, out var existing))
             _messages.TryUpdate(messageId,
                 existing with { Status = DeadLetterStatus.Retried },
                 existing);
-        }
         return Task.CompletedTask;
     }
 
-    public Task RemoveAsync(string messageId, CancellationToken cancellationToken = default)
+    public Task MarkArchivedAsync(string messageId, CancellationToken ct)
     {
-        _messages.TryRemove(messageId, out _);
+        if (_messages.TryGetValue(messageId, out var existing))
+            _messages.TryUpdate(messageId,
+                existing with { Status = DeadLetterStatus.Archived },
+                existing);
         return Task.CompletedTask;
     }
 
-    public Task<int> CountAsync(
-        string? eventType = null,
-        DeadLetterStatus? status = null,
-        CancellationToken cancellationToken = default)
+    public Task<int> CountAsync(DeadLetterStatus? status, CancellationToken ct)
     {
-        var query = _messages.Values.AsEnumerable();
+        var count = status is null
+            ? _messages.Count
+            : _messages.Values.Count(m => m.Status == status.Value);
+        return Task.FromResult(count);
+    }
 
-        if (eventType is not null)
-            query = query.Where(m => m.EventType == eventType);
-
-        if (status.HasValue)
-            query = query.Where(m => m.Status == status.Value);
-
-        return Task.FromResult(query.Count());
+    public Task<IReadOnlyList<DeadLetterMessage>> GetByEventNameAsync(
+        string eventName, int skip, int take, CancellationToken ct)
+    {
+        var messages = _messages.Values
+            .Where(m => m.EventName == eventName)
+            .OrderBy(m => m.FailedAt)
+            .Skip(skip)
+            .Take(take)
+            .ToList();
+        return Task.FromResult<IReadOnlyList<DeadLetterMessage>>(messages);
     }
 }
