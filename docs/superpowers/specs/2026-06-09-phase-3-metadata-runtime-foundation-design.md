@@ -59,15 +59,29 @@ public interface IDescriptor
     string Namespace { get; }
 
     /// <summary>
-    /// 全局唯一标识符。格式：{Namespace}.{Name}
+    /// 域内唯一标识符。不含 Namespace。
+    /// 例如："user.created", "approval.completed"
     /// </summary>
     string Id { get; }
+
+    /// <summary>
+    /// 全局唯一标识符。计算属性：{Namespace}.{Id}
+    /// 例如："event.user.created", "capability.approval"
+    /// </summary>
+    string FullId => $"{Namespace}.{Id}";
 
     /// <summary>
     /// 人类可读名称。
     /// </summary>
     string Name { get; }
+}
 
+/// <summary>
+/// 具有兼容性身份的描述符。
+/// 用于版本兼容性判断、拓扑分析、AI推理。
+/// </summary>
+public interface IHasContractIdentity
+{
     /// <summary>
     /// 兼容性哈希。用于判断两个描述符版本是否兼容。
     /// </summary>
@@ -190,17 +204,24 @@ public sealed record RegistrySnapshot<TDescriptor>(
     FrozenDictionary<string, ImmutableArray<TDescriptor>> ByName,
     FrozenDictionary<DescriptorKey, TDescriptor> ByVersion,
     ImmutableArray<TDescriptor> All,
-    FrozenDictionary<string, IReadOnlyList<TDescriptor>> CustomIndexes)
+    ImmutableDictionary<Type, IRegistryIndex> CustomIndexes)
     where TDescriptor : IDescriptor;
+
+/// <summary>
+/// 注册表索引抽象。允许 Registry 构建强类型额外索引。
+/// </summary>
+public interface IRegistryIndex
+{
+}
 
 /// <summary>
 /// 索引构建器。允许 Registry 构建额外索引（如 ContractHash、DefinitionHash）。
 /// </summary>
-public interface IRegistryIndexBuilder<TDescriptor>
+public interface IRegistryIndexBuilder<TDescriptor, TIndex>
     where TDescriptor : IDescriptor
+    where TIndex : IRegistryIndex
 {
-    string IndexName { get; }
-    FrozenDictionary<string, IReadOnlyList<TDescriptor>> BuildIndex(IReadOnlyList<TDescriptor> descriptors);
+    TIndex BuildIndex(IReadOnlyList<TDescriptor> descriptors);
 }
 
 /// <summary>
@@ -358,6 +379,39 @@ public interface IDescriptorResolver
     /// </summary>
     TDescriptor? Resolve<TDescriptor>(IDescriptorRef reference)
         where TDescriptor : IDescriptor;
+
+    /// <summary>
+    /// 高级查询 — 通过查询条件获取描述符列表。
+    /// Phase 3 预留接口，Phase 5~7 实现。
+    /// </summary>
+    IReadOnlyList<TDescriptor> Query<TDescriptor>(DescriptorQuery query)
+        where TDescriptor : IDescriptor;
+}
+
+/// <summary>
+/// 描述符查询条件。Phase 3 预留，Phase 5~7 实现。
+/// </summary>
+public sealed record DescriptorQuery
+{
+    /// <summary>
+    /// 按 ContractHash 查询兼容描述符。
+    /// </summary>
+    public string? ContractHash { get; init; }
+
+    /// <summary>
+    /// 按 SemanticTag 查询。
+    /// </summary>
+    public IReadOnlyList<string>? SemanticTags { get; init; }
+
+    /// <summary>
+    /// 按 Category 查询。
+    /// </summary>
+    public IReadOnlyList<string>? Categories { get; init; }
+
+    /// <summary>
+    /// 按 Namespace 过滤。
+    /// </summary>
+    public string? Namespace { get; init; }
 }
 ```
 
@@ -370,14 +424,20 @@ public interface IDescriptorResolver
 public interface IBootstrapTask
 {
     /// <summary>
+    /// 任务唯一标识。用于依赖声明和拓扑排序。
+    /// 例如："event-registry", "capability-registry"
+    /// </summary>
+    string TaskId { get; }
+
+    /// <summary>
     /// 任务类型。用于日志和诊断。
     /// </summary>
     Type ServiceType { get; }
 
     /// <summary>
-    /// 依赖的其他 BootstrapTask 类型。
+    /// 依赖的其他 BootstrapTask 的 TaskId。
     /// </summary>
-    IReadOnlyList<Type> Dependencies { get; }
+    IReadOnlyList<string> Dependencies { get; }
 
     /// <summary>
     /// 是否必需。如果为 true，失败时终止启动；如果为 false，失败时记录警告继续。
@@ -582,7 +642,7 @@ public sealed class EventVersionChainValidator : IRegistryValidator<GeneratedEve
 ### 4.2 CapabilityDescriptor
 
 ```csharp
-public sealed class CapabilityDescriptor : IVersionedDescriptor
+public sealed class CapabilityDescriptor : IVersionedDescriptor, IHasContractIdentity
 {
     // IDescriptor 通用字段
     public DescriptorKind Kind => DescriptorKind.Capability;
@@ -591,23 +651,17 @@ public sealed class CapabilityDescriptor : IVersionedDescriptor
     public string Name { get; init; } = string.Empty;
     public int Version { get; init; }
     public DescriptorState State { get; init; } = DescriptorState.Active;
+    public string? SupersededById { get; init; }
+
+    // IHasContractIdentity
     public string ContractHash { get; init; } = string.Empty;
     public string DefinitionHash { get; init; } = string.Empty;
-    public string? SupersededById { get; init; }
 
     // Capability 特定 Metadata 字段
     public IReadOnlyList<string> Categories { get; init; } = Array.Empty<string>();
     public IReadOnlyList<EventRef> Produces { get; init; } = Array.Empty<EventRef>();
     public IReadOnlyList<EventRef> Consumes { get; init; } = Array.Empty<EventRef>();
     public IReadOnlyList<string> SemanticTags { get; init; } = Array.Empty<string>();
-}
-
-public enum CapabilityKind
-{
-    HumanTask,
-    Workflow,
-    Integration,
-    Notification
 }
 ```
 
