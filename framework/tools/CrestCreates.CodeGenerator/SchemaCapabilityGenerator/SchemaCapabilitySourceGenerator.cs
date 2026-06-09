@@ -265,6 +265,8 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
 
         var hasEvent = compilation.ReferencedAssemblyNames
             .Any(a => a.Name == "CrestCreates.Event.Abstractions");
+        var hasCapability = compilation.ReferencedAssemblyNames
+            .Any(a => a.Name == "CrestCreates.Capability.Abstractions");
         var hasForm = compilation.ReferencedAssemblyNames
             .Any(a => a.Name == "CrestCreates.Form.Abstractions");
         var hasHumanTask = compilation.ReferencedAssemblyNames
@@ -277,8 +279,11 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
         sb.AppendLine("using System.Collections.Generic;");
         sb.AppendLine("using CrestCreates.Schema.Abstractions;");
         sb.AppendLine("using CrestCreates.Schema;");
-        sb.AppendLine("using CrestCreates.Capability.Abstractions;");
-        sb.AppendLine("using CrestCreates.Capability;");
+        if (hasCapability)
+        {
+            sb.AppendLine("using CrestCreates.Capability.Abstractions;");
+            sb.AppendLine("using CrestCreates.Capability;");
+        }
         if (hasEvent)
         {
             sb.AppendLine("using CrestCreates.Event.Abstractions;");

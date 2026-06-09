@@ -1,6 +1,5 @@
 using CrestCreates.Event.Abstractions;
 using CrestCreates.Metadata.Abstractions;
-using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
 
@@ -8,101 +7,253 @@ namespace CrestCreates.Event.Tests;
 
 public class EventRegistryTests
 {
-    private static EventDescriptor CreateEvent(string id, string name, int version,
-        EventCategory category = EventCategory.Domain,
-        EventSemantic semantic = EventSemantic.Fact,
-        EventImportance importance = EventImportance.Business)
-    {
-        return new EventDescriptor
+    private static GeneratedEventDescriptor CreateDescriptor(
+        string name, int version, DescriptorState state = DescriptorState.Active,
+        Type? payloadType = null)
+        => new()
         {
-            Id = id,
+            Id = GeneratedEventDescriptor.GenerateId(name),
             Name = name,
             Version = version,
-            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema_01", 1),
-            Category = category,
-            Semantic = semantic,
-            Importance = importance
+            State = state,
+            PayloadType = payloadType ?? typeof(object),
+            Scope = EventScope.Local,
+            Reliability = EventReliability.AtLeastOnce,
+            Importance = EventImportance.Business
         };
+
+    private class TestProvider(List<GeneratedEventDescriptor> descriptors) : IEventDescriptorProvider
+    {
+        public IReadOnlyList<GeneratedEventDescriptor> GetDescriptors() => descriptors;
     }
 
     [Fact]
-    public void GetById_Returns_Correct_Event()
+    public void Build_single_descriptor_succeeds()
     {
         var registry = new EventRegistry();
-        var evt = CreateEvent("evt_01", "crm.customer.created", 1);
-        registry.Register(evt);
+        var provider = new TestProvider([CreateDescriptor("test.event", 1)]);
 
-        var result = registry.GetById("evt_01");
+        registry.Build([provider]);
+
+        registry.State.Should().Be(RegistryState.Built);
+    }
+
+    [Fact]
+    public void Build_is_idempotent()
+    {
+        var registry = new EventRegistry();
+        var provider = new TestProvider([CreateDescriptor("test.event", 1)]);
+
+        registry.Build([provider]);
+        registry.Build([provider]);
+
+        registry.State.Should().Be(RegistryState.Built);
+    }
+
+    [Fact]
+    public void Build_throws_on_duplicate_name_version()
+    {
+        var registry = new EventRegistry();
+        var provider = new TestProvider([
+            CreateDescriptor("test.event", 1),
+            CreateDescriptor("test.event", 1)
+        ]);
+
+        Action act = () => registry.Build([provider]);
+        act.Should().Throw<EventRegistryBuildException>()
+            .WithMessage("*Duplicate*");
+    }
+
+    [Fact]
+    public void Build_throws_when_no_active_version()
+    {
+        var registry = new EventRegistry();
+        var provider = new TestProvider([
+            CreateDescriptor("test.event", 1, DescriptorState.Deprecated)
+        ]);
+
+        Action act = () => registry.Build([provider]);
+        act.Should().Throw<EventRegistryBuildException>()
+            .WithMessage("*no Active version*");
+    }
+
+    [Fact]
+    public void Build_throws_when_multiple_active_versions()
+    {
+        var registry = new EventRegistry();
+        var provider = new TestProvider([
+            CreateDescriptor("test.event", 1, DescriptorState.Active),
+            CreateDescriptor("test.event", 2, DescriptorState.Active)
+        ]);
+
+        Action act = () => registry.Build([provider]);
+        act.Should().Throw<EventRegistryBuildException>()
+            .WithMessage("*Active versions*");
+    }
+
+    [Fact]
+    public void Build_throws_when_highest_is_not_active()
+    {
+        var registry = new EventRegistry();
+        var provider = new TestProvider([
+            CreateDescriptor("test.event", 1, DescriptorState.Active),
+            CreateDescriptor("test.event", 2, DescriptorState.Deprecated)
+        ]);
+
+        Action act = () => registry.Build([provider]);
+        act.Should().Throw<EventRegistryBuildException>()
+            .WithMessage("*highest version*");
+    }
+
+    [Fact]
+    public void Build_succeeds_for_upgrade_scenario()
+    {
+        var registry = new EventRegistry();
+        var provider = new TestProvider([
+            CreateDescriptor("test.event", 1, DescriptorState.Deprecated),
+            CreateDescriptor("test.event", 2, DescriptorState.Active)
+        ]);
+
+        registry.Build([provider]);
+
+        registry.State.Should().Be(RegistryState.Built);
+    }
+
+    [Fact]
+    public void GetByName_returns_highest_active()
+    {
+        var registry = new EventRegistry();
+        var provider = new TestProvider([
+            CreateDescriptor("test.event", 1, DescriptorState.Deprecated),
+            CreateDescriptor("test.event", 2, DescriptorState.Active)
+        ]);
+        registry.Build([provider]);
+
+        var result = registry.GetByName("test.event");
 
         result.Should().NotBeNull();
-        result!.Name.Should().Be("crm.customer.created");
+        result!.Version.Should().Be(2);
     }
 
     [Fact]
-    public void GetByCategory_Filters_Correctly()
+    public void GetByNameAndVersion_returns_exact_version()
     {
         var registry = new EventRegistry();
-        registry.Register(CreateEvent("e1", "evt.domain", 1, EventCategory.Domain));
-        registry.Register(CreateEvent("e2", "evt.integration", 1, EventCategory.Integration));
-        registry.Register(CreateEvent("e3", "evt.capability", 1, EventCategory.Capability));
+        var provider = new TestProvider([
+            CreateDescriptor("test.event", 1, DescriptorState.Deprecated),
+            CreateDescriptor("test.event", 2, DescriptorState.Active)
+        ]);
+        registry.Build([provider]);
 
-        var domain = registry.GetByCategory(EventCategory.Domain);
-        domain.Should().HaveCount(1);
-        domain[0].Id.Should().Be("e1");
+        var v1 = registry.GetByNameAndVersion("test.event", 1);
+        var v2 = registry.GetByNameAndVersion("test.event", 2);
+
+        v1!.Version.Should().Be(1);
+        v1.State.Should().Be(DescriptorState.Deprecated);
+        v2!.Version.Should().Be(2);
     }
 
     [Fact]
-    public void GetBySemantic_Filters_Correctly()
+    public void GetLatestVersion_returns_highest_regardless_of_state()
     {
         var registry = new EventRegistry();
-        registry.Register(CreateEvent("e1", "evt.fact", 1, semantic: EventSemantic.Fact));
-        registry.Register(CreateEvent("e2", "evt.transition", 1, semantic: EventSemantic.StateTransition));
+        var provider = new TestProvider([
+            CreateDescriptor("test.event", 1, DescriptorState.Removed),
+            CreateDescriptor("test.event", 2, DescriptorState.Active)
+        ]);
+        registry.Build([provider]);
 
-        var facts = registry.GetBySemantic(EventSemantic.Fact);
-        facts.Should().HaveCount(1);
-    }
+        var latest = registry.GetLatestVersion("test.event");
 
-    [Fact]
-    public void GetByImportance_Filters_Correctly()
-    {
-        var registry = new EventRegistry();
-        registry.Register(CreateEvent("e1", "evt.critical", 1, importance: EventImportance.Critical));
-        registry.Register(CreateEvent("e2", "evt.ephemeral", 1, importance: EventImportance.Ephemeral));
-
-        var critical = registry.GetByImportance(EventImportance.Critical);
-        critical.Should().HaveCount(1);
-    }
-
-    [Fact]
-    public void GetActiveVersion_Returns_Highest_Active_Version()
-    {
-        var registry = new EventRegistry();
-        registry.Register(CreateEvent("e1", "evt.test", 1));
-        registry.Register(CreateEvent("e2", "evt.test", 2));
-        registry.Register(new EventDescriptor
-        {
-            Id = "e3", Name = "evt.test", Version = 3, State = DescriptorState.Deprecated,
-            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema_01", 1)
-        });
-
-        var active = registry.GetActiveVersion("evt.test");
-        active.Should().NotBeNull();
-        active!.Version.Should().Be(2);
-    }
-
-    [Fact]
-    public void GetLatestVersion_Returns_Highest_Version_Regardless_Of_State()
-    {
-        var registry = new EventRegistry();
-        registry.Register(CreateEvent("e1", "evt.test", 1));
-        registry.Register(new EventDescriptor
-        {
-            Id = "e3", Name = "evt.test", Version = 5, State = DescriptorState.Deprecated,
-            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema_01", 1)
-        });
-
-        var latest = registry.GetLatestVersion("evt.test");
         latest.Should().NotBeNull();
-        latest!.Version.Should().Be(5);
+        latest!.Version.Should().Be(2);
+    }
+
+    [Fact]
+    public void GetAllVersions_returns_all()
+    {
+        var registry = new EventRegistry();
+        var provider = new TestProvider([
+            CreateDescriptor("test.event", 1, DescriptorState.Deprecated),
+            CreateDescriptor("test.event", 2, DescriptorState.Active)
+        ]);
+        registry.Build([provider]);
+
+        var all = registry.GetAllVersions("test.event");
+
+        all.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void GetByPayloadType_resolves_typed_publish()
+    {
+        var payloadType = typeof(string);
+        var registry = new EventRegistry();
+        var provider = new TestProvider([
+            CreateDescriptor("test.event", 1, payloadType: payloadType)
+        ]);
+        registry.Build([provider]);
+
+        var result = registry.GetByPayloadType(payloadType);
+
+        result.Should().NotBeNull();
+        result!.Name.Should().Be("test.event");
+    }
+
+    [Fact]
+    public void Build_marks_state_failed_on_exception()
+    {
+        var registry = new EventRegistry();
+        var provider = new TestProvider([
+            CreateDescriptor("test.event", 1, DescriptorState.Deprecated)
+        ]);
+
+        try { registry.Build([provider]); } catch { }
+
+        registry.State.Should().Be(RegistryState.Failed);
+    }
+
+    [Fact]
+    public void Build_after_failed_throws()
+    {
+        var registry = new EventRegistry();
+        var provider = new TestProvider([CreateDescriptor("test.event", 1, DescriptorState.Deprecated)]);
+        try { registry.Build([provider]); } catch { }
+
+        var goodProvider = new TestProvider([CreateDescriptor("test.event", 1)]);
+        Action act = () => registry.Build([goodProvider]);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*previously failed*");
+    }
+
+    [Fact]
+    public void GetAll_returns_all_descriptors()
+    {
+        var registry = new EventRegistry();
+        var provider = new TestProvider([
+            CreateDescriptor("evt.a", 1, payloadType: typeof(string)),
+            CreateDescriptor("evt.b", 1, payloadType: typeof(int))
+        ]);
+        registry.Build([provider]);
+
+        var all = registry.GetAll();
+
+        all.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void Build_throws_on_payload_type_conflict()
+    {
+        var sharedType = typeof(string);
+        var registry = new EventRegistry();
+        var provider = new TestProvider([
+            CreateDescriptor("evt.a", 1, payloadType: sharedType),
+            CreateDescriptor("evt.b", 1, payloadType: sharedType)  // same type, different name
+        ]);
+
+        Action act = () => registry.Build([provider]);
+        act.Should().Throw<EventRegistryBuildException>()
+            .WithMessage("*PayloadType*");
     }
 }
