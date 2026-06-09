@@ -253,7 +253,7 @@ services.TryAddEnumerable(
 
 ### Manual Escape Hatch
 
-`EventRegistry.RegisterDynamic(EventDescriptor)` remains available for dynamically-defined events (e.g., tenant-custom events loaded from configuration at runtime). These are stored separately from generated descriptors but participate in all queries. **Phase 2a dynamic descriptors are always Version=1.** Versioned dynamic descriptors are not supported — generated events handle schema evolution.
+`EventRegistry.RegisterDynamic(EventDescriptor)` remains available for dynamically-defined events (e.g., tenant-custom events loaded from configuration at runtime). These are stored separately from generated descriptors but participate in all queries. **Phase 2a dynamic descriptors are always Version=1.** Versioned dynamic descriptors are not supported — generated events handle schema evolution. > Phase 3 should consider a distinct `DynamicEventDescriptor` type rather than reusing `EventDescriptor`, since generated (versioned) and dynamic (unversioned) events are semantically different.
 
 ---
 
@@ -287,22 +287,35 @@ public sealed class EventRegistry : IEventRegistry
 
         var descriptors = providers.SelectMany(p => p.GetDescriptors()).ToList();
 
-        ValidateNoDuplicateNameVersions(descriptors);
-        ValidateSingleActiveVersion(descriptors);
-        // Future: ValidateCapabilityRefs(descriptors);  // Phase 3
+        try
+        {
+            ValidateNoDuplicateNameVersions(descriptors);
+            ValidateSingleActiveVersion(descriptors);
+            // Future: ValidateCapabilityRefs(descriptors);  // Phase 3
 
-        foreach (var descriptor in descriptors)
-            RegisterGenerated(descriptor);
+            foreach (var descriptor in descriptors)
+                RegisterGenerated(descriptor);
 
-        State = RegistryState.Built;
+            State = RegistryState.Built;
+        }
+        catch
+        {
+            State = RegistryState.Failed;
+            throw;
+        }
     }
 
     // Runtime: dynamic/tenant-custom events (not frozen, always Version=1)
+    // Only allowed after Build() completes — rejects during Building or Failed states
     public bool RegisterDynamic(string name, Type payloadType, EventScope scope = EventScope.Integration)
     {
+        if (State != RegistryState.Built)
+            throw new InvalidOperationException(
+                $"Cannot register dynamic events while registry state is {State}. " +
+                "Dynamic registration is only allowed after Build() completes.");
         var descriptor = new EventDescriptor
         {
-            Id = GenerateId(payloadType, version: 1),
+            Id = GenerateId(name, version: 1),  // SHA256(Name + ":" + Version)
             Name = name,
             Version = 1,   // Locked — no version evolution for dynamic events
             State = DescriptorState.Active,
@@ -385,7 +398,7 @@ This ensures "v1 Deprecated + v2 Deprecated" returns `Deprecated`, not `NotRegis
 ### RegistryState
 
 ```csharp
-public enum RegistryState { Created, Building, Built }
+public enum RegistryState { Created, Building, Built, Failed }
 ```
 
 Future registries (Capability, Workflow, HumanTask) follow the same state model.
@@ -393,11 +406,11 @@ Future registries (Capability, Workflow, HumanTask) follow the same state model.
 ### Lifecycle
 
 ```
-                        ┌── dynamic Only ──► RegisterDynamic() (anytime, requires State == Built)
+                        ┌── dynamic Only ──► RegisterDynamic() (requires State == Built)
                         │
 Created ──► Building ──► Built (Generated Frozen)
                │
-               └── Fail-Fast on collision
+               └── Failed (no recovery; process must restart)
 ```
 
 Generated descriptors are frozen at startup. Dynamic descriptors can be added at runtime. Both are queryable through the same `IEventRegistry` interface.
@@ -438,7 +451,7 @@ public sealed class EventRegistryHostedService : IHostedService
 
 Registration: `services.AddHostedService<EventRegistryHostedService>()` in `EventModule`.
 
-Startup ordering (future): Registries build during host startup. Ordering is determined by the module dependency graph (e.g., CapabilityRegistry depends on EventRegistry, so EventRegistry builds first). No hardcoded chain in the spec.
+> **HostedService is transitional.** `IHostedService` works for Phase 2a's single registry, but does not guarantee ordering across multiple registries. Phase 3 will introduce `IRegistryBootstrapper` or `ModuleBootstrapper` with explicit dependency ordering. `EventRegistry` is the root registry — all others depend on it directly or transitively.
 
 ---
 
@@ -492,6 +505,14 @@ public sealed class RegistryEventValidator : IEventValidator
         if (_registry.State != RegistryState.Built)
             throw new InvalidOperationException(
                 "EventRegistry has not been built yet. Publish cannot occur before Build completes.");
+
+        // Defensive: multiple Active versions indicate registry corruption
+        var activeCount = _registry.GetAllByName(eventName)
+            .Count(d => d.State == DescriptorState.Active);
+        if (activeCount > 1)
+            throw new InvalidOperationException(
+                $"Registry corruption: event '{eventName}' has {activeCount} Active versions. " +
+                "Only one Active version is permitted per event name.");
 
         var latest = _registry.GetLatestVersion(eventName);
         if (latest is null)
@@ -572,10 +593,11 @@ public interface IDeadLetterStore
 public sealed record DeadLetterMessage(
     string MessageId,
     string EventName,              // "capability.succeeded" (registry-defined name)
-    string? EventDescriptorId,     // "evt_6A9D8F..." (stable descriptor id, not name-derived)
-    string? CorrelationId,         // ← added: correlation id for distributed tracing
+    int EventVersion,              // ← added: event version number
+    string? EventDescriptorId,     // "evt_6A9D8F..." (stable descriptor id)
+    string? CorrelationId,         // correlation id for distributed tracing
     EventScope Scope,
-    string EventType,              // Assembly-qualified type name
+    string PayloadTypeFullName,    // "MyApp.Events.CapabilitySucceeded" (not AQN — survives assembly version changes)
     byte[] Payload,
     string ErrorMessage,
     string? ExceptionType,         // typeof(TimeoutException).FullName
@@ -676,7 +698,7 @@ Steps 1–5 (metadata foundation) are independent of 6–11 (DLQ). Steps 6–7 m
 | Duplicate (name, version) detection | Two modules declare `"capability.succeeded"` v1 → `Build()` throws `EventRegistryBuildException` |
 | Version upgrade resolution | v1 Deprecated + v2 Active → `GetByName()` returns v2; validator accepts v2, rejects v1 |
 | Scope enforcement | Publish `Scope.Local` event via RabbitMQ → throws |
-| DLQ metadata | Handler throws → `IDeadLetterStore` receives `DeadLetterMessage` with EventName, Scope, ExceptionType populated |
+| DLQ metadata | Handler throws → `IDeadLetterStore` receives `DeadLetterMessage` with EventName, EventVersion, CorrelationId, OccurredAt, Scope, ExceptionType populated |
 
 ### Test Project Changes
 
@@ -713,6 +735,5 @@ Extend existing test projects — no new test projects needed:
 
 > **Phase 2b forward reference:** `EventReliability` is metadata only in Phase 2a. Phase 2b will introduce `DeliveryStrategy` resolution that maps `EventReliability` to transport behavior — `BestEffort` → fire-and-forget, `AtLeastOnce` → Outbox + retry, `Idempotent` → Outbox + idempotency check. The `EventReliability` enum is designed to accommodate this without schema changes.
 
-> **Phase 3 forward reference — typed publish:** `EventPublishingMiddleware` currently uses bare strings (`"capability.succeeded"`). The validator catches unregistered names at runtime, but Phase 3 should introduce `Publish<TEvent>(TEvent evt)` with compile-time resolution from the EventRegistry. Bare-string `Publish(string, payload)` becomes `[Obsolete]` at that point.
+> **Phase 3 forward reference — typed publish:** `EventPublishingMiddleware` currently uses bare strings (`"capability.succeeded"`). The validator catches unregistered names at runtime, but Phase 3 should introduce `Publish<TEvent>(TEvent evt)` with compile-time resolution from the EventRegistry. Bare-string `Publish(string, payload)` becomes `[Obsolete]` at that point. The `IEventBus` interface already reserves the generic overload: `Task PublishAsync<TEvent>(TEvent evt)` where `TEvent : IDomainEvent`. Phase 2a implementations throw `NotSupportedException`; Phase 3 will resolve `TEvent` → `EventDescriptor` via the registry.
 
-> **HostedService note:** `EventRegistryHostedService` uses `IHostedService` for Phase 2a simplicity. As registry count grows (Capability, Workflow, HumanTask), this will migrate to a `ModuleBootstrapper.Initialize()` pipeline with explicit dependency ordering. The spec does not mandate a specific boot mechanism for future registries.
