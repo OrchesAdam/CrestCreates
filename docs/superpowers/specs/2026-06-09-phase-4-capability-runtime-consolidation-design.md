@@ -303,25 +303,50 @@ Alias 解析不属于 Resolver，属于 Dispatcher/Gateway/HTTP/MCP 层。
 名称不含 "Descriptor"：返回类型已在签名中体现，避免 `IWorkflowDescriptorResolver` / `ISchemaDescriptorResolver` 等命名爆炸。
 
 ```csharp
+// Capability.Abstractions/CapabilityRef.cs
+// 结构化引用，避免隐式字符串语法
+public readonly record struct CapabilityRef(string Id, int? Version = null)
+{
+    /// <summary>
+    /// 解析字符串格式：
+    ///   "customer.create"     → ("customer.create", null)
+    ///   "customer.create:3"   → ("customer.create", 3)
+    /// </summary>
+    public static CapabilityRef Parse(string input)
+    {
+        var separatorIndex = input.LastIndexOf(':');
+        if (separatorIndex > 0 && int.TryParse(input.AsSpan(separatorIndex + 1), out var version))
+        {
+            return new CapabilityRef(input[..separatorIndex], version);
+        }
+        return new CapabilityRef(input);
+    }
+
+    public override string ToString()
+        => Version.HasValue ? $"{Id}:{Version}" : Id;
+}
+
 // Capability.Abstractions/ICapabilityResolver.cs
 public interface ICapabilityResolver
 {
     /// <summary>
-    /// 解析 Logical Capability Id + 版本选择，返回完整 CapabilityDescriptor。
-    ///
-    /// 输入格式：
-    ///   "customer.create"     → 最新 Active 版本
-    ///   "customer.create:3"   → 指定版本 3
-    ///
-    /// Latest Active 定义：State == Active
-    ///
-    /// 不支持 Alias（Alias 解析属于 Dispatcher/Gateway 层）
-    ///
-    /// 找不到 → 抛出 CapabilityNotFoundException
+    /// 结构化解析：CapabilityRef → CapabilityDescriptor。
     /// </summary>
-    CapabilityDescriptor Resolve(string capabilityIdOrVersion);
+    CapabilityDescriptor Resolve(CapabilityRef capabilityRef);
+
+    /// <summary>
+    /// 便利方法：内部解析字符串为 CapabilityRef 后委托主方法。
+    /// 输入格式："customer.create" / "customer.create:3"
+    /// </summary>
+    CapabilityDescriptor Resolve(string capabilityIdOrVersion)
+        => Resolve(CapabilityRef.Parse(capabilityIdOrVersion));
 }
 ```
+
+**设计决策**：
+- `CapabilityRef` 是值类型（record struct），零分配
+- `Parse()` 处理字符串语法，未来可扩展 `@beta` / `@latest` 等
+- `Resolve(string)` 是默认接口方法，便利但不强制实现
 
 ### 5.3 ICapabilityVersionResolver（内部）
 
@@ -353,20 +378,21 @@ public interface ICapabilityDispatcher
 {
     /// <summary>
     /// 主重载：直接接收 Descriptor（无重复 Resolve）。
-    /// Workflow/Agent 等已持有 Descriptor 的调用者应使用此重载。
+    /// InvocationSource 必须显式设置，禁止使用 Unknown。
     /// </summary>
     Task<CapabilityExecutionResult> DispatchAsync(
         CapabilityDescriptor descriptor,
+        InvocationSource source,
         object? input = null,
         Action<CapabilityExecutionContext>? configureContext = null,
         CancellationToken ct = default);
 
     /// <summary>
     /// 便利重载：内部 Resolve 后委托主重载。
-    /// 适用于未预先持有 Descriptor 的简单调用场景。
     /// </summary>
     Task<CapabilityExecutionResult> DispatchAsync(
         string capabilityId,
+        InvocationSource source,
         object? input = null,
         Action<CapabilityExecutionContext>? configureContext = null,
         CancellationToken ct = default);
@@ -387,6 +413,7 @@ internal sealed class CapabilityDispatcher : ICapabilityDispatcher
     // 主重载：直接接收 Descriptor
     public async Task<CapabilityExecutionResult> DispatchAsync(
         CapabilityDescriptor descriptor,
+        InvocationSource source,
         object? input = null,
         Action<CapabilityExecutionContext>? configureContext = null,
         CancellationToken ct = default)
@@ -394,9 +421,10 @@ internal sealed class CapabilityDispatcher : ICapabilityDispatcher
         return await _pipeline.ExecuteAsync(descriptor.Id, input, ctx =>
         {
             ctx.CapabilityId = descriptor.Id;
-            ctx.CapabilityName = descriptor.Name;              // 可读名称，用于日志/审计
+            ctx.CapabilityName = descriptor.Name;
             ctx.CapabilityVersion = descriptor.Version;
             ctx.CapabilityContractHash = descriptor.ContractHash;
+            ctx.InvocationSource = source;                     // 必填，由调用者传入
 
             // 自动注入
             ctx.TenantId = _tenantContext.TenantId;
@@ -409,12 +437,13 @@ internal sealed class CapabilityDispatcher : ICapabilityDispatcher
     // 便利重载：内部 Resolve 后委托主重载
     public async Task<CapabilityExecutionResult> DispatchAsync(
         string capabilityId,
+        InvocationSource source,
         object? input = null,
         Action<CapabilityExecutionContext>? configureContext = null,
         CancellationToken ct = default)
     {
         var descriptor = _descriptorResolver.Resolve(capabilityId);
-        return await DispatchAsync(descriptor, input, configureContext, ct);
+        return await DispatchAsync(descriptor, source, input, configureContext, ct);
     }
 }
 ```
@@ -441,10 +470,9 @@ internal sealed class CapabilityDispatcher : ICapabilityDispatcher
 // Capability.Abstractions/Execution/InvocationSource.cs
 namespace CrestCreates.Capability.Abstractions;
 
+// 无 Unknown 默认值 — 调用者必须显式设置
 public enum InvocationSource
 {
-    Unknown,
-
     Http,
     Workflow,
     HumanTask,
@@ -466,11 +494,12 @@ public enum InvocationSource
 ```csharp
 // 在现有 CapabilityExecutionContext 中新增
 public string CapabilityId { get; init; } = string.Empty;       // 稳定标识（= IDescriptor.Id）
-public InvocationSource InvocationSource { get; init; } = InvocationSource.Unknown;
+public InvocationSource InvocationSource { get; init; }          // 必填，无默认值
 ```
 
 - `CapabilityId` 由 Dispatcher 从 `descriptor.Id` 注入
 - `CapabilityName` 已有，用于可读展示
+- `InvocationSource` 必须由调用者显式设置（Dispatcher 或 configureContext 回调）
 - AuditMiddleware 读取 `context.CapabilityId` 写入 `CapabilityExecutionRecord.CapabilityId`
 
 ---
@@ -635,7 +664,29 @@ internal sealed class AuditMiddleware : ICapabilityPipelineMiddleware
 
 ## 10. Bootstrap Validators
 
-### 10.1 CapabilityHandlerValidator
+### 10.1 IBootstrapValidator vs IRegistryValidator
+
+**职责划分**：
+
+| 接口 | 职责 | 示例 |
+|---|---|---|
+| `IRegistryValidator<T>` | 单 Registry 内部校验 | Id 非空、Version > 0、ContractHash 非空 |
+| `IBootstrapValidator` | 跨 Registry 验证 | Handler 映射、Schema 引用、Workflow → Capability |
+
+`CapabilityHandlerValidator` 和 `CapabilitySchemaValidator` 都是**跨 Registry 验证**（依赖 Capability Registry + Handler Registry / Schema Registry），因此使用 `IBootstrapValidator`。
+
+```csharp
+// Metadata.Abstractions/IBootstrapValidator.cs
+// Bootstrap 阶段的跨 Registry 验证
+// Phase 6 Graph Engine 将扩展此接口（Workflow → Capability, Form → Schema 等）
+public interface IBootstrapValidator
+{
+    int Order { get; }
+    ValidationReport Validate();
+}
+```
+
+### 10.2 CapabilityHandlerValidator
 
 Source Generator 生成一个静态注册表 `GeneratedCapabilityHandlerRegistry`，实现 `ICapabilityHandlerRegistry` 接口。Validator 通过此接口检查映射，不依赖运行时 DI。
 
@@ -651,24 +702,28 @@ public interface ICapabilityHandlerRegistry
 }
 
 // Capability/Bootstrap/CapabilityHandlerValidator.cs
-public sealed class CapabilityHandlerValidator : IRegistryValidator<CapabilityDescriptor>
+public sealed class CapabilityHandlerValidator : IBootstrapValidator
 {
+    private readonly CapabilityRegistry _capabilityRegistry;
     private readonly ICapabilityHandlerRegistry _handlerRegistry;
 
-    public CapabilityHandlerValidator(ICapabilityHandlerRegistry handlerRegistry)
+    public CapabilityHandlerValidator(
+        CapabilityRegistry capabilityRegistry,
+        ICapabilityHandlerRegistry handlerRegistry)
     {
+        _capabilityRegistry = capabilityRegistry;
         _handlerRegistry = handlerRegistry;
     }
 
     public int Order => 100;
 
-    public ValidationReport Validate(IReadOnlyList<CapabilityDescriptor> descriptors)
+    public ValidationReport Validate()
     {
         var issues = new List<ValidationIssue>();
+        var descriptors = _capabilityRegistry.GetAll();
         var mappings = _handlerRegistry.GetHandlerMappings();
 
         // 检查每个 Descriptor 在 Source Generator 注册表中有对应 Handler
-        // 映射 key = CapabilityId（稳定标识），不使用 Name（可读名称）
         foreach (var descriptor in descriptors)
         {
             if (!mappings.ContainsKey(descriptor.Id))
@@ -684,9 +739,9 @@ public sealed class CapabilityHandlerValidator : IRegistryValidator<CapabilityDe
 }
 ```
 
-### 10.2 CapabilitySchemaValidator
+### 10.3 CapabilitySchemaValidator
 
-依赖抽象 `IDescriptorLookup`（只读接口），不依赖具体 Registry 类型。避免 Capability Validator → SchemaRegistry 的直接耦合，为 Phase 6 Graph Engine 铺路。
+依赖抽象 `IDescriptorLookup`（只读接口），不依赖具体 Registry 类型。
 
 ```csharp
 // Metadata.Abstractions/IDescriptorLookup.cs
@@ -697,21 +752,26 @@ public interface IDescriptorLookup
     bool Exists(DescriptorRef descriptorRef);
 }
 
-// Metadata/CapabilitySchemaValidator.cs
-public sealed class CapabilitySchemaValidator : IRegistryValidator<CapabilityDescriptor>
+// Capability/Bootstrap/CapabilitySchemaValidator.cs
+public sealed class CapabilitySchemaValidator : IBootstrapValidator
 {
+    private readonly CapabilityRegistry _capabilityRegistry;
     private readonly IDescriptorLookup _descriptorLookup;
 
-    public CapabilitySchemaValidator(IDescriptorLookup descriptorLookup)
+    public CapabilitySchemaValidator(
+        CapabilityRegistry capabilityRegistry,
+        IDescriptorLookup descriptorLookup)
     {
+        _capabilityRegistry = capabilityRegistry;
         _descriptorLookup = descriptorLookup;
     }
 
     public int Order => 200;
 
-    public ValidationReport Validate(IReadOnlyList<CapabilityDescriptor> descriptors)
+    public ValidationReport Validate()
     {
         var issues = new List<ValidationIssue>();
+        var descriptors = _capabilityRegistry.GetAll();
 
         foreach (var descriptor in descriptors)
         {
@@ -743,7 +803,7 @@ public sealed class CapabilitySchemaValidator : IRegistryValidator<CapabilityDes
 }
 ```
 
-### 10.3 设计决策
+### 10.4 设计决策
 
 | 决策 | 理由 |
 |---|---|
@@ -781,9 +841,9 @@ public static IServiceCollection AddCapabilityRuntime(
     // 生产环境：替换为真实实现（SQL/Mongo/Elastic）
     services.TryAddSingleton<ICapabilityAuditStore, NullCapabilityAuditStore>();
 
-    // Validators
-    services.AddSingleton<IRegistryValidator<CapabilityDescriptor>, CapabilityHandlerValidator>();
-    services.AddSingleton<IRegistryValidator<CapabilityDescriptor>, CapabilitySchemaValidator>();
+    // Bootstrap Validators（跨 Registry 验证）
+    services.AddSingleton<IBootstrapValidator, CapabilityHandlerValidator>();
+    services.AddSingleton<IBootstrapValidator, CapabilitySchemaValidator>();
 
     // AuditMiddleware（最外层）
     services.AddTransient<AuditMiddleware>();
@@ -873,7 +933,9 @@ ICapabilityAuditStore.RecordAsync(record)
 | `Capability.Abstractions/ICapabilityAuditStore.cs` | Audit 接口 |
 | `Capability.Abstractions/CapabilityExecutionRecord.cs` | Audit 记录 |
 | `Capability.Abstractions/ICapabilityResolver.cs` | 外部唯一解析入口（原 ICapabilityDescriptorResolver） |
+| `Capability.Abstractions/CapabilityRef.cs` | 结构化引用（避免隐式字符串语法） |
 | `Capability.Abstractions/CapabilityNotFoundException.cs` | 解析失败异常 |
+| `Metadata.Abstractions/IBootstrapValidator.cs` | 跨 Registry 验证接口 |
 | `Metadata.Abstractions/ICapabilityHandlerRegistry.cs` | Source Generator handler 注册表接口 |
 | `Metadata.Abstractions/IDescriptorLookup.cs` | Bootstrap 阶段只读查询接口 |
 | `Capability/Internal/ICapabilityVersionResolver.cs` | 内部版本解析 |
@@ -972,3 +1034,6 @@ ICapabilityAuditStore.RecordAsync(record)
 | 74 | CapabilityHandlerValidator 归属 Capability/Bootstrap | Metadata 不反向依赖 Runtime 语义，边界更干净 |
 | 75 | AuditMiddleware 区分 Cancellation | OperationCanceledException → "CANCELLED"，非 "UNHANDLED_EXCEPTION"。Workflow Suspend/Resume 依赖此区别 |
 | 76 | AddInMemoryCapabilityAudit 使用 Replace | 避免 IEnumerable 出现多个 ICapabilityAuditStore 实现 |
+| 77 | IBootstrapValidator 替代 IRegistryValidator 用于跨 Registry 验证 | Handler 映射/Schema 引用是 Cross Registry Validation，不属于单 Registry 校验 |
+| 78 | CapabilityRef 结构化引用 | 避免隐式字符串语法（"id:version"），为未来 @beta/@latest 扩展预留 |
+| 79 | InvocationSource 必填（无 Unknown） | 避免 Audit GROUP BY Source 出现 35% Unknown 垃圾桶 |
