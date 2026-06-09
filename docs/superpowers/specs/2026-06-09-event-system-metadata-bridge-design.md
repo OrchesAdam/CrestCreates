@@ -252,27 +252,35 @@ services.TryAddEnumerable(
 
 ### Manual Escape Hatch
 
-`EventRegistryProvider.Register(EventDescriptor)` remains available for dynamically-defined events (e.g., tenant-custom events loaded from configuration at runtime).
+`EventRegistry.RegisterDynamic(EventDescriptor)` remains available for dynamically-defined events (e.g., tenant-custom events loaded from configuration at runtime). These are stored separately from generated descriptors but participate in all queries.
 
 ---
 
 ## Design Section 3: EventRegistry — Build, Validate, Freeze
 
+### Two-Category Model: Generated vs Dynamic
+
+Generated descriptors (produced by source generators) and dynamically registered descriptors are distinct categories. Source-generator-produced descriptors are validated and frozen during `Build()`. Dynamically registered descriptors remain supported for tenant-defined or configuration-driven events and are stored separately from generated descriptors. Registry queries operate over the union of both sets.
+
 ### One-Shot Build
 
-`Build()` succeeds exactly once. After building, the registry is immutable.
+`Build()` succeeds exactly once for the generated category. After building, generated descriptors are immutable.
 
 ```csharp
 // CrestCreates.Event/EventRegistry.cs (revised)
 
 public sealed class EventRegistry : IEventRegistry
 {
+    private readonly ConcurrentDictionary<string, EventDescriptor> _generatedById = new();
+    private readonly ConcurrentDictionary<string, EventDescriptor> _dynamicById = new();
+    // ... (shared indexes by name, category, etc.)
     public bool IsBuilt { get; private set; }
 
+    // Called once at startup for generated descriptors
     public void Build(IEnumerable<IEventDescriptorProvider> providers)
     {
         if (IsBuilt)
-            return;  // Idempotent, not exceptional — multiple modules may trigger Build()
+            return;  // Idempotent — multiple modules may trigger Build()
 
         var descriptors = providers.SelectMany(p => p.GetDescriptors()).ToList();
 
@@ -281,10 +289,46 @@ public sealed class EventRegistry : IEventRegistry
         // Future: ValidateCapabilityRefs(descriptors);  // Phase 3
 
         foreach (var descriptor in descriptors)
-            Register(descriptor);
+            RegisterGenerated(descriptor);
 
         IsBuilt = true;
     }
+
+    // Runtime: dynamic/tenant-custom events (not frozen)
+    public void RegisterDynamic(EventDescriptor descriptor)
+    {
+        _dynamicById[descriptor.Id] = descriptor;
+        // ... (populate shared indexes)
+    }
+
+    private void RegisterGenerated(EventDescriptor descriptor)
+    {
+        _generatedById[descriptor.Id] = descriptor;
+        // ... (populate shared indexes)
+    }
+```
+
+### Name → Version Resolution
+
+When multiple versions of an event exist, `GetByName` returns the active version with the highest version number:
+
+```csharp
+// Returns v2 if v1 is Deprecated and v2 is Active
+public EventDescriptor? GetByName(string name)
+    => _byName.TryGetValue(name, out var versions)
+        ? versions.Where(v => v.State == DescriptorState.Active).MaxBy(v => v.Version)
+        : null;
+
+// Exact version lookup
+public EventDescriptor? GetByNameAndVersion(string name, int version)
+    => _byName.TryGetValue(name, out var versions)
+        ? versions.FirstOrDefault(v => v.Version == version)
+        : null;
+```
+
+This guarantees the validator always checks against the active (highest-version, non-deprecated) descriptor.
+
+### Build-Time Validation
 
     private static void ValidateNoDuplicateNames(List<EventDescriptor> descriptors)
     {
@@ -318,10 +362,14 @@ public sealed class EventRegistry : IEventRegistry
 ### Lifecycle
 
 ```
-Created ──► Build ──► Frozen (immutable)
+                        ┌── dynamic Only ──► RegisterDynamic() (anytime)
+                        │
+Created ──► Build ──► Generated Frozen
                │
                └── Fail-Fast on collision
 ```
+
+Generated descriptors are frozen at startup. Dynamic descriptors can be added at runtime. Both are queryable through the same `IEventRegistry` interface.
 
 Error at build time, not at runtime.
 
@@ -340,7 +388,21 @@ public interface IEventValidator
     ValidationResult Validate(string eventName, object? payload);
 }
 
-public sealed record ValidationResult(bool IsValid, string? Error, EventDescriptor? Descriptor);
+public sealed record ValidationResult(
+    bool IsValid,
+    EventValidationError ErrorCode,
+    string? Error,
+    EventDescriptor? Descriptor);
+
+public enum EventValidationError
+{
+    None,
+    NotRegistered,
+    Deprecated,
+    Removed,
+    InvalidScope,
+    InvalidPayload       // Phase 3
+}
 ```
 
 ### Single Implementation
@@ -434,16 +496,17 @@ public interface IDeadLetterStore
 ```csharp
 public sealed record DeadLetterMessage(
     string MessageId,
-    string EventName,           // ← added: "capability.succeeded" (registry-defined name)
-    EventScope Scope,           // ← added
-    string EventType,           // Assembly-qualified type name
+    string EventName,              // "capability.succeeded" (registry-defined name)
+    string? EventDescriptorId,     // ← added: "evt_capability.succeeded_v1" (stable reference)
+    EventScope Scope,              // ← added
+    string EventType,              // Assembly-qualified type name
     byte[] Payload,
     string ErrorMessage,
-    string? ExceptionType,      // ← added: typeof(TimeoutException).FullName
+    string? ExceptionType,         // ← added: typeof(TimeoutException).FullName
     DateTime FailedAt,
     int RetryCount,
     int MaxRetries,
-    DeadLetterStatus Status     // Pending | Retrying | Retried | Archived
+    DeadLetterStatus Status        // Pending | Retrying | Retried | Archived
 );
 ```
 
@@ -520,6 +583,7 @@ Steps 1–5 (metadata foundation) are independent of 6–11 (DLQ). Steps 6–7 m
 |------|-------|
 | `EventRegistry` | Register, GetByName, GetActiveVersion, IsBuilt flag, duplicate Build is idempotent |
 | `EventRegistry.Build()` validation | Duplicate event name → throws; duplicate (name, version) → throws; single registration succeeds |
+| `EventRegistry` version resolution | v1 Deprecated + v2 Active → GetByName returns v2; GetByNameAndVersion("name", 1) returns v1 |
 | `RegistryEventValidator` | Registered event → valid; unregistered → throws; Deprecated → throws with SupersededById message; Local scope on distributed bus → throws |
 | `InMemoryDeadLetterStore` | Full lifecycle: Enqueue → GetPending → MarkRetrying → MarkRetried; MarkArchived after max retries |
 | `EfCoreDeadLetterStore` | Same lifecycle + query by EventName, Scope, Status |
@@ -531,6 +595,7 @@ Steps 1–5 (metadata foundation) are independent of 6–11 (DLQ). Steps 6–7 m
 |------|----------|
 | Full compilation chain | `[CrestEvent]` → generator → provider → registry.Build() → validator.ValidateOrThrow() → pass |
 | Duplicate event detection | Two modules declare `"capability.succeeded"` → `Build()` throws `EventRegistryBuildException` |
+| Version upgrade resolution | v1 Deprecated + v2 Active → `GetByName()` returns v2; validator accepts v2, rejects v1 |
 | Scope enforcement | Publish `Scope.Local` event via RabbitMQ → throws |
 | DLQ metadata | Handler throws → `IDeadLetterStore` receives `DeadLetterMessage` with EventName, Scope, ExceptionType populated |
 
