@@ -7,6 +7,8 @@ namespace CrestCreates.Metadata.Tests;
 
 public class DescriptorRefTests
 {
+    // ── Generic DescriptorRef<TDescriptor> ──
+
     [Fact]
     public void DescriptorRef_Records_Id()
     {
@@ -50,5 +52,70 @@ public class DescriptorRefTests
         var vref2 = new VersionedDescriptorRef<SchemaDescriptor>("schema_01", 4);
 
         vref1.Should().NotBe(vref2);
+    }
+
+    // ── Non-generic DescriptorRef (Task 2) ──
+
+    [Fact]
+    public void DescriptorRef_with_version_creates_correctly()
+    {
+        var r = new DescriptorRef("event", "user.created", 2);
+        r.Namespace.Should().Be("event");
+        r.Id.Should().Be("user.created");
+        r.Version.Should().Be(2);
+    }
+
+    [Fact]
+    public void DescriptorRef_null_version_means_latest()
+    {
+        var r = new DescriptorRef("event", "user.created");
+        r.Version.Should().BeNull();
+    }
+
+    [Fact]
+    public void DescriptorRef_FullId_combines_namespace_and_id()
+    {
+        var r = new DescriptorRef("capability", "approval");
+        r.FullId.Should().Be("capability.approval");
+    }
+
+    [Fact]
+    public void DescriptorRef_is_IDescriptorRef()
+    {
+        IDescriptorRef r = new DescriptorRef("event", "test", 1);
+        r.Id.Should().Be("test");
+        r.Version.Should().Be(1);
+    }
+
+    // ── DescriptorKey ──
+
+    [Fact]
+    public void DescriptorKey_requires_version()
+    {
+        var k = new DescriptorKey("event", "user.created", 1);
+        k.Namespace.Should().Be("event");
+        k.Id.Should().Be("user.created");
+        k.Version.Should().Be(1);
+    }
+
+    // ── ValidationReport ──
+
+    [Fact]
+    public void ValidationReport_aggregates_issues()
+    {
+        var report = ValidationReport.FromIssues(
+            new ValidationIssue(ValidationSeverity.Error, "Duplicate name"),
+            new ValidationIssue(ValidationSeverity.Warning, "Missing description"));
+
+        report.HasErrors.Should().BeTrue();
+        report.HasWarnings.Should().BeTrue();
+        report.Issues.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void ValidationReport_empty_has_no_errors()
+    {
+        ValidationReport.Empty.HasErrors.Should().BeFalse();
+        ValidationReport.Empty.HasWarnings.Should().BeFalse();
     }
 }

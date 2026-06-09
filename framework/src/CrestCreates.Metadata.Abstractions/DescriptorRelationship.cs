@@ -4,7 +4,13 @@ namespace CrestCreates.Metadata.Abstractions;
 /// Non-generic descriptor reference with namespace and id.
 /// Used in relationship declarations. The generic DescriptorRef{TDescriptor} remains for typed refs.
 /// </summary>
-public readonly record struct DescriptorRef(string Namespace, string Id);
+public readonly record struct DescriptorRef(
+    string Namespace,
+    string Id,
+    int? Version = null) : IDescriptorRef
+{
+    public string FullId => $"{Namespace}.{Id}";
+}
 
 public sealed record DescriptorRelationship(
     DescriptorRef From,
