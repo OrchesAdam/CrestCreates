@@ -103,9 +103,9 @@ public interface IEventDescriptor
 public sealed record GeneratedEventDescriptor : IEventDescriptor, IVersionedDescriptor
 {
     // ── 1. Identity ──
-    public string Id { get; init; }                 // SHA256(Name + ":" + Version). Stable across CLR type renames; name change = new identity.
+    public string Id { get; init; }                 // SHA256(Name) — stable event family identity across all versions. Name change = new identity.
     public string Name { get; init; }
-    public int Version { get; init; }
+    public int Version { get; init; }               // separate from Id — the composite unique key is (Name, Version), not Id
     public DescriptorState State { get; init; }
     public string? Description { get; init; }
 
@@ -118,6 +118,7 @@ public sealed record GeneratedEventDescriptor : IEventDescriptor, IVersionedDesc
 
     // ── 4. Reliability ──
     public EventReliability Reliability { get; init; }
+    public bool RequiresIdempotency { get; init; }  // consumer-side dedup (AtLeastOnce + IdempotencyStore → effectively-once)
 
     // ── 5. Direction ──
     public EventDirection Direction { get; init; }
@@ -169,7 +170,11 @@ public sealed record DynamicEventDescriptor : IEventDescriptor
 ```csharp
 public enum EventScope      { Local, Domain, Integration }
 public enum EventDirection  { Internal, Incoming, Outgoing }
-public enum EventReliability { BestEffort, AtLeastOnce, Idempotent }  // Idempotent = AtLeastOnce + dedup
+public enum EventReliability { BestEffort, AtLeastOnce }  // Delivery semantic only
+
+// Consumer-side dedup is a separate concern:
+//   AtLeastOnce + IEventIdempotencyStore → effectively-once processing
+// Encoding it as a Reliability value conflates producer delivery with consumer behavior.
 public enum EventImportance { Low, Normal, High, Critical }
 ```
 
@@ -212,6 +217,7 @@ public sealed class CrestEventAttribute : Attribute
     public int Version { get; init; } = 1;              // defaults to 1; explicit for v2+
     public EventScope Scope { get; init; }              // required, no default
     public EventReliability Reliability { get; init; }  // AtLeastOnce (default)
+    public bool RequiresIdempotency { get; init; }      // consumer-side dedup
     public EventDirection Direction { get; init; }      // Internal (default)
     public EventImportance Importance { get; init; }    // Normal (default)
     public string? Description { get; init; }
@@ -229,7 +235,8 @@ public sealed class CrestEventAttribute : Attribute
     Name = "capability.succeeded",
     Version = 2,                                        // explicit — generator uses this
     Scope = EventScope.Integration,
-    Reliability = EventReliability.Idempotent,
+    Reliability = EventReliability.AtLeastOnce,
+    RequiresIdempotency = true,                         // consumer-side dedup
     Direction = EventDirection.Outgoing,
     Importance = EventImportance.High,
     IsAuditable = true,
@@ -264,16 +271,16 @@ public sealed class GeneratedEventDescriptorProvider : IEventDescriptorProvider
     public IReadOnlyList<GeneratedEventDescriptor> GetDescriptors() => [
         new GeneratedEventDescriptor
         {
-            Id = GeneratedEventDescriptorProvider.GenerateId(
-                "capability.succeeded", attribute.Version),
-            // Id = SHA256("capability.succeeded:2") → stable across type renames
+            Id = GeneratedEventDescriptorProvider.GenerateId("capability.succeeded"),
+            // Id = SHA256("capability.succeeded") → stable family identity across all versions
             Name = "capability.succeeded",
             Version = attribute.Version,           // from [CrestEvent(Version = 2)]
             State = DescriptorState.Active,
             PayloadType = typeof(CapabilitySucceeded),
             PayloadSchemaRef = null,  // Phase 3: SchemaRegistry.Resolve<CapabilitySucceeded>()
             Scope = EventScope.Integration,
-            Reliability = EventReliability.Idempotent,
+            Reliability = EventReliability.AtLeastOnce,
+            RequiresIdempotency = true,     // consumer-side dedup
             Direction = EventDirection.Outgoing,
             Importance = EventImportance.High,
             CapabilityRef = new VersionedDescriptorRef<CapabilityDescriptor>("cap-runtime", 1),
@@ -359,16 +366,22 @@ public interface IEventMetadataProvider
 
 public sealed class EventRegistry : IEventRegistry, IEventMetadataProvider
 {
-    private readonly ConcurrentDictionary<string, GeneratedEventDescriptor> _byId = new();
+    // (Name, Version) is the composite unique key. Id is SHA256(Name) — stable family identity.
+    private readonly ConcurrentDictionary<string, List<GeneratedEventDescriptor>> _byName = new();
     private readonly ConcurrentDictionary<Type, GeneratedEventDescriptor> _byPayloadType = new();
+    private readonly object _buildLock = new();
     public RegistryState State { get; private set; } = RegistryState.Created;
 
     public void Build(IEnumerable<IEventDescriptorProvider> providers)
     {
         if (State == RegistryState.Built) return;
-        if (State == RegistryState.Failed)
-            throw new InvalidOperationException("Build previously failed. Restart required.");
-        State = RegistryState.Building;
+        lock (_buildLock)
+        {
+            if (State == RegistryState.Built) return;
+            if (State == RegistryState.Failed)
+                throw new InvalidOperationException("Build previously failed. Restart required.");
+            State = RegistryState.Building;
+        }
         var descriptors = providers.SelectMany(p => p.GetDescriptors()).ToList();
         try
         {
@@ -388,7 +401,10 @@ public sealed class EventRegistry : IEventRegistry, IEventMetadataProvider
 
     private void RegisterGenerated(GeneratedEventDescriptor d)
     {
-        _byId[d.Id] = d;
+        _byName.AddOrUpdate(d.Name,
+            _ => new List<GeneratedEventDescriptor> { d },
+            (_, list) => { list.Add(d); return list; });
+        // Latest version wins in _byPayloadType — PublishAsync<T>() resolves to the newest
         _byPayloadType[d.PayloadType] = d;
     }
 }
@@ -425,7 +441,11 @@ public sealed class DynamicEventRegistry : IDynamicEventRegistry
                 $"Requested: {scope}. Use [CrestEvent] for Domain/Integration events.");
         if (_generated.State != RegistryState.Built)
             throw new InvalidOperationException("Cannot register dynamic events before Build completes.");
-        if (_generated.GetByName(name) is not null) return;  // generated wins, silent no-op
+        if (_generated.GetByName(name) is not null)
+            throw new InvalidOperationException(
+                $"Dynamic event '{name}' conflicts with an existing generated event. " +
+                "Dynamic events cannot shadow generated events. " +
+                "Use a different name or register the event via [CrestEvent].");
         _byName[name] = new DynamicEventDescriptor
         {
             Id = DynamicEventDescriptor.GenerateId(name),
@@ -924,7 +944,7 @@ Extend existing test projects — no new test projects needed:
 | `PayloadSchemaRef` in `DeadLetterMessage` | Phase 3 |
 | AoT optimization (`FrozenDictionary`, `switch`-based lookup) | Phase 4 |
 
-> **Phase 2b forward reference:** `EventReliability` is metadata only in Phase 2a. Phase 2b will introduce `DeliveryStrategy` resolution that maps `EventReliability` to transport behavior — `BestEffort` → fire-and-forget, `AtLeastOnce` → Outbox + retry, `Idempotent` → Outbox + idempotency check. Note: `Idempotent` is a consumer-side guarantee (AtLeastOnce + dedup), not a true exactly-once delivery semantic. This naming may be refined in Phase 2b.
+> **Phase 2b forward reference:** `EventReliability` and `RequiresIdempotency` are metadata only in Phase 2a. Phase 2b will introduce `DeliveryStrategy` resolution: `BestEffort` → fire-and-forget, `AtLeastOnce` → Outbox + retry. `RequiresIdempotency` drives idempotency key generation and `IEventIdempotencyStore` lookup on the consumer side. Together, `AtLeastOnce` + idempotency store → effectively-once processing without conflating delivery semantics with consumer dedup.
 
 > **Phase 2a — typed publish:** `IEventBus.PublishAsync<TEvent>(TEvent evt)` calls `IEventResolver.GetByPayloadType(typeof(TEvent))` to resolve the event name, then delegates to the string-based `PublishAsync(name, payload)`. The registry is the single authority for Type→Descriptor mapping — there is no separate `EventTypeMap` generated by the source generator. This eliminates magic strings for all `[CrestEvent]`-annotated types with zero dual-authority risk. The string-based overload remains as the low-level API for dynamic events; generated events use the typed overload by default.
 
