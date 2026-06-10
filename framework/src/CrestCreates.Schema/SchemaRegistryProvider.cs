@@ -1,21 +1,28 @@
+using CrestCreates.Metadata;
+using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 
 namespace CrestCreates.Schema;
 
 public static class SchemaRegistryProvider
 {
-    private static ISchemaRegistry? _registry;
+    private static readonly InMemorySchemaProvider _provider = new();
 
     public static void SetRegistry(ISchemaRegistry registry)
     {
-        _registry = registry;
+        DescriptorProviderRegistry.Register<SchemaDescriptor>(_provider);
     }
 
     public static void Register(SchemaDescriptor descriptor)
     {
-        if (_registry is SchemaRegistry concrete)
-        {
-            concrete.Register(descriptor);
-        }
+        _provider.Add(descriptor);
+    }
+
+    private class InMemorySchemaProvider : IDescriptorProvider<SchemaDescriptor>
+    {
+        private readonly List<SchemaDescriptor> _descriptors = new();
+
+        public void Add(SchemaDescriptor descriptor) => _descriptors.Add(descriptor);
+        public IReadOnlyList<SchemaDescriptor> GetDescriptors() => _descriptors;
     }
 }
