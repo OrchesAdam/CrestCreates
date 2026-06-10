@@ -17,6 +17,20 @@
 
 加两个 Instance Infrastructure descriptors：**Form**（Schema + UI metadata）和 **HumanTask**（人工交互的业务操作）。
 
+### Phase 4a: Main Chain Closure
+
+Phase 4a 统一所有 Registry 到 RegistryBase，消除 static Provider 模式，新增集中式 Provider 存储与元数据引导器：
+
+| 组件 | 说明 |
+|------|------|
+| `DescriptorProviderRegistry` | 集中式 IDescriptorProvider<T> 存储（替代 4 个 static Provider 类） |
+| `MetadataBootstrapper.BuildAll()` | 统一 Build 协调器 — 遍历 6 个 Registry 执行 Build |
+| `IDescriptorRegistry.Build()` | 接口级 Build 方法 — 所有 Registry 接口统一可用 |
+| `Schema/Form/HumanTask/WorkflowRegistry` | 迁移到 RegistryBase（全部 6 个 Registry 统一） |
+| Source Generator 统一 | 生成 IDescriptorProvider<T>（覆盖 5 种 descriptor 类型） |
+| E2E 集成测试 | 14 个全链路测试：Dispatch → Pipeline → Handler → Audit |
+| Cross-Registry 验证测试 | 3 个 DescriptorRef 跨 Registry 引用验证 |
+
 ### Phase 4: Capability Runtime Consolidation
 
 Phase 4 统一 Capability 运行时，打破循环依赖，收口 ICapabilityRegistry 到 Metadata，新增 Dispatcher、Resolver、Audit 链路：
@@ -74,46 +88,44 @@ framework/src/
 │                                           # ICapabilityRegistry (moved from Capability.Abstractions — breaks circular dep)
 │                                           # ICapabilityResolver, ICapabilityDispatcher (moved from Capability.Abstractions)
 │                                           # CapabilityProfile (moved from Capability.Abstractions)
+│                                           # DescriptorProviderRegistry, MetadataBootstrapper (Phase 4a)
 ├── CrestCreates.Schema.Abstractions/        # SchemaDescriptor, SchemaFieldDescriptor, ISchemaRegistry, ISchemaValidator
-├── CrestCreates.Schema/                     # SchemaRegistry (implements GetByVersion), SchemaValidator
+├── CrestCreates.Schema/                     # SchemaRegistry : RegistryBase<SchemaDescriptor>, SchemaValidator
 ├── CrestCreates.Capability.Abstractions/    # ICapabilityPipeline, CapabilityExecutionContext, CapabilityExecutionResult,
 │                                           # CapabilityRef, InvocationSource, CapabilityNotFoundException,
 │                                           # CapabilityExecutionRecord, ICapabilityAuditStore,
 │                                           # ICapabilityHandlerResolver, ICapabilityHandlerInvoker, CapabilityPipelineDelegate
-├── CrestCreates.Capability/                 # CapabilityPipeline (updated: Id-first lookup + CapabilityId in context),
+├── CrestCreates.Capability/                 # CapabilityPipeline (Id-first lookup, descriptor.Id for handler),
 │                                           # CapabilityDispatcher (unified facade, injects ITenantContext/ICurrentUser),
 │                                           # DefaultCapabilityResolver, DefaultCapabilityVersionResolver,
 │                                           # AuditMiddleware, NullCapabilityAuditStore, InMemoryCapabilityAuditStore,
 │                                           # CapabilityHandlerValidator, CapabilitySchemaValidator (bootstrap validators),
-│                                           # middleware chain (9层: Audit → RateLimit → Tenant → Auth → Validation → Idempotency → Metrics → Handler → EventPub)
+│                                           # middleware chain (9层)
 │                                           # CapabilityServiceCollectionExtensions (AddCapabilityRuntime DI)
-├── CrestCreates.Event.Abstractions/         # GeneratedEventDescriptor, DynamicEventDescriptor, EventCategory,
-│                                           # EventSemantic, EventImportance, CrestEventAttribute,
-│                                           # IEventDescriptorProvider, IEventRegistry, IEventMetadataProvider,
-│                                           # IEventResolver, IDynamicEventRegistry, IEventValidator
-├── CrestCreates.Event/                      # EventRegistry (inherits RegistryBase), EventResolver,
-│                                           # DynamicEventRegistry, RegistryEventValidator,
-│                                           # PassThroughEventValidator, EventRegistryBootstrapper
+├── CrestCreates.Event.Abstractions/         # GeneratedEventDescriptor, DynamicEventDescriptor,
+│                                           # IEventDescriptorProvider, IEventRegistry, IEventMetadataProvider
+├── CrestCreates.Event/                      # EventRegistry : RegistryBase<GeneratedEventDescriptor>, EventResolver,
+│                                           # DynamicEventRegistry, EventRegistryBootstrapper
 ├── CrestCreates.Form.Abstractions/          # FormDescriptor, FormFieldDescriptor, IFormRegistry
-├── CrestCreates.Form/                       # FormRegistry (implements GetByVersion)
+├── CrestCreates.Form/                       # FormRegistry : RegistryBase<FormDescriptor>
 ├── CrestCreates.HumanTask.Abstractions/     # HumanTaskDescriptor, CompletionOutcome, AssigneeStrategy, IHumanTaskRegistry
-├── CrestCreates.HumanTask/                  # HumanTaskRegistry (implements GetByVersion)
+├── CrestCreates.HumanTask/                  # HumanTaskRegistry : RegistryBase<HumanTaskDescriptor>
 ├── CrestCreates.Workflow.Abstractions/      # WorkflowDescriptor, WorkflowStep, InteractionTarget, IWorkflowEngine, IWorkflowRegistry
-├── CrestCreates.Workflow/                   # WorkflowRegistry (implements GetByVersion), WorkflowEngine
+├── CrestCreates.Workflow/                   # WorkflowRegistry : RegistryBase<WorkflowDescriptor>, WorkflowEngine
 ├── CrestCreates.Draft.Abstractions/         # DraftRecord, IDraftStore, DraftStatus
 ├── CrestCreates.Draft/                      # InMemoryDraftStore, TenantIsolatedDraftStore
 ├── CrestCreates.Exposure.Abstractions/      # AgentToolDescriptor, MCPToolDescriptor, ToolCallMode
 └── framework/tools/CrestCreates.CodeGenerator/  # 5 source generators (Schema/Capability/Event/Form/HumanTask/Workflow + Handler + RefValidation)
 
 framework/test/
-├── CrestCreates.Schema.Tests/               (19)
-├── CrestCreates.Metadata.Tests/             (79)  ← Phase 3/4: RegistryBase, Validators, Bootstrap, Resolver, CapabilityRegistry
-├── CrestCreates.Capability.Tests/           (104) ← Phase 4/4a: Resolver, Dispatcher, Audit, E2E, Registry migration
+├── CrestCreates.Schema.Tests/               (20)
+├── CrestCreates.Metadata.Tests/             (82)  ← Phase 3/4/4a: RegistryBase, Validators, Bootstrap, Resolver, CapabilityRegistry, RefValidation
+├── CrestCreates.Capability.Tests/           (104) ← Phase 4/4a: Resolver, Dispatcher, Audit, E2E(14), Registry migration
 ├── CrestCreates.Draft.Tests/               (13)
-├── CrestCreates.Event.Tests/               (32)  ← Phase 2a: EventRegistry, Validator, DynamicRegistry
+├── CrestCreates.Event.Tests/               (32)
 ├── CrestCreates.Exposure.Tests/            (12)
-├── CrestCreates.Form.Tests/                (8)
-├── CrestCreates.HumanTask.Tests/           (8)
+├── CrestCreates.Form.Tests/                (9)
+├── CrestCreates.HumanTask.Tests/           (9)
 └── CrestCreates.Workflow.Tests/            (28)
 ```
 
@@ -438,16 +450,16 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 
 | 测试项目 | 测试数 | 覆盖范围 |
 |----------|--------|---------|
-| Schema.Tests | 19 | Descriptor 创建, Registry CRUD + 版本, Validator(10) |
-| Metadata.Tests | 79 | **Phase 3/4:** RegistryBase(9), EventValidators(6), BootstrapCoordinator(4), DescriptorResolver(5), CapabilityRegistry(6, +GetByKind/GetByTag), CapabilityDescriptor(4), DescriptorIdentity(4), DescriptorRef(12), ValidationReport(2), + 原有 27 |
+| Schema.Tests | 20 | Descriptor 创建, Registry Build + GetById/GetByVersion/GetByName/GetActiveVersion/GetDeprecatedVersions/GetAllByName, Validator(10) |
+| Metadata.Tests | 82 | **Phase 3/4/4a:** RegistryBase(9), Validators(6), Bootstrap(4), Resolver(5), CapabilityRegistry(6), CapabilityDescriptor(4), DescriptorRef(12), RefValidation(3), + 原有 33 |
 | Capability.Tests | 104 | **Phase 4/4a:** Resolver(9), Dispatcher(8), Audit(5), InMemoryStore(5), NullStore(2), E2E(14), Registry(4), Pipeline(6), + 遗留 |
 | Draft.Tests | 13 | DraftRecord(4), InMemoryStore(5), TenantIsolated(4) |
-| Event.Tests | 32 | **Phase 2a:** EventRegistry(16), Validator(4), DynamicRegistry(7), Descriptor(5) |
+| Event.Tests | 32 | EventRegistry(16), Validator(4), DynamicRegistry(7), Descriptor(5) |
 | Exposure.Tests | 12 | AgentTool(5), MCPTool(3), CapabilityEndpoint(4) |
-| Form.Tests | 8 | Descriptor(5), Registry(3) |
-| HumanTask.Tests | 8 | Descriptor(6), Registry(2) |
+| Form.Tests | 9 | Descriptor(5), Registry(4) |
+| HumanTask.Tests | 9 | Descriptor(6), Registry(3) |
 | Workflow.Tests | 28 | Descriptor(6), Registry(3), InteractionTarget(4), Engine(11), Resume(4) |
-| **Total** | **~289** | |
+| **Total** | **~309** | |
 
 ---
 
@@ -525,3 +537,11 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 68 | CapabilityExecutionContext descriptor 属性 init-only（pipeline 设置），InvocationSource 为 set（dispatcher 设置） | ✅ Phase 4 |
 | 69 | IBootstrapValidator / IDescriptorLookup / ICapabilityHandlerRegistry 加入 Metadata.Descriptions | ✅ Phase 4 |
 | 70 | 测试: 90 个 Capability.Tests（+31 Phase 4 新增：Resolver/Dispacher/Audit） | ✅ Phase 4 |
+| 71 | DescriptorProviderRegistry 集中式 Provider 存储 — Registry 与 Provider Discovery 分离 | ✅ Phase 4a |
+| 72 | MetadataBootstrapper.BuildAll() 统一 Build 协调 — 6 个 Registry 同一生命周期 | ✅ Phase 4a |
+| 73 | 4 个 static *RegistryProvider.cs 废弃 — SG 改为生成 IDescriptorProvider<T> | ✅ Phase 4a |
+| 74 | Schema/Form/HumanTask/Workflow Registry 迁移到 RegistryBase — 全部 6 个 Registry 统一 | ✅ Phase 4a |
+| 75 | Event Provider 统一为 IDescriptorProvider<GeneratedEventDescriptor> | ✅ Phase 4a |
+| 76 | IDescriptorRegistry.Build() 接口级方法 — 所有 Registry 接口统一 Build | ✅ Phase 4a |
+| 77 | HandlerResolver 仅接受 Id — Name 永不参与 Runtime Dispatch | ✅ Phase 4a |
+| 78 | 测试: 104 个 Capability.Tests（+14 E2E + 3 RefValidation） | ✅ Phase 4a |

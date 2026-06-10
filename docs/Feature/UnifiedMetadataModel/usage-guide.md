@@ -1,7 +1,7 @@
 # 统一元数据模型 — 使用指南
 
 > 本文档面向 CrestCreates 模块开发者，介绍如何使用统一元数据模型声明和执行业务能力。
-> *更新于 Phase 4 (2026-06-10): 加入 CapabilityDispatcher, ICapabilityResolver, AuditMiddleware, CapabilityProfile 移至 Metadata*
+> *更新于 Phase 4a (2026-06-10): 所有 6 个 Registry 统一基于 RegistryBase, DescriptorProviderRegistry + MetadataBootstrapper, 全部使用 Build(providers) 模式*
 
 ---
 
@@ -366,15 +366,22 @@ var customerCaps = capabilityRegistry.GetByTag("customer");              // 按�
 
 ### 8.2 Registry 构建
 
-Registry 通过 `IDescriptorProvider<T>` + `Build(providers)` 模式构建（替代旧的 `Register()` 方法）：
+> ⚠️ **Phase 4a 更新:** **全部 6 个 Registry**（Schema/Form/HumanTask/Workflow/Capability/Event）统一基于 `RegistryBase<T>`，使用 `Build(providers)` 模式。旧的 `Register()` 方法已废弃。
+> Provider 通过 `DescriptorProviderRegistry.Register(provider)` 收集，由 `MetadataBootstrapper.BuildAll()` 统一协调执行。
 
 ```csharp
 // 手动构建（不推荐，通常由 BootstrapCoordinator 自动完成）
-var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
-var registry = new CapabilityRegistry(engine);
-registry.Build([new MyCapabilityProvider()]);  // IDescriptorProvider<CapabilityDescriptor>[]
+var engine = new RegistryValidationEngine<SchemaDescriptor>([]);
+var registry = new SchemaRegistry(engine);
+registry.Build([new MySchemaProvider()]);  // IDescriptorProvider<SchemaDescriptor>[]
 
-// 通过 DI 注入的 Registry 已在启动时自动构建
+// 所有 6 个 Registry API 一致：
+// schemaRegistry.Build(providers)
+// formRegistry.Build(providers)
+// humanTaskRegistry.Build(providers)
+// workflowRegistry.Build(providers)
+// capabilityRegistry.Build(providers)
+// eventRegistry.Build(providers)
 ```
 
 ### 8.3 验证管道
@@ -556,8 +563,10 @@ services.AddSingleton<MyRegistry>();
 | 设计规格书 | `docs/superpowers/specs/2026-06-08-unified-metadata-model-design.md` |
 | Phase 3 设计规格书 | `docs/superpowers/specs/2026-06-09-phase-3-metadata-runtime-foundation-design.md` |
 | Phase 4 设计规格书 | `docs/superpowers/specs/2026-06-09-phase-4-capability-runtime-consolidation-design.md` |
+| Phase 4a 设计规格书 | `docs/superpowers/specs/2026-06-10-phase-4a-main-chain-closure-design.md` |
 | Phase 3 实现计划 | `docs/superpowers/plans/2026-06-09-phase-3-metadata-runtime-foundation.md` |
 | Phase 4 实现计划 | `docs/superpowers/plans/2026-06-10-phase-4-capability-runtime-consolidation.md` |
+| Phase 4a 实现计划 | `docs/superpowers/plans/2026-06-10-phase-4a-main-chain-closure.md` |
 | 架构总结 | `docs/Feature/UnifiedMetadataModel/2026-06-09-unified-metadata-model-architecture-summary.md` |
 
 ### 关键接口一览
@@ -576,11 +585,13 @@ services.AddSingleton<MyRegistry>();
 | `IDescriptorResolver` | 统一解析器 | Metadata.Abstractions |
 | `IBootstrapTask` | 启动任务接口 | Metadata.Abstractions |
 | `BootstrapCoordinator` | 拓扑排序协调器 | Metadata |
+| `DescriptorProviderRegistry` | 集中式 Provider 存储 (Phase 4a) | Metadata |
+| `MetadataBootstrapper` | 统一 BuildAll() 协调 (Phase 4a) | Metadata |
 | `ICapabilityRegistry` | Capability 注册表 (Id/Name/Tag/Kind 查询) | Metadata |
 | `ICapabilityResolver` | Capability 统一解析入口 (Id-first) | Metadata |
 | `ICapabilityDispatcher` | Capability 统一执行门面 (注入 Tenant/User 上下文) | Metadata |
 | `ICapabilityAuditStore` | 审计存储契约 (InMemory/Null) | Capability.Abstractions |
-| `ICapabilityPipeline` | Capability 执行流水线 | Capability.Abstractions |
+| `ICapabilityPipeline` | Capability 执行流水线 (Phase 4a: `capabilityIdOrName` 参数) | Capability.Abstractions |
 | `ICapabilityHandlerInvoker` | 零反射 Handler 调用器 | Capability.Abstractions |
 | `IBootstrapValidator` | 启动阶段验证器 | Metadata.Abstractions |
 | `IDescriptorLookup` | 跨 Registry 描述符查找 | Metadata.Abstractions |
