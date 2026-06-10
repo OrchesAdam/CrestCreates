@@ -63,6 +63,8 @@ public static class DescriptorProviderRegistry
 }
 ```
 
+> **实现优化（不阻塞 Phase 4a）**: 当 provider 数量增长后，可将 `ConcurrentBag<object>` 改为 `ConcurrentDictionary<Type, List<object>>`，使 `GetProviders<T>()` 从 O(n) 扫描变为 O(1) 索引。
+
 ### 2.4 新增：MetadataBootstrapper.BuildAll()
 
 ```csharp
@@ -74,7 +76,7 @@ public static class MetadataBootstrapper
         IFormRegistry formRegistry,
         IHumanTaskRegistry humanTaskRegistry,
         IWorkflowRegistry workflowRegistry,
-        IEventRegistry eventRegistry)   // 也统一走 Build
+        IEventRegistry eventRegistry)
     {
         schemaRegistry.Build(DescriptorProviderRegistry.GetProviders<SchemaDescriptor>());
         formRegistry.Build(DescriptorProviderRegistry.GetProviders<FormDescriptor>());
@@ -84,6 +86,13 @@ public static class MetadataBootstrapper
     }
 }
 ```
+
+> **Architecture Enhancement (Phase 5+)**: 当前 `MetadataBootstrapper` 直接依赖具体 Registry 接口。未来引入 `IRegistryBuilder { void Build(); }` 接口后，可改为：
+> ```csharp
+> foreach (var builder in registries.OfType<IRegistryBuilder>())
+>     builder.Build();
+> ```
+> 这样新增 `AgentRegistry` / `TemplateRegistry` 等不再需要修改 Bootstrapper。不阻塞 Phase 4a。
 
 ### 2.5 每个 Registry 的改动模式
 
@@ -185,6 +194,8 @@ internal static class GeneratedDescriptorRegistry
 
 **注意：** `IEventDescriptorProvider` 接口本身保留不删除（已有 consumer 实现它），但 source generator 不再生成它的实现 — 改为生成 `IDescriptorProvider<GeneratedEventDescriptor>`。
 
+> **Capability 统一化不属 Phase 4a**：Capability 的 source generator 生成代码当前为注释状态。Capability Provider 统一到 `IDescriptorProvider<CapabilityDescriptor>` 将在后续 Metadata Runtime Consolidation 中处理。
+
 #### Source Generator 改动点
 
 - 删除 `IEventDescriptorProvider` 的 generated class 生成逻辑（`GeneratedCapabilityEventDescriptorProvider`）
@@ -242,11 +253,13 @@ Registry.Build → Resolver → Dispatcher → Pipeline → Handler → Audit �
 > E1: `ExecuteAsync("echo.v2")` → GetById 命中。E2: `ExecuteAsync("Echo Command")` → Name fallback 命中。  
 > **新代码应始终传 Id。** WorkflowRuntime 等组件传的是 `descriptor.Id`（稳定标识符），不是 Name。
 
-### 4.2 Cross-Registry 验证测试（新增）
+### 4.2 Metadata Reference Validation（跨 Registry 引用验证）
 
-**文件**: `framework/test/CrestCreates.Metadata.Tests/RegistryIntegrationTests.cs`
+**文件**: `framework/test/CrestCreates.Metadata.Tests/DescriptorReferenceValidationTests.cs`
 
-验证 Build 阶段跨 Registry 引用完整性。**核心价值：Build 时发现配置错误，而非运行时。**
+验证 `DescriptorRef` 机制的跨 Registry 完整性。**核心价值：Build 时发现配置错误，而非运行时。**
+
+本质验证的是 `DescriptorRef` 系统 — 同一个机制被 Form→Schema、Workflow→Capability、HumanTask→Form 等所有交叉引用复用。
 
 | # | 测试 | 引用 | 目标 | 预期 |
 |---|------|------|------|------|
@@ -287,17 +300,20 @@ Registry.Build → Resolver → Dispatcher → Pipeline → Handler → Audit �
 
 ### 5.3 HandlerResolver 语义明确化
 
+**Runtime 永远不使用 Name 解析 Handler。**
+
 ```csharp
-// ✅ 正确：传 descriptor.Id
+// ✅ 唯一正确路径：传 descriptor.Id
 handlerResolver.Register(descriptor.Id, handler);
 handlerResolver.Resolve(descriptor.Id);
-
-// ❌ 禁止：传 descriptor.Name
-handlerResolver.Register(descriptor.Name, handler);  // 编译不通过也会在运行时失调
 ```
 
-Pipeline 内部通过 `descriptor.Id` 查找 handler（`_handlerResolver.Resolve(capabilityIdOrName)` → 转为只用 Id）。  
-Name 不再出现在 handler 注册/解析路径。
+Name 仅参与以下场景，**绝不参与 Runtime Dispatch**：
+- UI 显示（Audit.CapabilityName）
+- 文档 / Designer
+- `descriptor.Name` 作为人类可读元数据存储
+
+> 确保未来不会出现 Id/Name 双注册路径。
 
 ### 5.4 受影响的测试文件
 
