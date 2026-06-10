@@ -2,12 +2,12 @@ namespace CrestCreates.Workflow.Abstractions;
 
 public interface IWorkflowEngine
 {
+    /// <summary>
+    /// TODO: Phase 5 — migrate to VersionedDescriptorRef&lt;WorkflowDescriptor&gt;
+    /// for unambiguous version targeting.
+    /// </summary>
     Task<WorkflowInstance> ExecuteAsync(
-        string workflowName,
+        string workflowId,
         Dictionary<string, object?>? inputVariables = null,
-        CancellationToken ct = default);
-
-    Task<WorkflowInstance> ResumeAsync(
-        string instanceId,
         CancellationToken ct = default);
 }
