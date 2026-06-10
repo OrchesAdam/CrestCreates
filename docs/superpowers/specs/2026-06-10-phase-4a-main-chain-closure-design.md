@@ -20,9 +20,27 @@ Phase 4 完成 Capability 运行时收口后，存在三项结构性债务阻碍
 
 ---
 
-## 2. Registry 迁移
+## 2. 前置条件
 
-### 2.1 目标架构
+Phase 4a 依赖以下已完成产物：
+
+| 前置条件 | 来源 | 状态 |
+|----------|------|------|
+| `RegistryBase<T>` + `RegistrySnapshot<T>` + `RegistryValidationEngine<T>` | Phase 3 | ✅ |
+| `IDescriptorProvider<T>` 接口 | Phase 3（Metadata.Abstractions） | ✅ |
+| CapabilityRegistry 已迁移到 RegistryBase（参考实现） | Phase 4 | ✅ |
+| `ISchemaDescriptorProvider` / `IFormDescriptorProvider` / `IHumanTaskDescriptorProvider` / `IWorkflowDescriptorProvider` 接口已存在 | Phase 1-2 | ✅ |
+| `SchemaCapabilitySourceGenerator` 已收集所有 descriptor 类型的 Provider 信息 | Phase 2a | ✅ |
+
+**Consumer 项目引用要求（Source Generator 改动后）：**
+
+SG 生成的代码将引用 `CrestCreates.Metadata`（for `DescriptorProviderRegistry`）和 `CrestCreates.Metadata.Abstractions`（for `IDescriptorProvider<T>`）。所有使用 SG 的 consumer 项目（如 samples/LibraryManagement.Domain）必须已引用这两个程序集。当前检查：`LibraryManagement.Domain` 通过依赖链已间接引用两者。Phase 4a 开始前需显式验证。
+
+---
+
+## 3. Registry 迁移
+
+### 3.1 目标架构
 
 所有 6 个 Registry 统一基于 `RegistryBase<T>`：
 
@@ -35,7 +53,7 @@ FormRegistry       : RegistryBase<FormDescriptor>          ❌→✅ Phase 4a
 WorkflowRegistry   : RegistryBase<WorkflowDescriptor>      ❌→✅ Phase 4a
 ```
 
-### 2.2 架构原则：Provider Discovery 与 Registry 分离
+### 3.2 架构原则：Provider Discovery 与 Registry 分离
 
 **Registry 不承担 Provider Discovery/Storage 职责。** 这是 RegistryBase 原始模型的核心：
 
@@ -47,7 +65,7 @@ Provider  →  DescriptorProviderRegistry (存储)  →  MetadataBootstrapper.Bu
 - `RegistryBase<T>`: 持有快照 + 验证 + 查询
 - 不含静态 Collector / Provider 存储
 
-### 2.3 新增：DescriptorProviderRegistry
+### 3.3 新增：DescriptorProviderRegistry
 
 ```csharp
 // CrestCreates.Metadata
@@ -65,7 +83,7 @@ public static class DescriptorProviderRegistry
 
 > **实现优化（不阻塞 Phase 4a）**: 当 provider 数量增长后，可将 `ConcurrentBag<object>` 改为 `ConcurrentDictionary<Type, List<object>>`，使 `GetProviders<T>()` 从 O(n) 扫描变为 O(1) 索引。
 
-### 2.4 新增：MetadataBootstrapper.BuildAll()
+### 3.4 新增：MetadataBootstrapper.BuildAll()
 
 ```csharp
 // CrestCreates.Metadata — BootstrapCoordinator 调用
@@ -94,7 +112,9 @@ public static class MetadataBootstrapper
 > ```
 > 这样新增 `AgentRegistry` / `TemplateRegistry` 等不再需要修改 Bootstrapper。不阻塞 Phase 4a。
 
-### 2.5 每个 Registry 的改动模式
+> **Bootstrap 时序**：`MetadataBootstrapper.BuildAll()` 由 `BootstrapCoordinator` 在 `IBootstrapTask` 执行阶段调用，位于所有 `[ModuleInitializer]` 完成后、WorkflowRuntime/HumanTaskRuntime 初始化前。具体位置：`BootstrapCoordinator` 现有 task pipeline 末尾新增 `MetadataBootstrapperTask : IBootstrapTask`。
+
+### 3.5 每个 Registry 的改动模式
 
 以 `SchemaRegistry` 为例：
 
@@ -111,12 +131,12 @@ public static class MetadataBootstrapper
   （无 static 状态，无 Provider 收集）
 ```
 
-### 2.6 保留的接口方法
+### 3.6 保留的接口方法
 
 Registry 迁移后，现有 `ISchemaRegistry` / `IHumanTaskRegistry` / `IFormRegistry` / `IWorkflowRegistry` 接口不变。  
 消费者（WorkflowEngine、WorkflowEventConsumer）仅依赖接口，不受影响。
 
-### 2.7 受影响文件
+### 3.7 受影响文件
 
 | 文件 | 操作 |
 |------|------|
@@ -135,9 +155,9 @@ Registry 迁移后，现有 `ISchemaRegistry` / `IHumanTaskRegistry` / `IFormReg
 
 ---
 
-## 3. Source Generator 改造
+## 4. Source Generator 改造
 
-### 3.1 当前状态
+### 4.1 当前状态
 
 `SchemaCapabilitySourceGenerator.GenerateRegistries()` 当前行为：
 
@@ -150,7 +170,7 @@ Registry 迁移后，现有 `ISchemaRegistry` / `IHumanTaskRegistry` / `IFormReg
 | Event | ✅ | ✅ `IEventDescriptorProvider`（单独模式，不一致） |
 | Capability | ✅ | ❌ 已注释 |
 
-### 3.2 改造方案
+### 4.2 改造方案
 
 **两个核心变更：**
 
@@ -204,11 +224,15 @@ internal static class GeneratedDescriptorRegistry
 - Form/HumanTask/Workflow 部分：新增 provider class 生成 + `DescriptorProviderRegistry.Register(...)`
 - Namespace 引用更新：移除 `using CrestCreates.Schema` 等 Provider 相关 using
 
+> ⚠️ **风险标注**：Source Generator 是本 Phase 最危险改动。它是 `netstandard2.0` Roslyn analyzer，修改后必须拿至少一个 consumer 项目（如 `samples/LibraryManagement/LibraryManagement.Domain`）做全量编译验证。仅运行 Source Generator 的单元测试不足以验证生成代码在真实 consumer 项目中可编译。
+>
+> **Consumer 引用**：SG 生成代码引用 `DescriptorProviderRegistry`（`CrestCreates.Metadata`）和 `IDescriptorProvider<T>`（`CrestCreates.Metadata.Abstractions`）。所有使用 SG 的 consumer 项目必须已引用这两个程序集。
+
 ---
 
-## 4. 集成测试
+## 5. 集成测试
 
-### 4.1 全链路 E2E 测试
+### 5.1 全链路 E2E 测试
 
 **文件**: `framework/test/CrestCreates.Capability.Tests/CapabilityEndToEndTests.cs`
 
@@ -253,7 +277,7 @@ Registry.Build → Resolver → Dispatcher → Pipeline → Handler → Audit �
 > E1: `ExecuteAsync("echo.v2")` → GetById 命中。E2: `ExecuteAsync("Echo Command")` → Name fallback 命中。  
 > **新代码应始终传 Id。** WorkflowRuntime 等组件传的是 `descriptor.Id`（稳定标识符），不是 Name。
 
-### 4.2 Metadata Reference Validation（跨 Registry 引用验证）
+### 5.2 Metadata Reference Validation（跨 Registry 引用验证）
 
 **文件**: `framework/test/CrestCreates.Metadata.Tests/DescriptorReferenceValidationTests.cs`
 
@@ -270,7 +294,7 @@ Registry.Build → Resolver → Dispatcher → Pipeline → Handler → Audit �
 | R5 | HumanTask_ReferencesForm_Existing_Ok | HumanTask.Form="form_01" | Form 存在 | Build 成功 ✅ |
 | R6 | HumanTask_ReferencesCapability_Missing_BuildFails | CompletionOutcome.Capability="cap_missing" | Capability 不存在 | Build 失败 ❌ |
 
-### 4.3 Registry 迁移测试
+### 5.3 Registry 迁移测试
 
 每个迁移后的 Registry 测试项目新增验证：
 
@@ -283,13 +307,13 @@ Registry.Build → Resolver → Dispatcher → Pipeline → Handler → Audit �
 
 ---
 
-## 5. Id/Name 语义统一
+## 6. Id/Name 语义统一
 
-### 5.1 原则
+### 6.1 原则
 
 **唯一主链：Id 是 Runtime 阶段的唯一标识符。Name 仅用于人类可读显示。**
 
-### 5.2 重命名
+### 6.2 重命名
 
 | 位置 | 当前 | 改为 | 说明 |
 |------|------|------|------|
@@ -298,7 +322,7 @@ Registry.Build → Resolver → Dispatcher → Pipeline → Handler → Audit �
 | `CapabilityHandlerResolver.Register` | `string capabilityName` | `string capabilityId` | **仅接受 Id** — 禁止传 Name |
 | `CapabilityHandlerResolver.Resolve` | `string capabilityName` | `string capabilityId` | **仅接受 Id** — 禁止传 Name |
 
-### 5.3 HandlerResolver 语义明确化
+### 6.3 HandlerResolver 语义明确化
 
 **Runtime 永远不使用 Name 解析 Handler。**
 
@@ -315,14 +339,14 @@ Name 仅参与以下场景，**绝不参与 Runtime Dispatch**：
 
 > 确保未来不会出现 Id/Name 双注册路径。
 
-### 5.4 受影响的测试文件
+### 6.4 受影响的测试文件
 
 - `CapabilityPipelineTests.cs` — 参数引用更新
 - `CapabilityHandlerResolver` 无单独测试（仅通过 PipelineTests 间接测试）
 
 ---
 
-## 6. 空 catch 块
+## 7. 空 catch 块
 
 **不处理。** `UnitOfWorkFactory.cs` 的 3 处空 catch 已有注释：
 
@@ -336,7 +360,7 @@ catch { /* 忽略注册失败，可能是因为未引用 FreeSql 提供者 */ }
 
 ---
 
-## 7. 文件清单
+## 8. 文件清单
 
 ### 重写
 
@@ -352,10 +376,10 @@ catch { /* 忽略注册失败，可能是因为未引用 FreeSql 提供者 */ }
 
 | 文件 | 说明 |
 |------|------|
-| `framework/src/CrestCreates.Schema/SchemaRegistryProvider.cs` | 迁移到 AddProvider 模式 |
-| `framework/src/CrestCreates.HumanTask/HumanTaskRegistryProvider.cs` | 迁移到 AddProvider 模式 |
-| `framework/src/CrestCreates.Form/FormRegistryProvider.cs` | 迁移到 AddProvider 模式 |
-| `framework/src/CrestCreates.Workflow/WorkflowRegistryProvider.cs` | 迁移到 AddProvider 模式 |
+| `framework/src/CrestCreates.Schema/SchemaRegistryProvider.cs` | 废弃（被 DescriptorProviderRegistry 取代） |
+| `framework/src/CrestCreates.HumanTask/HumanTaskRegistryProvider.cs` | 废弃（被 DescriptorProviderRegistry 取代） |
+| `framework/src/CrestCreates.Form/FormRegistryProvider.cs` | 废弃（被 DescriptorProviderRegistry 取代） |
+| `framework/src/CrestCreates.Workflow/WorkflowRegistryProvider.cs` | 废弃（被 DescriptorProviderRegistry 取代） |
 
 ### 新增
 
@@ -364,7 +388,7 @@ catch { /* 忽略注册失败，可能是因为未引用 FreeSql 提供者 */ }
 | `framework/src/CrestCreates.Metadata/DescriptorProviderRegistry.cs` | 集中式 Provider 存储 |
 | `framework/src/CrestCreates.Metadata/MetadataBootstrapper.cs` | 统一 BuildAll() 协调 |
 | `framework/test/CrestCreates.Capability.Tests/CapabilityEndToEndTests.cs` | 全链路 E2E 测试 (~15 个用例) |
-| `framework/test/CrestCreates.Metadata.Tests/RegistryIntegrationTests.cs` | Cross-Registry 验证测试 (6 个用例)
+| `framework/test/CrestCreates.Metadata.Tests/DescriptorReferenceValidationTests.cs` | Metadata Reference Validation (6 个用例) |
 
 ### 修改
 
@@ -382,7 +406,7 @@ catch { /* 忽略注册失败，可能是因为未引用 FreeSql 提供者 */ }
 
 ---
 
-## 8. 成功标准
+## 9. 成功标准
 
 - [ ] 所有 6 个 Registry 基于 RegistryBase（含 FrozenDictionary 快照 + Build 生命周期）— **Registry 不含 static Collector**
 - [ ] `DescriptorProviderRegistry` + `MetadataBootstrapper` 已实现（Provider 存储与 Registry 分离）
