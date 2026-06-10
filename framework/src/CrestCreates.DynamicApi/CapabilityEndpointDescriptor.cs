@@ -1,4 +1,3 @@
-using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 
 namespace CrestCreates.DynamicApi;
@@ -11,7 +10,7 @@ namespace CrestCreates.DynamicApi;
 /// </summary>
 public sealed class CapabilityEndpointDescriptor
 {
-    public VersionedDescriptorRef<CapabilityDescriptor> Capability { get; init; }
+    public VersionedDescriptorRef<IVersionedDescriptor> Capability { get; init; }
     public HttpMethod HttpMethod { get; init; } = HttpMethod.Post;
     public string RoutePattern { get; init; } = string.Empty;
     public string? GroupName { get; init; }

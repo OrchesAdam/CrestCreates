@@ -1,4 +1,3 @@
-using CrestCreates.Capability.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
@@ -65,12 +64,12 @@ public class HumanTaskDescriptorTests
                 new CompletionOutcome
                 {
                     Condition = CompletionCondition.Approve,
-                    Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 2)
+                    Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 2)
                 },
                 new CompletionOutcome
                 {
                     Condition = CompletionCondition.Reject,
-                    Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_02", 1)
+                    Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_02", 1)
                 }
             }
         };

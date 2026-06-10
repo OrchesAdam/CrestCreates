@@ -1,4 +1,3 @@
-using CrestCreates.Capability.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Workflow.Abstractions;
@@ -14,7 +13,7 @@ public class InteractionTargetTests
     {
         var target = new CapabilityTarget
         {
-            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 3)
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 3)
         };
 
         target.Capability.Id.Should().Be("cap_01");
@@ -48,7 +47,7 @@ public class InteractionTargetTests
     [Fact]
     public void All_Targets_Are_InteractionTarget()
     {
-        var cap = new CapabilityTarget { Capability = new VersionedDescriptorRef<CapabilityDescriptor>("c", 1) };
+        var cap = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("c", 1) };
         var ht = new HumanTaskTarget { HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("h", 1) };
         var sw = new SubWorkflowTarget { SubWorkflow = new VersionedDescriptorRef<WorkflowDescriptor>("w", 1) };
 

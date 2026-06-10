@@ -1,4 +1,3 @@
-using CrestCreates.Capability.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Workflow.Abstractions;
@@ -78,7 +77,7 @@ public class WorkflowEngineTests
                 Id = "step_01", Name = "Cap Step",
                 Target = new CapabilityTarget
                 {
-                    Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1)
+                    Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
                 }
             }));
         var engine = new WorkflowEngine(registry, pipeline: null);
@@ -161,7 +160,7 @@ public class WorkflowEngineTests
                     Id = "step_01", Name = "Failing Step",
                     Target = new CapabilityTarget
                     {
-                        Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1)
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
                     },
                     OnError = StepErrorBehavior.Retry
                 }
@@ -191,7 +190,7 @@ public class WorkflowEngineTests
                     Id = "step_01", Name = "Skipped Step",
                     Target = new CapabilityTarget
                     {
-                        Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1)
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
                     },
                     OnError = StepErrorBehavior.Skip
                 },
@@ -275,7 +274,7 @@ public class WorkflowEngineTests
                     Id = "step_01", Name = "Failing Step",
                     Target = new CapabilityTarget
                     {
-                        Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1)
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
                     },
                     OnError = StepErrorBehavior.Fail
                 },
@@ -457,7 +456,7 @@ public class WorkflowEngineTests
                     Id = "step_02", Name = "Never Executed",
                     Target = new CapabilityTarget
                     {
-                        Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1)
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
                     }
                 }
             }

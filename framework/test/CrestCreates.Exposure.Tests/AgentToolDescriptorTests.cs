@@ -1,4 +1,3 @@
-using CrestCreates.Capability.Abstractions;
 using CrestCreates.Exposure.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
@@ -15,7 +14,7 @@ public class AgentToolDescriptorTests
         {
             Id = "tool_01",
             Name = "create_customer",
-            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 3),
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 3),
             Description = "Creates a new customer record"
         };
 
@@ -30,7 +29,7 @@ public class AgentToolDescriptorTests
         {
             Id = "tool_01",
             Name = "create_customer",
-            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1)
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
         };
 
         tool.ToolCallMode.Should().Be(ToolCallMode.Auto);
@@ -43,7 +42,7 @@ public class AgentToolDescriptorTests
         {
             Id = "tool_01",
             Name = "create_customer",
-            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1)
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
         };
 
         tool.BudgetLimit.Should().BeNull();
@@ -56,7 +55,7 @@ public class AgentToolDescriptorTests
         {
             Id = "tool_01",
             Name = "create_customer",
-            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1)
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
         };
 
         tool.Tags.Should().BeEmpty();
@@ -69,7 +68,7 @@ public class AgentToolDescriptorTests
         {
             Id = "tool_01",
             Name = "create_customer",
-            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1),
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1),
             Tags = new List<string> { "customer", "crm", "create" }
         };
 

@@ -1,4 +1,3 @@
-using CrestCreates.Capability.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 
@@ -11,7 +10,7 @@ public abstract record InteractionTarget
 
 public sealed record CapabilityTarget : InteractionTarget
 {
-    public VersionedDescriptorRef<CapabilityDescriptor> Capability { get; init; }
+    public VersionedDescriptorRef<IVersionedDescriptor> Capability { get; init; }
 }
 
 public sealed record HumanTaskTarget : InteractionTarget

@@ -1,4 +1,3 @@
-using CrestCreates.Capability.Abstractions;
 using CrestCreates.DynamicApi;
 using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
@@ -13,7 +12,7 @@ public class CapabilityEndpointDescriptorTests
     {
         var endpoint = new CapabilityEndpointDescriptor
         {
-            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1),
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1),
             RoutePattern = "/api/customers"
         };
 
@@ -40,7 +39,7 @@ public class CapabilityEndpointDescriptorTests
     {
         var endpoint = new CapabilityEndpointDescriptor
         {
-            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1),
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1),
             RoutePattern = "/api/test"
         };
 

@@ -1,4 +1,3 @@
-using CrestCreates.Capability.Abstractions;
 using CrestCreates.Exposure.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
@@ -15,7 +14,7 @@ public class MCPToolDescriptorTests
         {
             Id = "mcp_01",
             Name = "customer_create",
-            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 2),
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 2),
             Description = "MCP tool for customer creation"
         };
 
@@ -30,7 +29,7 @@ public class MCPToolDescriptorTests
         {
             Id = "mcp_01",
             Name = "customer_create",
-            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1)
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
         };
 
         tool.ToolCallMode.Should().Be(ToolCallMode.Auto);
@@ -43,7 +42,7 @@ public class MCPToolDescriptorTests
         {
             Id = "mcp_01",
             Name = "customer_create",
-            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1),
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1),
             Description = "Creates a customer via MCP protocol"
         };
 

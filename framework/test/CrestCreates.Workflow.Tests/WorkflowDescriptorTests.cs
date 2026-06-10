@@ -1,4 +1,3 @@
-using CrestCreates.Capability.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
@@ -39,7 +38,7 @@ public class WorkflowDescriptorTests
                     Name = "Create Customer",
                     Target = new CapabilityTarget
                     {
-                        Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1)
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
                     },
                     OnError = StepErrorBehavior.Compensate
                 },
@@ -115,7 +114,7 @@ public class WorkflowDescriptorTests
             Name = "Some Step",
             Target = new CapabilityTarget
             {
-                Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_01", 1)
+                Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
             }
         };
 
