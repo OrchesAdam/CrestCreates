@@ -199,7 +199,7 @@ public interface IWorkflowStepExecutorRegistry
 }
 ```
 
-**注册表是预计算的：** 映射 `Type → IWorkflowStepExecutor`，使用 `FrozenDictionary`，在启动时构建。
+**注册表在启动期间预计算。** 映射 `Type → IWorkflowStepExecutor`，不可变。
 
 ### 5.5 WorkflowExecutionContext
 
@@ -256,6 +256,8 @@ public sealed class WorkflowStepResult
 
 **变更：** `bool IsSuccess` → `StepExecutionStatus Status`。新增 `DateTimeOffset ExecutedAt`。
 
+**语义说明：** `WorkflowStepResult.Status=Suspended` 表示该 step 请求暂停 workflow 并从 executor 视角视为已成功执行，而非 step 本身未完成。`StepExecutionResult` 表达 executor 对 workflow 的产出（继续/暂停/失败），`WorkflowStepResult` 表达已记录的历史（该 step 的最终执行记录）。
+
 ---
 
 ## 6. 实现
@@ -307,6 +309,8 @@ ExecuteAsync(workflowId, inputVariables, ct)
 ```
 
 **仅支持线性工作流。** 不允许 Branch、Fork、Join、Parallel、Loop、SubWorkflow。
+
+**Engine 负责所有 WorkflowInstance 状态变更。** Executor 视为纯执行代理：可返回输出和变量更新，但不得修改 WorkflowInstance 状态、step index、时间戳或生命周期状态。
 
 ### 6.2 CapabilityStepExecutor
 
@@ -462,7 +466,10 @@ public sealed class WorkflowCompatibilityValidator
 
 #### 6.6.1 启动执行时机
 
-`WorkflowCompatibilityValidator` 在以下时机执行：
+**Validator registration alone does not activate validation.**
+`WorkflowCompatibilityValidator` 必须由 `MetadataBootstrapper` 在应用程序启动期间显式调用。
+
+具体执行时机：
 
 ```
 MetadataBootstrapper.BuildAll()
@@ -473,9 +480,7 @@ MetadataBootstrapper.BuildAll()
            CompatibilityValidator.Validate(descriptor)
 ```
 
-具体来说，在 `WorkflowRegistry.Build()` 完成之后、应用程序开始接受请求之前。验证失败将导致应用程序启动失败（硬失败而非软降级）。
-
-集成点：在 `MetadataBootstrapper` 的 `BuildAll()` 方法中，遍历所有已注册的 `WorkflowDescriptor` 并调用 `Validate()`。或者，如果框架提供了 Bootstrap Validation 的扩展点，则在 `WorkflowRegistry` 的 `Build()` 完成后立即执行。
+在 `WorkflowRegistry.Build()` 完成之后、应用程序开始接受请求之前。验证失败将导致应用程序启动失败（硬失败而非软降级）。
 
 ### 6.7 DI 注册
 
