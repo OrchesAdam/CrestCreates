@@ -1,6 +1,7 @@
 # 统一元数据模型 — 使用指南
 
 > 本文档面向 CrestCreates 模块开发者，介绍如何使用统一元数据模型声明和执行业务能力。
+> *更新于 Phase 4 (2026-06-10): 加入 CapabilityDispatcher, ICapabilityResolver, AuditMiddleware, CapabilityProfile 移至 Metadata*
 
 ---
 
@@ -33,8 +34,11 @@ Schema 注册由 source generator 自动完成 — 实现 `ISchemaDescriptorProv
 
 ### 1.2 定义一个 Capability
 
+> ⚠️ **Phase 4 更新:** `CapabilityDescriptor` 已从 `CrestCreates.Capability.Abstractions` 移至 `CrestCreates.Metadata`。`Permission` 改为 `Permissions` (IReadOnlyList<string>)。`InputSchema`/`OutputSchema` 现在是可空类型。
+
 ```csharp
-using CrestCreates.Capability.Abstractions;
+using CrestCreates.Metadata;  // CapabilityDescriptor 现在在 Metadata 中
+using CrestCreates.Metadata.Abstractions;
 
 public class CreateCustomerCapability : ICapabilityProvider
 {
@@ -46,7 +50,7 @@ public class CreateCustomerCapability : ICapabilityProvider
         CapabilityKind = CapabilityKind.Command,
         InputSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema_customer", 1),
         OutputSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema_customer_output", 1),
-        Permission = "Customer.Create",
+        Permissions = new[] { "Customer.Create" },  // 改为复数 + 数组
         RiskLevel = CapabilityRiskLevel.Medium,
         SemanticTags = new List<string> { "customer", "crm", "create" }
     };
@@ -72,9 +76,11 @@ Handler 注册同样由 source generator 自动完成 — 实现 `ICapabilityHan
 
 ### 1.4 执行一个 Capability
 
+**推荐方式：使用 `ICapabilityDispatcher`**（Phase 4 新增统一门面 — 自动注入 InvocationSource + TenantId/UserId）：
+
 ```csharp
-// 注入 ICapabilityPipeline
-var result = await pipeline.ExecuteAsync("crm.customer.create", input: new
+// 注入 ICapabilityDispatcher
+var result = await dispatcher.DispatchAsync("crm.customer.create", InvocationSource.Http, input: new
 {
     Name = "John Doe",
     Email = "john@example.com",
@@ -82,13 +88,19 @@ var result = await pipeline.ExecuteAsync("crm.customer.create", input: new
 });
 
 if (result.IsSuccess)
-{
-    var output = result.Output;  // CustomerOutput
-}
+    Console.WriteLine($"Output: {result.Output}");
 else
-{
     Console.WriteLine($"Error: {result.ErrorCode} — {result.ErrorMessage}");
-}
+```
+
+**或直接使用 `ICapabilityPipeline`：**
+
+```csharp
+var result = await pipeline.ExecuteAsync("crm.customer.create", input: new
+{
+    Name = "John Doe",
+    Email = "john@example.com"
+});
 ```
 
 ---
@@ -230,19 +242,33 @@ public class ManagerApprovalProvider : IHumanTaskDescriptorProvider
 ### 5.1 DI 注册
 
 ```csharp
-// Program.cs
+// Program.cs — 推荐使用 AddCapabilityRuntime 一次性注册所有运行时组件
+services.AddCapabilityRuntime();  // 注册 Dispatcher, Resolver, Audit, Bootstrap Validators, Pipeline
+
+// 或单独配置 Pipeline
 services.AddCapabilityPipeline(options =>
 {
-    // 生产环境自定义配置
-    options.Use<CustomAuditMiddleware>();
+    options.Use<CustomAuditMiddleware>();  // 自定义审计中间件位置
 });
+
+// AuditMiddleware 已默认在最外层，替代 NullCapabilityAuditStore：
+services.AddInMemoryCapabilityAudit();  // 切换到内存审计存储
 
 services.AddWorkflowEngine();
 ```
 
+**Pipeline 中间件顺序（由内到外）：**
+```
+Handler → EventPublishing → Metrics → Idempotency → Validation → Authorization → Tenant → RateLimit → Audit
+```
+
 ### 5.2 CapabilityProfile — 环境/Tenant 级别覆盖
 
+> ⚠️ **Phase 4 更新:** `CapabilityProfile` 已移至 `CrestCreates.Metadata`。
+
 ```csharp
+using CrestCreates.Metadata;
+
 var profiles = new[]
 {
     new CapabilityProfile
@@ -250,12 +276,6 @@ var profiles = new[]
         Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_create_customer", 1),
         Scope = "Global-Prod",
         Timeout = TimeSpan.FromSeconds(5)
-    },
-    new CapabilityProfile
-    {
-        Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_create_customer", 1),
-        Scope = "Tenant:VIP",
-        Timeout = TimeSpan.FromSeconds(3)
     }
 };
 ```
@@ -306,8 +326,10 @@ services.AddCapabilityPipeline(cfg => cfg.Use<CustomLoggingMiddleware>());
 
 ## 7. 手动注册 Handler (不依赖 source-gen)
 
+> ⚠️ **Phase 4 更新:** `CapabilityRegistry` 现在使用 `Build(providers)` 模式，不再有 `Register()` 方法。
+
 ```csharp
-// 使用 DelegateHandlerInvoker — AOT 安全
+// 方式 1: DelegateHandlerInvoker — AOT 安全
 var resolver = new CapabilityHandlerResolver();
 resolver.Register("crm.customer.create",
     new DelegateHandlerInvoker(async (input, ct) =>
@@ -315,6 +337,11 @@ resolver.Register("crm.customer.create",
         var handler = new CreateCustomerHandler();
         return await handler.ExecuteAsync((CustomerInput)input!, ct);
     }));
+
+// 方式 2: 通过 ICapabilityDispatcher + ICapabilityResolver
+// (推荐 — 自动处理 Tenant/User 上下文)
+var dispatcher = serviceProvider.GetRequiredService<ICapabilityDispatcher>();
+var result = await dispatcher.DispatchAsync("crm.customer.create", InvocationSource.System, input);
 ```
 
 ---
@@ -327,23 +354,27 @@ resolver.Register("crm.customer.create",
 
 ```csharp
 // 通用查询（所有 Registry 都支持）
-var cap = capabilityRegistry.GetById("cap_create_customer");
-var caps = capabilityRegistry.GetByName("crm.customer.create");
-var all = capabilityRegistry.GetAll();
-var specific = capabilityRegistry.GetByVersion("cap_create_customer", 2);
+var cap = capabilityRegistry.GetById("cap_create_customer");         // Id 查找（所有 Registry）
+var caps = capabilityRegistry.GetByName("crm.customer.create");      // Name 查找（所有 Registry）
+var all = capabilityRegistry.GetAll();                                // 全部
+var specific = capabilityRegistry.GetByVersion("cap_create_customer", 2);  // Id + Version 精确查找 (Phase 4 新增)
+
+// CapabilityRegistry 特定查询 (Phase 4 新增)
+var commands = capabilityRegistry.GetByKind(CapabilityKind.Command);     // 按类型筛选
+var customerCaps = capabilityRegistry.GetByTag("customer");              // 按语义标签筛选
 ```
 
 ### 8.2 Registry 构建
 
-Registry 通过 `IBootstrapTask` + `BootstrapCoordinator` 在启动时自动构建：
+Registry 通过 `IDescriptorProvider<T>` + `Build(providers)` 模式构建（替代旧的 `Register()` 方法）：
 
 ```csharp
-// EventRegistryBootstrapper 已实现 IBootstrapTask
-// BootstrapCoordinator 自动拓扑排序启动
-
 // 手动构建（不推荐，通常由 BootstrapCoordinator 自动完成）
-eventRegistry.Build(providers);
-capabilityRegistry.Build(providers);
+var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
+var registry = new CapabilityRegistry(engine);
+registry.Build([new MyCapabilityProvider()]);  // IDescriptorProvider<CapabilityDescriptor>[]
+
+// 通过 DI 注入的 Registry 已在启动时自动构建
 ```
 
 ### 8.3 验证管道
@@ -432,13 +463,18 @@ var activeDrafts = await draftStore.QueryAsync(new DraftQuery
 
 ## 10. 暴露为 HTTP/Agent/MCP
 
+> ⚠️ **Phase 4 更新:** `VersionedDescriptorRef<CapabilityDescriptor>` 改为 `VersionedDescriptorRef<IVersionedDescriptor>`（避免循环依赖）。
+
 ```csharp
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Exposure.Abstractions;
+
 // Agent Tool
 var agentTool = new AgentToolDescriptor
 {
     Id = "tool_create_customer",
     Name = "create_customer",
-    Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_create_customer", 1),
+    Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_create_customer", 1),
     Description = "创建新客户记录",
     ToolCallMode = ToolCallMode.Auto,
     Tags = new List<string> { "customer", "crm" }
@@ -447,9 +483,8 @@ var agentTool = new AgentToolDescriptor
 // HTTP Endpoint
 var endpoint = new CapabilityEndpointDescriptor
 {
-    Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_create_customer", 1),
+    Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_create_customer", 1),
     RoutePattern = "/api/customers",
-    HttpMethod = CapabilityEndpointDescriptor.DeriveHttpMethod(CapabilityKind.Command),  // POST
     RequireAuthorization = true
 };
 ```
@@ -520,36 +555,44 @@ services.AddSingleton<MyRegistry>();
 |------|------|
 | 设计规格书 | `docs/superpowers/specs/2026-06-08-unified-metadata-model-design.md` |
 | Phase 3 设计规格书 | `docs/superpowers/specs/2026-06-09-phase-3-metadata-runtime-foundation-design.md` |
+| Phase 4 设计规格书 | `docs/superpowers/specs/2026-06-09-phase-4-capability-runtime-consolidation-design.md` |
 | Phase 3 实现计划 | `docs/superpowers/plans/2026-06-09-phase-3-metadata-runtime-foundation.md` |
+| Phase 4 实现计划 | `docs/superpowers/plans/2026-06-10-phase-4-capability-runtime-consolidation.md` |
 | 架构总结 | `docs/Feature/UnifiedMetadataModel/2026-06-09-unified-metadata-model-architecture-summary.md` |
-| Phase 1-13 计划 | `docs/superpowers/plans/2026-06-08-*` / `2026-06-09-*` |
 
 ### 关键接口一览
 
-| 接口 | 用途 |
-|------|------|
-| `IDescriptor` | 所有描述符基础接口 (Namespace, Id, FullId, Name) |
-| `IVersionedDescriptor` | 版本化描述符 (+ Version) |
-| `IHasContractIdentity` | 兼容性身份 (ContractHash, DefinitionHash) |
-| `IRelationshipAwareDescriptor` | 自描述关系 |
-| `RegistryBase<T>` | 通用注册表基类 |
-| `RegistrySnapshot<T>` | 不可变快照 (ById, ByName, ByVersion) |
-| `IRegistryValidator<T>` | 可插拔验证器 |
-| `IRegistryValidationEngine<T>` | 验证引擎 |
-| `IDescriptorProvider<T>` | 描述符提供者 |
-| `IDescriptorResolver` | 统一解析器 |
-| `IBootstrapTask` | 启动任务接口 |
-| `BootstrapCoordinator` | 拓扑排序启动协调器 |
-| `IDynamicRegistry<T>` | 动态注册表 |
-| `ISchemaDescriptorProvider` | 声明 Schema |
-| `ICapabilityProvider` | 声明 Capability |
-| `ICapabilityHandler<TIn,TOut>` | 实现业务逻辑 |
-| `IEventDescriptorProvider` | 声明 Event |
-| `IFormDescriptorProvider` | 声明 Form |
-| `IHumanTaskDescriptorProvider` | 声明 HumanTask |
-| `IWorkflowDescriptorProvider` | 声明 Workflow |
-| `ICapabilityPipeline` | 执行 Capability |
-| `IWorkflowEngine` | 执行 Workflow |
-| `IDraftStore` | Draft CRUD |
+| 接口 | 用途 | 位置 |
+|------|------|------|
+| `IDescriptor` | 所有描述符基础接口 | Metadata.Abstractions |
+| `IVersionedDescriptor` | 版本化描述符 | Metadata.Abstractions |
+| `IHasContractIdentity` | 兼容性身份 | Metadata.Abstractions |
+| `IRelationshipAwareDescriptor` | 自描述关系 | Metadata.Abstractions |
+| `RegistryBase<T>` | 通用注册表基类 | Metadata |
+| `RegistrySnapshot<T>` | 不可变快照 | Metadata |
+| `IRegistryValidator<T>` | 可插拔验证器 | Metadata.Abstractions |
+| `IRegistryValidationEngine<T>` | 验证引擎 | Metadata.Abstractions |
+| `IDescriptorProvider<T>` | 描述符提供者 | Metadata.Abstractions |
+| `IDescriptorResolver` | 统一解析器 | Metadata.Abstractions |
+| `IBootstrapTask` | 启动任务接口 | Metadata.Abstractions |
+| `BootstrapCoordinator` | 拓扑排序协调器 | Metadata |
+| `ICapabilityRegistry` | Capability 注册表 (Id/Name/Tag/Kind 查询) | Metadata |
+| `ICapabilityResolver` | Capability 统一解析入口 (Id-first) | Metadata |
+| `ICapabilityDispatcher` | Capability 统一执行门面 (注入 Tenant/User 上下文) | Metadata |
+| `ICapabilityAuditStore` | 审计存储契约 (InMemory/Null) | Capability.Abstractions |
+| `ICapabilityPipeline` | Capability 执行流水线 | Capability.Abstractions |
+| `ICapabilityHandlerInvoker` | 零反射 Handler 调用器 | Capability.Abstractions |
+| `IBootstrapValidator` | 启动阶段验证器 | Metadata.Abstractions |
+| `IDescriptorLookup` | 跨 Registry 描述符查找 | Metadata.Abstractions |
+| `ICapabilityHandlerRegistry` | Handler 注册表 | Metadata.Abstractions |
+| `ISchemaDescriptorProvider` | 声明 Schema | Schema.Abstractions |
+| `ICapabilityProvider` | 声明 Capability | Capability.Abstractions |
+| `ICapabilityHandler<TIn,TOut>` | 实现业务逻辑 | Capability.Abstractions |
+| `IEventDescriptorProvider` | 声明 Event | Event.Abstractions |
+| `IFormDescriptorProvider` | 声明 Form | Form.Abstractions |
+| `IHumanTaskDescriptorProvider` | 声明 HumanTask | HumanTask.Abstractions |
+| `IWorkflowDescriptorProvider` | 声明 Workflow | Workflow.Abstractions |
+| `IWorkflowEngine` | 执行 Workflow | Workflow.Abstractions |
+| `IDraftStore` | Draft CRUD | Draft.Abstractions |
 
 所有 Provider 接口由 source generator 自动发现并注册，无需手动调用 Registry。

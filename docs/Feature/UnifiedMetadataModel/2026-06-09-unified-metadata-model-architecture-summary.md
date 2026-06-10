@@ -1,6 +1,6 @@
 # 统一元数据模型 — 架构总结文档
 
-> **日期:** 2026-06-09 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 完成**
+> **日期:** 2026-06-10 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 完成**
 
 ---
 
@@ -16,6 +16,22 @@
 | **Workflow** | "如何编排？" | `WorkflowDescriptor` |
 
 加两个 Instance Infrastructure descriptors：**Form**（Schema + UI metadata）和 **HumanTask**（人工交互的业务操作）。
+
+### Phase 4: Capability Runtime Consolidation
+
+Phase 4 统一 Capability 运行时，打破循环依赖，收口 ICapabilityRegistry 到 Metadata，新增 Dispatcher、Resolver、Audit 链路：
+
+| 组件 | 说明 |
+|------|------|
+| `ICapabilityResolver` | 统一解析入口，Id-first 分辨率，移至 Metadata（避免循环依赖） |
+| `ICapabilityDispatcher` | Capability 执行统一门面，注入 ITenantContext/ICurrentUser |
+| `ICapabilityAuditStore` | 审计存储契约（InMemory/Null 实现） |
+| `AuditMiddleware` | 最外层审计中间件（隔离失败，不阻断执行） |
+| `DefaultCapabilityVersionResolver` | Id/Name 区分：Id 为稳定标识符，Name 为显示名 |
+| `IBootstrapValidator` | 启动阶段验证器契约 |
+| `IDescriptorLookup` | 跨 Registry 描述符查找契约 |
+| `ICapabilityHandlerRegistry` | Handler 注册表契约 |
+| `IVersionedDescriptorRegistry.GetByVersion(id, version)` | 基于 Id 的版本精确查找 |
 
 ### Phase 3: Metadata Runtime Foundation
 
@@ -46,15 +62,31 @@ framework/src/
 │                                           # IRegistryValidationEngine, IRegistryIndex, IDescriptorProvider,
 │                                           # IDescriptorResolver, DescriptorQuery, IBootstrapTask,
 │                                           # BootstrapDependencyException, IDynamicRegistry, RegistryState
+│                                           # CapabilityKind, CapabilityRiskLevel (moved from Capability.Abstractions)
+│                                           # IBootstrapValidator, IDescriptorLookup, ICapabilityHandlerRegistry
+│                                           # IVersionedDescriptorRegistry (updated: +GetByVersion)
 ├── CrestCreates.Metadata/                  # RegistryBase<T>, RegistrySnapshot<T>, RegistryValidationEngine<T>,
 │                                           # BootstrapCoordinator, DescriptorResolver, CapabilityDescriptor,
-│                                           # CapabilityRegistry, EventVersionChainValidator,
-│                                           # DuplicateNameVersionValidator, UniquePayloadTypeValidator,
+│                                           # CapabilityRegistry (unified, implements ICapabilityRegistry + RegistryBase),
+│                                           # EventVersionChainValidator, DuplicateNameVersionValidator,
+│                                           # UniquePayloadTypeValidator, TenantScopedRegistry (implements GetByVersion),
 │                                           # GlobalRegistry, Catalog, DependencyGraph, HashComputer
+│                                           # ICapabilityRegistry (moved from Capability.Abstractions — breaks circular dep)
+│                                           # ICapabilityResolver, ICapabilityDispatcher (moved from Capability.Abstractions)
+│                                           # CapabilityProfile (moved from Capability.Abstractions)
 ├── CrestCreates.Schema.Abstractions/        # SchemaDescriptor, SchemaFieldDescriptor, ISchemaRegistry, ISchemaValidator
-├── CrestCreates.Schema/                     # SchemaRegistry, SchemaValidator
-├── CrestCreates.Capability.Abstractions/    # CapabilityDescriptor (legacy), ICapabilityPipeline, ExecutionContext
-├── CrestCreates.Capability/                 # CapabilityRegistry (legacy), CapabilityPipeline, middleware chain (8个)
+├── CrestCreates.Schema/                     # SchemaRegistry (implements GetByVersion), SchemaValidator
+├── CrestCreates.Capability.Abstractions/    # ICapabilityPipeline, CapabilityExecutionContext, CapabilityExecutionResult,
+│                                           # CapabilityRef, InvocationSource, CapabilityNotFoundException,
+│                                           # CapabilityExecutionRecord, ICapabilityAuditStore,
+│                                           # ICapabilityHandlerResolver, ICapabilityHandlerInvoker, CapabilityPipelineDelegate
+├── CrestCreates.Capability/                 # CapabilityPipeline (updated: Id-first lookup + CapabilityId in context),
+│                                           # CapabilityDispatcher (unified facade, injects ITenantContext/ICurrentUser),
+│                                           # DefaultCapabilityResolver, DefaultCapabilityVersionResolver,
+│                                           # AuditMiddleware, NullCapabilityAuditStore, InMemoryCapabilityAuditStore,
+│                                           # CapabilityHandlerValidator, CapabilitySchemaValidator (bootstrap validators),
+│                                           # middleware chain (9层: Audit → RateLimit → Tenant → Auth → Validation → Idempotency → Metrics → Handler → EventPub)
+│                                           # CapabilityServiceCollectionExtensions (AddCapabilityRuntime DI)
 ├── CrestCreates.Event.Abstractions/         # GeneratedEventDescriptor, DynamicEventDescriptor, EventCategory,
 │                                           # EventSemantic, EventImportance, CrestEventAttribute,
 │                                           # IEventDescriptorProvider, IEventRegistry, IEventMetadataProvider,
@@ -62,12 +94,12 @@ framework/src/
 ├── CrestCreates.Event/                      # EventRegistry (inherits RegistryBase), EventResolver,
 │                                           # DynamicEventRegistry, RegistryEventValidator,
 │                                           # PassThroughEventValidator, EventRegistryBootstrapper
-├── CrestCreates.Form.Abstractions/          # FormDescriptor, FormFieldDescriptor
-├── CrestCreates.Form/                       # FormRegistry
-├── CrestCreates.HumanTask.Abstractions/     # HumanTaskDescriptor, CompletionOutcome, AssigneeStrategy
-├── CrestCreates.HumanTask/                  # HumanTaskRegistry
-├── CrestCreates.Workflow.Abstractions/      # WorkflowDescriptor, WorkflowStep, InteractionTarget, IWorkflowEngine
-├── CrestCreates.Workflow/                   # WorkflowRegistry, WorkflowEngine (step execution, resume, checkpoint)
+├── CrestCreates.Form.Abstractions/          # FormDescriptor, FormFieldDescriptor, IFormRegistry
+├── CrestCreates.Form/                       # FormRegistry (implements GetByVersion)
+├── CrestCreates.HumanTask.Abstractions/     # HumanTaskDescriptor, CompletionOutcome, AssigneeStrategy, IHumanTaskRegistry
+├── CrestCreates.HumanTask/                  # HumanTaskRegistry (implements GetByVersion)
+├── CrestCreates.Workflow.Abstractions/      # WorkflowDescriptor, WorkflowStep, InteractionTarget, IWorkflowEngine, IWorkflowRegistry
+├── CrestCreates.Workflow/                   # WorkflowRegistry (implements GetByVersion), WorkflowEngine
 ├── CrestCreates.Draft.Abstractions/         # DraftRecord, IDraftStore, DraftStatus
 ├── CrestCreates.Draft/                      # InMemoryDraftStore, TenantIsolatedDraftStore
 ├── CrestCreates.Exposure.Abstractions/      # AgentToolDescriptor, MCPToolDescriptor, ToolCallMode
@@ -75,10 +107,10 @@ framework/src/
 
 framework/test/
 ├── CrestCreates.Schema.Tests/               (19)
-├── CrestCreates.Metadata.Tests/             (73)  ← Phase 3 新增: RegistryBase, Validators, Bootstrap, Resolver, CapabilityRegistry
-├── CrestCreates.Capability.Tests/           (59)
+├── CrestCreates.Metadata.Tests/             (79)  ← Phase 3/4: RegistryBase, Validators, Bootstrap, Resolver, CapabilityRegistry
+├── CrestCreates.Capability.Tests/           (90)  ← Phase 4 新增: DefaultCapabilityResolver, CapabilityDispatcher, AuditMiddleware, AuditStores
 ├── CrestCreates.Draft.Tests/               (13)
-├── CrestCreates.Event.Tests/               (32)  ← Phase 2a 新增: EventRegistry, Validator, DynamicRegistry
+├── CrestCreates.Event.Tests/               (32)  ← Phase 2a: EventRegistry, Validator, DynamicRegistry
 ├── CrestCreates.Exposure.Tests/            (12)
 ├── CrestCreates.Form.Tests/                (8)
 ├── CrestCreates.HumanTask.Tests/           (8)
@@ -248,9 +280,15 @@ public readonly record struct VersionedDescriptorRef<T>(string Id, int Version)
 
 ## 4. Capability 执行流水线
 
-### 4.1 流水线架构（8 层中间件）
+### 4.1 流水线架构（9 层中间件 + Dispatcher 门面）
 
 ```
+ICapabilityDispatcher (统一执行入口 — 注入 InvocationSource + TenantId/UserId)
+    ↓
+ICapabilityPipeline.ExecuteAsync(id) → GetById → GetActiveVersion → GetByName (Id-first 查找)
+    ↓
+AuditMiddleware     →  最外层审计 (记录所有结果, 隔离失败不阻断)
+    ↓
 RateLimitMiddleware  →  滑动窗口限流 (100 req/min default)
     ↓
 TenantMiddleware     →  注入 TenantId
@@ -261,13 +299,13 @@ ValidationMiddleware →  Schema 验证 (ISchemaValidator → InputSchema)
     ↓
 IdempotencyMiddleware → 幂等性 (IIdempotenceStore → 重复检测/缓存)
     ↓
+MetricsMiddleware    →  执行指标 (IPipelineMetrics → count/duration)
+    ↓
 Handler Invoker      →  ICapabilityHandlerInvoker (source-gen, 零反射)
     ↓
 EventPublishingMiddleware → 发布 lifecycle events (ILocalEventBus)
     ↓
-MetricsMiddleware    →  执行指标 (IPipelineMetrics → count/duration)
-    ↓
-CapabilityExecutionResult (Status, Output, Duration, Events)
+CapabilityExecutionResult (Status, Output, Duration, Events, AuditRecordId)
 ```
 
 ### 4.2 关键接口
@@ -277,6 +315,20 @@ CapabilityExecutionResult (Status, Output, Duration, Events)
 public interface ICapabilityPipeline
 {
     Task<CapabilityExecutionResult> ExecuteAsync(string capabilityName, object? input, ...);
+}
+
+// 统一执行门面 (Phase 4 新增)
+public interface ICapabilityDispatcher
+{
+    Task<CapabilityExecutionResult> DispatchAsync(CapabilityDescriptor descriptor, InvocationSource source, ...);
+    Task<CapabilityExecutionResult> DispatchAsync(string capabilityId, InvocationSource source, ...);
+}
+
+// 统一解析器 (Phase 4 新增 — 移至 Metadata 避免循环依赖)
+public interface ICapabilityResolver
+{
+    CapabilityDescriptor Resolve(CapabilityRef capabilityRef);
+    CapabilityDescriptor Resolve(string capabilityIdOrVersion);  // DIM
 }
 
 // 零反射 handler 调用 (source-gen 生成)
@@ -289,6 +341,15 @@ public interface ICapabilityHandlerInvoker
 public interface ICapabilityPipelineMiddleware
 {
     Task<CapabilityExecutionResult> InvokeAsync(CapabilityExecutionContext ctx, CapabilityPipelineDelegate next);
+}
+
+// 执行上下文 (Phase 4 更新: CapabilityId + InvocationSource, descriptor 属性为 init-only)
+public sealed class CapabilityExecutionContext
+{
+    public string CapabilityId { get; init; }       // 稳定标识符 — pipeline 设置
+    public string CapabilityName { get; init; }     // 显示名 — pipeline 设置
+    public int CapabilityVersion { get; init; }     // 版本 — pipeline 设置
+    public InvocationSource InvocationSource { get; set; }  // 调用来源 — dispatcher 设置
 }
 ```
 
@@ -362,7 +423,7 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 
 ## 9. 系统事件
 
-4 个框架定义的 capability lifecycle events（注册在 EventRegistry）:
+4 个框架定义的 capability lifecycle events（通过 `SystemEventDescriptorProvider` 注册到 EventRegistry）:
 
 | Event | Category | Semantic | Importance |
 |-------|----------|----------|------------|
@@ -378,15 +439,15 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 测试项目 | 测试数 | 覆盖范围 |
 |----------|--------|---------|
 | Schema.Tests | 19 | Descriptor 创建, Registry CRUD + 版本, Validator(10) |
-| Metadata.Tests | 73 | **Phase 3 新增:** RegistryBase(9), EventValidators(6), BootstrapCoordinator(4), DescriptorResolver(5), CapabilityRegistry(4), DescriptorIdentity(4), DescriptorRef(12), ValidationReport(2), + 原有 27 |
-| Capability.Tests | 59 | Descriptor(4), Registry(4), Profile(2), Pipeline(6), Builder(3), ExecutionContext(5), ExecutionResult(4), SystemEvents(6), Idempotency(5), EventPublisher(4), Metrics(7), Tenant(2), RateLimit(5), DelegateHandler(3) |
+| Metadata.Tests | 79 | **Phase 3/4:** RegistryBase(9), EventValidators(6), BootstrapCoordinator(4), DescriptorResolver(5), CapabilityRegistry(6, +GetByKind/GetByTag), CapabilityDescriptor(4), DescriptorIdentity(4), DescriptorRef(12), ValidationReport(2), + 原有 27 |
+| Capability.Tests | 90 | **Phase 4 新增 (+31):** DefaultCapabilityResolver(9), CapabilityDispatcher(8), AuditMiddleware(5), InMemoryAuditStore(5), NullAuditStore(2), Descriptor(4), ExecutionContext(6), Pipeline(6), Registry(4), Profile(3), SystemEvents(3), + 遗留 |
 | Draft.Tests | 13 | DraftRecord(4), InMemoryStore(5), TenantIsolated(4) |
-| Event.Tests | 32 | **Phase 2a 新增:** EventRegistry(16), Validator(4), DynamicRegistry(7), Descriptor(5) |
+| Event.Tests | 32 | **Phase 2a:** EventRegistry(16), Validator(4), DynamicRegistry(7), Descriptor(5) |
 | Exposure.Tests | 12 | AgentTool(5), MCPTool(3), CapabilityEndpoint(4) |
 | Form.Tests | 8 | Descriptor(5), Registry(3) |
 | HumanTask.Tests | 8 | Descriptor(6), Registry(2) |
 | Workflow.Tests | 28 | Descriptor(6), Registry(3), InteractionTarget(4), Engine(11), Resume(4) |
-| **Total** | **~252** | |
+| **Total** | **~289** | |
 
 ---
 
@@ -452,3 +513,15 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 56 | DescriptorRef.Version = null 表示 Latest Stable | ✅ Phase 3 |
 | 57 | DescriptorKey 与 DescriptorRef 语义分离 | ✅ Phase 3 |
 | 58 | EventRegistry 内部迁移到 RegistryBase，API 不变 | ✅ Phase 3 |
+| 59 | CapabilityRegistry 基于 RegistryBase<CapabilityDescriptor> 统一实现 | ✅ Phase 4 |
+| 60 | ICapabilityRegistry + CapabilityProfile 移至 Metadata（打破 Capability.Descriptions → Metadata 循环依赖） | ✅ Phase 4 |
+| 61 | CapabilityDescriptor 在 Metadata 中统一（融合 Capability.Descriptions 版运行时属性） | ✅ Phase 4 |
+| 62 | CapabilityKind + CapabilityRiskLevel 移至 Metadata.Descriptions | ✅ Phase 4 |
+| 63 | Id 是稳定标识符，Name 是人类显示名 — DefaultCapabilityVersionResolver 使用 Id-first 查找 | ✅ Phase 4 |
+| 64 | ICapabilityDispatcher 是统一执行门面 — 注入 InvocationSource + TenantId/UserId | ✅ Phase 4 |
+| 65 | ICapabilityResolver 统一解析入口 — 移至 Metadata 而非 Capability.Descriptions | ✅ Phase 4 |
+| 66 | AuditMiddleware 在最外层记录所有执行结果（隔离审计失败，不阻断） | ✅ Phase 4 |
+| 67 | IVersionedDescriptorRegistry.GetByVersion(id, version) — 所有 Registry 实现 | ✅ Phase 4 |
+| 68 | CapabilityExecutionContext descriptor 属性 init-only（pipeline 设置），InvocationSource 为 set（dispatcher 设置） | ✅ Phase 4 |
+| 69 | IBootstrapValidator / IDescriptorLookup / ICapabilityHandlerRegistry 加入 Metadata.Descriptions | ✅ Phase 4 |
+| 70 | 测试: 90 个 Capability.Tests（+31 Phase 4 新增：Resolver/Dispacher/Audit） | ✅ Phase 4 |
