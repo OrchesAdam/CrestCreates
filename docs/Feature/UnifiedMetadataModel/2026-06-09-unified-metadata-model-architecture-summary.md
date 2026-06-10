@@ -1,6 +1,6 @@
 # 统一元数据模型 — 架构总结文档
 
-> **日期:** 2026-06-10 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a 完成**
+> **日期:** 2026-06-10 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a + Phase 4b 完成**
 
 ---
 
@@ -30,6 +30,20 @@ Phase 4a 统一所有 Registry 到 RegistryBase，消除 static Provider 模式�
 | Source Generator 统一 | 生成 IDescriptorProvider<T>（覆盖 5 种 descriptor 类型） |
 | E2E 集成测试 | 14 个全链路测试：Dispatch → Pipeline → Handler → Audit |
 | Cross-Registry 验证测试 | 3 个 DescriptorRef 跨 Registry 引用验证 |
+
+### Phase 4b: Workflow Runtime Foundation
+
+Phase 4b 将 `WorkflowEngine` 从单体执行器重构为基于 `IWorkflowStepExecutorRegistry` 的委托架构，建立最小执行闭环：
+
+| 组件 | 说明 |
+|------|------|
+| `IWorkflowStepExecutor` + `IWorkflowStepExecutorRegistry` | 统一执行入口 — 避免 target-type branching |
+| `CapabilityStepExecutor` / `HumanTaskStepExecutor` | Pure executors — 返回 StepExecutionResult，不修改 WorkflowInstance |
+| `IWorkflowInstanceStore` / `InMemoryWorkflowInstanceStore` | 工作流实例持久化 (upsert)，替代 IDraftStore checkpoint |
+| `WorkflowCompatibilityValidator` | 启动阶段验证 — 拒绝 SubWorkflowTarget, Retry, Compensate, Transitions |
+| `StepExecutionResult` / `StepExecutionStatus` | 运行时状态模型 — Completed / Suspended / Failed |
+| `WorkflowExecutionContext` | 纯状态传递对象 — 无 IServiceProvider |
+| `IWorkflowEngine` (revised) | ExecuteAsync only，workflowId 参数，ResumeAsync 移除 |
 
 ### Phase 4: Capability Runtime Consolidation
 
@@ -110,8 +124,16 @@ framework/src/
 ├── CrestCreates.Form/                       # FormRegistry : RegistryBase<FormDescriptor>
 ├── CrestCreates.HumanTask.Abstractions/     # HumanTaskDescriptor, CompletionOutcome, AssigneeStrategy, IHumanTaskRegistry
 ├── CrestCreates.HumanTask/                  # HumanTaskRegistry : RegistryBase<HumanTaskDescriptor>
-├── CrestCreates.Workflow.Abstractions/      # WorkflowDescriptor, WorkflowStep, InteractionTarget, IWorkflowEngine, IWorkflowRegistry
-├── CrestCreates.Workflow/                   # WorkflowRegistry : RegistryBase<WorkflowDescriptor>, WorkflowEngine
+├── CrestCreates.Workflow.Abstractions/      # WorkflowDescriptor, WorkflowStep, InteractionTarget (Capability/HumanTask/SubWorkflow),
+│                                           # IWorkflowEngine (ExecuteAsync only), IWorkflowRegistry,
+│                                           # IWorkflowStepExecutor, IWorkflowStepExecutorRegistry,
+│                                           # StepExecutionResult, StepExecutionStatus, WorkflowExecutionContext,
+│                                           # IWorkflowInstanceStore, WorkflowStepResult
+├── CrestCreates.Workflow/                   # WorkflowRegistry : RegistryBase<WorkflowDescriptor>,
+│                                           # WorkflowEngine (internally refactored — registry-based dispatch),
+│                                           # CapabilityStepExecutor, HumanTaskStepExecutor,
+│                                           # DefaultStepExecutorRegistry, InMemoryWorkflowInstanceStore,
+│                                           # WorkflowCompatibilityValidator (bootstrap)
 ├── CrestCreates.Draft.Abstractions/         # DraftRecord, IDraftStore, DraftStatus
 ├── CrestCreates.Draft/                      # InMemoryDraftStore, TenantIsolatedDraftStore
 ├── CrestCreates.Exposure.Abstractions/      # AgentToolDescriptor, MCPToolDescriptor, ToolCallMode
@@ -126,7 +148,7 @@ framework/test/
 ├── CrestCreates.Exposure.Tests/            (12)
 ├── CrestCreates.Form.Tests/                (9)
 ├── CrestCreates.HumanTask.Tests/           (9)
-└── CrestCreates.Workflow.Tests/            (28)
+└── CrestCreates.Workflow.Tests/            (37)
 ```
 
 ---
@@ -367,34 +389,84 @@ public sealed class CapabilityExecutionContext
 
 ---
 
-## 5. Workflow 运行时引擎
+## 5. Workflow 运行时引擎 (Phase 4b — Refactored)
 
-### 5.1 执行模型
+### 5.1 目标架构
+
+Phase 4b 将 `WorkflowEngine` 从单体执行器重构为基于 registry 的 delegate 架构：
 
 ```
-IWorkflowEngine.ExecuteAsync("employee.onboarding", vars)
-  → Resolve WorkflowDescriptor (registry)
-  → Create WorkflowInstance (pinned to descriptor version)
-  → Iterate steps:
-      ├── CapabilityTarget  → ICapabilityPipeline (执行 capability)
-      ├── HumanTaskTarget   → passthrough (deferred to HumanTask phase)
-      └── SubWorkflowTarget → 递归 ExecuteAsync
-  → Error handling: Retry(×3) | Skip | Fail | Compensate
-  → Step transitions: sequential or explicit transition targets
-  → Checkpoint → IDraftStore (DraftRecord)
-  → Instance.Completed
+IWorkflowEngine (ExecuteAsync only — ResumeAsync removed)
+    │
+    └── WorkflowEngine (internally refactored)
+          │
+          ├── IWorkflowStepExecutorRegistry  ── Resolves executor by InteractionTarget subtype
+          │     ├── CapabilityStepExecutor    ── ICapabilityPipeline (pure — returns Variables, never mutates instance)
+          │     └── HumanTaskStepExecutor     ── Returns Suspended (placeholder, Phase 5/6 replaces)
+          │
+          ├── IWorkflowInstanceStore
+          │     └── SaveAsync (upsert) / GetAsync
+          │
+          └── WorkflowCompatibilityValidator  ── Bootstrap validation (fail-fast at startup)
 ```
 
-### 5.2 断点恢复
+### 5.2 核心运行时状态模型
 
-```csharp
-// 崩溃后从 DraftRecord checkpoint 恢复
-await engine.ResumeAsync("instance_01")
-  → Load DraftRecord (wf_ckpt_{id})
-  → Deserialize CheckpointState (InstanceId, StepIndex, Variables)
-  → Reconstruct WorkflowInstance
-  → Continue from saved StepIndex
 ```
+Previous:  bool IsSuccess
+
+Phase 4b:  StepExecutionStatus
+              ├── Completed  — step finished, continue
+              ├── Suspended  — HumanTask pause (engine → WorkflowInstanceStatus.Suspended)
+              └── Failed     — known business failure (Skip or Fail based on OnError)
+```
+
+### 5.3 引擎算法（仅支持线性 Workflow）
+
+```
+ExecuteAsync(workflowId, inputVariables, ct)
+  → Resolve WorkflowDescriptor (registry.GetById)
+  → Create WorkflowInstance (WorkflowInstanceStatus.Running, StepIndex=0)
+  → For each step:
+      ├─ Resolve executor via IWorkflowStepExecutorRegistry.Resolve(target)
+      ├─ Execute: executor.ExecuteAsync(context, ct)
+      │   ├─ Completed → record WorkflowStepResult, apply Variables, continue
+      │   ├─ Suspended → record WorkflowStepResult(Status=Suspended), save instance, return
+      │   └─ Failed → check OnError: Skip→continue / Fail→save Failed, return
+      └─ Exception → catch, record as Failed(infrastructure error), save, return
+  → Completed → save instance, return
+```
+
+### 5.4 架构不变量
+
+- **WorkflowEngine never performs target-type branching** — 所有 dispatch 通过 `IWorkflowStepExecutorRegistry`
+- **Executors are pure** — 返回 `StepExecutionResult`，不修改 `WorkflowInstance` 状态；Variables 由 Engine 应用
+- **Bootstrap validation** — `SubWorkflowTarget`、`Retry`、`Compensate`、`Transitions` 在启动阶段被拒绝
+- **Metadata retained, execution paths removed** — descriptor 元数据保留，runtime 执行路径被移除
+
+### 5.5 已移除的执行路径（Phase 4b 范围外）
+
+| 移除项 | 后续阶段 |
+|--------|----------|
+| `ResumeAsync` | Phase 5/6 |
+| SubWorkflow 执行 | Phase 5+ |
+| Retry (MaxRetries=3) | Phase 5+ |
+| Compensation | Phase 5+ |
+| Branch/Transition | Phase 5+ |
+| `IDraftStore` checkpoint | — |
+| `ICapabilityPipeline?` nullable | — |
+
+### 5.6 新增类型一览
+
+| 类型 | 位置 | 职责 |
+|------|------|------|
+| `StepExecutionResult` | Workflow.Abstractions | executor 契约输出 (Status, Output, Variables) |
+| `StepExecutionStatus` | Workflow.Abstractions | Completed / Suspended / Failed |
+| `IWorkflowStepExecutor` | Workflow.Abstractions | 单步执行器接口 |
+| `IWorkflowStepExecutorRegistry` | Workflow.Abstractions | 按 InteractionTarget 解析 executor |
+| `IWorkflowInstanceStore` | Workflow.Abstractions | 工作流实例持久化 (upsert) |
+| `WorkflowExecutionContext` | Workflow.Abstractions | 纯状态传递对象 (无 IServiceProvider) |
+| `WorkflowCompatibilityValidator` | Workflow | 启动阶段验证器 |
 
 ---
 
@@ -458,8 +530,8 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | Exposure.Tests | 12 | AgentTool(5), MCPTool(3), CapabilityEndpoint(4) |
 | Form.Tests | 9 | Descriptor(5), Registry(4) |
 | HumanTask.Tests | 9 | Descriptor(6), Registry(3) |
-| Workflow.Tests | 28 | Descriptor(6), Registry(3), InteractionTarget(4), Engine(11), Resume(4) |
-| **Total** | **~309** | |
+| Workflow.Tests | 37 | Executor Registry(5), Validator(14), Engine(13), Runtime(5) |
+| **Total** | **~318** | |
 
 ---
 
@@ -545,3 +617,12 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 76 | IDescriptorRegistry.Build() 接口级方法 — 所有 Registry 接口统一 Build | ✅ Phase 4a |
 | 77 | HandlerResolver 仅接受 Id — Name 永不参与 Runtime Dispatch | ✅ Phase 4a |
 | 78 | 测试: 104 个 Capability.Tests（+14 E2E + 3 RefValidation） | ✅ Phase 4a |
+| 79 | WorkflowEngine 重构为 registry-based dispatch — IWorkflowStepExecutorRegistry | ✅ Phase 4b |
+| 80 | Executors are pure — 返回 StepExecutionResult，不修改 WorkflowInstance | ✅ Phase 4b |
+| 81 | WorkflowExecutionContext 是纯状态对象 — 无 IServiceProvider | ✅ Phase 4b |
+| 82 | IWorkflowInstanceStore (upsert) 替代 IDraftStore checkpoint | ✅ Phase 4b |
+| 83 | Boostrap validation — 启动阶段拒绝不支持的 Workflow 构造 | ✅ Phase 4b |
+| 84 | StepExecutionStatus {Completed, Suspended, Failed} 替代 bool IsSuccess | ✅ Phase 4b |
+| 85 | IWorkflowEngine 移除 ResumeAsync — 仅保留 ExecuteAsync | ✅ Phase 4b |
+| 86 | Metadata retained, execution paths removed — SubWorkflow/Retry/Compensate/Transition | ✅ Phase 4b |
+| 87 | 测试: 37 个 Workflow.Tests（含 validator、executor registry、runtime integration） | ✅ Phase 4b |

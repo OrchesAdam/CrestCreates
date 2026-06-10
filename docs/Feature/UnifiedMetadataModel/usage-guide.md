@@ -1,7 +1,7 @@
 # 统一元数据模型 — 使用指南
 
 > 本文档面向 CrestCreates 模块开发者，介绍如何使用统一元数据模型声明和执行业务能力。
-> *更新于 Phase 4a (2026-06-10): 所有 6 个 Registry 统一基于 RegistryBase, DescriptorProviderRegistry + MetadataBootstrapper, 全部使用 Build(providers) 模式*
+> *更新于 Phase 4b (2026-06-10): Workflow 运行时引擎重构 — IWorkflowStepExecutor 架构, IWorkflowInstanceStore, bootstrap validation*
 
 ---
 
@@ -129,6 +129,8 @@ public class CustomerCreatedEventProvider : IEventDescriptorProvider
 
 ## 3. 定义 Workflow
 
+> ⚠️ **Phase 4b 更新:** Workflow 运行时引擎重构 — `IWorkflowEngine.ExecuteAsync` 现在接受 `workflowId`（非 `workflowName`），不支持 `ResumeAsync`。`StepErrorBehavior.Retry` 和 `StepErrorBehavior.Compensate` 以及 `SubWorkflowTarget` 和 step transitions 目前不被运行时支持（bootstrap validator 会在启动阶段拒绝）。`OnError` 仅支持 `Fail` 和 `Skip`。HumanTask 步骤返回 `Suspended` 暂停状态。
+
 ```csharp
 using CrestCreates.Workflow.Abstractions;
 
@@ -149,7 +151,7 @@ public class OnboardingWorkflowProvider : IWorkflowDescriptorProvider
                 {
                     Capability = new VersionedDescriptorRef<CapabilityDescriptor>("cap_create_account", 1)
                 },
-                OnError = StepErrorBehavior.Compensate
+                OnError = StepErrorBehavior.Fail  // Phase 4b: 仅支持 Fail / Skip
             },
             new()
             {
@@ -159,6 +161,7 @@ public class OnboardingWorkflowProvider : IWorkflowDescriptorProvider
                 {
                     HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht_manager_approval", 1)
                 }
+                // HumanTask 步骤 → 返回 Suspended 暂停状态
             },
             new()
             {
@@ -177,14 +180,22 @@ public class OnboardingWorkflowProvider : IWorkflowDescriptorProvider
 执行 Workflow：
 
 ```csharp
-var instance = await engine.ExecuteAsync("employee.onboarding", new Dictionary<string, object?>
+// Phase 4b: 使用 workflowId 执行（稳定标识符）
+var instance = await engine.ExecuteAsync("wf_onboarding", new Dictionary<string, object?>
 {
     ["EmployeeId"] = "emp_001",
     ["DepartmentId"] = "dept_eng"
 });
 
+// Phase 4b 运行时状态模型:
+// Completed  — 所有步骤完成
+// Suspended — 遇到 HumanTask 暂停
+// Failed    — 步骤失败且 OnError != Skip
+
 if (instance.Status == WorkflowInstanceStatus.Completed)
     Console.WriteLine("入职流程完成");
+else if (instance.Status == WorkflowInstanceStatus.Suspended)
+    Console.WriteLine("入职流程等待审批");
 else
     Console.WriteLine($"工作流失败: {instance.ErrorMessage}");
 ```
@@ -567,6 +578,8 @@ services.AddSingleton<MyRegistry>();
 | Phase 3 实现计划 | `docs/superpowers/plans/2026-06-09-phase-3-metadata-runtime-foundation.md` |
 | Phase 4 实现计划 | `docs/superpowers/plans/2026-06-10-phase-4-capability-runtime-consolidation.md` |
 | Phase 4a 实现计划 | `docs/superpowers/plans/2026-06-10-phase-4a-main-chain-closure.md` |
+| Phase 4b 设计规格书 | `docs/superpowers/specs/2026-06-10-phase-4b-workflow-runtime-foundation-design.md` |
+| Phase 4b 实现计划 | `docs/superpowers/plans/2026-06-10-phase-4b-workflow-runtime-foundation.md` |
 | 架构总结 | `docs/Feature/UnifiedMetadataModel/2026-06-09-unified-metadata-model-architecture-summary.md` |
 
 ### 关键接口一览
@@ -603,7 +616,10 @@ services.AddSingleton<MyRegistry>();
 | `IFormDescriptorProvider` | 声明 Form | Form.Abstractions |
 | `IHumanTaskDescriptorProvider` | 声明 HumanTask | HumanTask.Abstractions |
 | `IWorkflowDescriptorProvider` | 声明 Workflow | Workflow.Abstractions |
-| `IWorkflowEngine` | 执行 Workflow | Workflow.Abstractions |
+| `IWorkflowEngine` | 执行 Workflow (ExecuteAsync only) | Workflow.Abstractions |
+| `IWorkflowStepExecutor` | 单步执行器 (Phase 4b) | Workflow.Abstractions |
+| `IWorkflowStepExecutorRegistry` | 按 target 解析 executor (Phase 4b) | Workflow.Abstractions |
+| `IWorkflowInstanceStore` | 工作流实例持久化 (upsert, Phase 4b) | Workflow.Abstractions |
 | `IDraftStore` | Draft CRUD | Draft.Abstractions |
 
 所有 Provider 接口由 source generator 自动发现并注册，无需手动调用 Registry。
