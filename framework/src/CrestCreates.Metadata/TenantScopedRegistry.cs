@@ -71,4 +71,7 @@ public sealed class TenantScopedRegistry<TDescriptor> : IVersionedDescriptorRegi
 
     public IReadOnlyList<TDescriptor> GetAll()
         => _inner.GetAll().Where(IsAccessible).ToList().AsReadOnly();
+
+    public void Build(IEnumerable<IDescriptorProvider<TDescriptor>> providers)
+        => _inner.Build(providers);
 }

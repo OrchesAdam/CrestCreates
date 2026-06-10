@@ -5,4 +5,5 @@ public interface IDescriptorRegistry<TDescriptor> where TDescriptor : IDescripto
     TDescriptor? GetById(string id);
     TDescriptor? GetByName(string name);
     IReadOnlyList<TDescriptor> GetAll();
+    void Build(IEnumerable<IDescriptorProvider<TDescriptor>> providers);
 }

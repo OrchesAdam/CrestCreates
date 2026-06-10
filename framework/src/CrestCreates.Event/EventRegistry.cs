@@ -36,10 +36,9 @@ public sealed class EventRegistry : RegistryBase<GeneratedEventDescriptor>,
     public GeneratedEventDescriptor? GetLatestVersion(string name)
         => base.GetByName(name).MaxBy(v => v.Version);
 
-    // IEventRegistry.Build — delegates to RegistryBase
-    public void Build(IEnumerable<IEventDescriptorProvider> providers)
+    public void Build(IEnumerable<IDescriptorProvider<GeneratedEventDescriptor>> providers)
     {
-        base.Build(providers.Cast<IDescriptorProvider<GeneratedEventDescriptor>>());
+        base.Build(providers);
     }
 
     protected override RegistrySnapshot<GeneratedEventDescriptor> BuildSnapshot(
