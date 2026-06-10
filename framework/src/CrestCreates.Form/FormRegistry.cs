@@ -1,61 +1,68 @@
-using System.Collections.Concurrent;
+using System.Collections.Frozen;
+using System.Collections.Immutable;
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Form.Abstractions;
 
 namespace CrestCreates.Form;
 
-public sealed class FormRegistry : IFormRegistry
+public sealed class FormRegistry : RegistryBase<FormDescriptor>, IFormRegistry
 {
-    private readonly ConcurrentDictionary<string, FormDescriptor> _byId = new();
-    private readonly ConcurrentDictionary<string, List<FormDescriptor>> _byName = new();
+    protected override string RegistryNamespace => "form";
 
-    public void Register(FormDescriptor descriptor)
+    public FormRegistry(IRegistryValidationEngine<FormDescriptor> validationEngine)
+        : base(validationEngine) { }
+
+    protected override RegistrySnapshot<FormDescriptor> BuildSnapshot(
+        List<FormDescriptor> descriptors)
     {
-        _byId[descriptor.Id] = descriptor;
-        _byName.GetOrAdd(descriptor.Name, _ => new()).Add(descriptor);
+        var byId = descriptors
+            .GroupBy(d => d.Id)
+            .ToFrozenDictionary(g => g.Key, g => g.OrderByDescending(d => d.Version).First());
+
+        var byName = descriptors
+            .GroupBy(d => d.Name)
+            .ToFrozenDictionary(g => g.Key, g => g.ToImmutableArray());
+
+        var byVersion = descriptors
+            .ToFrozenDictionary(d => new DescriptorKey(d.Namespace, d.Id, d.Version), d => d);
+
+        return new RegistrySnapshot<FormDescriptor>(
+            byId, byName, byVersion,
+            descriptors.ToImmutableArray(),
+            ImmutableDictionary<Type, IRegistryIndex>.Empty);
     }
 
-    public FormDescriptor? GetById(string id) =>
-        _byId.TryGetValue(id, out var d) ? d : null;
-
-    public FormDescriptor? GetByName(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.FirstOrDefault(v => v.State == DescriptorState.Active)
-            : null;
-
-    public FormDescriptor? GetByNameAndVersion(string name, int version) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.FirstOrDefault(v => v.Version == version)
-            : null;
-
-    public FormDescriptor? GetByVersion(string id, int version)
+    public new FormDescriptor? GetByName(string name)
     {
-        var byId = GetById(id);
-        if (byId != null && byId.Version == version)
-            return byId;
-        return GetAll().FirstOrDefault(d => d.Id == id && d.Version == version);
+        var versions = base.GetByName(name);
+        return versions.FirstOrDefault(v => v.State == DescriptorState.Active);
     }
 
-    public FormDescriptor? GetActiveVersion(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.Where(v => v.State == DescriptorState.Active).MaxBy(v => v.Version)
-            : null;
+    public FormDescriptor? GetByNameAndVersion(string name, int version)
+    {
+        var versions = base.GetByName(name);
+        return versions.FirstOrDefault(v => v.Version == version);
+    }
 
-    public FormDescriptor? GetLatestVersion(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.MaxBy(v => v.Version)
-            : null;
+    public IReadOnlyList<FormDescriptor> GetAllByName(string name)
+        => base.GetByName(name);
 
-    public IReadOnlyList<FormDescriptor> GetAllByName(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.AsReadOnly()
-            : Array.Empty<FormDescriptor>();
+    public FormDescriptor? GetActiveVersion(string name)
+    {
+        var versions = base.GetByName(name);
+        return versions.Where(v => v.State == DescriptorState.Active).MaxBy(v => v.Version);
+    }
 
-    public IReadOnlyList<FormDescriptor> GetDeprecatedVersions(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.Where(v => v.State == DescriptorState.Deprecated).ToList().AsReadOnly()
-            : Array.Empty<FormDescriptor>();
+    public FormDescriptor? GetLatestVersion(string name)
+    {
+        var versions = base.GetByName(name);
+        return versions.MaxBy(v => v.Version);
+    }
 
-    public IReadOnlyList<FormDescriptor> GetAll() =>
-        _byId.Values.ToList().AsReadOnly();
+    public IReadOnlyList<FormDescriptor> GetDeprecatedVersions(string name)
+    {
+        var versions = base.GetByName(name);
+        return versions.Where(v => v.State == DescriptorState.Deprecated).ToList().AsReadOnly();
+    }
 }

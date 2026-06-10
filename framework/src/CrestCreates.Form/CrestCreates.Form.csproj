@@ -8,5 +8,6 @@
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Form.Abstractions\CrestCreates.Form.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Metadata.Abstractions\CrestCreates.Metadata.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Metadata\CrestCreates.Metadata.csproj" />
   </ItemGroup>
 </Project>
