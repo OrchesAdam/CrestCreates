@@ -1,6 +1,6 @@
 # 统一元数据模型 — 架构总结文档
 
-> **日期:** 2026-06-10 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 完成**
+> **日期:** 2026-06-10 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a 完成**
 
 ---
 
@@ -108,7 +108,7 @@ framework/src/
 framework/test/
 ├── CrestCreates.Schema.Tests/               (19)
 ├── CrestCreates.Metadata.Tests/             (79)  ← Phase 3/4: RegistryBase, Validators, Bootstrap, Resolver, CapabilityRegistry
-├── CrestCreates.Capability.Tests/           (90)  ← Phase 4 新增: DefaultCapabilityResolver, CapabilityDispatcher, AuditMiddleware, AuditStores
+├── CrestCreates.Capability.Tests/           (104) ← Phase 4/4a: Resolver, Dispatcher, Audit, E2E, Registry migration
 ├── CrestCreates.Draft.Tests/               (13)
 ├── CrestCreates.Event.Tests/               (32)  ← Phase 2a: EventRegistry, Validator, DynamicRegistry
 ├── CrestCreates.Exposure.Tests/            (12)
@@ -440,7 +440,7 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 |----------|--------|---------|
 | Schema.Tests | 19 | Descriptor 创建, Registry CRUD + 版本, Validator(10) |
 | Metadata.Tests | 79 | **Phase 3/4:** RegistryBase(9), EventValidators(6), BootstrapCoordinator(4), DescriptorResolver(5), CapabilityRegistry(6, +GetByKind/GetByTag), CapabilityDescriptor(4), DescriptorIdentity(4), DescriptorRef(12), ValidationReport(2), + 原有 27 |
-| Capability.Tests | 90 | **Phase 4 新增 (+31):** DefaultCapabilityResolver(9), CapabilityDispatcher(8), AuditMiddleware(5), InMemoryAuditStore(5), NullAuditStore(2), Descriptor(4), ExecutionContext(6), Pipeline(6), Registry(4), Profile(3), SystemEvents(3), + 遗留 |
+| Capability.Tests | 104 | **Phase 4/4a:** Resolver(9), Dispatcher(8), Audit(5), InMemoryStore(5), NullStore(2), E2E(14), Registry(4), Pipeline(6), + 遗留 |
 | Draft.Tests | 13 | DraftRecord(4), InMemoryStore(5), TenantIsolated(4) |
 | Event.Tests | 32 | **Phase 2a:** EventRegistry(16), Validator(4), DynamicRegistry(7), Descriptor(5) |
 | Exposure.Tests | 12 | AgentTool(5), MCPTool(3), CapabilityEndpoint(4) |
