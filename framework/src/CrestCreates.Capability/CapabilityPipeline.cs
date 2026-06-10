@@ -59,7 +59,7 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
         {
             CapabilityPipelineDelegate handler = async (ctx) =>
             {
-                var invoker = _handlerResolver.Resolve(capabilityName);
+                var invoker = _handlerResolver.Resolve(descriptor.Id);
                 if (invoker == null)
                 {
                     return CapabilityExecutionResult.Failure(

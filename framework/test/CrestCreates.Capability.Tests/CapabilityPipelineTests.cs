@@ -120,7 +120,7 @@ public class CapabilityPipelineTests
         ])]);
 
         // Register handler invoker — zero reflection, AOT-safe
-        resolver.Register("test.echo", new EchoHandlerInvoker());
+        resolver.Register("cap_01", new EchoHandlerInvoker());
 
         services.AddSingleton<ICapabilityRegistry>(registry);
         services.AddSingleton<ICapabilityHandlerResolver>(resolver);
@@ -159,7 +159,7 @@ public class CapabilityPipelineTests
             }
         ])]);
 
-        resolver.Register("test.upper", new UpperHandlerInvoker());
+        resolver.Register("cap_02", new UpperHandlerInvoker());
 
         services.AddSingleton<ICapabilityRegistry>(registry);
         services.AddSingleton<ICapabilityHandlerResolver>(resolver);
@@ -198,7 +198,7 @@ public class CapabilityPipelineTests
             }
         ])]);
 
-        resolver.Register("test.broken", new ThrowingHandlerInvoker());
+        resolver.Register("cap_03", new ThrowingHandlerInvoker());
 
         services.AddSingleton<ICapabilityRegistry>(registry);
         services.AddSingleton<ICapabilityHandlerResolver>(resolver);
