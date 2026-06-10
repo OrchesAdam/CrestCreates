@@ -1,4 +1,4 @@
-using CrestCreates.Capability.Abstractions;
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
@@ -19,7 +19,7 @@ public class CapabilityDescriptorTests
             CapabilityKind = CapabilityKind.Command,
             InputSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema_01", 1),
             OutputSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema_02", 1),
-            Permission = "Customer.Create",
+            Permissions = new[] { "Customer.Create" },
             RiskLevel = CapabilityRiskLevel.Medium
         };
 
@@ -41,7 +41,7 @@ public class CapabilityDescriptorTests
     }
 
     [Fact]
-    public void CapabilityDescriptor_Aliases_Defaults_Empty()
+    public void CapabilityDescriptor_Permissions_Defaults_Empty()
     {
         var descriptor = new CapabilityDescriptor
         {
@@ -50,7 +50,7 @@ public class CapabilityDescriptorTests
             Version = 1
         };
 
-        descriptor.Aliases.Should().BeEmpty();
+        descriptor.Permissions.Should().BeEmpty();
     }
 
     [Fact]

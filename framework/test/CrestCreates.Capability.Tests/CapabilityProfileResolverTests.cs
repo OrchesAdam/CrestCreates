@@ -1,4 +1,4 @@
-using CrestCreates.Capability.Abstractions;
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
 using Xunit;

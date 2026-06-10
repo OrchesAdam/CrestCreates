@@ -1,4 +1,5 @@
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Metadata;
 using CrestCreates.Schema.Abstractions;
 
 namespace CrestCreates.Capability.Middleware;
@@ -36,7 +37,11 @@ public sealed class ValidationMiddleware : ICapabilityPipelineMiddleware
         if (capDescriptor == null)
             return next(context);
 
-        var schemaDescriptor = _schemaRegistry.GetById(capDescriptor.InputSchema.Id);
+        var inputSchema = capDescriptor.InputSchema;
+        if (inputSchema == null)
+            return next(context);
+
+        var schemaDescriptor = _schemaRegistry.GetById(inputSchema.Value.Id);
         if (schemaDescriptor == null)
             return next(context);
 

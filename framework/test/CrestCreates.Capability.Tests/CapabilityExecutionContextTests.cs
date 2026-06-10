@@ -71,6 +71,20 @@ public class CapabilityExecutionContextTests
     }
 
     [Fact]
+    public void Has_CapabilityId_and_InvocationSource_fields()
+    {
+        var ctx = new CapabilityExecutionContext
+        {
+            CapabilityId = "customer.create",
+            CapabilityName = "Create Customer",
+            InvocationSource = InvocationSource.Workflow
+        };
+
+        ctx.CapabilityId.Should().Be("customer.create");
+        ctx.InvocationSource.Should().Be(InvocationSource.Workflow);
+    }
+
+    [Fact]
     public void Context_StartedAt_Is_Set_On_Creation()
     {
         var before = DateTimeOffset.UtcNow;

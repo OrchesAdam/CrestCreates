@@ -1,5 +1,8 @@
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Capability.Bootstrap;
+using CrestCreates.Capability.Internal;
 using CrestCreates.Capability.Middleware;
+using CrestCreates.Metadata.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -13,13 +16,14 @@ public static class CapabilityServiceCollectionExtensions
     {
         var builder = new CapabilityPipelineBuilder();
 
+        builder.Use<AuditMiddleware>();           // Outermost — records all outcomes
         builder.Use<RateLimitMiddleware>();
         builder.Use<TenantMiddleware>();
         builder.Use<AuthorizationMiddleware>();
         builder.Use<ValidationMiddleware>();
         builder.Use<IdempotencyMiddleware>();
+        builder.Use<MetricsMiddleware>();          // Wraps Handler
         builder.Use<EventPublishingMiddleware>();
-        builder.Use<MetricsMiddleware>();
 
         configure?.Invoke(builder);
 
@@ -27,13 +31,14 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddSingleton<CapabilityHandlerResolver>();
         services.TryAddSingleton<ICapabilityHandlerResolver>(sp => sp.GetRequiredService<CapabilityHandlerResolver>());
         services.TryAddSingleton<ICapabilityPipeline, CapabilityPipeline>();
+        services.TryAddTransient<AuditMiddleware>();       // New
         services.TryAddTransient<RateLimitMiddleware>();
         services.TryAddTransient<TenantMiddleware>();
         services.TryAddTransient<AuthorizationMiddleware>();
         services.TryAddTransient<ValidationMiddleware>();
         services.TryAddTransient<IdempotencyMiddleware>();
-        services.TryAddTransient<EventPublishingMiddleware>();
         services.TryAddTransient<MetricsMiddleware>();
+        services.TryAddTransient<EventPublishingMiddleware>();
 
         return services;
     }
@@ -50,6 +55,32 @@ public static class CapabilityServiceCollectionExtensions
     {
         var invoker = new DelegateHandlerInvoker(handler);
         services.AddSingleton<ICapabilityHandlerInvoker>(invoker);
+        return services;
+    }
+
+    public static IServiceCollection AddCapabilityRuntime(
+        this IServiceCollection services)
+    {
+        services.AddCapabilityPipeline();
+
+        // Dispatcher + Resolver
+        services.TryAddSingleton<ICapabilityDispatcher, CapabilityDispatcher>();
+        services.TryAddSingleton<ICapabilityResolver, DefaultCapabilityResolver>();
+        services.TryAddSingleton<ICapabilityVersionResolver, DefaultCapabilityVersionResolver>();
+
+        // Audit — default NoOp
+        services.TryAddSingleton<ICapabilityAuditStore, NullCapabilityAuditStore>();
+
+        // Bootstrap Validators
+        services.AddSingleton<IBootstrapValidator, CapabilityHandlerValidator>();
+        services.AddSingleton<IBootstrapValidator, CapabilitySchemaValidator>();
+
+        return services;
+    }
+
+    public static IServiceCollection AddInMemoryCapabilityAudit(this IServiceCollection services)
+    {
+        services.Replace(ServiceDescriptor.Singleton<ICapabilityAuditStore, InMemoryCapabilityAuditStore>());
         return services;
     }
 }

@@ -1,4 +1,5 @@
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,11 +9,19 @@ namespace CrestCreates.Capability.Tests;
 
 public class CapabilityPipelineTests
 {
+    private sealed class TestCapabilityProvider : IDescriptorProvider<CapabilityDescriptor>
+    {
+        private readonly List<CapabilityDescriptor> _descriptors;
+        public TestCapabilityProvider(List<CapabilityDescriptor> descriptors) => _descriptors = descriptors;
+        public IReadOnlyList<CapabilityDescriptor> GetDescriptors() => _descriptors;
+    }
+
     [Fact]
     public async Task ExecuteAsync_CapabilityNotFound_ReturnsFailure()
     {
         var services = new ServiceCollection();
-        var registry = new CapabilityRegistry();
+        var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
+        var registry = new CapabilityRegistry(engine);
         var resolver = new CapabilityHandlerResolver();
         services.AddSingleton<ICapabilityRegistry>(registry);
         services.AddSingleton<ICapabilityHandlerResolver>(resolver);
@@ -31,16 +40,19 @@ public class CapabilityPipelineTests
     public async Task ExecuteAsync_CapabilityFound_ButHandlerNotFound_ReturnsFailure()
     {
         var services = new ServiceCollection();
-        var registry = new CapabilityRegistry();
+        var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
+        var registry = new CapabilityRegistry(engine);
         var resolver = new CapabilityHandlerResolver();
-        registry.Register(new CapabilityDescriptor
-        {
-            Id = "cap_01",
-            Name = "test.echo",
-            Version = 1,
-            CapabilityKind = CapabilityKind.Query,
-            State = DescriptorState.Active
-        });
+        registry.Build([new TestCapabilityProvider([
+            new CapabilityDescriptor
+            {
+                Id = "cap_01",
+                Name = "test.echo",
+                Version = 1,
+                CapabilityKind = CapabilityKind.Query,
+                State = DescriptorState.Active
+            }
+        ])]);
         services.AddSingleton<ICapabilityRegistry>(registry);
         services.AddSingleton<ICapabilityHandlerResolver>(resolver);
         services.AddSingleton(new CapabilityPipelineBuilder());
@@ -58,16 +70,19 @@ public class CapabilityPipelineTests
     public async Task ExecuteAsync_ConfigureContext_Overrides_Context_Values()
     {
         var services = new ServiceCollection();
-        var registry = new CapabilityRegistry();
+        var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
+        var registry = new CapabilityRegistry(engine);
         var resolver = new CapabilityHandlerResolver();
-        registry.Register(new CapabilityDescriptor
-        {
-            Id = "cap_01",
-            Name = "test.echo",
-            Version = 1,
-            CapabilityKind = CapabilityKind.Query,
-            State = DescriptorState.Active
-        });
+        registry.Build([new TestCapabilityProvider([
+            new CapabilityDescriptor
+            {
+                Id = "cap_01",
+                Name = "test.echo",
+                Version = 1,
+                CapabilityKind = CapabilityKind.Query,
+                State = DescriptorState.Active
+            }
+        ])]);
         services.AddSingleton<ICapabilityRegistry>(registry);
         services.AddSingleton<ICapabilityHandlerResolver>(resolver);
         services.AddSingleton(new CapabilityPipelineBuilder());
@@ -89,17 +104,20 @@ public class CapabilityPipelineTests
     {
         // Arrange: register a capability and a simple echo handler
         var services = new ServiceCollection();
-        var registry = new CapabilityRegistry();
+        var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
+        var registry = new CapabilityRegistry(engine);
         var resolver = new CapabilityHandlerResolver();
 
-        registry.Register(new CapabilityDescriptor
-        {
-            Id = "cap_01",
-            Name = "test.echo",
-            Version = 1,
-            CapabilityKind = CapabilityKind.Query,
-            State = DescriptorState.Active
-        });
+        registry.Build([new TestCapabilityProvider([
+            new CapabilityDescriptor
+            {
+                Id = "cap_01",
+                Name = "test.echo",
+                Version = 1,
+                CapabilityKind = CapabilityKind.Query,
+                State = DescriptorState.Active
+            }
+        ])]);
 
         // Register handler invoker — zero reflection, AOT-safe
         resolver.Register("test.echo", new EchoHandlerInvoker());
@@ -126,17 +144,20 @@ public class CapabilityPipelineTests
     public async Task ExecuteAsync_HandlerRegistered_WithContext_InvokesSuccessfully()
     {
         var services = new ServiceCollection();
-        var registry = new CapabilityRegistry();
+        var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
+        var registry = new CapabilityRegistry(engine);
         var resolver = new CapabilityHandlerResolver();
 
-        registry.Register(new CapabilityDescriptor
-        {
-            Id = "cap_02",
-            Name = "test.upper",
-            Version = 1,
-            CapabilityKind = CapabilityKind.Command,
-            State = DescriptorState.Active
-        });
+        registry.Build([new TestCapabilityProvider([
+            new CapabilityDescriptor
+            {
+                Id = "cap_02",
+                Name = "test.upper",
+                Version = 1,
+                CapabilityKind = CapabilityKind.Command,
+                State = DescriptorState.Active
+            }
+        ])]);
 
         resolver.Register("test.upper", new UpperHandlerInvoker());
 
@@ -162,17 +183,20 @@ public class CapabilityPipelineTests
     public async Task ExecuteAsync_PipelineError_ReturnsFailure()
     {
         var services = new ServiceCollection();
-        var registry = new CapabilityRegistry();
+        var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
+        var registry = new CapabilityRegistry(engine);
         var resolver = new CapabilityHandlerResolver();
 
-        registry.Register(new CapabilityDescriptor
-        {
-            Id = "cap_03",
-            Name = "test.broken",
-            Version = 1,
-            CapabilityKind = CapabilityKind.Command,
-            State = DescriptorState.Active
-        });
+        registry.Build([new TestCapabilityProvider([
+            new CapabilityDescriptor
+            {
+                Id = "cap_03",
+                Name = "test.broken",
+                Version = 1,
+                CapabilityKind = CapabilityKind.Command,
+                State = DescriptorState.Active
+            }
+        ])]);
 
         resolver.Register("test.broken", new ThrowingHandlerInvoker());
 

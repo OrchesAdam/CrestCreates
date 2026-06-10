@@ -1,4 +1,4 @@
-using CrestCreates.Capability.Abstractions;
+using CrestCreates.Metadata;
 
 namespace CrestCreates.Capability;
 
