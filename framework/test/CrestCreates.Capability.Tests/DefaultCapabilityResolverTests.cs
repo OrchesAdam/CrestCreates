@@ -111,4 +111,47 @@ public class DefaultCapabilityResolverTests
         result.Id.Should().Be("stable-id");
         result.Name.Should().Be("Display Name A");
     }
+
+    [Fact]
+    public void Resolve_WithoutVersion_LatestDeprecated_EarlierActive_ReturnsActive()
+    {
+        var registry = CreateRegistry(
+            new CapabilityDescriptor { Id = "customer.create", Name = "Customer", Version = 1, State = DescriptorState.Active },
+            new CapabilityDescriptor { Id = "customer.create", Name = "Customer", Version = 2, State = DescriptorState.Deprecated }
+        );
+        var resolver = CreateResolver(registry);
+
+        var result = resolver.Resolve(new CapabilityRef { Id = "customer.create" });
+
+        result.Version.Should().Be(1);
+        result.State.Should().Be(DescriptorState.Active);
+    }
+
+    [Fact]
+    public void Resolve_WithoutVersion_AllDeprecated_ReturnsLatest()
+    {
+        var registry = CreateRegistry(
+            new CapabilityDescriptor { Id = "customer.create", Name = "Customer", Version = 1, State = DescriptorState.Deprecated },
+            new CapabilityDescriptor { Id = "customer.create", Name = "Customer", Version = 2, State = DescriptorState.Deprecated }
+        );
+        var resolver = CreateResolver(registry);
+
+        var result = resolver.Resolve(new CapabilityRef { Id = "customer.create" });
+
+        result.Version.Should().Be(2);
+    }
+
+    [Fact]
+    public void Resolve_ByString_WithVersionSyntax_ReturnsCorrectVersion()
+    {
+        var registry = CreateRegistry(
+            new CapabilityDescriptor { Id = "customer.create", Name = "Customer", Version = 1 },
+            new CapabilityDescriptor { Id = "customer.create", Name = "Customer", Version = 5 }
+        );
+        var resolver = CreateResolver(registry);
+
+        var result = ((ICapabilityResolver)resolver).Resolve("customer.create:5");
+
+        result.Version.Should().Be(5);
+    }
 }

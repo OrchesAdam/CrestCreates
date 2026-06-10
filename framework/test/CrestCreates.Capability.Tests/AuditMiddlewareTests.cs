@@ -33,6 +33,8 @@ public class AuditMiddlewareTests
         records.Should().HaveCount(1);
         records[0].CapabilityId.Should().Be("test.cap");
         records[0].IsSuccess.Should().BeTrue();
+        records[0].Duration.Should().BePositive();
+        records[0].CorrelationId.Should().NotBeNullOrEmpty();
     }
 
     [Fact]
@@ -57,6 +59,8 @@ public class AuditMiddlewareTests
         records.Should().HaveCount(1);
         records[0].IsSuccess.Should().BeFalse();
         records[0].ErrorCode.Should().Be("ERR_001");
+        records[0].Duration.Should().BePositive();
+        records[0].CorrelationId.Should().NotBeNullOrEmpty();
     }
 
     [Fact]

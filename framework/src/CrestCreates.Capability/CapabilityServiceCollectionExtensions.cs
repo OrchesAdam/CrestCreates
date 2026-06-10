@@ -1,9 +1,11 @@
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Bootstrap;
 using CrestCreates.Capability.Internal;
 using CrestCreates.Capability.Middleware;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -65,7 +67,12 @@ public static class CapabilityServiceCollectionExtensions
         services.AddCapabilityPipeline();
 
         // Dispatcher + Resolver
-        services.TryAddSingleton<ICapabilityDispatcher, CapabilityDispatcher>();
+        services.TryAddSingleton<ICapabilityDispatcher>(sp =>
+            new CapabilityDispatcher(
+                sp.GetRequiredService<ICapabilityResolver>(),
+                sp.GetRequiredService<ICapabilityPipeline>(),
+                sp.GetService<ITenantContext>(),
+                sp.GetService<ICurrentUser>()));
         services.TryAddSingleton<ICapabilityResolver, DefaultCapabilityResolver>();
         services.TryAddSingleton<ICapabilityVersionResolver, DefaultCapabilityVersionResolver>();
 

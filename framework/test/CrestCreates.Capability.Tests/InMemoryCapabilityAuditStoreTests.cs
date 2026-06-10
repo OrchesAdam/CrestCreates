@@ -47,4 +47,42 @@ public class InMemoryCapabilityAuditStoreTests
 
         store.GetRecords().Should().BeEmpty();
     }
+
+    [Fact]
+    public void GetRecords_EmptyStore_ReturnsEmptyList()
+    {
+        var store = new InMemoryCapabilityAuditStore();
+
+        var records = store.GetRecords();
+
+        records.Should().NotBeNull();
+        records.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RecordAsync_PopulatesAllFields()
+    {
+        var store = new InMemoryCapabilityAuditStore();
+        var timestamp = DateTimeOffset.UtcNow;
+        var record = new CapabilityExecutionRecord
+        {
+            ExecutionId = "exec_all",
+            CapabilityId = "test.cap",
+            CapabilityName = "Test Cap",
+            CapabilityVersion = 3,
+            TenantId = "tenant_01",
+            UserId = "user_42",
+            CorrelationId = "corr_abc",
+            Source = InvocationSource.Workflow,
+            IsSuccess = true,
+            ErrorCode = null,
+            Duration = TimeSpan.FromMilliseconds(50),
+            Timestamp = timestamp
+        };
+
+        await store.RecordAsync(record);
+        var records = store.GetRecords();
+
+        records.Should().ContainSingle().Which.Should().BeEquivalentTo(record);
+    }
 }
