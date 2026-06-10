@@ -98,6 +98,32 @@ public class CapabilityEndToEndTests
     }
 
     [Fact]
+    public async Task E2E_InvocationSource_Http_Workflow_Agent()
+    {
+        var (_, pipeline, audit, resolver) = CreateE2EPipeline(
+            new CapabilityDescriptor { Id = "test.echo", Name = "Echo", Version = 1,
+                CapabilityKind = CapabilityKind.Query, State = DescriptorState.Active }
+        );
+        resolver.Register("test.echo", new EchoInvoker());
+
+        var resultHttp = await pipeline.ExecuteAsync("test.echo", input: "a",
+            configureContext: ctx => ctx.InvocationSource = InvocationSource.Http);
+        var resultWorkflow = await pipeline.ExecuteAsync("test.echo", input: "b",
+            configureContext: ctx => ctx.InvocationSource = InvocationSource.Workflow);
+        var resultAgent = await pipeline.ExecuteAsync("test.echo", input: "c",
+            configureContext: ctx => ctx.InvocationSource = InvocationSource.Agent);
+
+        resultHttp.IsSuccess.Should().BeTrue();
+        resultWorkflow.IsSuccess.Should().BeTrue();
+        resultAgent.IsSuccess.Should().BeTrue();
+        var records = audit.GetRecords();
+        records.Should().HaveCount(3);
+        records[0].Source.Should().Be(InvocationSource.Http);
+        records[1].Source.Should().Be(InvocationSource.Workflow);
+        records[2].Source.Should().Be(InvocationSource.Agent);
+    }
+
+    [Fact]
     public async Task E2E_CapabilityNotFound_ReturnsErrorCode()
     {
         var (_, pipeline, _, _) = CreateE2EPipeline();
@@ -162,6 +188,90 @@ public class CapabilityEndToEndTests
     }
 
     [Fact]
+    public async Task E2E_AuditRecord_AllFieldsPopulated()
+    {
+        var (_, pipeline, audit, resolver) = CreateE2EPipeline(
+            new CapabilityDescriptor { Id = "test.echo", Name = "Echo", Version = 1,
+                CapabilityKind = CapabilityKind.Query, State = DescriptorState.Active }
+        );
+        resolver.Register("test.echo", new EchoInvoker());
+
+        var result = await pipeline.ExecuteAsync("test.echo", input: "hello",
+            configureContext: ctx =>
+            {
+                ctx.InvocationSource = InvocationSource.Workflow;
+                ctx.TenantId = "t1";
+                ctx.UserId = "u1";
+            });
+
+        result.IsSuccess.Should().BeTrue();
+        var r = audit.GetRecords()[0];
+        r.ExecutionId.Should().NotBeNullOrEmpty();
+        r.CapabilityId.Should().Be("test.echo");
+        r.CapabilityName.Should().Be("Echo");
+        r.CapabilityVersion.Should().Be(1);
+        r.TenantId.Should().Be("t1");
+        r.UserId.Should().Be("u1");
+        r.CorrelationId.Should().NotBeNullOrEmpty();
+        r.Source.Should().Be(InvocationSource.Workflow);
+        r.IsSuccess.Should().BeTrue();
+        r.ErrorCode.Should().BeNull();
+        r.Duration.Should().BePositive();
+        r.Timestamp.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task E2E_TwoExecutions_ProduceTwoAuditRecords()
+    {
+        var (_, pipeline, audit, resolver) = CreateE2EPipeline(
+            new CapabilityDescriptor { Id = "test.echo", Name = "Echo", Version = 1,
+                CapabilityKind = CapabilityKind.Query, State = DescriptorState.Active }
+        );
+        resolver.Register("test.echo", new EchoInvoker());
+
+        await pipeline.ExecuteAsync("test.echo", input: "a",
+            configureContext: ctx => ctx.InvocationSource = InvocationSource.Http);
+        await pipeline.ExecuteAsync("test.echo", input: "b",
+            configureContext: ctx => ctx.InvocationSource = InvocationSource.Workflow);
+
+        var records = audit.GetRecords();
+        records.Should().HaveCount(2);
+        records[0].ExecutionId.Should().NotBe(records[1].ExecutionId);
+    }
+
+    [Fact]
+    public async Task E2E_AuditStoreThrows_ExecutionStillSucceeds()
+    {
+        var throwingStore = new Mock<ICapabilityAuditStore>();
+        throwingStore.Setup(s => s.RecordAsync(It.IsAny<CapabilityExecutionRecord>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Audit failure"));
+
+        var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
+        var registry = new CapabilityRegistry(engine);
+        registry.Build([new TestProvider([new CapabilityDescriptor { Id = "test.echo", Name = "Echo", Version = 1,
+            CapabilityKind = CapabilityKind.Query, State = DescriptorState.Active }])]);
+        var resolver = new CapabilityHandlerResolver();
+        resolver.Register("test.echo", new EchoInvoker());
+        var builder = new CapabilityPipelineBuilder();
+        builder.Use<AuditMiddleware>();
+
+        var services = new ServiceCollection();
+        services.AddSingleton<ICapabilityRegistry>(registry);
+        services.AddSingleton<ICapabilityHandlerResolver>(resolver);
+        services.AddSingleton<ICapabilityAuditStore>(throwingStore.Object);
+        services.AddSingleton(builder);
+        services.AddTransient<AuditMiddleware>();
+        services.AddTransient<ILogger<AuditMiddleware>>(_ => NullLogger<AuditMiddleware>.Instance);
+        services.AddSingleton<ICapabilityPipeline, CapabilityPipeline>();
+        var pipeline = services.BuildServiceProvider().GetRequiredService<ICapabilityPipeline>();
+
+        var result = await pipeline.ExecuteAsync("test.echo",
+            configureContext: ctx => ctx.InvocationSource = InvocationSource.Http);
+
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task E2E_IdDifferentFromName_PreservesBoth()
     {
         var (_, pipeline, audit, resolver) = CreateE2EPipeline(
@@ -188,6 +298,26 @@ public class CapabilityEndToEndTests
         var resolved = versionResolver.Resolve(new CapabilityRef { Id = "echo.v1" });
         resolved.Version.Should().Be(1);
         resolved.State.Should().Be(DescriptorState.Active);
+    }
+
+    [Fact]
+    public void E2E_GetByKind_And_GetByTag()
+    {
+        var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
+        var registry = new CapabilityRegistry(engine);
+        registry.Build([new TestProvider([
+            new CapabilityDescriptor { Id = "cmd.one", Name = "cmd.one", Version = 1, CapabilityKind = CapabilityKind.Command, SemanticTags = ["crm", "create"] },
+            new CapabilityDescriptor { Id = "cmd.two", Name = "cmd.two", Version = 1, CapabilityKind = CapabilityKind.Command, SemanticTags = ["crm"] },
+            new CapabilityDescriptor { Id = "qry.one", Name = "qry.one", Version = 1, CapabilityKind = CapabilityKind.Query, SemanticTags = ["report"] }
+        ])]);
+
+        var commands = registry.GetByKind(CapabilityKind.Command);
+        commands.Should().HaveCount(2);
+        commands.Should().OnlyContain(d => d.CapabilityKind == CapabilityKind.Command);
+
+        var crmCaps = registry.GetByTag("crm");
+        crmCaps.Should().HaveCount(2);
+        crmCaps.Should().OnlyContain(d => d.SemanticTags.Contains("crm"));
     }
 
     [Fact]
