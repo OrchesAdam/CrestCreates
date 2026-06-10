@@ -1,6 +1,7 @@
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Schema.Abstractions;
 
-namespace CrestCreates.Capability.Abstractions;
+namespace CrestCreates.Metadata;
 
 public sealed class CapabilityProfile
 {

@@ -23,9 +23,11 @@ public static class DescriptorRefValidator
 
         switch (descriptor)
         {
-            case CrestCreates.Capability.Abstractions.CapabilityDescriptor c:
-                ValidateRef(c.InputSchema, registry, errors, $"{c.Name}.InputSchema");
-                ValidateRef(c.OutputSchema, registry, errors, $"{c.Name}.OutputSchema");
+            case CapabilityDescriptor c:
+                if (c.InputSchema.HasValue)
+                    ValidateRef(c.InputSchema.Value, registry, errors, $"{c.Name}.InputSchema");
+                if (c.OutputSchema.HasValue)
+                    ValidateRef(c.OutputSchema.Value, registry, errors, $"{c.Name}.OutputSchema");
                 break;
 
             case EventDescriptor e:

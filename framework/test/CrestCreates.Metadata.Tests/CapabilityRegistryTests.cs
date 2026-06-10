@@ -1,3 +1,4 @@
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -72,5 +73,39 @@ public class CapabilityRegistryTests
         var cap = registry.GetById("approval")!;
         cap.Produces.Should().HaveCount(1);
         cap.Consumes.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void GetByKind_returns_matching_capabilities()
+    {
+        var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
+        var registry = new CapabilityRegistry(engine);
+        registry.Build([new TestCapabilityProvider([
+            new() { Id = "cmd.one", Name = "cmd.one", Version = 1, CapabilityKind = CapabilityKind.Command },
+            new() { Id = "cmd.two", Name = "cmd.two", Version = 1, CapabilityKind = CapabilityKind.Command },
+            new() { Id = "qry.one", Name = "qry.one", Version = 1, CapabilityKind = CapabilityKind.Query }
+        ])]);
+
+        var commands = registry.GetByKind(CapabilityKind.Command);
+
+        commands.Should().HaveCount(2);
+        commands.Should().OnlyContain(d => d.CapabilityKind == CapabilityKind.Command);
+    }
+
+    [Fact]
+    public void GetByTag_returns_matching_capabilities()
+    {
+        var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
+        var registry = new CapabilityRegistry(engine);
+        registry.Build([new TestCapabilityProvider([
+            new() { Id = "a", Name = "a", Version = 1, SemanticTags = ["customer", "crm"] },
+            new() { Id = "b", Name = "b", Version = 1, SemanticTags = ["order"] },
+            new() { Id = "c", Name = "c", Version = 1, SemanticTags = ["customer"] }
+        ])]);
+
+        var customerCaps = registry.GetByTag("customer");
+
+        customerCaps.Should().HaveCount(2);
+        customerCaps.Should().OnlyContain(d => d.SemanticTags.Contains("customer"));
     }
 }

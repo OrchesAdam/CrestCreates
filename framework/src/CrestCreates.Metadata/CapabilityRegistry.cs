@@ -4,12 +4,44 @@ using CrestCreates.Metadata.Abstractions;
 
 namespace CrestCreates.Metadata;
 
-public sealed class CapabilityRegistry : RegistryBase<CapabilityDescriptor>
+public sealed class CapabilityRegistry : RegistryBase<CapabilityDescriptor>, ICapabilityRegistry
 {
     protected override string RegistryNamespace => "capability";
 
     public CapabilityRegistry(IRegistryValidationEngine<CapabilityDescriptor> validationEngine)
         : base(validationEngine) { }
+
+    // === ICapabilityRegistry ===
+
+    public IReadOnlyList<CapabilityDescriptor> GetByKind(CapabilityKind kind)
+        => GetAll().Where(d => d.CapabilityKind == kind).ToList();
+
+    public IReadOnlyList<CapabilityDescriptor> GetByTag(string tag)
+        => GetAll().Where(d => d.SemanticTags.Contains(tag)).ToList();
+
+    // === IDescriptorRegistry<CapabilityDescriptor> ===
+
+    CapabilityDescriptor? IDescriptorRegistry<CapabilityDescriptor>.GetByName(string name)
+        => GetByName(name).FirstOrDefault(d => d.State == DescriptorState.Active) ?? GetByName(name).FirstOrDefault();
+
+    // === IVersionedDescriptorRegistry<CapabilityDescriptor> ===
+
+    public CapabilityDescriptor? GetByNameAndVersion(string name, int version)
+        => GetByName(name).FirstOrDefault(d => d.Version == version);
+
+    public IReadOnlyList<CapabilityDescriptor> GetAllByName(string name)
+        => GetByName(name);
+
+    public CapabilityDescriptor? GetActiveVersion(string name)
+        => GetByName(name).Where(d => d.State == DescriptorState.Active).MaxBy(d => d.Version);
+
+    public CapabilityDescriptor? GetLatestVersion(string name)
+        => GetByName(name).MaxBy(d => d.Version);
+
+    public IReadOnlyList<CapabilityDescriptor> GetDeprecatedVersions(string name)
+        => GetByName(name).Where(d => d.State == DescriptorState.Deprecated).ToList();
+
+    // === Build ===
 
     protected override RegistrySnapshot<CapabilityDescriptor> BuildSnapshot(
         List<CapabilityDescriptor> descriptors)

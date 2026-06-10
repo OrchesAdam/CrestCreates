@@ -1,3 +1,4 @@
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
@@ -25,7 +26,7 @@ public class GlobalDescriptorRegistryTests
     {
         var registry = new GlobalDescriptorRegistry();
         registry.Register(new SchemaDescriptor { Id = "schema_01", Name = "S1", Version = 1 });
-        registry.Register(new Capability.Abstractions.CapabilityDescriptor
+        registry.Register(new CapabilityDescriptor
         {
             Id = "cap_01",
             Name = "test.op",

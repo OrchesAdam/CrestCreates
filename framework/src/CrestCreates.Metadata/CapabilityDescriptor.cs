@@ -1,10 +1,11 @@
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Schema.Abstractions;
 
 namespace CrestCreates.Metadata;
 
-public sealed class CapabilityDescriptor : IDescriptor, IVersionedDescriptor, IHasContractIdentity
+public sealed class CapabilityDescriptor : IDescriptor, IVersionedDescriptor, IHasContractIdentity, IRelationshipAwareDescriptor
 {
-    // IDescriptor
+    // === IDescriptor ===
     public string Namespace { get; init; } = "capability";
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
@@ -12,18 +13,73 @@ public sealed class CapabilityDescriptor : IDescriptor, IVersionedDescriptor, IH
     public DescriptorState State { get; init; } = DescriptorState.Active;
     public string? SupersededById { get; init; }
 
-    // IVersionedDescriptor
+    // === IVersionedDescriptor ===
     public int Version { get; init; }
 
-    // IHasContractIdentity
+    // === IHasContractIdentity ===
     public string ContractHash { get; init; } = string.Empty;
     public string DefinitionHash { get; init; } = string.Empty;
 
-    // Capability-specific
+    // === Catalog Properties ===
     public IReadOnlyList<string> Categories { get; init; } = Array.Empty<string>();
     public IReadOnlyList<EventRef> Produces { get; init; } = Array.Empty<EventRef>();
     public IReadOnlyList<EventRef> Consumes { get; init; } = Array.Empty<EventRef>();
     public IReadOnlyList<string> SemanticTags { get; init; } = Array.Empty<string>();
+
+    // === Runtime Properties (merged from Capability.Abstractions) ===
+    public CapabilityKind CapabilityKind { get; init; }
+    public VersionedDescriptorRef<SchemaDescriptor>? InputSchema { get; init; }
+    public VersionedDescriptorRef<SchemaDescriptor>? OutputSchema { get; init; }
+    public IReadOnlyList<string> Permissions { get; init; } = Array.Empty<string>();
+    public CapabilityRiskLevel RiskLevel { get; init; } = CapabilityRiskLevel.Medium;
+
+    // === IRelationshipAwareDescriptor ===
+    public IEnumerable<DescriptorRelationship> GetRelationships()
+    {
+        var relationships = new List<DescriptorRelationship>();
+
+        if (InputSchema.HasValue)
+        {
+            relationships.Add(new DescriptorRelationship(
+                new DescriptorRef(Namespace, Id),
+                new DescriptorRef(InputSchema.Value.Id, InputSchema.Value.Id, InputSchema.Value.Version),
+                RelationshipKind.Consumes));
+        }
+
+        if (OutputSchema.HasValue)
+        {
+            relationships.Add(new DescriptorRelationship(
+                new DescriptorRef(Namespace, Id),
+                new DescriptorRef(OutputSchema.Value.Id, OutputSchema.Value.Id, OutputSchema.Value.Version),
+                RelationshipKind.Produces));
+        }
+
+        if (SupersededById is not null)
+        {
+            relationships.Add(new DescriptorRelationship(
+                new DescriptorRef(Namespace, Id),
+                new DescriptorRef(Namespace, SupersededById),
+                RelationshipKind.DependsOn));
+        }
+
+        foreach (var @event in Produces)
+        {
+            relationships.Add(new DescriptorRelationship(
+                new DescriptorRef(Namespace, Id),
+                new DescriptorRef(@event.Namespace, @event.Id, @event.Version),
+                RelationshipKind.Produces));
+        }
+
+        foreach (var @event in Consumes)
+        {
+            relationships.Add(new DescriptorRelationship(
+                new DescriptorRef(Namespace, Id),
+                new DescriptorRef(@event.Namespace, @event.Id, @event.Version),
+                RelationshipKind.Consumes));
+        }
+
+        return relationships;
+    }
 }
 
 /// <summary>

@@ -1,3 +1,4 @@
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
@@ -15,7 +16,7 @@ public class DescriptorRefValidatorTests
         registry.Register(new SchemaDescriptor
             { Id = "schema_01", Name = "Test", Version = 1, State = DescriptorState.Active });
 
-        var cap = new CrestCreates.Capability.Abstractions.CapabilityDescriptor
+        var cap = new CapabilityDescriptor
         {
             Id = "cap_01", Name = "test.cap", Version = 1, State = DescriptorState.Active,
             InputSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema_01", 1),
@@ -31,7 +32,7 @@ public class DescriptorRefValidatorTests
     {
         var registry = new GlobalDescriptorRegistry();
 
-        var cap = new CrestCreates.Capability.Abstractions.CapabilityDescriptor
+        var cap = new CapabilityDescriptor
         {
             Id = "cap_01", Name = "test.cap", Version = 1, State = DescriptorState.Active,
             InputSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema_missing", 1),
@@ -60,7 +61,7 @@ public class DescriptorRefValidatorTests
                     Id = "step_01", Name = "Step",
                     Target = new CapabilityTarget
                     {
-                        Capability = new VersionedDescriptorRef<CrestCreates.Capability.Abstractions.CapabilityDescriptor>("cap_missing", 1)
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_missing", 1)
                     }
                 }
             }
@@ -74,7 +75,7 @@ public class DescriptorRefValidatorTests
     public void Validate_ValidWorkflow_AllResolved()
     {
         var registry = new GlobalDescriptorRegistry();
-        registry.Register(new CrestCreates.Capability.Abstractions.CapabilityDescriptor
+        registry.Register(new CapabilityDescriptor
             { Id = "cap_01", Name = "test", Version = 1, State = DescriptorState.Active });
 
         var wf = new WorkflowDescriptor
@@ -87,7 +88,7 @@ public class DescriptorRefValidatorTests
                     Id = "step_01", Name = "Step",
                     Target = new CapabilityTarget
                     {
-                        Capability = new VersionedDescriptorRef<CrestCreates.Capability.Abstractions.CapabilityDescriptor>("cap_01", 1)
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
                     }
                 }
             }
@@ -111,7 +112,7 @@ public class DescriptorRefValidatorTests
                 new()
                 {
                     Condition = HumanTask.Abstractions.CompletionCondition.Approve,
-                    Capability = new VersionedDescriptorRef<CrestCreates.Capability.Abstractions.CapabilityDescriptor>("cap_missing", 1)
+                    Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_missing", 1)
                 }
             }
         };

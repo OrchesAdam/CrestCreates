@@ -1,3 +1,4 @@
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
@@ -118,21 +119,21 @@ public class DescriptorHashComputerTests
     }
 
     [Fact]
-    public void Capability_ContractHash_Excludes_Aliases()
+    public void Capability_ContractHash_Is_Stable()
     {
-        var cap1 = new Capability.Abstractions.CapabilityDescriptor
+        var cap1 = new CapabilityDescriptor
         {
             Id = "cap_01",
             Name = "crm.customer.create",
             Version = 1,
-            Aliases = new List<string> { "crm.customer.register" }
+            Permissions = new[] { "customer.create" }
         };
-        var cap2 = new Capability.Abstractions.CapabilityDescriptor
+        var cap2 = new CapabilityDescriptor
         {
             Id = "cap_01",
             Name = "crm.customer.create",
             Version = 1,
-            Aliases = new List<string> { "crm.customer.add" }
+            Permissions = new[] { "customer.create" }
         };
 
         var hash1 = DescriptorHashComputer.ComputeContractHash(cap1);
@@ -180,7 +181,7 @@ public class DescriptorHashComputerTests
                     Id = "step_01", Name = "Step A",
                     Target = new Workflow.Abstractions.CapabilityTarget
                     {
-                        Capability = new VersionedDescriptorRef<Capability.Abstractions.CapabilityDescriptor>("cap_01", 1)
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
                     }
                 }
             }
@@ -195,7 +196,7 @@ public class DescriptorHashComputerTests
                     Id = "step_01", Name = "Renamed Step",
                     Target = new Workflow.Abstractions.CapabilityTarget
                     {
-                        Capability = new VersionedDescriptorRef<Capability.Abstractions.CapabilityDescriptor>("cap_01", 1)
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_01", 1)
                     }
                 }
             }

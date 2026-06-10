@@ -60,7 +60,7 @@ public static class DescriptorHashComputer
                 }).OrderBy(f => f.Name).ToArray(),
                 References = s.References.Select(r => new { r.Id, r.Version }).OrderBy(r => r.Id).ToArray()
             },
-            CrestCreates.Capability.Abstractions.CapabilityDescriptor c => new
+            CapabilityDescriptor c => new
             {
                 c.Id,
                 c.Name,
@@ -68,9 +68,9 @@ public static class DescriptorHashComputer
                 c.CapabilityKind,
                 c.State,
                 c.SupersededById,
-                InputSchema = new { c.InputSchema.Id, c.InputSchema.Version },
-                OutputSchema = new { c.OutputSchema.Id, c.OutputSchema.Version },
-                c.Permission,
+                InputSchema = c.InputSchema.HasValue ? new { c.InputSchema.Value.Id, c.InputSchema.Value.Version } : null,
+                OutputSchema = c.OutputSchema.HasValue ? new { c.OutputSchema.Value.Id, c.OutputSchema.Value.Version } : null,
+                c.Permissions,
                 c.RiskLevel,
                 SemanticTags = c.SemanticTags.OrderBy(t => t).ToArray()
             },

@@ -11,7 +11,7 @@ namespace CrestCreates.Metadata;
 [JsonSerializable(typeof(DescriptorManifest))]
 [JsonSerializable(typeof(DescriptorSnapshot))]
 [JsonSerializable(typeof(SchemaDescriptor))]
-[JsonSerializable(typeof(CrestCreates.Capability.Abstractions.CapabilityDescriptor))]
+[JsonSerializable(typeof(CapabilityDescriptor))]
 [JsonSerializable(typeof(EventDescriptor))]
 [JsonSerializable(typeof(FormDescriptor))]
 [JsonSerializable(typeof(HumanTaskDescriptor))]

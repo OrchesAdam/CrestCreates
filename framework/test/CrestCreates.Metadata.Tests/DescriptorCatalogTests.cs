@@ -1,3 +1,4 @@
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
@@ -12,7 +13,7 @@ public class DescriptorCatalogTests
     {
         var globalRegistry = new GlobalDescriptorRegistry();
         globalRegistry.Register(new SchemaDescriptor { Id = "schema_01", Name = "CustomerInput", Version = 1 });
-        globalRegistry.Register(new Capability.Abstractions.CapabilityDescriptor
+        globalRegistry.Register(new CapabilityDescriptor
         {
             Id = "cap_01",
             Name = "crm.customer.create",
