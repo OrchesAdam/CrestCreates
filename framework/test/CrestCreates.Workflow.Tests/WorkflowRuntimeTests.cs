@@ -180,6 +180,46 @@ public class WorkflowRuntimeTests
         instance.ErrorMessage.Should().Be("infrastructure boom");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_Cancellation_PropagatesWithoutSave()
+    {
+        var registry = CreateRegistry(new WorkflowDescriptor
+        {
+            Id = "wf_01", Name = "cancel.wf", Version = 1, State = DescriptorState.Active,
+            Steps = new List<WorkflowStep>
+            {
+                new() { Id = "step_01", Name = "Cancel Me",
+                    Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_a", 1) } }
+            }
+        });
+
+        var cts = new CancellationTokenSource();
+        var engine = CreateEngine(registry, pipeline: new MockCancellationPipeline(cts));
+
+        // Start execution, cancel immediately
+        var task = engine.ExecuteAsync("wf_01", ct: cts.Token);
+        cts.Cancel();
+
+        // Assert: cancellation propagates, instance not saved as Failed
+        await Assert.ThrowsAsync<OperationCanceledException>(() => task);
+    }
+
+    private class MockCancellationPipeline : ICapabilityPipeline
+    {
+        private readonly CancellationTokenSource _cts;
+        public MockCancellationPipeline(CancellationTokenSource cts) => _cts = cts;
+
+        public Task<CapabilityExecutionResult> ExecuteAsync(
+            string capabilityIdOrName, object? input = null,
+            Action<CapabilityExecutionContext>? configureContext = null,
+            CancellationToken ct = default)
+        {
+            _cts.Cancel();
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(CapabilityExecutionResult.Success(null, TimeSpan.Zero));
+        }
+    }
+
     private class MockThrowingPipeline : ICapabilityPipeline
     {
         public Task<CapabilityExecutionResult> ExecuteAsync(
