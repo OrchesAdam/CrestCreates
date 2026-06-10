@@ -1,3 +1,5 @@
+using CrestCreates.Metadata;
+using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -16,12 +18,25 @@ public class WorkflowRegistryTests
         };
     }
 
+    private class TestWorkflowProvider : IDescriptorProvider<WorkflowDescriptor>
+    {
+        private readonly List<WorkflowDescriptor> _descriptors;
+        public TestWorkflowProvider(List<WorkflowDescriptor> descriptors) => _descriptors = descriptors;
+        public IReadOnlyList<WorkflowDescriptor> GetDescriptors() => _descriptors;
+    }
+
+    private static WorkflowRegistry CreateRegistry(params WorkflowDescriptor[] descriptors)
+    {
+        var engine = new RegistryValidationEngine<WorkflowDescriptor>(Array.Empty<IRegistryValidator<WorkflowDescriptor>>());
+        var registry = new WorkflowRegistry(engine);
+        registry.Build([new TestWorkflowProvider(descriptors.ToList())]);
+        return registry;
+    }
+
     [Fact]
     public void Register_And_GetById_Works()
     {
-        var registry = new WorkflowRegistry();
-        var wf = CreateWorkflow("wf_01", "employee.onboarding", 1);
-        registry.Register(wf);
+        var registry = CreateRegistry(CreateWorkflow("wf_01", "employee.onboarding", 1));
 
         var result = registry.GetById("wf_01");
 
@@ -32,9 +47,9 @@ public class WorkflowRegistryTests
     [Fact]
     public void GetActiveVersion_Returns_Highest_Active_Version()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(CreateWorkflow("w1", "employee.onboarding", 1));
-        registry.Register(CreateWorkflow("w2", "employee.onboarding", 2));
+        var registry = CreateRegistry(
+            CreateWorkflow("w1", "employee.onboarding", 1),
+            CreateWorkflow("w2", "employee.onboarding", 2));
 
         var active = registry.GetActiveVersion("employee.onboarding");
         active.Should().NotBeNull();
@@ -44,11 +59,23 @@ public class WorkflowRegistryTests
     [Fact]
     public void GetAll_Returns_All_Workflows()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(CreateWorkflow("w1", "wf.a", 1));
-        registry.Register(CreateWorkflow("w2", "wf.b", 1));
+        var registry = CreateRegistry(
+            CreateWorkflow("w1", "wf.a", 1),
+            CreateWorkflow("w2", "wf.b", 1));
 
         var all = registry.GetAll();
         all.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void Build_Sets_State_To_Built()
+    {
+        var engine = new RegistryValidationEngine<WorkflowDescriptor>(Array.Empty<IRegistryValidator<WorkflowDescriptor>>());
+        var registry = new WorkflowRegistry(engine);
+        var provider = new TestWorkflowProvider([CreateWorkflow("w1", "w", 1)]);
+
+        registry.Build([provider]);
+
+        registry.State.Should().Be(RegistryState.Built);
     }
 }

@@ -8,6 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Workflow.Abstractions\CrestCreates.Workflow.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Metadata.Abstractions\CrestCreates.Metadata.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Metadata\CrestCreates.Metadata.csproj" />
     <ProjectReference Include="..\CrestCreates.Capability.Abstractions\CrestCreates.Capability.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Draft.Abstractions\CrestCreates.Draft.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Schema.Abstractions\CrestCreates.Schema.Abstractions.csproj" />

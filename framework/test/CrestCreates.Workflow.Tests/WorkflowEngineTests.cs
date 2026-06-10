@@ -1,4 +1,5 @@
 using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
@@ -18,10 +19,26 @@ public class WorkflowEngineTests
         };
     }
 
+    private static WorkflowRegistry CreateRegistry(params WorkflowDescriptor[] descriptors)
+    {
+        var engine = new RegistryValidationEngine<WorkflowDescriptor>(Array.Empty<IRegistryValidator<WorkflowDescriptor>>());
+        var registry = new WorkflowRegistry(engine);
+        var provider = new TestWorkflowProvider(descriptors.ToList());
+        registry.Build([provider]);
+        return registry;
+    }
+
+    private class TestWorkflowProvider : IDescriptorProvider<WorkflowDescriptor>
+    {
+        private readonly List<WorkflowDescriptor> _descriptors;
+        public TestWorkflowProvider(List<WorkflowDescriptor> descriptors) => _descriptors = descriptors;
+        public IReadOnlyList<WorkflowDescriptor> GetDescriptors() => _descriptors;
+    }
+
     [Fact]
     public async Task ExecuteAsync_WorkflowNotFound_Throws()
     {
-        var registry = new WorkflowRegistry();
+        var registry = CreateRegistry();
         var engine = new WorkflowEngine(registry);
         await engine.Invoking(e => e.ExecuteAsync("nonexistent"))
             .Should().ThrowAsync<InvalidOperationException>();
@@ -30,8 +47,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ExecuteAsync_EmptyWorkflow_CompletesImmediately()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(CreateWorkflow("wf_01", "empty.wf", 1));
+        var registry = CreateRegistry(CreateWorkflow("wf_01", "empty.wf", 1));
         var engine = new WorkflowEngine(registry);
 
         var instance = await engine.ExecuteAsync("empty.wf");
@@ -43,8 +59,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ExecuteAsync_UnknownTarget_ReturnsFailure()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(new WorkflowDescriptor
+        var registry = CreateRegistry(new WorkflowDescriptor
         {
             Id = "wf_01", Name = "unknown.wf", Version = 1, State = DescriptorState.Active,
             Steps = new List<WorkflowStep>
@@ -70,8 +85,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ExecuteAsync_CapabilityTarget_NoPipeline_ReturnsFailure()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(CreateWorkflow("wf_01", "cap.wf", 1,
+        var registry = CreateRegistry(CreateWorkflow("wf_01", "cap.wf", 1,
             new WorkflowStep
             {
                 Id = "step_01", Name = "Cap Step",
@@ -91,8 +105,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ExecuteAsync_HumanTaskTarget_SucceedsAsPassthrough()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(CreateWorkflow("wf_01", "ht.wf", 1,
+        var registry = CreateRegistry(CreateWorkflow("wf_01", "ht.wf", 1,
             new WorkflowStep
             {
                 Id = "step_01", Name = "Human Step",
@@ -112,17 +125,17 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ExecuteAsync_SubWorkflow_ExecutesRecursively()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(CreateWorkflow("wf_01", "parent.wf", 1,
-            new WorkflowStep
-            {
-                Id = "step_01", Name = "Sub",
-                Target = new SubWorkflowTarget
+        var registry = CreateRegistry(
+            CreateWorkflow("wf_01", "parent.wf", 1,
+                new WorkflowStep
                 {
-                    SubWorkflow = new VersionedDescriptorRef<WorkflowDescriptor>("wf_02", 1)
-                }
-            }));
-        registry.Register(CreateWorkflow("wf_02", "child.wf", 1));
+                    Id = "step_01", Name = "Sub",
+                    Target = new SubWorkflowTarget
+                    {
+                        SubWorkflow = new VersionedDescriptorRef<WorkflowDescriptor>("wf_02", 1)
+                    }
+                }),
+            CreateWorkflow("wf_02", "child.wf", 1));
         var engine = new WorkflowEngine(registry);
 
         var instance = await engine.ExecuteAsync("parent.wf");
@@ -135,8 +148,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ExecuteAsync_Variables_PassedAsInput()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(CreateWorkflow("wf_01", "vars.wf", 1));
+        var registry = CreateRegistry(CreateWorkflow("wf_01", "vars.wf", 1));
         var engine = new WorkflowEngine(registry);
 
         var instance = await engine.ExecuteAsync("vars.wf",
@@ -149,8 +161,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ExecuteAsync_StepError_Retry_HasMaxRetryGuard()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(new WorkflowDescriptor
+        var registry = CreateRegistry(new WorkflowDescriptor
         {
             Id = "wf_01", Name = "retry.wf", Version = 1, State = DescriptorState.Active,
             Steps = new List<WorkflowStep>
@@ -170,7 +181,6 @@ public class WorkflowEngineTests
 
         var instance = await engine.ExecuteAsync("retry.wf");
 
-        // Retry max 3 times, then fails
         instance.Status.Should().Be(WorkflowInstanceStatus.Failed);
         instance.StepResults.Should().HaveCount(4);
         instance.StepResults.All(r => !r.IsSuccess).Should().BeTrue();
@@ -179,8 +189,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ExecuteAsync_StepError_Skip_ContinuesToNext()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(new WorkflowDescriptor
+        var registry = CreateRegistry(new WorkflowDescriptor
         {
             Id = "wf_01", Name = "skip.wf", Version = 1, State = DescriptorState.Active,
             Steps = new List<WorkflowStep>
@@ -217,8 +226,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ExecuteAsync_StepTransition_FollowsSpecifiedStep()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(new WorkflowDescriptor
+        var registry = CreateRegistry(new WorkflowDescriptor
         {
             Id = "wf_01", Name = "transition.wf", Version = 1, State = DescriptorState.Active,
             Steps = new List<WorkflowStep>
@@ -263,8 +271,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ExecuteAsync_StepError_Fail_StopsExecution()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(new WorkflowDescriptor
+        var registry = CreateRegistry(new WorkflowDescriptor
         {
             Id = "wf_01", Name = "fail.wf", Version = 1, State = DescriptorState.Active,
             Steps = new List<WorkflowStep>
@@ -299,8 +306,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ResumeAsync_NoDraftStore_Throws()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(CreateWorkflow("wf_01", "test.wf", 1));
+        var registry = CreateRegistry(CreateWorkflow("wf_01", "test.wf", 1));
         var engine = new WorkflowEngine(registry, draftStore: null);
 
         await engine.Invoking(e => e.ResumeAsync("instance_01"))
@@ -311,8 +317,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ResumeAsync_NoCheckpoint_Throws()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(CreateWorkflow("wf_01", "test.wf", 1));
+        var registry = CreateRegistry(CreateWorkflow("wf_01", "test.wf", 1));
         var draftStore = new Draft.InMemoryDraftStore();
         var engine = new WorkflowEngine(registry, draftStore: draftStore);
 
@@ -324,8 +329,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ResumeAsync_ValidCheckpoint_ContinuesExecution()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(new WorkflowDescriptor
+        var registry = CreateRegistry(new WorkflowDescriptor
         {
             Id = "wf_01", Name = "resume.wf", Version = 1, State = DescriptorState.Active,
             Steps = new List<WorkflowStep>
@@ -381,8 +385,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ResumeThenExecute_HasCorrectInstanceId()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(CreateWorkflow("wf_01", "resume2.wf", 1));
+        var registry = CreateRegistry(CreateWorkflow("wf_01", "resume2.wf", 1));
         var draftStore = new Draft.InMemoryDraftStore();
         var checkpointJson = System.Text.Json.JsonSerializer.Serialize(
             new WorkflowEngine.CheckpointState
@@ -414,8 +417,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ExecuteAsync_HumanTaskTarget_SuspendsInstance()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(CreateWorkflow("wf_01", "suspend.wf", 1,
+        var registry = CreateRegistry(CreateWorkflow("wf_01", "suspend.wf", 1,
             new WorkflowStep
             {
                 Id = "step_01", Name = "Human Step",
@@ -437,8 +439,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ExecuteAsync_StepsAfterHumanTask_NotExecuted()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(new WorkflowDescriptor
+        var registry = CreateRegistry(new WorkflowDescriptor
         {
             Id = "wf_01", Name = "suspend2.wf", Version = 1, State = DescriptorState.Active,
             Steps = new List<WorkflowStep>
@@ -473,8 +474,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task ResumeAsync_AfterSuspend_ContinuesFromNextStep()
     {
-        var registry = new WorkflowRegistry();
-        registry.Register(new WorkflowDescriptor
+        var registry = CreateRegistry(new WorkflowDescriptor
         {
             Id = "wf_01", Name = "resume.wf", Version = 1, State = DescriptorState.Active,
             Steps = new List<WorkflowStep>

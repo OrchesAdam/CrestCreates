@@ -1,61 +1,68 @@
-using System.Collections.Concurrent;
+using System.Collections.Frozen;
+using System.Collections.Immutable;
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 
 namespace CrestCreates.Workflow;
 
-public sealed class WorkflowRegistry : IWorkflowRegistry
+public sealed class WorkflowRegistry : RegistryBase<WorkflowDescriptor>, IWorkflowRegistry
 {
-    private readonly ConcurrentDictionary<string, WorkflowDescriptor> _byId = new();
-    private readonly ConcurrentDictionary<string, List<WorkflowDescriptor>> _byName = new();
+    protected override string RegistryNamespace => "workflow";
 
-    public void Register(WorkflowDescriptor descriptor)
+    public WorkflowRegistry(IRegistryValidationEngine<WorkflowDescriptor> validationEngine)
+        : base(validationEngine) { }
+
+    protected override RegistrySnapshot<WorkflowDescriptor> BuildSnapshot(
+        List<WorkflowDescriptor> descriptors)
     {
-        _byId[descriptor.Id] = descriptor;
-        _byName.GetOrAdd(descriptor.Name, _ => new()).Add(descriptor);
+        var byId = descriptors
+            .GroupBy(d => d.Id)
+            .ToFrozenDictionary(g => g.Key, g => g.OrderByDescending(d => d.Version).First());
+
+        var byName = descriptors
+            .GroupBy(d => d.Name)
+            .ToFrozenDictionary(g => g.Key, g => g.ToImmutableArray());
+
+        var byVersion = descriptors
+            .ToFrozenDictionary(d => new DescriptorKey(d.Namespace, d.Id, d.Version), d => d);
+
+        return new RegistrySnapshot<WorkflowDescriptor>(
+            byId, byName, byVersion,
+            descriptors.ToImmutableArray(),
+            ImmutableDictionary<Type, IRegistryIndex>.Empty);
     }
 
-    public WorkflowDescriptor? GetById(string id) =>
-        _byId.TryGetValue(id, out var d) ? d : null;
-
-    public WorkflowDescriptor? GetByName(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.FirstOrDefault(v => v.State == DescriptorState.Active)
-            : null;
-
-    public WorkflowDescriptor? GetByNameAndVersion(string name, int version) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.FirstOrDefault(v => v.Version == version)
-            : null;
-
-    public WorkflowDescriptor? GetByVersion(string id, int version)
+    public new WorkflowDescriptor? GetByName(string name)
     {
-        var byId = GetById(id);
-        if (byId != null && byId.Version == version)
-            return byId;
-        return GetAll().FirstOrDefault(d => d.Id == id && d.Version == version);
+        var versions = base.GetByName(name);
+        return versions.FirstOrDefault(v => v.State == DescriptorState.Active);
     }
 
-    public WorkflowDescriptor? GetActiveVersion(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.Where(v => v.State == DescriptorState.Active).MaxBy(v => v.Version)
-            : null;
+    public WorkflowDescriptor? GetByNameAndVersion(string name, int version)
+    {
+        var versions = base.GetByName(name);
+        return versions.FirstOrDefault(v => v.Version == version);
+    }
 
-    public WorkflowDescriptor? GetLatestVersion(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.MaxBy(v => v.Version)
-            : null;
+    public IReadOnlyList<WorkflowDescriptor> GetAllByName(string name)
+        => base.GetByName(name);
 
-    public IReadOnlyList<WorkflowDescriptor> GetAllByName(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.AsReadOnly()
-            : Array.Empty<WorkflowDescriptor>();
+    public WorkflowDescriptor? GetActiveVersion(string name)
+    {
+        var versions = base.GetByName(name);
+        return versions.Where(v => v.State == DescriptorState.Active).MaxBy(v => v.Version);
+    }
 
-    public IReadOnlyList<WorkflowDescriptor> GetDeprecatedVersions(string name) =>
-        _byName.TryGetValue(name, out var versions)
-            ? versions.Where(v => v.State == DescriptorState.Deprecated).ToList().AsReadOnly()
-            : Array.Empty<WorkflowDescriptor>();
+    public WorkflowDescriptor? GetLatestVersion(string name)
+    {
+        var versions = base.GetByName(name);
+        return versions.MaxBy(v => v.Version);
+    }
 
-    public IReadOnlyList<WorkflowDescriptor> GetAll() =>
-        _byId.Values.ToList().AsReadOnly();
+    public IReadOnlyList<WorkflowDescriptor> GetDeprecatedVersions(string name)
+    {
+        var versions = base.GetByName(name);
+        return versions.Where(v => v.State == DescriptorState.Deprecated).ToList().AsReadOnly();
+    }
 }
