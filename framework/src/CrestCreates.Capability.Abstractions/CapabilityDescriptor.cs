@@ -23,11 +23,3 @@ public sealed class CapabilityDescriptor : IVersionedDescriptor
     public IReadOnlyList<string> SemanticTags { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> Aliases { get; init; } = Array.Empty<string>();
 }
-
-public enum CapabilityRiskLevel
-{
-    Low,
-    Medium,
-    High,
-    Critical
-}
