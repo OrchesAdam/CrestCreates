@@ -278,6 +278,7 @@ ExecuteAsync(workflowId, inputVariables, ct)
     │   │     ├─ Completed → record WorkflowStepResult, apply Variables to instance, continue
     │   │     │
     │   │     ├─ Suspended →
+    │   │     │    record WorkflowStepResult(Status=Suspended)
     │   │     │    instance.Status = Suspended
     │   │     │    await store.SaveAsync(instance)
     │   │     │    return instance
@@ -340,6 +341,8 @@ public sealed class CapabilityStepExecutor : IWorkflowStepExecutor
 ```
 
 **Engine 负责将 `result.Variables` 应用到 `WorkflowInstance`** — executor 永远不修改 `context.Instance`。
+
+> **⚠️ 临时方案 (Phase 4b)：** 当前 Capability 输出到 Workflow Variables 的映射是直接字典合并。后续阶段应引入 Schema-based Variable Mapping，通过 `WorkflowStep.InputMapping` / `OutputMapping` 声明式地控制变量流入流出，而非将 Capability 的全部输出写入 WorkflowInstance。
 
 ### 6.3 HumanTaskStepExecutor
 
@@ -457,6 +460,23 @@ public sealed class WorkflowCompatibilityValidator
 
 **Bootstrap 验证器，非运行时验证器。** 不可达的运行时分支不存在——不受支持的构造在启动时即被拒绝。
 
+#### 6.6.1 启动执行时机
+
+`WorkflowCompatibilityValidator` 在以下时机执行：
+
+```
+MetadataBootstrapper.BuildAll()
+    │
+    ├─ Registry.Build(providers)
+    │
+    └─ For each WorkflowDescriptor in registry.GetAll():
+           CompatibilityValidator.Validate(descriptor)
+```
+
+具体来说，在 `WorkflowRegistry.Build()` 完成之后、应用程序开始接受请求之前。验证失败将导致应用程序启动失败（硬失败而非软降级）。
+
+集成点：在 `MetadataBootstrapper` 的 `BuildAll()` 方法中，遍历所有已注册的 `WorkflowDescriptor` 并调用 `Validate()`。或者，如果框架提供了 Bootstrap Validation 的扩展点，则在 `WorkflowRegistry` 的 `Build()` 完成后立即执行。
+
 ### 6.7 DI 注册
 
 ```csharp
@@ -515,7 +535,7 @@ Expected:  Status=Completed, 2 step results, both Status=Completed
 ```
 Workflow:  Step1(Capability A) → Step2(HumanTask)
 Expected:  Status=Suspended after Step1 completes, Step2 returns Suspended,
-           Step2 result recorded, StepIndex=1
+           Step2 WorkflowStepResult recorded (Status=Suspended), StepIndex=1
 ```
 
 ### Case 3 — Capability 失败 → Failed
