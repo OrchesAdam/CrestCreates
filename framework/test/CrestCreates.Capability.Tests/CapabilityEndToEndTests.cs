@@ -107,6 +107,61 @@ public class CapabilityEndToEndTests
     }
 
     [Fact]
+    public async Task E2E_HandlerNotFound_ReturnsErrorCode()
+    {
+        var (_, pipeline, audit, _) = CreateE2EPipeline(
+            new CapabilityDescriptor { Id = "missing.handler", Name = "Missing Handler", Version = 1,
+                CapabilityKind = CapabilityKind.Command, State = DescriptorState.Active }
+        );
+
+        var result = await pipeline.ExecuteAsync("missing.handler");
+
+        result.ErrorCode.Should().Be("HANDLER_NOT_FOUND");
+        result.IsSuccess.Should().BeFalse();
+        var records = audit.GetRecords();
+        records.Should().HaveCount(1);
+        records[0].IsSuccess.Should().BeFalse();
+        records[0].ErrorCode.Should().Be("HANDLER_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task E2E_HandlerThrows_RecordsUnhandledException()
+    {
+        var (_, pipeline, audit, resolver) = CreateE2EPipeline(
+            new CapabilityDescriptor { Id = "throws.handler", Name = "Throws", Version = 1,
+                CapabilityKind = CapabilityKind.Command, State = DescriptorState.Active }
+        );
+        resolver.Register("throws.handler", new ThrowingInvoker());
+
+        var result = await pipeline.ExecuteAsync("throws.handler");
+
+        result.ErrorCode.Should().Be("PIPELINE_ERROR");
+        result.IsSuccess.Should().BeFalse();
+        var records = audit.GetRecords();
+        records.Should().HaveCount(1);
+        records[0].ErrorCode.Should().Be("UNHANDLED_EXCEPTION");
+    }
+
+    [Fact]
+    public async Task E2E_Cancelled_RecordsCancelledStatus()
+    {
+        var (_, pipeline, audit, resolver) = CreateE2EPipeline(
+            new CapabilityDescriptor { Id = "slow.handler", Name = "Slow", Version = 1,
+                CapabilityKind = CapabilityKind.Query, State = DescriptorState.Active }
+        );
+        resolver.Register("slow.handler", new SlowInvoker());
+        var cts = new CancellationTokenSource();
+        cts.CancelAfter(10);
+
+        var result = await pipeline.ExecuteAsync("slow.handler", ct: cts.Token);
+
+        result.Status.Should().Be(CapabilityExecutionStatus.TimedOut);
+        var records = audit.GetRecords();
+        records.Should().HaveCount(1);
+        records[0].ErrorCode.Should().Be("CANCELLED");
+    }
+
+    [Fact]
     public async Task E2E_IdDifferentFromName_PreservesBoth()
     {
         var (_, pipeline, audit, resolver) = CreateE2EPipeline(
@@ -151,5 +206,20 @@ public class CapabilityEndToEndTests
     {
         public Task<object?> InvokeAsync(object? input, CancellationToken ct)
             => Task.FromResult<object?>($"ECHO: {input}");
+    }
+
+    private sealed class ThrowingInvoker : ICapabilityHandlerInvoker
+    {
+        public Task<object?> InvokeAsync(object? input, CancellationToken ct)
+            => throw new InvalidOperationException("Handler failure");
+    }
+
+    private sealed class SlowInvoker : ICapabilityHandlerInvoker
+    {
+        public async Task<object?> InvokeAsync(object? input, CancellationToken ct)
+        {
+            await Task.Delay(5000, ct);
+            return "done";
+        }
     }
 }

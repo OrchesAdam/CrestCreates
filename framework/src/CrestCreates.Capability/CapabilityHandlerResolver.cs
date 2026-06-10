@@ -7,14 +7,14 @@ public sealed class CapabilityHandlerResolver : ICapabilityHandlerResolver
 {
     private readonly ConcurrentDictionary<string, ICapabilityHandlerInvoker> _invokers = new();
 
-    public void Register(string capabilityName, ICapabilityHandlerInvoker invoker)
+    public void Register(string capabilityId, ICapabilityHandlerInvoker invoker)
     {
-        _invokers[capabilityName] = invoker;
+        _invokers[capabilityId] = invoker;
     }
 
-    public ICapabilityHandlerInvoker? Resolve(string capabilityName)
+    public ICapabilityHandlerInvoker? Resolve(string capabilityId)
     {
-        _invokers.TryGetValue(capabilityName, out var invoker);
+        _invokers.TryGetValue(capabilityId, out var invoker);
         return invoker;
     }
 }

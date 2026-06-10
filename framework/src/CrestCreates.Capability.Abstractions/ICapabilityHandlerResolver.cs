@@ -2,5 +2,5 @@ namespace CrestCreates.Capability.Abstractions;
 
 public interface ICapabilityHandlerResolver
 {
-    ICapabilityHandlerInvoker? Resolve(string capabilityName);
+    ICapabilityHandlerInvoker? Resolve(string capabilityId);
 }

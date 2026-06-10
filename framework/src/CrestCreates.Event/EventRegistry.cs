@@ -36,11 +36,6 @@ public sealed class EventRegistry : RegistryBase<GeneratedEventDescriptor>,
     public GeneratedEventDescriptor? GetLatestVersion(string name)
         => base.GetByName(name).MaxBy(v => v.Version);
 
-    public void Build(IEnumerable<IDescriptorProvider<GeneratedEventDescriptor>> providers)
-    {
-        base.Build(providers);
-    }
-
     protected override RegistrySnapshot<GeneratedEventDescriptor> BuildSnapshot(
         List<GeneratedEventDescriptor> descriptors)
     {
@@ -65,9 +60,4 @@ public sealed class EventRegistry : RegistryBase<GeneratedEventDescriptor>,
             descriptors.ToImmutableArray(),
             ImmutableDictionary<Type, IRegistryIndex>.Empty);
     }
-}
-
-public sealed class EventRegistryBuildException : Exception
-{
-    public EventRegistryBuildException(string message) : base(message) { }
 }

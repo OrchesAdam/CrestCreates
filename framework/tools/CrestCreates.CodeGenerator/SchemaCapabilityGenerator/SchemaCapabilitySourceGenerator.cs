@@ -439,21 +439,22 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
 
         if (hasEvent && events.Any(e => e != null))
         {
-            sb.AppendLine("internal sealed class GeneratedEventProvider : IDescriptorProvider<EventDescriptor>");
+            sb.AppendLine("internal sealed class GeneratedEventProvider : IDescriptorProvider<GeneratedEventDescriptor>");
             sb.AppendLine("{");
-            sb.AppendLine("    public IReadOnlyList<EventDescriptor> GetDescriptors() => new List<EventDescriptor>");
+            sb.AppendLine("    public IReadOnlyList<GeneratedEventDescriptor> GetDescriptors() => new List<GeneratedEventDescriptor>");
             sb.AppendLine("    {");
             foreach (var evt in events)
             {
                 if (evt == null) continue;
-                sb.AppendLine($"        new EventDescriptor");
+                sb.AppendLine($"        new GeneratedEventDescriptor");
                 sb.AppendLine("        {");
                 sb.AppendLine($"            Id = \"{evt.Id}\",");
                 sb.AppendLine($"            Name = \"{evt.Name}\",");
                 sb.AppendLine($"            Version = {evt.Version},");
-                sb.AppendLine($"            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>(\"{evt.PayloadSchemaId}\", {evt.PayloadSchemaVersion}),");
-                sb.AppendLine($"            Category = EventCategory.{evt.Category},");
-                sb.AppendLine($"            Semantic = EventSemantic.{evt.Semantic},");
+                sb.AppendLine($"            State = DescriptorState.Active,");
+                sb.AppendLine($"            PayloadType = typeof(object),");
+                sb.AppendLine($"            Scope = EventScope.Integration,");
+                sb.AppendLine($"            Reliability = EventReliability.AtLeastOnce,");
                 sb.AppendLine($"            Importance = EventImportance.{evt.Importance},");
                 sb.AppendLine($"            ChangeKind = SchemaChangeKind.{evt.ChangeKind},");
                 sb.AppendLine("        },");

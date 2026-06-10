@@ -25,20 +25,20 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
     }
 
     public async Task<CapabilityExecutionResult> ExecuteAsync(
-        string capabilityName,
+        string capabilityIdOrName,
         object? input = null,
         Action<CapabilityExecutionContext>? configureContext = null,
         CancellationToken ct = default)
     {
-        var descriptor = _registry.GetById(capabilityName)
-            ?? _registry.GetActiveVersion(capabilityName)
-            ?? _registry.GetByName(capabilityName);
+        var descriptor = _registry.GetById(capabilityIdOrName)
+            ?? _registry.GetActiveVersion(capabilityIdOrName)
+            ?? _registry.GetByName(capabilityIdOrName);
 
         if (descriptor == null)
         {
             return CapabilityExecutionResult.Failure(
                 "CAPABILITY_NOT_FOUND",
-                $"Capability '{capabilityName}' is not registered.",
+                $"Capability '{capabilityIdOrName}' is not registered.",
                 TimeSpan.Zero);
         }
 
@@ -64,7 +64,7 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
                 {
                     return CapabilityExecutionResult.Failure(
                         "HANDLER_NOT_FOUND",
-                        $"No handler registered for capability '{capabilityName}'.",
+                        $"No handler registered for capability '{descriptor.Id}'.",
                         DateTimeOffset.UtcNow - startedAt);
                 }
 
