@@ -1,40 +1,32 @@
-using System.Text.Json;
-using CrestCreates.Capability.Abstractions;
-using CrestCreates.Draft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
-using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 
 namespace CrestCreates.Workflow;
 
 public sealed class WorkflowEngine : IWorkflowEngine
 {
-    private const int MaxRetries = 3;
-
     private readonly IWorkflowRegistry _registry;
-    private readonly ICapabilityPipeline? _pipeline;
-    private readonly IDraftStore? _draftStore;
+    private readonly IWorkflowStepExecutorRegistry _executorRegistry;
+    private readonly IWorkflowInstanceStore _store;
 
     public WorkflowEngine(
         IWorkflowRegistry registry,
-        ICapabilityPipeline? pipeline = null,
-        IDraftStore? draftStore = null)
+        IWorkflowStepExecutorRegistry executorRegistry,
+        IWorkflowInstanceStore store)
     {
         _registry = registry;
-        _pipeline = pipeline;
-        _draftStore = draftStore;
+        _executorRegistry = executorRegistry;
+        _store = store;
     }
 
     public async Task<WorkflowInstance> ExecuteAsync(
-        string workflowName,
+        string workflowId,
         Dictionary<string, object?>? inputVariables = null,
         CancellationToken ct = default)
     {
-        var descriptor = _registry.GetActiveVersion(workflowName)
-            ?? _registry.GetByName(workflowName);
-
+        var descriptor = _registry.GetById(workflowId);
         if (descriptor == null)
-            throw new InvalidOperationException($"Workflow '{workflowName}' not found.");
+            throw new InvalidOperationException($"Workflow '{workflowId}' not found.");
 
         var instance = new WorkflowInstance
         {
@@ -50,45 +42,6 @@ public sealed class WorkflowEngine : IWorkflowEngine
         return await ExecuteStepsAsync(instance, descriptor, ct).ConfigureAwait(false);
     }
 
-    public async Task<WorkflowInstance> ResumeAsync(string instanceId, CancellationToken ct = default)
-    {
-        if (_draftStore == null)
-            throw new InvalidOperationException("No IDraftStore registered — cannot resume workflows.");
-
-        var checkpointId = $"wf_ckpt_{instanceId}";
-        var checkpoint = await _draftStore.GetAsync(checkpointId, ct).ConfigureAwait(false);
-
-        if (checkpoint == null)
-            throw new InvalidOperationException($"No checkpoint found for instance '{instanceId}'.");
-
-        var state = JsonSerializer.Deserialize<CheckpointState>(checkpoint.PayloadJson)
-            ?? throw new InvalidOperationException("Corrupted checkpoint payload.");
-
-        var descriptor = _registry.GetById(state.WorkflowId)
-            ?? throw new InvalidOperationException($"Workflow '{state.WorkflowId}' not found.");
-
-        var instance = new WorkflowInstance
-        {
-            InstanceId = state.InstanceId,
-            Workflow = new VersionedDescriptorRef<WorkflowDescriptor>(state.WorkflowId, state.WorkflowVersion),
-            StepIndex = state.StepIndex,
-            CurrentStepId = state.CurrentStepId,
-            Variables = state.Variables ?? new Dictionary<string, object?>()
-        };
-
-        return await ExecuteStepsAsync(instance, descriptor, ct).ConfigureAwait(false);
-    }
-
-    public sealed class CheckpointState
-    {
-        public string InstanceId { get; set; } = string.Empty;
-        public string WorkflowId { get; set; } = string.Empty;
-        public int WorkflowVersion { get; set; }
-        public int StepIndex { get; set; }
-        public string? CurrentStepId { get; set; }
-        public Dictionary<string, object?>? Variables { get; set; }
-    }
-
     private async Task<WorkflowInstance> ExecuteStepsAsync(
         WorkflowInstance instance,
         WorkflowDescriptor descriptor,
@@ -96,7 +49,6 @@ public sealed class WorkflowEngine : IWorkflowEngine
     {
         var steps = descriptor.Steps;
         instance.Status = WorkflowInstanceStatus.Running;
-        var retryCount = 0;
 
         while (instance.StepIndex < steps.Count)
         {
@@ -106,278 +58,94 @@ public sealed class WorkflowEngine : IWorkflowEngine
             instance.CurrentStepId = step.Id;
 
             var startedAt = DateTimeOffset.UtcNow;
-            WorkflowStepResult result;
 
+            // Resolve executor via registry — no target-type branching in engine
+            var executor = _executorRegistry.Resolve(step.Target);
+            var context = new WorkflowExecutionContext(descriptor, instance, step);
+
+            StepExecutionResult stepResult;
             try
             {
-                result = await ExecuteStepAsync(instance, step, descriptor, ct)
-                    .ConfigureAwait(false);
+                stepResult = await executor.ExecuteAsync(context, ct).ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                result = new WorkflowStepResult
+                // Infrastructure/programming error — record as Failed
+                var history = new WorkflowStepResult
                 {
                     StepId = step.Id,
                     StepName = step.Name,
-                    IsSuccess = false,
+                    Status = StepExecutionStatus.Failed,
                     ErrorMessage = ex.Message,
+                    ExecutedAt = DateTimeOffset.UtcNow,
                     Duration = DateTimeOffset.UtcNow - startedAt
                 };
-            }
-
-            result = new WorkflowStepResult
-            {
-                StepId = result.StepId,
-                StepName = step.Name,
-                IsSuccess = result.IsSuccess,
-                Output = result.Output,
-                ErrorMessage = result.ErrorMessage,
-                Duration = result.Duration
-            };
-
-            instance.StepResults.Add(result);
-
-            if (instance.Status == WorkflowInstanceStatus.Suspended)
-            {
-                instance.CurrentStepId = null;
+                instance.StepResults.Add(history);
+                instance.Status = WorkflowInstanceStatus.Failed;
+                instance.ErrorMessage = ex.Message;
+                instance.CompletedAt = DateTimeOffset.UtcNow;
+                await _store.SaveAsync(instance, ct).ConfigureAwait(false);
                 return instance;
             }
 
-            if (!result.IsSuccess)
+            // Engine applies variable changes — executor is pure
+            if (stepResult.Variables != null)
             {
-                var (handled, shouldRetry) = HandleStepError(step, ref retryCount);
-                if (shouldRetry)
-                {
+                foreach (var kv in stepResult.Variables)
+                    instance.Variables[kv.Key] = kv.Value;
+            }
+
+            // Record history
+            var duration = DateTimeOffset.UtcNow - startedAt;
+            var stepRecord = new WorkflowStepResult
+            {
+                StepId = step.Id,
+                StepName = step.Name,
+                Status = stepResult.Status,
+                Output = stepResult.Output,
+                ExecutedAt = DateTimeOffset.UtcNow,
+                Duration = duration
+            };
+            instance.StepResults.Add(stepRecord);
+
+            // State transitions based on executor result
+            switch (stepResult.Status)
+            {
+                case StepExecutionStatus.Completed:
+                    instance.StepIndex++;
                     continue;
-                }
-                if (!handled)
-                {
-                    instance.Status = WorkflowInstanceStatus.Failed;
-                    instance.ErrorMessage = result.ErrorMessage;
+
+                case StepExecutionStatus.Suspended:
+                    instance.Status = WorkflowInstanceStatus.Suspended;
+                    instance.CurrentStepId = null;
                     instance.CompletedAt = DateTimeOffset.UtcNow;
+                    await _store.SaveAsync(instance, ct).ConfigureAwait(false);
                     return instance;
-                }
-                retryCount = 0;
-            }
-            else
-            {
-                retryCount = 0;
-            }
 
-            await CheckpointAsync(instance, descriptor, ct).ConfigureAwait(false);
+                case StepExecutionStatus.Failed:
+                    // StepErrorBehavior.Skip: record failure, continue
+                    if (step.OnError == StepErrorBehavior.Skip)
+                    {
+                        instance.StepIndex++;
+                        continue;
+                    }
+                    // StepErrorBehavior.Fail (default): stop execution
+                    instance.Status = WorkflowInstanceStatus.Failed;
+                    instance.ErrorMessage = $"Step '{step.Id}' failed.";
+                    instance.CompletedAt = DateTimeOffset.UtcNow;
+                    await _store.SaveAsync(instance, ct).ConfigureAwait(false);
+                    return instance;
 
-            // Follow transitions or sequential next
-            if (step.Transitions.Count > 0)
-            {
-                var nextStepId = step.Transitions[0];
-                var stepsList = steps.ToList();
-                var nextIndex = stepsList.FindIndex(s => s.Id == nextStepId);
-                instance.StepIndex = nextIndex >= 0 ? nextIndex : instance.StepIndex + 1;
-            }
-            else
-            {
-                instance.StepIndex++;
+                default:
+                    throw new InvalidOperationException(
+                        $"Unknown StepExecutionStatus: {stepResult.Status}");
             }
         }
 
         instance.Status = WorkflowInstanceStatus.Completed;
         instance.CompletedAt = DateTimeOffset.UtcNow;
         instance.CurrentStepId = null;
+        await _store.SaveAsync(instance, ct).ConfigureAwait(false);
         return instance;
-    }
-
-    private async Task<WorkflowStepResult> ExecuteStepAsync(
-        WorkflowInstance instance,
-        WorkflowStep step,
-        WorkflowDescriptor descriptor,
-        CancellationToken ct)
-    {
-        var startedAt = DateTimeOffset.UtcNow;
-
-        return step.Target switch
-        {
-            CapabilityTarget capTarget => await ExecuteCapabilityTarget(
-                instance, capTarget, ct).ConfigureAwait(false),
-
-            HumanTaskTarget => await SuspendInstance(
-                instance, step, descriptor, ct, startedAt).ConfigureAwait(false),
-
-            SubWorkflowTarget subTarget => await ExecuteSubWorkflowTarget(
-                instance, subTarget, ct).ConfigureAwait(false),
-
-            _ => new WorkflowStepResult
-            {
-                StepId = step.Id,
-                IsSuccess = false,
-                ErrorMessage = $"Unknown target type: {step.Target.GetType().Name}",
-                Duration = DateTimeOffset.UtcNow - startedAt
-            }
-        };
-    }
-
-    private async Task<WorkflowStepResult> ExecuteCapabilityTarget(
-        WorkflowInstance instance,
-        CapabilityTarget target,
-        CancellationToken ct)
-    {
-        var startedAt = DateTimeOffset.UtcNow;
-
-        if (_pipeline == null)
-        {
-            return new WorkflowStepResult
-            {
-                StepId = instance.CurrentStepId ?? "",
-                IsSuccess = false,
-                ErrorMessage = "No ICapabilityPipeline registered — cannot execute CapabilityTarget.",
-                Duration = DateTimeOffset.UtcNow - startedAt
-            };
-        }
-
-        var capRef = target.Capability;
-        var result = await _pipeline.ExecuteAsync(
-            $"capability:{capRef.Id}",
-            input: instance.Variables,
-            ct: ct).ConfigureAwait(false);
-
-        if (result.IsSuccess && result.Output is Dictionary<string, object?> outputVars)
-        {
-            foreach (var kv in outputVars)
-                instance.Variables[kv.Key] = kv.Value;
-        }
-
-        return new WorkflowStepResult
-        {
-            StepId = instance.CurrentStepId ?? "",
-            IsSuccess = result.IsSuccess,
-            Output = result.Output,
-            ErrorMessage = result.ErrorMessage,
-            Duration = result.Duration
-        };
-    }
-
-    private async Task<WorkflowStepResult> ExecuteSubWorkflowTarget(
-        WorkflowInstance instance,
-        SubWorkflowTarget target,
-        CancellationToken ct)
-    {
-        var startedAt = DateTimeOffset.UtcNow;
-
-        try
-        {
-            var subRef = target.SubWorkflow;
-            var subDescriptor = _registry.GetById(subRef.Id);
-            if (subDescriptor == null)
-            {
-                return new WorkflowStepResult
-                {
-                    StepId = instance.CurrentStepId ?? "",
-                    IsSuccess = false,
-                    ErrorMessage = $"Sub-workflow '{subRef.Id}' not found.",
-                    Duration = DateTimeOffset.UtcNow - startedAt
-                };
-            }
-
-            var subInstance = await ExecuteAsync(
-                subDescriptor.Name,
-                new Dictionary<string, object?>(instance.Variables),
-                ct).ConfigureAwait(false);
-
-            if (subInstance.Status == WorkflowInstanceStatus.Completed)
-            {
-                foreach (var kv in subInstance.Variables)
-                    instance.Variables[$"sub_{kv.Key}"] = kv.Value;
-            }
-
-            return new WorkflowStepResult
-            {
-                StepId = instance.CurrentStepId ?? "",
-                IsSuccess = subInstance.Status == WorkflowInstanceStatus.Completed,
-                Duration = DateTimeOffset.UtcNow - startedAt
-            };
-        }
-        catch (Exception ex)
-        {
-            return new WorkflowStepResult
-            {
-                StepId = instance.CurrentStepId ?? "",
-                IsSuccess = false,
-                ErrorMessage = ex.Message,
-                Duration = DateTimeOffset.UtcNow - startedAt
-            };
-        }
-    }
-
-    private static (bool handled, bool shouldRetry) HandleStepError(
-        WorkflowStep step, ref int retryCount)
-    {
-        return step.OnError switch
-        {
-            StepErrorBehavior.Retry when retryCount < MaxRetries =>
-                (handled: true, shouldRetry: true),
-
-            StepErrorBehavior.Retry =>
-                (handled: false, shouldRetry: false),
-
-            StepErrorBehavior.Skip =>
-                (handled: true, shouldRetry: false),
-
-            StepErrorBehavior.Compensate =>
-                (handled: false, shouldRetry: false),
-
-            StepErrorBehavior.Fail =>
-                (handled: false, shouldRetry: false),
-
-            _ => (handled: false, shouldRetry: false)
-        };
-    }
-
-    private async Task<WorkflowStepResult> SuspendInstance(
-        WorkflowInstance instance,
-        WorkflowStep step,
-        WorkflowDescriptor descriptor,
-        CancellationToken ct,
-        DateTimeOffset startedAt)
-    {
-        instance.Status = WorkflowInstanceStatus.Suspended;
-        await CheckpointAsync(instance, descriptor, ct).ConfigureAwait(false);
-        instance.CompletedAt = DateTimeOffset.UtcNow;
-
-        return new WorkflowStepResult
-        {
-            StepId = step.Id,
-            StepName = step.Name,
-            IsSuccess = true,
-            Duration = DateTimeOffset.UtcNow - startedAt
-        };
-    }
-
-    private async Task CheckpointAsync(
-        WorkflowInstance instance,
-        WorkflowDescriptor descriptor,
-        CancellationToken ct)
-    {
-        if (_draftStore == null) return;
-
-        var checkpoint = new DraftRecord
-        {
-            DraftId = $"wf_ckpt_{instance.InstanceId}",
-            DraftType = "workflow.checkpoint",
-            Schema = new VersionedDescriptorRef<SchemaDescriptor>(
-                descriptor.VariableSchema?.Id ?? "schema_workflow_vars",
-                descriptor.VariableSchema?.Version ?? 1),
-            TenantId = instance.Variables.TryGetValue("TenantId", out var tid)
-                ? tid?.ToString() : null,
-            OwnerId = instance.InstanceId,
-            PayloadJson = JsonSerializer.Serialize(new
-            {
-                instance.InstanceId,
-                instance.StepIndex,
-                instance.CurrentStepId,
-                instance.Variables
-            }),
-            Status = DraftStatus.Active
-        };
-
-        await _draftStore.SaveAsync(checkpoint, ct).ConfigureAwait(false);
     }
 }

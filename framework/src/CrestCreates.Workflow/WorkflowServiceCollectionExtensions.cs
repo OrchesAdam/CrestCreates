@@ -9,6 +9,11 @@ public static class WorkflowServiceCollectionExtensions
     public static IServiceCollection AddWorkflowEngine(this IServiceCollection services)
     {
         services.TryAddSingleton<IWorkflowEngine, WorkflowEngine>();
+        services.TryAddSingleton<IWorkflowInstanceStore, InMemoryWorkflowInstanceStore>();
+        services.TryAddSingleton<CapabilityStepExecutor>();
+        services.TryAddSingleton<HumanTaskStepExecutor>();
+        services.TryAddSingleton<IWorkflowStepExecutorRegistry, DefaultStepExecutorRegistry>();
+        services.TryAddSingleton<WorkflowCompatibilityValidator>();
         return services;
     }
 }
