@@ -1,9 +1,9 @@
 using CrestCreates.Capability.Abstractions;
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata;
 
 namespace CrestCreates.Capability.Internal;
 
 internal interface ICapabilityVersionResolver
 {
-    IVersionedDescriptor Resolve(CapabilityRef capabilityRef);
+    CapabilityDescriptor Resolve(CapabilityRef capabilityRef);
 }

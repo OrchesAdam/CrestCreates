@@ -13,20 +13,32 @@ internal sealed class DefaultCapabilityVersionResolver : ICapabilityVersionResol
         _registry = registry;
     }
 
-    public IVersionedDescriptor Resolve(CapabilityRef capabilityRef)
+    public CapabilityDescriptor Resolve(CapabilityRef capabilityRef)
     {
         if (capabilityRef.Version.HasValue)
         {
-            var descriptor = _registry.GetByNameAndVersion(capabilityRef.Id, capabilityRef.Version.Value);
+            // Id + Version → direct DescriptorKey lookup
+            var descriptor = _registry.GetByVersion(capabilityRef.Id, capabilityRef.Version.Value);
             if (descriptor is not null) return descriptor;
         }
         else
         {
-            var byName = _registry.GetAllByName(capabilityRef.Id);
-            var active = byName
-                .Where(d => d.State == DescriptorState.Active)
-                .MaxBy(d => d.Version);
-            if (active is not null) return active;
+            // Id-only → prefer active version, fall back to latest
+            var latest = _registry.GetById(capabilityRef.Id);
+            if (latest is not null)
+            {
+                if (latest.State == DescriptorState.Active)
+                    return latest;
+
+                // Latest is not active — scan for any active version
+                var active = _registry.GetAll()
+                    .Where(d => d.Id == capabilityRef.Id && d.State == DescriptorState.Active)
+                    .MaxBy(d => d.Version);
+                if (active is not null) return active;
+
+                // No active version — return latest (even if deprecated)
+                return latest;
+            }
         }
 
         throw new CapabilityNotFoundException(capabilityRef);

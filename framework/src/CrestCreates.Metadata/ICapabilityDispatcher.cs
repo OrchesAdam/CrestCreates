@@ -1,6 +1,6 @@
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Capability.Abstractions;
 
-namespace CrestCreates.Capability.Abstractions;
+namespace CrestCreates.Metadata;
 
 /// <summary>
 /// Facade layer over ICapabilityPipeline. The unified entry point for all capability execution.
@@ -8,7 +8,7 @@ namespace CrestCreates.Capability.Abstractions;
 public interface ICapabilityDispatcher
 {
     Task<CapabilityExecutionResult> DispatchAsync(
-        IVersionedDescriptor descriptor,
+        CapabilityDescriptor descriptor,
         InvocationSource source,
         object? input = null,
         Action<CapabilityExecutionContext>? configureContext = null,

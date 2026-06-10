@@ -1,6 +1,6 @@
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Internal;
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata;
 
 namespace CrestCreates.Capability;
 
@@ -13,6 +13,6 @@ internal sealed class DefaultCapabilityResolver : ICapabilityResolver
         _versionResolver = versionResolver;
     }
 
-    public IVersionedDescriptor Resolve(CapabilityRef capabilityRef)
+    public CapabilityDescriptor Resolve(CapabilityRef capabilityRef)
         => _versionResolver.Resolve(capabilityRef);
 }

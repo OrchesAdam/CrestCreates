@@ -30,7 +30,8 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
         Action<CapabilityExecutionContext>? configureContext = null,
         CancellationToken ct = default)
     {
-        var descriptor = _registry.GetActiveVersion(capabilityName)
+        var descriptor = _registry.GetById(capabilityName)
+            ?? _registry.GetActiveVersion(capabilityName)
             ?? _registry.GetByName(capabilityName);
 
         if (descriptor == null)
@@ -43,6 +44,7 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
 
         var context = new CapabilityExecutionContext
         {
+            CapabilityId = descriptor.Id,
             CapabilityName = descriptor.Name,
             CapabilityVersion = descriptor.Version,
             CapabilityContractHash = descriptor.ContractHash,

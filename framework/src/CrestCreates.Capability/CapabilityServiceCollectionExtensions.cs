@@ -2,6 +2,7 @@ using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Bootstrap;
 using CrestCreates.Capability.Internal;
 using CrestCreates.Capability.Middleware;
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;

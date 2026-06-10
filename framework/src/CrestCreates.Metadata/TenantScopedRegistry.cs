@@ -45,6 +45,12 @@ public sealed class TenantScopedRegistry<TDescriptor> : IVersionedDescriptorRegi
         return d != null && IsAccessible(d) ? d : null;
     }
 
+    public TDescriptor? GetByVersion(string id, int version)
+    {
+        var d = _inner.GetByVersion(id, version);
+        return d != null && IsAccessible(d) ? d : null;
+    }
+
     public TDescriptor? GetActiveVersion(string name)
     {
         var d = _inner.GetActiveVersion(name);

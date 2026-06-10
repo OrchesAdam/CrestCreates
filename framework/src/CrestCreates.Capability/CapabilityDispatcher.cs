@@ -1,5 +1,7 @@
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability.Abstractions;
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata;
+using CrestCreates.MultiTenancy.Abstract;
 
 namespace CrestCreates.Capability;
 
@@ -7,17 +9,23 @@ internal sealed class CapabilityDispatcher : ICapabilityDispatcher
 {
     private readonly ICapabilityResolver _resolver;
     private readonly ICapabilityPipeline _pipeline;
+    private readonly ITenantContext? _tenantContext;
+    private readonly ICurrentUser? _currentUser;
 
     public CapabilityDispatcher(
         ICapabilityResolver resolver,
-        ICapabilityPipeline pipeline)
+        ICapabilityPipeline pipeline,
+        ITenantContext? tenantContext = null,
+        ICurrentUser? currentUser = null)
     {
         _resolver = resolver;
         _pipeline = pipeline;
+        _tenantContext = tenantContext;
+        _currentUser = currentUser;
     }
 
     public async Task<CapabilityExecutionResult> DispatchAsync(
-        IVersionedDescriptor descriptor,
+        CapabilityDescriptor descriptor,
         InvocationSource source,
         object? input = null,
         Action<CapabilityExecutionContext>? configureContext = null,
@@ -25,11 +33,9 @@ internal sealed class CapabilityDispatcher : ICapabilityDispatcher
     {
         return await _pipeline.ExecuteAsync(descriptor.Id, input, ctx =>
         {
-            ctx.CapabilityId = descriptor.Id;
-            ctx.CapabilityName = descriptor.Name;
-            ctx.CapabilityVersion = descriptor.Version;
-            ctx.CapabilityContractHash = descriptor.ContractHash;
             ctx.InvocationSource = source;
+            ctx.TenantId = _tenantContext?.CurrentTenantId;
+            ctx.UserId = _currentUser?.Id;
             configureContext?.Invoke(ctx);
         }, ct);
     }
@@ -41,7 +47,7 @@ internal sealed class CapabilityDispatcher : ICapabilityDispatcher
         Action<CapabilityExecutionContext>? configureContext = null,
         CancellationToken ct = default)
     {
-        var descriptor = _resolver.Resolve(capabilityId);
+        var descriptor = _resolver.Resolve(CapabilityRef.Parse(capabilityId));
         return await DispatchAsync(descriptor, source, input, configureContext, ct);
     }
 }

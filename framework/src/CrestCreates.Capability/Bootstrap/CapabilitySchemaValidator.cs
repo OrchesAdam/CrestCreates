@@ -28,7 +28,7 @@ public sealed class CapabilitySchemaValidator : IBootstrapValidator
             if (descriptor.InputSchema.HasValue)
             {
                 var schemaRef = descriptor.InputSchema.Value;
-                var refObj = new DescriptorRef(schemaRef.Id, schemaRef.Id, schemaRef.Version);
+                var refObj = new DescriptorRef("schema", schemaRef.Id, schemaRef.Version);
                 if (!_descriptorLookup.Exists(refObj))
                 {
                     issues.Add(new ValidationIssue(ValidationSeverity.Error,
@@ -39,7 +39,7 @@ public sealed class CapabilitySchemaValidator : IBootstrapValidator
             if (descriptor.OutputSchema.HasValue)
             {
                 var schemaRef = descriptor.OutputSchema.Value;
-                var refObj = new DescriptorRef(schemaRef.Id, schemaRef.Id, schemaRef.Version);
+                var refObj = new DescriptorRef("schema", schemaRef.Id, schemaRef.Version);
                 if (!_descriptorLookup.Exists(refObj))
                 {
                     issues.Add(new ValidationIssue(ValidationSeverity.Error,

@@ -1,6 +1,6 @@
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Capability.Abstractions;
 
-namespace CrestCreates.Capability.Abstractions;
+namespace CrestCreates.Metadata;
 
 /// <summary>
 /// Unified resolution entry point. All runtimes (Workflow, Agent, HTTP, MCP)
@@ -8,8 +8,8 @@ namespace CrestCreates.Capability.Abstractions;
 /// </summary>
 public interface ICapabilityResolver
 {
-    IVersionedDescriptor Resolve(CapabilityRef capabilityRef);
+    CapabilityDescriptor Resolve(CapabilityRef capabilityRef);
 
-    IVersionedDescriptor Resolve(string capabilityIdOrVersion)
+    CapabilityDescriptor Resolve(string capabilityIdOrVersion)
         => Resolve(CapabilityRef.Parse(capabilityIdOrVersion));
 }

@@ -28,6 +28,14 @@ public sealed class FormRegistry : IFormRegistry
             ? versions.FirstOrDefault(v => v.Version == version)
             : null;
 
+    public FormDescriptor? GetByVersion(string id, int version)
+    {
+        var byId = GetById(id);
+        if (byId != null && byId.Version == version)
+            return byId;
+        return GetAll().FirstOrDefault(d => d.Id == id && d.Version == version);
+    }
+
     public FormDescriptor? GetActiveVersion(string name) =>
         _byName.TryGetValue(name, out var versions)
             ? versions.Where(v => v.State == DescriptorState.Active).MaxBy(v => v.Version)
