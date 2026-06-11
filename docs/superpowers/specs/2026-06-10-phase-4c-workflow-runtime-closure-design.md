@@ -29,9 +29,11 @@ Completed
 ### 核心原则
 
 1. **不重新引入 ResumeAsync。** 公共 API 保持 `IWorkflowEngine.ExecuteAsync` 唯一。Continuation 是运行时管理的内部基础设施。
-2. **Event-driven continuation。** HumanTask 模块只依赖 Event Runtime 契约。Workflow 模块通过事件订阅触发 Continuation。
-3. **共享执行核心。** `IWorkflowExecutionRunner` 是 `WorkflowEngine` 和 `IWorkflowContinuationService` 共享的执行引擎，避免执行逻辑分叉。
-4. **Metadata retained, execution paths removed。** 同 Phase 4b 原则。
+2. **Event-driven continuation。** HumanTask 模块只依赖 Event Runtime 契约。Workflow 模块通过 `HumanTaskCompletedWorkflowSubscriber` 订阅 `HumanTaskCompletedEvent`，触发 Continuation。
+   - **依赖方向：** `HumanTask → Event Runtime`，`Workflow → Event Runtime + HumanTask.Abstractions (event contract)`。`HumanTask` 不得依赖 `Workflow`。
+3. **共享执行核心。** `IWorkflowExecutionRunner` 是 `WorkflowEngine` 和 `IWorkflowContinuationService` 共享的执行引擎。**Runner 拥有：step loop、执行驱动的状态转换、持久化、以及 suspended/completed/failed 生命周期事件。** Engine/ContinuationService 仅负责入口事件（started/resumed）。
+4. **所有 lifecycle event 均在 WorkflowInstance 成功保存后发布。** 不先于持久化。
+5. **Metadata retained, execution paths removed。** 同 Phase 4b 原则。
 
 ---
 
@@ -75,9 +77,11 @@ HumanTask Module (Phase 5/6)
     │
     └── Publish HumanTaskCompletedEvent { HumanTaskId, Outcome, Result }
               ↓
-         Event Subscriber (Workflow module)
-              ↓
-         IWorkflowContinuationService.ContinueAsync()
+         HumanTaskCompletedWorkflowSubscriber (implements IEventHandler<HumanTaskCompletedEvent>)
+              │
+              └── WorkflowContinuationRequest { HumanTaskId, Outcome, Result }
+                       ↓
+                  IWorkflowContinuationService.ContinueAsync(request)
 ```
 
 ### 3.2 CurrentStepIndex 语义 — 游标（下一步待执行步骤）
@@ -94,20 +98,37 @@ Resume:  HumanTask 已完成 → CurrentStepIndex = 2 (跳过 HumanTask，直接
 ### 3.3 HumanTask suspend/resume 流程
 
 ```
-Suspend:
-    instance.CurrentStepIndex = currentIndex;   // 游标停在 HumanTask 步骤
-    instance.WaitingHumanTaskId = "ht_01";
-    instance.Status = Suspended;
+Suspend (in WorkflowExecutionRunner):
+    HumanTaskStepExecutor returns StepExecutionResult(
+        Status=Suspended,
+        WaitingHumanTaskId="ht_01")
+    ↓
+    Runner sets: instance.WaitingHumanTaskId = stepResult.WaitingHumanTaskId
+    Runner validates: WaitingHumanTaskId must be non-null when Status=Suspended
+    instance.Status = Suspended
 
-Resume:
-    instance.CurrentStepIndex++;                // 跳过 HumanTask 步骤
-    instance.WaitingHumanTaskId = null;
-    instance.Status = Running;
-
-    executionRunner.RunAsync(instance);         // 从 Step[2] 开始
+Resume (in WorkflowContinuationService):
+    1. Load instance via GetByWaitingHumanTaskId
+    2. Ensure instance.Status == Suspended
+    3. ValidateTransition(Suspended, Running)
+    4. Write HumanTask step result:
+       - Resolve current step by CurrentStepIndex
+       - instance.StepResults.Add(new WorkflowStepResult {
+           StepId = currentStep.Id,
+           Status = StepExecutionStatus.Completed,
+           Output = request.Result
+         })
+    5. instance.Variables["lastStepOutcome"] = request.Outcome
+       instance.Variables["lastStepResult"] = request.Result
+    6. instance.CurrentStepIndex++            // advance past HumanTask step
+    7. instance.WaitingHumanTaskId = null
+    8. instance.Status = Running
+    9. await store.SaveAsync(instance)
+    10. Publish workflow.resumed
+    11. executionRunner.RunAsync(instance)    // starts from step after HumanTask
 ```
 
-`HumanTaskStepExecutor` 始终返回 `Suspended`。ContinuationService 负责跳过 HumanTask 步骤——executor 不需要"检查任务是否完成"。
+`HumanTaskStepExecutor` 始终返回 `Suspended`。ContinuationService 负责补写 HumanTask 步骤结果并跳过该步骤。
 
 ---
 
@@ -120,9 +141,11 @@ Resume:
 internal interface IWorkflowExecutionRunner
 {
     /// <summary>
-    /// Shared execution core. Consumed by both WorkflowEngine and WorkflowContinuationService.
-    /// Takes an instance with Status=Running and CurrentStepIndex set.
-    /// Returns instance with terminal status (Completed, Suspended, or Failed).
+    /// Shared execution core.
+    /// Does NOT create WorkflowInstance.
+    /// Does NOT handle external continuation entry.
+    /// Owns: step loop, execution-driven state transitions, persistence,
+    ///       and lifecycle events for workflow.suspended / workflow.completed / workflow.failed.
     /// </summary>
     Task<WorkflowInstance> RunAsync(
         WorkflowInstance instance,
@@ -130,17 +153,37 @@ internal interface IWorkflowExecutionRunner
 }
 ```
 
-实现 Phase 4b 的 step loop（for-loop, executor dispatch, state transitions, persistence）。纯执行——不发布事件，不创建实例。
+Runner 从 `instance.CurrentStepIndex` 开始执行步骤。每次状态转换后主动保存并发布对应 lifecycle event。
+
+### 4.1.1 StepExecutionResult（扩展）
+
+`StepExecutionResult` 新增 `WaitingHumanTaskId` 字段，使 HumanTaskStepExecutor 能将 task ID 传递给 Runner：
+
+```csharp
+public sealed record StepExecutionResult(
+    StepExecutionStatus Status,
+    object? Output = null,
+    IReadOnlyDictionary<string, object?>? Variables = null,
+    string? WaitingHumanTaskId = null);  // Phase 4c: set by HumanTaskStepExecutor on Suspend
+```
+
+Runner 在收到 `Status=Suspended` 时必须验证 `WaitingHumanTaskId` 非空。若为空则抛出 `InvalidOperationException`。
 
 ### 4.2 IWorkflowContinuationService
 
 ```csharp
 // CrestCreates.Workflow.Abstractions
+public sealed class WorkflowContinuationRequest
+{
+    public string HumanTaskId { get; init; } = string.Empty;
+    public string Outcome { get; init; } = string.Empty;
+    public object? Result { get; init; }
+}
+
 public interface IWorkflowContinuationService
 {
     Task ContinueAsync(
-        string humanTaskId,
-        object? result,
+        WorkflowContinuationRequest request,
         CancellationToken ct = default);
 }
 ```
@@ -148,19 +191,28 @@ public interface IWorkflowContinuationService
 算法：
 
 ```
-1. instance = store.GetByWaitingHumanTaskId(humanTaskId)
+1. instance = store.GetByWaitingHumanTaskId(request.HumanTaskId)
    → null → throw InvalidOperationException
-2. stateMachine.ValidateTransition(Suspended, Running)
-   → invalid → throw InvalidWorkflowTransitionException
-3. instance.Variables["stepResult"] = result
-4. instance.CurrentStepIndex++
-5. instance.WaitingHumanTaskId = null
-6. instance.Status = Running
-7. await store.SaveAsync(instance)
-8. eventPublisher.PublishAsync(workflow.resumed)
-9. executionRunner.RunAsync(instance)
-10. 根据返回状态发布 workflow.completed 或 workflow.failed
+2. Ensure instance.Status == Suspended
+3. stateMachine.ValidateTransition(Suspended, Running)
+4. Resolve current HumanTask step by instance.CurrentStepIndex
+5. Write HumanTask step result:
+   instance.StepResults.Add(new WorkflowStepResult {
+       StepId = currentStep.Id,
+       Status = StepExecutionStatus.Completed,
+       Output = request.Result
+   })
+6. instance.Variables["lastStepOutcome"] = request.Outcome
+   instance.Variables["lastStepResult"] = request.Result
+7. instance.CurrentStepIndex++                // advance past HumanTask step
+8. instance.WaitingHumanTaskId = null
+9. instance.Status = Running
+10. await store.SaveAsync(instance)
+11. eventPublisher.PublishAsync(workflow.resumed)
+12. return executionRunner.RunAsync(instance)
 ```
+
+注意：ContinuationService 不再根据 Runner 返回状态发布 completed/failed——Runner 自己负责。
 
 ### 4.3 IWorkflowStateMachine
 
@@ -209,15 +261,15 @@ public sealed class WorkflowLifecycleEvent
 }
 ```
 
-**事件触发点：**
+**事件触发点（所有事件在 WorkflowInstance 成功保存后发布）：**
 
 | 事件 | 触发时机 |
 |------|----------|
-| `workflow.started` | 创建实例后、Status=Running、首次执行步骤前 |
-| `workflow.suspended` | HumanTask 步骤返回 Suspended 后、保存前 |
-| `workflow.resumed` | `ValidateTransition` 通过后、Status=Running、执行恢复前 |
-| `workflow.completed` | 所有步骤完成 |
-| `workflow.failed` | 任何 Failure 退出路径（业务失败、基础设施异常、store 保存失败、continuation 失败） |
+| `workflow.started` | Engine: 创建实例后、Status=Running、保存成功、首次执行 Runner 前 |
+| `workflow.suspended` | Runner: HumanTask 步骤返回 Suspended、保存成功、返回前 |
+| `workflow.resumed` | ContinuationService: Suspended→Running 转换验证通过、保存成功、Runner 执行前 |
+| `workflow.completed` | Runner: 所有步骤完成、Status=Completed、保存成功、返回前 |
+| `workflow.failed` | Runner: 步骤失败、Status=Failed、保存成功后。**基础设施故障在持久化之前不保证发布 lifecycle event。** |
 
 ### 4.5 IWorkflowInstanceStore（扩展）
 
@@ -232,11 +284,18 @@ public interface IWorkflowInstanceStore
     Task<WorkflowInstance?> GetAsync(string instanceId, CancellationToken ct = default);
 
     // New (Phase 4c)
+    /// <summary>
+    /// Returns the Suspended WorkflowInstance waiting for the given HumanTask.
+    /// WaitingHumanTaskId must be unique across active instances.
+    /// If multiple matches are found, the store must throw WorkflowCorrelationException.
+    /// </summary>
     Task<WorkflowInstance?> GetByWaitingHumanTaskId(
         string humanTaskId,
         CancellationToken ct = default);
 }
 ```
+
+`WaitingHumanTaskId` 在活跃的 workflow instances 中必须唯一。`GetByWaitingHumanTaskId` 只返回 `Status=Suspended` 且 `WaitingHumanTaskId` 匹配的实例。若发现多个匹配，持久化 store 必须抛出 `WorkflowCorrelationException` 而非返回任意实例。Phase 4c InMemory store 亦须遵循此规则。
 
 ### 4.6 WorkflowInstance（扩展）
 
@@ -263,9 +322,57 @@ public sealed class HumanTaskCompletedEvent
 
 不包含任何 Workflow 字段（无 WorkflowInstanceId, WorkflowId, WorkflowStepId）。HumanTask 模块仅依赖 Event Runtime 契约。
 
-### 4.8 HumanTaskStepExecutor — 不变
+### 4.9 HumanTaskCompletedWorkflowSubscriber
 
-与 Phase 4b 完全相同。始终返回 `StepExecutionResult(Suspended)`。Continuation 逻辑在 `WorkflowContinuationService` 中。
+```csharp
+// CrestCreates.Workflow (internal)
+internal sealed class HumanTaskCompletedWorkflowSubscriber
+    : IEventHandler<HumanTaskCompletedEvent>
+{
+    private readonly IWorkflowContinuationService _continuationService;
+
+    public HumanTaskCompletedWorkflowSubscriber(
+        IWorkflowContinuationService continuationService)
+    {
+        _continuationService = continuationService;
+    }
+
+    public Task HandleAsync(HumanTaskCompletedEvent evt, CancellationToken ct)
+    {
+        return _continuationService.ContinueAsync(
+            new WorkflowContinuationRequest
+            {
+                HumanTaskId = evt.HumanTaskId,
+                Outcome = evt.Outcome,
+                Result = evt.Result
+            },
+            ct);
+    }
+}
+```
+
+此订阅者是闭环的关键——它将 HumanTask 域事件桥接到 Workflow 继续运行时。DI 必须注册：
+
+```csharp
+services.TryAddSingleton<IEventHandler<HumanTaskCompletedEvent>,
+    HumanTaskCompletedWorkflowSubscriber>();
+```
+
+HumanTaskStepExecutor 始终返回 `Suspended`，但现在通过 `StepExecutionResult.WaitingHumanTaskId` 将 task ID 传递给 Runner：
+
+```csharp
+public Task<StepExecutionResult> ExecuteAsync(
+    WorkflowExecutionContext context, CancellationToken ct)
+{
+    var target = (HumanTaskTarget)context.Step.Target;
+    return Task.FromResult(
+        new StepExecutionResult(
+            StepExecutionStatus.Suspended,
+            WaitingHumanTaskId: target.HumanTask.Id));
+}
+```
+
+Runner 接收到此结果后设置 `instance.WaitingHumanTaskId`。Continuation 逻辑在 `WorkflowContinuationService` 中。
 
 ---
 
@@ -273,28 +380,43 @@ public sealed class HumanTaskCompletedEvent
 
 ### 5.1 WorkflowEngine（修订版）
 
-构造函数新增：
+构造函数为 `internal`（因为 `IWorkflowExecutionRunner` 为 `internal`，不能出现在 public 构造函数中）：
 
 ```csharp
-public WorkflowEngine(
-    IWorkflowRegistry registry,
-    IWorkflowStepExecutorRegistry executorRegistry,
-    IWorkflowInstanceStore store,
-    IWorkflowExecutionRunner executionRunner,
-    IWorkflowStateMachine stateMachine,
-    IWorkflowLifecycleEventPublisher eventPublisher)
+// CrestCreates.Workflow
+public sealed class WorkflowEngine : IWorkflowEngine
+{
+    internal WorkflowEngine(
+        IWorkflowRegistry registry,
+        IWorkflowInstanceStore store,
+        IWorkflowExecutionRunner executionRunner,
+        IWorkflowLifecycleEventPublisher eventPublisher)
+    {
+        // ...
+    }
+}
 ```
 
-`ExecuteAsync` 流程：
+DI 使用 factory 注册：
+
+```csharp
+services.TryAddSingleton<IWorkflowEngine>(sp =>
+    new WorkflowEngine(
+        sp.GetRequiredService<IWorkflowRegistry>(),
+        sp.GetRequiredService<IWorkflowInstanceStore>(),
+        sp.GetRequiredService<IWorkflowExecutionRunner>(),
+        sp.GetRequiredService<IWorkflowLifecycleEventPublisher>()));
+```
+
+`ExecuteAsync` 流程（Engine 仅负责入口事件 + Runner 委托。Runner 拥有持久化和 terminal events）：
 
 ```
 1. descriptor = registry.GetById(workflowId)
-2. Create WorkflowInstance (Running, CurrentStepIndex=0)
-3. eventPublisher.PublishAsync(workflow.started)
-4. executionRunner.RunAsync(instance)
-5. 根据 returned 状态发布对应事件
-6. await store.SaveAsync(instance)
-7. return instance
+2. Create WorkflowInstance (Status=Running, CurrentStepIndex=0)
+3. await store.SaveAsync(instance)
+4. Publish workflow.started (after save)
+5. return executionRunner.RunAsync(instance)
+   // Runner handles: execution → state transitions → save → suspended/completed/failed events
 ```
 
 ### 5.2 WorkflowExecutionRunner
@@ -304,7 +426,13 @@ public WorkflowEngine(
 internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
 ```
 
-从当前 `WorkflowEngine.ExecuteStepsAsync` 提取。实现相同的步骤循环（for-loop, executor dispatch, state transitions），但不进行事件发布或实例创建。作为纯执行核心。
+Runner 职责（重构自当前 `WorkflowEngine.ExecuteStepsAsync`）：
+
+- 从 `instance.CurrentStepIndex` 开始执行步骤
+- 执行成功后：记录 step result，递增 `CurrentStepIndex`
+- HumanTask Suspended 时：验证 `stepResult.WaitingHumanTaskId` 非空，设置 `instance.WaitingHumanTaskId`，设置 `Status = Suspended`，保存，发布 `workflow.suspended`，返回
+- 所有步骤完成：设置 `Status = Completed`，保存，发布 `workflow.completed`，返回
+- 失败时：设置 `Status = Failed`，保存，发布 `workflow.failed`，返回
 
 ### 5.3 DefaultWorkflowStateMachine
 
@@ -350,11 +478,23 @@ public sealed class WorkflowContinuationService : IWorkflowContinuationService
 public Task<WorkflowInstance?> GetByWaitingHumanTaskId(
     string humanTaskId, CancellationToken ct)
 {
-    var match = _instances.Values
-        .FirstOrDefault(i => i.WaitingHumanTaskId == humanTaskId);
-    return Task.FromResult(match);
+    var matches = _instances.Values
+        .Where(i => i.Status == WorkflowInstanceStatus.Suspended &&
+                    i.WaitingHumanTaskId == humanTaskId)
+        .ToList();
+
+    if (matches.Count > 1)
+        throw new WorkflowCorrelationException(
+            $"Multiple suspended instances found for HumanTask '{humanTaskId}'.");
+
+    return Task.FromResult(matches.SingleOrDefault());
 }
 ```
+
+**并发说明：**
+- InMemory store 是线程安全的（ConcurrentDictionary），但不支持分布式锁。
+- Phase 4c 仅验证顺序幂等性（double-resume 被拒绝），不保证分布式 exactly-once continuation。
+- 持久化 store 应在后续阶段使用乐观并发 / row version。
 
 ### 5.6 DI 注册
 
@@ -395,6 +535,10 @@ public static IServiceCollection AddWorkflowEngine(this IServiceCollection servi
 | `WorkflowLifecycleEventPublisher` | `CrestCreates.Workflow` | internal |
 | `IWorkflowContinuationService` | `CrestCreates.Workflow.Abstractions` | public |
 | `WorkflowContinuationService` | `CrestCreates.Workflow` | public |
+| `WorkflowContinuationRequest` | `CrestCreates.Workflow.Abstractions` | public |
+| `HumanTaskCompletedWorkflowSubscriber` | `CrestCreates.Workflow` | internal |
+| `HumanTaskCompletedEvent` | `CrestCreates.HumanTask.Abstractions` | public |
+| `WorkflowCorrelationException` | `CrestCreates.Workflow.Abstractions` | public |
 | `HumanTaskCompletedEvent` | `CrestCreates.HumanTask.Abstractions` | public |
 | `WorkflowInstance` (extended) | `CrestCreates.Workflow.Abstractions` | public |
 | `IWorkflowInstanceStore` (extended) | `CrestCreates.Workflow.Abstractions` | public |
@@ -412,9 +556,12 @@ public static IServiceCollection AddWorkflowEngine(this IServiceCollection servi
 Workflow: Step1(Capability) → Step2(HumanTask "ht_01") → Step3(Capability)
 
 ExecuteAsync("wf_01") → Step1 Completed → Step2 Suspended
-    Status = Suspended, WaitingHumanTaskId = "ht_01", CurrentStepIndex = 1
+    Status = Suspended, WaitingHumanTaskId = "ht_01", StepIndex = 1
 
-ContinueAsync("ht_01", result) → CurrentStepIndex = 2, WaitingHumanTaskId = null
+ContinueAsync(new WorkflowContinuationRequest { HumanTaskId = "ht_01",
+    Outcome = "Approved", Result = new { Score = 95 } })
+    → HumanTask step result written to StepResults (Status=Completed)
+    → StepIndex = 2, WaitingHumanTaskId = null
     → Step3 Completed
     Status = Completed, StepResults.Count = 3
 ```
@@ -422,8 +569,8 @@ ContinueAsync("ht_01", result) → CurrentStepIndex = 2, WaitingHumanTaskId = nu
 ### Case 2 — 双次 resume
 
 ```
-ContinueAsync("ht_01", ...) → success (WaitingHumanTaskId 已清空)
-ContinueAsync("ht_01", ...) → GetByWaitingHumanTaskId 返回 null → InvalidOperationException
+ContinueAsync(request { HumanTaskId = "ht_01", Outcome = "ok" }) → success (WaitingHumanTaskId 清空)
+ContinueAsync(request { HumanTaskId = "ht_01", Outcome = "ok" }) → GetByWaitingHumanTaskId 返回 null → InvalidOperationException
 ```
 
 ### Case 3 — Invalid state transition
@@ -459,12 +606,14 @@ ContinueAsync → WaitingHumanTaskId = null
     store.GetByWaitingHumanTaskId("ht_01") → null
 ```
 
-### Case 7 — stepResult 变量传播
+### Case 7 — lastStepResult / lastStepOutcome 变量传播
 
 ```
-ContinueAsync("ht_01", new { Approved = true })
-    → instance.Variables["stepResult"] == { Approved: true }
-Step3 Capability 执行 → context.Instance.Variables["stepResult"] 可访问
+ContinueAsync(request { Outcome = "Approved", Result = new { Score = 95 } })
+    → instance.Variables["lastStepOutcome"] == "Approved"
+    → instance.Variables["lastStepResult"] == { Score: 95 }
+    → HumanTask StepResult written with Status=Completed, Output = request.Result
+Step3 Capability 执行 → context.Instance.Variables["lastStepResult"] 可访问
 ```
 
 ### Case 8 — HumanTaskCompletedEvent 无 Workflow 字段
