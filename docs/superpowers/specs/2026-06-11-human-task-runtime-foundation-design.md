@@ -222,12 +222,13 @@ Dependencies: `IHumanTaskRegistry`, `IHumanTaskInstanceStore`, `ILocalEventBus`.
   1. Load instance via `store.GetByIdAsync(request.HumanTaskInstanceId)`.
   2. Not found → throw `InvalidOperationException`.
   3. Status not `Created` or `Assigned` → throw `InvalidOperationException`.
-  4. Load descriptor via `registry.GetByVersion(instance.HumanTaskId, instance.HumanTaskVersion)`.
-  5. Validate outcome via `CompletionOutcomeMatcher.Resolve(descriptor, request.Outcome)`.
-  6. Set: `Status = Completed`, `Outcome = request.Outcome`, `Output = request.Result`, `CompletedAt = DateTimeOffset.UtcNow`.
-  7. `SaveAsync`.
-  8. Publish `HumanTaskCompletedEvent` with `HumanTaskInstanceId = instance.Id`, `HumanTaskId = instance.HumanTaskId`, `HumanTaskVersion = instance.HumanTaskVersion`, `Outcome = request.Outcome`, `Result = request.Result`.
-  9. Return instance.
+   4. Load descriptor via `registry.GetByVersion(instance.HumanTaskId, instance.HumanTaskVersion)`.
+   5. If descriptor is null → throw `InvalidOperationException` (descriptor was deleted/deprecated after instance creation).
+   6. Validate outcome via `CompletionOutcomeMatcher.Resolve(descriptor, request.Outcome)`.
+   7. Set: `Status = Completed`, `Outcome = request.Outcome`, `Output = request.Result`, `CompletedAt = DateTimeOffset.UtcNow`.
+   8. `SaveAsync`.
+   9. Publish `HumanTaskCompletedEvent` with `HumanTaskInstanceId = instance.Id`, `HumanTaskId = instance.HumanTaskId`, `HumanTaskVersion = instance.HumanTaskVersion`, `Outcome = request.Outcome`, `Result = request.Result`.
+  10. Return instance.
 
 - **CancelAsync**:
   1. Load instance.
@@ -269,6 +270,8 @@ Add to `CrestCreates.HumanTask.csproj`:
 #### 3.1 `HumanTaskStepExecutor`
 
 > **Interface stability**: Keep the existing `IWorkflowStepExecutor.ExecuteAsync` signature. Do not change `IWorkflowStepExecutor` unless compilation requires a minimal adjustment. The current signature is `ExecuteAsync(WorkflowExecutionContext context, CancellationToken ct)` — access the step via `context.Step`.
+>
+> **HumanTaskTarget stability**: Do not rename fields on `HumanTaskTarget`. Use the current shape from the codebase. Currently `target.HumanTask` is a `VersionedDescriptorRef<HumanTaskDescriptor>` with `.Id` and `.Version` properties. The sample code below using `target.HumanTask.Id` / `target.HumanTask.Version` is illustrative — match whatever the actual code provides.
 
 Constructor injection of `IHumanTaskRuntime`:
 
@@ -414,8 +417,8 @@ dotnet build    # zero errors
 dotnet test     # all HumanTask.Tests + Workflow.Tests pass
 ```
 
-- `CrestCreates.HumanTask.Tests`: all 7 new tests + 2 existing pass
-- `CrestCreates.Workflow.Tests`: 2 new tests + all 8 existing pass (total 10)
+- `CrestCreates.HumanTask.Tests`: all new Phase 5 tests (7 runtime + 1 store) + all existing tests pass
+- `CrestCreates.Workflow.Tests`: all new Phase 5 tests (2 tests) + all existing tests pass
 - `CrestCreates.Capability.Tests` not broken
 - `CrestCreates.Metadata.Tests` not broken
 
