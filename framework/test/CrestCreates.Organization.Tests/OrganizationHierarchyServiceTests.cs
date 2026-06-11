@@ -1,168 +1,179 @@
-using System;
-using System.Collections.Generic;
-using System.Reflection;
-using System.Threading.Tasks;
-using CrestCreates.Domain.Permission;
-using CrestCreates.Domain.Repositories.Permission;
-using CrestCreates.Infrastructure.Permission;
-using FluentAssertions;
-using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Options;
-using Moq;
-using Xunit;
+using CrestCreates.Organization;
+using CrestCreates.Organization.Abstractions;
 
 namespace CrestCreates.Organization.Tests;
 
 public class OrganizationHierarchyServiceTests
 {
-    private readonly Mock<IOrganizationRepository> _organizationRepositoryMock;
-    private readonly MemoryCache _cache;
-    private readonly OrganizationHierarchyService _service;
-
-    public OrganizationHierarchyServiceTests()
+    private static async Task<DefaultOrganizationHierarchyService> CreateServiceAsync(
+        List<OrganizationUnit> orgUnits,
+        List<UserOrganizationMembership>? memberships = null)
     {
-        _organizationRepositoryMock = new Mock<IOrganizationRepository>();
-        _cache = new MemoryCache(Options.Create(new MemoryCacheOptions()));
-        _service = new OrganizationHierarchyService(
-            _organizationRepositoryMock.Object,
-            _cache);
+        var store = new InMemoryOrganizationStore();
+        foreach (var unit in orgUnits)
+            await store.SaveOrganizationUnitAsync(unit);
+        if (memberships is not null)
+            foreach (var m in memberships)
+                await store.SaveMembershipAsync(m);
+        return new DefaultOrganizationHierarchyService(store);
     }
 
     [Fact]
-    public async Task GetOrganizationAndSubIdsAsync_WithNoChildren_ReturnsOnlySelf()
+    public async Task GetAncestors_ReturnsParentChain()
     {
-        var orgId = Guid.NewGuid();
-
-        _organizationRepositoryMock
-            .Setup(r => r.GetChildrenAsync(orgId, default))
-            .ReturnsAsync(new List<Domain.Permission.Organization>());
-
-        var result = await _service.GetOrganizationAndSubIdsAsync(orgId);
-
-        result.Should().HaveCount(1);
-        result.Should().Contain(orgId);
-    }
-
-    [Fact]
-    public async Task GetOrganizationAndSubIdsAsync_WithChildren_ReturnsSelfAndChildren()
-    {
-        var orgId = Guid.NewGuid();
-        var child1Id = Guid.NewGuid();
-        var child2Id = Guid.NewGuid();
-
-        var child1 = CreateOrganization(child1Id, orgId);
-        var child2 = CreateOrganization(child2Id, orgId);
-
-        _organizationRepositoryMock
-            .Setup(r => r.GetChildrenAsync(orgId, default))
-            .ReturnsAsync(new List<Domain.Permission.Organization> { child1, child2 });
-        _organizationRepositoryMock
-            .Setup(r => r.GetChildrenAsync(child1Id, default))
-            .ReturnsAsync(new List<Domain.Permission.Organization>());
-        _organizationRepositoryMock
-            .Setup(r => r.GetChildrenAsync(child2Id, default))
-            .ReturnsAsync(new List<Domain.Permission.Organization>());
-
-        var result = await _service.GetOrganizationAndSubIdsAsync(orgId);
-
-        result.Should().HaveCount(3);
-        result.Should().Contain(orgId);
-        result.Should().Contain(child1Id);
-        result.Should().Contain(child2Id);
-    }
-
-    [Fact]
-    public async Task GetOrganizationAndSubIdsAsync_WithNestedDescendants_ReturnsAll()
-    {
-        var rootId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
-        var grandchildId = Guid.NewGuid();
-
-        var child = CreateOrganization(childId, rootId);
-        var grandchild = CreateOrganization(grandchildId, childId);
-
-        _organizationRepositoryMock
-            .Setup(r => r.GetChildrenAsync(rootId, default))
-            .ReturnsAsync(new List<Domain.Permission.Organization> { child });
-        _organizationRepositoryMock
-            .Setup(r => r.GetChildrenAsync(childId, default))
-            .ReturnsAsync(new List<Domain.Permission.Organization> { grandchild });
-        _organizationRepositoryMock
-            .Setup(r => r.GetChildrenAsync(grandchildId, default))
-            .ReturnsAsync(new List<Domain.Permission.Organization>());
-
-        var result = await _service.GetOrganizationAndSubIdsAsync(rootId);
-
-        result.Should().HaveCount(3);
-        result.Should().ContainInOrder(rootId, childId, grandchildId);
-    }
-
-    [Fact]
-    public async Task GetOrganizationAndSubIdsAsync_UsesCache()
-    {
-        var orgId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
-
-        var child = CreateOrganization(childId, orgId);
-
-        _organizationRepositoryMock
-            .Setup(r => r.GetChildrenAsync(orgId, default))
-            .ReturnsAsync(new List<Domain.Permission.Organization> { child });
-        _organizationRepositoryMock
-            .Setup(r => r.GetChildrenAsync(childId, default))
-            .ReturnsAsync(new List<Domain.Permission.Organization>());
-
-        var firstResult = await _service.GetOrganizationAndSubIdsAsync(orgId);
-        var secondResult = await _service.GetOrganizationAndSubIdsAsync(orgId);
-
-        firstResult.Should().BeEquivalentTo(secondResult);
-        _organizationRepositoryMock.Verify(
-            r => r.GetChildrenAsync(orgId, default),
-            Times.Once);
-    }
-
-    [Fact]
-    public async Task GetOrganizationAndSubIdsAsync_CachesFor30Minutes()
-    {
-        var orgId = Guid.NewGuid();
-
-        _organizationRepositoryMock
-            .Setup(r => r.GetChildrenAsync(orgId, default))
-            .ReturnsAsync(new List<Domain.Permission.Organization>());
-
-        await _service.GetOrganizationAndSubIdsAsync(orgId);
-
-        var cacheKey = $"OrgHierarchy_{orgId}";
-        _cache.TryGetValue(cacheKey, out _).Should().BeTrue();
-
-        // Remove the cached entry and re-invoke to confirm it was the cache holding the value
-        _cache.Remove(cacheKey);
-        _cache.TryGetValue(cacheKey, out _).Should().BeFalse();
-
-        // Re-invoke to verify the service still works without cache
-        var result = await _service.GetOrganizationAndSubIdsAsync(orgId);
-        result.Should().Contain(orgId);
-    }
-
-    /// <summary>
-    /// Creates an <see cref="Organization"/> with the specified <paramref name="id"/> using reflection,
-    /// since <see cref="Organization"/> does not expose a constructor that sets <c>Id</c>.
-    /// </summary>
-    private static Domain.Permission.Organization CreateOrganization(Guid id, Guid? parentId)
-    {
-        var org = new Domain.Permission.Organization
+        var orgUnits = new List<OrganizationUnit>
         {
-            ParentId = parentId,
-            Code = $"ORG-{id.ToString()[..8]}",
-            Name = $"Org-{id.ToString()[..8]}",
-            IsActive = true
+            new() { Id = "root", Name = "Root" },
+            new() { Id = "dept", Name = "Department", ParentId = "root" },
+            new() { Id = "team", Name = "Team", ParentId = "dept" },
         };
+        var service = await CreateServiceAsync(orgUnits);
+        var ancestors = await service.GetAncestorsAsync("team");
+        ancestors.Should().HaveCount(2);
+        ancestors[0].Id.Should().Be("dept");
+        ancestors[1].Id.Should().Be("root");
+    }
 
-        typeof(Domain.Permission.Organization)
-            .BaseType! // Entity<Guid>
-            .GetProperty("Id", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
-            .SetValue(org, id);
+    [Fact]
+    public async Task GetAncestors_ReturnsEmpty_WhenNoParent()
+    {
+        var orgUnits = new List<OrganizationUnit> { new() { Id = "root", Name = "Root" } };
+        var service = await CreateServiceAsync(orgUnits);
+        var ancestors = await service.GetAncestorsAsync("root");
+        ancestors.Should().BeEmpty();
+    }
 
-        return org;
+    [Fact]
+    public async Task GetDescendants_ReturnsChildren()
+    {
+        var orgUnits = new List<OrganizationUnit>
+        {
+            new() { Id = "root", Name = "Root" },
+            new() { Id = "dept1", Name = "Dept1", ParentId = "root" },
+            new() { Id = "team1", Name = "Team1", ParentId = "dept1" },
+            new() { Id = "dept2", Name = "Dept2", ParentId = "root" },
+        };
+        var service = await CreateServiceAsync(orgUnits);
+        var descendants = await service.GetDescendantsAsync("root");
+        descendants.Should().HaveCount(3);
+        descendants.Select(d => d.Id).Should().Contain(["dept1", "team1", "dept2"]);
+    }
+
+    [Fact]
+    public async Task GetDescendants_ReturnsEmpty_WhenLeafNode()
+    {
+        var orgUnits = new List<OrganizationUnit> { new() { Id = "root", Name = "Root" }, new() { Id = "leaf", Name = "Leaf", ParentId = "root" } };
+        var service = await CreateServiceAsync(orgUnits);
+        var descendants = await service.GetDescendantsAsync("leaf");
+        descendants.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task IsDescendantOf_ReturnsTrue()
+    {
+        var orgUnits = new List<OrganizationUnit> { new() { Id = "root" }, new() { Id = "dept", ParentId = "root" }, new() { Id = "team", ParentId = "dept" } };
+        var service = await CreateServiceAsync(orgUnits);
+        (await service.IsDescendantOfAsync("team", "root")).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task IsDescendantOf_ReturnsFalse_WhenNotDescendant()
+    {
+        var orgUnits = new List<OrganizationUnit> { new() { Id = "root" }, new() { Id = "dept", ParentId = "root" } };
+        var service = await CreateServiceAsync(orgUnits);
+        (await service.IsDescendantOfAsync("root", "dept")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsDescendantOf_ReturnsFalse_WhenSame()
+    {
+        var service = await CreateServiceAsync(new List<OrganizationUnit> { new() { Id = "root" } });
+        (await service.IsDescendantOfAsync("root", "root")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetAncestors_DetectsCycle_ThrowsHierarchyException()
+    {
+        var orgUnits = new List<OrganizationUnit> { new() { Id = "a", ParentId = "c" }, new() { Id = "b", ParentId = "a" }, new() { Id = "c", ParentId = "b" } };
+        var service = await CreateServiceAsync(orgUnits);
+        await Assert.ThrowsAsync<OrganizationHierarchyException>(() => service.GetAncestorsAsync("a"));
+    }
+
+    [Fact]
+    public async Task GetDescendants_DetectsCycle_ThrowsHierarchyException()
+    {
+        var orgUnits = new List<OrganizationUnit> { new() { Id = "a", ParentId = "c" }, new() { Id = "b", ParentId = "a" }, new() { Id = "c", ParentId = "b" } };
+        var service = await CreateServiceAsync(orgUnits);
+        await Assert.ThrowsAsync<OrganizationHierarchyException>(() => service.GetDescendantsAsync("a"));
+    }
+
+    [Fact]
+    public async Task IsUserInOrganization_ReturnsTrue_WhenActiveMember()
+    {
+        var orgUnits = new List<OrganizationUnit> { new() { Id = "dept" } };
+        var memberships = new List<UserOrganizationMembership> { new() { Id = "m-1", UserId = "user-1", OrganizationUnitId = "dept", IsActive = true } };
+        var service = await CreateServiceAsync(orgUnits, memberships);
+        (await service.IsUserInOrganizationAsync("user-1", "dept")).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task IsUserInOrganization_ReturnsFalse_WhenInactiveMember()
+    {
+        var orgUnits = new List<OrganizationUnit> { new() { Id = "dept" } };
+        var memberships = new List<UserOrganizationMembership> { new() { Id = "m-1", UserId = "user-1", OrganizationUnitId = "dept", IsActive = false } };
+        var service = await CreateServiceAsync(orgUnits, memberships);
+        (await service.IsUserInOrganizationAsync("user-1", "dept")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsUserInOrganization_ReturnsFalse_WhenNotMember()
+    {
+        var orgUnits = new List<OrganizationUnit> { new() { Id = "dept" } };
+        var memberships = new List<UserOrganizationMembership> { new() { Id = "m-1", UserId = "user-1", OrganizationUnitId = "other", IsActive = true } };
+        var service = await CreateServiceAsync(orgUnits, memberships);
+        (await service.IsUserInOrganizationAsync("user-1", "dept")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsUserInDescendantOrganization_ReturnsTrue_WhenUserInDescendant()
+    {
+        var orgUnits = new List<OrganizationUnit> { new() { Id = "root" }, new() { Id = "dept", ParentId = "root" }, new() { Id = "team", ParentId = "dept" } };
+        var memberships = new List<UserOrganizationMembership> { new() { Id = "m-1", UserId = "user-1", OrganizationUnitId = "team", IsActive = true } };
+        var service = await CreateServiceAsync(orgUnits, memberships);
+        (await service.IsUserInDescendantOrganizationAsync("user-1", "root")).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task IsUserInDescendantOrganization_ReturnsFalse_WhenUserInUnrelatedOrg()
+    {
+        var orgUnits = new List<OrganizationUnit> { new() { Id = "root" }, new() { Id = "dept", ParentId = "root" }, new() { Id = "other" } };
+        var memberships = new List<UserOrganizationMembership> { new() { Id = "m-1", UserId = "user-1", OrganizationUnitId = "other", IsActive = true } };
+        var service = await CreateServiceAsync(orgUnits, memberships);
+        (await service.IsUserInDescendantOrganizationAsync("user-1", "root")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetAncestors_IsolatesByTenant()
+    {
+        var orgUnits = new List<OrganizationUnit>
+        {
+            new() { Id = "dept", TenantId = "t1", ParentId = "root-t1" },
+            new() { Id = "root-t1", TenantId = "t1" },
+            new() { Id = "dept", TenantId = "t2", ParentId = "root-t2" },
+            new() { Id = "root-t2", TenantId = "t2" },
+        };
+        var service = await CreateServiceAsync(orgUnits);
+        var ancestors = await service.GetAncestorsAsync("dept", "t1");
+        ancestors.Should().HaveCount(1);
+        ancestors[0].Id.Should().Be("root-t1");
+    }
+
+    [Fact]
+    public async Task GetAncestors_CrossTenantParent_Excluded()
+    {
+        var orgUnits = new List<OrganizationUnit> { new() { Id = "dept", TenantId = "t1", ParentId = "root-t2" }, new() { Id = "root-t2", TenantId = "t2" } };
+        var service = await CreateServiceAsync(orgUnits);
+        var ancestors = await service.GetAncestorsAsync("dept", "t1");
+        ancestors.Should().BeEmpty();
     }
 }

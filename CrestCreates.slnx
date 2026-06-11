@@ -48,6 +48,8 @@
     <Project Path="framework/src/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
     <Project Path="framework/src/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
     <Project Path="framework/src/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+    <Project Path="framework/src/CrestCreates.Organization.Abstractions/CrestCreates.Organization.Abstractions.csproj" />
+    <Project Path="framework/src/CrestCreates.Organization/CrestCreates.Organization.csproj" />
     <Project Path="framework/src/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
     <Project Path="framework/src/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
     <Project Path="framework/src/CrestCreates.Data.Abstractions/CrestCreates.Data.Abstractions.csproj" />
@@ -150,6 +152,7 @@
     <Project Path="framework/test/CrestCreates.VirtualFileSystem.Tests/CrestCreates.VirtualFileSystem.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Web.Tests/CrestCreates.Web.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Workflow.Tests/CrestCreates.Workflow.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.Organization.Tests/CrestCreates.Organization.Tests.csproj" />
   </Folder>
   <Folder Name="/src/tools/">
     <Project Path="framework/tools/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj" />

@@ -1,23 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
     <RootNamespace>CrestCreates.Organization.Tests</RootNamespace>
     <AssemblyName>CrestCreates.Organization.Tests</AssemblyName>
     <OutputType>Library</OutputType>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>disable</ImplicitUsings>
-    <IsPackable>false</IsPackable>
-    <IsTestProject>true</IsTestProject>
   </PropertyGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\src\CrestCreates.Domain\CrestCreates.Domain.csproj" />
-    <ProjectReference Include="..\..\src\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
-    <ProjectReference Include="..\..\src\CrestCreates.Authorization.Abstractions\CrestCreates.Authorization.Abstractions.csproj" />
-  </ItemGroup>
-
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
@@ -25,9 +14,11 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="coverlet.collector" />
-    <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Moq" />
   </ItemGroup>
-
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CrestCreates.Organization\CrestCreates.Organization.csproj" />
+    <ProjectReference Include="..\CrestCreates.TestBase\CrestCreates.TestBase.csproj" />
+  </ItemGroup>
 </Project>
