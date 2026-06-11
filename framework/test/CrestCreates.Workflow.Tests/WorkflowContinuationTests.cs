@@ -1,4 +1,6 @@
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.EventBus.Abstractions;
+using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
@@ -256,5 +258,180 @@ public class WorkflowContinuationTests
         await store.Invoking(s => s.GetByWaitingHumanTaskId("ht_01"))
             .Should().ThrowAsync<WorkflowCorrelationException>()
             .WithMessage("*Multiple suspended instances*");
+    }
+
+    [Fact]
+    public async Task HumanTaskStepExecutor_Creates_Instance_And_Returns_Suspended()
+    {
+        var mockRuntime = new Mock<IHumanTaskRuntime>();
+        mockRuntime
+            .Setup(r => r.CreateAsync(
+                It.IsAny<HumanTaskCreationRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((HumanTaskCreationRequest req, CancellationToken _) =>
+                new HumanTaskInstance
+                {
+                    Id = "inst-001",
+                    HumanTaskId = req.HumanTaskId,
+                    HumanTaskVersion = 1,
+                    Status = HumanTaskInstanceStatus.Created,
+                    WorkflowInstanceId = req.WorkflowInstanceId,
+                    WorkflowStepId = req.WorkflowStepId,
+                    Input = req.Input
+                });
+
+        var executor = new HumanTaskStepExecutor(mockRuntime.Object);
+
+        var descriptor = new WorkflowDescriptor
+        {
+            Id = "wf_01", Name = "test.wf", Version = 1,
+            State = DescriptorState.Active,
+            Steps = new List<WorkflowStep>
+            {
+                new()
+                {
+                    Id = "step_01", Name = "Approval",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht_01", 1)
+                    }
+                }
+            }
+        };
+        var instance = new WorkflowInstance
+        {
+            Workflow = new VersionedDescriptorRef<WorkflowDescriptor>("wf_01", 1),
+            Variables = { ["request"] = "test-data" }
+        };
+
+        var context = new WorkflowExecutionContext(descriptor, instance, descriptor.Steps[0]);
+        var result = await executor.ExecuteAsync(context, CancellationToken.None);
+
+        result.Status.Should().Be(StepExecutionStatus.Suspended);
+        result.WaitingHumanTaskId.Should().Be("inst-001");
+
+        mockRuntime.Verify(
+            r => r.CreateAsync(
+                It.Is<HumanTaskCreationRequest>(req =>
+                    req.HumanTaskId == "ht_01" &&
+                    req.WorkflowInstanceId == instance.InstanceId &&
+                    req.WorkflowStepId == "step_01" &&
+                    req.Input != null),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task Workflow_HumanTask_EndToEnd_Complete_Task_Resumes_Workflow()
+    {
+        // Build HumanTask descriptors with outcomes
+        var htDescriptor = new HumanTaskDescriptor
+        {
+            Id = "ht_01", Name = "approval.task", Version = 1,
+            Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("form_01", 1),
+            Outcomes = new[]
+            {
+                new CompletionOutcome { Condition = CompletionCondition.Approve },
+                new CompletionOutcome { Condition = CompletionCondition.Reject }
+            }
+        };
+        var htValidationEngine = new RegistryValidationEngine<HumanTaskDescriptor>(
+            Array.Empty<IRegistryValidator<HumanTaskDescriptor>>());
+        var htRegistry = new HumanTaskRegistry(htValidationEngine);
+        htRegistry.Build([new TestHumanTaskDescriptorProvider([htDescriptor])]);
+
+        var htStore = new InMemoryHumanTaskInstanceStore();
+        var htRuntime = new DefaultHumanTaskRuntime(htRegistry, htStore, NullLocalEventBus.Instance);
+
+        // Build Workflow with a HumanTask step followed by a Capability step
+        var pipeline = new CapturingCapabilityPipeline();
+        var wfRegistry = CreateRegistry(new WorkflowDescriptor
+        {
+            Id = "wf_01", Name = "e2e.wf", Version = 1,
+            State = DescriptorState.Active,
+            Steps = new List<WorkflowStep>
+            {
+                new()
+                {
+                    Id = "step_01", Name = "Approval",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht_01", 1)
+                    }
+                },
+                new()
+                {
+                    Id = "step_02", Name = "PostApproval",
+                    Target = new CapabilityTarget
+                    {
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_post", 1)
+                    }
+                }
+            }
+        });
+
+        var wfStore = new InMemoryWorkflowInstanceStore();
+        var stateMachine = new DefaultWorkflowStateMachine();
+        var eventPublisher = new WorkflowLifecycleEventPublisher();
+        var capExecutor = new CapabilityStepExecutor(pipeline);
+        var htExecutor = new HumanTaskStepExecutor(htRuntime);
+        var executorRegistry = new DefaultStepExecutorRegistry(capExecutor, htExecutor);
+        var executionRunner = new WorkflowExecutionRunner(
+            wfRegistry, executorRegistry, wfStore, stateMachine, eventPublisher);
+        var engine = new WorkflowEngine(wfRegistry, wfStore, executionRunner, eventPublisher);
+        var continuation = new WorkflowContinuationService(
+            wfStore, stateMachine, wfRegistry, executionRunner, eventPublisher);
+
+        // Start workflow → should suspend at HumanTask step
+        var instance = await engine.ExecuteAsync("wf_01");
+        instance.Status.Should().Be(WorkflowInstanceStatus.Suspended);
+        instance.WaitingHumanTaskId.Should().NotBeNullOrEmpty();
+        instance.StepIndex.Should().Be(0);
+
+        // Find the created HumanTaskInstance
+        var humanTaskInstance = await htStore.GetByIdAsync(instance.WaitingHumanTaskId!);
+        humanTaskInstance.Should().NotBeNull();
+        humanTaskInstance!.WorkflowInstanceId.Should().Be(instance.InstanceId);
+
+        // Complete the HumanTask
+        await htRuntime.CompleteAsync(new HumanTaskCompletionRequest
+        {
+            HumanTaskInstanceId = humanTaskInstance.Id,
+            Outcome = "Approve",
+            Result = new { Score = 95 }
+        });
+
+        // Manually trigger continuation (event bus is no-op in test)
+        await continuation.ContinueAsync(new WorkflowContinuationRequest
+        {
+            HumanTaskId = humanTaskInstance.Id,
+            Outcome = "Approve",
+            Result = new { Score = 95 }
+        });
+
+        // Workflow should complete
+        var final = await wfStore.GetAsync(instance.InstanceId);
+        final!.Status.Should().Be(WorkflowInstanceStatus.Completed);
+        final.WaitingHumanTaskId.Should().BeNull();
+        final.StepResults.Should().HaveCountGreaterThanOrEqualTo(3);
+        final.Variables["lastStepOutcome"].Should().Be("Approve");
+    }
+
+    private class TestHumanTaskDescriptorProvider : IDescriptorProvider<HumanTaskDescriptor>
+    {
+        private readonly List<HumanTaskDescriptor> _descriptors;
+        public TestHumanTaskDescriptorProvider(List<HumanTaskDescriptor> descriptors)
+            => _descriptors = descriptors;
+        public IReadOnlyList<HumanTaskDescriptor> GetDescriptors() => _descriptors;
+    }
+
+    private sealed class NullLocalEventBus : ILocalEventBus
+    {
+        public static readonly NullLocalEventBus Instance = new();
+        public Task PublishAsync(ILocalEvent @event, CancellationToken ct = default)
+            => Task.CompletedTask;
+        public Task PublishAsync<TEvent>(TEvent @event, CancellationToken ct = default)
+            where TEvent : ILocalEvent
+            => Task.CompletedTask;
     }
 }
