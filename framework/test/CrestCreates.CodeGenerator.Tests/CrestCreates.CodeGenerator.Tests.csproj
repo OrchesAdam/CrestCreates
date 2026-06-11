@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\CrestCreates.Domain\CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Application\CrestCreates.Application.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Metadata\CrestCreates.Metadata.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
   </ItemGroup>
   <ItemGroup>
