@@ -1,6 +1,6 @@
 # 统一元数据模型 — 架构总结文档
 
-> **日期:** 2026-06-11 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a + Phase 4b + Phase 4c 完成**
+> **日期:** 2026-06-11 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a + Phase 4b + Phase 4c + Phase 5 完成**
 
 ---
 
@@ -62,6 +62,33 @@ Phase 4c 关闭 Workflow Runtime 执行闭环——HumanTask 完成后自动恢�
 | `IWorkflowInstanceStore.GetByWaitingHumanTaskId()` | 按 HumanTaskId 查询暂停实例 (唯一性, suspended-only) |
 | `HumanTaskStepExecutor` (updated) | 通过 StepExecutionResult.WaitingHumanTaskId 返回 task ID |
 | `WorkflowEngine` (internal constructor) | 入口事件 (started) + Runner 委托 |
+
+### Phase 5: HumanTask Runtime Foundation
+
+Phase 5 实现 HumanTaskInstance 运行时，让 `HumanTaskStepExecutor` 创建真实的 `HumanTaskInstance`，并通过 `IHumanTaskRuntime.CompleteAsync` 发布 `HumanTaskCompletedEvent`，触发已有 Workflow continuation 闭环：
+
+| 组件 | 说明 |
+|------|------|
+| `HumanTaskInstance` | 运行时状态对象 — Id (Guid), HumanTaskId, HumanTaskVersion, Status, Assignee, Input/Output, Outcome, Timestamps |
+| `HumanTaskInstanceStatus` | Created / Assigned / Completed / Cancelled |
+| `HumanTaskCreationRequest` | 创建请求 — HumanTaskId, Version?, TenantId?, AssigneeUserId?, WorkflowInstanceId?, WorkflowStepId?, Input? |
+| `HumanTaskCompletionRequest` | 完成请求 — HumanTaskInstanceId, Outcome, Result? |
+| `IHumanTaskInstanceStore` | Instance 持久化 (upsert, GetByIdAsync, GetPendingByAssigneeAsync) |
+| `InMemoryHumanTaskInstanceStore` | ConcurrentDictionary 实现 (镜像 InMemoryWorkflowInstanceStore) |
+| `IHumanTaskRuntime` | 运行时入口 — CreateAsync, CompleteAsync, CancelAsync |
+| `DefaultHumanTaskRuntime` | Runtime 实现 — 解析 descriptor, 创建实例, 校验 outcome, 发布 HumanTaskCompletedEvent |
+| `CompletionOutcomeMatcher` | outcome 校验 helper — Condition.ToString() 匹配 (OrdinalIgnoreCase), CustomExpression 拒绝 |
+| `HumanTaskServiceCollectionExtensions.AddHumanTaskRuntime()` | DI 注册 — IHumanTaskInstanceStore + IHumanTaskRuntime |
+| `HumanTaskStepExecutor` (updated) | 构造函数注入 IHumanTaskRuntime, ExecuteAsync 调用 CreateAsync 创建真实 instance |
+| `HumanTaskCompletedEvent` (updated) | 新增 HumanTaskInstanceId + HumanTaskVersion 字段; 保持 HumanTaskId 作为 descriptor ID |
+| `HumanTaskCompletedWorkflowSubscriber` (updated) | 使用 evt.HumanTaskInstanceId 构造 WorkflowContinuationRequest |
+
+**关键不变量:**
+- `WaitingHumanTaskId` = `HumanTaskInstance.Id` (GUID), 非 descriptor ID
+- `WorkflowContinuationRequest.HumanTaskId` 接收 instance ID (legacy field name)
+- `HumanTaskCompletedEvent` 无 Workflow 字段 — 保持 HumanTask 域事件纯净
+- `HumanTaskDescriptor` 仍然是纯元数据 — 无运行时状态
+- Executor 返回 `StepExecutionResult`, 不修改 WorkflowInstance 状态
 
 ### Phase 4: Capability Runtime Consolidation
 
@@ -142,7 +169,11 @@ framework/src/
 ├── CrestCreates.Form/                       # FormRegistry : RegistryBase<FormDescriptor>
 ├── CrestCreates.HumanTask.Abstractions/     # HumanTaskDescriptor, CompletionOutcome, AssigneeStrategy, IHumanTaskRegistry,
 │                                           # HumanTaskCompletedEvent (implements ILocalEvent)
+│                                           # HumanTaskInstance, HumanTaskInstanceStatus, IHumanTaskInstanceStore,
+│                                           # IHumanTaskRuntime, HumanTaskCreationRequest, HumanTaskCompletionRequest (Phase 5)
 ├── CrestCreates.HumanTask/                  # HumanTaskRegistry : RegistryBase<HumanTaskDescriptor>
+│                                           # InMemoryHumanTaskInstanceStore, CompletionOutcomeMatcher,
+│                                           # DefaultHumanTaskRuntime, HumanTaskServiceCollectionExtensions (Phase 5)
 ├── CrestCreates.Workflow.Abstractions/      # WorkflowDescriptor, WorkflowStep, InteractionTarget (Capability/HumanTask/SubWorkflow),
 │                                           # IWorkflowEngine (ExecuteAsync only), IWorkflowRegistry,
 │                                           # IWorkflowStepExecutor, IWorkflowStepExecutorRegistry,
@@ -154,11 +185,11 @@ framework/src/
 ├── CrestCreates.Workflow/                   # WorkflowRegistry : RegistryBase<WorkflowDescriptor>,
 │                                           # WorkflowEngine (internal ctor, factory DI, delegates to IWorkflowExecutionRunner),
 │                                           # IWorkflowExecutionRunner (internal), WorkflowExecutionRunner (owns persistence + events),
-│                                           # CapabilityStepExecutor, HumanTaskStepExecutor (returns WaitingHumanTaskId),
+│                                           # CapabilityStepExecutor, HumanTaskStepExecutor (injects IHumanTaskRuntime, Phase 5),
 │                                           # DefaultStepExecutorRegistry, DefaultWorkflowStateMachine,
 │                                           # InMemoryWorkflowInstanceStore, WorkflowLifecycleEventPublisher (no-op),
 │                                           # WorkflowContinuationService (writes StepResult, advances cursor),
-│                                           # HumanTaskCompletedWorkflowSubscriber (ILocalEventHandler<HumanTaskCompletedEvent>),
+│                                           # HumanTaskCompletedWorkflowSubscriber (uses HumanTaskInstanceId, Phase 5),
 │                                           # WorkflowCompatibilityValidator (bootstrap)
 ├── CrestCreates.Draft.Abstractions/         # DraftRecord, IDraftStore, DraftStatus
 ├── CrestCreates.Draft/                      # InMemoryDraftStore, TenantIsolatedDraftStore
@@ -173,8 +204,8 @@ framework/test/
 ├── CrestCreates.Event.Tests/               (32)
 ├── CrestCreates.Exposure.Tests/            (12)
 ├── CrestCreates.Form.Tests/                (9)
-├── CrestCreates.HumanTask.Tests/           (9)
-└── CrestCreates.Workflow.Tests/            (47)
+├── CrestCreates.HumanTask.Tests/           (16)  ← Phase 5: +7 (Runtime 6 + Store 1)
+└── CrestCreates.Workflow.Tests/            (51)  ← Phase 5: +2 (Executor unit + E2E)
 ```
 
 ---
@@ -189,7 +220,7 @@ Descriptor = What can exist (Stateless)    vs    Instance = What is happening (S
 SchemaDescriptor                               DraftRecord
 CapabilityDescriptor                           CapabilityExecution
 EventDescriptor                                WorkflowInstance
-WorkflowDescriptor                             HumanTaskInstance
+WorkflowDescriptor                             HumanTaskInstance ✅ Phase 5
 FormDescriptor
 HumanTaskDescriptor
 ```
@@ -443,16 +474,17 @@ HumanTaskCompletedWorkflowSubscriber (ILocalEventHandler<HumanTaskCompletedEvent
     └── Bridges HumanTaskCompletedEvent → IWorkflowContinuationService.ContinueAsync()
 ```
 
-### 5.2 HumanTask suspend/resume 完整闭环
+### 5.2 HumanTask suspend/resume 完整闭环 (Phase 5 updated)
 
 ```
 Suspend (in WorkflowExecutionRunner):
-    HumanTaskStepExecutor → StepExecutionResult(Suspended, WaitingHumanTaskId="ht_01")
-    Runner: instance.WaitingHumanTaskId = stepResult.WaitingHumanTaskId
+    HumanTaskStepExecutor → IHumanTaskRuntime.CreateAsync() → HumanTaskInstance (Id = Guid)
+    HumanTaskStepExecutor → StepExecutionResult(Suspended, WaitingHumanTaskId=instance.Id)
+    Runner: instance.WaitingHumanTaskId = stepResult.WaitingHumanTaskId  (HumanTaskInstance.Id)
     Status = Suspended → save → publish workflow.suspended → return
 
 Resume (in WorkflowContinuationService):
-    Load instance via GetByWaitingHumanTaskId("ht_01")
+    Load instance via GetByWaitingHumanTaskId(humanTaskInstanceId)
     ValidateTransition(Suspended, Running)
     Write HumanTask StepResult (Status=Completed, Output=request.Result)
     Variables["lastStepOutcome"] = request.Outcome
@@ -461,6 +493,12 @@ Resume (in WorkflowContinuationService):
     Save → publish workflow.resumed
     executionRunner.RunAsync() → remaining steps
 ```
+
+**Phase 5 关键变化:**
+- `WaitingHumanTaskId` 现在是 `HumanTaskInstance.Id` (GUID)，不再是 descriptor ID
+- `HumanTaskStepExecutor` 通过 `IHumanTaskRuntime.CreateAsync()` 创建真实实例
+- `HumanTaskCompletedEvent.HumanTaskInstanceId` 携带 instance ID，subscriber 以此查找 workflow
+- `WorkflowContinuationRequest.HumanTaskId` 接收 instance ID (legacy field name)
 
 ### 5.3 生命周期事件
 
@@ -566,9 +604,9 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | Event.Tests | 32 | EventRegistry(16), Validator(4), DynamicRegistry(7), Descriptor(5) |
 | Exposure.Tests | 12 | AgentTool(5), MCPTool(3), CapabilityEndpoint(4) |
 | Form.Tests | 9 | Descriptor(5), Registry(4) |
-| HumanTask.Tests | 9 | Descriptor(6), Registry(3) |
-| Workflow.Tests | 47 | Executor Registry(5), Validator(14), Engine(13), Runtime(5), StateMachine(7), Continuation(3) |
-| **Total** | **~328** | |
+| HumanTask.Tests | 16 | Descriptor(6), Registry(3), **Store(1), Runtime(6)** |
+| Workflow.Tests | 51 | Executor Registry(5), Validator(14), Engine(13), Runtime(5), StateMachine(7), Continuation(5), **Executor(1), E2E(1)** |
+| **Total** | **~353** | |
 
 ---
 
@@ -673,4 +711,16 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 95 | ContinuationService 写入 HumanTask StepResult 后推进游标 — StepResults 完整 | ✅ Phase 4c |
 | 96 | WaitingHumanTaskId suspend 设置, resume 清空 — GetByWaitingHumanTaskId 唯一性 + suspended-only | ✅ Phase 4c |
 | 97 | WorkflowEngine internal ctor + factory DI — IWorkflowExecutionRunner 不泄漏到 public API | ✅ Phase 4c |
-| 98 | 测试: 47 个 Workflow.Tests（+7 StateMachine + 3 Continuation） | ✅ Phase 4c |
+| 98 | 测试: 47->51 个 Workflow.Tests（+1 Executor +1 E2E HumanTask-complete-resume） | ✅ Phase 5 |
+| 99 | HumanTaskInstance 运行时对象 — Id (Guid), HumanTaskId, HumanTaskVersion, Status, Assignee, Input/Output, timestamps | ✅ Phase 5 |
+| 100 | IHumanTaskInstanceStore — ConcurrentDictionary upsert, GetPendingByAssigneeAsync (Created\|Assigned) | ✅ Phase 5 |
+| 101 | IHumanTaskRuntime — CreateAsync (descriptor resolve + instance create), CompleteAsync (outcome validate + event publish), CancelAsync | ✅ Phase 5 |
+| 102 | CompletionOutcomeMatcher — Condition.ToString() 匹配 (OrdinalIgnoreCase), 拒绝 CustomExpression | ✅ Phase 5 |
+| 103 | HumanTaskStepExecutor 构造函数注入 IHumanTaskRuntime — 创建真实 HumanTaskInstance | ✅ Phase 5 |
+| 104 | HumanTaskCompletedEvent 新增 HumanTaskInstanceId + HumanTaskVersion; 保持 HumanTaskId 作为 descriptor ID | ✅ Phase 5 |
+| 105 | HumanTaskCompletedWorkflowSubscriber 使用 evt.HumanTaskInstanceId — 按 instance ID 查找 workflow | ✅ Phase 5 |
+| 106 | WaitingHumanTaskId = HumanTaskInstance.Id (GUID) — 不再使用 descriptor ID | ✅ Phase 5 |
+| 107 | HumanTaskServiceCollectionExtensions.AddHumanTaskRuntime() — DI 注册 store + runtime | ✅ Phase 5 |
+| 108 | HumanTask 运行时发布 HumanTaskCompletedEvent; Workflow 不直接完成 HumanTask — 事件驱动 continuation | ✅ Phase 5 |
+| 109 | HumanTaskCompletedEvent 无 Workflow 字段 — Workflow correlation 仅存于 HumanTaskInstance/creation request | ✅ Phase 5 |
+| 110 | HumanTaskDescriptor 仍然是纯元数据 — 不持有 instance state | ✅ Phase 5 |

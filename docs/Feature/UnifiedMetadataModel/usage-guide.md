@@ -1,7 +1,7 @@
 # 统一元数据模型 — 使用指南
 
 > 本文档面向 CrestCreates 模块开发者，介绍如何使用统一元数据模型声明和执行业务能力。
-> *更新于 Phase 4c (2026-06-11): Workflow 闭环完成 — IWorkflowContinuationService, lifecycle events, HumanTaskCompletedEvent integration*
+> *更新于 Phase 5 (2026-06-11): HumanTask Runtime Foundation — IHumanTaskRuntime, HumanTaskInstance, HumanTaskCompletedEvent 增强*
 
 ---
 
@@ -246,6 +246,56 @@ public class ManagerApprovalProvider : IHumanTaskDescriptorProvider
 }
 ```
 
+### 4.3 HumanTask 运行时操作 (Phase 5 新增)
+
+创建和完成 HumanTaskInstance：
+
+```csharp
+// 注入 IHumanTaskRuntime
+var runtime = serviceProvider.GetRequiredService<IHumanTaskRuntime>();
+
+// 创建 HumanTaskInstance
+var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
+{
+    HumanTaskId = "ht_manager_approval",
+    Version = 1,
+    AssigneeUserId = "user_001",
+    WorkflowInstanceId = "wf_abc123",     // 可选: Workflow correlation
+    WorkflowStepId = "step_approval",
+    Input = new { Reason = "员工入职审批" }
+});
+
+// instance.Id → Guid (e.g., "a1b2c3d4")
+// instance.Status → Assigned (因为指定了 AssigneeUserId)
+// instance.HumanTaskVersion → 1 (pin descriptor version)
+
+// 完成 HumanTaskInstance
+var completed = await runtime.CompleteAsync(new HumanTaskCompletionRequest
+{
+    HumanTaskInstanceId = instance.Id,
+    Outcome = "Approve",                   // 必须匹配 CompletionOutcome.Condition
+    Result = new { Comment = "批准" }
+});
+
+// completed.Status → Completed
+// 自动发布 HumanTaskCompletedEvent → 触发 Workflow continuation
+
+// 取消 HumanTaskInstance
+var cancelled = await runtime.CancelAsync(instance.Id, "申请已撤回");
+// cancelled.Status → Cancelled
+
+// 查询待处理任务
+var store = serviceProvider.GetRequiredService<IHumanTaskInstanceStore>();
+var pending = await store.GetPendingByAssigneeAsync("user_001");
+// 返回 Status = Created | Assigned 的任务
+```
+
+**关键约束:**
+- `HumanTaskDescriptor` 是纯元数据 — 不包含运行时状态
+- `HumanTaskInstance` 是运行时状态 — pin descriptor version
+- `HumanTaskCompletedEvent` 携带 `HumanTaskInstanceId` (instance ID)，不携带 Workflow 字段
+- Workflow continuation 通过 `WorkflowInstance.WaitingHumanTaskId` = `HumanTaskInstance.Id` 关联
+
 ---
 
 ## 5. 注册和配置
@@ -266,6 +316,9 @@ services.AddCapabilityPipeline(options =>
 services.AddInMemoryCapabilityAudit();  // 切换到内存审计存储
 
 services.AddWorkflowEngine();
+
+// Phase 5: HumanTask Runtime
+services.AddHumanTaskRuntime();  // 注册 IHumanTaskInstanceStore + IHumanTaskRuntime
 ```
 
 **Pipeline 中间件顺序（由内到外）：**
@@ -582,6 +635,8 @@ services.AddSingleton<MyRegistry>();
 | Phase 4b 实现计划 | `docs/superpowers/plans/2026-06-10-phase-4b-workflow-runtime-foundation.md` |
 | Phase 4c 设计规格书 | `docs/superpowers/specs/2026-06-10-phase-4c-workflow-runtime-closure-design.md` |
 | Phase 4c 实现计划 | `docs/superpowers/plans/2026-06-10-phase-4c-workflow-runtime-closure.md` |
+| Phase 5 设计规格书 | `docs/superpowers/specs/2026-06-11-human-task-runtime-foundation-design.md` |
+| Phase 5 实现计划 | `docs/superpowers/plans/2026-06-11-human-task-runtime-foundation.md` |
 | 架构总结 | `docs/Feature/UnifiedMetadataModel/2026-06-09-unified-metadata-model-architecture-summary.md` |
 
 ### 关键接口一览
@@ -617,6 +672,8 @@ services.AddSingleton<MyRegistry>();
 | `IEventDescriptorProvider` | 声明 Event | Event.Abstractions |
 | `IFormDescriptorProvider` | 声明 Form | Form.Abstractions |
 | `IHumanTaskDescriptorProvider` | 声明 HumanTask | HumanTask.Abstractions |
+| `IHumanTaskRuntime` | HumanTaskInstance 运行时 (Phase 5) | HumanTask.Abstractions |
+| `IHumanTaskInstanceStore` | HumanTaskInstance 持久化 (Phase 5) | HumanTask.Abstractions |
 | `IWorkflowDescriptorProvider` | 声明 Workflow | Workflow.Abstractions |
 | `IWorkflowEngine` | 执行 Workflow (ExecuteAsync only) | Workflow.Abstractions |
 | `IWorkflowStepExecutor` | 单步执行器 (Phase 4b) | Workflow.Abstractions |
