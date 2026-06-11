@@ -36,7 +36,11 @@ public class WorkflowRuntimeTests
         var htExecutor = new HumanTaskStepExecutor();
         var executorRegistry = new DefaultStepExecutorRegistry(capExecutor, htExecutor);
         var store = new InMemoryWorkflowInstanceStore();
-        return new WorkflowEngine(registry, executorRegistry, store);
+        var stateMachine = new DefaultWorkflowStateMachine();
+        var eventPublisher = new WorkflowLifecycleEventPublisher();
+        var executionRunner = new WorkflowExecutionRunner(
+            registry, executorRegistry, store, stateMachine, eventPublisher);
+        return new WorkflowEngine(registry, store, executionRunner, eventPublisher);
     }
 
     private class MockCapabilityPipeline : ICapabilityPipeline

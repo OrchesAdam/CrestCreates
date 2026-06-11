@@ -1,0 +1,75 @@
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Workflow.Abstractions;
+
+namespace CrestCreates.Workflow;
+
+internal sealed class WorkflowContinuationService : IWorkflowContinuationService
+{
+    private readonly IWorkflowInstanceStore _store;
+    private readonly IWorkflowStateMachine _stateMachine;
+    private readonly IWorkflowRegistry _registry;
+    private readonly IWorkflowExecutionRunner _executionRunner;
+    private readonly IWorkflowLifecycleEventPublisher _eventPublisher;
+
+    public WorkflowContinuationService(
+        IWorkflowInstanceStore store,
+        IWorkflowStateMachine stateMachine,
+        IWorkflowRegistry registry,
+        IWorkflowExecutionRunner executionRunner,
+        IWorkflowLifecycleEventPublisher eventPublisher)
+    {
+        _store = store;
+        _stateMachine = stateMachine;
+        _registry = registry;
+        _executionRunner = executionRunner;
+        _eventPublisher = eventPublisher;
+    }
+
+    public async Task ContinueAsync(
+        WorkflowContinuationRequest request, CancellationToken ct = default)
+    {
+        var instance = await _store.GetByWaitingHumanTaskId(request.HumanTaskId, ct)
+            .ConfigureAwait(false);
+        if (instance == null)
+            throw new InvalidOperationException(
+                $"No suspended workflow instance waiting for HumanTask '{request.HumanTaskId}'.");
+
+        if (instance.Status != WorkflowInstanceStatus.Suspended)
+            throw new InvalidOperationException(
+                $"Instance '{instance.InstanceId}' is not Suspended (status: {instance.Status}).");
+
+        _stateMachine.ValidateTransition(
+            WorkflowInstanceStatus.Suspended, WorkflowInstanceStatus.Running);
+
+        var descriptor = _registry.GetById(instance.Workflow.Id);
+        if (descriptor == null)
+            throw new InvalidOperationException($"Workflow '{instance.Workflow.Id}' not found.");
+
+        var currentStep = descriptor.Steps[instance.StepIndex];
+        instance.StepResults.Add(new WorkflowStepResult
+        {
+            StepId = currentStep.Id,
+            StepName = currentStep.Name,
+            Status = StepExecutionStatus.Completed,
+            Output = request.Result,
+            ExecutedAt = DateTimeOffset.UtcNow
+        });
+
+        instance.Variables["lastStepOutcome"] = request.Outcome;
+        instance.Variables["lastStepResult"] = request.Result;
+        instance.StepIndex++;
+        instance.WaitingHumanTaskId = null;
+        instance.Status = WorkflowInstanceStatus.Running;
+        await _store.SaveAsync(instance, ct).ConfigureAwait(false);
+
+        await _eventPublisher.PublishAsync(new WorkflowLifecycleEvent
+        {
+            EventType = "workflow.resumed",
+            WorkflowInstanceId = instance.InstanceId,
+            WorkflowId = descriptor.Id,
+            Status = WorkflowInstanceStatus.Running
+        }, ct).ConfigureAwait(false);
+
+        await _executionRunner.RunAsync(instance, ct).ConfigureAwait(false);
+    }
+}

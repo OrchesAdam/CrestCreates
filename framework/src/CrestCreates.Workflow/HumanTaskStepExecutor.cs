@@ -7,9 +7,10 @@ public sealed class HumanTaskStepExecutor : IWorkflowStepExecutor
     public Task<StepExecutionResult> ExecuteAsync(
         WorkflowExecutionContext context, CancellationToken ct)
     {
-        // Placeholder: produces Suspended result.
-        // Phase 5/6 HumanTask Runtime will replace with actual task creation.
+        var target = (HumanTaskTarget)context.Step.Target;
         return Task.FromResult(
-            new StepExecutionResult(StepExecutionStatus.Suspended));
+            new StepExecutionResult(
+                StepExecutionStatus.Suspended,
+                WaitingHumanTaskId: target.HumanTask.Id));
     }
 }

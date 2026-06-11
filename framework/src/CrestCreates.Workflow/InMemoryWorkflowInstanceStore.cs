@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using CrestCreates.Workflow.Abstractions;
 
 namespace CrestCreates.Workflow;
@@ -17,5 +18,20 @@ public sealed class InMemoryWorkflowInstanceStore : IWorkflowInstanceStore
     {
         _instances.TryGetValue(instanceId, out var instance);
         return Task.FromResult(instance);
+    }
+
+    public Task<WorkflowInstance?> GetByWaitingHumanTaskId(
+        string humanTaskId, CancellationToken ct = default)
+    {
+        var matches = _instances.Values
+            .Where(i => i.Status == WorkflowInstanceStatus.Suspended &&
+                        i.WaitingHumanTaskId == humanTaskId)
+            .ToList();
+
+        if (matches.Count > 1)
+            throw new WorkflowCorrelationException(
+                $"Multiple suspended instances found for HumanTask '{humanTaskId}'.");
+
+        return Task.FromResult(matches.SingleOrDefault());
     }
 }

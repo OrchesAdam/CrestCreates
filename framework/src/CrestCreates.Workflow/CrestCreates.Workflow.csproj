@@ -13,5 +13,9 @@
     <ProjectReference Include="..\CrestCreates.Draft.Abstractions\CrestCreates.Draft.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Schema.Abstractions\CrestCreates.Schema.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.HumanTask.Abstractions\CrestCreates.HumanTask.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.EventBus.Abstractions\CrestCreates.EventBus.Abstractions.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.Workflow.Tests" />
   </ItemGroup>
 </Project>
