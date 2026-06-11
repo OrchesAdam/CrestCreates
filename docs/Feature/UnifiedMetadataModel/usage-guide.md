@@ -1,7 +1,7 @@
 # 统一元数据模型 — 使用指南
 
 > 本文档面向 CrestCreates 模块开发者，介绍如何使用统一元数据模型声明和执行业务能力。
-> *更新于 Phase 4b (2026-06-10): Workflow 运行时引擎重构 — IWorkflowStepExecutor 架构, IWorkflowInstanceStore, bootstrap validation*
+> *更新于 Phase 4c (2026-06-11): Workflow 闭环完成 — IWorkflowContinuationService, lifecycle events, HumanTaskCompletedEvent integration*
 
 ---
 
@@ -580,6 +580,8 @@ services.AddSingleton<MyRegistry>();
 | Phase 4a 实现计划 | `docs/superpowers/plans/2026-06-10-phase-4a-main-chain-closure.md` |
 | Phase 4b 设计规格书 | `docs/superpowers/specs/2026-06-10-phase-4b-workflow-runtime-foundation-design.md` |
 | Phase 4b 实现计划 | `docs/superpowers/plans/2026-06-10-phase-4b-workflow-runtime-foundation.md` |
+| Phase 4c 设计规格书 | `docs/superpowers/specs/2026-06-10-phase-4c-workflow-runtime-closure-design.md` |
+| Phase 4c 实现计划 | `docs/superpowers/plans/2026-06-10-phase-4c-workflow-runtime-closure.md` |
 | 架构总结 | `docs/Feature/UnifiedMetadataModel/2026-06-09-unified-metadata-model-architecture-summary.md` |
 
 ### 关键接口一览
@@ -619,7 +621,10 @@ services.AddSingleton<MyRegistry>();
 | `IWorkflowEngine` | 执行 Workflow (ExecuteAsync only) | Workflow.Abstractions |
 | `IWorkflowStepExecutor` | 单步执行器 (Phase 4b) | Workflow.Abstractions |
 | `IWorkflowStepExecutorRegistry` | 按 target 解析 executor (Phase 4b) | Workflow.Abstractions |
-| `IWorkflowInstanceStore` | 工作流实例持久化 (upsert, Phase 4b) | Workflow.Abstractions |
+| `IWorkflowInstanceStore` | 工作流实例持久化 (upsert, Phase 4b/4c: +GetByWaitingHumanTaskId) | Workflow.Abstractions |
+| `IWorkflowStateMachine` | 状态转换验证 (Phase 4c) | Workflow.Abstractions |
+| `IWorkflowLifecycleEventPublisher` | 生命周期事件 (Phase 4c) | Workflow.Abstractions |
+| `IWorkflowContinuationService` | 运行时 continuation 基础设施 (Phase 4c) | Workflow.Abstractions |
 | `IDraftStore` | Draft CRUD | Draft.Abstractions |
 
 所有 Provider 接口由 source generator 自动发现并注册，无需手动调用 Registry。

@@ -1,6 +1,6 @@
 # 统一元数据模型 — 架构总结文档
 
-> **日期:** 2026-06-10 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a + Phase 4b 完成**
+> **日期:** 2026-06-11 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a + Phase 4b + Phase 4c 完成**
 
 ---
 
@@ -44,6 +44,24 @@ Phase 4b 将 `WorkflowEngine` 从单体执行器重构为基于 `IWorkflowStepEx
 | `StepExecutionResult` / `StepExecutionStatus` | 运行时状态模型 — Completed / Suspended / Failed |
 | `WorkflowExecutionContext` | 纯状态传递对象 — 无 IServiceProvider |
 | `IWorkflowEngine` (revised) | ExecuteAsync only，workflowId 参数，ResumeAsync 移除 |
+
+### Phase 4c: Workflow Runtime Closure
+
+Phase 4c 关闭 Workflow Runtime 执行闭环——HumanTask 完成后自动恢复 Workflow 执行：
+
+| 组件 | 说明 |
+|------|------|
+| `IWorkflowExecutionRunner` | 共享执行核心 — Engine/ContinuationService 共用 step loop、持久化、suspended/completed/failed 事件 |
+| `IWorkflowContinuationService` | 内部运行时基础设施 — 加载暂停实例、验证状态转换、写入 HumanTask StepResult、推进游标、恢复执行 |
+| `IWorkflowStateMachine` / `DefaultWorkflowStateMachine` | 纯函数状态验证 — Running↔Suspended 等 4 种有效转换 |
+| `IWorkflowLifecycleEventPublisher` | 5 种生命周期事件 — started/suspended/resumed/completed/failed (after save) |
+| `HumanTaskCompletedWorkflowSubscriber` | Event-driven bridge — 订阅 HumanTaskCompletedEvent → WorkflowContinuationService |
+| `WorkflowContinuationRequest` | 继续请求 — 包含 HumanTaskId、Outcome、Result |
+| `HumanTaskCompletedEvent` (implements ILocalEvent) | HumanTask 域事件 — 无 Workflow 字段 |
+| `WorkflowInstance.WaitingHumanTaskId` | 暂停时的 HumanTask 关联 — suspend 设置、resume 清空 |
+| `IWorkflowInstanceStore.GetByWaitingHumanTaskId()` | 按 HumanTaskId 查询暂停实例 (唯一性, suspended-only) |
+| `HumanTaskStepExecutor` (updated) | 通过 StepExecutionResult.WaitingHumanTaskId 返回 task ID |
+| `WorkflowEngine` (internal constructor) | 入口事件 (started) + Runner 委托 |
 
 ### Phase 4: Capability Runtime Consolidation
 
@@ -122,17 +140,25 @@ framework/src/
 │                                           # DynamicEventRegistry, EventRegistryBootstrapper
 ├── CrestCreates.Form.Abstractions/          # FormDescriptor, FormFieldDescriptor, IFormRegistry
 ├── CrestCreates.Form/                       # FormRegistry : RegistryBase<FormDescriptor>
-├── CrestCreates.HumanTask.Abstractions/     # HumanTaskDescriptor, CompletionOutcome, AssigneeStrategy, IHumanTaskRegistry
+├── CrestCreates.HumanTask.Abstractions/     # HumanTaskDescriptor, CompletionOutcome, AssigneeStrategy, IHumanTaskRegistry,
+│                                           # HumanTaskCompletedEvent (implements ILocalEvent)
 ├── CrestCreates.HumanTask/                  # HumanTaskRegistry : RegistryBase<HumanTaskDescriptor>
 ├── CrestCreates.Workflow.Abstractions/      # WorkflowDescriptor, WorkflowStep, InteractionTarget (Capability/HumanTask/SubWorkflow),
 │                                           # IWorkflowEngine (ExecuteAsync only), IWorkflowRegistry,
 │                                           # IWorkflowStepExecutor, IWorkflowStepExecutorRegistry,
 │                                           # StepExecutionResult, StepExecutionStatus, WorkflowExecutionContext,
-│                                           # IWorkflowInstanceStore, WorkflowStepResult
+│                                           # IWorkflowInstanceStore, WorkflowStepResult,
+│                                           # IWorkflowStateMachine, IWorkflowLifecycleEventPublisher,
+│                                           # WorkflowLifecycleEvent, IWorkflowContinuationService,
+│                                           # WorkflowContinuationRequest, WorkflowCorrelationException
 ├── CrestCreates.Workflow/                   # WorkflowRegistry : RegistryBase<WorkflowDescriptor>,
-│                                           # WorkflowEngine (internally refactored — registry-based dispatch),
-│                                           # CapabilityStepExecutor, HumanTaskStepExecutor,
-│                                           # DefaultStepExecutorRegistry, InMemoryWorkflowInstanceStore,
+│                                           # WorkflowEngine (internal ctor, factory DI, delegates to IWorkflowExecutionRunner),
+│                                           # IWorkflowExecutionRunner (internal), WorkflowExecutionRunner (owns persistence + events),
+│                                           # CapabilityStepExecutor, HumanTaskStepExecutor (returns WaitingHumanTaskId),
+│                                           # DefaultStepExecutorRegistry, DefaultWorkflowStateMachine,
+│                                           # InMemoryWorkflowInstanceStore, WorkflowLifecycleEventPublisher (no-op),
+│                                           # WorkflowContinuationService (writes StepResult, advances cursor),
+│                                           # HumanTaskCompletedWorkflowSubscriber (ILocalEventHandler<HumanTaskCompletedEvent>),
 │                                           # WorkflowCompatibilityValidator (bootstrap)
 ├── CrestCreates.Draft.Abstractions/         # DraftRecord, IDraftStore, DraftStatus
 ├── CrestCreates.Draft/                      # InMemoryDraftStore, TenantIsolatedDraftStore
@@ -148,7 +174,7 @@ framework/test/
 ├── CrestCreates.Exposure.Tests/            (12)
 ├── CrestCreates.Form.Tests/                (9)
 ├── CrestCreates.HumanTask.Tests/           (9)
-└── CrestCreates.Workflow.Tests/            (37)
+└── CrestCreates.Workflow.Tests/            (47)
 ```
 
 ---
@@ -389,53 +415,64 @@ public sealed class CapabilityExecutionContext
 
 ---
 
-## 5. Workflow 运行时引擎 (Phase 4b — Refactored)
+## 5. Workflow 运行时引擎 (Phase 4b Foundation + Phase 4c Closure)
 
-### 5.1 目标架构
-
-Phase 4b 将 `WorkflowEngine` 从单体执行器重构为基于 registry 的 delegate 架构：
+### 5.1 Phase 4c 目标架构
 
 ```
-IWorkflowEngine (ExecuteAsync only — ResumeAsync removed)
+IWorkflowEngine (ExecuteAsync only — 不变)
     │
-    └── WorkflowEngine (internally refactored)
+    └── WorkflowEngine (internal ctor, factory DI)
           │
-          ├── IWorkflowStepExecutorRegistry  ── Resolves executor by InteractionTarget subtype
-          │     ├── CapabilityStepExecutor    ── ICapabilityPipeline (pure — returns Variables, never mutates instance)
-          │     └── HumanTaskStepExecutor     ── Returns Suspended (placeholder, Phase 5/6 replaces)
-          │
-          ├── IWorkflowInstanceStore
-          │     └── SaveAsync (upsert) / GetAsync
-          │
-          └── WorkflowCompatibilityValidator  ── Bootstrap validation (fail-fast at startup)
+          ├── IWorkflowExecutionRunner (internal)  ── 共享执行核心 (Engine + ContinuationService)
+          │     └── Owns: step loop, persistence, suspended/completed/failed events
+          ├── IWorkflowStateMachine                 ── ValidateTransition(from, to)
+          ├── IWorkflowLifecycleEventPublisher      ── 5 种生命周期事件 (after save)
+          ├── IWorkflowStepExecutorRegistry
+          └── IWorkflowInstanceStore                ── + GetByWaitingHumanTaskId()
+
+IWorkflowContinuationService
+    │
+    ├── store.GetByWaitingHumanTaskId() → load Suspended instance
+    ├── stateMachine.ValidateTransition(Suspended, Running)
+    ├── Write HumanTask StepResult → advance cursor → clear WaitingHumanTaskId
+    ├── Publish workflow.resumed
+    └── executionRunner.RunAsync() → remaining steps
+
+HumanTaskCompletedWorkflowSubscriber (ILocalEventHandler<HumanTaskCompletedEvent>)
+    └── Bridges HumanTaskCompletedEvent → IWorkflowContinuationService.ContinueAsync()
 ```
 
-### 5.2 核心运行时状态模型
+### 5.2 HumanTask suspend/resume 完整闭环
 
 ```
-Previous:  bool IsSuccess
+Suspend (in WorkflowExecutionRunner):
+    HumanTaskStepExecutor → StepExecutionResult(Suspended, WaitingHumanTaskId="ht_01")
+    Runner: instance.WaitingHumanTaskId = stepResult.WaitingHumanTaskId
+    Status = Suspended → save → publish workflow.suspended → return
 
-Phase 4b:  StepExecutionStatus
-              ├── Completed  — step finished, continue
-              ├── Suspended  — HumanTask pause (engine → WorkflowInstanceStatus.Suspended)
-              └── Failed     — known business failure (Skip or Fail based on OnError)
+Resume (in WorkflowContinuationService):
+    Load instance via GetByWaitingHumanTaskId("ht_01")
+    ValidateTransition(Suspended, Running)
+    Write HumanTask StepResult (Status=Completed, Output=request.Result)
+    Variables["lastStepOutcome"] = request.Outcome
+    Variables["lastStepResult"] = request.Result
+    StepIndex++ → WaitingHumanTaskId = null → Status = Running
+    Save → publish workflow.resumed
+    executionRunner.RunAsync() → remaining steps
 ```
 
-### 5.3 引擎算法（仅支持线性 Workflow）
+### 5.3 生命周期事件
 
-```
-ExecuteAsync(workflowId, inputVariables, ct)
-  → Resolve WorkflowDescriptor (registry.GetById)
-  → Create WorkflowInstance (WorkflowInstanceStatus.Running, StepIndex=0)
-  → For each step:
-      ├─ Resolve executor via IWorkflowStepExecutorRegistry.Resolve(target)
-      ├─ Execute: executor.ExecuteAsync(context, ct)
-      │   ├─ Completed → record WorkflowStepResult, apply Variables, continue
-      │   ├─ Suspended → record WorkflowStepResult(Status=Suspended), save instance, return
-      │   └─ Failed → check OnError: Skip→continue / Fail→save Failed, return
-      └─ Exception → catch, record as Failed(infrastructure error), save, return
-  → Completed → save instance, return
-```
+| 事件 | 触发时机 | 负责组件 |
+|------|----------|----------|
+| `workflow.started` | 创建实例后、Status=Running、保存成功、首次执行前 | Engine |
+| `workflow.suspended` | HumanTask 步骤返回 Suspended、保存成功后、返回前 | Runner |
+| `workflow.resumed` | Suspended→Running 验证通过、保存成功后、执行前 | ContinuationService |
+| `workflow.completed` | 所有步骤完成、Status=Completed、保存成功后 | Runner |
+| `workflow.failed` | 步骤失败、Status=Failed、保存成功后 | Runner |
+
+**所有事件在 WorkflowInstance 成功保存后发布。**
 
 ### 5.4 架构不变量
 
@@ -530,8 +567,8 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | Exposure.Tests | 12 | AgentTool(5), MCPTool(3), CapabilityEndpoint(4) |
 | Form.Tests | 9 | Descriptor(5), Registry(4) |
 | HumanTask.Tests | 9 | Descriptor(6), Registry(3) |
-| Workflow.Tests | 37 | Executor Registry(5), Validator(14), Engine(13), Runtime(5) |
-| **Total** | **~318** | |
+| Workflow.Tests | 47 | Executor Registry(5), Validator(14), Engine(13), Runtime(5), StateMachine(7), Continuation(3) |
+| **Total** | **~328** | |
 
 ---
 
@@ -626,3 +663,14 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 85 | IWorkflowEngine 移除 ResumeAsync — 仅保留 ExecuteAsync | ✅ Phase 4b |
 | 86 | Metadata retained, execution paths removed — SubWorkflow/Retry/Compensate/Transition | ✅ Phase 4b |
 | 87 | 测试: 37 个 Workflow.Tests（含 validator、executor registry、runtime integration） | ✅ Phase 4b |
+| 88 | IWorkflowExecutionRunner 是共享执行核心 — Engine/ContinuationService 共用 step loop + 持久化 + 事件 | ✅ Phase 4c |
+| 89 | IWorkflowContinuationService — 运行时管理的 continuation 基础设施，非公共 API | ✅ Phase 4c |
+| 90 | IWorkflowStateMachine — 纯函数 ValidateTransition(from, to)，4 种有效转换 | ✅ Phase 4c |
+| 91 | 所有 lifecycle event 在 WorkflowInstance 成功保存后发布 | ✅ Phase 4c |
+| 92 | HumanTaskCompletedEvent 无 Workflow 字段 — HumanTask 模块仅依赖 Event Runtime 契约 | ✅ Phase 4c |
+| 93 | HumanTaskCompletedWorkflowSubscriber — Event-driven bridge (ILocalEventHandler<HumanTaskCompletedEvent>) | ✅ Phase 4c |
+| 94 | WorkflowContinuationRequest — 携带 HumanTaskId, Outcome, Result；不破坏 future 签名扩展 | ✅ Phase 4c |
+| 95 | ContinuationService 写入 HumanTask StepResult 后推进游标 — StepResults 完整 | ✅ Phase 4c |
+| 96 | WaitingHumanTaskId suspend 设置, resume 清空 — GetByWaitingHumanTaskId 唯一性 + suspended-only | ✅ Phase 4c |
+| 97 | WorkflowEngine internal ctor + factory DI — IWorkflowExecutionRunner 不泄漏到 public API | ✅ Phase 4c |
+| 98 | 测试: 47 个 Workflow.Tests（+7 StateMachine + 3 Continuation） | ✅ Phase 4c |
