@@ -1,3 +1,5 @@
+using CrestCreates.Metadata.Abstractions;
+
 namespace CrestCreates.HumanTask.Abstractions;
 
 public sealed class HumanTaskInstance
@@ -26,4 +28,32 @@ public sealed class HumanTaskInstance
     public DateTimeOffset? CancelledAt { get; set; }
 
     public string? CancellationReason { get; set; }
+
+    public string ConcurrencyStamp { get; set; } = Guid.NewGuid().ToString("N");
+    public DateTimeOffset? UpdatedAt { get; set; }
+
+    public HumanTaskInstance Clone()
+    {
+        return new HumanTaskInstance
+        {
+            Id = this.Id,
+            HumanTaskId = this.HumanTaskId,
+            HumanTaskVersion = this.HumanTaskVersion,
+            Status = this.Status,
+            TenantId = this.TenantId,
+            AssigneeUserId = this.AssigneeUserId,
+            AssigneeRoleId = this.AssigneeRoleId,
+            WorkflowInstanceId = this.WorkflowInstanceId,
+            WorkflowStepId = this.WorkflowStepId,
+            Input = this.Input,
+            Output = this.Output,
+            Outcome = this.Outcome,
+            CreatedAt = this.CreatedAt,
+            CompletedAt = this.CompletedAt,
+            CancelledAt = this.CancelledAt,
+            CancellationReason = this.CancellationReason,
+            ConcurrencyStamp = this.ConcurrencyStamp,
+            UpdatedAt = this.UpdatedAt
+        };
+    }
 }

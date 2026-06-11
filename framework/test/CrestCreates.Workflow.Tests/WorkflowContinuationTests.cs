@@ -142,7 +142,7 @@ public class WorkflowContinuationTests
     }
 
     [Fact]
-    public async Task ContinueAsync_DoubleResume_ThrowsOnSecondCall()
+    public async Task ContinueAsync_DoubleResume_DoesNotThrow_OnSecondCall()
     {
         var registry = CreateRegistry(new WorkflowDescriptor
         {
@@ -153,16 +153,20 @@ public class WorkflowContinuationTests
                     Target = new HumanTaskTarget { HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht_01", 1) } }
             }
         });
-        var (engine, continuation, _) = CreateServices(registry);
+        var (engine, continuation, store) = CreateServices(registry);
 
         var instance = await engine.ExecuteAsync("wf_01");
         await continuation.ContinueAsync(new WorkflowContinuationRequest
             { HumanTaskId = instance.WaitingHumanTaskId!, Outcome = "ok" });
 
-        await continuation.Invoking(c => c.ContinueAsync(new WorkflowContinuationRequest
-                { HumanTaskId = instance.WaitingHumanTaskId!, Outcome = "ok" }))
-            .Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*No suspended workflow instance*");
+        var secondAct = () => continuation.ContinueAsync(new WorkflowContinuationRequest
+            { HumanTaskId = instance.WaitingHumanTaskId!, Outcome = "ok" });
+        await secondAct.Should().NotThrowAsync();
+
+        var final = await store.GetAsync(instance.InstanceId);
+        final!.StepResults.Should().HaveCount(2);
+        final.Status.Should().Be(WorkflowInstanceStatus.Completed);
+        final.WaitingHumanTaskId.Should().BeNull();
     }
 
     [Fact]
@@ -440,6 +444,105 @@ public class WorkflowContinuationTests
         };
     }
 
+    [Fact]
+    public async Task WorkflowContinuation_DuplicateHumanTaskCompletedEvent_DoesNotDoubleAdvance()
+    {
+        // Build workflow with one HumanTask step followed by one Capability step
+        var htDescriptor = new HumanTaskDescriptor
+        {
+            Id = "ht_dup", Name = "dup.task", Version = 1,
+            Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("form_01", 1),
+            Outcomes = new[]
+            {
+                new CompletionOutcome { Condition = CompletionCondition.Approve }
+            }
+        };
+        var htValidationEngine = new RegistryValidationEngine<HumanTaskDescriptor>(
+            Array.Empty<IRegistryValidator<HumanTaskDescriptor>>());
+        var htRegistry = new HumanTaskRegistry(htValidationEngine);
+        htRegistry.Build([new TestHumanTaskDescriptorProvider([htDescriptor])]);
+
+        var htStore = new InMemoryHumanTaskInstanceStore();
+        var htRuntime = new DefaultHumanTaskRuntime(htRegistry, htStore, NullLocalEventBus.Instance);
+
+        var pipeline = new CapturingCapabilityPipeline();
+        var wfRegistry = CreateRegistry(new WorkflowDescriptor
+        {
+            Id = "wf_dup", Name = "dup.wf", Version = 1,
+            State = DescriptorState.Active,
+            Steps = new List<WorkflowStep>
+            {
+                new()
+                {
+                    Id = "step_01", Name = "Approval",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht_dup", 1)
+                    }
+                },
+                new()
+                {
+                    Id = "step_02", Name = "PostApproval",
+                    Target = new CapabilityTarget
+                    {
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_post", 1)
+                    }
+                }
+            }
+        });
+
+        var wfStore = new InMemoryWorkflowInstanceStore();
+        var stateMachine = new DefaultWorkflowStateMachine();
+        var eventPublisher = new WorkflowLifecycleEventPublisher();
+        var capExecutor = new CapabilityStepExecutor(pipeline);
+        var htExecutor = new HumanTaskStepExecutor(htRuntime);
+        var executorRegistry = new DefaultStepExecutorRegistry(capExecutor, htExecutor);
+        var executionRunner = new WorkflowExecutionRunner(
+            wfRegistry, executorRegistry, wfStore, stateMachine, eventPublisher);
+        var engine = new WorkflowEngine(wfRegistry, wfStore, executionRunner, eventPublisher);
+        var continuation = new WorkflowContinuationService(
+            wfStore, stateMachine, wfRegistry, executionRunner, eventPublisher);
+
+        // Start workflow → suspends at HumanTask step (step_01, index 0)
+        var instance = await engine.ExecuteAsync("wf_dup");
+        instance.Status.Should().Be(WorkflowInstanceStatus.Suspended);
+        instance.StepIndex.Should().Be(0);
+
+        // Find the HumanTaskInstance
+        var humanTaskInstance = await htStore.GetByIdAsync(instance.WaitingHumanTaskId!);
+        humanTaskInstance.Should().NotBeNull();
+        var htInstanceId = humanTaskInstance!.Id;
+
+        // Complete the HumanTask
+        await htRuntime.CompleteAsync(new HumanTaskCompletionRequest
+        {
+            HumanTaskInstanceId = htInstanceId,
+            Outcome = "Approve"
+        });
+
+        // First continuation — should advance
+        await continuation.ContinueAsync(new WorkflowContinuationRequest
+        {
+            HumanTaskId = htInstanceId,
+            Outcome = "Approve"
+        });
+        var afterFirst = await wfStore.GetAsync(instance.InstanceId);
+        afterFirst.Should().NotBeNull();
+        var stepResultsAfterFirst = afterFirst!.StepResults.Count;
+
+        // Second continuation with same instanceId — should be no-op (return, no exception)
+        await continuation.Invoking(c => c.ContinueAsync(new WorkflowContinuationRequest
+        {
+            HumanTaskId = htInstanceId,
+            Outcome = "Approve"
+        })).Should().NotThrowAsync();
+
+        var afterSecond = await wfStore.GetAsync(instance.InstanceId);
+        afterSecond.Should().NotBeNull();
+        // StepResults count unchanged — no double advance
+        afterSecond!.StepResults.Should().HaveCount(stepResultsAfterFirst);
+    }
+
     private class TestHumanTaskDescriptorProvider : IDescriptorProvider<HumanTaskDescriptor>
     {
         private readonly List<HumanTaskDescriptor> _descriptors;
@@ -448,4 +551,10 @@ public class WorkflowContinuationTests
         public IReadOnlyList<HumanTaskDescriptor> GetDescriptors() => _descriptors;
     }
 
+    private sealed class NullLocalEventBus : ILocalEventBus
+    {
+        public static readonly NullLocalEventBus Instance = new();
+        public Task PublishAsync(ILocalEvent @event, CancellationToken ct = default) => Task.CompletedTask;
+        public Task PublishAsync<TEvent>(TEvent @event, CancellationToken ct = default) where TEvent : ILocalEvent => Task.CompletedTask;
+    }
 }

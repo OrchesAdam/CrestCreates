@@ -187,4 +187,63 @@ public class HumanTaskRuntimeTests
         var stored = await store.GetByIdAsync(instance.Id);
         stored!.Status.Should().Be(HumanTaskInstanceStatus.Cancelled);
     }
+
+    [Fact]
+    public async Task CompleteAsync_DoesNotPublishEvent_When_SaveConcurrencyFails()
+    {
+        var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1,
+            CompletionCondition.Approve));
+        var eventBusMock = new Mock<ILocalEventBus>();
+
+        // Create a fake store that throws RuntimeConcurrencyException on second save
+        var throwingStore = new ConcurrencyThrowingHumanTaskInstanceStore();
+
+        var runtime = new DefaultHumanTaskRuntime(registry, throwingStore, eventBusMock.Object);
+
+        var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
+        {
+            HumanTaskId = "ht_01"
+        });
+
+        // CompleteAsync will call SaveAsync which throws — event must NOT be published
+        await runtime.Invoking(r => r.CompleteAsync(new HumanTaskCompletionRequest
+        {
+            HumanTaskInstanceId = instance.Id,
+            Outcome = "Approve"
+        })).Should().ThrowAsync<RuntimeConcurrencyException>();
+
+        eventBusMock.Verify(
+            b => b.PublishAsync(
+                It.IsAny<HumanTaskCompletedEvent>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+}
+
+sealed class ConcurrencyThrowingHumanTaskInstanceStore : IHumanTaskInstanceStore
+{
+    readonly InMemoryHumanTaskInstanceStore _inner = new();
+    bool _firstSave = true;
+
+    public Task SaveAsync(HumanTaskInstance instance, CancellationToken ct = default)
+    {
+        if (_firstSave)
+        {
+            _firstSave = false;
+            return _inner.SaveAsync(instance, ct);
+        }
+        throw new RuntimeConcurrencyException(
+            $"Concurrency conflict for HumanTaskInstance '{instance.Id}'.");
+    }
+
+    public Task<HumanTaskInstance?> GetByIdAsync(string instanceId, CancellationToken ct = default)
+        => _inner.GetByIdAsync(instanceId, ct);
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByAssigneeAsync(
+        string assigneeUserId, CancellationToken ct = default)
+        => _inner.GetPendingByAssigneeAsync(assigneeUserId, ct);
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByWorkflowAsync(
+        string workflowInstanceId, CancellationToken ct = default)
+        => _inner.GetPendingByWorkflowAsync(workflowInstanceId, ct);
 }

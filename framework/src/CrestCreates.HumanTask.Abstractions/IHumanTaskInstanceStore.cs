@@ -8,4 +8,7 @@ public interface IHumanTaskInstanceStore
 
     Task<IReadOnlyList<HumanTaskInstance>> GetPendingByAssigneeAsync(
         string assigneeUserId, CancellationToken ct = default);
+
+    Task<IReadOnlyList<HumanTaskInstance>> GetPendingByWorkflowAsync(
+        string workflowInstanceId, CancellationToken ct = default);
 }

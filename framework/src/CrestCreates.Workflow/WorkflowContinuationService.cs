@@ -31,8 +31,7 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         var instance = await _store.GetByWaitingHumanTaskId(request.HumanTaskId, ct)
             .ConfigureAwait(false);
         if (instance == null)
-            throw new InvalidOperationException(
-                $"No suspended workflow instance waiting for HumanTask '{request.HumanTaskId}'.");
+            return;
 
         if (instance.Status != WorkflowInstanceStatus.Suspended)
             throw new InvalidOperationException(
@@ -61,7 +60,23 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         instance.StepIndex++;
         instance.WaitingHumanTaskId = null;
         instance.Status = WorkflowInstanceStatus.Running;
-        await _store.SaveAsync(instance, ct).ConfigureAwait(false);
+
+        try
+        {
+            await _store.SaveAsync(instance, ct).ConfigureAwait(false);
+        }
+        catch (RuntimeConcurrencyException)
+        {
+            // Another duplicate continuation already saved — re-query to check.
+            // If WaitingHumanTaskId is already cleared (duplicate) → idempotent no-op.
+            var recheck = await _store.GetByWaitingHumanTaskId(request.HumanTaskId, ct)
+                .ConfigureAwait(false);
+            if (recheck == null)
+                return; // Duplicate: another continuation already cleared it
+
+            // Genuine concurrent conflict on unrelated save — rethrow
+            throw;
+        }
 
         await _eventPublisher.PublishAsync(new WorkflowLifecycleEvent
         {

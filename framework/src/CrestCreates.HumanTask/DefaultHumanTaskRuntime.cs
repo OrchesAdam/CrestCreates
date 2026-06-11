@@ -1,5 +1,6 @@
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Metadata.Abstractions;
 
 namespace CrestCreates.HumanTask;
 
@@ -60,7 +61,7 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
             .ConfigureAwait(false);
 
         if (instance == null)
-            throw new InvalidOperationException(
+            throw new RuntimeEntityNotFoundException(
                 $"HumanTask instance '{request.HumanTaskInstanceId}' not found.");
 
         if (instance.Status != HumanTaskInstanceStatus.Created &&
@@ -82,6 +83,8 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         instance.Output = request.Result;
         instance.CompletedAt = DateTimeOffset.UtcNow;
 
+        // Phase 5b: SaveAsync may throw RuntimeConcurrencyException.
+        // If it does, DO NOT publish — let exception propagate.
         await _store.SaveAsync(instance, ct).ConfigureAwait(false);
 
         await _eventBus.PublishAsync(new HumanTaskCompletedEvent
@@ -102,7 +105,7 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         var instance = await _store.GetByIdAsync(instanceId, ct).ConfigureAwait(false);
 
         if (instance == null)
-            throw new InvalidOperationException(
+            throw new RuntimeEntityNotFoundException(
                 $"HumanTask instance '{instanceId}' not found.");
 
         if (instance.Status == HumanTaskInstanceStatus.Completed ||
@@ -115,6 +118,7 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         instance.CancellationReason = reason;
         instance.CancelledAt = DateTimeOffset.UtcNow;
 
+        // Phase 5b: SaveAsync may throw RuntimeConcurrencyException — let it propagate
         await _store.SaveAsync(instance, ct).ConfigureAwait(false);
         return instance;
     }

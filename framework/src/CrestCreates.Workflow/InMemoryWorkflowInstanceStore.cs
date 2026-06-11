@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Linq;
+using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 
 namespace CrestCreates.Workflow;
@@ -10,14 +11,47 @@ public sealed class InMemoryWorkflowInstanceStore : IWorkflowInstanceStore
 
     public Task SaveAsync(WorkflowInstance instance, CancellationToken ct = default)
     {
-        _instances[instance.InstanceId] = instance;
-        return Task.CompletedTask;
+        var snapshot = instance.Clone();
+        snapshot.UpdatedAt = DateTimeOffset.UtcNow;
+
+        while (true)
+        {
+            if (!_instances.TryGetValue(instance.InstanceId, out var existing))
+            {
+                // First save — insert with fresh stamp
+                snapshot.ConcurrencyStamp = Guid.NewGuid().ToString("N");
+                if (_instances.TryAdd(instance.InstanceId, snapshot))
+                {
+                    instance.ConcurrencyStamp = snapshot.ConcurrencyStamp;
+                    instance.UpdatedAt = snapshot.UpdatedAt;
+                    return Task.CompletedTask;
+                }
+                // Race: another thread inserted between TryGetValue and TryAdd — retry
+                continue;
+            }
+
+            // Update existing — check concurrency stamp atomically
+            if (existing.ConcurrencyStamp != instance.ConcurrencyStamp)
+                throw new RuntimeConcurrencyException(
+                    $"Concurrency conflict for WorkflowInstance '{instance.InstanceId}'. " +
+                    $"Expected stamp '{instance.ConcurrencyStamp}', actual '{existing.ConcurrencyStamp}'.");
+
+            snapshot.ConcurrencyStamp = Guid.NewGuid().ToString("N");
+            if (_instances.TryUpdate(instance.InstanceId, snapshot, existing))
+            {
+                instance.ConcurrencyStamp = snapshot.ConcurrencyStamp;
+                instance.UpdatedAt = snapshot.UpdatedAt;
+                return Task.CompletedTask;
+            }
+            // Race: another thread updated — retry
+        }
     }
 
     public Task<WorkflowInstance?> GetAsync(string instanceId, CancellationToken ct = default)
     {
-        _instances.TryGetValue(instanceId, out var instance);
-        return Task.FromResult(instance);
+        if (_instances.TryGetValue(instanceId, out var existing))
+            return Task.FromResult<WorkflowInstance?>(existing.Clone());
+        return Task.FromResult<WorkflowInstance?>(null);
     }
 
     public Task<WorkflowInstance?> GetByWaitingHumanTaskId(
@@ -32,6 +66,6 @@ public sealed class InMemoryWorkflowInstanceStore : IWorkflowInstanceStore
             throw new WorkflowCorrelationException(
                 $"Multiple suspended instances found for HumanTask '{humanTaskId}'.");
 
-        return Task.FromResult(matches.SingleOrDefault());
+        return Task.FromResult(matches.SingleOrDefault()?.Clone());
     }
 }
