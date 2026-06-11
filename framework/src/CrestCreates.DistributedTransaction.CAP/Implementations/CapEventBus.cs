@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using CrestCreates.DistributedTransaction.Abstractions;
 using CrestCreates.DistributedTransaction.CAP.Abstractions;
 using CrestCreates.Domain.DomainEvents;
+using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstract;
 
 namespace CrestCreates.DistributedTransaction.CAP.Implementations;
@@ -15,7 +16,9 @@ public class CapEventBus : DistributedEventBusBase
 
     public CapEventBus(
         IDistributedEventPublisher eventPublisher,
-        ICapTopicNameProvider topicNameProvider)
+        ICapTopicNameProvider topicNameProvider,
+        IEventValidator validator)
+        : base(validator)
     {
         _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
         _topicNameProvider = topicNameProvider ?? throw new ArgumentNullException(nameof(topicNameProvider));
