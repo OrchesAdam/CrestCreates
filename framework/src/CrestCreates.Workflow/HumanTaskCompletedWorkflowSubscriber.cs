@@ -20,7 +20,7 @@ internal sealed class HumanTaskCompletedWorkflowSubscriber
         return _continuationService.ContinueAsync(
             new WorkflowContinuationRequest
             {
-                HumanTaskId = evt.HumanTaskId,
+                HumanTaskId = evt.HumanTaskInstanceId,
                 Outcome = evt.Outcome,
                 Result = evt.Result
             }, ct);

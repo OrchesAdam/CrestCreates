@@ -4,6 +4,7 @@ using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
+using Moq;
 using Xunit;
 
 namespace CrestCreates.Workflow.Tests;
@@ -58,7 +59,17 @@ public class WorkflowContinuationTests
         var pipelineImpl = pipeline ?? new MockCapabilityPipeline(
             CapabilityExecutionResult.Success(null, TimeSpan.Zero));
         var capExecutor = new CapabilityStepExecutor(pipelineImpl);
-        var htExecutor = new HumanTaskStepExecutor();
+        var mockRuntime = new Mock<IHumanTaskRuntime>();
+        mockRuntime
+            .Setup(r => r.CreateAsync(It.IsAny<HumanTaskCreationRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((HumanTaskCreationRequest req, CancellationToken _) =>
+                new HumanTaskInstance
+                {
+                    Id = req.HumanTaskId,
+                    HumanTaskId = req.HumanTaskId,
+                    HumanTaskVersion = req.Version ?? 1
+                });
+        var htExecutor = new HumanTaskStepExecutor(mockRuntime.Object);
         var executorRegistry = new DefaultStepExecutorRegistry(capExecutor, htExecutor);
         var store = new InMemoryWorkflowInstanceStore();
         var stateMachine = new DefaultWorkflowStateMachine();
