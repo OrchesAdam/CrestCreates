@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.DomainEvents;
+using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.EventBus.Local;
 using CrestCreates.EventBus.Local.Channel;
@@ -21,7 +22,7 @@ public class LocalDeadLetterQueueTests
         var services = new ServiceCollection();
         services.AddSingleton<LocalEventBusOptions>();
         services.Configure<LocalDeadLetterOptions>(_ => { });
-        services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
+        services.AddSingleton<IDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
         services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
@@ -29,15 +30,15 @@ public class LocalDeadLetterQueueTests
         var provider = services.BuildServiceProvider();
 
         var eventBus = provider.GetRequiredService<ILocalEventBus>();
-        var store = provider.GetRequiredService<ILocalDeadLetterStore>();
+        var store = provider.GetRequiredService<IDeadLetterStore>();
         var testEvent = new FailingTestEvent();
 
         var exception = await Record.ExceptionAsync(() => eventBus.PublishAsync(testEvent));
 
         exception.Should().NotBeNull();
-        var messages = await store.ListAsync(take: 10);
+        var messages = await store.GetPendingAsync(0, 10, CancellationToken.None);
         messages.Should().HaveCount(1);
-        messages[0].EventType.Should().Contain(nameof(FailingTestEvent));
+        messages[0].PayloadTypeFullName.Should().Contain(nameof(FailingTestEvent));
         messages[0].Status.Should().Be(DeadLetterStatus.Pending);
         messages[0].RetryCount.Should().Be(0);
     }
@@ -49,32 +50,38 @@ public class LocalDeadLetterQueueTests
         services.AddLogging();
         services.AddSingleton<LocalEventBusOptions>();
         services.Configure<LocalDeadLetterOptions>(_ => { });
-        services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
+        services.AddSingleton<IDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
         services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
         services.AddScoped<ILocalEventHandler<RetryTestEvent>, RetryTestEventHandler>();
         var provider = services.BuildServiceProvider();
 
-        var store = provider.GetRequiredService<ILocalDeadLetterStore>();
+        var store = provider.GetRequiredService<IDeadLetterStore>();
         var manager = provider.GetRequiredService<ILocalDeadLetterManager>();
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(new RetryTestEvent(), typeof(RetryTestEvent));
         var message = new DeadLetterMessage(
-            MessageId: Guid.NewGuid().ToString("N"),
-            EventType: typeof(RetryTestEvent).AssemblyQualifiedName!,
-            Payload: payload,
-            ErrorMessage: "Test failure",
-            FailedAt: DateTime.UtcNow,
-            RetryCount: 0,
-            MaxRetries: 3,
-            Status: DeadLetterStatus.Pending);
-        await store.EnqueueAsync(message);
+            Guid.NewGuid().ToString("N"),
+            typeof(RetryTestEvent).Name!,
+            1,
+            null, null, null,
+            EventScope.Local,
+            typeof(RetryTestEvent).AssemblyQualifiedName!,
+            payload,
+            "Test failure",
+            null,
+            DateTime.UtcNow,
+            DateTime.UtcNow,
+            0,
+            3,
+            DeadLetterStatus.Pending);
+        await store.EnqueueAsync(message, CancellationToken.None);
 
         var result = await manager.RetryAsync(message.MessageId);
 
         result.Success.Should().BeTrue();
-        var updated = await store.GetAsync(message.MessageId);
+        var updated = await store.GetByIdAsync(message.MessageId, CancellationToken.None);
         updated!.Status.Should().Be(DeadLetterStatus.Retried);
     }
 
@@ -85,32 +92,38 @@ public class LocalDeadLetterQueueTests
         services.AddLogging();
         services.AddSingleton<LocalEventBusOptions>();
         services.Configure<LocalDeadLetterOptions>(_ => { });
-        services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
+        services.AddSingleton<IDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
         services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
         services.AddScoped<ILocalEventHandler<FailingTestEvent>, FailingTestEventHandler>();
         var provider = services.BuildServiceProvider();
 
-        var store = provider.GetRequiredService<ILocalDeadLetterStore>();
+        var store = provider.GetRequiredService<IDeadLetterStore>();
         var manager = provider.GetRequiredService<ILocalDeadLetterManager>();
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(new FailingTestEvent(), typeof(FailingTestEvent));
         var message = new DeadLetterMessage(
-            MessageId: Guid.NewGuid().ToString("N"),
-            EventType: typeof(FailingTestEvent).AssemblyQualifiedName!,
-            Payload: payload,
-            ErrorMessage: "Test failure",
-            FailedAt: DateTime.UtcNow,
-            RetryCount: 2,
-            MaxRetries: 3,
-            Status: DeadLetterStatus.Pending);
-        await store.EnqueueAsync(message);
+            Guid.NewGuid().ToString("N"),
+            typeof(FailingTestEvent).Name!,
+            1,
+            null, null, null,
+            EventScope.Local,
+            typeof(FailingTestEvent).AssemblyQualifiedName!,
+            payload,
+            "Test failure",
+            null,
+            DateTime.UtcNow,
+            DateTime.UtcNow,
+            2,
+            3,
+            DeadLetterStatus.Pending);
+        await store.EnqueueAsync(message, CancellationToken.None);
 
         var result = await manager.RetryAsync(message.MessageId);
 
         result.Success.Should().BeFalse();
-        var updated = await store.GetAsync(message.MessageId);
+        var updated = await store.GetByIdAsync(message.MessageId, CancellationToken.None);
         updated!.Status.Should().Be(DeadLetterStatus.Archived);
         updated.RetryCount.Should().Be(3);
     }
@@ -122,27 +135,33 @@ public class LocalDeadLetterQueueTests
         services.AddLogging();
         services.AddSingleton<LocalEventBusOptions>();
         services.Configure<LocalDeadLetterOptions>(_ => { });
-        services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
+        services.AddSingleton<IDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
         services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
         services.AddScoped<ILocalEventHandler<RetryTestEvent>, RetryTestEventHandler>();
         var provider = services.BuildServiceProvider();
 
-        var store = provider.GetRequiredService<ILocalDeadLetterStore>();
+        var store = provider.GetRequiredService<IDeadLetterStore>();
         var manager = provider.GetRequiredService<ILocalDeadLetterManager>();
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(new RetryTestEvent(), typeof(RetryTestEvent));
         var message = new DeadLetterMessage(
-            MessageId: Guid.NewGuid().ToString("N"),
-            EventType: typeof(RetryTestEvent).AssemblyQualifiedName!,
-            Payload: payload,
-            ErrorMessage: "Test failure",
-            FailedAt: DateTime.UtcNow,
-            RetryCount: 1,
-            MaxRetries: 3,
-            Status: DeadLetterStatus.Pending);
-        await store.EnqueueAsync(message);
+            Guid.NewGuid().ToString("N"),
+            typeof(RetryTestEvent).Name!,
+            1,
+            null, null, null,
+            EventScope.Local,
+            typeof(RetryTestEvent).AssemblyQualifiedName!,
+            payload,
+            "Test failure",
+            null,
+            DateTime.UtcNow,
+            DateTime.UtcNow,
+            1,
+            3,
+            DeadLetterStatus.Pending);
+        await store.EnqueueAsync(message, CancellationToken.None);
 
         var result = await manager.RetryAsync(message.MessageId);
 
@@ -157,29 +176,35 @@ public class LocalDeadLetterQueueTests
         services.AddLogging();
         services.AddSingleton<LocalEventBusOptions>();
         services.Configure<LocalDeadLetterOptions>(_ => { });
-        services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
+        services.AddSingleton<IDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
         services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
         services.AddScoped<ILocalEventHandler<RetryTestEvent>, RetryTestEventHandler>();
         var provider = services.BuildServiceProvider();
 
-        var store = provider.GetRequiredService<ILocalDeadLetterStore>();
+        var store = provider.GetRequiredService<IDeadLetterStore>();
         var manager = provider.GetRequiredService<ILocalDeadLetterManager>();
 
         for (int i = 0; i < 3; i++)
         {
             var payload = JsonSerializer.SerializeToUtf8Bytes(new RetryTestEvent(), typeof(RetryTestEvent));
             var message = new DeadLetterMessage(
-                MessageId: Guid.NewGuid().ToString("N"),
-                EventType: typeof(RetryTestEvent).AssemblyQualifiedName!,
-                Payload: payload,
-                ErrorMessage: $"Failure {i}",
-                FailedAt: DateTime.UtcNow,
-                RetryCount: 0,
-                MaxRetries: 3,
-                Status: DeadLetterStatus.Pending);
-            await store.EnqueueAsync(message);
+                Guid.NewGuid().ToString("N"),
+                typeof(RetryTestEvent).Name!,
+                1,
+                null, null, null,
+                EventScope.Local,
+                typeof(RetryTestEvent).AssemblyQualifiedName!,
+                payload,
+                $"Failure {i}",
+                null,
+                DateTime.UtcNow,
+                DateTime.UtcNow,
+                0,
+                3,
+                DeadLetterStatus.Pending);
+            await store.EnqueueAsync(message, CancellationToken.None);
         }
 
         var results = await manager.RetryAllAsync();
@@ -194,17 +219,25 @@ public class LocalDeadLetterQueueTests
         var store = new InMemoryDeadLetterStore(Microsoft.Extensions.Options.Options.Create(new LocalDeadLetterOptions()));
         var payload = JsonSerializer.SerializeToUtf8Bytes(new RetryTestEvent(), typeof(RetryTestEvent));
 
-        var msg1 = new DeadLetterMessage("1", typeof(RetryTestEvent).AssemblyQualifiedName!,
-            payload, "err", DateTime.UtcNow, 0, 3, DeadLetterStatus.Retried);
-        var msg2 = new DeadLetterMessage("2", typeof(FailingTestEvent).AssemblyQualifiedName!,
-            payload, "err", DateTime.UtcNow, 0, 3, DeadLetterStatus.Retried);
-        await store.EnqueueAsync(msg1);
-        await store.EnqueueAsync(msg2);
+        var msg1 = new DeadLetterMessage("1", typeof(RetryTestEvent).Name!, 1,
+            null, null, null, EventScope.Local,
+            typeof(RetryTestEvent).AssemblyQualifiedName!,
+            payload, "err", null,
+            DateTime.UtcNow, DateTime.UtcNow, 0, 3, DeadLetterStatus.Retried);
+        var msg2 = new DeadLetterMessage("2", typeof(FailingTestEvent).Name!, 1,
+            null, null, null, EventScope.Local,
+            typeof(FailingTestEvent).AssemblyQualifiedName!,
+            payload, "err", null,
+            DateTime.UtcNow, DateTime.UtcNow, 0, 3, DeadLetterStatus.Retried);
+        await store.EnqueueAsync(msg1, CancellationToken.None);
+        await store.EnqueueAsync(msg2, CancellationToken.None);
 
-        var type1Count = await store.CountAsync(typeof(RetryTestEvent).AssemblyQualifiedName);
-        type1Count.Should().Be(1);
-        var type2Count = await store.CountAsync(typeof(FailingTestEvent).AssemblyQualifiedName);
-        type2Count.Should().Be(1);
+        var type1Results = await store.GetByEventNameAsync(
+            typeof(RetryTestEvent).AssemblyQualifiedName!, 0, 100, CancellationToken.None);
+        type1Results.Count.Should().Be(1);
+        var type2Results = await store.GetByEventNameAsync(
+            typeof(FailingTestEvent).AssemblyQualifiedName!, 0, 100, CancellationToken.None);
+        type2Results.Count.Should().Be(1);
     }
 
     [Fact]
@@ -215,13 +248,17 @@ public class LocalDeadLetterQueueTests
 
         for (int i = 0; i < 5; i++)
         {
-            var msg = new DeadLetterMessage(i.ToString(), typeof(RetryTestEvent).AssemblyQualifiedName!,
-                payload, $"err {i}", DateTime.UtcNow.AddMinutes(-i), 0, 3, DeadLetterStatus.Pending);
-            await store.EnqueueAsync(msg);
+            var msg = new DeadLetterMessage(i.ToString(), typeof(RetryTestEvent).Name!, 1,
+                null, null, null, EventScope.Local,
+                typeof(RetryTestEvent).AssemblyQualifiedName!,
+                payload, $"err {i}", null,
+                DateTime.UtcNow.AddMinutes(-i), DateTime.UtcNow.AddMinutes(-i),
+                0, 3, DeadLetterStatus.Pending);
+            await store.EnqueueAsync(msg, CancellationToken.None);
         }
 
-        var page1 = await store.ListAsync(skip: 0, take: 2);
-        var page2 = await store.ListAsync(skip: 2, take: 2);
+        var page1 = await store.GetPendingAsync(0, 2, CancellationToken.None);
+        var page2 = await store.GetPendingAsync(2, 2, CancellationToken.None);
 
         page1.Should().HaveCount(2);
         page2.Should().HaveCount(2);
@@ -234,12 +271,15 @@ public class LocalDeadLetterQueueTests
         var store = new InMemoryDeadLetterStore(Microsoft.Extensions.Options.Options.Create(new LocalDeadLetterOptions()));
         var payload = JsonSerializer.SerializeToUtf8Bytes(new CountingTestEvent(), typeof(CountingTestEvent));
 
-        var msg = new DeadLetterMessage("dup-1", typeof(CountingTestEvent).AssemblyQualifiedName!,
-            payload, "err", DateTime.UtcNow, 0, 3, DeadLetterStatus.Pending);
-        await store.EnqueueAsync(msg);
-        await store.EnqueueAsync(msg);
+        var msg = new DeadLetterMessage("dup-1", typeof(CountingTestEvent).Name!, 1,
+            null, null, null, EventScope.Local,
+            typeof(CountingTestEvent).AssemblyQualifiedName!,
+            payload, "err", null,
+            DateTime.UtcNow, DateTime.UtcNow, 0, 3, DeadLetterStatus.Pending);
+        await store.EnqueueAsync(msg, CancellationToken.None);
+        await store.EnqueueAsync(msg, CancellationToken.None);
 
-        var all = await store.ListAsync(take: 10);
+        var all = await store.GetPendingAsync(0, 10, CancellationToken.None);
         all.Should().HaveCount(1);
     }
 
@@ -255,14 +295,17 @@ public class LocalDeadLetterQueueTests
             var id = i.ToString();
             tasks.Add(Task.Run(async () =>
             {
-                var msg = new DeadLetterMessage(id, typeof(RetryTestEvent).AssemblyQualifiedName!,
-                    payload, "err", DateTime.UtcNow, 0, 3, DeadLetterStatus.Pending);
-                await store.EnqueueAsync(msg);
+                var msg = new DeadLetterMessage(id, typeof(RetryTestEvent).Name!, 1,
+                    null, null, null, EventScope.Local,
+                    typeof(RetryTestEvent).AssemblyQualifiedName!,
+                    payload, "err", null,
+                    DateTime.UtcNow, DateTime.UtcNow, 0, 3, DeadLetterStatus.Pending);
+                await store.EnqueueAsync(msg, CancellationToken.None);
             }));
         }
         await Task.WhenAll(tasks);
 
-        var count = await store.CountAsync();
+        var count = await store.CountAsync(null, CancellationToken.None);
         count.Should().Be(100);
     }
 
@@ -272,17 +315,26 @@ public class LocalDeadLetterQueueTests
         var store = new InMemoryDeadLetterStore(Microsoft.Extensions.Options.Options.Create(new LocalDeadLetterOptions()));
         var payload = JsonSerializer.SerializeToUtf8Bytes(new RetryTestEvent(), typeof(RetryTestEvent));
 
-        await store.EnqueueAsync(new DeadLetterMessage("1", typeof(RetryTestEvent).AssemblyQualifiedName!,
-            payload, "e", DateTime.UtcNow, 0, 3, DeadLetterStatus.Pending));
-        await store.EnqueueAsync(new DeadLetterMessage("2", typeof(RetryTestEvent).AssemblyQualifiedName!,
-            payload, "e", DateTime.UtcNow, 0, 3, DeadLetterStatus.Retried));
-        await store.EnqueueAsync(new DeadLetterMessage("3", typeof(RetryTestEvent).AssemblyQualifiedName!,
-            payload, "e", DateTime.UtcNow, 3, 3, DeadLetterStatus.Archived));
+        await store.EnqueueAsync(new DeadLetterMessage("1", typeof(RetryTestEvent).Name!, 1,
+            null, null, null, EventScope.Local,
+            typeof(RetryTestEvent).AssemblyQualifiedName!,
+            payload, "e", null,
+            DateTime.UtcNow, DateTime.UtcNow, 0, 3, DeadLetterStatus.Pending), CancellationToken.None);
+        await store.EnqueueAsync(new DeadLetterMessage("2", typeof(RetryTestEvent).Name!, 1,
+            null, null, null, EventScope.Local,
+            typeof(RetryTestEvent).AssemblyQualifiedName!,
+            payload, "e", null,
+            DateTime.UtcNow, DateTime.UtcNow, 0, 3, DeadLetterStatus.Retried), CancellationToken.None);
+        await store.EnqueueAsync(new DeadLetterMessage("3", typeof(RetryTestEvent).Name!, 1,
+            null, null, null, EventScope.Local,
+            typeof(RetryTestEvent).AssemblyQualifiedName!,
+            payload, "e", null,
+            DateTime.UtcNow, DateTime.UtcNow, 3, 3, DeadLetterStatus.Archived), CancellationToken.None);
 
-        var total = await store.CountAsync();
-        var pending = await store.CountAsync(status: DeadLetterStatus.Pending);
-        var retried = await store.CountAsync(status: DeadLetterStatus.Retried);
-        var archived = await store.CountAsync(status: DeadLetterStatus.Archived);
+        var total = await store.CountAsync(null, CancellationToken.None);
+        var pending = await store.CountAsync(DeadLetterStatus.Pending, CancellationToken.None);
+        var retried = await store.CountAsync(DeadLetterStatus.Retried, CancellationToken.None);
+        var archived = await store.CountAsync(DeadLetterStatus.Archived, CancellationToken.None);
 
         total.Should().Be(3);
         pending.Should().Be(1);
@@ -300,12 +352,15 @@ public class LocalDeadLetterQueueTests
 
         for (int i = 0; i < 1000; i++)
         {
-            var msg = new DeadLetterMessage(i.ToString(), typeof(RetryTestEvent).AssemblyQualifiedName!,
-                payload, "err", DateTime.UtcNow, 0, 3, DeadLetterStatus.Pending);
-            await store.EnqueueAsync(msg);
+            var msg = new DeadLetterMessage(i.ToString(), typeof(RetryTestEvent).Name!, 1,
+                null, null, null, EventScope.Local,
+                typeof(RetryTestEvent).AssemblyQualifiedName!,
+                payload, "err", null,
+                DateTime.UtcNow, DateTime.UtcNow, 0, 3, DeadLetterStatus.Pending);
+            await store.EnqueueAsync(msg, CancellationToken.None);
         }
 
-        var count = await store.CountAsync();
+        var count = await store.CountAsync(null, CancellationToken.None);
         count.Should().Be(500);
     }
 

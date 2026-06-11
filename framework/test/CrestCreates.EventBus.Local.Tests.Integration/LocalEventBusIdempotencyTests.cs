@@ -1,6 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.DomainEvents;
+using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.EventBus.Local;
 using CrestCreates.EventBus.Local.Channel;
@@ -18,7 +19,7 @@ public class LocalEventBusIdempotencyTests
         var services = new ServiceCollection();
         services.AddSingleton<LocalEventBusOptions>();
         services.Configure<LocalDeadLetterOptions>(_ => { });
-        services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
+        services.AddSingleton<IDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
         services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
@@ -44,17 +45,23 @@ public class LocalEventBusIdempotencyTests
         var payload = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
             new IdempotentTestEvent(), typeof(IdempotentTestEvent));
 
-        var msg1 = new DeadLetterMessage("same-id", typeof(IdempotentTestEvent).AssemblyQualifiedName!,
-            payload, "err1", System.DateTime.UtcNow, 0, 3, DeadLetterStatus.Pending);
-        var msg2 = new DeadLetterMessage("same-id", typeof(IdempotentTestEvent).AssemblyQualifiedName!,
-            payload, "err2", System.DateTime.UtcNow, 0, 3, DeadLetterStatus.Pending);
+        var msg1 = new DeadLetterMessage("same-id", typeof(IdempotentTestEvent).Name!, 1,
+            null, null, null, EventScope.Local,
+            typeof(IdempotentTestEvent).AssemblyQualifiedName!,
+            payload, "err1", null,
+            System.DateTime.UtcNow, System.DateTime.UtcNow, 0, 3, DeadLetterStatus.Pending);
+        var msg2 = new DeadLetterMessage("same-id", typeof(IdempotentTestEvent).Name!, 1,
+            null, null, null, EventScope.Local,
+            typeof(IdempotentTestEvent).AssemblyQualifiedName!,
+            payload, "err2", null,
+            System.DateTime.UtcNow, System.DateTime.UtcNow, 0, 3, DeadLetterStatus.Pending);
 
-        await store.EnqueueAsync(msg1);
-        await store.EnqueueAsync(msg2);
+        await store.EnqueueAsync(msg1, CancellationToken.None);
+        await store.EnqueueAsync(msg2, CancellationToken.None);
 
-        var count = await store.CountAsync();
+        var count = await store.CountAsync(null, CancellationToken.None);
         count.Should().Be(1);
-        var stored = await store.GetAsync("same-id");
+        var stored = await store.GetByIdAsync("same-id", CancellationToken.None);
         stored!.ErrorMessage.Should().Be("err2");
     }
 

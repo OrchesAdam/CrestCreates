@@ -18,7 +18,7 @@ public class LocalEventBusDispatchTests
         var services = new ServiceCollection();
         services.AddSingleton<LocalEventBusOptions>();
         services.Configure<LocalDeadLetterOptions>(_ => { });
-        services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
+        services.AddSingleton<IDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
         services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
@@ -26,12 +26,12 @@ public class LocalEventBusDispatchTests
         var provider = services.BuildServiceProvider();
 
         var eventBus = provider.GetRequiredService<ILocalEventBus>();
-        var store = provider.GetRequiredService<ILocalDeadLetterStore>();
+        var store = provider.GetRequiredService<IDeadLetterStore>();
 
         var exception = await Record.ExceptionAsync(() => eventBus.PublishAsync(new SuccessTestEvent()));
 
         exception.Should().BeNull();
-        var dlqCount = await store.CountAsync();
+        var dlqCount = await store.CountAsync(null, CancellationToken.None);
         dlqCount.Should().Be(0);
     }
 
@@ -41,7 +41,7 @@ public class LocalEventBusDispatchTests
         var services = new ServiceCollection();
         services.AddSingleton<LocalEventBusOptions>();
         services.Configure<LocalDeadLetterOptions>(_ => { });
-        services.AddSingleton<ILocalDeadLetterStore, InMemoryDeadLetterStore>();
+        services.AddSingleton<IDeadLetterStore, InMemoryDeadLetterStore>();
         services.AddScoped<ILocalDeadLetterManager, DefaultLocalDeadLetterManager>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
         services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
@@ -49,13 +49,13 @@ public class LocalEventBusDispatchTests
         var provider = services.BuildServiceProvider();
 
         var eventBus = provider.GetRequiredService<ILocalEventBus>();
-        var store = provider.GetRequiredService<ILocalDeadLetterStore>();
+        var store = provider.GetRequiredService<IDeadLetterStore>();
 
         var exception = await Record.ExceptionAsync(() => eventBus.PublishAsync(new AlwaysFailEvent()));
 
         exception.Should().NotBeNull();
         exception.Should().BeOfType<InvalidOperationException>();
-        var dlqCount = await store.CountAsync();
+        var dlqCount = await store.CountAsync(null, CancellationToken.None);
         dlqCount.Should().Be(1);
     }
 
