@@ -1,6 +1,6 @@
 # 统一元数据模型 — 架构总结文档
 
-> **日期:** 2026-06-11 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a + Phase 4b + Phase 4c + Phase 5 完成**
+> **日期:** 2026-06-11 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a + Phase 4b + Phase 4c + Phase 5 + Phase 5b 完成**
 
 ---
 
@@ -90,6 +90,39 @@ Phase 5 实现 HumanTaskInstance 运行时，让 `HumanTaskStepExecutor` 创建�
 - `HumanTaskDescriptor` 仍然是纯元数据 — 无运行时状态
 - Executor 返回 `StepExecutionResult`, 不修改 WorkflowInstance 状态
 
+### Phase 5b: Durable Runtime Store Contracts
+
+Phase 5b 加固 InMemory Workflow 和 HumanTask 实例存储，增加原子 CAS 并发控制、浅层快照语义、幂等重复处理和事件后持久化保障：
+
+| 组件 | 说明 |
+|------|------|
+| `RuntimeStoreException` | 存储层异常基类 — Metadata.Abstractions |
+| `RuntimeConcurrencyException` | CAS 冲突异常 — 并发写入检测 |
+| `RuntimeEntityNotFoundException` | 实体缺失异常 — GetById 失败守卫 |
+| `WorkflowInstance.ConcurrencyStamp` | Guid 并发戳 — 每次保存更新，纯属性（因 Domain.Shared 同名接口冲突不实现 IHasConcurrencyStamp） |
+| `WorkflowInstance.UpdatedAt` | 最后更新时间戳 |
+| `WorkflowInstance.Clone()` | 浅层快照 — 复制框架拥有的集合，共享 object? payload |
+| `HumanTaskInstance.ConcurrencyStamp` | 同上，HumanTask 实例并发戳 |
+| `HumanTaskInstance.UpdatedAt` | 同上 |
+| `HumanTaskInstance.Clone()` | 同上 |
+| `InMemoryWorkflowInstanceStore` (rewritten) | 原子 CAS 循环 (TryAdd/TryUpdate)，保存/读取时 Clone，冲突 → RuntimeConcurrencyException |
+| `InMemoryHumanTaskInstanceStore` (rewritten) | 同上 + `GetPendingByWorkflowAsync` |
+| `IHumanTaskInstanceStore.GetPendingByWorkflowAsync()` | 按 WorkflowInstanceId 查询 pending HumanTask |
+| `DefaultHumanTaskRuntime` (hardened) | 缺失实例 → RuntimeEntityNotFoundException；完成前并发戳验证 → 冲突时静默抑制事件 |
+| `WorkflowContinuationService` (hardened) | 重复 HumanTaskCompletedEvent → 幂等 no-op；保存冲突 → 重新查询 HumanTaskId → null 时为重复 no-op，否则重新抛出 |
+| `WorkflowContinuationRequest.HumanTaskInstanceId` | `HumanTaskId` 别名 — 明确此值为 HumanTaskInstance.Id (GUID)，非 descriptor ID |
+| `InMemoryWorkflowInstanceStoreTests` | 5 个新测试 — 并发 CAS (Barrier(2) 真实争用)、查询、幂等 |
+| `InMemoryHumanTaskInstanceStoreTests` | 4 个新测试 — 并发 CAS、GetPendingByWorkflowAsync |
+| `HumanTaskRuntimeTests` | +1 并发失败事件抑制测试 |
+| `WorkflowContinuationTests` | +2 重复处理测试、1 个更新为幂等行为 |
+
+**关键不变量:**
+- CAS 算法：`while(true)` 循环内 `TryAdd` 插入 / `TryUpdate(key, newValue, comparisonValue)` 更新 — 原子戳检查 + 替换，无 TOCTOU
+- Clone 可见性：`public Clone()` 在 WorkflowInstance 和 HumanTaskInstance 上 — 跨程序集边界调用
+- 浅层复制边界：`Variables`、`StepVariables`、`StepResults` 集合为新实例；`object?` 值共享。保存后修改 payload 不受支持
+- 并发重复幂等：`WorkflowContinuationService.ContinueAsync` 捕获 `RuntimeConcurrencyException`，按 HumanTaskId 重新查询 — null → 重复 no-op，否则重新抛出
+- 测试 Barrier：`System.Threading.Barrier(2)` + `SignalAndWait()` 强制真实并发争用
+
 ### Phase 4: Capability Runtime Consolidation
 
 Phase 4 统一 Capability 运行时，打破循环依赖，收口 ICapabilityRegistry 到 Metadata，新增 Dispatcher、Resolver、Audit 链路：
@@ -148,6 +181,8 @@ framework/src/
 │                                           # ICapabilityResolver, ICapabilityDispatcher (moved from Capability.Abstractions)
 │                                           # CapabilityProfile (moved from Capability.Abstractions)
 │                                           # DescriptorProviderRegistry, MetadataBootstrapper (Phase 4a)
+│                                           # RuntimeStoreException, RuntimeConcurrencyException (Phase 5b)
+│                                           # RuntimeEntityNotFoundException (Phase 5b)
 ├── CrestCreates.Schema.Abstractions/        # SchemaDescriptor, SchemaFieldDescriptor, ISchemaRegistry, ISchemaValidator
 ├── CrestCreates.Schema/                     # SchemaRegistry : RegistryBase<SchemaDescriptor>, SchemaValidator
 ├── CrestCreates.Capability.Abstractions/    # ICapabilityPipeline, CapabilityExecutionContext, CapabilityExecutionResult,
@@ -171,9 +206,11 @@ framework/src/
 │                                           # HumanTaskCompletedEvent (implements ILocalEvent)
 │                                           # HumanTaskInstance, HumanTaskInstanceStatus, IHumanTaskInstanceStore,
 │                                           # IHumanTaskRuntime, HumanTaskCreationRequest, HumanTaskCompletionRequest (Phase 5)
+│                                           # HumanTaskInstance.ConcurrencyStamp, UpdatedAt, Clone() (Phase 5b)
+│                                           # IHumanTaskInstanceStore.GetPendingByWorkflowAsync (Phase 5b)
 ├── CrestCreates.HumanTask/                  # HumanTaskRegistry : RegistryBase<HumanTaskDescriptor>
-│                                           # InMemoryHumanTaskInstanceStore, CompletionOutcomeMatcher,
-│                                           # DefaultHumanTaskRuntime, HumanTaskServiceCollectionExtensions (Phase 5)
+│                                           # InMemoryHumanTaskInstanceStore (CAS + clone + GetPendingByWorkflowAsync, Phase 5b), CompletionOutcomeMatcher,
+│                                           # DefaultHumanTaskRuntime (concurrency guard, Phase 5b), HumanTaskServiceCollectionExtensions (Phase 5)
 ├── CrestCreates.Workflow.Abstractions/      # WorkflowDescriptor, WorkflowStep, InteractionTarget (Capability/HumanTask/SubWorkflow),
 │                                           # IWorkflowEngine (ExecuteAsync only), IWorkflowRegistry,
 │                                           # IWorkflowStepExecutor, IWorkflowStepExecutorRegistry,
@@ -182,13 +219,14 @@ framework/src/
 │                                           # IWorkflowStateMachine, IWorkflowLifecycleEventPublisher,
 │                                           # WorkflowLifecycleEvent, IWorkflowContinuationService,
 │                                           # WorkflowContinuationRequest, WorkflowCorrelationException
+│                                           # WorkflowInstance.ConcurrencyStamp, UpdatedAt, Clone() (Phase 5b)
 ├── CrestCreates.Workflow/                   # WorkflowRegistry : RegistryBase<WorkflowDescriptor>,
 │                                           # WorkflowEngine (internal ctor, factory DI, delegates to IWorkflowExecutionRunner),
 │                                           # IWorkflowExecutionRunner (internal), WorkflowExecutionRunner (owns persistence + events),
 │                                           # CapabilityStepExecutor, HumanTaskStepExecutor (injects IHumanTaskRuntime, Phase 5),
 │                                           # DefaultStepExecutorRegistry, DefaultWorkflowStateMachine,
-│                                           # InMemoryWorkflowInstanceStore, WorkflowLifecycleEventPublisher (no-op),
-│                                           # WorkflowContinuationService (writes StepResult, advances cursor),
+│                                           # InMemoryWorkflowInstanceStore (CAS + clone, Phase 5b), WorkflowLifecycleEventPublisher (no-op),
+│                                           # WorkflowContinuationService (idempotent dup, Phase 5b),
 │                                           # HumanTaskCompletedWorkflowSubscriber (uses HumanTaskInstanceId, Phase 5),
 │                                           # WorkflowCompatibilityValidator (bootstrap)
 ├── CrestCreates.Draft.Abstractions/         # DraftRecord, IDraftStore, DraftStatus
@@ -204,8 +242,8 @@ framework/test/
 ├── CrestCreates.Event.Tests/               (32)
 ├── CrestCreates.Exposure.Tests/            (12)
 ├── CrestCreates.Form.Tests/                (9)
-├── CrestCreates.HumanTask.Tests/           (16)  ← Phase 5: +7 (Runtime 6 + Store 1)
-└── CrestCreates.Workflow.Tests/            (51)  ← Phase 5: +2 (Executor unit + E2E)
+├── CrestCreates.HumanTask.Tests/           (21)  ← Phase 5: +7 (Runtime 6 + Store 1); Phase 5b: +5 (Store 4 + Runtime 1)
+└── CrestCreates.Workflow.Tests/            (57)  ← Phase 5: +2 (Executor unit + E2E); Phase 5b: +6 (Store 5 + Continuation 1)
 ```
 
 ---
@@ -604,9 +642,9 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | Event.Tests | 32 | EventRegistry(16), Validator(4), DynamicRegistry(7), Descriptor(5) |
 | Exposure.Tests | 12 | AgentTool(5), MCPTool(3), CapabilityEndpoint(4) |
 | Form.Tests | 9 | Descriptor(5), Registry(4) |
-| HumanTask.Tests | 16 | Descriptor(6), Registry(3), **Store(1), Runtime(6)** |
-| Workflow.Tests | 51 | Executor Registry(5), Validator(14), Engine(13), Runtime(5), StateMachine(7), Continuation(5), **Executor(1), E2E(1)** |
-| **Total** | **~353** | |
+| HumanTask.Tests | 21 | Descriptor(6), Registry(3), **Store(5), Runtime(7)** |
+| Workflow.Tests | 57 | Executor Registry(5), Validator(14), Engine(13), Runtime(5), StateMachine(7), Continuation(7), **Store(5), Executor(1), E2E(1)** |
+| **Total** | **~371** | |
 
 ---
 
@@ -724,3 +762,12 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 108 | HumanTask 运行时发布 HumanTaskCompletedEvent; Workflow 不直接完成 HumanTask — 事件驱动 continuation | ✅ Phase 5 |
 | 109 | HumanTaskCompletedEvent 无 Workflow 字段 — Workflow correlation 仅存于 HumanTaskInstance/creation request | ✅ Phase 5 |
 | 110 | HumanTaskDescriptor 仍然是纯元数据 — 不持有 instance state | ✅ Phase 5 |
+| 111 | RuntimeStoreException — 所有 store-level 异常的基类（Metadata.Abstractions） | ✅ Phase 5b |
+| 112 | RuntimeConcurrencyException — CAS 冲突；并发写入 Detect/Prevent（Metadata.Abstractions） | ✅ Phase 5b |
+| 113 | RuntimeEntityNotFoundException — 实体缺失；GetById 失败时 Runtime 守卫 | ✅ Phase 5b |
+| 114 | WorkflowInstance + HumanTaskInstance ConcurrencyStamp 作为纯属性 — 因 Domain.Shared 接口冲突不实现 IHasConcurrencyStamp | ✅ Phase 5b |
+| 115 | 原子 CAS 算法 — while(true) TryAdd/TryUpdate；戳检查 + 替换为原子操作，无 TOCTOU | ✅ Phase 5b |
+| 116 | Shallow Clone 语义 — 框架拥有的集合复制；object? payload 引用共享；保存后修改 payload 不受支持 | ✅ Phase 5b |
+| 117 | 并发重复幂等 — WorkflowContinuationService 捕获 RuntimeConcurrencyException，重新查询 HumanTaskId；null → 重复 no-op | ✅ Phase 5b |
+| 118 | HumanTask 并发守卫 — DefaultHumanTaskRuntime 完成前验证戳；冲突时抑制事件，不发布虚假 HumanTaskCompletedEvent | ✅ Phase 5b |
+| 119 | Barrier(2) 并发测试 — System.Threading.Barrier 强制同时进入 SaveAsync，证明 CAS 在真实争用下工作 | ✅ Phase 5b |

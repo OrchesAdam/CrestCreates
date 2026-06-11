@@ -1,7 +1,7 @@
 # 统一元数据模型 — 使用指南
 
 > 本文档面向 CrestCreates 模块开发者，介绍如何使用统一元数据模型声明和执行业务能力。
-> *更新于 Phase 5 (2026-06-11): HumanTask Runtime Foundation — IHumanTaskRuntime, HumanTaskInstance, HumanTaskCompletedEvent 增强*
+> *更新于 Phase 5b (2026-06-11): Durable Runtime Store Contracts — 原子 CAS 并发、浅层快照、幂等重复处理、Runtime Store 异常类型*
 
 ---
 
@@ -295,6 +295,13 @@ var pending = await store.GetPendingByAssigneeAsync("user_001");
 - `HumanTaskInstance` 是运行时状态 — pin descriptor version
 - `HumanTaskCompletedEvent` 携带 `HumanTaskInstanceId` (instance ID)，不携带 Workflow 字段
 - Workflow continuation 通过 `WorkflowInstance.WaitingHumanTaskId` = `HumanTaskInstance.Id` 关联
+
+**Phase 5b — 并发与错误处理:**
+- `RuntimeConcurrencyException` — 并发写入冲突。两个调用者同时修改同一 WorkflowInstance 或 HumanTaskInstance 时抛出。调用方可捕获此异常并重试或将其视为幂等重复。
+- `RuntimeEntityNotFoundException` — 实体缺失。GetById 在 store 中找不到实体时抛出。通常在并发完成/取消场景中发生。
+- `RuntimeStoreException` — 所有 store-level 异常的基类。可直接捕获所有存储错误。
+- 重复 HumanTaskCompletedEvent 到达 `WorkflowContinuationService` 时会自动退化为幂等 no-op（无需用户干预）。
+- 并发 HumanTask 完成在 `DefaultHumanTaskRuntime` 中被安全检测 — 冲突时事件被抑制（不发布虚假 HumanTaskCompletedEvent）。
 
 ---
 
@@ -637,6 +644,8 @@ services.AddSingleton<MyRegistry>();
 | Phase 4c 实现计划 | `docs/superpowers/plans/2026-06-10-phase-4c-workflow-runtime-closure.md` |
 | Phase 5 设计规格书 | `docs/superpowers/specs/2026-06-11-human-task-runtime-foundation-design.md` |
 | Phase 5 实现计划 | `docs/superpowers/plans/2026-06-11-human-task-runtime-foundation.md` |
+| Phase 5b 设计规格书 | `docs/superpowers/specs/2026-06-11-phase-5b-durable-runtime-store-contracts-design.md` |
+| Phase 5b 实现计划 | `docs/superpowers/plans/2026-06-11-phase-5b-durable-runtime-store-contracts.md` |
 | 架构总结 | `docs/Feature/UnifiedMetadataModel/2026-06-09-unified-metadata-model-architecture-summary.md` |
 
 ### 关键接口一览
@@ -683,5 +692,8 @@ services.AddSingleton<MyRegistry>();
 | `IWorkflowLifecycleEventPublisher` | 生命周期事件 (Phase 4c) | Workflow.Abstractions |
 | `IWorkflowContinuationService` | 运行时 continuation 基础设施 (Phase 4c) | Workflow.Abstractions |
 | `IDraftStore` | Draft CRUD | Draft.Abstractions |
+| `RuntimeStoreException` | Store-level 异常基类 (Phase 5b) | Metadata.Abstractions |
+| `RuntimeConcurrencyException` | CAS 并发冲突异常 (Phase 5b) | Metadata.Abstractions |
+| `RuntimeEntityNotFoundException` | 实体缺失异常 (Phase 5b) | Metadata.Abstractions |
 
 所有 Provider 接口由 source generator 自动发现并注册，无需手动调用 Registry。
