@@ -9,6 +9,7 @@ public sealed class WorkflowInstance
     public WorkflowInstanceStatus Status { get; set; } = WorkflowInstanceStatus.Running;
     public string? CurrentStepId { get; set; }
     public int StepIndex { get; set; }
+    public string? WaitingHumanTaskId { get; set; }
     public DateTimeOffset StartedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAt { get; set; }
     public Dictionary<string, object?> Variables { get; init; } = new();

@@ -7,4 +7,5 @@ public interface IWorkflowInstanceStore
 {
     Task SaveAsync(WorkflowInstance instance, CancellationToken ct = default);
     Task<WorkflowInstance?> GetAsync(string instanceId, CancellationToken ct = default);
+    Task<WorkflowInstance?> GetByWaitingHumanTaskId(string humanTaskId, CancellationToken ct = default);
 }
