@@ -9,5 +9,6 @@
     <ProjectReference Include="..\CrestCreates.HumanTask.Abstractions\CrestCreates.HumanTask.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Metadata.Abstractions\CrestCreates.Metadata.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Metadata\CrestCreates.Metadata.csproj" />
+    <ProjectReference Include="..\CrestCreates.EventBus.Abstractions\CrestCreates.EventBus.Abstractions.csproj" />
   </ItemGroup>
 </Project>
