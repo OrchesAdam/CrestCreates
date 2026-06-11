@@ -1,6 +1,6 @@
 # Organization Identity Kernel — Architecture Summary
 
-> **Date:** 2026-06-11 | **Status:** Complete | **Phase 5c: Organization Identity Kernel**
+> **Date:** 2026-06-12 | **Status:** Complete | **Phases 5c/5d/5e: Organization Identity Kernel + Authorization Bridge + Data Permission Runtime**
 
 ---
 
@@ -9,9 +9,9 @@
 Establish the minimum Organization Identity Kernel to serve as foundation for:
 - HumanTask assignee resolution (future phase)
 - Capability Authorization (Phase 5d — complete)
-- DataPermissionFilter by org-unit hierarchy (future phase)
+- Data Permission Runtime (Phase 5e — complete)
 
-The kernel answers 5 questions:
+The kernel answers 6 questions:
 
 | Question | Service |
 |----------|---------|
@@ -20,6 +20,7 @@ The kernel answers 5 questions:
 | Is a user in a given org unit or its descendants? | `IOrganizationHierarchyService` |
 | Does a user hold a given position/role? | `IOrganizationIdentityService` |
 | What is the current user's organization context? | `IOrganizationContextAccessor` |
+| What data scope should apply for a given resource? | `IDataPermissionRuntime` |
 
 ---
 
@@ -28,9 +29,9 @@ The kernel answers 5 questions:
 Three projects following the existing HumanTask/Workflow conventions:
 
 ```
-framework/src/CrestCreates.Organization.Abstractions/   # 15 files — pure models + interfaces
-framework/src/CrestCreates.Organization/                  # 7 files — InMemory store + services + DI
-framework/test/CrestCreates.Organization.Tests/           # 6 files — 42 tests
+framework/src/CrestCreates.Organization.Abstractions/   # 23 files — pure models + interfaces
+framework/src/CrestCreates.Organization/                  # 10 files — InMemory store + services + DI
+framework/test/CrestCreates.Organization.Tests/           # 8 files — 79 tests
 ```
 
 **Dependencies**: Organization.Abstractions depends on nothing. Organization references only Abstractions + `Microsoft.Extensions.DependencyInjection.Abstractions`. No dependency on Workflow, HumanTask, Capability, or ASP.NET Core.
@@ -176,13 +177,69 @@ All filtering: active-only (`IsActive == true`). Primary selection: first `IsPri
 
 ---
 
-## 8. DataPermission Scope (Stub)
+## 8. Data Permission Runtime (Phase 5e)
+
+### 8.1 Scope Resolution
 
 ```
-DataPermissionScopeKind: None | Self | OwnOrganization | OwnOrganizationAndDescendants | All
+DataPermissionScopeRequest (UserId, TenantId, Resource, Action, Permission)
+        │
+        ▼
+IDataPermissionScopeRuleStore ──┐  (tenant-aware: 6-priority matching)
+IDataPermissionScopeProvider ───┤  (rule store > org-membership fallback)
+        │
+        ▼
+DataPermissionScope (Kind, UserId, TenantId, OrgUnitIds, ...)
+        │
+        ▼
+IDataPermissionFilterBuilder ────→ DataPermissionFilter (IsDenied, IsUnrestricted, Rules[])
 ```
 
-`DefaultDataPermissionScopeProvider`: no organization → `Self`. Has primary org → `OwnOrganization`. No configuration system, no LINQ/SQL generation. Foundation for future `DataPermissionFilter`.
+**Scope kinds**: `None | Self | OwnOrganization | OwnOrganizationAndDescendants | All | Custom` (Custom → fail closed).
+
+**Resolution priority**:
+1. If `request.Resource` is set, query `IDataPermissionScopeRuleStore` with tenantId. Tenant-specific rules override global rules.
+2. Fall back to org-membership via `IOrganizationIdentityService.GetContextAsync()`:
+   - No `PrimaryOrganizationUnitId` → `Self`
+   - Has primary org → `OwnOrganization`
+3. For rule-resolved `OwnOrganization`/`OwnOrganizationAndDescendants` without primary org → **fail closed** (return `None`).
+4. `Custom` scope kind → **fail closed** at provider level (return `None`).
+
+### 8.2 Rule Store
+
+`InMemoryDataPermissionScopeRuleStore` — `ConcurrentDictionary`-based, tenant-aware.
+
+Match priority (all tenant rules before all global):
+1. tenant-exact → tenant-wildcard-permission → tenant-wildcard-action
+2. global-exact → global-wildcard-permission → global-wildcard-action
+
+Rules are configured via `SaveRuleAsync(DataPermissionScopeRule)` on the interface — no implementation-only `AddRule()` leak.
+
+### 8.3 Filter Builder
+
+`DefaultDataPermissionFilterBuilder` — stateless, fail-closed:
+
+| Scope | Missing Mapping | Result |
+|-------|----------------|--------|
+| `None` | — | `IsDenied = true` |
+| `Custom` / unknown | — | `IsDenied = true` |
+| `All` (no tenant) | — | `IsUnrestricted = true` |
+| `All` (+ tenant) | — | `IsUnrestricted = false`, `Rules = [(TenantId, Equal, val)]` |
+| `Self` | `!HasUserIdField` | `IsDenied = true` |
+| `OwnOrganization` | `!HasOrganizationUnitIdField` or `OrganizationUnitId is null` | `IsDenied = true` |
+| `OwnOrganizationAndDescendants` | `!HasOrganizationUnitIdField` or `OrganizationUnitIds.Count == 0` | `IsDenied = true` |
+
+Tenant scoping is additive — appended to all non-denied filters when `HasTenantIdField && scope.TenantId is not null`.
+
+### 8.4 ORM-neutral Filter Model
+
+`DataPermissionFilter` uses explicit `IsDenied`/`IsUnrestricted` bools (no sentinel convention). Rules use `DataPermissionFilterOperator.Equal`/`In`. `DataPermissionFieldMapping` bridges entity fields (`UserIdField`, `OrganizationUnitIdField`, `TenantIdField`).
+
+### 8.5 Runtime Facade
+
+`IDataPermissionRuntime` composes scope resolution + filter building:
+- `ResolveScopeAsync(DataPermissionScopeRequest)` → `DataPermissionScope`
+- `BuildFilter(DataPermissionScope, DataPermissionFieldMapping)` → `DataPermissionFilter`
 
 ---
 
@@ -191,11 +248,14 @@ DataPermissionScopeKind: None | Self | OwnOrganization | OwnOrganizationAndDesce
 ```csharp
 services.AddOrganizationKernel();
 // Registers:
-//   IOrganizationStore              → InMemoryOrganizationStore         (Singleton)
-//   IOrganizationHierarchyService   → DefaultOrganizationHierarchyService (Scoped)
-//   IOrganizationIdentityService    → DefaultOrganizationIdentityService  (Scoped)
-//   IDataPermissionScopeProvider    → DefaultDataPermissionScopeProvider  (Scoped)
-//   IOrganizationContextAccessor    → NullOrganizationContextAccessor     (Singleton)
+//   IOrganizationStore              → InMemoryOrganizationStore             (Singleton)
+//   IOrganizationHierarchyService   → DefaultOrganizationHierarchyService   (Scoped)
+//   IOrganizationIdentityService    → DefaultOrganizationIdentityService    (Scoped)
+//   IDataPermissionScopeProvider    → DefaultDataPermissionScopeProvider    (Scoped)
+//   IDataPermissionScopeRuleStore   → InMemoryDataPermissionScopeRuleStore  (Singleton)
+//   IDataPermissionFilterBuilder    → DefaultDataPermissionFilterBuilder    (Singleton)
+//   IDataPermissionRuntime          → DefaultDataPermissionRuntime          (Scoped)
+//   IOrganizationContextAccessor    → NullOrganizationContextAccessor       (Singleton)
 ```
 
 All use `TryAdd*` — won't override consumer custom registrations.
@@ -214,14 +274,17 @@ Plain `Exception` base (no `CrestException` — no HTTP layer in this phase).
 
 ---
 
-## 11. Tests (42 tests, 0 failures)
+## 11. Tests (79 tests, 0 failures)
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
 | `InMemoryOrganizationStoreTests` | 11 | Upsert, get-by-id, get-by-tenant, membership query, role assignment, position CRUD |
-| `OrganizationHierarchyServiceTests` | 16 | Ancestors, descendants, IsDescendantOf, cycle detection (ancestors + descendants), IsUserInOrganization (active/inactive/not-member), IsUserInDescendantOrganization, cross-tenant isolation, cross-tenant parent exclusion |
-| `OrganizationIdentityServiceTests` | 13 | GetContext (orgs/roles/positions), dedup, primary selection, inactive exclusion, IsInRole, HasPosition, GetUserIds (org/role/position) |
-| `DataPermissionScopeProviderTests` | 2 | Self when no org, OwnOrganization when primary exists |
+| `OrganizationHierarchyServiceTests` | 16 | Ancestors, descendants, IsDescendantOf, cycle detection, cross-tenant isolation |
+| `OrganizationIdentityServiceTests` | 13 | GetContext, dedup, primary selection, inactive exclusion, IsInRole, HasPosition |
+| `DataPermissionScopeProviderTests` | 15 | Self/OwnOrganization/OwnOrgAndDescendants/All/None/Custom resolutions, rule overrides, tenant isolation, fail-closed, old overload adapter |
+| `DataPermissionFilterBuilderTests` | 13 | None/All/Self/OwnOrg/Descendants fail-closed rules, tenant scoping, Custom→Denied, missing mapping→Denied |
+| `InMemoryDataPermissionScopeRuleStoreTests` | 8 | Exact/wildcard matching, tenant-priority ordering, tenant-wildcard-overrides-global-exact |
+| `DataPermissionRuntimeTests` | 3 | ResolveScopeAsync delegation, BuildFilter delegation, end-to-end resolve-then-build |
 
 ---
 
@@ -303,11 +366,81 @@ Key test scenarios: empty permissions allow (even without `IPermissionChecker`),
 
 ---
 
-## 15. References
+## 15. Data Permission Runtime Foundation (Phase 5e)
+
+The Data Permission Runtime Foundation establishes an organization-identity-driven data permission system that resolves `DataPermissionScope` from org identity + rule store, and converts it to an ORM-neutral `DataPermissionFilter`.
+
+### 15.1 How It Works
+
+```
+DataPermissionScopeRequest (UserId, TenantId, Resource, Action, Permission)
+        │
+        ▼
+IDataPermissionScopeRuleStore.GetScopeKindAsync(resource, action, permission, tenantId)
+        │
+        ├─ Rule found → ResolveByKindAsync(kind, request)
+        │     ├─ Self/All → return scope without org context
+        │     ├─ None/Custom → return Denied scope
+        │     └─ OwnOrganization/OwnOrganizationAndDescendants
+        │           ├─ No primary org → fail closed (None)
+        │           └─ Has primary org → fetch descendants, build scope
+        │
+        └─ No rule → fall back to org-membership
+              ├─ No primary org → Self
+              └─ Has primary org → OwnOrganization
+                      │
+                      ▼
+              DataPermissionScope
+                      │
+                      ▼
+              IDataPermissionFilterBuilder.Build(scope, mapping)
+                      │
+                      ▼
+              DataPermissionFilter (IsDenied, IsUnrestricted, Rules[])
+```
+
+- Rule store is tenant-aware: tenant-specific rules override global rules.
+- Filter builder is fail-closed: missing field mappings, Custom scope, unknown enum → deny.
+- `All` + `TenantIdField` → tenant-scoped (not unrestricted).
+- Old `IDataPermissionFilter` in Infrastructure is untouched — Phase 5e builds the new chain alongside it.
+- No changes to `AuthorizationMiddleware` or `PermissionCapabilityAuthorizationService`.
+
+### 15.2 Key Files
+
+| File | Role |
+|------|------|
+| `CrestCreates.Organization.Abstractions/DataPermissionFilter.cs` | Filter result model (explicit IsDenied/IsUnrestricted) |
+| `CrestCreates.Organization.Abstractions/DataPermissionFilterRule.cs` | Single rule (FieldName, Operator, Value/Values) |
+| `CrestCreates.Organization.Abstractions/DataPermissionFilterOperator.cs` | Enum: Equal, In |
+| `CrestCreates.Organization.Abstractions/DataPermissionFieldMapping.cs` | Entity field bridge (UserIdField, OrgUnitIdField, TenantIdField) |
+| `CrestCreates.Organization.Abstractions/IDataPermissionFilterBuilder.cs` | Build filter from scope + mapping |
+| `CrestCreates.Organization.Abstractions/IDataPermissionRuntime.cs` | Composes scope resolution + filter building |
+| `CrestCreates.Organization.Abstractions/DataPermissionScopeRequest.cs` | Input model for scope resolution |
+| `CrestCreates.Organization.Abstractions/IDataPermissionScopeRuleStore.cs` | Tenant-aware rule store interface |
+| `CrestCreates.Organization.Abstractions/DataPermissionScopeRule.cs` | Rule model (Resource, Action, Permission, TenantId, ScopeKind) |
+| `CrestCreates.Organization.Abstractions/DataPermissionAction.cs` | Static constants: Read/Create/Update/Delete/Query |
+| `CrestCreates.Organization/DefaultDataPermissionFilterBuilder.cs` | Fail-closed builder implementation |
+| `CrestCreates.Organization/DefaultDataPermissionRuntime.cs` | Runtime facade |
+| `CrestCreates.Organization/InMemoryDataPermissionScopeRuleStore.cs` | Tenant-aware rule store (6-priority match) |
+
+### 15.3 Tests
+
+```bash
+dotnet test framework/test/CrestCreates.Organization.Tests/
+# 79 tests, 0 failures (includes 37 data permission tests)
+```
+
+Key test scenarios: scope resolution (rule store > org-membership), fail-closed (Custom→None, missing mapping→Denied, no primary org→None), tenant isolation (tenant-rule-overrides-global, cross-tenant rule does not apply), filter builder (All+TenantId→tenant-scoped, explicit IsDenied/IsUnrestricted), runtime delegation.
+
+---
+
+## 16. References
 
 - Design spec (Phase 5c): `docs/superpowers/specs/2026-06-11-phase-5c-organization-identity-kernel-design.md`
 - Implementation plan (Phase 5c): `docs/superpowers/plans/2026-06-11-phase-5c-organization-identity-kernel.md`
 - Design spec (Phase 5d): `docs/superpowers/specs/2026-06-11-phase-5d-capability-authorization-bridge-design.md`
 - Implementation plan (Phase 5d): `docs/superpowers/plans/2026-06-11-phase-5d-capability-authorization-bridge.md`
+- Design spec (Phase 5e): `docs/superpowers/specs/2026-06-11-phase-5e-data-permission-runtime-foundation-design.md`
+- Implementation plan (Phase 5e): `docs/superpowers/plans/2026-06-11-phase-5e-data-permission-runtime-foundation.md`
 - InMemory store reference: `framework/src/CrestCreates.HumanTask/InMemoryHumanTaskInstanceStore.cs`
 - DI registration reference: `framework/src/CrestCreates.HumanTask/HumanTaskServiceCollectionExtensions.cs`

@@ -6,5 +6,6 @@ public enum DataPermissionScopeKind
     Self,
     OwnOrganization,
     OwnOrganizationAndDescendants,
-    All
+    All,
+    Custom
 }

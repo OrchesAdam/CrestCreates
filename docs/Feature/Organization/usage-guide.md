@@ -3,6 +3,7 @@
 > This document is for CrestCreates module developers who need to work with organization identity — org units, membership, hierarchy queries, and organization context.
 > *Updated for Phase 5c (2026-06-11): Organization Identity Kernel — composite-key storage, tenant-scoped hierarchy, cycle detection, 42 tests*
 > *Updated for Phase 5d (2026-06-11): Capability Authorization Bridge — `CapabilityDescriptor.Permissions` → `IPermissionChecker` via `RequiredPermissions`, organization roles remain separate from RBAC*
+> *Updated for Phase 5e (2026-06-12): Data Permission Runtime Foundation — scope resolution from org identity + rule store, ORM-neutral filter model*
 
 ---
 
@@ -18,7 +19,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOrganizationKernel();
 ```
 
-This registers all 5 services with `TryAdd*` semantics — if you provide custom implementations, they won't be overwritten.
+This registers all 8 services with `TryAdd*` semantics — if you provide custom implementations, they won't be overwritten.
 
 ### 1.2 Define an Organization Hierarchy
 
@@ -246,20 +247,114 @@ var ancestors = await hierarchy.GetAncestorsAsync("dept", "t1");
 
 ---
 
-## 6. Data Permission Scope (Stub)
+## 6. Data Permission Runtime
 
-`IDataPermissionScopeProvider` provides a minimal foundation for future data filtering:
+`IDataPermissionRuntime` resolves data access scope from org identity and converts it to an ORM-neutral filter.
+
+### 6.1 Basic Scope Resolution
 
 ```csharp
-var scopeProvider = serviceProvider.GetRequiredService<IDataPermissionScopeProvider>();
+var runtime = serviceProvider.GetRequiredService<IDataPermissionRuntime>();
 
-var scope = await scopeProvider.GetScopeAsync("user-1", "read:documents", "t1");
+var request = new DataPermissionScopeRequest
+{
+    UserId = "user-1",
+    TenantId = "t1",
+    Resource = "Book",
+    Action = DataPermissionAction.Read
+};
 
-// No organization → DataPermissionScopeKind.Self
-// Has primary org  → DataPermissionScopeKind.OwnOrganization
+var scope = await runtime.ResolveScopeAsync(request);
+
+// scope.Kind → DataPermissionScopeKind.OwnOrganization (if user has primary org)
+// scope.OrganizationUnitId → "dept-1"
+// scope.IsEmpty → false (Self or higher)
+// scope.IsUnrestricted → false (not All)
 ```
 
-This is a **stub** in Phase 5c. No configuration system, no LINQ/SQL generation. Full `DataPermissionFilter` integration is a future phase.
+### 6.2 Resolution Flow
+
+1. **Rule store lookup** (if `request.Resource` is set):
+   - Query `IDataPermissionScopeRuleStore` with tenantId
+   - Tenant-specific rules override global rules
+   - Match priority: tenant-exact > tenant-wildcard-perm > tenant-wildcard-action > global-*
+2. **Org-membership fallback** (no rule matched):
+   - No primary org → `Self`
+   - Has primary org → `OwnOrganization`
+3. **Fail closed**:
+   - `Custom` scope kind → `None`
+   - `OwnOrganization`/`OwnOrganizationAndDescendants` without primary org → `None`
+
+### 6.3 Configure Scope Rules
+
+```csharp
+var ruleStore = serviceProvider.GetRequiredService<IDataPermissionScopeRuleStore>();
+
+// Global: Book.Read → OwnOrganization scope
+await ruleStore.SaveRuleAsync(new DataPermissionScopeRule
+{
+    Resource = "Book", Action = "Read",
+    ScopeKind = DataPermissionScopeKind.OwnOrganization
+});
+
+// Tenant-specific override: Book.Read → All for tenant "t-A"
+await ruleStore.SaveRuleAsync(new DataPermissionScopeRule
+{
+    Resource = "Book", Action = "Read", TenantId = "t-A",
+    ScopeKind = DataPermissionScopeKind.All
+});
+
+// Block access: SecretDoc.Read → None
+await ruleStore.SaveRuleAsync(new DataPermissionScopeRule
+{
+    Resource = "SecretDoc", Action = "Read",
+    ScopeKind = DataPermissionScopeKind.None
+});
+```
+
+### 6.4 Build an ORM-neutral Filter
+
+```csharp
+// Given a scope from ResolveScopeAsync...
+var scope = await runtime.ResolveScopeAsync(request);
+
+// Define field mapping for your entity
+var mapping = new DataPermissionFieldMapping
+{
+    UserIdField = "CreatorId",
+    OrganizationUnitIdField = "OrganizationUnitId",
+    TenantIdField = "TenantId"
+};
+
+// Build the filter
+var filter = runtime.BuildFilter(scope, mapping);
+
+if (filter.IsDenied)
+{
+    // Access denied — return empty/403
+}
+else if (filter.IsUnrestricted)
+{
+    // No filtering needed
+}
+else
+{
+    // Apply rules to your ORM query:
+    // filter.Rules[0] → (OrganizationUnitId, Equal, "dept-1")
+    // filter.Rules[1] → (TenantId, Equal, "t1")  // if tenant scoping active
+}
+```
+
+### 6.5 Fail-Closed Behavior
+
+| Scenario | Result |
+|----------|--------|
+| Scope = `Custom` | `filter.IsDenied = true` |
+| `Self` scope but no `UserIdField` mapping | `filter.IsDenied = true` |
+| `OwnOrganization` but no `OrganizationUnitIdField` | `filter.IsDenied = true` |
+| `OwnOrganizationAndDescendants` but no `OrganizationUnitIdField` | `filter.IsDenied = true` |
+| `All` scope with no `TenantIdField` | `filter.IsUnrestricted = true` |
+| `All` scope + `TenantIdField` + `scope.TenantId` | `filter.IsUnrestricted = false`, `Rules = [(TenantId, Equal, val)]` |
 
 ---
 
@@ -276,15 +371,27 @@ This is a **stub** in Phase 5c. No configuration system, no LINQ/SQL generation.
 | `IOrganizationStore` | `Abstractions` | Upsert + query contract |
 | `IOrganizationHierarchyService` | `Abstractions` | Ancestors, descendants, membership checks |
 | `IOrganizationIdentityService` | `Abstractions` | Context, role, position queries |
-| `IDataPermissionScopeProvider` | `Abstractions` | Data scope resolution (stub) |
-| `DataPermissionScopeKind` | `Abstractions` | Scope enum |
+| `IDataPermissionScopeProvider` | `Abstractions` | Data scope resolution |
+| `IDataPermissionRuntime` | `Abstractions` | Scope resolution + filter building facade |
+| `IDataPermissionFilterBuilder` | `Abstractions` | Build filter from scope + mapping |
+| `IDataPermissionScopeRuleStore` | `Abstractions` | Tenant-aware scope rule storage |
+| `DataPermissionScopeKind` | `Abstractions` | Scope enum: None/Self/OwnOrg/OwnOrgAndDescendants/All/Custom |
 | `DataPermissionScope` | `Abstractions` | Scope value object |
+| `DataPermissionScopeRequest` | `Abstractions` | Input for scope resolution |
+| `DataPermissionScopeRule` | `Abstractions` | Rule model (Resource, Action, Permission, TenantId, ScopeKind) |
+| `DataPermissionAction` | `Abstractions` | Action constants: Read/Create/Update/Delete/Query |
+| `DataPermissionFilter` | `Abstractions` | ORM-neutral filter result (IsDenied, IsUnrestricted, Rules) |
+| `DataPermissionFilterRule` | `Abstractions` | Single rule: FieldName, Operator (Equal/In), Value/Values |
+| `DataPermissionFieldMapping` | `Abstractions` | Entity field bridge |
 | `OrganizationException` | `Abstractions` | Base exception |
 | `OrganizationHierarchyException` | `Abstractions` | Cycle/hierarchy failure |
 | `InMemoryOrganizationStore` | `Organization` | ConcurrentDictionary store |
 | `DefaultOrganizationHierarchyService` | `Organization` | BFS/DFS + cycle detection |
 | `DefaultOrganizationIdentityService` | `Organization` | Active-only + dedup |
-| `DefaultDataPermissionScopeProvider` | `Organization` | Minimal scope resolution |
+| `DefaultDataPermissionScopeProvider` | `Organization` | Full scope resolution with rule store + hierarchy |
+| `DefaultDataPermissionRuntime` | `Organization` | Runtime facade |
+| `DefaultDataPermissionFilterBuilder` | `Organization` | Fail-closed filter builder |
+| `InMemoryDataPermissionScopeRuleStore` | `Organization` | Tenant-aware rule store (6-priority match) |
 | `NullOrganizationContextAccessor` | `Organization` | Null default accessor |
 | `AddOrganizationKernel()` | `Organization` | DI registration extension |
 
@@ -349,7 +456,7 @@ Run all Organization tests:
 
 ```bash
 dotnet test framework/test/CrestCreates.Organization.Tests/
-# 42 tests, 0 failures
+# 79 tests, 0 failures
 ```
 
 Run specific test groups:
@@ -359,6 +466,9 @@ dotnet test framework/test/CrestCreates.Organization.Tests/ --filter "FullyQuali
 dotnet test framework/test/CrestCreates.Organization.Tests/ --filter "FullyQualifiedName~OrganizationHierarchyServiceTests"
 dotnet test framework/test/CrestCreates.Organization.Tests/ --filter "FullyQualifiedName~OrganizationIdentityServiceTests"
 dotnet test framework/test/CrestCreates.Organization.Tests/ --filter "FullyQualifiedName~DataPermissionScopeProviderTests"
+dotnet test framework/test/CrestCreates.Organization.Tests/ --filter "FullyQualifiedName~DataPermissionFilterBuilderTests"
+dotnet test framework/test/CrestCreates.Organization.Tests/ --filter "FullyQualifiedName~DataPermissionRuntimeTests"
+dotnet test framework/test/CrestCreates.Organization.Tests/ --filter "FullyQualifiedName~InMemoryDataPermissionScopeRuleStoreTests"
 ```
 
 ---
@@ -370,4 +480,6 @@ dotnet test framework/test/CrestCreates.Organization.Tests/ --filter "FullyQuali
 - Implementation plan (Phase 5c): `docs/superpowers/plans/2026-06-11-phase-5c-organization-identity-kernel.md`
 - Design spec (Phase 5d): `docs/superpowers/specs/2026-06-11-phase-5d-capability-authorization-bridge-design.md`
 - Implementation plan (Phase 5d): `docs/superpowers/plans/2026-06-11-phase-5d-capability-authorization-bridge.md`
+- Design spec (Phase 5e): `docs/superpowers/specs/2026-06-11-phase-5e-data-permission-runtime-foundation-design.md`
+- Implementation plan (Phase 5e): `docs/superpowers/plans/2026-06-11-phase-5e-data-permission-runtime-foundation.md`
 - Platform memory: `memory.md`

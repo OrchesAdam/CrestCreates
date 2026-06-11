@@ -12,6 +12,9 @@ public static class OrganizationServiceCollectionExtensions
         services.TryAddScoped<IOrganizationHierarchyService, DefaultOrganizationHierarchyService>();
         services.TryAddScoped<IOrganizationIdentityService, DefaultOrganizationIdentityService>();
         services.TryAddScoped<IDataPermissionScopeProvider, DefaultDataPermissionScopeProvider>();
+        services.TryAddSingleton<IDataPermissionScopeRuleStore, InMemoryDataPermissionScopeRuleStore>();
+        services.TryAddSingleton<IDataPermissionFilterBuilder, DefaultDataPermissionFilterBuilder>();
+        services.TryAddScoped<IDataPermissionRuntime, DefaultDataPermissionRuntime>();
         services.TryAddSingleton<IOrganizationContextAccessor, NullOrganizationContextAccessor>();
         return services;
     }
