@@ -15,5 +15,6 @@ public sealed class CapabilityExecutionContext
     public object? Input { get; set; }
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
     public IDictionary<string, object?> Items { get; init; } = new Dictionary<string, object?>();
+    public IReadOnlyList<string> RequiredPermissions { get; set; } = Array.Empty<string>();
     public CancellationToken CancellationToken { get; init; }
 }

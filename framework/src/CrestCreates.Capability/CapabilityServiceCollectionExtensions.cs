@@ -33,7 +33,8 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddSingleton(builder);
         services.TryAddSingleton<CapabilityHandlerResolver>();
         services.TryAddSingleton<ICapabilityHandlerResolver>(sp => sp.GetRequiredService<CapabilityHandlerResolver>());
-        services.TryAddSingleton<ICapabilityPipeline, CapabilityPipeline>();
+        services.TryAddScoped<ICapabilityPipeline, CapabilityPipeline>();
+        services.TryAddScoped<ICapabilityAuthorizationService, PermissionCapabilityAuthorizationService>();
         services.TryAddTransient<AuditMiddleware>();       // New
         services.TryAddTransient<RateLimitMiddleware>();
         services.TryAddTransient<TenantMiddleware>();
@@ -67,7 +68,7 @@ public static class CapabilityServiceCollectionExtensions
         services.AddCapabilityPipeline();
 
         // Dispatcher + Resolver
-        services.TryAddSingleton<ICapabilityDispatcher>(sp =>
+        services.TryAddScoped<ICapabilityDispatcher>(sp =>
             new CapabilityDispatcher(
                 sp.GetRequiredService<ICapabilityResolver>(),
                 sp.GetRequiredService<ICapabilityPipeline>(),

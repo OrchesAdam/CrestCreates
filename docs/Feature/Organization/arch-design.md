@@ -8,7 +8,7 @@
 
 Establish the minimum Organization Identity Kernel to serve as foundation for:
 - HumanTask assignee resolution (future phase)
-- Capability Authorization (future phase)
+- Capability Authorization (Phase 5d — complete)
 - DataPermissionFilter by org-unit hierarchy (future phase)
 
 The kernel answers 5 questions:
@@ -251,9 +251,63 @@ No dependency on ASP.NET Core HttpContext, Workflow, HumanTask, or Capability pr
 
 ---
 
-## 14. References
+## 14. Capability Authorization Bridge (Phase 5d)
 
-- Design spec: `docs/superpowers/specs/2026-06-11-phase-5c-organization-identity-kernel-design.md`
-- Implementation plan: `docs/superpowers/plans/2026-06-11-phase-5c-organization-identity-kernel.md`
+The Capability Authorization Bridge connects Capability Runtime to the existing `IPermissionChecker` RBAC main chain.
+
+### 14.1 How It Works
+
+```
+CapabilityDescriptor.Permissions      (string[])
+        ↓
+CapabilityExecutionContext.RequiredPermissions
+        ↓
+AuthorizationMiddleware
+        ↓
+PermissionCapabilityAuthorizationService
+        ↓
+IPermissionChecker.IsGrantedAsync()   (existing RBAC chain)
+```
+
+- `CapabilityDescriptor.Permissions` declares which permissions a capability requires.
+- `CapabilityPipeline.ExecuteAsync` copies those into `context.RequiredPermissions` **after** `configureContext` (bypass-proof — caller cannot clear).
+- `AuthorizationMiddleware` calls `ICapabilityAuthorizationService.AuthorizeAsync()` with the required permissions.
+- `PermissionCapabilityAuthorizationService` delegates to the existing `IPermissionChecker`:
+  - Empty permissions → allow (no checker needed).
+  - Non-empty → `IsGrantedAsync(string[])` with `AllGranted` semantics.
+- `ICapabilityPipeline` and `ICapabilityDispatcher` are now Scoped (were Singleton), fixing captive dependencies on scoped `ITenantContext`/`ICurrentUser`.
+
+### 14.2 Explicit Boundary: Organization Role Does NOT Participate
+
+`UserOrganizationRoleAssignment` (Phase 5c) stores organization-scoped role context (e.g., "Department Manager"). It does NOT flow into `IPermissionChecker` or the Capability Authorization Bridge. The framework's RBAC truth source remains `IPermissionChecker` and claims. Organization roles are identity facts for workflow routing and future data-permission filtering — not for API access control.
+
+### 14.3 Key Files
+
+| File | Role |
+|------|------|
+| `CrestCreates.Capability/PermissionCapabilityAuthorizationService.cs` | Default auth implementation |
+| `CrestCreates.Capability.Abstractions/ICapabilityAuthorizationService.cs` | Interface (accepts `requiredPermissions`) |
+| `CrestCreates.Capability.Abstractions/CapabilityExecutionContext.cs` | Carries `RequiredPermissions` |
+| `CrestCreates.Capability/Middleware/AuthorizationMiddleware.cs` | Pipeline middleware (requires `ICapabilityAuthorizationService`) |
+| `CrestCreates.Capability/CapabilityPipeline.cs` | Populates `RequiredPermissions` from descriptor |
+| `CrestCreates.Capability/CapabilityServiceCollectionExtensions.cs` | Registers default auth service as Scoped |
+
+### 14.4 Tests
+
+```bash
+dotnet test framework/test/CrestCreates.Capability.Tests/
+# 117 tests, 0 failures (includes 13 auth bridge tests)
+```
+
+Key test scenarios: empty permissions allow (even without `IPermissionChecker`), all-granted passes, any-denied returns UNAUTHORIZED, configureContext cannot clear permissions, missing `IPermissionChecker` causes failure (not silent skip).
+
+---
+
+## 15. References
+
+- Design spec (Phase 5c): `docs/superpowers/specs/2026-06-11-phase-5c-organization-identity-kernel-design.md`
+- Implementation plan (Phase 5c): `docs/superpowers/plans/2026-06-11-phase-5c-organization-identity-kernel.md`
+- Design spec (Phase 5d): `docs/superpowers/specs/2026-06-11-phase-5d-capability-authorization-bridge-design.md`
+- Implementation plan (Phase 5d): `docs/superpowers/plans/2026-06-11-phase-5d-capability-authorization-bridge.md`
 - InMemory store reference: `framework/src/CrestCreates.HumanTask/InMemoryHumanTaskInstanceStore.cs`
 - DI registration reference: `framework/src/CrestCreates.HumanTask/HumanTaskServiceCollectionExtensions.cs`

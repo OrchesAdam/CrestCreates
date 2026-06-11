@@ -53,6 +53,8 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
         };
         configureContext?.Invoke(context);
 
+        context.RequiredPermissions = descriptor.Permissions;
+
         var startedAt = DateTimeOffset.UtcNow;
 
         try

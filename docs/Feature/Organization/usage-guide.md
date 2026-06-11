@@ -2,6 +2,7 @@
 
 > This document is for CrestCreates module developers who need to work with organization identity — org units, membership, hierarchy queries, and organization context.
 > *Updated for Phase 5c (2026-06-11): Organization Identity Kernel — composite-key storage, tenant-scoped hierarchy, cycle detection, 42 tests*
+> *Updated for Phase 5d (2026-06-11): Capability Authorization Bridge — `CapabilityDescriptor.Permissions` → `IPermissionChecker` via `RequiredPermissions`, organization roles remain separate from RBAC*
 
 ---
 
@@ -309,6 +310,37 @@ The Organization Kernel has zero dependency on ASP.NET Core `HttpContext`, `IHtt
 
 This phase deliberately excludes: AppService, Controller, Minimal API, UI, Permission tree management, Menu permissions, complete RBAC admin backend, database persistence, cache invalidation.
 
+### Capability Authorization Bridge (Phase 5d)
+
+The Capability Authorization Bridge connects Capability Runtime to the existing `IPermissionChecker` RBAC chain:
+
+```csharp
+// Define a capability descriptor with permissions
+var descriptor = new CapabilityDescriptor
+{
+    Id = "approve.expense",
+    Name = "Approve Expense",
+    Permissions = new[] { "expense.approve", "expense.read" }
+};
+
+// Register capability runtime (includes default auth service)
+services.AddCapabilityRuntime();
+
+// Permissions flow: descriptor.Permissions → context.RequiredPermissions
+// → AuthorizationMiddleware → PermissionCapabilityAuthorizationService
+// → IPermissionChecker.IsGrantedAsync(permissions)
+
+// Empty permissions → allow (no IPermissionChecker required)
+// Non-empty → ALL must be granted (AllGranted semantics)
+// Any denied → pipeline returns UNAUTHORIZED
+```
+
+**Organization roles remain separate**: `UserOrganizationRoleAssignment` and `IOrganizationIdentityService.IsInRoleAsync()` are organization-scoped identity facts. They do NOT flow into `IPermissionChecker` or the Capability Authorization Bridge. The sole RBAC truth sources are `IPermissionChecker` and claims.
+
+For full details, see:
+- Design spec: `docs/superpowers/specs/2026-06-11-phase-5d-capability-authorization-bridge-design.md`
+- Implementation plan: `docs/superpowers/plans/2026-06-11-phase-5d-capability-authorization-bridge.md`
+
 ---
 
 ## 9. Tests Quick Reference
@@ -334,6 +366,8 @@ dotnet test framework/test/CrestCreates.Organization.Tests/ --filter "FullyQuali
 ## 10. References
 
 - Architecture summary: `docs/Feature/Organization/arch-design.md`
-- Design spec: `docs/superpowers/specs/2026-06-11-phase-5c-organization-identity-kernel-design.md`
-- Implementation plan: `docs/superpowers/plans/2026-06-11-phase-5c-organization-identity-kernel.md`
+- Design spec (Phase 5c): `docs/superpowers/specs/2026-06-11-phase-5c-organization-identity-kernel-design.md`
+- Implementation plan (Phase 5c): `docs/superpowers/plans/2026-06-11-phase-5c-organization-identity-kernel.md`
+- Design spec (Phase 5d): `docs/superpowers/specs/2026-06-11-phase-5d-capability-authorization-bridge-design.md`
+- Implementation plan (Phase 5d): `docs/superpowers/plans/2026-06-11-phase-5d-capability-authorization-bridge.md`
 - Platform memory: `memory.md`
