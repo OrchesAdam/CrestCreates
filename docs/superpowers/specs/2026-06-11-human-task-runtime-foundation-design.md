@@ -1,7 +1,7 @@
 # Phase 5 — HumanTask Runtime Foundation: Design Spec
 
 **Date**: 2026-06-11
-**Status**: Approved
+**Status**: Ready for Implementation
 **Context**: Metadata Kernel v1.0, Phase 3, Phase 4, Phase 4a, Phase 4b, Phase 4c completed. Workflow runtime has suspend/resume closed loop. HumanTask module needs instance runtime.
 
 ---
@@ -129,6 +129,7 @@ public interface IHumanTaskInstanceStore
 
 - `SaveAsync` is upsert.
 - `GetPendingByAssigneeAsync` returns `Created` or `Assigned` instances for the given `AssigneeUserId`.
+- In normal Phase 5 creation flow, user-assigned tasks will be `Assigned`. `Created` status is included in the filter primarily to keep the store tolerant of externally constructed test instances where `AssigneeUserId` may be set but status remains `Created`.
 - Store is pure persistence — no business validation.
 
 #### 1.6 `IHumanTaskRuntime`
@@ -172,6 +173,8 @@ Pattern mirrors `InMemoryWorkflowInstanceStore`:
 
 #### 2.2 `CompletionOutcomeMatcher` (internal static)
 
+> **Descriptor property name**: Use the existing outcome collection property on `HumanTaskDescriptor`. The current code uses `Outcomes`. Do not rename the descriptor property in Phase 5. If the property is named `CompletionOutcomes` in the current codebase, use that name; otherwise use `Outcomes`.
+
 ```csharp
 internal static class CompletionOutcomeMatcher
 {
@@ -180,7 +183,7 @@ internal static class CompletionOutcomeMatcher
 
     public static CompletionOutcome Resolve(HumanTaskDescriptor descriptor, string outcome)
     {
-        var matches = descriptor.Outcomes
+        var matches = descriptor.Outcomes  // use existing property name; do not rename
             .Where(o => Matches(o, outcome))
             .ToList();
 
@@ -248,6 +251,8 @@ public static class HumanTaskServiceCollectionExtensions
 }
 ```
 
+> **Composition reminder**: Any test host or application host that registers Workflow runtime with `HumanTaskStepExecutor` (via `AddWorkflowEngine()`) must also call `AddHumanTaskRuntime()`. Otherwise DI will fail resolving `HumanTaskStepExecutor` because it now depends on `IHumanTaskRuntime`. If the project has a top-level `AddCrestCreatesRuntime()` or similar composition entry point, `AddHumanTaskRuntime()` must be included there.
+
 #### 2.5 Project Reference
 
 Add to `CrestCreates.HumanTask.csproj`:
@@ -255,11 +260,15 @@ Add to `CrestCreates.HumanTask.csproj`:
 <ProjectReference Include="..\CrestCreates.EventBus.Abstractions\CrestCreates.EventBus.Abstractions.csproj" />
 ```
 
+> While `CrestCreates.HumanTask.Abstractions` already references `CrestCreates.EventBus.Abstractions` (needed for `ILocalEvent` on `HumanTaskCompletedEvent`), `CrestCreates.HumanTask` must explicitly reference it to resolve `ILocalEventBus` used by `DefaultHumanTaskRuntime`. Direct dependencies should be expressed explicitly. No reverse dependency (`HumanTask → Workflow`) is introduced.
+
 ---
 
 ### 3. Workflow Changes
 
 #### 3.1 `HumanTaskStepExecutor`
+
+> **Interface stability**: Keep the existing `IWorkflowStepExecutor.ExecuteAsync` signature. Do not change `IWorkflowStepExecutor` unless compilation requires a minimal adjustment. The current signature is `ExecuteAsync(WorkflowExecutionContext context, CancellationToken ct)` — access the step via `context.Step`.
 
 Constructor injection of `IHumanTaskRuntime`:
 
@@ -309,7 +318,7 @@ public Task HandleAsync(HumanTaskCompletedEvent evt, CancellationToken ct)
 }
 ```
 
-Note: `WorkflowContinuationRequest.HumanTaskId` field name stays as-is (it was already used for the `WaitingHumanTaskId` lookup key; changing it would cascade). The value assigned is now the instance ID, matching what `WorkflowInstance.WaitingHumanTaskId` stores.
+Note: **`WorkflowContinuationRequest.HumanTaskId` is a legacy field name.** In Phase 5, the value assigned to it MUST be `HumanTaskCompletedEvent.HumanTaskInstanceId`, NOT `HumanTaskCompletedEvent.HumanTaskId`. No caller may pass `HumanTaskDescriptor.Id` into `WorkflowContinuationRequest.HumanTaskId`. The field name may be renamed to `HumanTaskInstanceId` in a future phase to eliminate ambiguity; do not rename it in Phase 5 to avoid cascading changes.
 
 #### 3.3 No Other Workflow Changes
 
@@ -385,12 +394,12 @@ IHumanTaskRuntime.CompleteAsync(new HumanTaskCompletionRequest
 
 | # | Test | Assertions |
 |---|------|-----------|
-| 8 | `HumanTaskStepExecutor_Creates_Instance_And_Returns_Suspended` | Status=Suspended, WaitingHumanTaskId=instance.Id, store contains instance |
+| 8 | `HumanTaskStepExecutor_Creates_Instance_And_Returns_Suspended` | `CreateAsync` called once; `request.HumanTaskId` correct; `request.WorkflowInstanceId` correct; `request.WorkflowStepId` correct; `result.Status` = Suspended; `result.WaitingHumanTaskId` = returnedInstance.Id |
 | 9 | `Workflow_HumanTask_EndToEnd_Complete_Task_Resumes_Workflow` | Full flow: start→suspend→complete→resumed→completed |
 
-**Test infrastructure for #8**: Mock `IHumanTaskRuntime` returning pre-built instance. Real `InMemoryHumanTaskInstanceStore` for verification.
+**Test infrastructure for #8** (executor unit test): Mock `IHumanTaskRuntime` returning a pre-built `HumanTaskInstance { Id = "inst-001" }`. Assert the mock was called with correct request fields. Assert the returned `StepExecutionResult`. **Do not assert InMemoryHumanTaskInstanceStore contents** — the mocked runtime does not write to the store.
 
-**Test infrastructure for #9**: All real implementations wired together. HumanTaskRegistry built with actual descriptors. Synchronous local event bus (or directly trigger subscriber). Assert workflow reaches Completed state.
+**Test infrastructure for #9** (integration test): All real implementations wired together. HumanTaskRegistry built with actual descriptors. Real `DefaultHumanTaskRuntime` + `InMemoryHumanTaskInstanceStore`. Use a synchronous/dispatched local event bus (or directly invoke the subscriber). Assert workflow reaches Completed state. **Store persistence is covered by `DefaultHumanTaskRuntime` tests in `CrestCreates.HumanTask.Tests`.**
 
 **Project reference**: `CrestCreates.Workflow.Tests.csproj` must add reference to `CrestCreates.HumanTask` (runtime module).
 
