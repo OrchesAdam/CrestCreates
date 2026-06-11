@@ -37,6 +37,20 @@ public class WorkflowContinuationTests
             => Task.FromResult(_result);
     }
 
+    private sealed class CapturingCapabilityPipeline : ICapabilityPipeline
+    {
+        public List<string> CapabilityIds { get; } = new();
+
+        public Task<CapabilityExecutionResult> ExecuteAsync(
+            string capabilityIdOrName, object? input = null,
+            Action<CapabilityExecutionContext>? configureContext = null,
+            CancellationToken ct = default)
+        {
+            CapabilityIds.Add(capabilityIdOrName);
+            return Task.FromResult(CapabilityExecutionResult.Success(null, TimeSpan.Zero));
+        }
+    }
+
     private static (WorkflowEngine engine, WorkflowContinuationService continuation,
         InMemoryWorkflowInstanceStore store) CreateServices(
         WorkflowRegistry registry, ICapabilityPipeline? pipeline = null)
@@ -141,5 +155,95 @@ public class WorkflowContinuationTests
         final.StepResults.Should().HaveCount(2);
         final.StepResults[1].Status.Should().Be(StepExecutionStatus.Completed);
         final.StepResults[1].Output.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task ContinueAsync_WhenLatestWorkflowVersionDiffers_ResumesOriginalInstanceVersion()
+    {
+        var pipeline = new CapturingCapabilityPipeline();
+        var registry = CreateRegistry(
+            new WorkflowDescriptor
+            {
+                Id = "wf_01", Name = "versioned.wf", Version = 1, State = DescriptorState.Active,
+                Steps = new List<WorkflowStep>
+                {
+                    new() { Id = "v1_start", Name = "V1 Start",
+                        Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_v1_start", 1) } },
+                    new() { Id = "v1_human", Name = "V1 Approval",
+                        Target = new HumanTaskTarget { HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht_01", 1) } },
+                    new() { Id = "v1_after", Name = "V1 After",
+                        Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_v1_after", 1) } }
+                }
+            },
+            new WorkflowDescriptor
+            {
+                Id = "wf_01", Name = "versioned.wf", Version = 2, State = DescriptorState.Active,
+                Steps = new List<WorkflowStep>
+                {
+                    new() { Id = "v2_start", Name = "V2 Start",
+                        Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_v2_start", 1) } },
+                    new() { Id = "v2_human", Name = "V2 Approval",
+                        Target = new HumanTaskTarget { HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht_01", 1) } },
+                    new() { Id = "v2_after", Name = "V2 After",
+                        Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_v2_after", 1) } }
+                }
+            });
+        var (_, continuation, store) = CreateServices(registry, pipeline);
+        var instance = new WorkflowInstance
+        {
+            Workflow = new VersionedDescriptorRef<WorkflowDescriptor>("wf_01", 1),
+            Status = WorkflowInstanceStatus.Suspended,
+            StepIndex = 1,
+            WaitingHumanTaskId = "ht_01",
+            StepResults =
+            {
+                new WorkflowStepResult
+                {
+                    StepId = "v1_start",
+                    StepName = "V1 Start",
+                    Status = StepExecutionStatus.Completed,
+                    ExecutedAt = DateTimeOffset.UtcNow
+                },
+                new WorkflowStepResult
+                {
+                    StepId = "v1_human",
+                    StepName = "V1 Approval",
+                    Status = StepExecutionStatus.Suspended,
+                    ExecutedAt = DateTimeOffset.UtcNow
+                }
+            }
+        };
+        await store.SaveAsync(instance);
+
+        await continuation.ContinueAsync(new WorkflowContinuationRequest
+            { HumanTaskId = "ht_01", Outcome = "Approved" });
+
+        var final = await store.GetAsync(instance.InstanceId);
+        final!.Status.Should().Be(WorkflowInstanceStatus.Completed);
+        final.StepResults.Select(r => r.StepId).Should().ContainInOrder(
+            "v1_start", "v1_human", "v1_human", "v1_after");
+        pipeline.CapabilityIds.Should().Equal("capability:cap_v1_after");
+    }
+
+    [Fact]
+    public async Task GetByWaitingHumanTaskId_WhenDuplicateSuspendedInstancesExist_ThrowsCorrelationException()
+    {
+        var store = new InMemoryWorkflowInstanceStore();
+        await store.SaveAsync(new WorkflowInstance
+        {
+            Workflow = new VersionedDescriptorRef<WorkflowDescriptor>("wf_01", 1),
+            Status = WorkflowInstanceStatus.Suspended,
+            WaitingHumanTaskId = "ht_01"
+        });
+        await store.SaveAsync(new WorkflowInstance
+        {
+            Workflow = new VersionedDescriptorRef<WorkflowDescriptor>("wf_02", 1),
+            Status = WorkflowInstanceStatus.Suspended,
+            WaitingHumanTaskId = "ht_01"
+        });
+
+        await store.Invoking(s => s.GetByWaitingHumanTaskId("ht_01"))
+            .Should().ThrowAsync<WorkflowCorrelationException>()
+            .WithMessage("*Multiple suspended instances*");
     }
 }

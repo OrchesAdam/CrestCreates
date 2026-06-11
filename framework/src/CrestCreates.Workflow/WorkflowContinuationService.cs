@@ -41,9 +41,10 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         _stateMachine.ValidateTransition(
             WorkflowInstanceStatus.Suspended, WorkflowInstanceStatus.Running);
 
-        var descriptor = _registry.GetById(instance.Workflow.Id);
+        var descriptor = _registry.GetByVersion(instance.Workflow.Id, instance.Workflow.Version);
         if (descriptor == null)
-            throw new InvalidOperationException($"Workflow '{instance.Workflow.Id}' not found.");
+            throw new InvalidOperationException(
+                $"Workflow '{instance.Workflow.Id}' version {instance.Workflow.Version} not found.");
 
         var currentStep = descriptor.Steps[instance.StepIndex];
         instance.StepResults.Add(new WorkflowStepResult
