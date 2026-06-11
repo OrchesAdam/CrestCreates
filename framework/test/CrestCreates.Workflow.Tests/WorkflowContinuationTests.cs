@@ -1,11 +1,15 @@
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Event;
+using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstractions;
+using CrestCreates.EventBus.Local;
 using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 
@@ -54,6 +58,22 @@ public class WorkflowContinuationTests
         }
     }
 
+    private sealed class WorkflowTestServices : IDisposable
+    {
+        public required ServiceProvider Provider { get; init; }
+        public required IServiceScope Scope { get; init; }
+        public required IWorkflowEngine Engine { get; init; }
+        public required IHumanTaskRuntime HumanTaskRuntime { get; init; }
+        public required IWorkflowInstanceStore WorkflowStore { get; init; }
+        public required IHumanTaskInstanceStore HumanTaskStore { get; init; }
+
+        public void Dispose()
+        {
+            Scope.Dispose();
+            Provider.Dispose();
+        }
+    }
+
     private static (WorkflowEngine engine, WorkflowContinuationService continuation,
         InMemoryWorkflowInstanceStore store) CreateServices(
         WorkflowRegistry registry, ICapabilityPipeline? pipeline = null)
@@ -67,7 +87,7 @@ public class WorkflowContinuationTests
             .ReturnsAsync((HumanTaskCreationRequest req, CancellationToken _) =>
                 new HumanTaskInstance
                 {
-                    Id = req.HumanTaskId,
+                    Id = $"inst-{req.HumanTaskId}",
                     HumanTaskId = req.HumanTaskId,
                     HumanTaskVersion = req.Version ?? 1
                 });
@@ -107,12 +127,12 @@ public class WorkflowContinuationTests
 
         var instance = await engine.ExecuteAsync("wf_01");
         instance.Status.Should().Be(WorkflowInstanceStatus.Suspended);
-        instance.WaitingHumanTaskId.Should().Be("ht_01");
+        instance.WaitingHumanTaskId.Should().Be("inst-ht_01");
         instance.StepIndex.Should().Be(1);
         instance.StepResults.Should().HaveCount(2);
 
         await continuation.ContinueAsync(new WorkflowContinuationRequest
-            { HumanTaskId = "ht_01", Outcome = "Approved", Result = new { Score = 95 } });
+            { HumanTaskId = instance.WaitingHumanTaskId!, Outcome = "Approved", Result = new { Score = 95 } });
 
         var final = await store.GetAsync(instance.InstanceId);
         final!.Status.Should().Be(WorkflowInstanceStatus.Completed);
@@ -135,12 +155,12 @@ public class WorkflowContinuationTests
         });
         var (engine, continuation, _) = CreateServices(registry);
 
-        await engine.ExecuteAsync("wf_01");
+        var instance = await engine.ExecuteAsync("wf_01");
         await continuation.ContinueAsync(new WorkflowContinuationRequest
-            { HumanTaskId = "ht_01", Outcome = "ok" });
+            { HumanTaskId = instance.WaitingHumanTaskId!, Outcome = "ok" });
 
         await continuation.Invoking(c => c.ContinueAsync(new WorkflowContinuationRequest
-                { HumanTaskId = "ht_01", Outcome = "ok" }))
+                { HumanTaskId = instance.WaitingHumanTaskId!, Outcome = "ok" }))
             .Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*No suspended workflow instance*");
     }
@@ -161,7 +181,7 @@ public class WorkflowContinuationTests
 
         var instance = await engine.ExecuteAsync("wf_01");
         await continuation.ContinueAsync(new WorkflowContinuationRequest
-            { HumanTaskId = "ht_01", Outcome = "Approved", Result = new { Score = 95 } });
+            { HumanTaskId = instance.WaitingHumanTaskId!, Outcome = "Approved", Result = new { Score = 95 } });
 
         var final = await store.GetAsync(instance.InstanceId);
         final!.Variables["lastStepOutcome"].Should().Be("Approved");
@@ -207,7 +227,7 @@ public class WorkflowContinuationTests
             Workflow = new VersionedDescriptorRef<WorkflowDescriptor>("wf_01", 1),
             Status = WorkflowInstanceStatus.Suspended,
             StepIndex = 1,
-            WaitingHumanTaskId = "ht_01",
+            WaitingHumanTaskId = "inst-versioned-01",
             StepResults =
             {
                 new WorkflowStepResult
@@ -229,7 +249,7 @@ public class WorkflowContinuationTests
         await store.SaveAsync(instance);
 
         await continuation.ContinueAsync(new WorkflowContinuationRequest
-            { HumanTaskId = "ht_01", Outcome = "Approved" });
+            { HumanTaskId = "inst-versioned-01", Outcome = "Approved" });
 
         var final = await store.GetAsync(instance.InstanceId);
         final!.Status.Should().Be(WorkflowInstanceStatus.Completed);
@@ -246,16 +266,16 @@ public class WorkflowContinuationTests
         {
             Workflow = new VersionedDescriptorRef<WorkflowDescriptor>("wf_01", 1),
             Status = WorkflowInstanceStatus.Suspended,
-            WaitingHumanTaskId = "ht_01"
+            WaitingHumanTaskId = "inst-dup"
         });
         await store.SaveAsync(new WorkflowInstance
         {
             Workflow = new VersionedDescriptorRef<WorkflowDescriptor>("wf_02", 1),
             Status = WorkflowInstanceStatus.Suspended,
-            WaitingHumanTaskId = "ht_01"
+            WaitingHumanTaskId = "inst-dup"
         });
 
-        await store.Invoking(s => s.GetByWaitingHumanTaskId("ht_01"))
+        await store.Invoking(s => s.GetByWaitingHumanTaskId("inst-dup"))
             .Should().ThrowAsync<WorkflowCorrelationException>()
             .WithMessage("*Multiple suspended instances*");
     }
@@ -322,9 +342,8 @@ public class WorkflowContinuationTests
     }
 
     [Fact]
-    public async Task Workflow_HumanTask_EndToEnd_Complete_Task_Resumes_Workflow()
+    public async Task Workflow_HumanTask_EndToEnd_Event_Completion_Resumes_Workflow()
     {
-        // Build HumanTask descriptors with outcomes
         var htDescriptor = new HumanTaskDescriptor
         {
             Id = "ht_01", Name = "approval.task", Version = 1,
@@ -340,10 +359,6 @@ public class WorkflowContinuationTests
         var htRegistry = new HumanTaskRegistry(htValidationEngine);
         htRegistry.Build([new TestHumanTaskDescriptorProvider([htDescriptor])]);
 
-        var htStore = new InMemoryHumanTaskInstanceStore();
-        var htRuntime = new DefaultHumanTaskRuntime(htRegistry, htStore, NullLocalEventBus.Instance);
-
-        // Build Workflow with a HumanTask step followed by a Capability step
         var pipeline = new CapturingCapabilityPipeline();
         var wfRegistry = CreateRegistry(new WorkflowDescriptor
         {
@@ -370,51 +385,59 @@ public class WorkflowContinuationTests
             }
         });
 
-        var wfStore = new InMemoryWorkflowInstanceStore();
-        var stateMachine = new DefaultWorkflowStateMachine();
-        var eventPublisher = new WorkflowLifecycleEventPublisher();
-        var capExecutor = new CapabilityStepExecutor(pipeline);
-        var htExecutor = new HumanTaskStepExecutor(htRuntime);
-        var executorRegistry = new DefaultStepExecutorRegistry(capExecutor, htExecutor);
-        var executionRunner = new WorkflowExecutionRunner(
-            wfRegistry, executorRegistry, wfStore, stateMachine, eventPublisher);
-        var engine = new WorkflowEngine(wfRegistry, wfStore, executionRunner, eventPublisher);
-        var continuation = new WorkflowContinuationService(
-            wfStore, stateMachine, wfRegistry, executionRunner, eventPublisher);
+        using var services = CreateComposedServices(wfRegistry, htRegistry, pipeline);
 
-        // Start workflow → should suspend at HumanTask step
-        var instance = await engine.ExecuteAsync("wf_01");
+        var instance = await services.Engine.ExecuteAsync("wf_01");
         instance.Status.Should().Be(WorkflowInstanceStatus.Suspended);
         instance.WaitingHumanTaskId.Should().NotBeNullOrEmpty();
         instance.StepIndex.Should().Be(0);
 
-        // Find the created HumanTaskInstance
-        var humanTaskInstance = await htStore.GetByIdAsync(instance.WaitingHumanTaskId!);
+        var humanTaskInstance = await services.HumanTaskStore.GetByIdAsync(instance.WaitingHumanTaskId!);
         humanTaskInstance.Should().NotBeNull();
         humanTaskInstance!.WorkflowInstanceId.Should().Be(instance.InstanceId);
 
-        // Complete the HumanTask
-        await htRuntime.CompleteAsync(new HumanTaskCompletionRequest
+        await services.HumanTaskRuntime.CompleteAsync(new HumanTaskCompletionRequest
         {
             HumanTaskInstanceId = humanTaskInstance.Id,
             Outcome = "Approve",
             Result = new { Score = 95 }
         });
 
-        // Manually trigger continuation (event bus is no-op in test)
-        await continuation.ContinueAsync(new WorkflowContinuationRequest
-        {
-            HumanTaskId = humanTaskInstance.Id,
-            Outcome = "Approve",
-            Result = new { Score = 95 }
-        });
-
-        // Workflow should complete
-        var final = await wfStore.GetAsync(instance.InstanceId);
+        var final = await services.WorkflowStore.GetAsync(instance.InstanceId);
         final!.Status.Should().Be(WorkflowInstanceStatus.Completed);
         final.WaitingHumanTaskId.Should().BeNull();
         final.StepResults.Should().HaveCountGreaterThanOrEqualTo(3);
         final.Variables["lastStepOutcome"].Should().Be("Approve");
+    }
+
+    private static WorkflowTestServices CreateComposedServices(
+        WorkflowRegistry workflowRegistry,
+        HumanTaskRegistry humanTaskRegistry,
+        ICapabilityPipeline capabilityPipeline)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IWorkflowRegistry>(workflowRegistry);
+        services.AddSingleton<IHumanTaskRegistry>(humanTaskRegistry);
+        services.AddSingleton(capabilityPipeline);
+        services.AddSingleton<IEventValidator, PassThroughEventValidator>();
+        services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
+        services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
+        services.AddHumanTaskRuntime();
+        services.AddWorkflowEngine();
+
+        var provider = services.BuildServiceProvider(validateScopes: true);
+        var scope = provider.CreateScope();
+        var scoped = scope.ServiceProvider;
+
+        return new WorkflowTestServices
+        {
+            Provider = provider,
+            Scope = scope,
+            Engine = scoped.GetRequiredService<IWorkflowEngine>(),
+            HumanTaskRuntime = scoped.GetRequiredService<IHumanTaskRuntime>(),
+            WorkflowStore = scoped.GetRequiredService<IWorkflowInstanceStore>(),
+            HumanTaskStore = scoped.GetRequiredService<IHumanTaskInstanceStore>()
+        };
     }
 
     private class TestHumanTaskDescriptorProvider : IDescriptorProvider<HumanTaskDescriptor>
@@ -425,13 +448,4 @@ public class WorkflowContinuationTests
         public IReadOnlyList<HumanTaskDescriptor> GetDescriptors() => _descriptors;
     }
 
-    private sealed class NullLocalEventBus : ILocalEventBus
-    {
-        public static readonly NullLocalEventBus Instance = new();
-        public Task PublishAsync(ILocalEvent @event, CancellationToken ct = default)
-            => Task.CompletedTask;
-        public Task PublishAsync<TEvent>(TEvent @event, CancellationToken ct = default)
-            where TEvent : ILocalEvent
-            => Task.CompletedTask;
-    }
 }

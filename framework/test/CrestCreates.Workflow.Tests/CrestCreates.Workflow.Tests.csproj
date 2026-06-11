@@ -19,6 +19,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\CrestCreates.Workflow\CrestCreates.Workflow.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Draft\CrestCreates.Draft.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Event\CrestCreates.Event.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.EventBus.Local\CrestCreates.EventBus.Local.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Metadata.Abstractions\CrestCreates.Metadata.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.Schema.Abstractions\CrestCreates.Schema.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\CrestCreates.HumanTask.Abstractions\CrestCreates.HumanTask.Abstractions.csproj" />

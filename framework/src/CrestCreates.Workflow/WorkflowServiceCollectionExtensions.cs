@@ -11,24 +11,24 @@ public static class WorkflowServiceCollectionExtensions
     public static IServiceCollection AddWorkflowEngine(this IServiceCollection services)
     {
         services.TryAddSingleton<IWorkflowInstanceStore, InMemoryWorkflowInstanceStore>();
-        services.TryAddSingleton<CapabilityStepExecutor>();
-        services.TryAddSingleton<HumanTaskStepExecutor>();
-        services.TryAddSingleton<IWorkflowStepExecutorRegistry, DefaultStepExecutorRegistry>();
-        services.TryAddSingleton<WorkflowCompatibilityValidator>();
+        services.TryAddScoped<CapabilityStepExecutor>();
+        services.TryAddScoped<HumanTaskStepExecutor>();
+        services.TryAddScoped<IWorkflowStepExecutorRegistry, DefaultStepExecutorRegistry>();
+        services.TryAddScoped<WorkflowCompatibilityValidator>();
 
         services.TryAddSingleton<IWorkflowStateMachine, DefaultWorkflowStateMachine>();
         services.TryAddSingleton<IWorkflowLifecycleEventPublisher, WorkflowLifecycleEventPublisher>();
-        services.TryAddSingleton<IWorkflowExecutionRunner, WorkflowExecutionRunner>();
-        services.TryAddSingleton<IWorkflowContinuationService, WorkflowContinuationService>();
+        services.TryAddScoped<IWorkflowExecutionRunner, WorkflowExecutionRunner>();
+        services.TryAddScoped<IWorkflowContinuationService, WorkflowContinuationService>();
 
-        services.TryAddSingleton<IWorkflowEngine>(sp =>
+        services.TryAddScoped<IWorkflowEngine>(sp =>
             new WorkflowEngine(
                 sp.GetRequiredService<IWorkflowRegistry>(),
                 sp.GetRequiredService<IWorkflowInstanceStore>(),
                 sp.GetRequiredService<IWorkflowExecutionRunner>(),
                 sp.GetRequiredService<IWorkflowLifecycleEventPublisher>()));
 
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<
             ILocalEventHandler<HumanTaskCompletedEvent>,
             HumanTaskCompletedWorkflowSubscriber>());
 
