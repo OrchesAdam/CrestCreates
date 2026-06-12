@@ -18,7 +18,7 @@ public class WorkflowBindingStatusContributorTests
         var wfRegistry = new Mock<IWorkflowRegistry>();
         var schemaRegistry = new Mock<ISchemaRegistry>();
         var capRegistry = new Mock<ICapabilityRegistry>();
-        capRegistry.Setup(r => r.GetById(It.IsAny<string>())).Returns((CapabilityDescriptor?)null);
+        capRegistry.Setup(r => r.GetByVersion(It.IsAny<string>(), It.IsAny<int>())).Returns((CapabilityDescriptor?)null);
         var taskRegistry = new Mock<IHumanTaskRegistry>();
 
         var contributor = new WorkflowBindingStatusContributor(wfRegistry.Object, schemaRegistry.Object, capRegistry.Object, taskRegistry.Object);
@@ -68,7 +68,7 @@ public class WorkflowBindingStatusContributorTests
         var wfRegistry = new Mock<IWorkflowRegistry>();
         var schemaRegistry = new Mock<ISchemaRegistry>();
         var capRegistry = new Mock<ICapabilityRegistry>();
-        capRegistry.Setup(r => r.GetById("test.cap"))
+        capRegistry.Setup(r => r.GetByVersion("test.cap", 1))
             .Returns(new CapabilityDescriptor { Id = "test.cap", Name = "Test", Version = 1 });
         var taskRegistry = new Mock<IHumanTaskRegistry>();
 
@@ -95,7 +95,7 @@ public class WorkflowBindingStatusContributorTests
         var wfRegistry = new Mock<IWorkflowRegistry>();
         var schemaRegistry = new Mock<ISchemaRegistry>();
         var capRegistry = new Mock<ICapabilityRegistry>();
-        capRegistry.Setup(r => r.GetById("test.cap"))
+        capRegistry.Setup(r => r.GetByVersion("test.cap", 1))
             .Returns(new CapabilityDescriptor { Id = "test.cap", Name = "Test", Version = 1 });
         var taskRegistry = new Mock<IHumanTaskRegistry>();
 
@@ -122,7 +122,7 @@ public class WorkflowBindingStatusContributorTests
         var wfRegistry = new Mock<IWorkflowRegistry>();
         var schemaRegistry = new Mock<ISchemaRegistry>();
         var capRegistry = new Mock<ICapabilityRegistry>();
-        capRegistry.Setup(r => r.GetById("test.cap"))
+        capRegistry.Setup(r => r.GetByVersion("test.cap", 1))
             .Returns(new CapabilityDescriptor { Id = "test.cap", Name = "Test", Version = 1 });
         var taskRegistry = new Mock<IHumanTaskRegistry>();
 
@@ -149,7 +149,7 @@ public class WorkflowBindingStatusContributorTests
         var wfRegistry = new Mock<IWorkflowRegistry>();
         var schemaRegistry = new Mock<ISchemaRegistry>();
         var capRegistry = new Mock<ICapabilityRegistry>();
-        capRegistry.Setup(r => r.GetById("test.cap"))
+        capRegistry.Setup(r => r.GetByVersion("test.cap", 1))
             .Returns(new CapabilityDescriptor { Id = "test.cap", Name = "Test", Version = 1 });
         var taskRegistry = new Mock<IHumanTaskRegistry>();
 

@@ -89,11 +89,12 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddSingleton<IRegistryValidationEngine<CapabilityDescriptor>,
             RegistryValidationEngine<CapabilityDescriptor>>();
 
-        // ICapabilityHandlerResolver bridging (populated by source generator [ModuleInitializer])
-        services.TryAddSingleton<ICapabilityHandlerResolver>(_ =>
-            CapabilityHandlerResolverProvider.GetResolver()
-            ?? throw new InvalidOperationException(
-                "CapabilityHandlerResolver not initialized by source generator."));
+        // Replace DI resolver with source-generator-populated resolver
+        var generatedResolver = CapabilityHandlerResolverProvider.GetResolver();
+        if (generatedResolver != null)
+        {
+            services.Replace(ServiceDescriptor.Singleton<ICapabilityHandlerResolver>(_ => generatedResolver));
+        }
 
         // Binding Status Contributor
         services.AddSingleton<IDescriptorBindingStatusContributor, CapabilityBindingStatusContributor>();

@@ -81,11 +81,11 @@ public sealed class HumanTaskBindingStatusContributor : IDescriptorBindingStatus
             if (outcome.Capability.HasValue)
             {
                 var refVal = outcome.Capability.Value;
-                var cap = _capabilityRegistry.GetById(refVal.Id);
+                var cap = _capabilityRegistry.GetByVersion(refVal.Id, refVal.Version);
                 if (cap == null)
                 {
                     issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_CAPABILITY",
-                        $"Outcome capability '{refVal.Id}' not found.",
+                        $"Outcome capability '{refVal.Id}' v{refVal.Version} not found.",
                         fullId, DescriptorKind.HumanTask, "Outcomes"));
                 }
             }

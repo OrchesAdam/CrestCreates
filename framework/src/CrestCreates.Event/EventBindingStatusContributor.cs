@@ -7,12 +7,12 @@ namespace CrestCreates.Event;
 
 public sealed class EventBindingStatusContributor : IDescriptorBindingStatusContributor
 {
-    private readonly IEventRegistry _eventRegistry;
+    private readonly IEventMetadataProvider _eventMetadata;
     private readonly ISchemaRegistry _schemaRegistry;
 
-    public EventBindingStatusContributor(IEventRegistry eventRegistry, ISchemaRegistry schemaRegistry)
+    public EventBindingStatusContributor(IEventMetadataProvider eventMetadata, ISchemaRegistry schemaRegistry)
     {
-        _eventRegistry = eventRegistry;
+        _eventMetadata = eventMetadata;
         _schemaRegistry = schemaRegistry;
     }
 
@@ -21,7 +21,7 @@ public sealed class EventBindingStatusContributor : IDescriptorBindingStatusCont
 
     public IReadOnlyList<IDescriptor> GetDescriptors()
     {
-        return Array.Empty<IDescriptor>();
+        return _eventMetadata.GetAll().Cast<IDescriptor>().ToList();
     }
 
     public DescriptorBindingReport Evaluate(IDescriptor descriptor)

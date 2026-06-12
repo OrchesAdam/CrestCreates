@@ -13,10 +13,10 @@ public class EventBindingStatusContributorTests
     [Fact]
     public void Evaluate_Deprecated_ReturnsPartiallyBound()
     {
-        var eventRegistry = new Mock<IEventRegistry>();
+        var eventMetadata = new Mock<IEventMetadataProvider>();
         var schemaRegistry = new Mock<ISchemaRegistry>();
 
-        var contributor = new EventBindingStatusContributor(eventRegistry.Object, schemaRegistry.Object);
+        var contributor = new EventBindingStatusContributor(eventMetadata.Object, schemaRegistry.Object);
         var evt = new GeneratedEventDescriptor { Id = "test.event", Name = "Test", Version = 1, State = DescriptorState.Deprecated, PayloadType = typeof(string) };
 
         var result = contributor.Evaluate(evt);
@@ -27,10 +27,10 @@ public class EventBindingStatusContributorTests
     [Fact]
     public void Evaluate_Removed_ReturnsUnsupported()
     {
-        var eventRegistry = new Mock<IEventRegistry>();
+        var eventMetadata = new Mock<IEventMetadataProvider>();
         var schemaRegistry = new Mock<ISchemaRegistry>();
 
-        var contributor = new EventBindingStatusContributor(eventRegistry.Object, schemaRegistry.Object);
+        var contributor = new EventBindingStatusContributor(eventMetadata.Object, schemaRegistry.Object);
         var evt = new GeneratedEventDescriptor { Id = "test.event", Name = "Test", Version = 1, State = DescriptorState.Removed, PayloadType = typeof(string) };
 
         var result = contributor.Evaluate(evt);
@@ -41,11 +41,11 @@ public class EventBindingStatusContributorTests
     [Fact]
     public void Evaluate_MissingPayloadSchema_ReturnsInvalid()
     {
-        var eventRegistry = new Mock<IEventRegistry>();
+        var eventMetadata = new Mock<IEventMetadataProvider>();
         var schemaRegistry = new Mock<ISchemaRegistry>();
         schemaRegistry.Setup(r => r.GetByVersion(It.IsAny<string>(), It.IsAny<int>())).Returns((SchemaDescriptor?)null);
 
-        var contributor = new EventBindingStatusContributor(eventRegistry.Object, schemaRegistry.Object);
+        var contributor = new EventBindingStatusContributor(eventMetadata.Object, schemaRegistry.Object);
         var evt = new GeneratedEventDescriptor { Id = "test.event", Name = "Test", Version = 1, State = DescriptorState.Active, PayloadType = typeof(string),
             PayloadSchemaRef = new VersionedDescriptorRef<SchemaDescriptor>("missing", 1) };
 
@@ -57,16 +57,31 @@ public class EventBindingStatusContributorTests
     [Fact]
     public void Evaluate_Active_ReturnsRuntimeReady()
     {
-        var eventRegistry = new Mock<IEventRegistry>();
+        var eventMetadata = new Mock<IEventMetadataProvider>();
         var schemaRegistry = new Mock<ISchemaRegistry>();
         schemaRegistry.Setup(r => r.GetByVersion("test.schema", 1))
             .Returns(new SchemaDescriptor { Id = "test.schema", Name = "Schema", Version = 1 });
 
-        var contributor = new EventBindingStatusContributor(eventRegistry.Object, schemaRegistry.Object);
+        var contributor = new EventBindingStatusContributor(eventMetadata.Object, schemaRegistry.Object);
         var evt = new GeneratedEventDescriptor { Id = "test.event", Name = "Test", Version = 1, State = DescriptorState.Active, PayloadType = typeof(string),
             PayloadSchemaRef = new VersionedDescriptorRef<SchemaDescriptor>("test.schema", 1) };
 
         var result = contributor.Evaluate(evt);
         result.Status.Should().Be(DescriptorBindingStatus.RuntimeReady);
+    }
+
+    [Fact]
+    public void GetDescriptors_ReturnsAllEvents()
+    {
+        var eventMetadata = new Mock<IEventMetadataProvider>();
+        var evt1 = new GeneratedEventDescriptor { Id = "evt.1", Name = "Event1", Version = 1, State = DescriptorState.Active, PayloadType = typeof(string) };
+        var evt2 = new GeneratedEventDescriptor { Id = "evt.2", Name = "Event2", Version = 1, State = DescriptorState.Active, PayloadType = typeof(string) };
+        eventMetadata.Setup(m => m.GetAll()).Returns(new[] { evt1, evt2 });
+        var schemaRegistry = new Mock<ISchemaRegistry>();
+
+        var contributor = new EventBindingStatusContributor(eventMetadata.Object, schemaRegistry.Object);
+
+        var descriptors = contributor.GetDescriptors();
+        descriptors.Should().HaveCount(2);
     }
 }

@@ -54,20 +54,20 @@ public sealed class WorkflowBindingStatusContributor : IDescriptorBindingStatusC
             switch (step.Target)
             {
                 case CapabilityTarget capTarget:
-                    var cap = _capabilityRegistry.GetById(capTarget.Capability.Id);
+                    var cap = _capabilityRegistry.GetByVersion(capTarget.Capability.Id, capTarget.Capability.Version);
                     if (cap == null)
                     {
                         issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_TARGET",
-                            $"Capability target '{capTarget.Capability.Id}' not found.",
+                            $"Capability target '{capTarget.Capability.Id}' v{capTarget.Capability.Version} not found.",
                             fullId, DescriptorKind.Workflow, $"Steps[{step.Id}].Target"));
                     }
                     break;
                 case HumanTaskTarget taskTarget:
-                    var task = _humanTaskRegistry.GetById(taskTarget.HumanTask.Id);
+                    var task = _humanTaskRegistry.GetByVersion(taskTarget.HumanTask.Id, taskTarget.HumanTask.Version);
                     if (task == null)
                     {
                         issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_TARGET",
-                            $"HumanTask target '{taskTarget.HumanTask.Id}' not found.",
+                            $"HumanTask target '{taskTarget.HumanTask.Id}' v{taskTarget.HumanTask.Version} not found.",
                             fullId, DescriptorKind.Workflow, $"Steps[{step.Id}].Target"));
                     }
                     break;
