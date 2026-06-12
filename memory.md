@@ -321,7 +321,7 @@ This thread achieved the following:
 - `EventRegistry` same-instance bridging (concrete → interface) for `EventRegistryBootstrapper`.
 - `ICapabilityHandlerResolver` DI bridge from `CapabilityHandlerResolverProvider.GetResolver()`.
 - 29 new tests (10 Metadata + 19 per-contributor). 0 regressions across 6 suites (Metadata 95, Form 35, HumanTask 47, Workflow 63, Capability 120, Event 36).
-- **Caveat**: `IEventRegistry` lacks `GetAll()` — Event contributor returns empty from `GetDescriptors()`; individual events checked via `Evaluate()` only. No integration test for real-registry round-trip. Unknown DescriptorKind → PartiallyBound (WARN_NO_BINDING_CONTRIBUTOR). 0 MetadataBootstrapper changes. 0 runtime execution changes. `ICapabilityHandlerRegistry` not implemented — Capability contributor uses `ICapabilityHandlerResolver` instead.
+- **Caveat**: `ICapabilityHandlerResolver` is replaced from source generator provider in `AddCapabilityRuntime()`; custom resolver registrations must go after `AddCapabilityRuntime()`. Unknown DescriptorKind → PartiallyBound (WARN_NO_BINDING_CONTRIBUTOR). 0 MetadataBootstrapper changes. 0 runtime execution changes.
 
 ---
 

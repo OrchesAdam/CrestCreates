@@ -89,7 +89,7 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddSingleton<IRegistryValidationEngine<CapabilityDescriptor>,
             RegistryValidationEngine<CapabilityDescriptor>>();
 
-        // Replace DI resolver with source-generator-populated resolver
+        // Custom ICapabilityHandlerResolver registrations must go after AddCapabilityRuntime().
         var generatedResolver = CapabilityHandlerResolverProvider.GetResolver();
         if (generatedResolver != null)
         {
