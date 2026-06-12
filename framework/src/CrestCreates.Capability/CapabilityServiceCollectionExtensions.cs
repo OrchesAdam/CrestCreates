@@ -84,6 +84,20 @@ public static class CapabilityServiceCollectionExtensions
         services.AddSingleton<IBootstrapValidator, CapabilityHandlerValidator>();
         services.AddSingleton<IBootstrapValidator, CapabilitySchemaValidator>();
 
+        // Capability Registry (for binding status contributors)
+        services.TryAddSingleton<ICapabilityRegistry, CapabilityRegistry>();
+        services.TryAddSingleton<IRegistryValidationEngine<CapabilityDescriptor>,
+            RegistryValidationEngine<CapabilityDescriptor>>();
+
+        // ICapabilityHandlerResolver bridging (populated by source generator [ModuleInitializer])
+        services.TryAddSingleton<ICapabilityHandlerResolver>(_ =>
+            CapabilityHandlerResolverProvider.GetResolver()
+            ?? throw new InvalidOperationException(
+                "CapabilityHandlerResolver not initialized by source generator."));
+
+        // Binding Status Contributor
+        services.AddSingleton<IDescriptorBindingStatusContributor, CapabilityBindingStatusContributor>();
+
         return services;
     }
 

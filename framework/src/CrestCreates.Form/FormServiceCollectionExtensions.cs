@@ -25,6 +25,9 @@ public static class FormServiceCollectionExtensions
         // Schema binding validator (singleton — stateless, used via onFormBuilt callback)
         services.TryAddSingleton<FormSchemaBindingValidator>();
 
+        // Binding Status Contributor
+        services.AddSingleton<IDescriptorBindingStatusContributor, FormBindingStatusContributor>();
+
         return services;
     }
 }
