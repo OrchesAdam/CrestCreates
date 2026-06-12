@@ -331,14 +331,29 @@ Currently only `FormRegistry` is registered. Phase 5h adds:
 // In each module's *ServiceCollectionExtensions:
 services.TryAddSingleton<ISchemaRegistry, SchemaRegistry>();
 services.TryAddSingleton<IWorkflowRegistry, WorkflowRegistry>();
-services.TryAddSingleton<IEventRegistry, EventRegistry>();
 services.TryAddSingleton<IHumanTaskRegistry, HumanTaskRegistry>();
 services.TryAddSingleton<ICapabilityRegistry, CapabilityRegistry>();
 
 // Plus their validation engines (required by RegistryBase constructor):
 services.TryAddSingleton<IRegistryValidationEngine<SchemaDescriptor>, RegistryValidationEngine<SchemaDescriptor>>();
-// ... etc for Capability, Workflow, HumanTask, Event, Form (Form already done)
+// ... etc for Capability, Workflow, HumanTask (Form already done)
 ```
+
+**EventRegistry — same-instance bridging**:
+
+`EventRegistryBootstrapper` takes `EventRegistry` (concrete class, not `IEventRegistry`).
+If interface and concrete are registered separately, two different instances exist — one gets built by the bootstrapper, the other (injected into `EventBindingStatusContributor`) stays `Created`.
+
+Use the same-instance bridging pattern:
+
+```csharp
+// Register concrete first, then interface resolves to the same instance
+services.TryAddSingleton<EventRegistry>();
+services.TryAddSingleton<IEventRegistry>(sp => sp.GetRequiredService<EventRegistry>());
+services.TryAddSingleton<IEventMetadataProvider>(sp => sp.GetRequiredService<EventRegistry>());
+```
+
+Other registries (Schema, Workflow, HumanTask, Capability) have no concrete-type consumers in production code — interface-only DI is sufficient.
 
 **This is NOT a new registry path or build path.** These are the same existing `RegistryBase<T>` subclasses that `MetadataBootstrapper.BuildAll()` already builds. Registering them in DI is wire-up — the same types, registered as singletons so contributors can inject them.
 
@@ -352,7 +367,7 @@ services.TryAddSingleton<IRegistryValidationEngine<SchemaDescriptor>, RegistryVa
 
 **File**: `CrestCreates.Capability/CapabilityBindingStatusContributor.cs`
 
-Constructor DI: `ICapabilityRegistry`, `ICapabilityHandlerRegistry`, `ISchemaRegistry`
+Constructor DI: `ICapabilityRegistry`, `ICapabilityHandlerResolver`, `ISchemaRegistry`
 
 | Check | Issue Code | Severity | Status |
 |---|---|---|---|
@@ -361,6 +376,20 @@ Constructor DI: `ICapabilityRegistry`, `ICapabilityHandlerRegistry`, `ISchemaReg
 | Handler mapped | `BIND_NO_HANDLER` | Error | Unbound |
 | Registry built | `BIND_REGISTRY_NOT_BUILT` | Error | Unbound |
 | All valid | — | — | RuntimeReady |
+
+**Handler binding data source**: Uses `ICapabilityHandlerResolver.Resolve(capabilityId)` — the same runtime resolver that `CapabilityPipeline` uses. This is the single source of truth for handler binding. Capability ID matches `CapabilityDescriptor.Id` (stable identifier, NOT Name).
+
+`ICapabilityHandlerResolver` is populated by the source-generated `[ModuleInitializer]` via `CapabilityHandlerResolverProvider.SetResolver()`. Phase 5h adds a DI registration to bridge the static provider into DI so the contributor can inject it:
+
+```csharp
+// In CapabilityServiceCollectionExtensions:
+services.TryAddSingleton<ICapabilityHandlerResolver>(_ =>
+    CapabilityHandlerResolverProvider.GetResolver()
+    ?? throw new InvalidOperationException(
+        "CapabilityHandlerResolver not initialized by source generator."));
+```
+
+Do NOT depend on `ICapabilityHandlerRegistry` — it has no DI implementation and is not the handler binding truth used at runtime. The `CapabilityHandlerValidator` (which references `ICapabilityHandlerRegistry`) is pre-existing code that may itself need alignment in a future cleanup; Phase 5h does not fix that.
 
 ### 5.2 FormBindingStatusContributor
 
@@ -474,11 +503,11 @@ framework/src/CrestCreates.Event/
 ### Modified Files (6)
 
 ```
-framework/src/CrestCreates.Capability/CapabilityServiceCollectionExtensions.cs  (+contributor DI, +registry DI)
+framework/src/CrestCreates.Capability/CapabilityServiceCollectionExtensions.cs  (+contributor DI, +registry DI, +ICapabilityHandlerResolver bridging DI)
 framework/src/CrestCreates.Form/FormServiceCollectionExtensions.cs              (+contributor DI)
 framework/src/CrestCreates.HumanTask/HumanTaskServiceCollectionExtensions.cs    (+contributor DI, +registry DI)
 framework/src/CrestCreates.Workflow/WorkflowServiceCollectionExtensions.cs     (+contributor DI, +registry DI)
-framework/src/CrestCreates.Event/EventServiceCollectionExtensions.cs            (+contributor DI, +registry DI)
+framework/src/CrestCreates.Event/EventServiceCollectionExtensions.cs            (+contributor DI, +EventRegistry same-instance bridging DI)
 framework/src/CrestCreates.Schema/                                              (+registry DI, new extension file)
 framework/test/CrestCreates.Metadata.Tests/                                     (+integration test)
 ```
@@ -592,6 +621,8 @@ All existing test suites must pass with zero regressions:
 | No `MetadataBootstrapper` changes | Binding status is a post-build query, not a build-time validation gate. Instance consistency between DI and BuildAll() is a consumer call-site convention |
 | Registry DI registration as prerequisite | Only `FormRegistry` is in DI today; contributors need all registries. Wire-up only — no new build path or registry orchestration |
 | Unknown DescriptorKind → PartiallyBound | Optimistic `RuntimeReady` for unknown kinds would silently approve descriptors that have no binding check at all; `WARN_NO_BINDING_CONTRIBUTOR` is explicit |
+| EventRegistry same-instance bridging | `EventRegistryBootstrapper` takes concrete `EventRegistry`; registering both interface and concrete as separate singletons would create two instances — bridge ensures one singleton |
+| `ICapabilityHandlerResolver` for handler binding | The runtime handler truth is `ICapabilityHandlerResolver` (used by `CapabilityPipeline`), not `ICapabilityHandlerRegistry` (no DI implementation). Contributor must use the same source of truth |
 
 ---
 
