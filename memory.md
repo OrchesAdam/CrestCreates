@@ -307,6 +307,22 @@ This thread achieved the following:
 - 27 new tests (10 resolver, 6 runtime, 6 store/instance, 5 existing fixed). 43 HumanTask pass. Zero Workflow/Organization/Capability regressions (57/79/117).
 - **Caveat**: RoundRobin/LeastLoaded return unassigned with reason string. No Organization-based auto-selection. No claim/delegate/transfer. No HumanTaskCreatedEvent. No Workflow changes.
 
+### Runtime Binding Status (Phase 5h, 2026-06-12)
+
+- `DescriptorBindingStatus` enum: RuntimeReady, PartiallyBound, Unbound, Unsupported, Invalid.
+- `DescriptorBindingIssue` record — independent from `ValidationIssue` (Code, Path, DescriptorId, DescriptorKind).
+- `IDescriptorBindingStatusContributor` interface — per-module evaluator + self-enumeration via `GetDescriptors()`.
+- `IDescriptorRuntimeBindingStatusProvider` — consumer-facing `GetStatus(IDescriptor)` + `GetAllStatuses()`.
+- `DefaultDescriptorRuntimeBindingStatusProvider` — aggregates contributors via `IEnumerable<T>`, sorted by Order.
+- `BindingStatusSynthesizer` — static synthesis: REF_* → Invalid, BIND_* → Unbound, UNSUPPORTED_* → Unsupported, warnings → PartiallyBound.
+- `MetadataServiceCollectionExtensions.AddBindingStatusKernel()` — DI for provider.
+- 5 contributors: Capability (handler resolver + schema), Form (schema field parity + required warnings), HumanTask (assignee strategy + outcome capabilities), Workflow (step targets + unsupported SubWorkflow/Retry/Compensate/Transitions), Event (deprecated/removed state + payload schema).
+- DI registrations for Schema, Workflow, HumanTask, Capability registries (all interface-only except Event).
+- `EventRegistry` same-instance bridging (concrete → interface) for `EventRegistryBootstrapper`.
+- `ICapabilityHandlerResolver` DI bridge from `CapabilityHandlerResolverProvider.GetResolver()`.
+- 29 new tests (10 Metadata + 19 per-contributor). 0 regressions across 6 suites (Metadata 95, Form 35, HumanTask 47, Workflow 63, Capability 120, Event 36).
+- **Caveat**: `IEventRegistry` lacks `GetAll()` — Event contributor returns empty from `GetDescriptors()`; individual events checked via `Evaluate()` only. No integration test for real-registry round-trip. Unknown DescriptorKind → PartiallyBound (WARN_NO_BINDING_CONTRIBUTOR). 0 MetadataBootstrapper changes. 0 runtime execution changes. `ICapabilityHandlerRegistry` not implemented — Capability contributor uses `ICapabilityHandlerResolver` instead.
+
 ---
 
 ## Recommended Next Thread Entry Prompt
