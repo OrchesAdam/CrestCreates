@@ -54,7 +54,7 @@ Phase 5h provides the **binding query layer** — it tells you whether a descrip
 | `WorkflowCompatibilityValidator` | `CrestCreates.Workflow` | ✅ Runtime feature support check |
 | `CapabilityHandlerValidator` / `CapabilitySchemaValidator` | `CrestCreates.Capability` | ✅ Bootstrap validators |
 | `RegistryEventValidator` (IEventValidator) | `CrestCreates.Event` | ✅ Runtime publish validation |
-| `IGlobalDescriptorRegistry` | `CrestCreates.Metadata` | ✅ Cross-kind descriptor enumeration |
+| `IGlobalDescriptorRegistry` | `CrestCreates.Metadata` | ⚠️ Populated via explicit `Register()`, NOT by `RegistryBase.Build()`; not suitable as enumeration source without a sync mechanism |
 | `MetadataBootstrapper.BuildAll()` | `CrestCreates.Metadata` | ✅ Sequential registry builds |
 
 ### Gap
@@ -65,7 +65,8 @@ Phase 5h provides the **binding query layer** — it tells you whether a descrip
 | Per-descriptor binding report | Each validator returns different types (ValidationReport, exception, ValidationResult) |
 | Contributor-based extensibility | No way for new descriptor kinds to plug into the binding status system |
 | Runtime query API | No public `GetAllStatuses()` — each caller must manually orchestrate checks |
-| DI-registered registries | Only FormRegistry is in DI; contributors need typed registry access |
+| DI-registered registries | Only FormRegistry is in DI; contributors need typed registry access via constructor injection |
+| Enumeration source | `IGlobalDescriptorRegistry` is not auto-populated by `RegistryBase.Build()` — cannot be used as main enumeration source; contributors self-enumerate from injected registries instead |
 
 ---
 
@@ -190,8 +191,8 @@ public static DescriptorBindingStatus SynthesizeStatus(IReadOnlyList<DescriptorB
 namespace CrestCreates.Metadata.Abstractions;
 
 /// <summary>
-/// Per-module evaluator. Each module (Capability, Form, HumanTask, Workflow, Event)
-/// implements one to evaluate descriptors of its SupportedKind.
+/// Per-module evaluator + descriptor enumerator. Each module (Capability, Form, HumanTask,
+/// Workflow, Event) implements one to enumerate and evaluate descriptors of its SupportedKind.
 /// Singleton, stateless, receives typed registries via constructor DI.
 /// </summary>
 public interface IDescriptorBindingStatusContributor
@@ -201,6 +202,13 @@ public interface IDescriptorBindingStatusContributor
 
     /// <summary>Execution order (lower = earlier). Contributors are sorted before evaluation.</summary>
     int Order { get; }
+
+    /// <summary>
+    /// Enumerate all descriptors of this kind from the contributor's injected registry.
+    /// Returns empty list if the registry has not been built (RegistryState != Built).
+    /// Must not trigger registry.Build().
+    /// </summary>
+    IReadOnlyList<IDescriptor> GetDescriptors();
 
     /// <summary>Evaluate a single descriptor. Must not mutate state.</summary>
     DescriptorBindingReport Evaluate(IDescriptor descriptor);
@@ -232,14 +240,11 @@ public sealed class DefaultDescriptorRuntimeBindingStatusProvider
     : IDescriptorRuntimeBindingStatusProvider
 {
     private readonly IReadOnlyList<IDescriptorBindingStatusContributor> _contributors;
-    private readonly IGlobalDescriptorRegistry _globalRegistry;
 
     public DefaultDescriptorRuntimeBindingStatusProvider(
-        IEnumerable<IDescriptorBindingStatusContributor> contributors,
-        IGlobalDescriptorRegistry globalRegistry)
+        IEnumerable<IDescriptorBindingStatusContributor> contributors)
     {
         _contributors = contributors.OrderBy(c => c.Order).ToList();
-        _globalRegistry = globalRegistry;
     }
 
     public DescriptorBindingReport GetStatus(IDescriptor descriptor)
@@ -250,15 +255,31 @@ public sealed class DefaultDescriptorRuntimeBindingStatusProvider
             {
                 DescriptorId = descriptor.FullId,
                 DescriptorKind = descriptor.Kind,
-                Status = DescriptorBindingStatus.RuntimeReady,
-                Issues = Array.Empty<DescriptorBindingIssue>()
+                Status = DescriptorBindingStatus.PartiallyBound,
+                Issues = new[]
+                {
+                    new DescriptorBindingIssue(
+                        Severity: ValidationSeverity.Warning,
+                        Code: "WARN_NO_BINDING_CONTRIBUTOR",
+                        Message: $"No binding status contributor registered for {descriptor.Kind}.",
+                        DescriptorId: descriptor.FullId,
+                        DescriptorKind: descriptor.Kind)
+                }
             };
     }
 
     public RuntimeBindingReport GetAllStatuses()
     {
-        var allDescriptors = _globalRegistry.GetAll();
-        var reports = allDescriptors.Select(GetStatus).ToList();
+        var reports = new List<DescriptorBindingReport>();
+        foreach (var contributor in _contributors)
+        {
+            // Each contributor enumerates its own descriptors from its injected registry.
+            // Registries return empty if not built — no gate needed.
+            foreach (var descriptor in contributor.GetDescriptors())
+            {
+                reports.Add(contributor.Evaluate(descriptor));
+            }
+        }
         return new RuntimeBindingReport { Descriptors = reports };
     }
 }
@@ -303,21 +324,25 @@ Use `AddSingleton` (not `TryAddSingleton`) to allow multiple registration of `ID
 
 ### 4.5 Registry DI Prerequisite
 
-Since contributors need typed registry access, registries must be registered in DI.
+Since contributors need typed registry access, existing registry types must be registered in DI.
 Currently only `FormRegistry` is registered. Phase 5h adds:
 
 ```csharp
-// In each module's *ServiceCollectionExtensions or a new AddRegistry:
+// In each module's *ServiceCollectionExtensions:
 services.TryAddSingleton<ISchemaRegistry, SchemaRegistry>();
 services.TryAddSingleton<IWorkflowRegistry, WorkflowRegistry>();
 services.TryAddSingleton<IEventRegistry, EventRegistry>();
 services.TryAddSingleton<IHumanTaskRegistry, HumanTaskRegistry>();
 services.TryAddSingleton<ICapabilityRegistry, CapabilityRegistry>();
 
-// Plus their validation engines:
+// Plus their validation engines (required by RegistryBase constructor):
 services.TryAddSingleton<IRegistryValidationEngine<SchemaDescriptor>, RegistryValidationEngine<SchemaDescriptor>>();
-// ... etc
+// ... etc for Capability, Workflow, HumanTask, Event, Form (Form already done)
 ```
+
+**This is NOT a new registry path or build path.** These are the same existing `RegistryBase<T>` subclasses that `MetadataBootstrapper.BuildAll()` already builds. Registering them in DI is wire-up — the same types, registered as singletons so contributors can inject them.
+
+**Instance consistency requirement**: For binding status to work correctly, the DI-registered registry instances MUST be the same ones that `BuildAll()` builds. Consumers calling `BuildAll()` must resolve registry instances from DI (e.g., `serviceProvider.GetRequiredService<ISchemaRegistry>()`), not construct them with `new`. If `BuildAll()` builds different instances than those in DI, contributors will see `Created`-state registries and `GetDescriptors()` returns empty — resulting in an empty `GetAllStatuses()` report. This is correct behavior (no descriptors are available), not a bug. Tests MUST verify this scenario explicitly (see §9.2).
 
 ---
 
@@ -407,7 +432,8 @@ Do NOT query subscriber registries (no first-class queryable subscriber registry
 
 - `BuildAll()` continues to handle structural validation (validators + bootstrap validators + callbacks).
 - Binding status is queried separately: `provider.GetAllStatuses()` called by consumers after registries are built.
-- Contributors access typed registries via DI — no new `BuildAll()` parameters needed.
+- **Registry instance consistency** (§4.5) is a consumer responsibility: the registries passed to `BuildAll()` must be the same singletons registered in DI so contributors see the built instances. This is not a `BuildAll()` change — it's a call-site convention.
+- Contributors access typed registries via DI — no new `BuildAll()` parameters or callbacks needed.
 
 ---
 
@@ -445,7 +471,7 @@ framework/src/CrestCreates.Event/
   EventBindingStatusContributor.cs
 ```
 
-### Modified Files (5+)
+### Modified Files (6)
 
 ```
 framework/src/CrestCreates.Capability/CapabilityServiceCollectionExtensions.cs  (+contributor DI, +registry DI)
@@ -454,14 +480,16 @@ framework/src/CrestCreates.HumanTask/HumanTaskServiceCollectionExtensions.cs    
 framework/src/CrestCreates.Workflow/WorkflowServiceCollectionExtensions.cs     (+contributor DI, +registry DI)
 framework/src/CrestCreates.Event/EventServiceCollectionExtensions.cs            (+contributor DI, +registry DI)
 framework/src/CrestCreates.Schema/                                              (+registry DI, new extension file)
+framework/test/CrestCreates.Metadata.Tests/                                     (+integration test)
 ```
 
-### Test Files (7)
+### Test Files (8)
 
 ```
 framework/test/CrestCreates.Metadata.Tests/
   BindingStatusSynthesizerTests.cs          (status synthesis rules)
   DefaultDescriptorRuntimeBindingStatusProviderTests.cs  (aggregation, GetStatus, GetAllStatuses)
+  RuntimeBindingStatusIntegrationTests.cs   (real registry build → GetAllStatuses)
 
 framework/test/CrestCreates.Capability.Tests/
   CapabilityBindingStatusContributorTests.cs
@@ -504,7 +532,7 @@ Phase 5h MUST NOT implement:
 - API / UI / AppService
 - Runtime reflection scanning
 - Service locator
-- New registries or registry paths
+- New registries or registry paths (i.e., new registry *types* or alternative build mechanisms; registering existing types in DI for contributor injection is wire-up, not a new path)
 - Modifications to `MetadataBootstrapper.BuildAll()`
 
 ---
@@ -521,10 +549,19 @@ Phase 5h MUST NOT implement:
 | UNSUPPORTED_* error → Unsupported | `SynthesizeStatus([UNSUPPORTED_RETRY error]) == Unsupported` |
 | Warning-only → PartiallyBound | `SynthesizeStatus([WARN_DEPRECATED warning]) == PartiallyBound` |
 | Mixed errors → Invalid (worst-first synthesis) | REF_* errors take priority over UNSUPPORTED_* |
-| GetAllStatuses() aggregates all descriptors | Mock IGlobalDescriptorRegistry with 3 descriptors, verify 3 reports |
-| Unknown DescriptorKind → RuntimeReady | No contributor for the kind → default RuntimeReady |
+| GetAllStatuses() aggregates from all contributors | Mock 3 contributors each returning 1 descriptor → 3 reports |
+| Contributor's GetDescriptors() empty → skipped | Contributor returning empty list → no reports for that kind |
+| Unknown DescriptorKind → PartiallyBound | No contributor for the kind → WARN_NO_BINDING_CONTRIBUTOR, PartiallyBound |
 
-### 9.2 Per-Contributor Tests (each module)
+### 9.2 Integration Test (real registries)
+
+| Test | Assertion |
+|---|---|
+| Built registries → non-empty GetAllStatuses() | Build schema/form/capability/humantask/workflow/event registries via `MetadataBootstrapper.BuildAll()`, call `provider.GetAllStatuses()`, verify report count matches total descriptors from built registries (not empty, not mock) |
+| DI registries not built → empty GetAllStatuses() | Register registries in DI but don't call BuildAll(); `GetAllStatuses()` returns empty report (contributors' `GetDescriptors()` returns empty) |
+| Round-trip: BuildAll with DI instances | Resolve registries from DI, pass to `BuildAll()`, call `GetAllStatuses()` → descriptors present with non-Unbound statuses |
+
+### 9.3 Per-Contributor Tests (each module)
 
 | Module | Test Cases |
 |---|---|
@@ -534,7 +571,7 @@ Phase 5h MUST NOT implement:
 | Workflow | Missing target → Invalid, SubWorkflow/Retry/Compensate/Transitions → Unsupported, valid → RuntimeReady |
 | Event | Registry not built → Unbound, missing schema → Invalid, deprecated → PartiallyBound, active+schema → RuntimeReady |
 
-### 9.3 Regression Gate
+### 9.4 Regression Gate
 
 All existing test suites must pass with zero regressions:
 - Form.Tests (32), Metadata.Tests (85), HumanTask.Tests (44), Workflow.Tests (57)
@@ -551,9 +588,10 @@ All existing test suites must pass with zero regressions:
 | Standalone (not `IBootstrapValidator`) | `IBootstrapValidator.Validate()` takes zero parameters and returns `ValidationReport`; binding contributors need typed registries and return `DescriptorBindingReport` |
 | DI injection for registries | Contributors need typed `ISchemaRegistry`, `IWorkflowRegistry`, etc. — DI is the established pattern (see `WorkflowCompatibilityValidator`) |
 | `AddSingleton` (not `TryAddSingleton`) for contributors | Multiple contributors must co-exist for the same interface; `TryAddSingleton` would drop the second registration |
-| `IGlobalDescriptorRegistry.GetAll()` for enumeration | No need for contributors to re-scan — `IGlobalDescriptorRegistry` is the established cross-kind descriptor catalog |
-| No `MetadataBootstrapper` changes | Binding status is a post-build query, not a build-time validation gate. Consumers decide when to query. |
-| Registry DI registration as prerequisite | Only `FormRegistry` is in DI today; contributors need all registries. One-time cleanup, backward-compatible. |
+| `GetDescriptors()` on contributor for enumeration | Contributors own their registry; enumerating from within avoids depending on `IGlobalDescriptorRegistry` (which is only populated via explicit `Register()`, not by `RegistryBase.Build()`) |
+| No `MetadataBootstrapper` changes | Binding status is a post-build query, not a build-time validation gate. Instance consistency between DI and BuildAll() is a consumer call-site convention |
+| Registry DI registration as prerequisite | Only `FormRegistry` is in DI today; contributors need all registries. Wire-up only — no new build path or registry orchestration |
+| Unknown DescriptorKind → PartiallyBound | Optimistic `RuntimeReady` for unknown kinds would silently approve descriptors that have no binding check at all; `WARN_NO_BINDING_CONTRIBUTOR` is explicit |
 
 ---
 
