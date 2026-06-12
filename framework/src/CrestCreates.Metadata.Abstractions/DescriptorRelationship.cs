@@ -1,9 +1,5 @@
 namespace CrestCreates.Metadata.Abstractions;
 
-/// <summary>
-/// Non-generic descriptor reference with namespace and id.
-/// Used in relationship declarations. The generic DescriptorRef{TDescriptor} remains for typed refs.
-/// </summary>
 public readonly record struct DescriptorRef(
     string Namespace,
     string Id,
@@ -15,12 +11,18 @@ public readonly record struct DescriptorRef(
 public sealed record DescriptorRelationship(
     DescriptorRef From,
     DescriptorRef To,
-    RelationshipKind Kind);
+    RelationshipKind Kind,
+    string? Role = null,
+    string? SourcePath = null,
+    RelationshipStrength Strength = RelationshipStrength.Strong,
+    bool IsRuntimeBinding = false);
 
 public enum RelationshipKind
 {
     Produces,
     Consumes,
     DependsOn,
-    References
+    References,
+    Uses,
+    Triggers
 }

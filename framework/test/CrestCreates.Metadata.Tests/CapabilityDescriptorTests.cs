@@ -47,23 +47,6 @@ public class CapabilityDescriptorTests
     }
 
     [Fact]
-    public void Implements_IRelationshipAwareDescriptor()
-    {
-        var descriptor = new CapabilityDescriptor
-        {
-            Id = "customer.create",
-            Version = 1,
-            InputSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema_customer", 1),
-            Produces = new[] { new EventRef("event", "customer.created") }
-        };
-
-        var relationships = descriptor.GetRelationships();
-        relationships.Should().NotBeEmpty();
-        relationships.Should().Contain(r => r.Kind == RelationshipKind.Consumes);
-        relationships.Should().Contain(r => r.Kind == RelationshipKind.Produces);
-    }
-
-    [Fact]
     public void Schema_refs_are_nullable()
     {
         var descriptor = new CapabilityDescriptor

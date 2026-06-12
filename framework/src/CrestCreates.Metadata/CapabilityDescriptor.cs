@@ -3,7 +3,7 @@ using CrestCreates.Schema.Abstractions;
 
 namespace CrestCreates.Metadata;
 
-public sealed class CapabilityDescriptor : IDescriptor, IVersionedDescriptor, IHasContractIdentity, IRelationshipAwareDescriptor
+public sealed class CapabilityDescriptor : IDescriptor, IVersionedDescriptor, IHasContractIdentity
 {
     // === IDescriptor ===
     public string Namespace { get; init; } = "capability";
@@ -33,53 +33,6 @@ public sealed class CapabilityDescriptor : IDescriptor, IVersionedDescriptor, IH
     public IReadOnlyList<string> Permissions { get; init; } = Array.Empty<string>();
     public CapabilityRiskLevel RiskLevel { get; init; } = CapabilityRiskLevel.Medium;
 
-    // === IRelationshipAwareDescriptor ===
-    public IEnumerable<DescriptorRelationship> GetRelationships()
-    {
-        var relationships = new List<DescriptorRelationship>();
-
-        if (InputSchema.HasValue)
-        {
-            relationships.Add(new DescriptorRelationship(
-                new DescriptorRef(Namespace, Id),
-                new DescriptorRef(InputSchema.Value.Id, InputSchema.Value.Id, InputSchema.Value.Version),
-                RelationshipKind.Consumes));
-        }
-
-        if (OutputSchema.HasValue)
-        {
-            relationships.Add(new DescriptorRelationship(
-                new DescriptorRef(Namespace, Id),
-                new DescriptorRef(OutputSchema.Value.Id, OutputSchema.Value.Id, OutputSchema.Value.Version),
-                RelationshipKind.Produces));
-        }
-
-        if (SupersededById is not null)
-        {
-            relationships.Add(new DescriptorRelationship(
-                new DescriptorRef(Namespace, Id),
-                new DescriptorRef(Namespace, SupersededById),
-                RelationshipKind.DependsOn));
-        }
-
-        foreach (var @event in Produces)
-        {
-            relationships.Add(new DescriptorRelationship(
-                new DescriptorRef(Namespace, Id),
-                new DescriptorRef(@event.Namespace, @event.Id, @event.Version),
-                RelationshipKind.Produces));
-        }
-
-        foreach (var @event in Consumes)
-        {
-            relationships.Add(new DescriptorRelationship(
-                new DescriptorRef(Namespace, Id),
-                new DescriptorRef(@event.Namespace, @event.Id, @event.Version),
-                RelationshipKind.Consumes));
-        }
-
-        return relationships;
-    }
 }
 
 /// <summary>

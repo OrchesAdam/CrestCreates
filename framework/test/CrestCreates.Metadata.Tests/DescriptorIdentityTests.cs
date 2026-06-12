@@ -42,15 +42,6 @@ public class DescriptorIdentityTests
         descriptor.DefinitionHash.Should().Be("def456");
     }
 
-    [Fact]
-    public void IRelationshipAwareDescriptor_returns_relationships()
-    {
-        var descriptor = new TestRelationshipDescriptor();
-        var rels = descriptor.GetRelationships().ToList();
-        rels.Should().HaveCount(1);
-        rels[0].Kind.Should().Be(RelationshipKind.Produces);
-    }
-
     private class TestContractDescriptor : IDescriptor, IHasContractIdentity
     {
         public string Namespace => "event";
@@ -69,25 +60,4 @@ public class DescriptorIdentityTests
         string IDescriptor.DefinitionHash => ((IHasContractIdentity)this).DefinitionHash;
     }
 
-    private class TestRelationshipDescriptor : IDescriptor, IRelationshipAwareDescriptor
-    {
-        public string Namespace => "capability";
-        public string Id => "test";
-        public string Name => "Test";
-
-        // Existing IDescriptor members
-        public DescriptorKind Kind => DescriptorKind.Capability;
-        public DescriptorState State => DescriptorState.Active;
-        public string ContractHash => string.Empty;
-        public string DefinitionHash => string.Empty;
-        public string? SupersededById => null;
-
-        public IEnumerable<DescriptorRelationship> GetRelationships()
-        {
-            yield return new DescriptorRelationship(
-                new DescriptorRef("capability", "test"),
-                new DescriptorRef("event", "user.created"),
-                RelationshipKind.Produces);
-        }
-    }
 }

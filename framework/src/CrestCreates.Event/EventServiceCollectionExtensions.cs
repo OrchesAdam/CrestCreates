@@ -23,6 +23,9 @@ public static class EventServiceCollectionExtensions
         // Binding Status Contributor
         services.AddSingleton<IDescriptorBindingStatusContributor, EventBindingStatusContributor>();
 
+        // Relationship Extractor
+        services.AddSingleton<IDescriptorRelationshipExtractor, EventRelationshipExtractor>();
+
         return services;
     }
 }

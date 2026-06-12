@@ -99,6 +99,9 @@ public static class CapabilityServiceCollectionExtensions
         // Binding Status Contributor
         services.AddSingleton<IDescriptorBindingStatusContributor, CapabilityBindingStatusContributor>();
 
+        // Relationship Extractor
+        services.AddSingleton<IDescriptorRelationshipExtractor, CapabilityRelationshipExtractor>();
+
         return services;
     }
 

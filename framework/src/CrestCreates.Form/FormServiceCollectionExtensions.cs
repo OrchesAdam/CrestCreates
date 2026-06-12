@@ -28,6 +28,9 @@ public static class FormServiceCollectionExtensions
         // Binding Status Contributor
         services.AddSingleton<IDescriptorBindingStatusContributor, FormBindingStatusContributor>();
 
+        // Relationship Extractor
+        services.AddSingleton<IDescriptorRelationshipExtractor, FormRelationshipExtractor>();
+
         return services;
     }
 }

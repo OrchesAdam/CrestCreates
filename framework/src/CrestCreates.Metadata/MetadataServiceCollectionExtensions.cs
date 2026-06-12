@@ -12,4 +12,14 @@ public static class MetadataServiceCollectionExtensions
             DefaultDescriptorRuntimeBindingStatusProvider>();
         return services;
     }
+
+    public static IServiceCollection AddRelationshipKernel(this IServiceCollection services)
+    {
+        services.TryAddSingleton<IDescriptorRelationshipProvider,
+            DefaultDescriptorRelationshipProvider>();
+
+        services.AddSingleton<IDescriptorRelationshipExtractor, SchemaRelationshipExtractor>();
+
+        return services;
+    }
 }

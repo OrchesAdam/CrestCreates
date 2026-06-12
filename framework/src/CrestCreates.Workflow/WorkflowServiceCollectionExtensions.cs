@@ -26,6 +26,9 @@ public static class WorkflowServiceCollectionExtensions
         // Binding Status Contributor
         services.AddSingleton<IDescriptorBindingStatusContributor, WorkflowBindingStatusContributor>();
 
+        // Relationship Extractor
+        services.AddSingleton<IDescriptorRelationshipExtractor, WorkflowRelationshipExtractor>();
+
         services.TryAddSingleton<IWorkflowStateMachine, DefaultWorkflowStateMachine>();
         services.TryAddSingleton<IWorkflowLifecycleEventPublisher, WorkflowLifecycleEventPublisher>();
         services.TryAddScoped<IWorkflowExecutionRunner, WorkflowExecutionRunner>();

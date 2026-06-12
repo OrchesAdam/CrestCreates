@@ -22,6 +22,9 @@ public static class HumanTaskServiceCollectionExtensions
         // Binding Status Contributor
         services.AddSingleton<IDescriptorBindingStatusContributor, HumanTaskBindingStatusContributor>();
 
+        // Relationship Extractor
+        services.AddSingleton<IDescriptorRelationshipExtractor, HumanTaskRelationshipExtractor>();
+
         return services;
     }
 }
