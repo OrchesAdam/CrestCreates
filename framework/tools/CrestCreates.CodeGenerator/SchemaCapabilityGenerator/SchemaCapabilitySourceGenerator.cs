@@ -37,13 +37,6 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
             .Where(static x => x is not null)
             .Collect();
 
-        var formProviders = context.SyntaxProvider
-            .CreateSyntaxProvider(
-                predicate: static (node, _) => node is ClassDeclarationSyntax,
-                transform: static (ctx, ct) => GetFormProviderInfo(ctx))
-            .Where(static x => x is not null)
-            .Collect();
-
         var humanTaskProviders = context.SyntaxProvider
             .CreateSyntaxProvider(
                 predicate: static (node, _) => node is ClassDeclarationSyntax,
@@ -63,7 +56,6 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
         context.RegisterSourceOutput(
             entityClasses.Combine(serviceClasses)
                 .Combine(eventProviders)
-                .Combine(formProviders)
                 .Combine(humanTaskProviders)
                 .Combine(workflowProviders)
                 .Combine(compilationProvider),
@@ -72,11 +64,10 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
                 var compilation = source.Right;
                 var workflowList = source.Left.Right;
                 var humanTaskList = source.Left.Left.Right;
-                var formList = source.Left.Left.Left.Right;
-                var eventList = source.Left.Left.Left.Left.Right;
-                var entityAndCapability = source.Left.Left.Left.Left.Left;
+                var eventList = source.Left.Left.Left.Right;
+                var entityAndCapability = source.Left.Left.Left.Left;
                 GenerateRegistries(spc, entityAndCapability.Left, entityAndCapability.Right,
-                    eventList, formList, humanTaskList, workflowList, compilation);
+                    eventList, ImmutableArray<FormDescriptorInfo?>.Empty, humanTaskList, workflowList, compilation);
             });
     }
 
@@ -175,27 +166,6 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
         };
     }
 
-    private static FormDescriptorInfo? GetFormProviderInfo(GeneratorSyntaxContext ctx)
-    {
-        var classDecl = (ClassDeclarationSyntax)ctx.Node;
-        var symbol = ctx.SemanticModel.GetDeclaredSymbol(classDecl) as INamedTypeSymbol;
-        if (symbol == null) return null;
-
-        var formProviderType = ctx.SemanticModel.Compilation
-            .GetTypeByMetadataName("CrestCreates.Form.Abstractions.IFormDescriptorProvider");
-        if (formProviderType == null) return null;
-
-        var implements = symbol.AllInterfaces.Any(i =>
-            SymbolEqualityComparer.Default.Equals(i, formProviderType));
-        if (!implements) return null;
-
-        return new FormDescriptorInfo
-        {
-            Id = $"form_{Guid.NewGuid():N}",
-            Name = symbol.ContainingNamespace?.ToDisplayString() + "." + symbol.Name
-        };
-    }
-
     private static HumanTaskDescriptorInfo? GetHumanTaskProviderInfo(GeneratorSyntaxContext ctx)
     {
         var classDecl = (ClassDeclarationSyntax)ctx.Node;
@@ -256,7 +226,6 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
         var hasAny = schemas.Any(s => s != null)
             || capabilities.Any(c => c != null)
             || events.Any(e => e != null)
-            || forms.Any(f => f != null)
             || humanTasks.Any(h => h != null)
             || workflows.Any(w => w != null);
 
@@ -267,8 +236,6 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
             .Any(a => a.Name == "CrestCreates.Event.Abstractions");
         var hasCapability = compilation.ReferencedAssemblyNames
             .Any(a => a.Name == "CrestCreates.Capability.Abstractions");
-        var hasForm = compilation.ReferencedAssemblyNames
-            .Any(a => a.Name == "CrestCreates.Form.Abstractions");
         var hasHumanTask = compilation.ReferencedAssemblyNames
             .Any(a => a.Name == "CrestCreates.HumanTask.Abstractions");
         var hasWorkflow = compilation.ReferencedAssemblyNames
@@ -281,8 +248,6 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
         sb.AppendLine("using CrestCreates.Metadata.Abstractions;");
         sb.AppendLine("using System.Runtime.CompilerServices;");
         sb.AppendLine("using CrestCreates.Schema.Abstractions;");
-        if (hasForm)
-            sb.AppendLine("using CrestCreates.Form.Abstractions;");
         if (hasHumanTask)
             sb.AppendLine("using CrestCreates.HumanTask.Abstractions;");
         if (hasWorkflow)
@@ -321,44 +286,6 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
                     sb.AppendLine("                },");
                 }
                 sb.AppendLine("            }");
-                sb.AppendLine("        },");
-            }
-            sb.AppendLine("    };");
-            sb.AppendLine("}");
-            sb.AppendLine();
-        }
-
-        if (hasForm && forms.Any(f => f != null))
-        {
-            sb.AppendLine("internal sealed class GeneratedFormProvider : IDescriptorProvider<FormDescriptor>");
-            sb.AppendLine("{");
-            sb.AppendLine("    public IReadOnlyList<FormDescriptor> GetDescriptors() => new List<FormDescriptor>");
-            sb.AppendLine("    {");
-            foreach (var form in forms)
-            {
-                if (form == null) continue;
-                sb.AppendLine($"        new FormDescriptor");
-                sb.AppendLine("        {");
-                sb.AppendLine($"            Id = \"{form.Id}\",");
-                sb.AppendLine($"            Name = \"{form.Name}\",");
-                sb.AppendLine($"            Version = {form.Version},");
-                sb.AppendLine($"            Schema = new VersionedDescriptorRef<SchemaDescriptor>(\"{form.SchemaId}\", {form.SchemaVersion}),");
-                if (form.Fields.Count > 0)
-                {
-                    sb.AppendLine($"            Fields = new List<FormFieldDescriptor>");
-                    sb.AppendLine("            {");
-                    foreach (var field in form.Fields)
-                    {
-                        sb.AppendLine($"                new FormFieldDescriptor");
-                        sb.AppendLine("                {");
-                        sb.AppendLine($"                    SchemaFieldName = \"{field.SchemaFieldName}\",");
-                        if (field.Label != null)
-                            sb.AppendLine($"                    Label = \"{field.Label}\",");
-                        sb.AppendLine($"                    Order = {field.Order},");
-                        sb.AppendLine("                },");
-                    }
-                    sb.AppendLine("            },");
-                }
                 sb.AppendLine("        },");
             }
             sb.AppendLine("    };");
@@ -471,8 +398,6 @@ public sealed class SchemaCapabilitySourceGenerator : IIncrementalGenerator
         sb.AppendLine("    {");
         if (schemas.Any(s => s != null))
             sb.AppendLine("        DescriptorProviderRegistry.Register(new GeneratedSchemaProvider());");
-        if (hasForm && forms.Any(f => f != null))
-            sb.AppendLine("        DescriptorProviderRegistry.Register(new GeneratedFormProvider());");
         if (hasHumanTask && humanTasks.Any(h => h != null))
             sb.AppendLine("        DescriptorProviderRegistry.Register(new GeneratedHumanTaskProvider());");
         if (hasWorkflow && workflows.Any(w => w != null))

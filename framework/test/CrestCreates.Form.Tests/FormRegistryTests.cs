@@ -1,6 +1,7 @@
 using CrestCreates.Form.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Schema;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -78,5 +79,84 @@ public class FormRegistryTests
         registry.Build([provider]);
 
         registry.State.Should().Be(RegistryState.Built);
+    }
+
+    [Fact]
+    public void Build_Runs_FormValidator()
+    {
+        var engine = new RegistryValidationEngine<FormDescriptor>(
+            [new FormDescriptorValidator()]);
+        var registry = new FormRegistry(engine);
+        var validForm = CreateForm("f1", "ValidForm", 1);
+        var provider = new TestFormProvider([validForm]);
+
+        registry.Build([provider]);
+
+        registry.State.Should().Be(RegistryState.Built);
+    }
+
+    [Fact]
+    public void Build_Fails_On_ValidationError()
+    {
+        var engine = new RegistryValidationEngine<FormDescriptor>(
+            [new FormDescriptorValidator()]);
+        var registry = new FormRegistry(engine);
+        var invalidForm = CreateForm("", "NoIdForm", 0);
+        var provider = new TestFormProvider([invalidForm]);
+
+        var act = () => registry.Build([provider]);
+
+        act.Should().Throw<RegistryValidationException>();
+        registry.State.Should().Be(RegistryState.Failed);
+    }
+
+    [Fact]
+    public void FormSchemaBindingValidator_With_Real_Registries()
+    {
+        var schemaEngine = new RegistryValidationEngine<SchemaDescriptor>(
+            Array.Empty<IRegistryValidator<SchemaDescriptor>>());
+        var schemaRegistry = new SchemaRegistry(schemaEngine);
+        var schemaProvider = new TestSchemaProviderForRegistry([
+            new SchemaDescriptor
+            {
+                Id = "s1", Name = "CustomerSchema", Version = 1,
+                Fields = new List<SchemaFieldDescriptor>
+                {
+                    new() { Name = "Name", FieldType = "string", IsRequired = true },
+                    new() { Name = "Email", FieldType = "string", IsRequired = false }
+                }
+            }
+        ]);
+        schemaRegistry.Build([schemaProvider]);
+
+        var formEngine = new RegistryValidationEngine<FormDescriptor>(
+            [new FormDescriptorValidator()]);
+        var formRegistry = new FormRegistry(formEngine);
+        var formProvider = new TestFormProvider([
+            new FormDescriptor
+            {
+                Id = "f1", Name = "CustomerForm", Version = 1,
+                Schema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+                Fields = new List<FormFieldDescriptor>
+                {
+                    new() { SchemaFieldName = "Name" },
+                    new() { SchemaFieldName = "Email" }
+                }
+            }
+        ]);
+        formRegistry.Build([formProvider]);
+
+        var bindingValidator = new FormSchemaBindingValidator();
+        var report = bindingValidator.Validate(formRegistry.GetAll(), schemaRegistry);
+
+        report.HasErrors.Should().BeFalse();
+        report.HasWarnings.Should().BeFalse();
+    }
+
+    private class TestSchemaProviderForRegistry : IDescriptorProvider<SchemaDescriptor>
+    {
+        private readonly List<SchemaDescriptor> _descriptors;
+        public TestSchemaProviderForRegistry(List<SchemaDescriptor> descriptors) => _descriptors = descriptors;
+        public IReadOnlyList<SchemaDescriptor> GetDescriptors() => _descriptors;
     }
 }

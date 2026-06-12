@@ -236,4 +236,88 @@ public class DescriptorHashComputerTests
         // Label is cosmetic — same structural contract
         h1.Should().Be(h2);
     }
+
+    [Fact]
+    public void FormContractHash_Changes_When_ControlTypeChanges()
+    {
+        var form1 = new Form.Abstractions.FormDescriptor
+        {
+            Id = "f1", Name = "Test", Version = 1,
+            Schema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            Fields = new[]
+            {
+                new Form.Abstractions.FormFieldDescriptor { SchemaFieldName = "Name", ControlType = "text" }
+            }
+        };
+        var form2 = new Form.Abstractions.FormDescriptor
+        {
+            Id = "f1", Name = "Test", Version = 1,
+            Schema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            Fields = new[]
+            {
+                new Form.Abstractions.FormFieldDescriptor { SchemaFieldName = "Name", ControlType = "select" }
+            }
+        };
+
+        var hash1 = DescriptorHashComputer.ComputeContractHash(form1);
+        var hash2 = DescriptorHashComputer.ComputeContractHash(form2);
+
+        hash1.Should().NotBe(hash2);
+    }
+
+    [Fact]
+    public void FormContractHash_Changes_When_IsRequiredOverrideChanges()
+    {
+        var form1 = new Form.Abstractions.FormDescriptor
+        {
+            Id = "f1", Name = "Test", Version = 1,
+            Schema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            Fields = new[]
+            {
+                new Form.Abstractions.FormFieldDescriptor { SchemaFieldName = "Name", IsRequiredOverride = true }
+            }
+        };
+        var form2 = new Form.Abstractions.FormDescriptor
+        {
+            Id = "f1", Name = "Test", Version = 1,
+            Schema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            Fields = new[]
+            {
+                new Form.Abstractions.FormFieldDescriptor { SchemaFieldName = "Name", IsRequiredOverride = false }
+            }
+        };
+
+        var hash1 = DescriptorHashComputer.ComputeContractHash(form1);
+        var hash2 = DescriptorHashComputer.ComputeContractHash(form2);
+
+        hash1.Should().NotBe(hash2);
+    }
+
+    [Fact]
+    public void FormContractHash_DoesNotChange_When_ValidationMessageChanges()
+    {
+        var form1 = new Form.Abstractions.FormDescriptor
+        {
+            Id = "f1", Name = "Test", Version = 1,
+            Schema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            Fields = new[]
+            {
+                new Form.Abstractions.FormFieldDescriptor { SchemaFieldName = "Name", ValidationMessage = "Msg A" }
+            }
+        };
+        var form2 = new Form.Abstractions.FormDescriptor
+        {
+            Id = "f1", Name = "Test", Version = 1,
+            Schema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            Fields = new[]
+            {
+                new Form.Abstractions.FormFieldDescriptor { SchemaFieldName = "Name", ValidationMessage = "Msg B" }
+            }
+        };
+
+        var hash1 = DescriptorHashComputer.ComputeContractHash(form1);
+        var hash2 = DescriptorHashComputer.ComputeContractHash(form2);
+
+        hash1.Should().Be(hash2);
+    }
 }

@@ -100,7 +100,10 @@ public static class DescriptorHashComputer
                     fd.SchemaFieldName,
                     fd.IsReadOnly,
                     fd.Order,
-                    fd.Group
+                    fd.Group,
+                    fd.ControlType,        // NEW — changes interaction contract
+                    fd.IsRequiredOverride,  // NEW — changes interaction contract
+                    fd.OptionsSource        // NEW — changes interaction contract
                 }).OrderBy(fd => fd.SchemaFieldName).ToArray()
             },
             HumanTaskDescriptor h => new

@@ -18,6 +18,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\CrestCreates.Form\CrestCreates.Form.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Schema\CrestCreates.Schema.csproj" />
     <ProjectReference Include="..\CrestCreates.TestBase\CrestCreates.TestBase.csproj" />
   </ItemGroup>
 </Project>
