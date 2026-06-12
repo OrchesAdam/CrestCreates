@@ -22,4 +22,10 @@ public static class MetadataServiceCollectionExtensions
 
         return services;
     }
+
+    public static IServiceCollection AddTopologyKernel(this IServiceCollection services)
+    {
+        services.TryAddSingleton<IDescriptorTopologyBuilder, DescriptorTopologyBuilder>();
+        return services;
+    }
 }

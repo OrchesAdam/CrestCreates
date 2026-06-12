@@ -1,6 +1,6 @@
-# Descriptor Relationship Coverage — Architecture Summary
+# Descriptor Architecture Summary
 
-> **Date:** 2026-06-12 | **Status:** Complete | **Phase 6a: Descriptor Relationship Coverage**
+> **Date:** 2026-06-12 | **Status:** Complete | **Phase 6a: Relationship Coverage + Phase 6b: Topology Read Model**
 
 ---
 
@@ -223,6 +223,123 @@ services.AddRelationshipKernel()
 | `FormDescriptorDependencyExtractor` | Replaced by `FormRelationshipExtractor`. Moved to `./99_RecycleBin/`. |
 
 `DependencyEdge`, `DescriptorDependencyKind`, `IDescriptorDependencyGraph`, `DescriptorDependencyGraph` are preserved as Phase 6b projection targets.
+
+---
+
+## 8. Phase 6b: Descriptor Topology Read Model
+
+### 8.1 Overview
+
+Phase 6b builds a **unique topology read model** on top of Phase 6a's relationship data layer. It projects flat `DescriptorRelationship` lists into a structured graph: nodes, edges, consumer index, and diagnostics — all computed at snapshot build time.
+
+```
+IDescriptorRelationshipProvider (Phase 6a)
+         │
+         ▼
+IDescriptorTopologyBuilder.Build(descriptors)
+         │
+         ▼
+DescriptorTopologySnapshot
+  ├─ Nodes:  Dictionary<DescriptorRef, DescriptorNode>
+  ├─ Edges:  List<DescriptorEdge>
+  ├─ Diagnostics: DescriptorTopologyDiagnostics (5 rules)
+  ├─ Consumer Index: 3-way version-aware segmentation
+  └─ Query API: direct/transitive deps, consumers, lookups
+```
+
+### 8.2 Core Types
+
+All types in `CrestCreates.Metadata.Abstractions.DescriptorTopology`:
+
+| Type | Description |
+|------|-------------|
+| `DescriptorIdentity` | Version-independent key: `(Namespace, Id)` |
+| `DescriptorNode` | Graph node: `Ref` + summary (`Kind`, `Name`, `State`, `ContractHash`) + edge index sets |
+| `DescriptorEdge` | Directed edge: `From → To` = "From depends on To". Carries `Kind`, `Role`, `SourcePath`, `Strength`, `IsRuntimeBinding` |
+| `DescriptorTopologySnapshot` | Frozen immutable graph with embedded diagnostics, consumer index, and query API |
+| `DescriptorTopologyDiagnostics` | Collection of `DescriptorTopologyDiagnostic` with `Error`/`Warning` filtering |
+| `DiagnosticSeverity` | `Error`, `Warning`, `Info` |
+| `RelationshipRoles` | Canonical role constants (InputSchema, OutputSchema, SubWorkflowStep, etc.) |
+
+### 8.3 Query API (on DescriptorTopologySnapshot)
+
+| Method | Direction | Semantics |
+|--------|-----------|-----------|
+| `GetDirectDependencies(of)` | Outgoing | Descriptors `of` depends on |
+| `GetDirectDependents(of)` | Incoming | Descriptors that depend on `of` |
+| `GetTransitiveDependencies(of, includeWeak)` | BFS outgoing | All downstream (Strong-only default) |
+| `GetTransitiveDependents(of, includeWeak)` | BFS incoming | All upstream (Strong-only default) |
+| `GetConsumers(ns, id, version?)` | Consumer index | Version-aware: null→all, exact→exact+unpinned |
+| `Contains(r)` / `FindNode(r)` | Lookup | Version-aware resolution |
+
+### 8.4 Version-Aware Resolution
+
+`TryResolveRef(DescriptorRef)` — exact match first, then `(Namespace, Id)` fallback for `Version=null` refs. Applied consistently in builder, snapshot queries, BFS, and adapter edge matching. This ensures unpinned relationships (e.g., SupersededBy, unversioned EventRef) correctly resolve to versioned target nodes.
+
+### 8.5 Diagnostics (5 Rules)
+
+| Code | Severity | Rule |
+|------|----------|------|
+| `MISSING_TARGET` | Error (Strong) / Warning (Weak) | Edge.To not found in nodes |
+| `STRONG_CYCLE` | Error | DFS back-edge on Strong edges (both From/To must exist) |
+| `ORPHAN` | Warning | Node with zero incoming edges, State ∉ {Draft, Removed} |
+| `EXACT_DUPLICATE` | Warning | Full semantic key (7 fields) appears ≥2 times |
+| `UNSUPPORTED_REFERENCE` | Warning | Edge matches explicit `(Role, Kind)` whitelist; NOT Weak inference |
+
+### 8.6 Consumer Index (3-Way Segmentation)
+
+```
+_consumersByIdentity         — all consumers, regardless of version
+_consumersByExactVersion     — only edges where To.Version != null
+_consumersByUnpinnedVersion  — only edges where To.Version == null
+```
+
+Query: `version == null` → all; `version != null` → exact + unpinned (null-as-any).
+
+### 8.7 DI Registration
+
+```csharp
+services.AddTopologyKernel()  // registers IDescriptorTopologyBuilder (TryAddSingleton)
+```
+
+### 8.8 Backward Compat
+
+`DescriptorDependencyGraphAdapter` wraps `IDescriptorTopologyBuilder` → `IDescriptorDependencyGraph` for `DescriptorCatalog` backward compat. Uses bare-Id semantics. `AddEdge()` throws. `AnalyzeImpact` is direct-only (matches old one-hop behavior). All 6 `RelationshipKind→DescriptorDependencyKind` mappings covered.
+
+### 8.9 Removed
+
+- `DescriptorDependencyGraph` → `99_RecycleBin/`
+- `DependencyGraphProvider` → `99_RecycleBin/`
+
+Preserved (no `[Obsolete]`): `DependencyEdge`, `DescriptorDependencyKind`, `ImpactReport`.
+
+### 8.10 Project Structure (Phase 6b additions)
+
+```
+framework/src/CrestCreates.Metadata.Abstractions/
+  DescriptorTopology/
+    DescriptorIdentity.cs
+    DescriptorNode.cs
+    DescriptorEdge.cs
+    DescriptorTopologySnapshot.cs
+    DescriptorTopologyDiagnostics.cs
+    DescriptorTopologyDiagnostic.cs
+    DiagnosticSeverity.cs
+    RelationshipRoles.cs
+  IDescriptorTopologyBuilder.cs
+
+framework/src/CrestCreates.Metadata/
+  DescriptorTopologyBuilder.cs              (internal)
+  DescriptorDependencyGraphAdapter.cs
+
+framework/test/CrestCreates.Metadata.Tests/
+  DescriptorTopology/
+    DescriptorNodeTests.cs
+    DescriptorTopologySnapshotTests.cs
+    DescriptorTopologyBuilderTests.cs
+    DescriptorTopologyDiagnosticsTests.cs
+    DescriptorDependencyGraphAdapterTests.cs
+```
 
 ---
 

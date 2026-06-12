@@ -6,6 +6,7 @@
     <RootNamespace>CrestCreates.Metadata</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.Metadata.Tests" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Logging" />
   </ItemGroup>

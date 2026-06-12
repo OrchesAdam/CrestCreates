@@ -6,6 +6,8 @@
     <RootNamespace>CrestCreates.Metadata.Abstractions</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.Metadata" />
+    <InternalsVisibleTo Include="CrestCreates.Metadata.Tests" />
     <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
   </ItemGroup>
 </Project>

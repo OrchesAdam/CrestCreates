@@ -1,7 +1,8 @@
-# Descriptor Relationship Coverage — Usage Guide
+# Descriptor — Usage Guide
 
-> This document is for CrestCreates module developers who need to consume or extend descriptor relationship extraction.
+> This document is for CrestCreates module developers who need to consume or extend descriptor relationship extraction and topology queries.
 > *Phase 6a (2026-06-12): Descriptor Relationship Coverage — 6 extractors, 1 provider, 434 tests*
+> *Phase 6b (2026-06-12): Descriptor Topology Read Model — builder, snapshot, diagnostics, consumer index, 146 Metadata.Tests*
 
 ---
 
@@ -259,3 +260,91 @@ Descriptive relationship logic belongs in extractors, not in descriptors. Descri
 | `EventDescriptor` relationships are empty | By design — `EventRelationshipExtractor` handles `GeneratedEventDescriptor` only | Use `GeneratedEventDescriptor` (the registry main-path type) or register a second extractor |
 | Missing `From.Version` | Older code that doesn't pass `descriptor.Version` | Always include Version: `new DescriptorRef(ns, id, version)` |
 | Duplicate relationships for same ref | Two extractors registered for same `DescriptorType` | Use `TryAddSingleton` or check for duplicate registrations |
+
+---
+
+## 7. Phase 6b: Topology Queries
+
+### 7.1 Register the Topology Kernel
+
+```csharp
+using CrestCreates.Metadata;
+
+builder.Services.AddTopologyKernel();  // registers IDescriptorTopologyBuilder
+```
+
+### 7.2 Build a Topology Snapshot
+
+```csharp
+var topologyBuilder = services.GetRequiredService<IDescriptorTopologyBuilder>();
+var descriptors = GetMyDescriptors();  // from registries
+
+var snapshot = topologyBuilder.Build(descriptors);
+```
+
+### 7.3 Query Direct Dependencies
+
+```csharp
+var myCapability = new DescriptorRef("capability", "approve-order", version: 2);
+
+// What does this capability depend on?
+var deps = snapshot.GetDirectDependencies(myCapability);
+foreach (var dep in deps)
+    Console.WriteLine($"{dep.Ref.FullId} ({dep.Kind}, {dep.Name})");
+
+// What depends on this capability?
+var consumers = snapshot.GetDirectDependents(myCapability);
+```
+
+### 7.4 Transitive Traversal
+
+```csharp
+// All downstream dependencies (Strong edges only by default)
+var allDownstream = snapshot.GetTransitiveDependencies(myCapability);
+
+// Include Weak edges for full impact analysis
+var fullDownstream = snapshot.GetTransitiveDependencies(myCapability, includeWeak: true);
+
+// All upstream consumers (reversed graph)
+var allConsumers = snapshot.GetTransitiveDependents(myCapability);
+```
+
+### 7.5 Consumer Index (Version-Aware)
+
+```csharp
+// All consumers of "schema.User" regardless of version
+var all = snapshot.GetConsumers("schema", "User");
+
+// Consumers of "schema.User" version 2 exactly + unpinned consumers
+var v2 = snapshot.GetConsumers("schema", "User", version: 2);
+```
+
+### 7.6 Check Diagnostics
+
+```csharp
+var snapshot = topologyBuilder.Build(descriptors);
+
+if (!snapshot.Diagnostics.IsHealthy)
+{
+    foreach (var diag in snapshot.Diagnostics.Errors)
+        Console.WriteLine($"ERROR [{diag.Code}]: {diag.Message}");
+
+    foreach (var diag in snapshot.Diagnostics.Warnings)
+        Console.WriteLine($"WARN [{diag.Code}]: {diag.Message}");
+}
+
+// Quick checks:
+snapshot.Diagnostics.HasErrors      // true if any MISSING_TARGET(Strong) or STRONG_CYCLE
+snapshot.Diagnostics.IsHealthy      // true if no errors
+```
+
+### 7.7 Lookup with Version-Aware Resolution
+
+```csharp
+// Exact match
+var node = snapshot.FindNode(new DescriptorRef("schema", "User", 2));
+
+// Unpinned ref resolves to any version
+var anyVersion = snapshot.FindNode(new DescriptorRef("schema", "User", null));
+// → returns version 2 node (or whatever version exists)
+```
