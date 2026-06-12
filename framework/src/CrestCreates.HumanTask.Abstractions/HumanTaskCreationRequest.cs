@@ -14,4 +14,8 @@ public sealed class HumanTaskCreationRequest
     public string? WorkflowStepId { get; init; }
 
     public object? Input { get; init; }
+
+    public string? RequestedOrganizationUnitId { get; init; }
+    public string? RequestedPositionId { get; init; }
+    public string? RequestedByUserId { get; init; }
 }

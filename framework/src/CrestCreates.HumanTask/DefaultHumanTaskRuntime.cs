@@ -9,15 +9,18 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
     private readonly IHumanTaskRegistry _registry;
     private readonly IHumanTaskInstanceStore _store;
     private readonly ILocalEventBus _eventBus;
+    private readonly IHumanTaskAssigneeResolver _resolver;
 
     public DefaultHumanTaskRuntime(
         IHumanTaskRegistry registry,
         IHumanTaskInstanceStore store,
-        ILocalEventBus eventBus)
+        ILocalEventBus eventBus,
+        IHumanTaskAssigneeResolver resolver)
     {
         _registry = registry;
         _store = store;
         _eventBus = eventBus;
+        _resolver = resolver;
     }
 
     public async Task<HumanTaskInstance> CreateAsync(
@@ -33,17 +36,26 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
             throw new InvalidOperationException(
                 $"HumanTask descriptor '{request.HumanTaskId}' not found.");
 
+        var resolution = await _resolver.ResolveAsync(descriptor, request, ct)
+            .ConfigureAwait(false);
+
         var instance = new HumanTaskInstance
         {
             Id = Guid.NewGuid().ToString("N"),
             HumanTaskId = descriptor.Id,
             HumanTaskVersion = descriptor.Version,
-            Status = (request.AssigneeUserId != null || request.AssigneeRoleId != null)
+            Status = (!string.IsNullOrWhiteSpace(resolution.AssigneeUserId)
+                   || !string.IsNullOrWhiteSpace(resolution.AssigneeRoleId))
                 ? HumanTaskInstanceStatus.Assigned
                 : HumanTaskInstanceStatus.Created,
             TenantId = request.TenantId,
-            AssigneeUserId = request.AssigneeUserId,
-            AssigneeRoleId = request.AssigneeRoleId,
+            AssigneeUserId = resolution.AssigneeUserId,
+            AssigneeRoleId = resolution.AssigneeRoleId,
+            CandidateUserIds = resolution.CandidateUserIds.ToArray(),
+            CandidateRoleIds = resolution.CandidateRoleIds.ToArray(),
+            OrganizationUnitId = resolution.OrganizationUnitId,
+            PositionId = resolution.PositionId,
+            AssigneeResolutionReason = resolution.AssigneeResolutionReason,
             WorkflowInstanceId = request.WorkflowInstanceId,
             WorkflowStepId = request.WorkflowStepId,
             Input = request.Input,

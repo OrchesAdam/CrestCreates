@@ -463,7 +463,8 @@ public class WorkflowContinuationTests
         htRegistry.Build([new TestHumanTaskDescriptorProvider([htDescriptor])]);
 
         var htStore = new InMemoryHumanTaskInstanceStore();
-        var htRuntime = new DefaultHumanTaskRuntime(htRegistry, htStore, NullLocalEventBus.Instance);
+        var htRuntime = new DefaultHumanTaskRuntime(htRegistry, htStore, NullLocalEventBus.Instance,
+            new DefaultHumanTaskAssigneeResolver());
 
         var pipeline = new CapturingCapabilityPipeline();
         var wfRegistry = CreateRegistry(new WorkflowDescriptor

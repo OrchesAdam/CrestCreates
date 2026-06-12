@@ -29,6 +29,12 @@ public sealed class HumanTaskInstance
 
     public string? CancellationReason { get; set; }
 
+    public IReadOnlyList<string> CandidateUserIds { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> CandidateRoleIds { get; set; } = Array.Empty<string>();
+    public string? OrganizationUnitId { get; set; }
+    public string? PositionId { get; set; }
+    public string? AssigneeResolutionReason { get; set; }
+
     public string ConcurrencyStamp { get; set; } = Guid.NewGuid().ToString("N");
     public DateTimeOffset? UpdatedAt { get; set; }
 
@@ -53,7 +59,12 @@ public sealed class HumanTaskInstance
             CancelledAt = this.CancelledAt,
             CancellationReason = this.CancellationReason,
             ConcurrencyStamp = this.ConcurrencyStamp,
-            UpdatedAt = this.UpdatedAt
+            UpdatedAt = this.UpdatedAt,
+            CandidateUserIds = this.CandidateUserIds.ToArray(),
+            CandidateRoleIds = this.CandidateRoleIds.ToArray(),
+            OrganizationUnitId = this.OrganizationUnitId,
+            PositionId = this.PositionId,
+            AssigneeResolutionReason = this.AssigneeResolutionReason
         };
     }
 }

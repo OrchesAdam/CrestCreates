@@ -1,6 +1,6 @@
 # 统一元数据模型 — 架构总结文档
 
-> **日期:** 2026-06-11 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a + Phase 4b + Phase 4c + Phase 5 + Phase 5b 完成**
+> **日期:** 2026-06-12 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a + Phase 4b + Phase 4c + Phase 5 + Phase 5b + Phase 5f 完成**
 
 ---
 
@@ -89,6 +89,28 @@ Phase 5 实现 HumanTaskInstance 运行时，让 `HumanTaskStepExecutor` 创建�
 - `HumanTaskCompletedEvent` 无 Workflow 字段 — 保持 HumanTask 域事件纯净
 - `HumanTaskDescriptor` 仍然是纯元数据 — 无运行时状态
 - Executor 返回 `StepExecutionResult`, 不修改 WorkflowInstance 状态
+
+### Phase 5f: HumanTask Assignee Resolver Foundation
+
+Phase 5f 建立 HumanTask assignee resolution 的最小主链，使 `DefaultHumanTaskRuntime.CreateAsync` 通过 `IHumanTaskAssigneeResolver` 解析分派对象：
+
+| 组件 | 说明 |
+|------|------|
+| `HumanTaskAssigneeResolution` | 分派结果 DTO — AssigneeUserId/RoleId, CandidateUserIds/RoleIds, OrganizationUnitId, PositionId, AssigneeResolutionReason |
+| `IHumanTaskAssigneeResolver` | 分派解析器接口 — ResolveAsync(descriptor, request, ct) |
+| `DefaultHumanTaskAssigneeResolver` | 4 级累加优先级解析: 显式用户 > 显式角色 > 辅助上下文 (org/position) > 策略适配 |
+| `HumanTaskCreationRequest` (extended) | 新增 RequestedOrganizationUnitId, RequestedPositionId, RequestedByUserId |
+| `HumanTaskInstance` (extended) | 新增 CandidateUserIds, CandidateRoleIds, OrganizationUnitId, PositionId, AssigneeResolutionReason |
+| `IHumanTaskInstanceStore` (extended) | 新增 GetPendingByCandidateUser/Role/Organization/PositionAsync |
+| `DefaultHumanTaskRuntime.CreateAsync` (updated) | 通过 resolver 解析 → 应用 resolution → 状态决策 → 保存 |
+| `HumanTaskServiceCollectionExtensions` (updated) | TryAddScoped<IHumanTaskAssigneeResolver, DefaultHumanTaskAssigneeResolver>() |
+
+**关键不变量:**
+- `!string.IsNullOrWhiteSpace()` 用于所有身份字段 — 空白字符串视为 null
+- Candidate list snapshot 四层防护: Resolver → Runtime(.ToArray) → Clone(.ToArray) → Store(依赖 Clone)
+- RoundRobin/LeastLoaded 返回 unassigned + 原因字符串
+- 完全无 Organization 依赖 — HumanTask 不引用 Organization.Abstractions
+- 零 Workflow 变更
 
 ### Phase 5b: Durable Runtime Store Contracts
 
@@ -208,9 +230,16 @@ framework/src/
 │                                           # IHumanTaskRuntime, HumanTaskCreationRequest, HumanTaskCompletionRequest (Phase 5)
 │                                           # HumanTaskInstance.ConcurrencyStamp, UpdatedAt, Clone() (Phase 5b)
 │                                           # IHumanTaskInstanceStore.GetPendingByWorkflowAsync (Phase 5b)
+│                                           # HumanTaskAssigneeResolution, IHumanTaskAssigneeResolver (Phase 5f)
+│                                           # HumanTaskCreationRequest.RequestedOrganizationUnitId/PositionId/ByUserId (Phase 5f)
+│                                           # HumanTaskInstance.CandidateUserIds/RoleIds, OrganizationUnitId, PositionId,
+│                                           #   AssigneeResolutionReason (Phase 5f)
+│                                           # IHumanTaskInstanceStore.GetPendingByCandidateUser/Role/Organization/PositionAsync (Phase 5f)
 ├── CrestCreates.HumanTask/                  # HumanTaskRegistry : RegistryBase<HumanTaskDescriptor>
-│                                           # InMemoryHumanTaskInstanceStore (CAS + clone + GetPendingByWorkflowAsync, Phase 5b), CompletionOutcomeMatcher,
-│                                           # DefaultHumanTaskRuntime (concurrency guard, Phase 5b), HumanTaskServiceCollectionExtensions (Phase 5)
+│                                           # InMemoryHumanTaskInstanceStore (CAS + clone + GetPendingByWorkflowAsync, Phase 5b;
+│                                           #   4 new pending queries Phase 5f), CompletionOutcomeMatcher,
+│                                           # DefaultHumanTaskRuntime (concurrency guard Phase 5b, resolver integration Phase 5f),
+│                                           # DefaultHumanTaskAssigneeResolver (Phase 5f), HumanTaskServiceCollectionExtensions (Phase 5)
 ├── CrestCreates.Workflow.Abstractions/      # WorkflowDescriptor, WorkflowStep, InteractionTarget (Capability/HumanTask/SubWorkflow),
 │                                           # IWorkflowEngine (ExecuteAsync only), IWorkflowRegistry,
 │                                           # IWorkflowStepExecutor, IWorkflowStepExecutorRegistry,
@@ -242,7 +271,8 @@ framework/test/
 ├── CrestCreates.Event.Tests/               (32)
 ├── CrestCreates.Exposure.Tests/            (12)
 ├── CrestCreates.Form.Tests/                (9)
-├── CrestCreates.HumanTask.Tests/           (21)  ← Phase 5: +7 (Runtime 6 + Store 1); Phase 5b: +5 (Store 4 + Runtime 1)
+├── CrestCreates.HumanTask.Tests/           (44)  ← Phase 5: +7 (Runtime 6 + Store 1); Phase 5b: +5 (Store 4 + Runtime 1);
+│                                           # Phase 5f: +22 (10 Resolver + 6 Runtime + 6 Store)
 └── CrestCreates.Workflow.Tests/            (57)  ← Phase 5: +2 (Executor unit + E2E); Phase 5b: +6 (Store 5 + Continuation 1)
 ```
 
@@ -642,9 +672,9 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | Event.Tests | 32 | EventRegistry(16), Validator(4), DynamicRegistry(7), Descriptor(5) |
 | Exposure.Tests | 12 | AgentTool(5), MCPTool(3), CapabilityEndpoint(4) |
 | Form.Tests | 9 | Descriptor(5), Registry(4) |
-| HumanTask.Tests | 21 | Descriptor(6), Registry(3), **Store(5), Runtime(7)** |
+| HumanTask.Tests | 44 | Descriptor(6), Registry(3), **Store(11), Runtime(14), Resolver(10)** |
 | Workflow.Tests | 57 | Executor Registry(5), Validator(14), Engine(13), Runtime(5), StateMachine(7), Continuation(7), **Store(5), Executor(1), E2E(1)** |
-| **Total** | **~371** | |
+| **Total** | **~394** | |
 
 ---
 
@@ -771,3 +801,14 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 117 | 并发重复幂等 — WorkflowContinuationService 捕获 RuntimeConcurrencyException，重新查询 HumanTaskId；null → 重复 no-op | ✅ Phase 5b |
 | 118 | HumanTask 并发守卫 — DefaultHumanTaskRuntime 完成前验证戳；冲突时抑制事件，不发布虚假 HumanTaskCompletedEvent | ✅ Phase 5b |
 | 119 | Barrier(2) 并发测试 — System.Threading.Barrier 强制同时进入 SaveAsync，证明 CAS 在真实争用下工作 | ✅ Phase 5b |
+| 120 | IHumanTaskAssigneeResolver — 4 级累加优先级: 显式用户 > 显式角色 > 辅助上下文 (org/position) > 策略适配 | ✅ Phase 5f |
+| 121 | HumanTaskAssigneeResolution — 不可变 DTO，computed IsAssigned/HasCandidates/IsUnassigned | ✅ Phase 5f |
+| 122 | HumanTaskCreationRequest 扩展 — RequestedOrganizationUnitId, RequestedPositionId, RequestedByUserId (audit only) | ✅ Phase 5f |
+| 123 | HumanTaskInstance 扩展 — CandidateUserIds/RoleIds, OrganizationUnitId, PositionId, AssigneeResolutionReason | ✅ Phase 5f |
+| 124 | HumanTaskInstance.Clone() 包含 .ToArray() snapshot — candidate lists 不可变引用泄露 | ✅ Phase 5f |
+| 125 | IHumanTaskInstanceStore 4 个新查询 — GetPendingByCandidateUser/Role/Organization/PositionAsync | ✅ Phase 5f |
+| 126 | DefaultHumanTaskRuntime.CreateAsync 通过 resolver 解析 — 状态决策使用 !IsNullOrWhiteSpace | ✅ Phase 5f |
+| 127 | DI: TryAddScoped<IHumanTaskAssigneeResolver, DefaultHumanTaskAssigneeResolver>() | ✅ Phase 5f |
+| 128 | 无 Organization 依赖 — HumanTask 不引用 Organization.Abstractions | ✅ Phase 5f |
+| 129 | 零 Workflow 变更 — HumanTaskStepExecutor 未修改 | ✅ Phase 5f |
+| 130 | 测试: 44 个 HumanTask.Tests（+22 Phase 5f: 10 Resolver + 6 Runtime + 6 Store） | ✅ Phase 5f |

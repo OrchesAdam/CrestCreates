@@ -80,4 +80,60 @@ public sealed class InMemoryHumanTaskInstanceStore : IHumanTaskInstanceStore
 
         return Task.FromResult((IReadOnlyList<HumanTaskInstance>)results);
     }
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByCandidateUserAsync(
+        string userId, CancellationToken ct = default)
+    {
+        var results = _instances.Values
+            .Where(i => (i.Status == HumanTaskInstanceStatus.Created ||
+                         i.Status == HumanTaskInstanceStatus.Assigned) &&
+                        i.CandidateUserIds.Contains(userId))
+            .Select(i => i.Clone())
+            .ToList()
+            .AsReadOnly();
+
+        return Task.FromResult((IReadOnlyList<HumanTaskInstance>)results);
+    }
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByCandidateRoleAsync(
+        string roleId, CancellationToken ct = default)
+    {
+        var results = _instances.Values
+            .Where(i => (i.Status == HumanTaskInstanceStatus.Created ||
+                         i.Status == HumanTaskInstanceStatus.Assigned) &&
+                        i.CandidateRoleIds.Contains(roleId))
+            .Select(i => i.Clone())
+            .ToList()
+            .AsReadOnly();
+
+        return Task.FromResult((IReadOnlyList<HumanTaskInstance>)results);
+    }
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByOrganizationAsync(
+        string organizationUnitId, CancellationToken ct = default)
+    {
+        var results = _instances.Values
+            .Where(i => (i.Status == HumanTaskInstanceStatus.Created ||
+                         i.Status == HumanTaskInstanceStatus.Assigned) &&
+                        i.OrganizationUnitId == organizationUnitId)
+            .Select(i => i.Clone())
+            .ToList()
+            .AsReadOnly();
+
+        return Task.FromResult((IReadOnlyList<HumanTaskInstance>)results);
+    }
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByPositionAsync(
+        string positionId, CancellationToken ct = default)
+    {
+        var results = _instances.Values
+            .Where(i => (i.Status == HumanTaskInstanceStatus.Created ||
+                         i.Status == HumanTaskInstanceStatus.Assigned) &&
+                        i.PositionId == positionId)
+            .Select(i => i.Clone())
+            .ToList()
+            .AsReadOnly();
+
+        return Task.FromResult((IReadOnlyList<HumanTaskInstance>)results);
+    }
 }

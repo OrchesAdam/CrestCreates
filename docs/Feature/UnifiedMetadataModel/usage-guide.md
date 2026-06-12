@@ -1,7 +1,7 @@
 # 统一元数据模型 — 使用指南
 
 > 本文档面向 CrestCreates 模块开发者，介绍如何使用统一元数据模型声明和执行业务能力。
-> *更新于 Phase 5b (2026-06-11): Durable Runtime Store Contracts — 原子 CAS 并发、浅层快照、幂等重复处理、Runtime Store 异常类型*
+> *更新于 Phase 5f (2026-06-12): HumanTask Assignee Resolver Foundation — 分派解析主链, instance 扩展, 4 个新 pending 查询*
 
 ---
 
@@ -246,7 +246,7 @@ public class ManagerApprovalProvider : IHumanTaskDescriptorProvider
 }
 ```
 
-### 4.3 HumanTask 运行时操作 (Phase 5 新增)
+### 4.3 HumanTask 运行时操作 (Phase 5 新增, Phase 5f 扩展)
 
 创建和完成 HumanTaskInstance：
 
@@ -260,14 +260,23 @@ var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
     HumanTaskId = "ht_manager_approval",
     Version = 1,
     AssigneeUserId = "user_001",
+    AssigneeRoleId = "role_managers",
     WorkflowInstanceId = "wf_abc123",     // 可选: Workflow correlation
     WorkflowStepId = "step_approval",
+
+    // Phase 5f: 辅助上下文 — 用于 Organization/Position 感知查询
+    RequestedOrganizationUnitId = "org_dept_eng",
+    RequestedPositionId = "pos_manager",
+    RequestedByUserId = "user_initiator",
+
     Input = new { Reason = "员工入职审批" }
 });
 
 // instance.Id → Guid (e.g., "a1b2c3d4")
 // instance.Status → Assigned (因为指定了 AssigneeUserId)
 // instance.HumanTaskVersion → 1 (pin descriptor version)
+// instance.OrganizationUnitId → "org_dept_eng" (Phase 5f)
+// instance.CandidateRoleIds → ["role_managers"] (Phase 5f: user 优先, role 变 candidate)
 
 // 完成 HumanTaskInstance
 var completed = await runtime.CompleteAsync(new HumanTaskCompletionRequest
@@ -288,13 +297,27 @@ var cancelled = await runtime.CancelAsync(instance.Id, "申请已撤回");
 var store = serviceProvider.GetRequiredService<IHumanTaskInstanceStore>();
 var pending = await store.GetPendingByAssigneeAsync("user_001");
 // 返回 Status = Created | Assigned 的任务
+
+// Phase 5f: 扩展查询能力
+var byCandidate = await store.GetPendingByCandidateUserAsync("user_002");
+var byRole = await store.GetPendingByCandidateRoleAsync("role_reviewers");
+var byOrg = await store.GetPendingByOrganizationAsync("org_dept_eng");
+var byPosition = await store.GetPendingByPositionAsync("pos_manager");
 ```
+
+**Assignee Resolution 优先级 (Phase 5f):**
+1. 显式用户 (`request.AssigneeUserId`) — 最高优先级，同时指定 role 则 role 进入 CandidateRoleIds
+2. 显式角色 (`request.AssigneeRoleId`)
+3. 辅助上下文 (`RequestedOrganizationUnitId`, `RequestedPositionId`)
+4. 策略适配 (`descriptor.AssigneeStrategy`): RoundRobin/LeastLoaded 返回 unassigned + reason
 
 **关键约束:**
 - `HumanTaskDescriptor` 是纯元数据 — 不包含运行时状态
 - `HumanTaskInstance` 是运行时状态 — pin descriptor version
 - `HumanTaskCompletedEvent` 携带 `HumanTaskInstanceId` (instance ID)，不携带 Workflow 字段
 - Workflow continuation 通过 `WorkflowInstance.WaitingHumanTaskId` = `HumanTaskInstance.Id` 关联
+- Candidate list 快照防护: Resolver → Runtime(.ToArray) → Clone(.ToArray) → Store(依赖 Clone)
+- 所有身份字段使用 `!string.IsNullOrWhiteSpace()` — 空白字符串视为 null
 
 **Phase 5b — 并发与错误处理:**
 - `RuntimeConcurrencyException` — 并发写入冲突。两个调用者同时修改同一 WorkflowInstance 或 HumanTaskInstance 时抛出。调用方可捕获此异常并重试或将其视为幂等重复。
@@ -646,6 +669,8 @@ services.AddSingleton<MyRegistry>();
 | Phase 5 实现计划 | `docs/superpowers/plans/2026-06-11-human-task-runtime-foundation.md` |
 | Phase 5b 设计规格书 | `docs/superpowers/specs/2026-06-11-phase-5b-durable-runtime-store-contracts-design.md` |
 | Phase 5b 实现计划 | `docs/superpowers/plans/2026-06-11-phase-5b-durable-runtime-store-contracts.md` |
+| Phase 5f 设计规格书 | `docs/superpowers/specs/2026-06-12-phase-5f-humantask-assignee-resolver-design.md` |
+| Phase 5f 实现计划 | `docs/superpowers/plans/2026-06-12-phase-5f-humantask-assignee-resolver.md` |
 | 架构总结 | `docs/Feature/UnifiedMetadataModel/2026-06-09-unified-metadata-model-architecture-summary.md` |
 
 ### 关键接口一览
@@ -682,7 +707,8 @@ services.AddSingleton<MyRegistry>();
 | `IFormDescriptorProvider` | 声明 Form | Form.Abstractions |
 | `IHumanTaskDescriptorProvider` | 声明 HumanTask | HumanTask.Abstractions |
 | `IHumanTaskRuntime` | HumanTaskInstance 运行时 (Phase 5) | HumanTask.Abstractions |
-| `IHumanTaskInstanceStore` | HumanTaskInstance 持久化 (Phase 5) | HumanTask.Abstractions |
+| `IHumanTaskInstanceStore` | HumanTaskInstance 持久化 (Phase 5/5f: +4 pending queries) | HumanTask.Abstractions |
+| `IHumanTaskAssigneeResolver` | HumanTask 分派解析器 (Phase 5f) | HumanTask.Abstractions |
 | `IWorkflowDescriptorProvider` | 声明 Workflow | Workflow.Abstractions |
 | `IWorkflowEngine` | 执行 Workflow (ExecuteAsync only) | Workflow.Abstractions |
 | `IWorkflowStepExecutor` | 单步执行器 (Phase 4b) | Workflow.Abstractions |

@@ -10,6 +10,7 @@ public static class HumanTaskServiceCollectionExtensions
     {
         services.TryAddSingleton<IHumanTaskInstanceStore, InMemoryHumanTaskInstanceStore>();
         services.TryAddScoped<IHumanTaskRuntime, DefaultHumanTaskRuntime>();
+        services.TryAddScoped<IHumanTaskAssigneeResolver, DefaultHumanTaskAssigneeResolver>();
         return services;
     }
 }

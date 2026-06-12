@@ -41,20 +41,35 @@ public class HumanTaskRuntimeTests
         return registry;
     }
 
-    private static (DefaultHumanTaskRuntime runtime, InMemoryHumanTaskInstanceStore store, Mock<ILocalEventBus> eventBusMock)
-        CreateRuntime(HumanTaskRegistry registry, Mock<ILocalEventBus>? busMock = null)
+    private static (DefaultHumanTaskRuntime runtime, InMemoryHumanTaskInstanceStore store,
+        Mock<ILocalEventBus> eventBusMock, Mock<IHumanTaskAssigneeResolver> resolverMock)
+        CreateRuntime(HumanTaskRegistry registry,
+            Mock<ILocalEventBus>? busMock = null,
+            Mock<IHumanTaskAssigneeResolver>? resolverMock = null)
     {
         var store = new InMemoryHumanTaskInstanceStore();
         var eventBus = busMock ?? new Mock<ILocalEventBus>();
-        var runtime = new DefaultHumanTaskRuntime(registry, store, eventBus.Object);
-        return (runtime, store, eventBus);
+        var resolver = resolverMock ?? new Mock<IHumanTaskAssigneeResolver>();
+
+        if (resolverMock == null)
+        {
+            resolver
+                .Setup(r => r.ResolveAsync(
+                    It.IsAny<HumanTaskDescriptor>(),
+                    It.IsAny<HumanTaskCreationRequest>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new HumanTaskAssigneeResolution());
+        }
+
+        var runtime = new DefaultHumanTaskRuntime(registry, store, eventBus.Object, resolver.Object);
+        return (runtime, store, eventBus, resolver);
     }
 
     [Fact]
     public async Task CreateAsync_Creates_Instance_From_Descriptor()
     {
         var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1));
-        var (runtime, store, _) = CreateRuntime(registry);
+        var (runtime, store, _, _) = CreateRuntime(registry);
 
         var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
         {
@@ -77,7 +92,7 @@ public class HumanTaskRuntimeTests
     public async Task CreateAsync_Throws_When_Descriptor_Not_Found()
     {
         var registry = CreateRegistry();
-        var (runtime, _, _) = CreateRuntime(registry);
+        var (runtime, _, _, _) = CreateRuntime(registry);
 
         await runtime.Invoking(r => r.CreateAsync(new HumanTaskCreationRequest
         {
@@ -91,7 +106,7 @@ public class HumanTaskRuntimeTests
         var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1,
             CompletionCondition.Approve, CompletionCondition.Reject));
         var eventBusMock = new Mock<ILocalEventBus>();
-        var (runtime, store, _) = CreateRuntime(registry, eventBusMock);
+        var (runtime, store, _, _) = CreateRuntime(registry, eventBusMock);
 
         var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
         {
@@ -128,7 +143,7 @@ public class HumanTaskRuntimeTests
     {
         var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1,
             CompletionCondition.Approve));
-        var (runtime, store, _) = CreateRuntime(registry);
+        var (runtime, store, _, _) = CreateRuntime(registry);
 
         var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
         {
@@ -147,7 +162,7 @@ public class HumanTaskRuntimeTests
     {
         var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1,
             CompletionCondition.Approve));
-        var (runtime, store, _) = CreateRuntime(registry);
+        var (runtime, store, _, _) = CreateRuntime(registry);
 
         var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
         {
@@ -171,7 +186,7 @@ public class HumanTaskRuntimeTests
     public async Task CancelAsync_Cancels_Instance()
     {
         var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1));
-        var (runtime, store, _) = CreateRuntime(registry);
+        var (runtime, store, _, _) = CreateRuntime(registry);
 
         var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
         {
@@ -198,7 +213,15 @@ public class HumanTaskRuntimeTests
         // Create a fake store that throws RuntimeConcurrencyException on second save
         var throwingStore = new ConcurrencyThrowingHumanTaskInstanceStore();
 
-        var runtime = new DefaultHumanTaskRuntime(registry, throwingStore, eventBusMock.Object);
+        var resolver = new Mock<IHumanTaskAssigneeResolver>();
+        resolver
+            .Setup(r => r.ResolveAsync(
+                It.IsAny<HumanTaskDescriptor>(),
+                It.IsAny<HumanTaskCreationRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HumanTaskAssigneeResolution());
+
+        var runtime = new DefaultHumanTaskRuntime(registry, throwingStore, eventBusMock.Object, resolver.Object);
 
         var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
         {
@@ -217,6 +240,167 @@ public class HumanTaskRuntimeTests
                 It.IsAny<HumanTaskCompletedEvent>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    public async Task HumanTaskRuntime_CreateAsync_Applies_AssigneeResolution_User()
+    {
+        var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1));
+        var resolverMock = new Mock<IHumanTaskAssigneeResolver>();
+        resolverMock
+            .Setup(r => r.ResolveAsync(
+                It.IsAny<HumanTaskDescriptor>(),
+                It.IsAny<HumanTaskCreationRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HumanTaskAssigneeResolution
+            {
+                AssigneeUserId = "resolved-user",
+                CandidateRoleIds = new[] { "resolved-role" }
+            });
+        var (runtime, store, _, _) = CreateRuntime(registry, resolverMock: resolverMock);
+
+        var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
+        {
+            HumanTaskId = "ht_01"
+        });
+
+        instance.AssigneeUserId.Should().Be("resolved-user");
+        instance.CandidateRoleIds.Should().BeEquivalentTo(new[] { "resolved-role" });
+        instance.Status.Should().Be(HumanTaskInstanceStatus.Assigned);
+
+        var stored = await store.GetByIdAsync(instance.Id);
+        stored!.AssigneeUserId.Should().Be("resolved-user");
+        stored!.CandidateRoleIds.Should().BeEquivalentTo(new[] { "resolved-role" });
+    }
+
+    [Fact]
+    public async Task HumanTaskRuntime_CreateAsync_Applies_AssigneeResolution_Role()
+    {
+        var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1));
+        var resolverMock = new Mock<IHumanTaskAssigneeResolver>();
+        resolverMock
+            .Setup(r => r.ResolveAsync(
+                It.IsAny<HumanTaskDescriptor>(),
+                It.IsAny<HumanTaskCreationRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HumanTaskAssigneeResolution
+            {
+                AssigneeRoleId = "resolved-role"
+            });
+        var (runtime, store, _, _) = CreateRuntime(registry, resolverMock: resolverMock);
+
+        var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
+        {
+            HumanTaskId = "ht_01"
+        });
+
+        instance.AssigneeRoleId.Should().Be("resolved-role");
+        instance.Status.Should().Be(HumanTaskInstanceStatus.Assigned);
+    }
+
+    [Fact]
+    public async Task HumanTaskRuntime_CreateAsync_WithCandidates_StatusCreated()
+    {
+        var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1));
+        var resolverMock = new Mock<IHumanTaskAssigneeResolver>();
+        resolverMock
+            .Setup(r => r.ResolveAsync(
+                It.IsAny<HumanTaskDescriptor>(),
+                It.IsAny<HumanTaskCreationRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HumanTaskAssigneeResolution
+            {
+                CandidateUserIds = new[] { "candidate-1", "candidate-2" }
+            });
+        var (runtime, store, _, _) = CreateRuntime(registry, resolverMock: resolverMock);
+
+        var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
+        {
+            HumanTaskId = "ht_01"
+        });
+
+        instance.CandidateUserIds.Should().BeEquivalentTo(new[] { "candidate-1", "candidate-2" });
+        instance.Status.Should().Be(HumanTaskInstanceStatus.Created);
+    }
+
+    [Fact]
+    public async Task HumanTaskRuntime_CreateAsync_Stores_OrganizationUnit_And_Position()
+    {
+        var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1));
+        var resolverMock = new Mock<IHumanTaskAssigneeResolver>();
+        resolverMock
+            .Setup(r => r.ResolveAsync(
+                It.IsAny<HumanTaskDescriptor>(),
+                It.IsAny<HumanTaskCreationRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HumanTaskAssigneeResolution
+            {
+                OrganizationUnitId = "org-dept-1",
+                PositionId = "pos-manager",
+                AssigneeResolutionReason = "context-based assignment"
+            });
+        var (runtime, store, _, _) = CreateRuntime(registry, resolverMock: resolverMock);
+
+        var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
+        {
+            HumanTaskId = "ht_01"
+        });
+
+        instance.OrganizationUnitId.Should().Be("org-dept-1");
+        instance.PositionId.Should().Be("pos-manager");
+        instance.AssigneeResolutionReason.Should().Be("context-based assignment");
+    }
+
+    [Fact]
+    public async Task HumanTaskRuntime_CreateAsync_ResolverException_Propagates_AndDoesNotSave()
+    {
+        var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1));
+        var resolverMock = new Mock<IHumanTaskAssigneeResolver>();
+        resolverMock
+            .Setup(r => r.ResolveAsync(
+                It.IsAny<HumanTaskDescriptor>(),
+                It.IsAny<HumanTaskCreationRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("resolver failure"));
+
+        var store = new InMemoryHumanTaskInstanceStore();
+        var eventBus = new Mock<ILocalEventBus>();
+        var runtime = new DefaultHumanTaskRuntime(
+            registry, store, eventBus.Object, resolverMock.Object);
+
+        await runtime.Invoking(r => r.CreateAsync(new HumanTaskCreationRequest
+        {
+            HumanTaskId = "ht_01",
+            WorkflowInstanceId = "wf-1"
+        })).Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("resolver failure");
+
+        var allPending = await store.GetPendingByWorkflowAsync("wf-1");
+        allPending.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task HumanTaskRuntime_CreateAsync_ExplicitAssignment_Works_WithoutOrganizationServices()
+    {
+        var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1));
+        var resolver = new DefaultHumanTaskAssigneeResolver();
+        var store = new InMemoryHumanTaskInstanceStore();
+        var eventBus = new Mock<ILocalEventBus>();
+        var runtime = new DefaultHumanTaskRuntime(
+            registry, store, eventBus.Object, resolver);
+
+        var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
+        {
+            HumanTaskId = "ht_01",
+            AssigneeUserId = "user-1",
+            RequestedOrganizationUnitId = "org-dept-1",
+            RequestedPositionId = "pos-manager"
+        });
+
+        instance.AssigneeUserId.Should().Be("user-1");
+        instance.OrganizationUnitId.Should().Be("org-dept-1");
+        instance.PositionId.Should().Be("pos-manager");
+        instance.Status.Should().Be(HumanTaskInstanceStatus.Assigned);
     }
 }
 
@@ -246,4 +430,20 @@ sealed class ConcurrencyThrowingHumanTaskInstanceStore : IHumanTaskInstanceStore
     public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByWorkflowAsync(
         string workflowInstanceId, CancellationToken ct = default)
         => _inner.GetPendingByWorkflowAsync(workflowInstanceId, ct);
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByCandidateUserAsync(
+        string userId, CancellationToken ct = default)
+        => _inner.GetPendingByCandidateUserAsync(userId, ct);
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByCandidateRoleAsync(
+        string roleId, CancellationToken ct = default)
+        => _inner.GetPendingByCandidateRoleAsync(roleId, ct);
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByOrganizationAsync(
+        string organizationUnitId, CancellationToken ct = default)
+        => _inner.GetPendingByOrganizationAsync(organizationUnitId, ct);
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByPositionAsync(
+        string positionId, CancellationToken ct = default)
+        => _inner.GetPendingByPositionAsync(positionId, ct);
 }
