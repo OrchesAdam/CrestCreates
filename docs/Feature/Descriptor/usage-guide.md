@@ -3,6 +3,7 @@
 > This document is for CrestCreates module developers who need to consume or extend descriptor relationship extraction and topology queries.
 > *Phase 6a (2026-06-12): Descriptor Relationship Coverage — 6 extractors, 1 provider, 434 tests*
 > *Phase 6b (2026-06-12): Descriptor Topology Read Model — builder, snapshot, diagnostics, consumer index, 146 Metadata.Tests*
+> *Phase 6c (2026-06-13): Impact Analysis Engine — analyzer, change set builder, severity model, 48 tests*
 
 ---
 
@@ -24,6 +25,8 @@ builder.Services.AddCapabilityRuntime();   // registers CapabilityRelationshipEx
 builder.Services.AddEventKernel();         // registers EventRelationshipExtractor
 builder.Services.AddHumanTaskRuntime();    // registers HumanTaskRelationshipExtractor
 builder.Services.AddWorkflowEngine();      // registers WorkflowRelationshipExtractor
+builder.Services.AddTopologyKernel();             // Phase 6b: topology builder
+builder.Services.AddDescriptorImpactAnalysis();   // Phase 6c: impact analyzer + change set builder
 ```
 
 ### 1.2 Query Relationships
@@ -348,3 +351,111 @@ var node = snapshot.FindNode(new DescriptorRef("schema", "User", 2));
 var anyVersion = snapshot.FindNode(new DescriptorRef("schema", "User", null));
 // → returns version 2 node (or whatever version exists)
 ```
+
+---
+
+## 8. Phase 6c: Impact Analysis
+
+### 8.1 Register the Impact Analysis Services
+
+```csharp
+using CrestCreates.Metadata;
+
+builder.Services.AddTopologyKernel();                // Phase 6b — required
+builder.Services.AddDescriptorImpactAnalysis();      // Phase 6c
+```
+
+### 8.2 Build a Change Set
+
+Compare two descriptor inventories to detect what changed:
+
+```csharp
+var changeSetBuilder = services.GetRequiredService<IDescriptorChangeSetBuilder>();
+
+var beforeDescriptors = GetDescriptorsFromRegistry();   // e.g., from package snapshot
+var afterDescriptors = GetCurrentDescriptors();          // e.g., after update
+
+var changeSet = changeSetBuilder.Build(beforeDescriptors, afterDescriptors);
+
+foreach (var change in changeSet.Changes)
+    Console.WriteLine($"{change.Ref.FullId}: {change.Kind}");
+// e.g., "schema.Order@1: Removed", "capability.ProcessOrder@2: ContractHashChanged"
+```
+
+### 8.3 Run Impact Analysis
+
+```csharp
+var topologyBuilder = services.GetRequiredService<IDescriptorTopologyBuilder>();
+var analyzer = services.GetRequiredService<IDescriptorImpactAnalyzer>();
+
+var snapshot = topologyBuilder.Build(currentDescriptors);
+var report = analyzer.Analyze(snapshot, changeSet);
+
+Console.WriteLine($"Max severity: {report.MaxSeverity}");
+
+foreach (var affected in report.AffectedDescriptors)
+{
+    Console.WriteLine($"[{affected.Severity}] {affected.Ref.FullId} ({affected.Name})");
+    Console.WriteLine($"  Reason: {affected.Reason}");
+    Console.WriteLine($"  Runtime areas: {string.Join(", ", affected.RuntimeAreas)}");
+
+    foreach (var path in affected.Paths)
+    {
+        Console.WriteLine($"  Path from {path.SourceChange.FullId}:");
+        foreach (var seg in path.Segments)
+            Console.WriteLine($"    {seg.From.FullId} --[{seg.Kind}/{seg.Role}]--> {seg.To.FullId} ({seg.Strength}, runtime={seg.IsRuntimeBinding})");
+    }
+}
+
+// Check diagnostics
+foreach (var diag in report.Diagnostics)
+    Console.WriteLine($"[{diag.Severity}] {diag.Code}: {diag.Message}");
+```
+
+### 8.4 Filter Impact with Options
+
+```csharp
+// Conservative: include everything (default)
+var fullReport = analyzer.Analyze(snapshot, changeSet);
+
+// Exclude Weak edges
+var strongOnly = analyzer.Analyze(snapshot, changeSet,
+    new DescriptorImpactAnalysisOptions { IncludeWeakRelationships = false });
+
+// Skip advisory edges (SupersededBy, unsupported SubWorkflow, etc.)
+var noAdvisory = analyzer.Analyze(snapshot, changeSet,
+    new DescriptorImpactAnalysisOptions { IncludeAdvisoryRelationships = false });
+
+// Depth-limited (first-hop consumers only)
+var shallowReport = analyzer.Analyze(snapshot, changeSet,
+    new DescriptorImpactAnalysisOptions { MaxDepth = 1 });
+```
+
+### 8.5 Manual Change Set Construction
+
+```csharp
+// Build a change set without using the builder (for targeted analysis)
+var changeSet = new DescriptorChangeSet
+{
+    Changes = new DescriptorChange[]
+    {
+        new() { Ref = new DescriptorRef("schema", "Order", 1), Kind = DescriptorChangeKind.Removed },
+        new() { Ref = new DescriptorRef("capability", "ProcessOrder", 2), Kind = DescriptorChangeKind.Updated }
+    }
+};
+
+var report = analyzer.Analyze(snapshot, changeSet);
+```
+
+### 8.6 Understanding Impact Severity
+
+| Severity | When |
+|---|---|
+| None | Changed descriptor has zero consumers |
+| Info | Added/Activated, or too deep to matter |
+| Low | Weak advisory path, StateChanged via metadata |
+| Medium | Updated/ContractHashChanged via weak path, Deprecated via advisory |
+| High | Removed via Strong path, Updated via Strong runtime path |
+| Critical | Removed via Strong runtime path (hard break) |
+
+Severity is structural only — descriptor-kind-specific breaking compatibility rules are Phase 6d.`

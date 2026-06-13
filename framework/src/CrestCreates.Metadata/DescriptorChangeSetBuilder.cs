@@ -1,0 +1,108 @@
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorImpact;
+
+namespace CrestCreates.Metadata;
+
+public sealed class DescriptorChangeSetBuilder : IDescriptorChangeSetBuilder
+{
+    public DescriptorChangeSet Build(
+        IReadOnlyList<IDescriptor> before,
+        IReadOnlyList<IDescriptor> after)
+    {
+        var beforeByRef = before.ToDictionary(
+            d => new DescriptorRef(d.Namespace, d.Id, (d as IVersionedDescriptor)?.Version));
+
+        var changes = new List<DescriptorChange>();
+
+        foreach (var d in after)
+        {
+            var refKey = new DescriptorRef(d.Namespace, d.Id, (d as IVersionedDescriptor)?.Version);
+
+            if (!beforeByRef.TryGetValue(refKey, out var beforeDesc))
+            {
+                changes.Add(new DescriptorChange
+                {
+                    Ref = refKey,
+                    Kind = DescriptorChangeKind.Added,
+                    AfterState = d.State,
+                    AfterContractHash = d.ContractHash
+                });
+                continue;
+            }
+
+            var beforeState = beforeDesc.State;
+            var afterState = d.State;
+
+            DescriptorChangeKind kind;
+            if (afterState == DescriptorState.Removed && beforeState != DescriptorState.Removed)
+                kind = DescriptorChangeKind.Removed;
+            else if (afterState == DescriptorState.Deprecated && beforeState != DescriptorState.Deprecated)
+                kind = DescriptorChangeKind.Deprecated;
+            else if (afterState == DescriptorState.Active && beforeState == DescriptorState.Draft)
+                kind = DescriptorChangeKind.Activated;
+            else if (beforeState != afterState)
+                kind = DescriptorChangeKind.StateChanged;
+            else if (d.ContractHash != beforeDesc.ContractHash)
+                kind = DescriptorChangeKind.ContractHashChanged;
+            else if (d.Name != beforeDesc.Name)
+                kind = DescriptorChangeKind.Updated;
+            else
+                continue;
+
+            changes.Add(new DescriptorChange
+            {
+                Ref = refKey,
+                Kind = kind,
+                BeforeState = beforeState,
+                AfterState = afterState,
+                BeforeContractHash = beforeDesc.ContractHash,
+                AfterContractHash = d.ContractHash
+            });
+        }
+
+        // Removed: in before but not in after
+        var afterRefs = after.Select(d =>
+            new DescriptorRef(d.Namespace, d.Id, (d as IVersionedDescriptor)?.Version))
+            .ToHashSet();
+
+        foreach (var kv in beforeByRef)
+        {
+            if (!afterRefs.Contains(kv.Key))
+            {
+                changes.Add(new DescriptorChange
+                {
+                    Ref = kv.Key,
+                    Kind = DescriptorChangeKind.Removed,
+                    BeforeState = kv.Value.State,
+                    BeforeContractHash = kv.Value.ContractHash
+                });
+            }
+        }
+
+        var deduped = DeduplicateByPriority(changes);
+        return new DescriptorChangeSet { Changes = deduped };
+    }
+
+    private static IReadOnlyList<DescriptorChange> DeduplicateByPriority(List<DescriptorChange> changes)
+    {
+        var result = new Dictionary<DescriptorRef, DescriptorChange>();
+        foreach (var c in changes)
+        {
+            if (!result.TryGetValue(c.Ref, out var existing) || Priority(c.Kind) < Priority(existing.Kind))
+                result[c.Ref] = c;
+        }
+        return result.Values.ToList().AsReadOnly();
+    }
+
+    private static int Priority(DescriptorChangeKind kind) => kind switch
+    {
+        DescriptorChangeKind.Removed => 1,
+        DescriptorChangeKind.Deprecated => 2,
+        DescriptorChangeKind.StateChanged => 3,
+        DescriptorChangeKind.ContractHashChanged => 4,
+        DescriptorChangeKind.Updated => 5,
+        DescriptorChangeKind.Added => 6,
+        DescriptorChangeKind.Activated => 7,
+        _ => int.MaxValue
+    };
+}

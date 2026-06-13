@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-06-12
+Last Updated: 2026-06-13
 
 ## Purpose
 
@@ -354,6 +354,20 @@ This thread achieved the following:
 - 146 Metadata.Tests pass (+51 from pre-6b). 0 regressions across Form (38), Capability (124), Event (41), HumanTask (51), Workflow (68).
 - **Design spec**: `docs/superpowers/specs/2026-06-12-phase-6b-descriptor-topology-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-12-phase-6b-descriptor-topology.md`
+
+### Impact Analysis Engine (Phase 6c, 2026-06-13)
+
+- `IDescriptorImpactAnalyzer` — consumes `DescriptorTopologySnapshot` + `DescriptorChangeSet`, BFS upstream traversal, per-terminal-segment severity with RuntimeBoost (Descriptor→Runtime upgrade, no double-counting), fan-out-safe unpinned resolution, advisory edge filtering, depth limiting.
+- `IDescriptorChangeSetBuilder` — diffs `before`/`after` `IReadOnlyList<IDescriptor>` inventories into `DescriptorChangeSet` with state-aware transition detection (Removed/Deprecated/Activated/StateChanged/ContractHashChanged/Updated) and priority dedup.
+- Core types (15 files under `DescriptorImpact/`): 3 enums (`DescriptorChangeKind`, `DescriptorImpactSeverity`, `DescriptorImpactRuntimeArea`), 10 records (`DescriptorChange`, `DescriptorChangeSet`, `DescriptorImpactPathSegment`, `DescriptorImpactPath`, `AffectedDescriptor`, `DescriptorImpactDiagnostic`, `DescriptorImpactAnalysisReport`, `DescriptorImpactAnalysisOptions`), 2 interfaces (`IDescriptorImpactAnalyzer`, `IDescriptorChangeSetBuilder`).
+- 3 diagnostic code categories: `IMPACT_TOPOLOGY_*` (MISSING_TARGET, STRONG_CYCLE, UNSUPPORTED_REFERENCE — re-mapped from topology snapshot), `IMPACT_*` (AMBIGUOUS_UNPINNED_TARGET, UNRESOLVED_CONSUMER, PATH_TRUNCATED, SKIPPED_WEAK_PATH).
+- Analyzer builds internal 3-index lookup (exact, identity, fan-out-aware impactIncoming) from `topology.Nodes`/`topology.Edges` — does NOT use `DescriptorNode.IncomingEdgeIndices` (Phase 6b's FirstOrDefault is not fan-out-safe).
+- Severity model: table base → transitive attenuation (depth≥2) → RuntimeBoost (Descriptor→Runtime only, no double-count). Advisory edge predicate (`IsAdvisory`): Weak References/DependsOn/SupersededBy/SubWorkflowStep, runtime edges never advisory.
+- `AddDescriptorImpactAnalysis()` DI registration (TryAddSingleton for both services). No scoped dependencies.
+- 45 new tests (11 ChangeSetBuilder + 20 Analyzer + 14 Severity). 191 Metadata.Tests pass. 0 regressions across 6 suites (513 total).
+- No changes to Phase 6a/6b types or legacy `DescriptorCatalog.AnalyzeImpact()`.
+- **Design spec**: `docs/superpowers/specs/2026-06-13-phase-6c-impact-analysis-engine-design.md`
+- **Implementation plan**: `docs/superpowers/plans/2026-06-13-phase-6c-impact-analysis-engine.md`
 
 ---
 

@@ -1,4 +1,5 @@
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -26,6 +27,14 @@ public static class MetadataServiceCollectionExtensions
     public static IServiceCollection AddTopologyKernel(this IServiceCollection services)
     {
         services.TryAddSingleton<IDescriptorTopologyBuilder, DescriptorTopologyBuilder>();
+        return services;
+    }
+
+    public static IServiceCollection AddDescriptorImpactAnalysis(
+        this IServiceCollection services)
+    {
+        services.TryAddSingleton<IDescriptorImpactAnalyzer, DescriptorImpactAnalyzer>();
+        services.TryAddSingleton<IDescriptorChangeSetBuilder, DescriptorChangeSetBuilder>();
         return services;
     }
 }

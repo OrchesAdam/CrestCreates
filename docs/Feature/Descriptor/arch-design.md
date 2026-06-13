@@ -1,6 +1,6 @@
 # Descriptor Architecture Summary
 
-> **Date:** 2026-06-12 | **Status:** Complete | **Phase 6a: Relationship Coverage + Phase 6b: Topology Read Model**
+> **Date:** 2026-06-13 | **Status:** Complete | **Phase 6a: Relationship Coverage + Phase 6b: Topology Read Model + Phase 6c: Impact Analysis Engine**
 
 ---
 
@@ -340,6 +340,166 @@ framework/test/CrestCreates.Metadata.Tests/
     DescriptorTopologyDiagnosticsTests.cs
     DescriptorDependencyGraphAdapterTests.cs
 ```
+
+---
+
+## 9. Phase 6c: Impact Analysis Engine
+
+### 9.1 Overview
+
+Phase 6c builds a structural impact analysis engine on top of Phase 6b's topology snapshot. It answers: "Given descriptor changes, which descriptors are affected, through which relationship paths, and what runtime areas may need attention?"
+
+```
+DescriptorTopologySnapshot (Phase 6b)
+        +
+DescriptorChangeSet (changed descriptors)
+        ↓
+IDescriptorImpactAnalyzer.Analyze(topology, changeSet, options)
+        ↓
+DescriptorImpactAnalysisReport
+  ├─ AffectedDescriptors (deduped, with impact paths)
+  ├─ Paths (all version branches preserved)
+  ├─ MaxSeverity
+  └─ Diagnostics (IMPACT_TOPOLOGY_* + IMPACT_*)
+```
+
+### 9.2 Core Types
+
+All types in `CrestCreates.Metadata.Abstractions.DescriptorImpact`:
+
+| Type | Description |
+|------|-------------|
+| `DescriptorChangeKind` | Enum: Added, Updated, Deprecated, Removed, Activated, StateChanged, ContractHashChanged |
+| `DescriptorImpactSeverity` | Enum: None, Info, Low, Medium, High, Critical |
+| `DescriptorImpactRuntimeArea` | Enum: Metadata, Schema, Form, Capability, Event, Workflow, HumanTask, RuntimeBinding |
+| `DescriptorChange` | Record: Ref + Kind + BeforeState/AfterState + BeforeContractHash/AfterContractHash |
+| `DescriptorChangeSet` | Record: list of `DescriptorChange` |
+| `DescriptorImpactPathSegment` | Record: From, To, Kind, Strength, IsRuntimeBinding, Role, SourcePath |
+| `DescriptorImpactPath` | Record: SourceChange, Affected, Segments |
+| `AffectedDescriptor` | Record: Ref, Kind, Name, Severity, RuntimeAreas, Paths, Reason, SuggestedAction |
+| `DescriptorImpactDiagnostic` | Record: Severity, Code, Message, Subject, RelatedRefs |
+| `DescriptorImpactAnalysisReport` | Record: ChangeSet, AffectedDescriptors, Paths, MaxSeverity, Diagnostics |
+| `DescriptorImpactAnalysisOptions` | Record: IncludeWeakRelationships, IncludeAdvisoryRelationships, MaxDepth |
+| `IDescriptorImpactAnalyzer` | Interface: `Analyze(topology, changeSet, options?)` → report |
+| `IDescriptorChangeSetBuilder` | Interface: `Build(before, after)` → change set |
+
+### 9.3 Analyzer Internals
+
+The analyzer builds three internal indices at `Analyze()` start from `topology.Nodes` + `topology.Edges`:
+
+1. **`_exactIndex`**: `DescriptorRef` → `DescriptorNode` (exact version match)
+2. **`_identityIndex`**: `DescriptorIdentity` → `List<DescriptorNode>` (all versions of same identity, deterministically sorted)
+3. **`_impactIncomingIndex`**: `DescriptorRef` → `List<DescriptorEdge>` — fan-out-aware incoming edge index
+
+The `_impactIncomingIndex` is critical: it does NOT use `DescriptorNode.IncomingEdgeIndices` (which uses `FirstOrDefault` for unpinned edges). Instead, it iterates all `topology.Edges` and fans out unpinned edges (`Version == null`) to ALL matching versioned target nodes. This ensures deterministic multi-version impact analysis.
+
+### 9.4 Severity Model
+
+Severity is **structural only** — descriptor-kind-specific compatibility rules belong to Phase 6d.
+
+| Change Kind | Strong Runtime | Strong Descriptor | Weak |
+|---|---|---|---|
+| Removed | Critical | High | Medium |
+| Deprecated | High | Medium | Low |
+| Updated / ContractHashChanged | High | Medium | Low |
+| StateChanged | Medium | Low | Info |
+| Activated / Added | Info | Info | Info |
+
+**Modifiers (applied in order):**
+1. **Transitive attenuation**: depth ≥ 2 → reduce one level
+2. **RuntimeBoost**: terminal segment `IsRuntimeBinding == true` AND base NOT already from Strong Runtime column → +1 level, cap High
+3. **RuntimeBinding area**: any segment in path with `IsRuntimeBinding == true` → add `RuntimeBinding` to `RuntimeAreas`
+
+**Advisory edges** (Weak References/DependsOn/SupersededBy/SubWorkflowStep, non-runtime) are skippable via `IncludeAdvisoryRelationships=false`.
+
+### 9.5 Traversal Algorithm
+
+BFS upstream (incoming edges = consumers/dependents). Visited key: `(originChangedRef, currentNodeRef, edgeIndex)` — prevents false merge across version branches and infinite loops in cycles.
+
+Unpinned `edge.From` (consumer) resolution:
+- Exact match → normal traversal
+- `Version == null`, one matching node → normal traversal
+- `Version == null`, multiple matching nodes → **fan-out**: separate branch per versioned consumer, emit `IMPACT_AMBIGUOUS_UNPINNED_TARGET`
+- Zero matching → emit `IMPACT_UNRESOLVED_CONSUMER`, path stops
+
+### 9.6 Diagnostics
+
+| Code | Severity | Source |
+|---|---|---|
+| `IMPACT_TOPOLOGY_MISSING_TARGET` | Error/Warning | Re-mapped from `MISSING_TARGET` if on path |
+| `IMPACT_TOPOLOGY_STRONG_CYCLE` | Error | Re-mapped from `STRONG_CYCLE` if on path |
+| `IMPACT_TOPOLOGY_UNSUPPORTED_REFERENCE` | Warning | Re-mapped from `UNSUPPORTED_REFERENCE` if on path |
+| `IMPACT_AMBIGUOUS_UNPINNED_TARGET` | Warning | Consumer resolves to 2+ versions |
+| `IMPACT_UNRESOLVED_CONSUMER` | Warning | Consumer resolves to 0 nodes |
+| `IMPACT_PATH_TRUNCATED` | Warning | BFS stopped at MaxDepth |
+| `IMPACT_SKIPPED_WEAK_PATH` | Info | Advisory edge excluded by option |
+
+### 9.7 ChangeSetBuilder
+
+`IDescriptorChangeSetBuilder.Build(before, after)` diffs two `IReadOnlyList<IDescriptor>` inventories:
+
+- Not in before → Added
+- Not in after → Removed
+- State transition → Removed (to Removed), Deprecated (to Deprecated), Activated (Draft→Active), StateChanged (other)
+- Same State, different ContractHash → ContractHashChanged
+- Same State, same ContractHash, different Name → Updated
+
+Changes are deduplicated by priority: Removed > Deprecated > StateChanged > ContractHashChanged > Updated > Added > Activated.
+
+### 9.8 DI Registration
+
+```csharp
+services.AddDescriptorImpactAnalysis()
+  → TryAddSingleton<IDescriptorImpactAnalyzer, DescriptorImpactAnalyzer>()
+  → TryAddSingleton<IDescriptorChangeSetBuilder, DescriptorChangeSetBuilder>()
+```
+
+Both singletons (stateless pure functions). No scoped dependencies.
+
+### 9.9 Boundary Rules
+
+- Does NOT use legacy `DescriptorCatalog.AnalyzeImpact()` or `IDescriptorDependencyGraph`
+- Does NOT use `DescriptorNode.IncomingEdgeIndices` (not fan-out-safe)
+- Does NOT re-parse descriptor internals or introduce new relationship extraction
+- Severity is structural only — Phase 6d handles descriptor-kind-specific compatibility
+- Preserves: `DependencyEdge`, `DescriptorDependencyKind`, `ImpactReport` (still used by adapter)
+
+### 9.10 Project Structure (Phase 6c additions)
+
+```
+framework/src/CrestCreates.Metadata.Abstractions/
+  DescriptorImpact/
+    DescriptorChangeKind.cs
+    DescriptorImpactSeverity.cs
+    DescriptorImpactRuntimeArea.cs
+    DescriptorChange.cs
+    DescriptorChangeSet.cs
+    DescriptorImpactPathSegment.cs
+    DescriptorImpactPath.cs
+    AffectedDescriptor.cs
+    DescriptorImpactDiagnostic.cs
+    DescriptorImpactAnalysisReport.cs
+    DescriptorImpactAnalysisOptions.cs
+    IDescriptorImpactAnalyzer.cs
+    IDescriptorChangeSetBuilder.cs
+
+framework/src/CrestCreates.Metadata/
+  DescriptorImpactAnalyzer.cs
+  DescriptorChangeSetBuilder.cs
+
+framework/test/CrestCreates.Metadata.Tests/
+  DescriptorImpact/
+    DescriptorChangeSetBuilderTests.cs
+    DescriptorImpactAnalyzerTests.cs
+    DescriptorImpactSeverityTests.cs
+```
+
+### 9.11 Non-Goals (Phase 6c)
+
+- Descriptor-kind-specific breaking-change rules → Phase 6d
+- Lifecycle governance → Phase 6e
+- Package/manifest persistence → Phase 6f
+- Runtime instance lookup, LLM, UI/API
 
 ---
 
