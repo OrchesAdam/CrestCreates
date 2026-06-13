@@ -512,3 +512,47 @@ framework/test/CrestCreates.Metadata.Tests/
 - Exposure descriptor coverage → Phase 8
 - Runtime execution changes of any kind
 - Dynamic / reflection-based extraction
+
+---
+
+## 10. Phase 6d — Compatibility / Breaking Change Analyzer
+
+### 10.1 Position
+
+Phase 6d sits on top of Phase 6c (Impact Analysis). It consumes before/after descriptor inventories, `DescriptorChangeSet`, and `DescriptorImpactAnalysisReport` to produce a rule-based `DescriptorCompatibilityReport`. It does not rebuild topology or redo impact traversal.
+
+### 10.2 Core Types
+
+| Type | Purpose |
+|---:|---|
+| `DescriptorCompatibilityLevel` | Compatible(1)/Risky(2)/SecuritySensitive(3)/Breaking(4)/Unsupported(0). Unsupported=0 ensures MaxLevel excludes it. |
+| `DescriptorCompatibilityFinding` | Per-change finding with Level, RuleId, Message, AffectedRefs, Path, BeforeValue, AfterValue |
+| `DescriptorCompatibilityReport` | Aggregate with Findings, MaxLevel, Diagnostics, plus HasBreakingChanges/HasSecuritySensitiveChanges/RequiresReview |
+| `IDescriptorCompatibilityAnalyzer` | `.Analyze(before, after, changeSet, impactReport, options?)` — stateless singleton |
+| `IDescriptorCompatibilityRule` | Public interface for future module-owned rules. Methods: CanAnalyze, Analyze |
+
+### 10.3 Rule Architecture
+
+- **Generic rules** cover all 7 `DescriptorChangeKind` values without inspecting descriptor internals. Uses only Phase 6c affected consumers for severity decisions (e.g., Removed → Breaking if affected consumers, Risky otherwise).
+- **Descriptor-specific rules** fire on `ContractHashChanged`/`Updated` and compare before/after descriptor internals (fields, schemas, permissions, steps, outcomes).
+- Rules dispatch: specific rules first, generic rule as catch-all. Dedup by (Subject, RuleId, Path, Level).
+
+### 10.4 Descriptor-Specific Coverage
+
+| Descriptor Kind | Rule ID | Coverage |
+|---|---:|---|
+| Schema | SchemaCompatibilityRule | Field add/remove/type/reference, IsRequired, IsNullable, MaxLength/MinLength, MaxValue/MinValue, Pattern, Collection, References, DeclaredBreaking |
+| Form | FormCompatibilityRule | Schema ref, field add/remove, IsRequiredOverride, IsReadOnly, ControlType, OptionsSource, presentation-only |
+| Capability | CapabilityCompatibilityRule | Input/Output schema, permissions (SecuritySensitive), risk level (SecuritySensitive), capability kind, semantic tags |
+| Event | EventCompatibilityRule | Payload schema (both EventDescriptor and GeneratedEventDescriptor), importance, scope, reliability, operational flags, DeclaredBreaking |
+| HumanTask | HumanTaskCompatibilityRule | Interaction ref, schema refs, assignee strategy, permissions (SecuritySensitive), outcomes (add/remove/capability change), timeout |
+| Workflow | WorkflowCompatibilityRule | Variable schema, steps (add/remove/target/transitions), OnError, mappings, variable scope |
+
+### 10.5 Key Boundaries
+
+- **6c severity is never projected into 6d compatibility.** High impact ≠ Breaking; Low impact ≠ Compatible.
+- **Unsupported means insufficient rule knowledge**, not "more severe than Breaking." Phase 6e may map it to mandatory review.
+- **No data-permission comparisons** — no descriptor owns data-permission scope rules today.
+- **No topology access** — compatibility rules consume Phase 6c's impact report, not the topology snapshot.
+- **DI**: `AddDescriptorCompatibilityAnalysis()` (TryAddSingleton).
+- **Impact diagnostics** mapped to compatibility diagnostics: topology errors → `COMPAT_BLOCKED_BY_TOPOLOGY_ERROR`, path truncation → `COMPAT_ANALYSIS_INCOMPLETE`, unpinned ambiguity → `COMPAT_VERSION_AMBIGUITY`.

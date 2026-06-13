@@ -1,5 +1,7 @@
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorImpact;
+using CrestCreates.Metadata.DescriptorCompatibility;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -35,6 +37,13 @@ public static class MetadataServiceCollectionExtensions
     {
         services.TryAddSingleton<IDescriptorImpactAnalyzer, DescriptorImpactAnalyzer>();
         services.TryAddSingleton<IDescriptorChangeSetBuilder, DescriptorChangeSetBuilder>();
+        return services;
+    }
+
+    public static IServiceCollection AddDescriptorCompatibilityAnalysis(
+        this IServiceCollection services)
+    {
+        services.TryAddSingleton<IDescriptorCompatibilityAnalyzer, DescriptorCompatibilityAnalyzer>();
         return services;
     }
 }

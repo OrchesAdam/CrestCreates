@@ -458,4 +458,79 @@ var report = analyzer.Analyze(snapshot, changeSet);
 | High | Removed via Strong path, Updated via Strong runtime path |
 | Critical | Removed via Strong runtime path (hard break) |
 
-Severity is structural only — descriptor-kind-specific breaking compatibility rules are Phase 6d.`
+Severity is structural only — descriptor-kind-specific breaking compatibility rules are Phase 6d.
+
+---
+
+## 9. Phase 6d — Compatibility Analysis
+
+Phase 6d adds `IDescriptorCompatibilityAnalyzer` to classify descriptor changes as Compatible, Risky, SecuritySensitive, Breaking, or Unsupported.
+
+### 9.1 Quick Start
+
+```csharp
+var analyzer = services.GetRequiredService<IDescriptorCompatibilityAnalyzer>();
+
+var beforeInventory = GetCurrentDescriptors();  // IReadOnlyList<IDescriptor>
+var afterInventory = GetUpdatedDescriptors();   // IReadOnlyList<IDescriptor>
+
+var changeSet = changeSetBuilder.Build(beforeInventory, afterInventory);
+var topology = topologyBuilder.Build(beforeInventory);
+var impactReport = impactAnalyzer.Analyze(topology, changeSet);
+
+var report = analyzer.Analyze(beforeInventory, afterInventory, changeSet, impactReport);
+
+Console.WriteLine($"Max Level: {report.MaxLevel}");
+Console.WriteLine($"Requires Review: {report.RequiresReview}");
+Console.WriteLine($"Has Breaking: {report.HasBreakingChanges}");
+Console.WriteLine($"Has Security-Sensitive: {report.HasSecuritySensitiveChanges}");
+
+foreach (var f in report.Findings)
+{
+    Console.WriteLine($"[{f.Level}] {f.RuleId}: {f.Message}");
+    if (f.Path != null)
+        Console.WriteLine($"  Path: {f.Path}");
+    if (f.BeforeValue != null || f.AfterValue != null)
+        Console.WriteLine($"  {f.BeforeValue} → {f.AfterValue}");
+}
+```
+
+### 9.2 Interpreting the Report
+
+| Report Property | Semantics |
+|---|---|
+| `MaxLevel` | Highest classified level (Compatible..Breaking). Only `Unsupported` if ALL findings are Unsupported. |
+| `RequiresReview` | True if MaxLevel is Risky, SecuritySensitive, Breaking, or Unsupported. |
+| `HasBreakingChanges` | True if any finding is Breaking. |
+| `HasSecuritySensitiveChanges` | True if any finding is SecuritySensitive. |
+| `HasUnsupportedFindings` | True if any finding is Unsupported. |
+
+### 9.3 Unsupported ≠ Breaking
+
+`Unsupported` means the analyzer lacks rule knowledge to classify the change — not that it's a known breaking change. Phase 6e can map `Unsupported` to mandatory human review. `MaxLevel` reports `Unsupported` only when every finding is Unsupported.
+
+### 9.4 Impact Severity Is Not Compatibility
+
+Phase 6c severity and Phase 6d compatibility are independent:
+- High impact ≠ Breaking — an optional field addition may have broad impact but is perfectly compatible.
+- Low impact ≠ Compatible — removing a required field may affect few consumers but is still breaking.
+
+### 9.5 Options
+
+```csharp
+var options = new DescriptorCompatibilityAnalysisOptions
+{
+    TreatRemovedWithoutConsumersAsRisky = true,    // default: true
+    TreatUnknownDescriptorKindAsUnsupported = true,  // default: true
+    TreatImpactWarningsAsUnsupported = false,        // default: false
+    IncludeCompatibleFindings = true                 // default: true
+};
+
+var report = analyzer.Analyze(before, after, changeSet, impactReport, options);
+```
+
+### 9.6 DI Registration
+
+```csharp
+services.AddDescriptorCompatibilityAnalysis();
+```

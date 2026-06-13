@@ -369,6 +369,23 @@ This thread achieved the following:
 - **Design spec**: `docs/superpowers/specs/2026-06-13-phase-6c-impact-analysis-engine-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-13-phase-6c-impact-analysis-engine.md`
 
+### Compatibility / Breaking Change Analyzer (Phase 6d, 2026-06-13)
+
+- `IDescriptorCompatibilityAnalyzer` — consumes `(before inventory, after inventory, DescriptorChangeSet, DescriptorImpactAnalysisReport)` and produces a rule-based `DescriptorCompatibilityReport` with deterministic findings, max level, and diagnostics. Stateless singleton.
+- `IDescriptorCompatibilityRule` — public interface (`RuleId`, `CanAnalyze`, `Analyze`) for future module-owned rules. 7 concrete rules: Generic + Schema + Form + Capability + Event + HumanTask + Workflow.
+- Core types (9 files under `DescriptorCompatibility/`): 2 enums (`DescriptorCompatibilityLevel` with Unsupported=0 for MaxLevel exclusion, `DescriptorCompatibilityFindingKind`), 4 records (`DescriptorCompatibilityDiagnostic`, `DescriptorCompatibilityFinding`, `DescriptorCompatibilityReport`, `DescriptorCompatibilityAnalysisOptions`), 2 interfaces (`IDescriptorCompatibilityAnalyzer`, `IDescriptorCompatibilityRule`), 1 orchestrator (`DescriptorCompatibilityAnalyzer`).
+- Generic rules cover all 7 `DescriptorChangeKind` values without descriptor internals. Uses Phase 6c affected consumers for severity.
+- Descriptor-specific rules fire on `ContractHashChanged`/`Updated` and compare before/after internals: Schema (14 rules), Form (9 rules), Capability (7 rules with SecuritySensitive for permissions/risk), Event (7 rules for both EventDescriptor and GeneratedEventDescriptor), HumanTask (8 rules with SecuritySensitive for permissions), Workflow (6 rules).
+- `DescriptorCompatibilityLevel.Unsupported = 0` — `MaxLevel` uses natural `Max()` over classified findings; Unsupported only when ALL findings are Unsupported. Means "insufficient rule knowledge", not "more severe than Breaking."
+- **6c severity is never projected into 6d compatibility.** High impact ≠ Breaking; Low impact ≠ Compatible.
+- Impact diagnostics mapped to compatibility diagnostics: `IMPACT_TOPOLOGY_*` → `COMPAT_*`, `IMPACT_PATH_TRUNCATED` → `COMPAT_ANALYSIS_INCOMPLETE`, `IMPACT_AMBIGUOUS_UNPINNED_TARGET` → `COMPAT_VERSION_AMBIGUITY`.
+- No topology access — compatibility rules consume Phase 6c report only. No lifecycle governance, no migration generation.
+- Data-permission scope rules reserved but NOT implemented — no descriptor owns data-permission scope today.
+- `AddDescriptorCompatibilityAnalysis()` DI registration (TryAddSingleton).
+- 50 new tests (13 generic + 8 schema + 5 form + 5 capability + 4 event + 5 humantask + 5 workflow + 5 diagnostics). 244 Metadata.Tests pass (194 pre-existing + 50 new). 0 regressions.
+- **Design spec**: `docs/superpowers/specs/2026-06-13-phase-6d-compatibility-breaking-change-analyzer-design.md`
+- **Implementation plan**: `docs/superpowers/plans/2026-06-13-phase-6d-compatibility-breaking-change-analyzer.md`
+
 ---
 
 ## Recommended Next Thread Entry Prompt
