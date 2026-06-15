@@ -48,7 +48,7 @@ public sealed class CrudServiceMainlineSourceGeneratorTests
         Assert.True(result.ContainsFile("UpdateProductDto.g.cs"));
         Assert.True(result.ContainsFile("ProductListRequestDto.g.cs"));
         Assert.True(result.ContainsFile("IProductAppService.g.cs"));
-        Assert.True(result.ContainsFile("ProductAppService.g.cs"));
+        Assert.True(result.ContainsFile("ProductAppService.g.cs"), DescribeGeneratedOutput(result));
         Assert.True(result.ContainsFile("ProductCrudPermissions.g.cs"));
         Assert.True(result.ContainsFile("ProductObjectMappings.g.cs"));
         // Dynamic API registration is conditional on IDynamicApiGeneratedProvider presence
@@ -574,5 +574,13 @@ namespace TestNamespace.Mappings
             EntitySource,
             new[] { EntitySupport, MappingSupport },
             FrameworkReferences);
+    }
+
+    private static string DescribeGeneratedOutput(SourceGeneratorResult result)
+    {
+        return "Generated files:\n" +
+            string.Join("\n", result.GeneratedSources.Select(s => s.FileName)) +
+            "\nDiagnostics:\n" +
+            string.Join("\n", result.Diagnostics.Select(d => d.ToString()));
     }
 }

@@ -214,14 +214,6 @@ namespace CrestCreates.Domain.Shared.Attributes
             var compilation = CreateCompilation(sources, additionalSources, additionalReferences);
             var allDiagnostics = new List<Diagnostic>();
             var generatedSources = new List<GeneratedSource>();
-            var originalSourceTexts = new HashSet<string>(sources, StringComparer.Ordinal);
-            if (additionalSources != null)
-            {
-                foreach (var source in additionalSources)
-                {
-                    originalSourceTexts.Add(source);
-                }
-            }
 
             foreach (var generator in generators)
             {
@@ -236,14 +228,10 @@ namespace CrestCreates.Domain.Shared.Attributes
                 allDiagnostics.AddRange(diagnostics);
                 allDiagnostics.AddRange(runResult.Diagnostics);
 
-                var generatedTrees = runResult.GeneratedTrees;
-                if (generatedTrees.IsEmpty)
-                {
-                    generatedTrees = outputCompilation.SyntaxTrees
-                        .Where(tree => !originalSourceTexts.Any(s => tree.ToString().Contains(s.Substring(0, Math.Min(100, s.Length)))))
-                        .Where(tree => !IsSystemFile(tree.FilePath))
-                        .ToImmutableArray();
-                }
+                var generatedTrees = outputCompilation.SyntaxTrees
+                    .Where(tree => !string.IsNullOrWhiteSpace(tree.FilePath))
+                    .Where(tree => !IsSystemFile(tree.FilePath))
+                    .ToImmutableArray();
 
                 generatedSources.AddRange(generatedTrees.Select(tree => new GeneratedSource(
                     tree.FilePath,
