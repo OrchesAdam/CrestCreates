@@ -41,9 +41,18 @@ dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r win
 - SDK: .NET 10.0.100，`rollForward: latestMinor`（见 `global.json`）
 - 解决方案: `CrestCreates.slnx`（XML 格式的新方案，不是 `.sln`）
 - 中央包管理: `Directory.Packages.props`，所有 NuGet 版本集中管理
-- CodeGenerator 在 `framework/tools/`（非 `framework/src/`），target 为 `netstandard2.0`
+- CodeGenerator 在 `framework/tools/`（非 `framework/src/`），target 为 `netstandard2.0`；`framework/src/` 下有一个同名空壳项目（Exe stub），忽略即可
+- BuildTasks 在 `build/CrestCreates.BuildTasks/`，target 为 `net10.0`（注意不是 netstandard2.0）
 - AoT 配置在 `Directory.Build.Aot.props`，默认 `trim` 模式；显式 AoT 需 `-p:CrestCreatesPublishMode=aot`
 - 测试项目在 `Directory.Build.targets` 中强制关闭 Trim/AoT（Moq/DynamicProxy 不兼容）
+- Source Generator 可通过 `-p:CrestCreatesCodeGeneration=false` 全局禁用（见 `Directory.Build.Aot.props`）
+- Source Generator 输出到 `obj/{config}/{tfm}/source-generators/`（见 `Directory.Build.targets` 的 `CompilerGeneratedFilesOutputPath`）
+
+**.slnx 与磁盘不一致的项目**：以下项目存在于磁盘但不在 `CrestCreates.slnx` 中，`dotnet build`（solution 级）不会构建它们：
+- `CrestCreates.ModuleDiagnostics` — 通过 `Directory.Build.Aot.props` 全局注入，无需 slnx 引用
+- `CrestCreates.OrmProviders.MongoDB` / `CrestCreates.PluginSystem` — 存在于 `framework/src/` 但未加入 slnx
+- `CrestCreates.Blazor` — 空目录（无 .csproj），忽略
+- 部分测试项目（`BuildTasks.Tests`、`Localization.Tests`、`ModuleDiagnostics.Tests`、`MongoDB.Tests`、`TestBase.Tests`）也不在 slnx 中
 
 ---
 
@@ -86,21 +95,22 @@ dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r win
 ```
 CrestCreates/
 ├── framework/
-│   ├── src/              # 框架源码（77 个项目，扁平化布局，与 .slnx 虚拟文件夹映射）
-│   ├── test/             # 测试项目（38 个）
+│   ├── src/              # 框架源码（扁平化布局，与 .slnx 虚拟文件夹映射）
+│   ├── test/             # 测试项目
 │   └── tools/            # CodeGenerator（Roslyn Source Generator，target netstandard2.0）
-├── build/                # BuildTasks（MSBuild 跨项目代码生成）
+├── build/                # BuildTasks（MSBuild 跨项目代码生成，target net10.0）
 ├── samples/
-│   ├── LibraryManagement/  # DDD 示例应用（图书馆管理）
-│   └── SaaSHelpdesk/     # DDD 示例应用（SaaS 工单系统）
+│   ├── LibraryManagement/  # DDD 示例应用（6 项目：Domain.Shared/Domain/App.Contracts/App/EFCore/Web）
+│   └── SaaSHelpdesk/     # DDD 示例应用（7 项目：同上 + Tests）
 ├── docs/
 │   ├── design/           # 设计文档
 │   ├── Feature/          # 功能文档
 │   ├── review/           # 评审文档
 │   └── superpowers/      # 设计规格（specs/）和工作计划（plans/）
+├── 99_RecycleBin/        # 软删除回收站（文件删除规则见下）
 ├── CrestCreates.slnx     # 解决方案（.slnx XML 格式，非 .sln）
 ├── Directory.Build.props # 全局构建配置（net10.0, Nullable, 中央包管理）
-├── Directory.Build.Aot.props # Trim / NativeAOT 发布模式配置
+├── Directory.Build.Aot.props # Trim / NativeAOT 发布模式配置 + SG 全局注入 + ModuleDiagnostics 全局注入
 ├── Directory.Build.targets   # 测试项目 Trim/AoT 禁用 + SG 输出路径
 ├── Directory.Packages.props  # 中央包版本管理
 ├── global.json           # SDK 版本锁定
@@ -108,10 +118,12 @@ CrestCreates/
 ├── memory.md             # 平台闭环状态记录（关键决策和未完成工作）
 ├── AGENTS.md             # 本文件
 ├── CLAUDE.md             # Claude Code 用指令文件
-└── .github/copilot-instructions.md  # GitHub Copilot 用指令文件
+└── .github/copilot-instructions.md  # GitHub Copilot 用指令文件（部分过时，见下方警告）
 ```
 
 **注意**：`.github/copilot-instructions.md` 中的部分信息已过时（如使用 `OrmProviders.*` 命名、`ModuleA/ModuleB` 示例模块不存在等），不要以此为准。
+
+**命名陷阱**：`CrestCreates.Scheduling/` 目录下的 csproj 实际名为 `CrestCreates.Scheduling.Abstractions.csproj`（目录名 ≠ 项目名），在 slnx 中引用的是 `framework/src/CrestCreates.Scheduling/CrestCreates.Scheduling.Abstractions.csproj`。
 
 ### .slnx 虚拟文件夹组织
 
@@ -159,12 +171,18 @@ CrestCreates/
 
 | 管线 | 技术 | 作用域 | 输出 |
 |------|------|--------|------|
-| Source Generator | Roslyn Analyzer | 逐项目编译期 | DynamicApi 端点、DTO、Repository、Mapping、Permissions、Validator、QueryBuilder、CRUD Service、Entity、Module、Service 注册、BackgroundJobs、Controller、EnumDisplay、HealthCheck、Kafka、RabbitMQ、SchemaCapability、TenantDbContextFactory、TenantFilter、CompensationExecutor |
+| Source Generator | Roslyn Analyzer | 逐项目编译期 | DynamicApi 端点、DTO、Repository、ORM Mapping、ObjectMapping、Permissions、Validator、CRUD Service、Module、Service 注册、BackgroundJobs、EnumDisplay、HealthCheck、Kafka、RabbitMQ、SchemaCapability（DescriptorRegistry + HandlerInvoker + RefValidation 诊断）、TenantDbContextFactory、TenantFilter、CompensationExecutor |
 | BuildTasks | MSBuild Task | 跨项目构建期 | ModuleManifest.json、ModuleAutoInitializer.g.cs、EntityPermissionsManifest.json |
 
 Source Generator 全局注入在 `Directory.Build.Aot.props`，通过 `OutputItemType="Analyzer"` 引用。
 
-BuildTasks 有 4 个 Task：`ScanModulesFromSource` → `CollectModuleManifests` → `GenerateAggregatedModuleCode` → `ScanEntityPermissions`。使用者需 import `build/CrestCreates.BuildTasks/CrestCreates.Modules.props`。
+BuildTasks 有 4 个 Task：
+- 编译前链：`ScanModulesFromSource` → `CollectModuleManifests` → `GenerateAggregatedModuleCode`（在 `CoreCompile` 前顺序执行）
+- 编译后：`ScanEntityPermissions`（`AfterTargets="Build"`，不在编译前链中）
+
+使用者需 import `build/CrestCreates.BuildTasks/CrestCreates.Modules.props`。
+
+**注意**：Controller 生成器（`ControllerSourceGenerator`、`CrudControllerSourceGenerator`）已标记 `[Obsolete]`，主链使用 `DynamicApiAotSourceGenerator` 生成的 Minimal API 端点。不存在独立的 QueryBuilder Source Generator。
 
 ### 4. 关键属性
 
@@ -250,8 +268,14 @@ Domain.Shared ← Domain ← Application.Contracts ← Application
 
 - 框架：xUnit 2.9.3 + FluentAssertions + Moq + AutoFixture
 - 集成测试：`WebApplicationFactory<Program>` + Testcontainers PostgreSQL，每测试独立 schema（`itest_{guid}`）
-- 测试基类继承链：`TestBase` → `DomainTestBase` → `ApplicationTestBase` → `IntegrationTestBase` → `ApiTestBase<TStartup>`
-- 测试基类在 `framework/test/CrestCreates.TestBase/`
+- 测试基类在 `framework/test/CrestCreates.TestBase/`，层次结构为扁平型（非线性链式）：
+  ```
+  TestBase                      ← 根基类（IFixture, IServiceProvider, mock 注册）
+  ├── DomainTestBase            ← 直接继承 TestBase
+  ├── ApplicationTestBase       ← 直接继承 TestBase
+  ├── IntegrationTestBase       ← 直接继承 TestBase
+  │   └── ApiTestBase<TStartup> ← 继承 IntegrationTestBase
+  ```
 
 ### 测试原则
 
@@ -286,4 +310,4 @@ Domain.Shared ← Domain ← Application.Contracts ← Application
 
 ---
 
-**最后更新**: 2026-06-11
+**最后更新**: 2026-06-15
