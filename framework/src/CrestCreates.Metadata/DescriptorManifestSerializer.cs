@@ -5,19 +5,15 @@ namespace CrestCreates.Metadata;
 
 public static class DescriptorManifestSerializer
 {
-    private static readonly JsonSerializerOptions Options = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
     public static string Serialize(DescriptorManifest manifest)
     {
-        return JsonSerializer.Serialize(manifest, Options);
+        return JsonSerializer.Serialize(manifest,
+            CrestCreatesMetadataJsonContext.Default.DescriptorManifest);
     }
 
     public static DescriptorManifest? Deserialize(string json)
     {
-        return JsonSerializer.Deserialize<DescriptorManifest>(json, Options);
+        return JsonSerializer.Deserialize(json,
+            CrestCreatesMetadataJsonContext.Default.DescriptorManifest);
     }
 }

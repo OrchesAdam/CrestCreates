@@ -2,19 +2,28 @@ namespace CrestCreates.Metadata.Abstractions;
 
 public sealed class DescriptorManifest
 {
+    public string FormatVersion { get; init; } = "1.0";
     public string PackageId { get; init; } = string.Empty;
     public string PackageVersion { get; init; } = string.Empty;
-    public IReadOnlyList<DescriptorManifestEntry> Schemas { get; init; } = Array.Empty<DescriptorManifestEntry>();
-    public IReadOnlyList<DescriptorManifestEntry> Capabilities { get; init; } = Array.Empty<DescriptorManifestEntry>();
-    public IReadOnlyList<DescriptorManifestEntry> Events { get; init; } = Array.Empty<DescriptorManifestEntry>();
-    public IReadOnlyList<DescriptorManifestEntry> Workflows { get; init; } = Array.Empty<DescriptorManifestEntry>();
-    public IReadOnlyList<DescriptorManifestEntry> Forms { get; init; } = Array.Empty<DescriptorManifestEntry>();
-    public IReadOnlyList<DescriptorManifestEntry> HumanTasks { get; init; } = Array.Empty<DescriptorManifestEntry>();
+    public string? Name { get; init; }
+    public DateTimeOffset CreatedAt { get; init; }
+    public string? CreatedBy { get; init; }
+    public string? Source { get; init; }
+    public int DescriptorCount { get; init; }
+    public IReadOnlyList<DescriptorManifestEntry> DescriptorEntries { get; init; }
+        = Array.Empty<DescriptorManifestEntry>();
+    public string ContentHash { get; init; } = string.Empty;
+    public string? EvidenceHash { get; init; }
+    public string? EnvelopeHash { get; init; }
 }
 
 public sealed class DescriptorManifestEntry
 {
-    public string Id { get; init; } = string.Empty;
+    public DescriptorRef Ref { get; init; }
+    public DescriptorKind Kind { get; init; }
     public string Name { get; init; } = string.Empty;
-    public int Version { get; init; }
+    public DescriptorState State { get; init; }
+    public string ContractHash { get; init; } = string.Empty;
+    public string DefinitionHash { get; init; } = string.Empty;
+    public string? SupersededById { get; init; }
 }

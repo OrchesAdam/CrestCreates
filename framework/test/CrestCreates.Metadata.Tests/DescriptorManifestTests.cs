@@ -13,13 +13,22 @@ public class DescriptorManifestTests
         {
             PackageId = "CrestCreates.CRM",
             PackageVersion = "1.0.0",
-            Schemas = new[]
+            DescriptorEntries = new[]
             {
-                new DescriptorManifestEntry { Id = "schema_01", Name = "CustomerInput", Version = 1 }
-            },
-            Capabilities = new[]
-            {
-                new DescriptorManifestEntry { Id = "cap_01", Name = "crm.customer.create", Version = 1 }
+                new DescriptorManifestEntry
+                {
+                    Ref = new DescriptorRef("schema", "schema_01", 1),
+                    Kind = DescriptorKind.Schema,
+                    Name = "CustomerInput",
+                    State = DescriptorState.Active
+                },
+                new DescriptorManifestEntry
+                {
+                    Ref = new DescriptorRef("capability", "cap_01", 1),
+                    Kind = DescriptorKind.Capability,
+                    Name = "crm.customer.create",
+                    State = DescriptorState.Active
+                }
             }
         };
 
@@ -28,7 +37,12 @@ public class DescriptorManifestTests
 
         deserialized.Should().NotBeNull();
         deserialized!.PackageId.Should().Be("CrestCreates.CRM");
-        deserialized.Schemas.Should().HaveCount(1);
-        deserialized.Capabilities.Should().HaveCount(1);
+        deserialized.DescriptorEntries.Should().HaveCount(2);
+        deserialized.DescriptorEntries
+            .Should().ContainSingle(e => e.Name == "CustomerInput")
+            .Which.Kind.Should().Be(DescriptorKind.Schema);
+        deserialized.DescriptorEntries
+            .Should().ContainSingle(e => e.Name == "crm.customer.create")
+            .Which.Kind.Should().Be(DescriptorKind.Capability);
     }
 }

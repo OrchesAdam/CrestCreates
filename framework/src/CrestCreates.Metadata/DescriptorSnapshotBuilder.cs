@@ -2,6 +2,8 @@ using CrestCreates.Metadata.Abstractions;
 
 namespace CrestCreates.Metadata;
 
+[Obsolete("Use IDescriptorPackageBuilder.Build() instead. This static method reads from " +
+          "IGlobalDescriptorRegistry and does not produce deterministic snapshots.")]
 public static class DescriptorSnapshotBuilder
 {
     public static DescriptorSnapshot TakeSnapshot(
@@ -12,10 +14,13 @@ public static class DescriptorSnapshotBuilder
         var allDescriptors = registry.GetAll();
         var entries = allDescriptors.Select(d => new SnapshotEntry
         {
-            DescriptorId = d.Id,
+            Ref = new DescriptorRef(d.Namespace, d.Id, (d as IVersionedDescriptor)?.Version),
             DescriptorName = d.Name,
             Kind = d.Kind,
-            Version = (d as IVersionedDescriptor)?.Version ?? 0
+            State = d.State,
+            ContractHash = d.ContractHash,
+            DefinitionHash = d.DefinitionHash,
+            SupersededById = d.SupersededById
         }).ToList();
 
         return new DescriptorSnapshot

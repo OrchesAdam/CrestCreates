@@ -8,8 +8,20 @@ using CrestCreates.Workflow.Abstractions;
 
 namespace CrestCreates.Metadata;
 
+[JsonSerializable(typeof(DescriptorPackage))]
 [JsonSerializable(typeof(DescriptorManifest))]
+[JsonSerializable(typeof(DescriptorManifestEntry))]
 [JsonSerializable(typeof(DescriptorSnapshot))]
+[JsonSerializable(typeof(SnapshotEntry))]
+[JsonSerializable(typeof(DescriptorPackageEvidence))]
+[JsonSerializable(typeof(EvidenceFinding))]
+[JsonSerializable(typeof(EvidenceFindingCount))]
+[JsonSerializable(typeof(DescriptorPackageRelationshipEntry))]
+[JsonSerializable(typeof(DescriptorPackageDiagnostic))]
+[JsonSerializable(typeof(DescriptorPackageDiff))]
+[JsonSerializable(typeof(DescriptorDiffEntry))]
+[JsonSerializable(typeof(DescriptorStateChange))]
+[JsonSerializable(typeof(DescriptorPackageMetadataChange))]
 [JsonSerializable(typeof(SchemaDescriptor))]
 [JsonSerializable(typeof(CapabilityDescriptor))]
 [JsonSerializable(typeof(EventDescriptor))]

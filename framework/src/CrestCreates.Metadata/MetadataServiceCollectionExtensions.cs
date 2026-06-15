@@ -56,4 +56,16 @@ public static class MetadataServiceCollectionExtensions
             DefaultDescriptorLifecycleGovernanceService>();
         return services;
     }
+
+    public static IServiceCollection AddDescriptorPackaging(
+        this IServiceCollection services)
+    {
+        services.TryAddSingleton<IDescriptorPackageBuilder,
+            DefaultDescriptorPackageBuilder>();
+        services.TryAddSingleton<IDescriptorPackageDiffer,
+            DescriptorPackageDiffer>();
+        services.TryAddSingleton<IDescriptorPackageSerializer,
+            DescriptorPackageSerializer>();
+        return services;
+    }
 }

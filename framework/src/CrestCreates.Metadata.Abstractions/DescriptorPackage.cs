@@ -2,8 +2,13 @@ namespace CrestCreates.Metadata.Abstractions;
 
 public sealed class DescriptorPackage
 {
-    public string PackageId { get; init; } = string.Empty;
-    public string Name { get; init; } = string.Empty;
-    public string Version { get; init; } = string.Empty;
-    public IReadOnlyList<IDescriptor> Descriptors { get; init; } = Array.Empty<IDescriptor>();
+    public DescriptorManifest Manifest { get; init; } = new();
+    public DescriptorSnapshot Snapshot { get; init; } = new();
+    public DescriptorPackageEvidence Evidence { get; init; } = new();
+    public IReadOnlyList<DescriptorPackageDiagnostic> Diagnostics { get; init; }
+        = Array.Empty<DescriptorPackageDiagnostic>();
+
+    public string PackageId => Manifest.PackageId;
+    public string PackageVersion => Manifest.PackageVersion;
+    public string ContentHash => Manifest.ContentHash;
 }
