@@ -26,7 +26,7 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
 
         // Compute content hash
         var contentHash = DescriptorPackageHashComputer.ComputeContentHash(
-            request.Options.FormatVersion, entries, relationships, evidenceHash);
+            request.Options.FormatVersion, entries, relationships);
 
         // Build manifest
         var manifest = new DescriptorManifest
@@ -43,7 +43,7 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
             ContentHash = contentHash,
             EvidenceHash = evidenceHash,
             EnvelopeHash = DescriptorPackageHashComputer.ComputeEnvelopeHash(
-                contentHash, request.PackageId, request.PackageVersion,
+                contentHash, evidenceHash, request.PackageId, request.PackageVersion,
                 createdAt, request.CreatedBy, request.Source)
         };
 

@@ -772,7 +772,7 @@ Note: serialization round-trips metadata/envelope only (manifest, refs, evidence
 ### 11.6 Deterministic Hashing
 
 ```csharp
-// Same inventory + same evidence → same ContentHash, regardless of input order
+// Same inventory + same relationships → same ContentHash, regardless of input order
 var pkg1 = builder.Build(request with { Descriptors = descriptors1 });
 var pkg2 = builder.Build(request with { Descriptors = descriptors2 });
 // descriptors1 and descriptors2 contain same descriptors in different order
@@ -780,8 +780,9 @@ var pkg2 = builder.Build(request with { Descriptors = descriptors2 });
 pkg1.ContentHash == pkg2.ContentHash;           // true
 pkg1.Snapshot.SnapshotId == pkg2.Snapshot.SnapshotId; // true
 
-// Different CreatedAt → different EnvelopeHash, same ContentHash
-pkg1.ContentHash == pkg2.ContentHash;           // true
+// Different evidence → same ContentHash, different EvidenceHash/EnvelopeHash
+pkg1.ContentHash == pkg2.ContentHash;           // still true
+pkg1.Manifest.EvidenceHash == pkg2.Manifest.EvidenceHash; // false
 pkg1.Manifest.EnvelopeHash == pkg2.Manifest.EnvelopeHash; // false
 ```
 

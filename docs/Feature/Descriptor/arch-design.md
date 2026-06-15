@@ -756,10 +756,13 @@ Builder is stateless singleton. Explicit inventory input — does NOT read from 
 | `ContractHash` | From legacy `DescriptorHashComputer` (informational only) |
 | `DefinitionHash` | From legacy `DescriptorHashComputer` (informational only) |
 | `EvidenceHash` | Deterministic string concat of all evidence fields including diagnostic counts and normalized findings with RelatedRefs |
-| `ContentHash` | `SHA256(FormatVersion + sorted refs + sorted relationships + EvidenceHash)` |
-| `EnvelopeHash` | `SHA256(ContentHash + PackageId + PackageVersion + CreatedAt/CreatedBy/Source)` |
+| `ContentHash` | `SHA256(FormatVersion + sorted refs + sorted relationships)` — snapshot identity only, no evidence dependence |
+| `EnvelopeHash` | `SHA256(ContentHash + EvidenceHash + PackageId + PackageVersion + CreatedAt/CreatedBy/Source)` |
 
-Key invariant: `CreatedAt` does NOT affect `ContentHash`.
+Key invariants:
+- `CreatedAt` does NOT affect `ContentHash`.
+- Different evidence → same `ContentHash`, different `EvidenceHash`, different `EnvelopeHash`.
+- `SnapshotId` derives from `ContentHash[..16]` only.
 
 ### 12.5 Evidence Summary
 

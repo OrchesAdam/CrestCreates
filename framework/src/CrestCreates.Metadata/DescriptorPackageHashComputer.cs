@@ -9,14 +9,12 @@ public static class DescriptorPackageHashComputer
     public static string ComputeContentHash(
         string formatVersion,
         IReadOnlyList<DescriptorManifestEntry> entries,
-        IReadOnlyList<DescriptorPackageRelationshipEntry> relationships,
-        string evidenceHash)
+        IReadOnlyList<DescriptorPackageRelationshipEntry> relationships)
     {
         var sb = new StringBuilder();
         sb.Append(formatVersion);
         sb.Append('|');
 
-        // Sorted descriptor refs: Ns:Id:Version:Kind:State
         var sortedRefs = entries
             .OrderBy(e => e.Ref.Namespace)
             .ThenBy(e => e.Ref.Id)
@@ -27,7 +25,6 @@ public static class DescriptorPackageHashComputer
         sb.AppendJoin("||", sortedRefs);
         sb.Append('|');
 
-        // Sorted relationship entries
         var sortedRels = relationships
             .OrderBy(r => r.From.Namespace)
             .ThenBy(r => r.From.Id)
@@ -47,8 +44,6 @@ public static class DescriptorPackageHashComputer
             .ToList();
 
         sb.AppendJoin("||", sortedRels);
-        sb.Append('|');
-        sb.Append(evidenceHash);
 
         return ComputeSha256(sb.ToString());
     }
@@ -133,6 +128,7 @@ public static class DescriptorPackageHashComputer
 
     public static string ComputeEnvelopeHash(
         string contentHash,
+        string evidenceHash,
         string packageId,
         string packageVersion,
         DateTimeOffset createdAt,
@@ -141,6 +137,8 @@ public static class DescriptorPackageHashComputer
     {
         var sb = new StringBuilder();
         sb.Append(contentHash);
+        sb.Append('|');
+        sb.Append(evidenceHash);
         sb.Append('|');
         sb.Append(packageId);
         sb.Append('|');

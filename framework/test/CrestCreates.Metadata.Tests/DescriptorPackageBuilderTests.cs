@@ -532,4 +532,138 @@ public class DescriptorPackageBuilderTests
         pkg.Diagnostics.Should().Contain(d =>
             d.Code == DescriptorPackageDiagnosticCode.DuplicateDescriptorRef);
     }
+
+    [Fact]
+    public void Build_DifferentEvidence_DoesNotChangeContentHash()
+    {
+        var descriptors = new IDescriptor[] { MakeSchema("s1", 1, "S1") };
+        var createdAt = new DateTimeOffset(2026, 6, 15, 12, 0, 0, TimeSpan.Zero);
+
+        var pkg1 = _builder.Build(new DescriptorPackageBuildRequest
+        {
+            PackageId = "test.pkg", PackageVersion = "1.0.0", Descriptors = descriptors,
+            CreatedAt = createdAt,
+            GovernanceReport = new DescriptorLifecycleGovernanceReport
+            {
+                Decisions = Array.Empty<DescriptorLifecycleDecision>(),
+                MaxDecision = DescriptorLifecycleDecisionKind.Allowed,
+                PackageFindings = Array.Empty<DescriptorLifecycleFinding>()
+            }
+        });
+
+        var pkg2 = _builder.Build(new DescriptorPackageBuildRequest
+        {
+            PackageId = "test.pkg", PackageVersion = "1.0.0", Descriptors = descriptors,
+            CreatedAt = createdAt,
+            GovernanceReport = new DescriptorLifecycleGovernanceReport
+            {
+                Decisions = Array.Empty<DescriptorLifecycleDecision>(),
+                MaxDecision = DescriptorLifecycleDecisionKind.Blocked,
+                PackageFindings = Array.Empty<DescriptorLifecycleFinding>()
+            }
+        });
+
+        pkg1.ContentHash.Should().Be(pkg2.ContentHash);
+        pkg1.Evidence.MaxLifecycleDecision.Should().NotBe(pkg2.Evidence.MaxLifecycleDecision);
+    }
+
+    [Fact]
+    public void Build_DifferentEvidence_DifferentEvidenceHash()
+    {
+        var descriptors = new IDescriptor[] { MakeSchema("s1", 1, "S1") };
+        var createdAt = new DateTimeOffset(2026, 6, 15, 12, 0, 0, TimeSpan.Zero);
+
+        var pkg1 = _builder.Build(new DescriptorPackageBuildRequest
+        {
+            PackageId = "test.pkg", PackageVersion = "1.0.0", Descriptors = descriptors,
+            CreatedAt = createdAt,
+            GovernanceReport = new DescriptorLifecycleGovernanceReport
+            {
+                Decisions = Array.Empty<DescriptorLifecycleDecision>(),
+                MaxDecision = DescriptorLifecycleDecisionKind.Allowed,
+                PackageFindings = Array.Empty<DescriptorLifecycleFinding>()
+            }
+        });
+
+        var pkg2 = _builder.Build(new DescriptorPackageBuildRequest
+        {
+            PackageId = "test.pkg", PackageVersion = "1.0.0", Descriptors = descriptors,
+            CreatedAt = createdAt,
+            GovernanceReport = new DescriptorLifecycleGovernanceReport
+            {
+                Decisions = Array.Empty<DescriptorLifecycleDecision>(),
+                MaxDecision = DescriptorLifecycleDecisionKind.Blocked,
+                PackageFindings = Array.Empty<DescriptorLifecycleFinding>()
+            }
+        });
+
+        pkg1.Manifest.EvidenceHash.Should().NotBe(pkg2.Manifest.EvidenceHash);
+    }
+
+    [Fact]
+    public void Build_DifferentEvidence_DifferentEnvelopeHash()
+    {
+        var descriptors = new IDescriptor[] { MakeSchema("s1", 1, "S1") };
+        var createdAt = new DateTimeOffset(2026, 6, 15, 12, 0, 0, TimeSpan.Zero);
+
+        var pkg1 = _builder.Build(new DescriptorPackageBuildRequest
+        {
+            PackageId = "test.pkg", PackageVersion = "1.0.0", Descriptors = descriptors,
+            CreatedAt = createdAt,
+            GovernanceReport = new DescriptorLifecycleGovernanceReport
+            {
+                Decisions = Array.Empty<DescriptorLifecycleDecision>(),
+                MaxDecision = DescriptorLifecycleDecisionKind.Allowed,
+                PackageFindings = Array.Empty<DescriptorLifecycleFinding>()
+            }
+        });
+
+        var pkg2 = _builder.Build(new DescriptorPackageBuildRequest
+        {
+            PackageId = "test.pkg", PackageVersion = "1.0.0", Descriptors = descriptors,
+            CreatedAt = createdAt,
+            GovernanceReport = new DescriptorLifecycleGovernanceReport
+            {
+                Decisions = Array.Empty<DescriptorLifecycleDecision>(),
+                MaxDecision = DescriptorLifecycleDecisionKind.Blocked,
+                PackageFindings = Array.Empty<DescriptorLifecycleFinding>()
+            }
+        });
+
+        pkg1.Manifest.EnvelopeHash.Should().NotBe(pkg2.Manifest.EnvelopeHash);
+    }
+
+    [Fact]
+    public void Build_SnapshotId_DerivesFromContentHashNotEvidence()
+    {
+        var descriptors = new IDescriptor[] { MakeSchema("s1", 1, "S1") };
+        var createdAt = new DateTimeOffset(2026, 6, 15, 12, 0, 0, TimeSpan.Zero);
+
+        var pkg1 = _builder.Build(new DescriptorPackageBuildRequest
+        {
+            PackageId = "test.pkg", PackageVersion = "1.0.0", Descriptors = descriptors,
+            CreatedAt = createdAt,
+            GovernanceReport = new DescriptorLifecycleGovernanceReport
+            {
+                Decisions = Array.Empty<DescriptorLifecycleDecision>(),
+                MaxDecision = DescriptorLifecycleDecisionKind.Allowed,
+                PackageFindings = Array.Empty<DescriptorLifecycleFinding>()
+            }
+        });
+
+        var pkg2 = _builder.Build(new DescriptorPackageBuildRequest
+        {
+            PackageId = "test.pkg", PackageVersion = "1.0.0", Descriptors = descriptors,
+            CreatedAt = createdAt,
+            GovernanceReport = new DescriptorLifecycleGovernanceReport
+            {
+                Decisions = Array.Empty<DescriptorLifecycleDecision>(),
+                MaxDecision = DescriptorLifecycleDecisionKind.Blocked,
+                PackageFindings = Array.Empty<DescriptorLifecycleFinding>()
+            }
+        });
+
+        pkg1.ContentHash.Should().Be(pkg2.ContentHash);
+        pkg1.Snapshot.SnapshotId.Should().Be(pkg2.Snapshot.SnapshotId);
+    }
 }

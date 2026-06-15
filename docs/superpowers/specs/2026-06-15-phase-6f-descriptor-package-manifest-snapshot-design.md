@@ -44,7 +44,7 @@ Phase 6f does package construction, manifest generation, immutable snapshot crea
 2. **Evolve existing types** — upgrade `DescriptorPackage`, `DescriptorManifest`, `DescriptorManifestEntry`, `DescriptorSnapshot`, `SnapshotEntry`; do not create parallel second-main-chain types.
 3. **Stateless and deterministic** — builder/differ/serializer are pure functions; singleton-safe.
 4. **AoT-friendly** — records, enums, static dispatch, source-generated JSON serialization; no runtime reflection, dynamic, or expression trees. `ContentHash` is computed by a new `DescriptorPackageHashComputer` using deterministic string concatenation over stable manifest/relationship/evidence fields — it does NOT use `JsonSerializer.Serialize` with runtime types, anonymous objects, or `descriptor.GetType()`.
-5. **Deterministic hashing** — same inventory + same evidence → same `ContentHash`, regardless of input order or `CreatedAt`.
+5. **Deterministic hashing** — same inventory + same relationships → same `ContentHash`, regardless of input order or `CreatedAt`. Different evidence → same `ContentHash`, different `EvidenceHash` and `EnvelopeHash`.
 6. **Explicit inventory input** — builder accepts `IReadOnlyList<IDescriptor>` from caller; does not read from `IGlobalDescriptorRegistry`.
 7. **Metadata/evidence package** — 6f package contains manifest identity, descriptor refs, hashes, relationships, evidence summaries, and diagnostics. It does NOT contain full descriptor payload (no `IDescriptor` objects in serialized form). This is intentional: 6f is a control-plane metadata package, not a descriptor import/export provider. Full descriptor payload import/export belongs to a later provider/import phase.
 
@@ -338,8 +338,8 @@ Both `ContractHash` and `DefinitionHash` are stored in `DescriptorManifestEntry`
 | `ContractHash` (per descriptor) | `DescriptorHashComputer` (legacy, not AoT-safe) | Informational only; not used in 6f identity | No |
 | `DefinitionHash` (per descriptor) | `DescriptorHashComputer` (legacy, not AoT-safe) | Informational only; not used in 6f identity | No |
 | `EvidenceHash` | `DescriptorPackageHashComputer` (NEW, AoT-safe) | Deterministic string concat of normalized evidence summary fields | No |
-| `ContentHash` | `DescriptorPackageHashComputer` (NEW, AoT-safe) | Deterministic string concat of: format version + sorted descriptor refs (Ns:Id:Version:Kind:State) + sorted relationship entries + EvidenceHash | **No** |
-| `EnvelopeHash` | `DescriptorPackageHashComputer` (NEW, AoT-safe) | ContentHash + PackageId + PackageVersion + CreatedAt + CreatedBy + Source | **Yes** |
+| `ContentHash` | `DescriptorPackageHashComputer` (NEW, AoT-safe) | Deterministic string concat of: format version + sorted descriptor refs (Ns:Id:Version:Kind:State) + sorted relationship entries | **No** |
+| `EnvelopeHash` | `DescriptorPackageHashComputer` (NEW, AoT-safe) | ContentHash + EvidenceHash + PackageId + PackageVersion + CreatedAt + CreatedBy + Source | **Yes** |
 
 ### 5.3 ContentHash Algorithm
 
@@ -347,8 +347,7 @@ Both `ContractHash` and `DefinitionHash` are stored in `DescriptorManifestEntry`
 ContentHash = SHA256(
     FormatVersion
     + "|" + sortedDescriptorRefs (each: "Ns:Id:Version:Kind:State", joined by "||")
-    + "|" + sortedRelationshipEntries (each: "FromNs:FromId:FromVersion→ToNs:ToId:ToVersion:Kind:Strength", joined by "||")
-    + "|" + EvidenceHash
+    + "|" + sortedRelationshipEntries (each: "FromNs:FromId:FromVersion→ToNs:ToId:ToVersion:Kind:Strength:Role:SourcePath:IsRuntimeBinding", joined by "||")
 )
 ```
 
@@ -358,10 +357,9 @@ Sorting rules:
 
 ### 5.4 Invariants
 
-- Same descriptor inventory + same evidence → same `ContentHash`, regardless of input order or `CreatedAt`.
-- Different `CreatedAt` → different `EnvelopeHash`, same `ContentHash`.
-- `ContentHash` does NOT depend on `ContractHash`, `DefinitionHash`, or any runtime-type serialization.
-- `EvidenceHash` is computed from the same normalized evidence summary fields that populate `DescriptorPackageEvidence`.
+- Same descriptor inventory + same relationships → same `ContentHash`, regardless of input order or `CreatedAt`.
+- Different evidence → same `ContentHash`, different `EvidenceHash` and `EnvelopeHash`.
+- `ContentHash` does NOT depend on `ContractHash`, `DefinitionHash`, `EvidenceHash`, or any runtime-type serialization.
 
 ---
 
@@ -683,8 +681,8 @@ framework/test/CrestCreates.Metadata.Tests/
 Phase 6f is complete when:
 
 1. `IDescriptorPackageBuilder.Build()` returns a deterministic `DescriptorPackage` from explicit inventory and optional precomputed 6b/6c/6d/6e reports.
-2. Package includes: manifest identity/descriptor hash entries, deterministic content hash computed by `DescriptorPackageHashComputer` from stable refs/states/relationships/EvidenceHash (not from `ContractHash` or `DefinitionHash`), deterministic snapshot ID, relationship facts with SourcePath, evidence summary, package self-consistency diagnostics.
-3. Hash hierarchy is correct: `ContentHash` is computed by `DescriptorPackageHashComputer` using deterministic string concatenation over stable refs/relationships/evidence fields — no `JsonSerializer.Serialize`, no anonymous objects, no runtime reflection. Same input produces same hash; `CreatedAt` does not affect `ContentHash`. `ContractHash` and `DefinitionHash` (from legacy `DescriptorHashComputer`) are stored for informational purposes only; not used in 6f identity.
+2. Package includes: manifest identity/descriptor hash entries, deterministic content hash computed by `DescriptorPackageHashComputer` from stable refs/states/relationships only (not from `ContractHash`, `DefinitionHash`, or `EvidenceHash`), deterministic snapshot ID derived from ContentHash, relationship facts with SourcePath, evidence summary, package self-consistency diagnostics.
+3. Hash hierarchy is correct: `ContentHash` is computed by `DescriptorPackageHashComputer` using deterministic string concatenation over stable refs/relationships fields — no `JsonSerializer.Serialize`, no anonymous objects, no runtime reflection. Same inventory + same relationships produces same `ContentHash`; `EvidenceHash` and `CreatedAt` do not affect `ContentHash`. `EvidenceHash` and `EnvelopeHash` vary with evidence. `ContractHash` and `DefinitionHash` (from legacy `DescriptorHashComputer`) are stored for informational purposes only; not used in 6f identity.
 4. `IDescriptorPackageDiffer` produces shallow structural diff (added/removed changed refs/states, strong-typed metadata changes).
 5. `IDescriptorPackageSerializer` round-trips package metadata/envelope (manifest, refs, evidence, diagnostics) via source-generated JSON; does NOT serialize descriptor payload.
 6. Builder/differ/serializer are stateless, AoT-friendly, do not mutate registries or rerun prior analyzers.
