@@ -1,6 +1,6 @@
 # Descriptor Architecture Summary
 
-> **Date:** 2026-06-13 | **Status:** Complete | **Phase 6a: Relationship Coverage + Phase 6b: Topology Read Model + Phase 6c: Impact Analysis Engine**
+> **Date:** 2026-06-15 | **Status:** Complete | **Phase 6a: Relationship Coverage + Phase 6b: Topology Read Model + Phase 6c: Impact Analysis Engine + Phase 6d: Compatibility Analyzer + Phase 6e: Lifecycle Governance**
 
 ---
 
@@ -556,3 +556,135 @@ Phase 6d sits on top of Phase 6c (Impact Analysis). It consumes before/after des
 - **No topology access** — compatibility rules consume Phase 6c's impact report, not the topology snapshot.
 - **DI**: `AddDescriptorCompatibilityAnalysis()` (TryAddSingleton).
 - **Impact diagnostics** mapped to compatibility diagnostics: topology errors → `COMPAT_BLOCKED_BY_TOPOLOGY_ERROR`, path truncation → `COMPAT_ANALYSIS_INCOMPLETE`, unpinned ambiguity → `COMPAT_VERSION_AMBIGUITY`.
+
+---
+
+## 11. Phase 6e — Descriptor Lifecycle Governance
+
+### 11.1 Overview
+
+Phase 6e answers: **given current analysis reports and a requested descriptor lifecycle transition, can this transition proceed?**
+
+It is a **stateless, deterministic governance gate** — pure function over `(request) → report`. It consumes (does not recompute) all prior analysis reports.
+
+```
+ValidationReport + RuntimeBindingReport + TopologyDiagnostics
+       + ImpactAnalysisReport + CompatibilityReport
+              ↓
+IDescriptorLifecycleGovernanceService.Evaluate(request)
+              ↓
+GovernanceReport { MaxDecision: Allowed | ReviewRequired | Blocked }
+```
+
+### 11.2 Core Types
+
+All types in `CrestCreates.Metadata.Abstractions.DescriptorLifecycle`:
+
+| Type | Description |
+|------|-------------|
+| `DescriptorLifecycleOperation` | Enum: ValidateDraft, SubmitForReview, Approve, Activate, Deprecate, Retire, Reject |
+| `DescriptorLifecycleDecisionKind` | Enum: Allowed, ReviewRequired, Blocked (Blocked > ReviewRequired > Allowed) |
+| `DescriptorLifecycleFindingSeverity` | Enum: Info, Warning, Review, Blocker |
+| `DescriptorLifecycleTransition` | Record: Subject (DescriptorRef) + Operation + optional FromState/ToState/Reason |
+| `DescriptorLifecycleFinding` | Record: Severity, Code, Message, Subject, Source (validation/binding/topology/impact/compatibility/policy), RelatedRefs |
+| `DescriptorLifecycleDecision` | Record: Transition + Decision + Findings (per-transition) |
+| `DescriptorLifecycleGovernanceReport` | Record: Decisions, MaxDecision, PackageFindings; convenience: IsAllowed/RequiresReview/IsBlocked |
+| `DescriptorLifecycleGovernanceRequest` | Record: Transitions + all 5 input reports + Options |
+| `DescriptorLifecycleGovernanceOptions` | Record: BlockActivateOn* flags, Treat*AsReviewRequired flags |
+| `IDescriptorLifecycleGovernanceService` | Interface: `Evaluate(request)` → report |
+
+### 11.3 Operation → Policy Mapping
+
+| Operation | Change-Driven? | Strictness | Key Default Behavior |
+|---|---|---|---|
+| ValidateDraft | No | Lenient | Binding unbound → ReviewRequired |
+| SubmitForReview | Yes | Medium | Breaking compat → ReviewRequired |
+| Approve | Yes | Medium | Breaking compat → ReviewRequired |
+| Activate | Yes | Strict | Breaking compat → ReviewRequired (or Blocked if option enabled). Binding unbound → Blocked. |
+| Deprecate | Yes | Medium | Affected consumers → ReviewRequired |
+| Retire | Yes | Medium | Breaking compat → ReviewRequired |
+| Reject | No | Lenient | Always Allowed (human gate reversal) |
+
+### 11.4 Finding Severity → Decision Mapping
+
+Per-transition findings drive the decision:
+
+| Worst Finding Severity | Decision |
+|---|---|
+| No findings, or Info/Warning only | Allowed |
+| Review | ReviewRequired |
+| Blocker | Blocked |
+
+Package-level findings (change-set mismatch, binding-report inconsistencies, subject-not-in-changeset) with `Review` or `Blocker` severity **upgrade `MaxDecision`**: Review → ReviewRequired (if currently Allowed), Blocker → Blocked.
+
+### 11.5 Finding Sources
+
+Findings carry a stable `Source` string for UI/CI grouping:
+
+| Source | Origin Report | Example Findings |
+|---|---|---|
+| `validation` | ValidationReport | Validation errors/warnings |
+| `binding` | RuntimeBindingReport | Unbound, version ambiguity, ID unresolvable, namespace/kind mismatch |
+| `topology` | TopologyDiagnostics | MISSING_TARGET, STRONG_CYCLE |
+| `impact` | ImpactAnalysisReport | Impact severity, affected consumers |
+| `compatibility` | CompatibilityReport | Breaking, Risky, SecuritySensitive, Unsupported |
+| `policy` | Governance logic | ChangeSet mismatch, subject not in change set |
+
+### 11.6 Compatibility Cross-Contamination Prevention
+
+Compatibility findings are filtered per-transition by `f.Subject == transition.Subject`. A Breaking finding for descriptor A does NOT affect descriptor B's transition. `DescriptorCompatibilityReport.MaxLevel` is never used as a fallback — only subject-matched findings contribute to a transition's decision.
+
+### 11.7 Binding Report Validation
+
+The governance service validates binding-report entries for consistency:
+- **Unresolvable ID**: empty/null or non-parseable `Namespace.Id` format → `Review`
+- **Namespace/kind mismatch**: DescriptorId namespace must match the canonical namespace for its DescriptorKind (`schema`, `capability`, `event`, `workflow`, `form`, `humantask`) → `Review`
+- **Multi-kind per ID**: same DescriptorId with different DescriptorKind values → `Review`
+- **Version ambiguity**: same (Kind, ID) with different Status values → `Review`
+
+### 11.8 DI Registration
+
+```csharp
+services.AddDescriptorLifecycleGovernance()   // TryAddSingleton
+```
+
+### 11.9 Boundary Rules
+
+- **Consume, do not recompute** — no re-validation, re-binding, re-topology, re-impact, or re-compatibility
+- **Classification only** — does not persist approvals, mutate descriptor state, or publish runtime changes
+- **Stateless & deterministic** — pure function, no DI state, no runtime reflection
+- **AoT-friendly** — records, enums, static dispatch only
+- **Compatibility Unsupported ≠ more severe than Breaking** — it means "knowledge gap", not "harder block"
+
+### 11.10 Project Structure
+
+```
+framework/src/CrestCreates.Metadata.Abstractions/
+  DescriptorLifecycle/
+    DescriptorLifecycleOperation.cs
+    DescriptorLifecycleDecisionKind.cs
+    DescriptorLifecycleFindingSeverity.cs
+    DescriptorLifecycleTransition.cs
+    DescriptorLifecycleFinding.cs
+    DescriptorLifecycleDecision.cs
+    DescriptorLifecycleGovernanceReport.cs
+    DescriptorLifecycleGovernanceOptions.cs
+    DescriptorLifecycleGovernanceRequest.cs
+    IDescriptorLifecycleGovernanceService.cs
+
+framework/src/CrestCreates.Metadata/
+  DescriptorLifecycle/
+    DefaultDescriptorLifecycleGovernanceService.cs
+
+framework/test/CrestCreates.Metadata.Tests/
+  DescriptorLifecycle/
+    DescriptorLifecycleGovernanceServiceTests.cs    (48 tests)
+```
+
+### 11.11 Non-Goals
+
+- Approval workflow engine
+- Persistence of approval records
+- Package/manifest persistence → Phase 6f
+- UI / API / AppService
+- CI gate integration

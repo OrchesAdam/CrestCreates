@@ -4,6 +4,8 @@
 > *Phase 6a (2026-06-12): Descriptor Relationship Coverage — 6 extractors, 1 provider, 434 tests*
 > *Phase 6b (2026-06-12): Descriptor Topology Read Model — builder, snapshot, diagnostics, consumer index, 146 Metadata.Tests*
 > *Phase 6c (2026-06-13): Impact Analysis Engine — analyzer, change set builder, severity model, 48 tests*
+> *Phase 6d (2026-06-13): Compatibility Analyzer — 6 descriptor-specific rules, generic change-kind rules*
+> *Phase 6e (2026-06-15): Lifecycle Governance — decision gate, 48 tests*
 
 ---
 
@@ -27,6 +29,8 @@ builder.Services.AddHumanTaskRuntime();    // registers HumanTaskRelationshipExt
 builder.Services.AddWorkflowEngine();      // registers WorkflowRelationshipExtractor
 builder.Services.AddTopologyKernel();             // Phase 6b: topology builder
 builder.Services.AddDescriptorImpactAnalysis();   // Phase 6c: impact analyzer + change set builder
+builder.Services.AddDescriptorCompatibilityAnalysis(); // Phase 6d: compatibility analyzer
+builder.Services.AddDescriptorLifecycleGovernance();   // Phase 6e: lifecycle governance gate
 ```
 
 ### 1.2 Query Relationships
@@ -533,4 +537,132 @@ var report = analyzer.Analyze(before, after, changeSet, impactReport, options);
 
 ```csharp
 services.AddDescriptorCompatibilityAnalysis();
+```
+
+---
+
+## 10. Phase 6e — Lifecycle Governance
+
+Phase 6e adds `IDescriptorLifecycleGovernanceService` — the governance gate that answers: can this descriptor lifecycle transition proceed?
+
+### 10.1 Quick Start
+
+```csharp
+var governance = services.GetRequiredService<IDescriptorLifecycleGovernanceService>();
+
+var request = new DescriptorLifecycleGovernanceRequest
+{
+    Transitions = new[]
+    {
+        new DescriptorLifecycleTransition
+        {
+            Subject = new DescriptorRef("schema", "Order", 1),
+            Operation = DescriptorLifecycleOperation.Activate
+        }
+    },
+    ValidationReport = validationReport,       // from pre-6
+    BindingReport = bindingReport,              // from Phase 5h
+    TopologyDiagnostics = snapshot.Diagnostics,  // from Phase 6b
+    ImpactReport = impactReport,                // from Phase 6c
+    CompatibilityReport = compatReport          // from Phase 6d
+};
+
+var report = governance.Evaluate(request);
+
+Console.WriteLine($"Max decision: {report.MaxDecision}");
+// Allowed, ReviewRequired, or Blocked
+
+if (report.IsBlocked)
+{
+    foreach (var d in report.Decisions)
+        foreach (var f in d.Findings.Where(f => f.Severity == DescriptorLifecycleFindingSeverity.Blocker))
+            Console.WriteLine($"  BLOCKER [{f.Code}]: {f.Message}");
+}
+else if (report.RequiresReview)
+{
+    Console.WriteLine("Requires human review before proceeding.");
+}
+```
+
+### 10.2 Understanding the Report
+
+| Property | Semantics |
+|---|---|
+| `MaxDecision` | Worst decision across all transitions and package findings |
+| `IsAllowed` | True if MaxDecision == Allowed |
+| `RequiresReview` | True if MaxDecision == ReviewRequired |
+| `IsBlocked` | True if MaxDecision == Blocked |
+| `Decisions` | One per transition, each with its own findings list |
+| `PackageFindings` | Issues not attributable to a single transition (change-set mismatch, binding inconsistencies) |
+
+### 10.3 Decision Hierarchy
+
+```
+Blocked > ReviewRequired > Allowed
+```
+
+A single `Blocked` decision anywhere in the request produces `MaxDecision = Blocked`. Package-level `Review` findings upgrade `Allowed` to `ReviewRequired`. Package-level `Blocker` findings force `Blocked`.
+
+### 10.4 Operations and Their Strictness
+
+| Operation | Change-Driven? | Description | Default Strictness |
+|---|---|---|---|
+| `ValidateDraft` | No | Early authoring gate | Lenient |
+| `SubmitForReview` | Yes | Can a human review this? | Medium |
+| `Approve` | Yes | Approve for activation | Medium |
+| `Activate` | Yes | Make runtime-active now | Strict (Blocked if Binding Unbound) |
+| `Deprecate` | Yes | Mark deprecated | Medium |
+| `Retire` | Yes | Remove/retire | Medium |
+| `Reject` | No | Reject review request | Always Allowed |
+
+### 10.5 Reading Findings
+
+Each decision carries a list of findings with stable `Source` and `Code` values:
+
+| Source | What It Checks |
+|---|---|
+| `validation` | ValidationReport issues |
+| `binding` | Unbound descriptors, ID unresolvable, namespace/kind mismatch, version ambiguity |
+| `topology` | Missing targets, strong cycles, orphans |
+| `impact` | Affected consumers, impact severity, diagnostics |
+| `compatibility` | Breaking/Risky/SecuritySensitive/Unsupported changes |
+| `policy` | Change-set consistency, subjects in change set |
+
+```csharp
+foreach (var decision in report.Decisions)
+{
+    var bySource = decision.Findings.GroupBy(f => f.Source);
+    foreach (var group in bySource)
+        Console.WriteLine($"  {group.Key}: {group.Count()} findings");
+}
+```
+
+### 10.6 Customizing with Options
+
+```csharp
+var options = new DescriptorLifecycleGovernanceOptions
+{
+    BlockActivateOnBreakingCompatibility = true,        // default: false
+    BlockActivateOnUnboundBinding = true,               // default: true
+    BlockActivateOnTopologyErrors = true,               // default: true
+    TreatBreakingCompatibilityAsReviewRequired = true,   // default: true
+    TreatSecuritySensitiveAsReviewRequired = true,       // default: true
+    TreatRiskyCompatibilityAsReviewRequired = true,      // default: true
+    TreatUnsupportedCompatibilityAsReviewRequired = true, // default: true
+    TreatUnboundBindingAsBlocked = true,                 // default: true (for Activate)
+    TreatPartialBindingAsAllowed = true                  // default: true
+};
+
+var request = new DescriptorLifecycleGovernanceRequest
+{
+    Transitions = transitions,
+    Options = options,
+    // ... reports
+};
+```
+
+### 10.7 DI Registration
+
+```csharp
+services.AddDescriptorLifecycleGovernance();   // TryAddSingleton
 ```
