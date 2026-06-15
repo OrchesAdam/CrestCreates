@@ -24,6 +24,7 @@ public static class MetadataServiceCollectionExtensions
             DefaultDescriptorRelationshipProvider>();
 
         services.AddSingleton<IDescriptorRelationshipExtractor, SchemaRelationshipExtractor>();
+        services.AddSingleton<IDescriptorRelationshipExtractor, WorkflowRelationshipExtractor>();
 
         return services;
     }

@@ -259,7 +259,7 @@ public class WorkflowContinuationTests
         final!.Status.Should().Be(WorkflowInstanceStatus.Completed);
         final.StepResults.Select(r => r.StepId).Should().ContainInOrder(
             "v1_start", "v1_human", "v1_human", "v1_after");
-        pipeline.CapabilityIds.Should().Equal("capability:cap_v1_after");
+        pipeline.CapabilityIds.Should().Equal("cap_v1_after");
     }
 
     [Fact]

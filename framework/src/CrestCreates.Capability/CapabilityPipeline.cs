@@ -70,8 +70,11 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
                         DateTimeOffset.UtcNow - startedAt);
                 }
 
-                var output = await invoker.InvokeAsync(ctx.Input, ctx.CancellationToken)
-                    .ConfigureAwait(false);
+                var output = invoker is ICapabilityContextAwareHandlerInvoker contextAwareInvoker
+                    ? await contextAwareInvoker.InvokeAsync(ctx, ctx.CancellationToken)
+                        .ConfigureAwait(false)
+                    : await invoker.InvokeAsync(ctx.Input, ctx.CancellationToken)
+                        .ConfigureAwait(false);
 
                 return CapabilityExecutionResult.Success(
                     output,

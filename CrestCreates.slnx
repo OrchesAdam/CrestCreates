@@ -120,6 +120,9 @@
     <Project Path="samples/SaaSHelpdesk/SaaSHelpdesk.EntityFrameworkCore/SaaSHelpdesk.EntityFrameworkCore.csproj" />
     <Project Path="samples/SaaSHelpdesk/SaaSHelpdesk.Web/SaaSHelpdesk.Web.csproj" />
   </Folder>
+  <Folder Name="/src/samples/CrestCreates.Samples.DescriptorControlPlane/">
+    <Project Path="samples/CrestCreates.Samples.DescriptorControlPlane/CrestCreates.Samples.DescriptorControlPlane.csproj" />
+  </Folder>
   <Folder Name="/src/test/">
     <Project Path="framework/test/CrestCreates.Application.Tests/CrestCreates.Application.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.AuditLogging.Tests/CrestCreates.AuditLogging.Tests.csproj" />
@@ -153,6 +156,7 @@
     <Project Path="framework/test/CrestCreates.Web.Tests/CrestCreates.Web.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Workflow.Tests/CrestCreates.Workflow.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Organization.Tests/CrestCreates.Organization.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.Samples.Tests/CrestCreates.Samples.Tests.csproj" />
   </Folder>
   <Folder Name="/src/tools/">
     <Project Path="framework/tools/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj" />

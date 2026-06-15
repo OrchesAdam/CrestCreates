@@ -15,7 +15,7 @@ public sealed class CapabilityStepExecutor : IWorkflowStepExecutor
     {
         var target = (CapabilityTarget)context.Step.Target;
         var result = await _pipeline.ExecuteAsync(
-            $"capability:{target.Capability.Id}",
+            target.Capability.Id,
             input: context.Instance.Variables,
             ct: ct);
 
