@@ -1,6 +1,6 @@
 # Descriptor Architecture Summary
 
-> **Date:** 2026-06-15 | **Status:** Complete | **Phase 6a: Relationship Coverage + Phase 6b: Topology Read Model + Phase 6c: Impact Analysis Engine + Phase 6d: Compatibility Analyzer + Phase 6e: Lifecycle Governance**
+> **Date:** 2026-06-15 | **Status:** Complete | **Phase 6a: Relationship Coverage + Phase 6b: Topology Read Model + Phase 6c: Impact Analysis Engine + Phase 6d: Compatibility Analyzer + Phase 6e: Lifecycle Governance + Phase 6f: Package / Manifest / Snapshot**
 
 ---
 
@@ -498,7 +498,7 @@ framework/test/CrestCreates.Metadata.Tests/
 
 - Descriptor-kind-specific breaking-change rules → Phase 6d
 - Lifecycle governance → Phase 6e
-- Package/manifest persistence → Phase 6f
+- Package/manifest persistence → Phase 6f ✅ (completed)
 - Runtime instance lookup, LLM, UI/API
 
 ---
@@ -685,6 +685,141 @@ framework/test/CrestCreates.Metadata.Tests/
 
 - Approval workflow engine
 - Persistence of approval records
-- Package/manifest persistence → Phase 6f
+- Package/manifest persistence → Phase 6f ✅ (completed)
 - UI / API / AppService
 - CI gate integration
+
+---
+
+## 12. Phase 6f — Descriptor Package / Manifest / Snapshot
+
+### 12.1 Overview
+
+Phase 6f freezes what the descriptor control plane knows into a deterministic, inspectable, portable package/snapshot unit. It does **not** decide runtime activation, mutate registries, or re-execute prior phase analyzers.
+
+```
+Descriptor inventory
++ Descriptor hashes (ContractHash / DefinitionHash, informational)
++ Relationship facts (from 6b topology)
++ Evidence summaries (from 6b/6c/6d/6e reports)
++ Package self-consistency diagnostics
+→ deterministic DescriptorPackage
+```
+
+### 12.2 Core Types
+
+All types in `CrestCreates.Metadata.Abstractions` (evolved in-place) + new files:
+
+| Type | Status | Description |
+|------|--------|-------------|
+| `DescriptorPackage` | UPGRADED | Envelope: Manifest + Snapshot + Evidence + Diagnostics; convenience passthroughs for PackageId/Version/ContentHash |
+| `DescriptorManifest` | UPGRADED | Deterministic manifest: FormatVersion, identity metadata, flat `DescriptorEntries`, ContentHash/EvidenceHash/EnvelopeHash |
+| `DescriptorManifestEntry` | UPGRADED | Identity: `DescriptorRef` (Namespace, Id, Version) + Kind/Name/State/ContractHash/DefinitionHash/SupersededById |
+| `DescriptorSnapshot` | UPGRADED | Deterministic SnapshotId (first 16 chars of ContentHash, no Guid) + Descriptors + Relationships |
+| `SnapshotEntry` | UPGRADED | Identity: `DescriptorRef` + contract/definition hashes + state |
+| `DescriptorPackageRelationshipEntry` | NEW | Flattened relationship: From/To refs + Kind/Role/SourcePath/Strength/IsRuntimeBinding |
+| `DescriptorPackageEvidence` | NEW | Aggregated evidence: topology counts + impact severity/counts + compatibility level/finding counts + lifecycle decision |
+| `EvidenceFinding` | NEW | Normalized finding: Source/Code/Severity/Subject/Message/RelatedRefs |
+| `EvidenceFindingCount` | NEW | Aggregated count by Severity+Code |
+| `DescriptorPackageDiagnostic` | NEW | Self-consistency diagnostic: Code/Severity/Message/Subject |
+| `DescriptorPackageDiagnosticCode` | NEW | 12 diagnostic code constants + 3 severity constants |
+
+### 12.3 Builder API
+
+```csharp
+public interface IDescriptorPackageBuilder
+{
+    DescriptorPackage Build(DescriptorPackageBuildRequest request);
+}
+
+public sealed record DescriptorPackageBuildRequest
+{
+    public required string PackageId { get; init; }
+    public required string PackageVersion { get; init; }
+    public required IReadOnlyList<IDescriptor> Descriptors { get; init; }
+    // Optional reports from 6b/6c/6d/6e:
+    public DescriptorTopologySnapshot? TopologySnapshot { get; init; }
+    public DescriptorImpactAnalysisReport? ImpactReport { get; init; }
+    public DescriptorCompatibilityReport? CompatibilityReport { get; init; }
+    public DescriptorLifecycleGovernanceReport? GovernanceReport { get; init; }
+}
+```
+
+Builder is stateless singleton. Explicit inventory input — does NOT read from `IGlobalDescriptorRegistry`.
+
+### 12.4 Hash Rules (AoT-Safe)
+
+`DescriptorPackageHashComputer` uses deterministic string concatenation + SHA-256 — no `JsonSerializer.Serialize`, no anonymous objects, no runtime reflection.
+
+| Hash | Contents |
+|------|----------|
+| `ContractHash` | From legacy `DescriptorHashComputer` (informational only) |
+| `DefinitionHash` | From legacy `DescriptorHashComputer` (informational only) |
+| `EvidenceHash` | Deterministic string concat of all evidence fields including diagnostic counts and normalized findings with RelatedRefs |
+| `ContentHash` | `SHA256(FormatVersion + sorted refs + sorted relationships + EvidenceHash)` |
+| `EnvelopeHash` | `SHA256(ContentHash + PackageId + PackageVersion + CreatedAt/CreatedBy/Source)` |
+
+Key invariant: `CreatedAt` does NOT affect `ContentHash`.
+
+### 12.5 Evidence Summary
+
+`BuildEvidence()` populates from supplied reports without recomputation:
+
+- **Topology**: NodeCount, EdgeCount, HasTopologyErrors, diagnostic counts
+- **Impact**: MaxSeverity, AffectedDescriptorCount, ImpactPathCount, diagnostic counts
+- **Compatibility**: MaxLevel, finding counts by level (Breaking / SecuritySensitive / Unsupported)
+- **Lifecycle**: MaxDecision, RequiresReview, IsBlocked, PackageFindingCount
+- **NormalizedFindings**: Unified `EvidenceFinding[]` from all 4 report types
+
+### 12.6 Package Diagnostics (12 Codes)
+
+| Code | Severity | Trigger |
+|------|----------|---------|
+| `PACKAGE_DUPLICATE_DESCRIPTOR_REF` | Error | Same (Namespace, Id, Version) appears twice |
+| `PACKAGE_EVIDENCE_SUBJECT_OUTSIDE_INVENTORY` | Warning | Normalized finding subject not in package refs |
+| `PACKAGE_TOPOLOGY_EDGE_OUTSIDE_PACKAGE` | Warning | Topology edge endpoint not in package |
+| `PACKAGE_IMPACT_CHANGE_OUTSIDE_PACKAGE` | Warning | Impact change ref not in package |
+| `PACKAGE_COMPATIBILITY_SUBJECT_OUTSIDE_PACKAGE` | Warning | Compatibility finding subject not in package |
+| `PACKAGE_LIFECYCLE_TRANSITION_OUTSIDE_INVENTORY` | Warning | Lifecycle transition subject not in package |
+| `PACKAGE_TOPOLOGY_NOT_PROVIDED` | Info | No topology snapshot supplied |
+
+Plus: `PACKAGE_DESCRIPTOR_HASH_MISMATCH`, `PACKAGE_MANIFEST_REF_MISMATCH`, `PACKAGE_HASH_MISMATCH`, `PACKAGE_FORMAT_UNSUPPORTED` (defined but not all emitted by default builder).
+
+### 12.7 Package Diff (Shallow)
+
+```csharp
+public interface IDescriptorPackageDiffer
+{
+    DescriptorPackageDiff Diff(DescriptorPackage before, DescriptorPackage after);
+}
+```
+
+Output: `AddedRefs`, `RemovedRefs`, `ChangedEntries` (hash changes), `StateChanges`, `MetadataChanges` (strong-typed: `DescriptorPackageMetadataChange` with Field/BeforeValue/AfterValue).
+
+Diff is shallow — no impact traversal, compatibility classification, or lifecycle governance.
+
+### 12.8 Serializer
+
+`IDescriptorPackageSerializer` — source-generated JSON via `CrestCreatesMetadataJsonContext` (AoT-safe). Round-trips metadata/envelope: manifest, snapshot refs, evidence, diagnostics. Does NOT serialize descriptor payload (`IDescriptor` objects).
+
+### 12.9 DI Registration
+
+```csharp
+services.AddDescriptorPackaging();
+// TryAddSingleton for: IDescriptorPackageBuilder, IDescriptorPackageDiffer, IDescriptorPackageSerializer
+```
+
+### 12.10 Project Structure (Phase 6f additions)
+
+```
+framework/src/CrestCreates.Metadata.Abstractions/    ← 14 new files (evidence/diagnostic/builder/diff/serializer types)
+framework/src/CrestCreates.Metadata/                  ← 4 new files (builder, hash computer, differ, serializer)
+framework/test/CrestCreates.Metadata.Tests/           ← 5 new test files (41 tests)
+```
+
+### 12.11 Boundary Rules
+
+- 6f does NOT: activate descriptors, mutate registries, rerun 6b/6c/6d/6e analyzers, persist approvals, deploy runtime changes.
+- 6f IS: evidence freezing, manifest/snapshot construction, deterministic identity, shallow diff.
+- `ContentHash` = AoT-safe. `ContractHash`/`DefinitionHash` = informational, not used in package identity.
+- `DescriptorSnapshotBuilder.TakeSnapshot()` is `[Obsolete]`. New main path: `IDescriptorPackageBuilder.Build(explicit inventory)`.

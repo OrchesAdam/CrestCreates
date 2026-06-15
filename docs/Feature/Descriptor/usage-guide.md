@@ -666,3 +666,136 @@ var request = new DescriptorLifecycleGovernanceRequest
 ```csharp
 services.AddDescriptorLifecycleGovernance();   // TryAddSingleton
 ```
+
+---
+
+## 11. Phase 6f — Descriptor Package / Manifest / Snapshot
+
+### 11.1 Overview
+
+Phase 6f builds deterministic, inspectable descriptor packages from explicit inventory and optional precomputed reports from Phases 6b-6e. The package is a metadata/evidence envelope — it does **not** contain descriptor payload, rerun analysis, or activate descriptors.
+
+### 11.2 DI Registration
+
+```csharp
+services.AddDescriptorPackaging();
+// Registers (TryAddSingleton):
+//   IDescriptorPackageBuilder → DefaultDescriptorPackageBuilder
+//   IDescriptorPackageDiffer   → DescriptorPackageDiffer
+//   IDescriptorPackageSerializer → DescriptorPackageSerializer
+```
+
+### 11.3 Build a Package
+
+```csharp
+var builder = services.GetRequiredService<IDescriptorPackageBuilder>();
+
+var package = builder.Build(new DescriptorPackageBuildRequest
+{
+    PackageId = "CrestCreates.CRM",
+    PackageVersion = "1.0.0",
+    Descriptors = myDescriptors,                    // IReadOnlyList<IDescriptor>
+    TopologySnapshot = topologySnapshot,            // optional, from 6b
+    ImpactReport = impactReport,                    // optional, from 6c
+    CompatibilityReport = compatibilityReport,      // optional, from 6d
+    GovernanceReport = governanceReport             // optional, from 6e
+});
+
+// Access package identity
+Console.WriteLine(package.PackageId);       // "CrestCreates.CRM"
+Console.WriteLine(package.ContentHash);     // deterministic SHA-256 hex (64 chars)
+Console.WriteLine(package.Snapshot.SnapshotId); // "snapshot_" + ContentHash[..16]
+
+// Access manifest entries
+foreach (var entry in package.Manifest.DescriptorEntries)
+{
+    Console.WriteLine($"{entry.Ref.FullId} v{entry.Ref.Version} [{entry.State}]");
+    Console.WriteLine($"  ContractHash: {entry.ContractHash}");
+    Console.WriteLine($"  DefinitionHash: {entry.DefinitionHash}");
+}
+
+// Access evidence summary
+Console.WriteLine($"Max impact severity: {package.Evidence.MaxImpactSeverity}");
+Console.WriteLine($"Compatibility level: {package.Evidence.MaxCompatibilityLevel}");
+Console.WriteLine($"Requires review: {package.Evidence.RequiresReview}");
+
+// Access self-consistency diagnostics
+foreach (var diag in package.Diagnostics)
+{
+    Console.WriteLine($"[{diag.Severity}] {diag.Code}: {diag.Message}");
+}
+
+// Access relationship facts
+foreach (var rel in package.Snapshot.Relationships)
+{
+    Console.WriteLine($"{rel.From.FullId} → {rel.To.FullId} ({rel.Kind})");
+    Console.WriteLine($"  SourcePath: {rel.SourcePath}");
+}
+```
+
+### 11.4 Diff Two Packages
+
+```csharp
+var differ = services.GetRequiredService<IDescriptorPackageDiffer>();
+
+var diff = differ.Diff(packageV1, packageV2);
+
+Console.WriteLine($"Added: {diff.AddedRefs.Count}");
+Console.WriteLine($"Removed: {diff.RemovedRefs.Count}");
+Console.WriteLine($"Changed hashes: {diff.ChangedEntries.Count}");
+
+foreach (var stateChange in diff.StateChanges)
+{
+    Console.WriteLine($"{stateChange.Ref.Id}: {stateChange.FromState} → {stateChange.ToState}");
+}
+
+foreach (var metaChange in diff.MetadataChanges)
+{
+    Console.WriteLine($"{metaChange.Field}: {metaChange.BeforeValue} → {metaChange.AfterValue}");
+}
+```
+
+### 11.5 Serialize / Deserialize
+
+```csharp
+var serializer = services.GetRequiredService<IDescriptorPackageSerializer>();
+
+var json = serializer.Serialize(package);
+var restored = serializer.Deserialize(json);
+
+Console.WriteLine(restored.PackageId == package.PackageId); // true
+Console.WriteLine(restored.ContentHash == package.ContentHash); // true
+```
+
+Note: serialization round-trips metadata/envelope only (manifest, refs, evidence, diagnostics). Descriptor payload (`IDescriptor` objects) is not serialized.
+
+### 11.6 Deterministic Hashing
+
+```csharp
+// Same inventory + same evidence → same ContentHash, regardless of input order
+var pkg1 = builder.Build(request with { Descriptors = descriptors1 });
+var pkg2 = builder.Build(request with { Descriptors = descriptors2 });
+// descriptors1 and descriptors2 contain same descriptors in different order
+
+pkg1.ContentHash == pkg2.ContentHash;           // true
+pkg1.Snapshot.SnapshotId == pkg2.Snapshot.SnapshotId; // true
+
+// Different CreatedAt → different EnvelopeHash, same ContentHash
+pkg1.ContentHash == pkg2.ContentHash;           // true
+pkg1.Manifest.EnvelopeHash == pkg2.Manifest.EnvelopeHash; // false
+```
+
+### 11.7 Key Types Reference
+
+| Type | Namespace | Purpose |
+|------|-----------|---------|
+| `DescriptorPackage` | `CrestCreates.Metadata.Abstractions` | Package envelope |
+| `DescriptorManifest` | `CrestCreates.Metadata.Abstractions` | Deterministic manifest |
+| `DescriptorManifestEntry` | `CrestCreates.Metadata.Abstractions` | Entry with Ref/Kind/State/hashes |
+| `DescriptorSnapshot` | `CrestCreates.Metadata.Abstractions` | Deterministic snapshot |
+| `DescriptorPackageEvidence` | `CrestCreates.Metadata.Abstractions` | Aggregated evidence |
+| `DescriptorPackageRelationshipEntry` | `CrestCreates.Metadata.Abstractions` | Relationship fact |
+| `DescriptorPackageDiagnostic` | `CrestCreates.Metadata.Abstractions` | Self-consistency diagnostic |
+| `IDescriptorPackageBuilder` | `CrestCreates.Metadata.Abstractions` | Builder interface |
+| `IDescriptorPackageDiffer` | `CrestCreates.Metadata.Abstractions` | Differ interface |
+| `IDescriptorPackageSerializer` | `CrestCreates.Metadata.Abstractions` | Serializer interface |
