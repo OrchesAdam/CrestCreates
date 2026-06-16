@@ -42,15 +42,19 @@ namespace CrestCreates.Snapshot.Abstractions;
 /// Snapshot means safe boundary copy — explicit, deterministic, and deep enough
 /// to protect internal state from external mutation. It is NOT a generic deep clone.
 /// </para>
+/// <para>
+/// The returned object must not share mutable reference state with this instance.
+/// Immutable values may be reused. Shared references are allowed only when the
+/// referenced object is immutable, stateless, or intentionally shared infrastructure
+/// (e.g., ILogger, IServiceProvider, FrozenDictionary), and the model documents that choice.
+/// </para>
 /// </summary>
 /// <typeparam name="T">The concrete type producing the snapshot.</typeparam>
-public interface ISnapshotable<out T>
+public interface ISnapshotable<T>
     where T : ISnapshotable<T>
 {
     /// <summary>
     /// Creates a defensive copy of this instance.
-    /// The returned object must not share mutable reference state with this instance.
-    /// Immutable values may be reused.
     /// </summary>
     T Snapshot();
 }
@@ -58,9 +62,9 @@ public interface ISnapshotable<out T>
 
 Key decisions:
 - **CRTP constraint** (`where T : ISnapshotable<T>`) — ensures the return type is the same concrete type, preventing `ISnapshotable<Cat>.Snapshot()` from returning `Animal`.
-- **Covariant `out T`** — enables variance scenarios like `IEnumerable<ISnapshotable<Derived>>`.
+- **No `out T` covariance** — removed to avoid variance + CRTP complexity. Snapshot scenarios don't need variance, and removing it reduces generic constraint complexity and potential AOT/compiler edge cases.
 - **No non-generic base** — avoids `object`-returning methods that invite runtime downcasting, which violates AOT rules.
-- **XML docs encode the contract** — "must not share mutable reference state with this instance."
+- **XML docs encode the contract** — mutable reference state must not be shared; immutable/stateless/shared infrastructure references may be reused if the model documents that choice.
 
 ## Extension Helpers
 
@@ -79,19 +83,22 @@ public static class SnapshotExtensions
     }
 
     public static IReadOnlyDictionary<TKey, TValue> SnapshotDictionary<TKey, TValue>(
-        this IReadOnlyDictionary<TKey, TValue> source)
+        this IReadOnlyDictionary<TKey, TValue> source,
+        IEqualityComparer<TKey>? comparer = null)
         where TKey : notnull
         where TValue : ISnapshotable<TValue>
     {
         ArgumentNullException.ThrowIfNull(source);
-        return source.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Snapshot());
+        return source.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Snapshot(), comparer);
     }
 
     public static IReadOnlyDictionary<string, string> SnapshotStringDictionary(
         this IReadOnlyDictionary<string, string>? source)
     {
         if (source is null or { Count: 0 })
-            return ReadOnlyDictionary<string, string>.Empty;
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
 
         return new Dictionary<string, string>(source, StringComparer.Ordinal);
     }
@@ -100,9 +107,9 @@ public static class SnapshotExtensions
 
 Key decisions:
 - `SnapshotList` returns `IReadOnlyList<T>` via `.ToArray()` — array is the simplest immutable container, fully AOT-safe.
-- `SnapshotDictionary` uses `ToDictionary()` without explicit comparer — keys are assumed immutable, default comparer is fine for non-string keys.
+- `SnapshotDictionary` accepts optional `IEqualityComparer<TKey>` — defaults to `null` (uses default equality), but callers can pass `StringComparer.Ordinal` for string keys to preserve deterministic semantics.
 - `SnapshotStringDictionary` explicitly uses `StringComparer.Ordinal` — deterministic, culture-invariant, matches existing pattern in `DescriptorDraft.CreateClone()`.
-- `SnapshotStringDictionary` accepts `null` and returns `ReadOnlyDictionary<string, string>.Empty` — the only nullable-accepting helper, because `Metadata` dictionaries are commonly null in the codebase.
+- `SnapshotStringDictionary` accepts `null` and returns a new empty `Dictionary<string, string>(StringComparer.Ordinal)` — always returns an independent container, never a shared static empty. This keeps snapshot semantics pure: every call returns an isolated instance.
 - `ArgumentNullException.ThrowIfNull` — .NET 7+ pattern, no reflection.
 
 ## Project Structure
@@ -168,10 +175,11 @@ All three projects added to `CrestCreates.slnx`.
 | 3 | `Rejects_Null_Source` — `SnapshotList` throws `ArgumentNullException` | `SnapshotListTests.cs` | #5 |
 | 4 | `Empty_Source_Returns_Empty_Result` — empty input yields empty output | `SnapshotListTests.cs` | — |
 | 5 | `Returns_New_Value_Snapshots` — `SnapshotDictionary` returns value snapshots, not original references | `SnapshotDictionaryTests.cs` | #4 |
+| 5b | `Custom_Comparer_Is_Used` — `SnapshotDictionary` with explicit comparer uses it for key equality | `SnapshotDictionaryTests.cs` | #6 |
 | 6 | `Rejects_Null_Source` — `SnapshotDictionary` throws `ArgumentNullException` | `SnapshotDictionaryTests.cs` | #5 |
 | 7 | `Returns_New_Dictionary_Instance` — `SnapshotStringDictionary` returns different reference | `SnapshotStringDictionaryTests.cs` | #1 |
 | 8 | `Source_Mutation_Does_Not_Affect_Snapshot` — adding/removing from source doesn't change snapshot | `SnapshotStringDictionaryTests.cs` | #2 |
-| 9 | `Null_Source_Returns_Empty_Dictionary` — null input returns empty, not null | `SnapshotStringDictionaryTests.cs` | #5 |
+| 9 | `Null_Source_Returns_Empty_Dictionary` — null input returns new empty dictionary with ordinal comparer, not null and not shared static | `SnapshotStringDictionaryTests.cs` | #5 |
 | 10 | `Deterministic_Ordinal_Comparer` — string keys use `StringComparer.Ordinal` | `SnapshotStringDictionaryTests.cs` | #6 |
 | 11 | No helper uses reflection or JSON — design constraint, verified by code review | (static guarantee) | #8 |
 
@@ -247,6 +255,7 @@ Migration is tracked separately. This issue does not modify any existing models.
 - No object graph walker.
 - Snapshot is implemented explicitly by each participating model.
 - Immutable values may be reused.
+- Shared references are allowed only when the referenced object is immutable, stateless, or intentionally shared infrastructure, and the model documents that choice.
 - Mutable collections must be copied.
 - Mutable child objects must call `Snapshot()` or equivalent explicit clone.
 - Dictionary helpers use deterministic comparers where relevant (`StringComparer.Ordinal`).
