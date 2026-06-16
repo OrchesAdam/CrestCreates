@@ -138,9 +138,10 @@ public static class DescriptorPackageHashComputer
         var sortedFindings = evidence.NormalizedFindings
             .OrderBy(f => f.Source, StringComparer.Ordinal)
             .ThenBy(f => f.Code, StringComparer.Ordinal)
-            .ThenBy(f => f.Severity)
-            .ThenBy(f => f.Subject?.FullId ?? "")
-            .ThenBy(f => f.Message, StringComparer.Ordinal);
+            .ThenBy(f => f.Severity, StringComparer.Ordinal)
+            .ThenBy(f => f.Subject?.FullId ?? NullSentinel, StringComparer.Ordinal)
+            .ThenBy(f => f.Message, StringComparer.Ordinal)
+            .ThenBy(f => RelatedRefsCanonicalKey(f), StringComparer.Ordinal);
 
         foreach (var f in sortedFindings)
         {
@@ -190,6 +191,24 @@ public static class DescriptorPackageHashComputer
     }
 
     // ── Hashing ────────────────────────────────────────────────
+
+    private static string RelatedRefsCanonicalKey(EvidenceFinding f)
+    {
+        if (f.RelatedRefs.Count == 0)
+            return NullSentinel;
+
+        var sb = new StringBuilder();
+        foreach (var rr in f.RelatedRefs
+                     .OrderBy(r => r.Namespace, StringComparer.Ordinal)
+                     .ThenBy(r => r.Id, StringComparer.Ordinal)
+                     .ThenBy(r => r.Version ?? 0))
+        {
+            AppendField(sb, rr.Namespace);
+            AppendField(sb, rr.Id);
+            AppendField(sb, rr.Version);
+        }
+        return sb.ToString();
+    }
 
     private static string ComputeSha256(string input)
     {

@@ -236,4 +236,30 @@ public class DescriptorPackageHashComputerTests
 
         h1.Should().Be(h2, "related refs order must be canonicalized");
     }
+
+    [Fact]
+    public void ComputeEvidenceHash_NormalizedFindings_OrderInsensitive_WhenRelatedRefsDiffer()
+    {
+        // Two findings with identical Source/Code/Severity/Subject/Message
+        // but different RelatedRefs — outer finding order must be stable.
+        var findingA = new EvidenceFinding
+        {
+            Source = "test", Code = "T001", Severity = "Error", Message = "msg",
+            RelatedRefs = new[] { new DescriptorRef("capability", "c1", 1) }
+        };
+        var findingB = new EvidenceFinding
+        {
+            Source = "test", Code = "T001", Severity = "Error", Message = "msg",
+            RelatedRefs = new[] { new DescriptorRef("schema", "s1", 1) }
+        };
+
+        var evidence1 = new DescriptorPackageEvidence { NormalizedFindings = new[] { findingA, findingB } };
+        var evidence2 = new DescriptorPackageEvidence { NormalizedFindings = new[] { findingB, findingA } };
+
+        var h1 = DescriptorPackageHashComputer.ComputeEvidenceHash(evidence1);
+        var h2 = DescriptorPackageHashComputer.ComputeEvidenceHash(evidence2);
+
+        h1.Should().Be(h2,
+            "finding order must be canonicalized even when RelatedRefs differ but outer keys match");
+    }
 }
