@@ -148,6 +148,7 @@ public sealed class DescriptorStableHashBuilder : IDescriptorStableHashBuilder
                 foreach (var s in w.Steps)
                 {
                     AppendField(sb, s.Id);
+                    AppendField(sb, s.Condition);
                     AppendField(sb, (int)s.OnError);
                     AppendTargetRef(sb, s.Target);
                     foreach (var t in s.Transitions.OrderBy(t => t, StringComparer.Ordinal))

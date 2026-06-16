@@ -213,6 +213,47 @@ public sealed class DescriptorStableHashCoverageTests
             new(nameof(WorkflowStep.OutputMapping), HashFieldCoverage.DefinitionOnly, "Output mapping expression — wiring detail, not contract structure"),
             new(nameof(WorkflowStep.OnError), HashFieldCoverage.Contract, "Error behavior affects execution semantics"),
         },
+
+        // ── SchemaValidationRule ───────────────────────────────
+        [typeof(SchemaValidationRule)] = new FieldCoverage[]
+        {
+            new(nameof(SchemaValidationRule.Name), HashFieldCoverage.DefinitionOnly, "Validation rule identity — not structural contract"),
+            new(nameof(SchemaValidationRule.Expression), HashFieldCoverage.DefinitionOnly, "Validation expression — changes validation, not schema structure"),
+            new(nameof(SchemaValidationRule.ErrorMessage), HashFieldCoverage.DefinitionOnly, "Error message text — cosmetic"),
+        },
+
+        // ── CompletionOutcome ─────────────────────────────────
+        [typeof(CompletionOutcome)] = new FieldCoverage[]
+        {
+            new(nameof(CompletionOutcome.Condition), HashFieldCoverage.Contract, "Outcome condition defines task completion contract"),
+            new(nameof(CompletionOutcome.Capability), HashFieldCoverage.Contract, "Post-completion capability reference — part of task contract"),
+        },
+
+        // ── CapabilityTarget ──────────────────────────────────
+        [typeof(CapabilityTarget)] = new FieldCoverage[]
+        {
+            new(nameof(CapabilityTarget.Capability), HashFieldCoverage.Contract, "Target capability reference — defines what step invokes"),
+        },
+
+        // ── HumanTaskTarget ───────────────────────────────────
+        [typeof(HumanTaskTarget)] = new FieldCoverage[]
+        {
+            new(nameof(HumanTaskTarget.HumanTask), HashFieldCoverage.Contract, "Target human task reference"),
+        },
+
+        // ── SubWorkflowTarget ─────────────────────────────────
+        [typeof(SubWorkflowTarget)] = new FieldCoverage[]
+        {
+            new(nameof(SubWorkflowTarget.SubWorkflow), HashFieldCoverage.Contract, "Target sub-workflow reference"),
+        },
+
+        // ── EventRef ──────────────────────────────────────────
+        [typeof(EventRef)] = new FieldCoverage[]
+        {
+            new(nameof(EventRef.Namespace), HashFieldCoverage.DefinitionOnly, "Event namespace — metadata, not structural contract"),
+            new(nameof(EventRef.Id), HashFieldCoverage.DefinitionOnly, "Event identity — registered in catalog, not structural"),
+            new(nameof(EventRef.Version), HashFieldCoverage.DefinitionOnly, "Event version — pinning detail, not structural"),
+        },
     };
 
     // ═══════════════════════════════════════════════════════════

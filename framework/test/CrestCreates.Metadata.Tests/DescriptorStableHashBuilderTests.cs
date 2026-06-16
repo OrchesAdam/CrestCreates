@@ -682,6 +682,62 @@ public sealed class DescriptorStableHashBuilderTests
         h1.DefinitionHash.Should().NotBe(h2.DefinitionHash, "step name change must change definition hash");
     }
 
+    [Fact]
+    public void Changing_WorkflowStepCondition_Should_ChangeContractHash()
+    {
+        var w1 = new WorkflowDescriptor
+        {
+            Id = "wf1", Name = "test", Version = 1,
+            Steps = new[] { new WorkflowStep { Id = "s1", Condition = "x > 0", Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_x", 1) }, Transitions = Array.Empty<string>() } }
+        };
+        var w2 = new WorkflowDescriptor
+        {
+            Id = "wf1", Name = "test", Version = 1,
+            Steps = new[] { new WorkflowStep { Id = "s1", Condition = "x > 100", Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_x", 1) }, Transitions = Array.Empty<string>() } }
+        };
+
+        var h1 = _builder.Build(w1);
+        var h2 = _builder.Build(w2);
+
+        h1.ContractHash.Should().NotBe(h2.ContractHash, "condition change affects runtime flow — must change contract hash");
+    }
+
+    [Fact]
+    public void Changing_EventCategory_Should_ChangeContractHash()
+    {
+        var e1 = new EventDescriptor { Id = "e1", Name = "test", Version = 1, Category = EventCategory.Domain, PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1) };
+        var e2 = new EventDescriptor { Id = "e1", Name = "test", Version = 1, Category = EventCategory.Integration, PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1) };
+
+        var h1 = _builder.Build(e1);
+        var h2 = _builder.Build(e2);
+
+        h1.ContractHash.Should().NotBe(h2.ContractHash, "category change affects event routing — must change contract hash");
+    }
+
+    [Fact]
+    public void Changing_HumanTaskAssigneeStrategy_Should_ChangeContractHash()
+    {
+        var ht1 = new HumanTaskDescriptor { Id = "ht1", Name = "test", Version = 1, Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("f1", 1), AssigneeStrategy = AssigneeStrategy.SingleUser };
+        var ht2 = new HumanTaskDescriptor { Id = "ht1", Name = "test", Version = 1, Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("f1", 1), AssigneeStrategy = AssigneeStrategy.CandidateGroup };
+
+        var h1 = _builder.Build(ht1);
+        var h2 = _builder.Build(ht2);
+
+        h1.ContractHash.Should().NotBe(h2.ContractHash, "assignee strategy affects task distribution — must change contract hash");
+    }
+
+    [Fact]
+    public void Changing_FormControlType_Should_ChangeContractHash()
+    {
+        var f1 = new FormDescriptor { Id = "f1", Name = "test", Version = 1, Schema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1), Fields = new[] { new FormFieldDescriptor { SchemaFieldName = "Email", ControlType = "text", Order = 0 } } };
+        var f2 = new FormDescriptor { Id = "f1", Name = "test", Version = 1, Schema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1), Fields = new[] { new FormFieldDescriptor { SchemaFieldName = "Email", ControlType = "select", Order = 0 } } };
+
+        var h1 = _builder.Build(f1);
+        var h2 = _builder.Build(f2);
+
+        h1.ContractHash.Should().NotBe(h2.ContractHash, "control type change affects interaction contract — must change contract hash");
+    }
+
     // ── Helpers ──
 
     private static SchemaDescriptor CreateSchema(
