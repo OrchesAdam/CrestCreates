@@ -758,10 +758,11 @@ public sealed class DescriptorStableHashBuilderTests
         s1 = new SchemaDescriptor { Id = s1.Id, Name = s1.Name, Version = s1.Version, State = s1.State, Fields = s1.Fields, References = refs1 };
         s2 = new SchemaDescriptor { Id = s2.Id, Name = s2.Name, Version = s2.Version, State = s2.State, Fields = s2.Fields, References = refs2 };
 
-        var h1 = _builder.Build(s1).DefinitionHash;
-        var h2 = _builder.Build(s2).DefinitionHash;
+        var h1 = _builder.Build(s1);
+        var h2 = _builder.Build(s2);
 
-        h1.Should().Be(h2, "references with same Id but different Version must be order-insensitive");
+        h1.ContractHash.Should().Be(h2.ContractHash, "references order must be transparent to contract hash");
+        h1.DefinitionHash.Should().Be(h2.DefinitionHash, "references with same Id but different Version must be order-insensitive");
     }
 
     [Fact]
@@ -794,10 +795,25 @@ public sealed class DescriptorStableHashBuilderTests
         var ht1 = new HumanTaskDescriptor { Id = "ht1", Name = "Test", Version = 1, Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("f1", 1), Outcomes = outcomes1 };
         var ht2 = new HumanTaskDescriptor { Id = "ht1", Name = "Test", Version = 1, Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("f1", 1), Outcomes = outcomes2 };
 
-        var h1 = _builder.Build(ht1).DefinitionHash;
-        var h2 = _builder.Build(ht2).DefinitionHash;
+        var h1 = _builder.Build(ht1);
+        var h2 = _builder.Build(ht2);
 
-        h1.Should().Be(h2, "outcomes with same Condition, different Capability must be order-insensitive");
+        h1.ContractHash.Should().Be(h2.ContractHash, "outcomes order must be transparent to contract hash");
+        h1.DefinitionHash.Should().Be(h2.DefinitionHash, "outcomes with same Condition, different Capability must be order-insensitive");
+    }
+
+    [Fact]
+    public void ValidationRules_SameNameExpression_DifferentErrorMessage_OrderInsensitive()
+    {
+        var rules1 = new[] { new SchemaValidationRule { Name = "r1", Expression = "x > 0", ErrorMessage = "Too high" }, new SchemaValidationRule { Name = "r1", Expression = "x > 0", ErrorMessage = "Too low" } };
+        var rules2 = new[] { new SchemaValidationRule { Name = "r1", Expression = "x > 0", ErrorMessage = "Too low" }, new SchemaValidationRule { Name = "r1", Expression = "x > 0", ErrorMessage = "Too high" } };
+        var s1 = new SchemaDescriptor { Id = "s1", Name = "Test", Version = 1, State = DescriptorState.Active, ValidationRules = rules1 };
+        var s2 = new SchemaDescriptor { Id = "s1", Name = "Test", Version = 1, State = DescriptorState.Active, ValidationRules = rules2 };
+
+        var h1 = _builder.Build(s1).DefinitionHash;
+        var h2 = _builder.Build(s2).DefinitionHash;
+
+        h1.Should().Be(h2, "validation rules with same Name/Expression, different ErrorMessage must be order-insensitive");
     }
 
     // ── Helpers ──
