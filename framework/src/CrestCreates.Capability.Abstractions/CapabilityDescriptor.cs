@@ -32,7 +32,6 @@ public sealed class CapabilityDescriptor : IDescriptor, IVersionedDescriptor, IH
     public VersionedDescriptorRef<SchemaDescriptor>? OutputSchema { get; init; }
     public IReadOnlyList<string> Permissions { get; init; } = Array.Empty<string>();
     public CapabilityRiskLevel RiskLevel { get; init; } = CapabilityRiskLevel.Medium;
-
 }
 
 /// <summary>
