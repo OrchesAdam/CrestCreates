@@ -596,7 +596,7 @@ public class MyDescriptorService
 
 | 哈希 | 语义 | 变更触发条件 |
 |------|------|------------|
-| `ContractHash` | 外部可观测的契约 | Schema 必填字段增删、Capability Permissions/SemanticTags 变更、Event PayloadSchema 变更、Form ControlType/IsRequiredOverride 变更、HumanTask Outcomes 变更、Workflow Steps 变更 |
+| `ContractHash` | 外部可观测的契约 | Schema 字段增删（当前包含所有字段，含 optional — 显式 exclusion policy 待实现）、Capability Permissions/SemanticTags 变更、Event PayloadSchema 变更、Form ControlType/IsRequiredOverride 变更、HumanTask Outcomes 变更、Workflow Steps 变更（按列表顺序，非排序） |
 | `DefinitionHash` | 任意定义级变更 | 可选字段新增、显示元数据变更、Form 布局变更、生命周期元数据变更、权限/风险元数据变更 |
 | `RuntimeHash` | 运行时绑定状态（保留） | 未来 |
 | `BindingHash` | 绑定状态（保留） | 未来 |

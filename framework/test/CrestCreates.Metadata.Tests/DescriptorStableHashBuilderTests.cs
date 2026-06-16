@@ -363,6 +363,62 @@ public sealed class DescriptorStableHashBuilderTests
             "CURRENT: all fields (including optional) are in contract hash — update to .Be() when exclusion policy is implemented");
     }
 
+    [Fact]
+    public void Build_WorkflowStepReorder_Should_ChangeContractHash()
+    {
+        var original = new WorkflowDescriptor
+        {
+            Id = "wf_01", Name = "test.wf", Version = 1,
+            Steps = new[]
+            {
+                new WorkflowStep { Id = "step_a", Name = "A", Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_x", 1) }, Transitions = Array.Empty<string>() },
+                new WorkflowStep { Id = "step_b", Name = "B", Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_y", 1) }, Transitions = Array.Empty<string>() },
+            }
+        };
+        var reordered = new WorkflowDescriptor
+        {
+            Id = "wf_01", Name = "test.wf", Version = 1,
+            Steps = new[]
+            {
+                new WorkflowStep { Id = "step_b", Name = "B", Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_y", 1) }, Transitions = Array.Empty<string>() },
+                new WorkflowStep { Id = "step_a", Name = "A", Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_x", 1) }, Transitions = Array.Empty<string>() },
+            }
+        };
+
+        var h1 = _builder.Build(original);
+        var h2 = _builder.Build(reordered);
+
+        h1.ContractHash.Should().NotBe(h2.ContractHash, "step order is runtime-semantic — reordering must change contract hash");
+    }
+
+    [Fact]
+    public void Build_WorkflowStepReorder_Should_ChangeDefinitionHash()
+    {
+        var original = new WorkflowDescriptor
+        {
+            Id = "wf_01", Name = "test.wf", Version = 1,
+            Steps = new[]
+            {
+                new WorkflowStep { Id = "step_a", Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_x", 1) }, Transitions = Array.Empty<string>() },
+                new WorkflowStep { Id = "step_b", Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_y", 1) }, Transitions = Array.Empty<string>() },
+            }
+        };
+        var reordered = new WorkflowDescriptor
+        {
+            Id = "wf_01", Name = "test.wf", Version = 1,
+            Steps = new[]
+            {
+                new WorkflowStep { Id = "step_b", Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_y", 1) }, Transitions = Array.Empty<string>() },
+                new WorkflowStep { Id = "step_a", Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_x", 1) }, Transitions = Array.Empty<string>() },
+            }
+        };
+
+        var h1 = _builder.Build(original);
+        var h2 = _builder.Build(reordered);
+
+        h1.DefinitionHash.Should().NotBe(h2.DefinitionHash, "step order is runtime-semantic — reordering must change definition hash");
+    }
+
     // ── DI Registration Test ──
 
     [Fact]
@@ -428,7 +484,7 @@ public sealed class DescriptorStableHashBuilderTests
         var result = _builder.Build(schema);
 
         result.ContractHash.Should().NotBe(result.DefinitionHash,
-            "contract hash (subset) should differ from definition hash (full serialization)");
+            "contract hash (subset) should differ from definition hash (explicit field enumeration)");
     }
 
     [Fact]
