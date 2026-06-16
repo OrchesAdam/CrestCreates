@@ -61,7 +61,7 @@ public sealed class DescriptorStableHashBuilder : IDescriptorStableHashBuilder
                     AppendField(sb, f.CollectionElementType);
                 }
                 // References: ordered by id
-                foreach (var r in s.References.OrderBy(r => r.Id, StringComparer.Ordinal))
+                foreach (var r in s.References.OrderBy(r => r.Id, StringComparer.Ordinal).ThenBy(r => r.Version))
                 {
                     AppendField(sb, r.Id);
                     AppendField(sb, r.Version);
@@ -130,7 +130,7 @@ public sealed class DescriptorStableHashBuilder : IDescriptorStableHashBuilder
                 AppendOptionalRef(sb, h.OutputSchema);
                 AppendField(sb, (int)h.AssigneeStrategy);
                 AppendField(sb, h.Permissions);
-                foreach (var o in h.Outcomes.OrderBy(o => o.Condition.ToString(), StringComparer.Ordinal))
+                foreach (var o in h.Outcomes.OrderBy(o => o.Condition.ToString(), StringComparer.Ordinal).ThenBy(o => o.Capability?.Id ?? "", StringComparer.Ordinal).ThenBy(o => (int)(o.Capability?.Version ?? 0)))
                 {
                     AppendField(sb, (int)o.Condition);
                     AppendOptionalRef(sb, o.Capability);
@@ -188,13 +188,13 @@ public sealed class DescriptorStableHashBuilder : IDescriptorStableHashBuilder
                 AppendField(sb, (int)s.ChangeKind);
                 foreach (var f in s.Fields.OrderBy(f => f.Name, StringComparer.Ordinal))
                     AppendSchemaFieldDefinition(sb, f);
-                foreach (var r in s.ValidationRules.OrderBy(r => r.Name, StringComparer.Ordinal))
+                foreach (var r in s.ValidationRules.OrderBy(r => r.Name, StringComparer.Ordinal).ThenBy(r => r.Expression, StringComparer.Ordinal))
                 {
                     AppendField(sb, r.Name);
                     AppendField(sb, r.Expression);
                     AppendField(sb, r.ErrorMessage);
                 }
-                foreach (var r in s.References.OrderBy(r => r.Id, StringComparer.Ordinal))
+                foreach (var r in s.References.OrderBy(r => r.Id, StringComparer.Ordinal).ThenBy(r => r.Version))
                 {
                     AppendField(sb, r.Id);
                     AppendField(sb, r.Version);
@@ -255,7 +255,7 @@ public sealed class DescriptorStableHashBuilder : IDescriptorStableHashBuilder
             AppendField(sb, (int)h.AssigneeStrategy);
             AppendField(sb, h.Permissions);
             AppendField(sb, h.Timeout?.ToString("c", CultureInfo.InvariantCulture) ?? "");
-                foreach (var o in h.Outcomes.OrderBy(o => o.Condition.ToString(), StringComparer.Ordinal))
+                foreach (var o in h.Outcomes.OrderBy(o => o.Condition.ToString(), StringComparer.Ordinal).ThenBy(o => o.Capability?.Id ?? "", StringComparer.Ordinal).ThenBy(o => (int)(o.Capability?.Version ?? 0)))
                 {
                     AppendField(sb, (int)o.Condition);
                     AppendOptionalRef(sb, o.Capability);
