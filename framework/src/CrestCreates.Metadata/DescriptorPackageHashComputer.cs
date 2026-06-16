@@ -1,130 +1,172 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using CrestCreates.Metadata.Abstractions;
 
 namespace CrestCreates.Metadata;
 
+/// <summary>
+/// AoT-safe deterministic hash computer for descriptor packages.
+/// All hashes use explicit string concatenation with delimiter escaping,
+/// null sentinels, ordinal ordering, and invariant formatting — no runtime JSON.
+/// </summary>
 public static class DescriptorPackageHashComputer
 {
+    private const string NullSentinel = "\\0";
+
+    private static string Esc(string value) =>
+        value.Replace("\\", "\\\\").Replace("|", "\\|");
+
+    private static void AppendField(StringBuilder sb, string? value)
+    {
+        sb.Append(value is null ? NullSentinel : Esc(value));
+        sb.Append('|');
+    }
+
+    private static void AppendField(StringBuilder sb, int value)
+    {
+        sb.Append(value.ToString(CultureInfo.InvariantCulture));
+        sb.Append('|');
+    }
+
+    private static void AppendField(StringBuilder sb, int? value)
+    {
+        sb.Append(value?.ToString(CultureInfo.InvariantCulture) ?? NullSentinel);
+        sb.Append('|');
+    }
+
+    private static void AppendField(StringBuilder sb, bool value)
+    {
+        sb.Append(value ? '1' : '0');
+        sb.Append('|');
+    }
+
+    // ── Content Hash ───────────────────────────────────────────
+
     public static string ComputeContentHash(
         string formatVersion,
         IReadOnlyList<DescriptorManifestEntry> entries,
         IReadOnlyList<DescriptorPackageRelationshipEntry> relationships)
     {
         var sb = new StringBuilder();
-        sb.Append(formatVersion);
-        sb.Append('|');
+        AppendField(sb, formatVersion);
 
-        var sortedRefs = entries
-            .OrderBy(e => e.Ref.Namespace)
-            .ThenBy(e => e.Ref.Id)
-            .ThenBy(e => e.Ref.Version ?? 0)
-            .Select(e => $"{e.Ref.Namespace}:{e.Ref.Id}:{e.Ref.Version}:{e.Kind}:{e.State}")
-            .ToList();
+        var sortedEntries = entries
+            .OrderBy(e => e.Ref.Namespace, StringComparer.Ordinal)
+            .ThenBy(e => e.Ref.Id, StringComparer.Ordinal)
+            .ThenBy(e => e.Ref.Version ?? 0);
 
-        sb.AppendJoin("||", sortedRefs);
-        sb.Append('|');
+        foreach (var e in sortedEntries)
+        {
+            AppendField(sb, e.Ref.Namespace);
+            AppendField(sb, e.Ref.Id);
+            AppendField(sb, e.Ref.Version);
+            AppendField(sb, (int)e.Kind);
+            AppendField(sb, (int)e.State);
+        }
 
         var sortedRels = relationships
-            .OrderBy(r => r.From.Namespace)
-            .ThenBy(r => r.From.Id)
+            .OrderBy(r => r.From.Namespace, StringComparer.Ordinal)
+            .ThenBy(r => r.From.Id, StringComparer.Ordinal)
             .ThenBy(r => r.From.Version ?? 0)
-            .ThenBy(r => r.To.Namespace)
-            .ThenBy(r => r.To.Id)
+            .ThenBy(r => r.To.Namespace, StringComparer.Ordinal)
+            .ThenBy(r => r.To.Id, StringComparer.Ordinal)
             .ThenBy(r => r.To.Version ?? 0)
             .ThenBy(r => r.Kind)
             .ThenBy(r => r.Strength)
-            .ThenBy(r => r.Role ?? "")
-            .ThenBy(r => r.SourcePath ?? "")
-            .ThenBy(r => r.IsRuntimeBinding)
-            .Select(r =>
-                $"{r.From.Namespace}:{r.From.Id}:{r.From.Version}→" +
-                $"{r.To.Namespace}:{r.To.Id}:{r.To.Version}:{r.Kind}:{r.Strength}" +
-                $":{r.Role}:{r.SourcePath}:{r.IsRuntimeBinding}")
-            .ToList();
+            .ThenBy(r => r.Role ?? "", StringComparer.Ordinal)
+            .ThenBy(r => r.SourcePath ?? "", StringComparer.Ordinal)
+            .ThenBy(r => r.IsRuntimeBinding);
 
-        sb.AppendJoin("||", sortedRels);
+        foreach (var r in sortedRels)
+        {
+            AppendField(sb, r.From.Namespace);
+            AppendField(sb, r.From.Id);
+            AppendField(sb, r.From.Version);
+            AppendField(sb, r.To.Namespace);
+            AppendField(sb, r.To.Id);
+            AppendField(sb, r.To.Version);
+            AppendField(sb, (int)r.Kind);
+            AppendField(sb, (int)r.Strength);
+            AppendField(sb, r.Role);
+            AppendField(sb, r.SourcePath);
+            AppendField(sb, r.IsRuntimeBinding);
+        }
 
         return ComputeSha256(sb.ToString());
     }
+
+    // ── Evidence Hash ──────────────────────────────────────────
 
     public static string ComputeEvidenceHash(DescriptorPackageEvidence evidence)
     {
         var sb = new StringBuilder();
 
-        sb.Append(evidence.TopologyNodeCount);
-        sb.Append('|');
-        sb.Append(evidence.TopologyEdgeCount);
-        sb.Append('|');
-        sb.Append(evidence.HasTopologyErrors);
-        sb.Append('|');
+        AppendField(sb, evidence.TopologyNodeCount);
+        AppendField(sb, evidence.TopologyEdgeCount);
+        AppendField(sb, evidence.HasTopologyErrors);
 
-        var sortedTopologyDiagnosticCounts = evidence.TopologyDiagnosticCounts
-            .OrderBy(d => d.Severity).ThenBy(d => d.Code);
-        foreach (var dc in sortedTopologyDiagnosticCounts)
+        foreach (var dc in evidence.TopologyDiagnosticCounts
+                     .OrderBy(d => d.Severity, StringComparer.Ordinal).ThenBy(d => d.Code, StringComparer.Ordinal))
         {
-            sb.Append(dc.Severity); sb.Append(':');
-            sb.Append(dc.Code); sb.Append(':');
-            sb.Append(dc.Count);
-            sb.Append('|');
+            AppendField(sb, dc.Severity);
+            AppendField(sb, dc.Code);
+            AppendField(sb, dc.Count);
         }
 
-        sb.Append(evidence.MaxImpactSeverity);
-        sb.Append('|');
-        sb.Append(evidence.AffectedDescriptorCount);
-        sb.Append('|');
-        sb.Append(evidence.ImpactPathCount);
-        sb.Append('|');
+        AppendField(sb, (int)evidence.MaxImpactSeverity);
+        AppendField(sb, evidence.AffectedDescriptorCount);
+        AppendField(sb, evidence.ImpactPathCount);
 
-        var sortedImpactDiagnosticCounts = evidence.ImpactDiagnosticCounts
-            .OrderBy(d => d.Severity).ThenBy(d => d.Code);
-        foreach (var dc in sortedImpactDiagnosticCounts)
+        foreach (var dc in evidence.ImpactDiagnosticCounts
+                     .OrderBy(d => d.Severity, StringComparer.Ordinal).ThenBy(d => d.Code, StringComparer.Ordinal))
         {
-            sb.Append(dc.Severity); sb.Append(':');
-            sb.Append(dc.Code); sb.Append(':');
-            sb.Append(dc.Count);
-            sb.Append('|');
+            AppendField(sb, dc.Severity);
+            AppendField(sb, dc.Code);
+            AppendField(sb, dc.Count);
         }
 
-        sb.Append(evidence.MaxCompatibilityLevel);
-        sb.Append('|');
-        sb.Append(evidence.BreakingFindingCount);
-        sb.Append('|');
-        sb.Append(evidence.SecuritySensitiveFindingCount);
-        sb.Append('|');
-        sb.Append(evidence.UnsupportedFindingCount);
-        sb.Append('|');
-        sb.Append(evidence.MaxLifecycleDecision);
-        sb.Append('|');
-        sb.Append(evidence.RequiresReview);
-        sb.Append('|');
-        sb.Append(evidence.IsBlocked);
-        sb.Append('|');
-        sb.Append(evidence.PackageFindingCount);
-        sb.Append('|');
+        AppendField(sb, (int)evidence.MaxCompatibilityLevel);
+        AppendField(sb, evidence.BreakingFindingCount);
+        AppendField(sb, evidence.SecuritySensitiveFindingCount);
+        AppendField(sb, evidence.UnsupportedFindingCount);
+        AppendField(sb, (int)evidence.MaxLifecycleDecision);
+        AppendField(sb, evidence.RequiresReview);
+        AppendField(sb, evidence.IsBlocked);
+        AppendField(sb, evidence.PackageFindingCount);
 
-        var sortedNormalizedFindings = evidence.NormalizedFindings
-            .OrderBy(f => f.Source).ThenBy(f => f.Code).ThenBy(f => f.Severity)
-            .ThenBy(f => f.Subject?.FullId ?? "").ThenBy(f => f.Message)
-            .ThenBy(f => string.Join(',',
-                f.RelatedRefs
-                    .OrderBy(r => r.Namespace).ThenBy(r => r.Id).ThenBy(r => r.Version ?? 0)
-                    .Select(r => r.FullId)));
-        foreach (var f in sortedNormalizedFindings)
+        var sortedFindings = evidence.NormalizedFindings
+            .OrderBy(f => f.Source, StringComparer.Ordinal)
+            .ThenBy(f => f.Code, StringComparer.Ordinal)
+            .ThenBy(f => f.Severity)
+            .ThenBy(f => f.Subject?.FullId ?? "")
+            .ThenBy(f => f.Message, StringComparer.Ordinal);
+
+        foreach (var f in sortedFindings)
         {
-            sb.Append(f.Source); sb.Append(':');
-            sb.Append(f.Code); sb.Append(':');
-            sb.Append(f.Severity); sb.Append(':');
-            sb.Append(f.Subject?.FullId ?? ""); sb.Append(':');
-            sb.Append(f.Message); sb.Append(':');
+            AppendField(sb, f.Source);
+            AppendField(sb, f.Code);
+            AppendField(sb, f.Severity);
+            AppendField(sb, f.Subject?.FullId);
+            AppendField(sb, f.Message);
+
+            // Related refs in canonical order — each ref as individual fields
             var sortedRelated = f.RelatedRefs
-                .OrderBy(r => r.Namespace).ThenBy(r => r.Id).ThenBy(r => r.Version ?? 0);
-            sb.AppendJoin(',', sortedRelated.Select(r => r.FullId));
-            sb.Append('|');
+                .OrderBy(r => r.Namespace, StringComparer.Ordinal)
+                .ThenBy(r => r.Id, StringComparer.Ordinal)
+                .ThenBy(r => r.Version ?? 0);
+            foreach (var rr in sortedRelated)
+            {
+                AppendField(sb, rr.Namespace);
+                AppendField(sb, rr.Id);
+                AppendField(sb, rr.Version);
+            }
         }
 
         return ComputeSha256(sb.ToString());
     }
+
+    // ── Envelope Hash ──────────────────────────────────────────
 
     public static string ComputeEnvelopeHash(
         string contentHash,
@@ -136,22 +178,18 @@ public static class DescriptorPackageHashComputer
         string? source)
     {
         var sb = new StringBuilder();
-        sb.Append(contentHash);
-        sb.Append('|');
-        sb.Append(evidenceHash);
-        sb.Append('|');
-        sb.Append(packageId);
-        sb.Append('|');
-        sb.Append(packageVersion);
-        sb.Append('|');
-        sb.Append(createdAt.ToString("O"));
-        sb.Append('|');
-        sb.Append(createdBy ?? "");
-        sb.Append('|');
-        sb.Append(source ?? "");
+        AppendField(sb, contentHash);
+        AppendField(sb, evidenceHash);
+        AppendField(sb, packageId);
+        AppendField(sb, packageVersion);
+        AppendField(sb, createdAt.ToString("O", CultureInfo.InvariantCulture));
+        AppendField(sb, createdBy);
+        AppendField(sb, source);
 
         return ComputeSha256(sb.ToString());
     }
+
+    // ── Hashing ────────────────────────────────────────────────
 
     private static string ComputeSha256(string input)
     {

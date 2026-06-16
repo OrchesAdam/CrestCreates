@@ -391,7 +391,7 @@ This thread achieved the following:
 - Upgraded `DescriptorPackage`, `DescriptorManifest`, `DescriptorManifestEntry`, `DescriptorSnapshot`, `SnapshotEntry` in-place.
 - Removed per-kind manifest entry lists (`Schemas`, `Capabilities`, …) — replaced by flat `DescriptorEntries`.
 - `IDescriptorPackageBuilder` + `DefaultDescriptorPackageBuilder` — stateless singleton, explicit inventory input, consumes optional 6b/6c/6d/6e reports.
-- `DescriptorPackageHashComputer` — AoT-safe deterministic hashing (string concat, SHA-256, no `JsonSerializer.Serialize` on runtime types, no anonymous objects, no `descriptor.GetType()`).
+- `DescriptorPackageHashComputer` — explicit field encoding with escaped string fields (`Esc`), null sentinels (`\\0`), ordinal ordering (`StringComparer.Ordinal`), invariant formatting (`CultureInfo.InvariantCulture`), SHA-256. `ContentHash`/`EvidenceHash`/`EnvelopeHash` fully AoT-safe and deterministic; zero runtime JSON.
 - `DescriptorPackageEvidence` + `EvidenceFinding` — aggregated evidence summary from topology/impact/compatibility/lifecycle reports.
 - `DescriptorPackageRelationshipEntry` — flattened relationship facts with `SourcePath` preservation from topology edges.
 - `DescriptorPackageDiagnostic` + 12 self-consistency diagnostic codes.
@@ -402,7 +402,6 @@ This thread achieved the following:
 - 41 new tests (6 hash computer + 20 builder + 8 diff + 4 serializer + 3 DI). 333 Metadata.Tests pass. 0 regressions across existing suites.
 - **Design spec**: `docs/superpowers/specs/2026-06-15-phase-6f-descriptor-package-manifest-snapshot-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-15-phase-6f-descriptor-package.md`
-- **Caveat**: `IDescriptorPackageSerializer` uses source-generated `CrestCreatesMetadataJsonContext`; package serialization is metadata/envelope only and does not serialize live descriptor payloads. `ContentHash`/`EvidenceHash`/`EnvelopeHash` are AoT-safe (string concat, no runtime JSON).
 
 ### Descriptor Stable Hash Builder Public Surface (Phase 6g, 2026-06-16)
 

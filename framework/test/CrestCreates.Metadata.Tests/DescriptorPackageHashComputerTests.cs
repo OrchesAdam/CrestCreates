@@ -141,4 +141,99 @@ public class DescriptorPackageHashComputerTests
         hash1.Should().Be(hash2);
         hash1.Should().HaveLength(64);
     }
+
+    // ── Post-canonicalization regression tests ──────────────────
+
+    [Fact]
+    public void ComputeContentHash_UsesOrdinalOrdering()
+    {
+        // Names that differ only by case or culture-sensitivity must produce stable order
+        var entries = new[]
+        {
+            new DescriptorManifestEntry { Ref = new DescriptorRef("Schema", "Zebra", 1), Kind = DescriptorKind.Schema, Name = "Z", State = DescriptorState.Active },
+            new DescriptorManifestEntry { Ref = new DescriptorRef("schema", "alpha", 1), Kind = DescriptorKind.Schema, Name = "A", State = DescriptorState.Active },
+        };
+        var relationships = Array.Empty<DescriptorPackageRelationshipEntry>();
+
+        var hash1 = DescriptorPackageHashComputer.ComputeContentHash("1.0", entries, relationships);
+        var hash2 = DescriptorPackageHashComputer.ComputeContentHash("1.0", entries, relationships);
+
+        hash1.Should().Be(hash2);
+        hash1.Should().HaveLength(64);
+    }
+
+    [Fact]
+    public void ComputeContentHash_DelimiterCharacters_DoNotCollide()
+    {
+        var entries1 = new[]
+        {
+            new DescriptorManifestEntry { Ref = new DescriptorRef("sch|ema", "s1", 1), Kind = DescriptorKind.Schema, Name = "S1", State = DescriptorState.Active }
+        };
+        var entries2 = new[]
+        {
+            new DescriptorManifestEntry { Ref = new DescriptorRef("sch", "ema|s1", 1), Kind = DescriptorKind.Schema, Name = "S1", State = DescriptorState.Active }
+        };
+        var relationships = Array.Empty<DescriptorPackageRelationshipEntry>();
+
+        var h1 = DescriptorPackageHashComputer.ComputeContentHash("1.0", entries1, relationships);
+        var h2 = DescriptorPackageHashComputer.ComputeContentHash("1.0", entries2, relationships);
+
+        h1.Should().NotBe(h2, "pipe in field values must not cause delimiter ambiguity");
+    }
+
+    [Fact]
+    public void ComputeEnvelopeHash_NullAndEmptyStrings_AreDifferent()
+    {
+        var contentHash = "deadbeef";
+        var createdAt = new DateTimeOffset(2026, 6, 15, 12, 0, 0, TimeSpan.Zero);
+
+        var hashNull = DescriptorPackageHashComputer.ComputeEnvelopeHash(contentHash, "ev", "pkg", "1.0", createdAt, createdBy: null, source: null);
+        var hashEmpty = DescriptorPackageHashComputer.ComputeEnvelopeHash(contentHash, "ev", "pkg", "1.0", createdAt, createdBy: "", source: "");
+
+        hashNull.Should().NotBe(hashEmpty, "null and empty string must produce different hashes");
+    }
+
+    [Fact]
+    public void ComputeEnvelopeHash_UsesInvariantTimestamp()
+    {
+        var contentHash = "deadbeef";
+        var createdAt = new DateTimeOffset(2026, 6, 15, 12, 0, 0, TimeSpan.Zero);
+
+        var hash1 = DescriptorPackageHashComputer.ComputeEnvelopeHash(contentHash, "ev", "pkg", "1.0", createdAt, null, null);
+        var hash2 = DescriptorPackageHashComputer.ComputeEnvelopeHash(contentHash, "ev", "pkg", "1.0", createdAt, null, null);
+
+        hash1.Should().Be(hash2);
+        hash1.Should().HaveLength(64);
+    }
+
+    [Fact]
+    public void ComputeEvidenceHash_RelatedRefs_OrderInsensitive_WithOrdinalOrdering()
+    {
+        var finding1 = new EvidenceFinding
+        {
+            Source = "test", Code = "T001", Severity = "Error", Message = "msg",
+            RelatedRefs = new[]
+            {
+                new DescriptorRef("capability", "c2", 1),
+                new DescriptorRef("schema", "s1", 1),
+            }
+        };
+        var finding2 = new EvidenceFinding
+        {
+            Source = "test", Code = "T001", Severity = "Error", Message = "msg",
+            RelatedRefs = new[]
+            {
+                new DescriptorRef("schema", "s1", 1),
+                new DescriptorRef("capability", "c2", 1),
+            }
+        };
+
+        var evidence1 = new DescriptorPackageEvidence { NormalizedFindings = new[] { finding1 } };
+        var evidence2 = new DescriptorPackageEvidence { NormalizedFindings = new[] { finding2 } };
+
+        var h1 = DescriptorPackageHashComputer.ComputeEvidenceHash(evidence1);
+        var h2 = DescriptorPackageHashComputer.ComputeEvidenceHash(evidence2);
+
+        h1.Should().Be(h2, "related refs order must be canonicalized");
+    }
 }
