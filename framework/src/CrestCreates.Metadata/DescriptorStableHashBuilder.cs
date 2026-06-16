@@ -188,7 +188,7 @@ public sealed class DescriptorStableHashBuilder : IDescriptorStableHashBuilder
                 AppendField(sb, (int)s.ChangeKind);
                 foreach (var f in s.Fields.OrderBy(f => f.Name, StringComparer.Ordinal))
                     AppendSchemaFieldDefinition(sb, f);
-                foreach (var r in s.ValidationRules.OrderBy(r => r.Name, StringComparer.Ordinal).ThenBy(r => r.Expression, StringComparer.Ordinal))
+                foreach (var r in s.ValidationRules.OrderBy(r => r.Name, StringComparer.Ordinal).ThenBy(r => r.Expression, StringComparer.Ordinal).ThenBy(r => r.ErrorMessage ?? "", StringComparer.Ordinal))
                 {
                     AppendField(sb, r.Name);
                     AppendField(sb, r.Expression);

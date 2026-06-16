@@ -738,6 +738,68 @@ public sealed class DescriptorStableHashBuilderTests
         h1.ContractHash.Should().NotBe(h2.ContractHash, "control type change affects interaction contract — must change contract hash");
     }
 
+    // ── Tie-breaker tests: duplicate-key order insensitivity ──
+
+    [Fact]
+    public void SchemaReferences_SameId_DifferentVersion_OrderInsensitive()
+    {
+        var refs1 = new[]
+        {
+            new VersionedDescriptorRef<SchemaDescriptor>("s1", 2),
+            new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+        };
+        var refs2 = new[]
+        {
+            new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            new VersionedDescriptorRef<SchemaDescriptor>("s1", 2),
+        };
+        var s1 = CreateSchema("s1", "Test", fields: new[] { new SchemaFieldDescriptor { Name = "N", FieldType = "string" } });
+        var s2 = CreateSchema("s1", "Test", fields: new[] { new SchemaFieldDescriptor { Name = "N", FieldType = "string" } });
+        s1 = new SchemaDescriptor { Id = s1.Id, Name = s1.Name, Version = s1.Version, State = s1.State, Fields = s1.Fields, References = refs1 };
+        s2 = new SchemaDescriptor { Id = s2.Id, Name = s2.Name, Version = s2.Version, State = s2.State, Fields = s2.Fields, References = refs2 };
+
+        var h1 = _builder.Build(s1).DefinitionHash;
+        var h2 = _builder.Build(s2).DefinitionHash;
+
+        h1.Should().Be(h2, "references with same Id but different Version must be order-insensitive");
+    }
+
+    [Fact]
+    public void ValidationRules_SameName_DifferentExpression_OrderInsensitive()
+    {
+        var rules1 = new[] { new SchemaValidationRule { Name = "r1", Expression = "x > 100" }, new SchemaValidationRule { Name = "r1", Expression = "x > 0" } };
+        var rules2 = new[] { new SchemaValidationRule { Name = "r1", Expression = "x > 0" }, new SchemaValidationRule { Name = "r1", Expression = "x > 100" } };
+        var s1 = new SchemaDescriptor { Id = "s1", Name = "Test", Version = 1, State = DescriptorState.Active, ValidationRules = rules1 };
+        var s2 = new SchemaDescriptor { Id = "s1", Name = "Test", Version = 1, State = DescriptorState.Active, ValidationRules = rules2 };
+
+        var h1 = _builder.Build(s1).DefinitionHash;
+        var h2 = _builder.Build(s2).DefinitionHash;
+
+        h1.Should().Be(h2, "validation rules with same Name, different Expression must be order-insensitive");
+    }
+
+    [Fact]
+    public void HumanTaskOutcomes_SameCondition_DifferentCapability_OrderInsensitive()
+    {
+        var outcomes1 = new[]
+        {
+            new CompletionOutcome { Condition = CompletionCondition.Approve, Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_b", 1) },
+            new CompletionOutcome { Condition = CompletionCondition.Approve, Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_a", 1) },
+        };
+        var outcomes2 = new[]
+        {
+            new CompletionOutcome { Condition = CompletionCondition.Approve, Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_a", 1) },
+            new CompletionOutcome { Condition = CompletionCondition.Approve, Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_b", 1) },
+        };
+        var ht1 = new HumanTaskDescriptor { Id = "ht1", Name = "Test", Version = 1, Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("f1", 1), Outcomes = outcomes1 };
+        var ht2 = new HumanTaskDescriptor { Id = "ht1", Name = "Test", Version = 1, Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("f1", 1), Outcomes = outcomes2 };
+
+        var h1 = _builder.Build(ht1).DefinitionHash;
+        var h2 = _builder.Build(ht2).DefinitionHash;
+
+        h1.Should().Be(h2, "outcomes with same Condition, different Capability must be order-insensitive");
+    }
+
     // ── Helpers ──
 
     private static SchemaDescriptor CreateSchema(
