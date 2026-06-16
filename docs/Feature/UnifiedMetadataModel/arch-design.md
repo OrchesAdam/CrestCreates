@@ -1,6 +1,6 @@
 # 统一元数据模型 — 架构总结文档
 
-> **日期:** 2026-06-12 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a + Phase 4b + Phase 4c + Phase 5 + Phase 5b + Phase 5f 完成**
+> **日期:** 2026-06-16 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a + Phase 4b + Phase 4c + Phase 5 + Phase 5b + Phase 5f + Phase 6g 完成**
 
 ---
 
@@ -145,6 +145,26 @@ Phase 5b 加固 InMemory Workflow 和 HumanTask 实例存储，增加原子 CAS 
 - 并发重复幂等：`WorkflowContinuationService.ContinueAsync` 捕获 `RuntimeConcurrencyException`，按 HumanTaskId 重新查询 — null → 重复 no-op，否则重新抛出
 - 测试 Barrier：`System.Threading.Barrier(2)` + `SignalAndWait()` 强制真实并发争用
 
+### Phase 6g: Descriptor Stable Hash Builder Public Surface
+
+Phase 6g 将 descriptor 哈希计算收口为框架主链可注入式 API，替换临时哨兵哈希：
+
+| 组件 | 说明 |
+|------|------|
+| `IDescriptorStableHashBuilder` | 构建器接口 — `Build(IDescriptor) → DescriptorStableHashes` |
+| `DescriptorStableHashes` | 结果记录 — ContractHash, DefinitionHash, RuntimeHash?, BindingHash? |
+| `DescriptorStableHashBuilder` | 实现 — 全 AoT 安全字符串拼接 (SHA-256)，零 JsonSerializer.Serialize 调用，显式 per-kind 字段提取，字符串分隔符转义，StringComparer.Ordinal 排序，InvariantCulture 数值格式 |
+| `AddDescriptorStableHash()` | DI 注册 — `TryAddSingleton<IDescriptorStableHashBuilder, DescriptorStableHashBuilder>()` |
+| `DescriptorHashComputer` → `[Obsolete]` | 旧静态类标记废弃，内部委托给 DescriptorStableHashBuilder |
+| 样本迁移 | `CompanyCertificationChangeScenarios` 中所有 `"INVALIDATED"` 哨兵哈希替换为实际计算值 |
+| 测试 | 15 个 DescriptorStableHashBuilderTests + 12 个样本测试（真实哈希驱动变更检测） |
+
+**关键不变量:**
+- ContractHash 按 descriptor kind 提取语义相关字段（Schema 字段、Capability Permissions/SemanticTags、Event PayloadSchema、Form ControlType、HumanTask Outcomes、Workflow Steps），集合规范化排序
+- DefinitionHash 覆盖任意定义级变更 — 全 AoT 安全字符串拼接，显式 per-kind 字段枚举，StringComparer.Ordinal 排序，分隔符转义
+- Permission/SemanticTag 数组已规范化排序 — `OrderBy()` 保证确定性
+- RuntimeHash / BindingHash 保留字段 — 供未来运行时绑定状态分离
+
 ### Phase 4: Capability Runtime Consolidation
 
 Phase 4 统一 Capability 运行时，打破循环依赖，收口 ICapabilityRegistry 到 Metadata，新增 Dispatcher、Resolver、Audit 链路：
@@ -193,6 +213,7 @@ framework/src/
 │                                           # CapabilityKind, CapabilityRiskLevel (moved from Capability.Abstractions)
 │                                           # IBootstrapValidator, IDescriptorLookup, ICapabilityHandlerRegistry
 │                                           # IVersionedDescriptorRegistry (updated: +GetByVersion)
+│                                           # IDescriptorStableHashBuilder, DescriptorStableHashes (Phase 6g)
 ├── CrestCreates.Metadata/                  # RegistryBase<T>, RegistrySnapshot<T>, RegistryValidationEngine<T>,
 │                                           # BootstrapCoordinator, DescriptorResolver, CapabilityDescriptor,
 │                                           # CapabilityRegistry (unified, implements ICapabilityRegistry + RegistryBase),
@@ -205,6 +226,7 @@ framework/src/
 │                                           # DescriptorProviderRegistry, MetadataBootstrapper (Phase 4a)
 │                                           # RuntimeStoreException, RuntimeConcurrencyException (Phase 5b)
 │                                           # RuntimeEntityNotFoundException (Phase 5b)
+│                                           # DescriptorStableHashBuilder (Phase 6g)
 ├── CrestCreates.Schema.Abstractions/        # SchemaDescriptor, SchemaFieldDescriptor, ISchemaRegistry, ISchemaValidator
 ├── CrestCreates.Schema/                     # SchemaRegistry : RegistryBase<SchemaDescriptor>, SchemaValidator
 ├── CrestCreates.Capability.Abstractions/    # ICapabilityPipeline, CapabilityExecutionContext, CapabilityExecutionResult,
@@ -265,7 +287,7 @@ framework/src/
 
 framework/test/
 ├── CrestCreates.Schema.Tests/               (20)
-├── CrestCreates.Metadata.Tests/             (82)  ← Phase 3/4/4a: RegistryBase, Validators, Bootstrap, Resolver, CapabilityRegistry, RefValidation
+├── CrestCreates.Metadata.Tests/             (355) ← Phase 3/4/4a/6g: RegistryBase, Validators, Bootstrap, Resolver, CapabilityRegistry, RefValidation, StableHashBuilder(15)
 ├── CrestCreates.Capability.Tests/           (104) ← Phase 4/4a: Resolver, Dispatcher, Audit, E2E(14), Registry migration
 ├── CrestCreates.Draft.Tests/               (13)
 ├── CrestCreates.Event.Tests/               (32)
@@ -666,7 +688,7 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 测试项目 | 测试数 | 覆盖范围 |
 |----------|--------|---------|
 | Schema.Tests | 20 | Descriptor 创建, Registry Build + GetById/GetByVersion/GetByName/GetActiveVersion/GetDeprecatedVersions/GetAllByName, Validator(10) |
-| Metadata.Tests | 82 | **Phase 3/4/4a:** RegistryBase(9), Validators(6), Bootstrap(4), Resolver(5), CapabilityRegistry(6), CapabilityDescriptor(4), DescriptorRef(12), RefValidation(3), + 原有 33 |
+| Metadata.Tests | 355 | **Phase 3/4/4a/6g:** RegistryBase(9), Validators(6), Bootstrap(4), Resolver(5), CapabilityRegistry(6), CapabilityDescriptor(4), DescriptorRef(12), RefValidation(3), StableHashBuilder(15), + 原有 291 |
 | Capability.Tests | 104 | **Phase 4/4a:** Resolver(9), Dispatcher(8), Audit(5), InMemoryStore(5), NullStore(2), E2E(14), Registry(4), Pipeline(6), + 遗留 |
 | Draft.Tests | 13 | DraftRecord(4), InMemoryStore(5), TenantIsolated(4) |
 | Event.Tests | 32 | EventRegistry(16), Validator(4), DynamicRegistry(7), Descriptor(5) |
@@ -674,7 +696,7 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | Form.Tests | 9 | Descriptor(5), Registry(4) |
 | HumanTask.Tests | 44 | Descriptor(6), Registry(3), **Store(11), Runtime(14), Resolver(10)** |
 | Workflow.Tests | 57 | Executor Registry(5), Validator(14), Engine(13), Runtime(5), StateMachine(7), Continuation(7), **Store(5), Executor(1), E2E(1)** |
-| **Total** | **~394** | |
+| **Total** | **~499** | |
 
 ---
 
@@ -812,3 +834,11 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 128 | 无 Organization 依赖 — HumanTask 不引用 Organization.Abstractions | ✅ Phase 5f |
 | 129 | 零 Workflow 变更 — HumanTaskStepExecutor 未修改 | ✅ Phase 5f |
 | 130 | 测试: 44 个 HumanTask.Tests（+22 Phase 5f: 10 Resolver + 6 Runtime + 6 Store） | ✅ Phase 5f |
+| 131 | IDescriptorStableHashBuilder — 框架主链可注入式哈希构建器，替代 DescriptorHashComputer 静态类 | ✅ Phase 6g |
+| 132 | DescriptorStableHashes — ContractHash/DefinitionHash/RuntimeHash?/BindingHash? 统一记录 | ✅ Phase 6g |
+| 133 | DescriptorHashComputer 标记 [Obsolete]，内部委托给 DescriptorStableHashBuilder — 零破坏性变更 | ✅ Phase 6g |
+| 134 | AddDescriptorStableHash() DI 注册 — TryAddSingleton，与现有 Metadata DI 模式一致 | ✅ Phase 6g |
+| 135 | ContractHash 按 descriptor kind switch 正则化提取，集合规范化排序 — 全 AoT 安全字符串拼接 | ✅ Phase 6g |
+| 136 | Permission/SemanticTag 数组已规范化排序 — OrderBy() 保证确定性 | ✅ Phase 6g |
+| 137 | CompanyCertificationChangeScenarios 中所有 "INVALIDATED" 哨兵哈希已替换 | ✅ Phase 6g |
+| 138 | 测试: 355 个 Metadata.Tests（+15 StableHashBuilder）+ 12 个 Sample Tests | ✅ Phase 6g |

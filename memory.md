@@ -402,7 +402,22 @@ This thread achieved the following:
 - 41 new tests (6 hash computer + 20 builder + 8 diff + 4 serializer + 3 DI). 333 Metadata.Tests pass. 0 regressions across existing suites.
 - **Design spec**: `docs/superpowers/specs/2026-06-15-phase-6f-descriptor-package-manifest-snapshot-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-15-phase-6f-descriptor-package.md`
-- **Caveat**: `IDescriptorPackageSerializer` uses reflection-based `JsonSerializerOptions` (trim warning IL2026); source-generated `JsonSerializerContext` path deferred. `ContentHash`/`EvidenceHash`/`EnvelopeHash` are AoT-safe (string concat, no runtime JSON). `ContractHash`/`DefinitionHash` from legacy `DescriptorHashComputer` are stored for informational purposes only; not used in 6f identity.
+- **Caveat**: `IDescriptorPackageSerializer` uses reflection-based `JsonSerializerOptions` (trim warning IL2026); source-generated `JsonSerializerContext` path deferred. `ContentHash`/`EvidenceHash`/`EnvelopeHash` are AoT-safe (string concat, no runtime JSON).
+
+### Descriptor Stable Hash Builder Public Surface (Phase 6g, 2026-06-16)
+
+- `IDescriptorStableHashBuilder` interface + `DescriptorStableHashes` record in `CrestCreates.Metadata.Abstractions`.
+  - `Build(IDescriptor)` returns `DescriptorStableHashes(ContractHash, DefinitionHash, RuntimeHash?, BindingHash?)`.
+- `DescriptorStableHashBuilder` implementation in `CrestCreates.Metadata` — **fully AoT-safe** string concatenation (SHA-256), zero `JsonSerializer.Serialize` calls, zero IL2026 trim warnings.
+  - ContractHash: per-kind switch extraction of semantically meaningful fields with canonical ordering.
+  - DefinitionHash: exhaustive per-kind field enumeration with canonical ordering (sorted collections, sorted dictionary keys).
+  - `InteractionTarget` subtypes (`CapabilityTarget`, `HumanTaskTarget`, `SubWorkflowTarget`) handled explicitly via `AppendTargetRef` switch — **both** hashes correctly capture target ref changes.
+  - `FormFieldDescriptor.Metadata` dictionary keys sorted for canonical ordering.
+- `DescriptorHashComputer` (static class) marked `[Obsolete]` — delegates to `DescriptorStableHashBuilder`. **Note**: static `Builder` instance bypasses DI.
+- `AddDescriptorStableHash()` DI registration.
+- 18 tests: same/recreated stability, optional field→definition change, required field addition/removal→contract change, permission change→both hashes, form label→contract stable, workflow step id→definition change, workflow target ref change→**both** hashes change, DI resolution, cross-instance stability, HumanTask/Event stability, optional field contract hash behavior (exclusion policy deferred).
+- `CompanyCertificationChangeScenarios` — `"INVALIDATED"` sentinels replaced; 12 control-plane tests pass.
+- **Design spec**: GitHub issue #29.
 
 ---
 

@@ -1,7 +1,7 @@
 # 统一元数据模型 — 使用指南
 
 > 本文档面向 CrestCreates 模块开发者，介绍如何使用统一元数据模型声明和执行业务能力。
-> *更新于 Phase 5f (2026-06-12): HumanTask Assignee Resolver Foundation — 分派解析主链, instance 扩展, 4 个新 pending 查询*
+> *更新于 Phase 6g (2026-06-16): Descriptor Stable Hash Builder — 可注入式哈希构建器主链接口*
 
 ---
 
@@ -562,7 +562,101 @@ var activeDrafts = await draftStore.QueryAsync(new DraftQuery
 
 ---
 
-## 10. 暴露为 HTTP/Agent/MCP
+## 10. 描述符稳定哈希（Phase 6g）
+
+### 10.1 注入并使用 IDescriptorStableHashBuilder
+
+```csharp
+// DI 注册（通常由宿主自动完成）
+services.AddDescriptorStableHash();
+
+// 注入并使用
+public class MyDescriptorService
+{
+    private readonly IDescriptorStableHashBuilder _hashBuilder;
+
+    public MyDescriptorService(IDescriptorStableHashBuilder hashBuilder)
+    {
+        _hashBuilder = hashBuilder;
+    }
+
+    public void ComputeHashes(IDescriptor descriptor)
+    {
+        var hashes = _hashBuilder.Build(descriptor);
+
+        Console.WriteLine($"ContractHash:   {hashes.ContractHash}");
+        Console.WriteLine($"DefinitionHash: {hashes.DefinitionHash}");
+        // hashes.RuntimeHash  → null（保留字段）
+        // hashes.BindingHash  → null（保留字段）
+    }
+}
+```
+
+### 10.2 哈希语义
+
+| 哈希 | 语义 | 变更触发条件 |
+|------|------|------------|
+| `ContractHash` | 外部可观测的契约 | Schema 必填字段增删、Capability Permissions/SemanticTags 变更、Event PayloadSchema 变更、Form ControlType/IsRequiredOverride 变更、HumanTask Outcomes 变更、Workflow Steps 变更 |
+| `DefinitionHash` | 任意定义级变更 | 可选字段新增、显示元数据变更、Form 布局变更、生命周期元数据变更、权限/风险元数据变更 |
+| `RuntimeHash` | 运行时绑定状态（保留） | 未来 |
+| `BindingHash` | 绑定状态（保留） | 未来 |
+
+### 10.3 变更检测场景
+
+```csharp
+var hashBuilder = serviceProvider.GetRequiredService<IDescriptorStableHashBuilder>();
+
+// 创建修改后的描述符
+var original = GetCapabilityDescriptor();
+var modified = new CapabilityDescriptor
+{
+    Id = original.Id, Name = original.Name, Version = original.Version,
+    Permissions = new[] { "new.permission" },  // 权限变更
+    // ... 其他属性保持不变
+};
+
+// 计算修改后描述符的哈希
+var hashes = hashBuilder.Build(modified);
+
+// 将哈希写入描述符（init-only 属性需要重建对象）
+var finalized = new CapabilityDescriptor
+{
+    // ... 所有属性 ...
+    ContractHash = hashes.ContractHash,
+    DefinitionHash = hashes.DefinitionHash,
+};
+
+// DescriptorChangeSetBuilder 会通过哈希差异自动检测变更
+```
+
+### 10.4 从旧 API 迁移
+
+> **旧 API (`[Obsolete]`)：**
+> ```csharp
+> var ch = DescriptorHashComputer.ComputeContractHash(descriptor);
+> var dh = DescriptorHashComputer.ComputeDefinitionHash(descriptor);
+> ```
+>
+> **新 API：**
+> ```csharp
+> var hashes = hashBuilder.Build(descriptor);
+> var ch = hashes.ContractHash;
+> var dh = hashes.DefinitionHash;
+> ```
+
+静态类 `DescriptorHashComputer` 仍然可用（内部委托给 Builder），但建议迁移到注入式 `IDescriptorStableHashBuilder`。
+
+### 10.5 实现细节
+
+- **AoT 安全**：全量字符串拼接 + SHA-256，零 `JsonSerializer.Serialize` 依赖，零 IL2026 Trim 警告。
+- **分隔符转义**：所有字符串值通过 `Esc()` 转义 `\` 和 `|`，防止字段值中的管道符导致哈希冲突。
+- **Null 区分**：`null` 字段输出 `\0|`（哨兵值），`""` 空字符串输出 `|`，二者哈希不同。
+- **规范排序**：所有字符串集合使用 `StringComparer.Ordinal` 排序，`double` 使用 `InvariantCulture` 格式，`TimeSpan` 使用 ISO 8601 格式。
+- **多态支持**：`InteractionTarget` 子类型（`CapabilityTarget`/`HumanTaskTarget`/`SubWorkflowTarget`）通过显式 switch 提取，ContractHash 和 DefinitionHash 均正确捕获目标引用变更。
+
+---
+
+## 11. 暴露为 HTTP/Agent/MCP
 
 > ⚠️ **Phase 4 更新:** `VersionedDescriptorRef<CapabilityDescriptor>` 改为 `VersionedDescriptorRef<IVersionedDescriptor>`（避免循环依赖）。
 
@@ -592,7 +686,7 @@ var endpoint = new CapabilityEndpointDescriptor
 
 ---
 
-## 11. 创建自定义 Registry
+## 12. 创建自定义 Registry
 
 使用 `RegistryBase<T>` 创建新的 Registry：
 
@@ -650,7 +744,7 @@ services.AddSingleton<MyRegistry>();
 
 ---
 
-## 12. 参考
+## 13. 参考
 
 | 文档 | 位置 |
 |------|------|
@@ -700,6 +794,8 @@ services.AddSingleton<MyRegistry>();
 | `IBootstrapValidator` | 启动阶段验证器 | Metadata.Abstractions |
 | `IDescriptorLookup` | 跨 Registry 描述符查找 | Metadata.Abstractions |
 | `ICapabilityHandlerRegistry` | Handler 注册表 | Metadata.Abstractions |
+| `IDescriptorStableHashBuilder` | 描述符稳定哈希构建器 (Phase 6g) | Metadata.Abstractions |
+| `DescriptorStableHashes` | 哈希结果记录 (Phase 6g) | Metadata.Abstractions |
 | `ISchemaDescriptorProvider` | 声明 Schema | Schema.Abstractions |
 | `ICapabilityProvider` | 声明 Capability | Capability.Abstractions |
 | `ICapabilityHandler<TIn,TOut>` | 实现业务逻辑 | Capability.Abstractions |

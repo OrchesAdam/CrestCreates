@@ -23,6 +23,8 @@ public record CompanyCertificationChangeScenario(
     IReadOnlyList<IDescriptor> Before,
     IReadOnlyList<IDescriptor> After)
 {
+    private static readonly DescriptorStableHashBuilder HashBuilder = new();
+
     //  Baseline
 
     /// <summary>
@@ -54,8 +56,6 @@ public record CompanyCertificationChangeScenario(
             Version = original.Version,
             State = original.State,
             ChangeKind = SchemaChangeKind.Additive,
-            ContractHash = "INVALIDATED",
-            DefinitionHash = "INVALIDATED",
             SupersededById = original.SupersededById,
             Fields = original.Fields
                 .Select(CopySchemaField)
@@ -69,6 +69,22 @@ public record CompanyCertificationChangeScenario(
                 .ToArray(),
             ValidationRules = original.ValidationRules.Select(CopyValidationRule).ToArray(),
             References = original.References.ToArray(),
+        };
+
+        var hashes = HashBuilder.Build(modified);
+        modified = new SchemaDescriptor
+        {
+            Id = modified.Id,
+            Name = modified.Name,
+            Version = modified.Version,
+            State = modified.State,
+            ChangeKind = modified.ChangeKind,
+            ContractHash = hashes.ContractHash,
+            DefinitionHash = hashes.DefinitionHash,
+            SupersededById = modified.SupersededById,
+            Fields = modified.Fields,
+            ValidationRules = modified.ValidationRules,
+            References = modified.References,
         };
 
         var after = BuildAfter(CopyAllDescriptors(), original.Id, modified);
@@ -98,11 +114,6 @@ public record CompanyCertificationChangeScenario(
             Version = original.Version,
             State = original.State,
             ChangeKind = SchemaChangeKind.Breaking,
-            // Hashes intentionally invalidated because structural change invalidates
-            // both contract and definition identity; this allows ChangeSetBuilder
-            // and compatibility rules to detect the modification.
-            ContractHash = "INVALIDATED",
-            DefinitionHash = "INVALIDATED",
             SupersededById = original.SupersededById,
             Fields = original.Fields
                 .Where(f => f.Name != "UnifiedSocialCreditCode")
@@ -110,6 +121,22 @@ public record CompanyCertificationChangeScenario(
                 .ToArray(),
             ValidationRules = original.ValidationRules.Select(CopyValidationRule).ToArray(),
             References = original.References.ToArray(),
+        };
+
+        var hashes = HashBuilder.Build(modified);
+        modified = new SchemaDescriptor
+        {
+            Id = modified.Id,
+            Name = modified.Name,
+            Version = modified.Version,
+            State = modified.State,
+            ChangeKind = modified.ChangeKind,
+            ContractHash = hashes.ContractHash,
+            DefinitionHash = hashes.DefinitionHash,
+            SupersededById = modified.SupersededById,
+            Fields = modified.Fields,
+            ValidationRules = modified.ValidationRules,
+            References = modified.References,
         };
 
         var after = BuildAfter(CopyAllDescriptors(), original.Id, modified);
@@ -138,8 +165,6 @@ public record CompanyCertificationChangeScenario(
             Name = original.Name,
             Version = original.Version,
             State = original.State,
-            ContractHash = "INVALIDATED",
-            DefinitionHash = "INVALIDATED",
             SupersededById = original.SupersededById,
             CapabilityKind = original.CapabilityKind,
             InputSchema = original.InputSchema,
@@ -150,6 +175,27 @@ public record CompanyCertificationChangeScenario(
             Consumes = original.Consumes.ToArray(),
             Categories = original.Categories.ToArray(),
             SemanticTags = original.SemanticTags.ToArray(),
+        };
+
+        var hashes = HashBuilder.Build(modified);
+        modified = new CapabilityDescriptor
+        {
+            Id = modified.Id,
+            Name = modified.Name,
+            Version = modified.Version,
+            State = modified.State,
+            ContractHash = hashes.ContractHash,
+            DefinitionHash = hashes.DefinitionHash,
+            SupersededById = modified.SupersededById,
+            CapabilityKind = modified.CapabilityKind,
+            InputSchema = modified.InputSchema,
+            OutputSchema = modified.OutputSchema,
+            Permissions = modified.Permissions,
+            RiskLevel = modified.RiskLevel,
+            Produces = modified.Produces,
+            Consumes = modified.Consumes,
+            Categories = modified.Categories,
+            SemanticTags = modified.SemanticTags,
         };
 
         var after = BuildAfter(CopyAllDescriptors(), original.Id, modified);
@@ -177,8 +223,6 @@ public record CompanyCertificationChangeScenario(
             Name = original.Name,
             Version = original.Version,
             State = original.State,
-            ContractHash = "INVALIDATED",
-            DefinitionHash = "INVALIDATED",
             SupersededById = original.SupersededById,
             VariableSchema = original.VariableSchema,
             DefaultVariableScope = original.DefaultVariableScope,
@@ -198,6 +242,21 @@ public record CompanyCertificationChangeScenario(
                 CopyWorkflowStep(original.Steps[1]),
                 CopyWorkflowStep(original.Steps[2]),
             },
+        };
+
+        var hashes = HashBuilder.Build(modified);
+        modified = new WorkflowDescriptor
+        {
+            Id = modified.Id,
+            Name = modified.Name,
+            Version = modified.Version,
+            State = modified.State,
+            ContractHash = hashes.ContractHash,
+            DefinitionHash = hashes.DefinitionHash,
+            SupersededById = modified.SupersededById,
+            VariableSchema = modified.VariableSchema,
+            DefaultVariableScope = modified.DefaultVariableScope,
+            Steps = modified.Steps,
         };
 
         var after = BuildAfter(CopyAllDescriptors(), original.Id, modified);
@@ -227,8 +286,6 @@ public record CompanyCertificationChangeScenario(
             Name = original.Name,
             Version = original.Version,
             State = original.State,
-            ContractHash = "INVALIDATED",
-            DefinitionHash = "INVALIDATED",
             SupersededById = original.SupersededById,
             VariableSchema = original.VariableSchema,
             DefaultVariableScope = original.DefaultVariableScope,
@@ -249,6 +306,21 @@ public record CompanyCertificationChangeScenario(
                 CopyWorkflowStep(original.Steps[1]),
                 CopyWorkflowStep(original.Steps[2]),
             },
+        };
+
+        var hashes = HashBuilder.Build(modified);
+        modified = new WorkflowDescriptor
+        {
+            Id = modified.Id,
+            Name = modified.Name,
+            Version = modified.Version,
+            State = modified.State,
+            ContractHash = hashes.ContractHash,
+            DefinitionHash = hashes.DefinitionHash,
+            SupersededById = modified.SupersededById,
+            VariableSchema = modified.VariableSchema,
+            DefaultVariableScope = modified.DefaultVariableScope,
+            Steps = modified.Steps,
         };
 
         var after = BuildAfter(CopyAllDescriptors(), original.Id, modified);

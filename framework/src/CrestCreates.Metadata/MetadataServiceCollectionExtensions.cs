@@ -58,6 +58,13 @@ public static class MetadataServiceCollectionExtensions
         return services;
     }
 
+    public static IServiceCollection AddDescriptorStableHash(
+        this IServiceCollection services)
+    {
+        services.TryAddSingleton<IDescriptorStableHashBuilder, DescriptorStableHashBuilder>();
+        return services;
+    }
+
     public static IServiceCollection AddDescriptorPackaging(
         this IServiceCollection services)
     {
