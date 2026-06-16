@@ -653,6 +653,9 @@ var finalized = new CapabilityDescriptor
 - **Null 区分**：`null` 字段输出 `\0|`（哨兵值），`""` 空字符串输出 `|`，二者哈希不同。
 - **规范排序**：所有字符串集合使用 `StringComparer.Ordinal` 排序，`double` 使用 `InvariantCulture` 格式，`TimeSpan` 使用 ISO 8601 格式。
 - **多态支持**：`InteractionTarget` 子类型（`CapabilityTarget`/`HumanTaskTarget`/`SubWorkflowTarget`）通过显式 switch 提取，ContractHash 和 DefinitionHash 均正确捕获目标引用变更。
+- **字段覆盖 Guard**：`DescriptorStableHashCoverageTests` 覆盖 15 种类型（9 种顶层 descriptor + 6 种嵌套 payload 类型），通过 reflection 断言所有 public 属性均已显式分类。新增字段未更新 coverage 时测试失败 — 防止 "行为变但 hash 不变" 的遗漏。
+- **完整 tie-breaker**：所有排序键覆盖到 append 的全部字段（References: Id+Version, ValidationRules: Name+Expression+ErrorMessage, Outcomes: Condition+CapabilityId+CapabilityVersion），确保重复 key 场景下 hash 对输入顺序不敏感。
+- **Package Hash 同步**：`DescriptorPackageHashComputer` 已收口到相同标准（转义 + null sentinel + ordinal 排序 + invariant 格式），ContentHash/EvidenceHash/EnvelopeHash 全 AoT 安全。
 
 ---
 

@@ -157,13 +157,15 @@ Phase 6g 将 descriptor 哈希计算收口为框架主链可注入式 API，替�
 | `AddDescriptorStableHash()` | DI 注册 — `TryAddSingleton<IDescriptorStableHashBuilder, DescriptorStableHashBuilder>()` |
 | `DescriptorHashComputer` → `[Obsolete]` | 旧静态类标记废弃，内部委托给 DescriptorStableHashBuilder |
 | 样本迁移 | `CompanyCertificationChangeScenarios` 中所有 `"INVALIDATED"` 哨兵哈希替换为实际计算值 |
-| 测试 | 15 个 DescriptorStableHashBuilderTests + 12 个样本测试（真实哈希驱动变更检测） |
+| 测试 | 38 个 DescriptorStableHashBuilderTests（含 6 个 per-kind 行为测试 + 3 个 tie-breaker 回归测试）+ 4 个 DescriptorStableHashCoverageTests（15 类型字段覆盖 guard） + 12 个样本测试 |
 
 **关键不变量:**
-- ContractHash 按 descriptor kind 提取语义相关字段（Schema 字段、Capability Permissions/SemanticTags、Event PayloadSchema、Form ControlType、HumanTask Outcomes、Workflow Steps），集合规范化排序
-- DefinitionHash 覆盖任意定义级变更 — 全 AoT 安全字符串拼接，显式 per-kind 字段枚举，StringComparer.Ordinal 排序，分隔符转义
-- Permission/SemanticTag 数组已规范化排序 — `OrderBy()` 保证确定性
+- ContractHash 按 descriptor kind 提取语义相关字段（Schema 字段、Capability Permissions/SemanticTags、Event PayloadSchema、Form ControlType、HumanTask Outcomes、Workflow Steps — 含 Condition），集合规范化排序，重复 key 带完整 tie-breaker
+- DefinitionHash 覆盖任意定义级变更 — 全 AoT 安全字符串拼接，显式 per-kind 字段枚举，`StringComparer.Ordinal` 排序，分隔符转义，`NullSentinel` 区分 null/empty
+- 15 种类型字段覆盖 guard — 防止 descriptor 新增字段后忘记同步更新 hash builder；6 种嵌套类型（SchemaValidationRule、CompletionOutcome、CapabilityTarget、HumanTaskTarget、SubWorkflowTarget、EventRef）均已在 guard 中登记
+- Permission/SemanticTag 数组已规范化排序 — `OrderBy()` + tie-breaker 保证确定性
 - RuntimeHash / BindingHash 保留字段 — 供未来运行时绑定状态分离
+- `DescriptorPackageHashComputer` 同步收口到相同标准 — AoT 安全字符串拼接 + 转义 + null sentinel + ordinal 排序 + invariant 格式
 
 ### Phase 4: Capability Runtime Consolidation
 
