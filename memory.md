@@ -417,6 +417,8 @@ This thread achieved the following:
 - `AddDescriptorStableHash()` DI registration.
 - 18 tests: same/recreated stability, optional field→definition change, required field addition/removal→contract change, permission change→both hashes, form label→contract stable, workflow step id→definition change, workflow target ref change→**both** hashes change, DI resolution, cross-instance stability, HumanTask/Event stability, optional field contract hash behavior (exclusion policy deferred).
 - `CompanyCertificationChangeScenarios` — `"INVALIDATED"` sentinels replaced; 12 control-plane tests pass.
+- **Schema field inclusion policy**: ContractHash currently includes ALL schema fields (required + optional). This is conservative and does not miss changes, but is stricter than eventual compatibility semantics. An explicit per-descriptor-kind inclusion/exclusion policy (Issue #29 Requirement #4) should be implemented before relying on ContractHash as a compatibility boundary for schemas.
+- **Workflow step ordering**: Steps are hashed in list order (NOT sorted by Id), because step order is semantically meaningful for workflow execution.
 - **Design spec**: GitHub issue #29.
 
 ---

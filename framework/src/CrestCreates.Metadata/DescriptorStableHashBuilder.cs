@@ -145,7 +145,7 @@ public sealed class DescriptorStableHashBuilder : IDescriptorStableHashBuilder
                 AppendField(sb, w.SupersededById);
                 AppendOptionalRef(sb, w.VariableSchema);
                 AppendField(sb, (int)w.DefaultVariableScope);
-                foreach (var s in w.Steps.OrderBy(s => s.Id, StringComparer.Ordinal))
+                foreach (var s in w.Steps)
                 {
                     AppendField(sb, s.Id);
                     AppendField(sb, (int)s.OnError);
@@ -265,7 +265,7 @@ public sealed class DescriptorStableHashBuilder : IDescriptorStableHashBuilder
                 AppendField(sb, w.Version);
                 AppendOptionalRef(sb, w.VariableSchema);
                 AppendField(sb, (int)w.DefaultVariableScope);
-                foreach (var s in w.Steps.OrderBy(s => s.Id, StringComparer.Ordinal))
+                foreach (var s in w.Steps)
                     AppendWorkflowStepDefinition(sb, s);
                 break;
 
