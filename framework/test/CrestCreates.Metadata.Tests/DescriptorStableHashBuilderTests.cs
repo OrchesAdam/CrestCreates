@@ -555,6 +555,133 @@ public sealed class DescriptorStableHashBuilderTests
         h1.DefinitionHash.Should().Be(h2.DefinitionHash);
     }
 
+    // ── Per-kind behavior tests: Contract vs DefinitionOnly ──
+
+    [Fact]
+    public void Changing_SchemaValidationRule_Should_ChangeDefinitionHashOnly()
+    {
+        var s1 = new SchemaDescriptor
+        {
+            Id = "s1", Name = "Test", Version = 1, State = DescriptorState.Active,
+            Fields = new[] { new SchemaFieldDescriptor { Name = "Name", FieldType = "string" } },
+            ValidationRules = new[] { new SchemaValidationRule { Name = "r1", Expression = "x > 0" } }
+        };
+        var s2 = new SchemaDescriptor
+        {
+            Id = "s1", Name = "Test", Version = 1, State = DescriptorState.Active,
+            Fields = new[] { new SchemaFieldDescriptor { Name = "Name", FieldType = "string" } },
+            ValidationRules = new[] { new SchemaValidationRule { Name = "r1", Expression = "x > 100" } }
+        };
+
+        var h1 = _builder.Build(s1);
+        var h2 = _builder.Build(s2);
+
+        h1.ContractHash.Should().Be(h2.ContractHash, "validation rule change is definition-only");
+        h1.DefinitionHash.Should().NotBe(h2.DefinitionHash, "validation rule change must change definition hash");
+    }
+
+    [Fact]
+    public void Changing_CapabilityCategory_Should_ChangeDefinitionHashOnly()
+    {
+        var c1 = new CapabilityDescriptor { Id = "c1", Name = "test", Version = 1, Categories = new[] { "cat-a" } };
+        var c2 = new CapabilityDescriptor { Id = "c1", Name = "test", Version = 1, Categories = new[] { "cat-b" } };
+
+        var h1 = _builder.Build(c1);
+        var h2 = _builder.Build(c2);
+
+        h1.ContractHash.Should().Be(h2.ContractHash, "category change is definition-only metadata");
+        h1.DefinitionHash.Should().NotBe(h2.DefinitionHash);
+    }
+
+    [Fact]
+    public void Changing_FormLayoutColumns_Should_ChangeDefinitionHashOnly()
+    {
+        var f1 = new FormDescriptor
+        {
+            Id = "f1", Name = "Test", Version = 1,
+            Schema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            LayoutColumns = "2",
+        };
+        var f2 = new FormDescriptor
+        {
+            Id = "f1", Name = "Test", Version = 1,
+            Schema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            LayoutColumns = "3",
+        };
+
+        var h1 = _builder.Build(f1);
+        var h2 = _builder.Build(f2);
+
+        h1.ContractHash.Should().Be(h2.ContractHash, "layout columns change is definition-only");
+        h1.DefinitionHash.Should().NotBe(h2.DefinitionHash);
+    }
+
+    [Fact]
+    public void Changing_FormFieldLabel_Should_NotChangeContractHash()
+    {
+        var f1 = new FormDescriptor
+        {
+            Id = "f1", Name = "Test", Version = 1,
+            Schema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            Fields = new[] { new FormFieldDescriptor { SchemaFieldName = "Email", Label = "Email", Order = 0 } }
+        };
+        var f2 = new FormDescriptor
+        {
+            Id = "f1", Name = "Test", Version = 1,
+            Schema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            Fields = new[] { new FormFieldDescriptor { SchemaFieldName = "Email", Label = "E-mail Address", Order = 0 } }
+        };
+
+        var h1 = _builder.Build(f1);
+        var h2 = _builder.Build(f2);
+
+        h1.ContractHash.Should().Be(h2.ContractHash, "label change is cosmetic — not in contract");
+    }
+
+    [Fact]
+    public void Changing_HumanTaskTimeout_Should_ChangeDefinitionHashOnly()
+    {
+        var ht1 = new HumanTaskDescriptor
+        {
+            Id = "ht1", Name = "Test", Version = 1,
+            Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("form_01", 1),
+            Timeout = TimeSpan.FromHours(1)
+        };
+        var ht2 = new HumanTaskDescriptor
+        {
+            Id = "ht1", Name = "Test", Version = 1,
+            Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("form_01", 1),
+            Timeout = TimeSpan.FromHours(2)
+        };
+
+        var h1 = _builder.Build(ht1);
+        var h2 = _builder.Build(ht2);
+
+        h1.ContractHash.Should().Be(h2.ContractHash, "timeout change is definition-only operational metadata");
+        h1.DefinitionHash.Should().NotBe(h2.DefinitionHash);
+    }
+
+    [Fact]
+    public void Changing_WorkflowStepName_Should_ChangeDefinitionHashOnly()
+    {
+        var w1 = new WorkflowDescriptor
+        {
+            Id = "wf1", Name = "test", Version = 1,
+            Steps = new[] { new WorkflowStep { Id = "s1", Name = "Step A", Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_x", 1) }, Transitions = Array.Empty<string>() } }
+        };
+        var w2 = new WorkflowDescriptor
+        {
+            Id = "wf1", Name = "test", Version = 1,
+            Steps = new[] { new WorkflowStep { Id = "s1", Name = "Step B", Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_x", 1) }, Transitions = Array.Empty<string>() } }
+        };
+
+        var h1 = _builder.Build(w1);
+        var h2 = _builder.Build(w2);
+
+        h1.ContractHash.Should().Be(h2.ContractHash, "step name is display metadata — not in contract");
+        h1.DefinitionHash.Should().NotBe(h2.DefinitionHash, "step name change must change definition hash");
+    }
+
     // ── Helpers ──
 
     private static SchemaDescriptor CreateSchema(
