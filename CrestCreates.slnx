@@ -60,7 +60,8 @@
     <Project Path="framework/src/CrestCreates.Schema/CrestCreates.Schema.csproj" />
     <Project Path="framework/src/CrestCreates.Security.Abstractions/CrestCreates.Security.Abstractions.csproj" />
     <Project Path="framework/src/CrestCreates.Security/CrestCreates.Security.csproj" />
-      
+    <Project Path="framework/src/CrestCreates.Snapshot.Abstractions/CrestCreates.Snapshot.Abstractions.csproj" />
+    <Project Path="framework/src/CrestCreates.Snapshot/CrestCreates.Snapshot.csproj" />
     <Project Path="framework/src/CrestCreates.Testing/CrestCreates.Testing.csproj" />
       
     <Project Path="framework/src/CrestCreates.VirtualFileSystem/CrestCreates.VirtualFileSystem.csproj" />
@@ -151,6 +152,7 @@
     <Project Path="framework/test/CrestCreates.OrmProviders.Tests/CrestCreates.OrmProviders.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Scheduling.IntegrationTests/CrestCreates.Scheduling.IntegrationTests.csproj" />
     <Project Path="framework/test/CrestCreates.Scheduling.Tests/CrestCreates.Scheduling.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.Snapshot.Tests/CrestCreates.Snapshot.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Schema.Tests/CrestCreates.Schema.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
     <Project Path="framework/test/CrestCreates.FileManagement.Tests/CrestCreates.FileManagement.Tests.csproj" />
