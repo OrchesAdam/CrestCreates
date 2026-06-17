@@ -100,7 +100,9 @@ public static class SnapshotExtensions
             return new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
-        return new Dictionary<string, string>(source, StringComparer.Ordinal);
+        return new Dictionary<string, string>(
+            source.OrderBy(kvp => kvp.Key, StringComparer.Ordinal),
+            StringComparer.Ordinal);
     }
 }
 ```
@@ -108,7 +110,7 @@ public static class SnapshotExtensions
 Key decisions:
 - `SnapshotList` returns `IReadOnlyList<T>` via `.ToArray()` — array is the simplest immutable container, fully AOT-safe.
 - `SnapshotDictionary` accepts optional `IEqualityComparer<TKey>` — defaults to `null` (uses default equality), but callers can pass `StringComparer.Ordinal` for string keys to preserve deterministic semantics.
-- `SnapshotStringDictionary` explicitly uses `StringComparer.Ordinal` — deterministic, culture-invariant, matches existing pattern in `DescriptorDraft.CreateClone()`.
+- `SnapshotStringDictionary` explicitly uses `StringComparer.Ordinal` — deterministic, culture-invariant, matches existing pattern in `DescriptorDraft.CreateClone()`. Entries are sorted by key during construction so enumeration order is deterministic regardless of source insertion order. This matters for stable hashes, manifests, and review evidence.
 - `SnapshotStringDictionary` accepts `null` and returns a new empty `Dictionary<string, string>(StringComparer.Ordinal)` — always returns an independent container, never a shared static empty. This keeps snapshot semantics pure: every call returns an isolated instance.
 - `ArgumentNullException.ThrowIfNull` — .NET 7+ pattern, no reflection.
 
