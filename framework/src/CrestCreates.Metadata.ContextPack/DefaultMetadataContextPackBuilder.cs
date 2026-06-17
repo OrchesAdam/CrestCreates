@@ -139,8 +139,11 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
         var descriptorPresentRefs = new HashSet<DescriptorRef>(descriptorEntries.Select(e => e.Ref));
         var relationshipEntries = CollectRelationshipEntries(descriptorPresentRefs, includedEdges, source);
 
-        // 10. Build summary
-        var summary = BuildSummary(descriptorEntries, relationshipEntries, foundFocusRefs, diagnostics, traversalDepthReached);
+        // 10. Build summary — canonicalize focus refs to match descriptor entry refs
+        var canonicalFocusRefs = foundFocusRefs
+            .Select(r => source.Resolve(r).CanonicalRef)
+            .ToList();
+        var summary = BuildSummary(descriptorEntries, relationshipEntries, canonicalFocusRefs, diagnostics, traversalDepthReached);
 
         // 11. Sort output deterministically
         var sortedDescriptors = SortDescriptors(descriptorEntries);
@@ -462,19 +465,15 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
         foreach (var edge in includedEdges)
         {
             // Pack closure invariant: every relationship endpoint must exist in the descriptor set
+            // includedRefs contains canonical refs from descriptor entries
             var fromResolved = source.Resolve(edge.From);
             var toResolved = source.Resolve(edge.To);
 
             var fromCanonical = fromResolved.CanonicalRef;
             var toCanonical = toResolved.CanonicalRef;
 
-            // Check containment using topology refs (includedRefs stores topology refs)
-            var fromTopologyRef = fromResolved.TopologyNode?.Ref ?? fromCanonical;
-            var toTopologyRef = toResolved.TopologyNode?.Ref ?? toCanonical;
+            if (!includedRefs.Contains(fromCanonical) || !includedRefs.Contains(toCanonical)) continue;
 
-            if (!includedRefs.Contains(fromTopologyRef) || !includedRefs.Contains(toTopologyRef)) continue;
-
-            // Output uses canonical versioned refs
             var key = (fromCanonical, toCanonical, edge.Kind);
             if (!seen.Add(key)) continue;
 

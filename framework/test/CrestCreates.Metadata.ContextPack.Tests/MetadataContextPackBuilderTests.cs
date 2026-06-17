@@ -1603,6 +1603,44 @@ public class MetadataContextPackBuilderTests
         pack.Relationships[0].To.Should().Be(b);
     }
 
+    [Fact]
+    public void Unpinned_Edge_Endpoints_With_Single_Version_Descriptors_Keep_Canonical_Relationship()
+    {
+        // Topology uses unpinned refs; inventory has single versioned descriptors
+        var capUnpinned = new DescriptorRef("capability", "SubmitCap");
+        var schemaUnpinned = new DescriptorRef("schema", "InputSchema");
+        var capV1 = new DescriptorRef("capability", "SubmitCap", 1);
+        var schemaV1 = new DescriptorRef("schema", "InputSchema", 1);
+
+        var topology = CreateSnapshot(
+            new[] { (capUnpinned, DescriptorKind.Capability, "SubmitCap"),
+                    (schemaUnpinned, DescriptorKind.Schema, "InputSchema") },
+            new (int, DescriptorRef, DescriptorRef, RelationshipKind, string?, RelationshipStrength, bool)[] {
+                (0, capUnpinned, schemaUnpinned, RelationshipKind.Uses, null, RelationshipStrength.Strong, false)
+            });
+
+        var capDesc = new VersionedTestDescriptor(capV1, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active, 1);
+        var schemaDesc = new VersionedTestDescriptor(schemaV1, DescriptorKind.Schema, "InputSchema", DescriptorState.Active, 1);
+        var descriptors = new List<IDescriptor> { capDesc, schemaDesc };
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.DirectDependencies,
+            FocusDescriptors = new[] { capUnpinned }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // Descriptors use canonical versioned refs
+        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { capV1, schemaV1 });
+        // Relationship must be preserved with canonical versioned refs — not dropped by closure check
+        pack.Relationships.Should().ContainSingle();
+        pack.Relationships[0].From.Should().Be(capV1);
+        pack.Relationships[0].To.Should().Be(schemaV1);
+        // Summary.FocusRefs should also be canonicalized
+        pack.Summary.FocusRefs.Should().BeEquivalentTo(new[] { capV1 });
+    }
+
     private sealed class InventoryOnlyDescriptor : IDescriptor
     {
         private readonly DescriptorRef _ref;
