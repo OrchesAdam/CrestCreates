@@ -93,6 +93,35 @@ public class SnapshotStringDictionaryTests
     }
 
     [Fact]
+    public void Deterministic_Enumeration_Order_Regardless_Of_Insertion_Order()
+    {
+        // Two dictionaries with same content but different insertion order
+        var source1 = new Dictionary<string, string>
+        {
+            ["zebra"] = "z",
+            ["apple"] = "a",
+            ["mango"] = "m",
+        };
+
+        var source2 = new Dictionary<string, string>
+        {
+            ["mango"] = "m",
+            ["zebra"] = "z",
+            ["apple"] = "a",
+        };
+
+        var snapshot1 = source1.SnapshotStringDictionary();
+        var snapshot2 = source2.SnapshotStringDictionary();
+
+        // Both snapshots must enumerate in the same ordinal-sorted order
+        var keys1 = snapshot1.Keys.ToList();
+        var keys2 = snapshot2.Keys.ToList();
+
+        keys1.Should().Equal(keys2);
+        keys1.Should().BeInAscendingOrder(StringComparer.Ordinal);
+    }
+
+    [Fact]
     public void Preserves_All_Entries()
     {
         var source = new Dictionary<string, string>
