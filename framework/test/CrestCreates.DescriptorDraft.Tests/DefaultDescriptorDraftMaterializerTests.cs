@@ -133,6 +133,38 @@ public class DefaultDescriptorDraftMaterializerTests
     }
 
     [Fact]
+    public void Create_Does_Not_Share_Existing_Descriptor_Reference_With_CurrentInventory()
+    {
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Existing", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var draft = CreateCreateDraft(id: "schema2", version: 1);
+
+        var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, With(existing));
+
+        result.IsMaterialized.Should().BeTrue();
+        var proposedExisting = result.ProposedInventory
+            .OfType<SchemaDescriptor>()
+            .Single(x => x.Id == "schema1");
+        proposedExisting.Should().NotBeSameAs(existing);
+    }
+
+    [Fact]
+    public void Update_Does_Not_Share_NonReplaced_Descriptor_Reference_With_CurrentInventory()
+    {
+        var v1 = new SchemaDescriptor { Id = "schema1", Name = "V1", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var v2 = new SchemaDescriptor { Id = "schema2", Name = "V2", Version = 1, State = DescriptorState.Active, ContractHash = "c", DefinitionHash = "d" };
+        var inventory = new List<IDescriptor> { v1, v2 };
+        var draft = CreateUpdateDraft();
+
+        var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, inventory);
+
+        result.IsMaterialized.Should().BeTrue();
+        var proposedV2 = result.ProposedInventory
+            .OfType<SchemaDescriptor>()
+            .Single(x => x.Id == "schema2");
+        proposedV2.Should().NotBeSameAs(v2);
+    }
+
+    [Fact]
     public void Create_Does_Not_Insert_Original_Payload_Descriptor_Reference()
     {
         var draft = CreateCreateDraft();
