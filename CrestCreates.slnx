@@ -48,6 +48,8 @@
     <Project Path="framework/src/CrestCreates.Localization/CrestCreates.Localization.csproj" />
     <Project Path="framework/src/CrestCreates.Logging/CrestCreates.Logging.csproj" />
     <Project Path="framework/src/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
+    <Project Path="framework/src/CrestCreates.Metadata.ContextPack.Abstractions/CrestCreates.Metadata.ContextPack.Abstractions.csproj" />
+    <Project Path="framework/src/CrestCreates.Metadata.ContextPack/CrestCreates.Metadata.ContextPack.csproj" />
     <Project Path="framework/src/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
     <Project Path="framework/src/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
     <Project Path="framework/src/CrestCreates.Organization.Abstractions/CrestCreates.Organization.Abstractions.csproj" />
@@ -148,6 +150,7 @@
     <Project Path="framework/test/CrestCreates.HumanTask.Tests/CrestCreates.HumanTask.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.IntegrationTests/CrestCreates.IntegrationTests.csproj" />
     <Project Path="framework/test/CrestCreates.Logging.Tests/CrestCreates.Logging.Tests.csproj" />
+    <Project Path="framework/test/CrestCreates.Metadata.ContextPack.Tests/CrestCreates.Metadata.ContextPack.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Metadata.Tests/CrestCreates.Metadata.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.OrmProviders.Tests/CrestCreates.OrmProviders.Tests.csproj" />
     <Project Path="framework/test/CrestCreates.Scheduling.IntegrationTests/CrestCreates.Scheduling.IntegrationTests.csproj" />

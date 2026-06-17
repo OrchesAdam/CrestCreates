@@ -3,12 +3,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>CrestCreates.Metadata.Abstractions</RootNamespace>
+    <RootNamespace>CrestCreates.Metadata.ContextPack.Abstractions</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <InternalsVisibleTo Include="CrestCreates.Metadata" />
-    <InternalsVisibleTo Include="CrestCreates.Metadata.Tests" />
+    <InternalsVisibleTo Include="CrestCreates.Metadata.ContextPack" />
     <InternalsVisibleTo Include="CrestCreates.Metadata.ContextPack.Tests" />
-    <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="..\CrestCreates.Metadata.Abstractions\CrestCreates.Metadata.Abstractions.csproj" />
   </ItemGroup>
 </Project>
