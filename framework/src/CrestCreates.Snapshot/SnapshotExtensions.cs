@@ -38,20 +38,21 @@ public static class SnapshotExtensions
     /// <summary>
     /// Creates a defensive copy of a string-to-string dictionary
     /// using <see cref="StringComparer.Ordinal"/> for deterministic key comparison
-    /// and enumeration order. String values are immutable and reused; only the
-    /// dictionary container is copied. Always returns an independent container,
-    /// never a shared static empty.
+    /// and enumeration order. Enumeration order is guaranteed to be sorted by key
+    /// per <see cref="StringComparer.Ordinal"/>, regardless of source insertion order.
+    /// String values are immutable and reused; only the dictionary container is copied.
+    /// Always returns an independent container, never a shared static empty.
     /// </summary>
     public static IReadOnlyDictionary<string, string> SnapshotStringDictionary(
         this IReadOnlyDictionary<string, string>? source)
     {
         if (source is null or { Count: 0 })
         {
-            return new Dictionary<string, string>(StringComparer.Ordinal);
+            return new SortedDictionary<string, string>(StringComparer.Ordinal);
         }
 
-        return new Dictionary<string, string>(
-            source.OrderBy(kvp => kvp.Key, StringComparer.Ordinal),
+        return new SortedDictionary<string, string>(
+            source.ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.Ordinal),
             StringComparer.Ordinal);
     }
 }
