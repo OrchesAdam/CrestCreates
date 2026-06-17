@@ -9,4 +9,7 @@ public static class MetadataContextPackDiagnosticCodes
     public const string KindExcluded = "CTXPACK_KIND_EXCLUDED";
     public const string FocusKindFiltered = "CTXPACK_FOCUS_KIND_FILTERED";
     public const string HashBuilderMissing = "CTXPACK_HASH_BUILDER_MISSING";
+    public const string DescriptorMissingForTopologyRef = "CTXPACK_DESCRIPTOR_MISSING_FOR_TOPOLOGY_REF";
+    public const string TopologyNodeMissingForDescriptor = "CTXPACK_TOPOLOGY_NODE_MISSING_FOR_DESCRIPTOR";
+    public const string AmbiguousDescriptorRef = "CTXPACK_AMBIGUOUS_DESCRIPTOR_REF";
 }

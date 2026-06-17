@@ -26,31 +26,72 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
         // 2. Snapshot request collections defensively
         var snapshotRequest = SnapshotRequest(request);
 
-        // 3. Build descriptor index
-        var descriptorIndex = BuildDescriptorIndex(descriptors);
+        // 3. Create descriptor source (centralizes topology + inventory lookup)
+        var source = new MetadataContextDescriptorSource(topology, descriptors);
 
-        // 4. Resolve focus nodes
+        // 4. Resolve focus nodes with asymmetric mismatch policy
         var focusRefs = snapshotRequest.FocusDescriptors;
         var foundFocusRefs = new List<DescriptorRef>();
-        var missingFocusRefs = new List<DescriptorRef>();
 
         foreach (var focusRef in focusRefs)
         {
-            if (topology.Contains(focusRef))
+            var resolved = source.Resolve(focusRef);
+
+            // Ambiguity check takes priority over all other resolution states
+            if (resolved.IsAmbiguousUnpinned)
             {
-                foundFocusRefs.Add(topology.FindNode(focusRef)!.Ref);
+                diagnostics.Add(new MetadataContextPackDiagnostic
+                {
+                    Severity = MetadataContextPackDiagnosticSeverity.Warning,
+                    Code = MetadataContextPackDiagnosticCodes.AmbiguousDescriptorRef,
+                    Message = $"Focus descriptor ref '{focusRef.FullId}' matches multiple versions. Specify an exact version.",
+                    Subject = focusRef
+                });
+                continue;
             }
-            else
+
+            if (resolved.TopologyNode is null && resolved.Descriptor is null)
             {
-                missingFocusRefs.Add(focusRef);
+                // Neither topology nor inventory — not found
                 diagnostics.Add(new MetadataContextPackDiagnostic
                 {
                     Severity = MetadataContextPackDiagnosticSeverity.Warning,
                     Code = MetadataContextPackDiagnosticCodes.FocusNotFound,
-                    Message = $"Focus descriptor '{focusRef.FullId}' not found in topology.",
+                    Message = $"Focus descriptor '{focusRef.FullId}' not found in topology or descriptor inventory.",
                     Subject = focusRef
                 });
+                continue;
             }
+
+            if (resolved.TopologyNode is not null && resolved.Descriptor is null)
+            {
+                // Topology has the node but inventory has no descriptor
+                diagnostics.Add(new MetadataContextPackDiagnostic
+                {
+                    Severity = MetadataContextPackDiagnosticSeverity.Error,
+                    Code = MetadataContextPackDiagnosticCodes.DescriptorMissingForTopologyRef,
+                    Message = $"Topology references descriptor '{focusRef.FullId}' but it is absent from descriptor inventory.",
+                    Subject = focusRef
+                });
+                continue;
+            }
+
+            if (resolved.TopologyNode is null && resolved.Descriptor is not null)
+            {
+                // Inventory-only — include if focused, no traversal possible
+                diagnostics.Add(new MetadataContextPackDiagnostic
+                {
+                    Severity = MetadataContextPackDiagnosticSeverity.Warning,
+                    Code = MetadataContextPackDiagnosticCodes.TopologyNodeMissingForDescriptor,
+                    Message = $"Descriptor '{focusRef.FullId}' exists in inventory but has no topology node.",
+                    Subject = focusRef
+                });
+                foundFocusRefs.Add(focusRef);
+                continue;
+            }
+
+            // Fully resolved
+            foundFocusRefs.Add(resolved.TopologyNode!.Ref);
         }
 
         // 5. Scope-driven traversal
@@ -66,36 +107,37 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
                 break;
 
             case MetadataContextPackScope.DirectDependencies:
-                ResolveDirectDependencies(foundFocusRefs, topology, includedRefs, includedEdges);
+                ResolveDirectDependencies(foundFocusRefs, source, includedRefs, includedEdges);
                 traversalDepthReached = 1;
                 break;
 
             case MetadataContextPackScope.DirectDependents:
-                ResolveDirectDependents(foundFocusRefs, topology, includedRefs, includedEdges);
+                ResolveDirectDependents(foundFocusRefs, source, includedRefs, includedEdges);
                 traversalDepthReached = 1;
                 break;
 
             case MetadataContextPackScope.ImpactRadius:
-                traversalDepthReached = ResolveImpactRadius(foundFocusRefs, topology, snapshotRequest.MaxTraversalDepth, includedRefs, includedEdges, diagnostics);
+                traversalDepthReached = ResolveImpactRadius(foundFocusRefs, source, snapshotRequest.MaxTraversalDepth, includedRefs, includedEdges, diagnostics);
                 break;
 
             case MetadataContextPackScope.RuntimeScenario:
-                traversalDepthReached = ResolveRuntimeScenario(foundFocusRefs, topology, snapshotRequest, includedRefs, includedEdges, diagnostics);
+                traversalDepthReached = ResolveRuntimeScenario(foundFocusRefs, source, snapshotRequest, includedRefs, includedEdges);
                 break;
         }
 
         // 6. Apply kind filters (non-focus only)
         var focusSet = new HashSet<DescriptorRef>(foundFocusRefs);
-        ApplyKindFilters(includedRefs, focusSet, snapshotRequest, topology, diagnostics);
+        ApplyKindFilters(includedRefs, focusSet, snapshotRequest, source, diagnostics);
 
         // 7. Apply count bounds (non-focus only)
         ApplyCountBounds(includedRefs, focusSet, snapshotRequest.MaxDescriptorCount, diagnostics);
 
-        // 8. Collect relationship edges
-        var relationshipEntries = CollectRelationshipEntries(includedRefs, includedEdges, topology);
+        // 8. Build descriptor entries (only when resolved.Descriptor is not null)
+        var descriptorEntries = BuildDescriptorEntries(includedRefs, focusSet, source, snapshotRequest, diagnostics);
 
-        // 9. Build descriptor entries
-        var descriptorEntries = BuildDescriptorEntries(includedRefs, focusSet, descriptorIndex, topology, snapshotRequest, diagnostics);
+        // 9. Collect relationship edges (with pack closure invariant against actual descriptor entries)
+        var descriptorPresentRefs = new HashSet<DescriptorRef>(descriptorEntries.Select(e => e.Ref));
+        var relationshipEntries = CollectRelationshipEntries(descriptorPresentRefs, includedEdges, source);
 
         // 10. Build summary
         var summary = BuildSummary(descriptorEntries, relationshipEntries, foundFocusRefs, diagnostics, traversalDepthReached);
@@ -140,89 +182,40 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
         };
     }
 
-    private static Dictionary<DescriptorRef, IDescriptor> BuildDescriptorIndex(IReadOnlyList<IDescriptor> descriptors)
-    {
-        var index = new Dictionary<DescriptorRef, IDescriptor>();
-        foreach (var d in descriptors)
-        {
-            // Index by exact ref including version from IVersionedDescriptor
-            var version = d is IVersionedDescriptor vd ? vd.Version : (int?)null;
-            var exactKey = new DescriptorRef(d.Namespace, d.Id, version);
-            index[exactKey] = d;
-
-            // Also store by unpinned key as fallback, but don't overwrite an existing entry
-            var unpinnedKey = new DescriptorRef(d.Namespace, d.Id, null);
-            if (!index.ContainsKey(unpinnedKey))
-                index[unpinnedKey] = d;
-        }
-        return index;
-    }
-
-    private static IDescriptor? FindDescriptor(
-        DescriptorRef ref_, Dictionary<DescriptorRef, IDescriptor> descriptorIndex)
-    {
-        // Try exact match first (version-aware)
-        if (ref_.Version.HasValue && descriptorIndex.TryGetValue(ref_, out var exact))
-            return exact;
-
-        // Fallback to unpinned lookup
-        var unpinnedKey = new DescriptorRef(ref_.Namespace, ref_.Id, null);
-        if (descriptorIndex.TryGetValue(unpinnedKey, out var unpinned))
-            return unpinned;
-
-        return null;
-    }
-
     private static void ResolveDirectDependencies(
-        List<DescriptorRef> focusRefs, DescriptorTopologySnapshot topology,
+        List<DescriptorRef> focusRefs, MetadataContextDescriptorSource source,
         HashSet<DescriptorRef> includedRefs, List<DescriptorEdge> includedEdges)
     {
         foreach (var focusRef in focusRefs)
         {
             includedRefs.Add(focusRef);
-            var deps = topology.GetDirectDependencies(focusRef);
-            foreach (var dep in deps)
-            {
-                includedRefs.Add(dep.Ref);
-            }
 
-            var focusNode = topology.FindNode(focusRef);
-            if (focusNode is not null)
+            foreach (var visit in source.GetDirectedEdges(focusRef, ScenarioTraversalDirection.Dependencies))
             {
-                foreach (var edgeIdx in focusNode.OutgoingEdgeIndices)
-                {
-                    includedEdges.Add(topology.Edges[edgeIdx]);
-                }
+                includedEdges.Add(visit.Edge);
+                includedRefs.Add(visit.Target);
             }
         }
     }
 
     private static void ResolveDirectDependents(
-        List<DescriptorRef> focusRefs, DescriptorTopologySnapshot topology,
+        List<DescriptorRef> focusRefs, MetadataContextDescriptorSource source,
         HashSet<DescriptorRef> includedRefs, List<DescriptorEdge> includedEdges)
     {
         foreach (var focusRef in focusRefs)
         {
             includedRefs.Add(focusRef);
-            var dependents = topology.GetDirectDependents(focusRef);
-            foreach (var dep in dependents)
-            {
-                includedRefs.Add(dep.Ref);
-            }
 
-            var focusNode = topology.FindNode(focusRef);
-            if (focusNode is not null)
+            foreach (var visit in source.GetDirectedEdges(focusRef, ScenarioTraversalDirection.Dependents))
             {
-                foreach (var edgeIdx in focusNode.IncomingEdgeIndices)
-                {
-                    includedEdges.Add(topology.Edges[edgeIdx]);
-                }
+                includedEdges.Add(visit.Edge);
+                includedRefs.Add(visit.Target);
             }
         }
     }
 
     private static int ResolveImpactRadius(
-        List<DescriptorRef> focusRefs, DescriptorTopologySnapshot topology, int maxDepth,
+        List<DescriptorRef> focusRefs, MetadataContextDescriptorSource source, int maxDepth,
         HashSet<DescriptorRef> includedRefs, List<DescriptorEdge> includedEdges,
         List<MetadataContextPackDiagnostic> diagnostics)
     {
@@ -232,11 +225,10 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
         // Depth 0: focus nodes
         foreach (var r in focusRefs)
         {
-            var node = topology.FindNode(r);
-            if (node is not null && visited.Add(node.Ref))
+            if (visited.Add(r))
             {
-                includedRefs.Add(node.Ref);
-                frontier.Add(node.Ref);
+                includedRefs.Add(r);
+                frontier.Add(r);
             }
         }
 
@@ -247,32 +239,13 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
             var nextFrontier = new List<DescriptorRef>();
             foreach (var currentRef in frontier)
             {
-                var currentNode = topology.FindNode(currentRef);
-                if (currentNode is null) continue;
-
-                // Follow outgoing edges
-                foreach (var edgeIdx in currentNode.OutgoingEdgeIndices)
+                foreach (var visit in source.GetDirectedEdges(currentRef, ScenarioTraversalDirection.Both))
                 {
-                    var edge = topology.Edges[edgeIdx];
-                    includedEdges.Add(edge);
-                    var target = topology.FindNode(edge.To);
-                    if (target is not null && visited.Add(target.Ref))
+                    includedEdges.Add(visit.Edge);
+                    if (visited.Add(visit.Target))
                     {
-                        includedRefs.Add(target.Ref);
-                        nextFrontier.Add(target.Ref);
-                    }
-                }
-
-                // Follow incoming edges
-                foreach (var edgeIdx in currentNode.IncomingEdgeIndices)
-                {
-                    var edge = topology.Edges[edgeIdx];
-                    includedEdges.Add(edge);
-                    var source = topology.FindNode(edge.From);
-                    if (source is not null && visited.Add(source.Ref))
-                    {
-                        includedRefs.Add(source.Ref);
-                        nextFrontier.Add(source.Ref);
+                        includedRefs.Add(visit.Target);
+                        nextFrontier.Add(visit.Target);
                     }
                 }
             }
@@ -289,29 +262,9 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
         var hasUnvisitedBeyond = false;
         foreach (var frontierRef in frontier)
         {
-            var frontierNode = topology.FindNode(frontierRef);
-            if (frontierNode is null) continue;
-
-            // Check outgoing edges
-            foreach (var edgeIdx in frontierNode.OutgoingEdgeIndices)
+            foreach (var visit in source.GetDirectedEdges(frontierRef, ScenarioTraversalDirection.Both))
             {
-                var edge = topology.Edges[edgeIdx];
-                var target = topology.FindNode(edge.To);
-                if (target is not null && !visited.Contains(target.Ref))
-                {
-                    hasUnvisitedBeyond = true;
-                    break;
-                }
-            }
-
-            if (hasUnvisitedBeyond) break;
-
-            // Check incoming edges
-            foreach (var edgeIdx in frontierNode.IncomingEdgeIndices)
-            {
-                var edge = topology.Edges[edgeIdx];
-                var source = topology.FindNode(edge.From);
-                if (source is not null && !visited.Contains(source.Ref))
+                if (!visited.Contains(visit.Target))
                 {
                     hasUnvisitedBeyond = true;
                     break;
@@ -335,10 +288,9 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
     }
 
     private static int ResolveRuntimeScenario(
-        List<DescriptorRef> focusRefs, DescriptorTopologySnapshot topology,
+        List<DescriptorRef> focusRefs, MetadataContextDescriptorSource source,
         MetadataContextPackRequest request,
-        HashSet<DescriptorRef> includedRefs, List<DescriptorEdge> includedEdges,
-        List<MetadataContextPackDiagnostic> diagnostics)
+        HashSet<DescriptorRef> includedRefs, List<DescriptorEdge> includedEdges)
     {
         var recipe = request.ScenarioRecipe;
         if (recipe is null) return 0;
@@ -359,51 +311,22 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
 
                 foreach (var currentRef in boundary)
                 {
-                    var currentNode = topology.FindNode(currentRef);
-                    if (currentNode is null) continue;
-
-                    // Build edge list with direction tracking for correct target resolution
-                    List<(int EdgeIndex, bool IsOutgoing)> directedEdges = new();
-
-                    switch (step.Direction)
+                    foreach (var visit in source.GetDirectedEdges(currentRef, step.Direction))
                     {
-                        case ScenarioTraversalDirection.Dependencies:
-                            foreach (var idx in currentNode.OutgoingEdgeIndices)
-                                directedEdges.Add((idx, true));
-                            break;
-                        case ScenarioTraversalDirection.Dependents:
-                            foreach (var idx in currentNode.IncomingEdgeIndices)
-                                directedEdges.Add((idx, false));
-                            break;
-                        case ScenarioTraversalDirection.Both:
-                            foreach (var idx in currentNode.OutgoingEdgeIndices)
-                                directedEdges.Add((idx, true));
-                            foreach (var idx in currentNode.IncomingEdgeIndices)
-                                directedEdges.Add((idx, false));
-                            break;
-                    }
+                        if (visit.Edge.Kind != step.FollowKind) continue;
+                        if (step.Role is not null && visit.Edge.Role != step.Role) continue;
 
-                    foreach (var (edgeIdx, isOutgoing) in directedEdges)
-                    {
-                        var edge = topology.Edges[edgeIdx];
-
-                        if (edge.Kind != step.FollowKind) continue;
-                        if (step.Role is not null && edge.Role != step.Role) continue;
-
-                        // Outgoing edges target edge.To; incoming edges target edge.From
-                        var targetRef = isOutgoing ? edge.To : edge.From;
-
-                        var targetNode = topology.FindNode(targetRef);
+                        var targetNode = source.Resolve(visit.Target).TopologyNode;
                         if (targetNode is null) continue;
 
                         if (step.TargetKind.HasValue && targetNode.Kind != step.TargetKind.Value) continue;
 
-                        includedEdges.Add(edge);
+                        includedEdges.Add(visit.Edge);
 
-                        if (stepVisited.Add(targetNode.Ref))
+                        if (stepVisited.Add(visit.Target))
                         {
-                            includedRefs.Add(targetNode.Ref);
-                            nextBoundary.Add(targetNode.Ref);
+                            includedRefs.Add(visit.Target);
+                            nextBoundary.Add(visit.Target);
                         }
                     }
                 }
@@ -421,21 +344,21 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
 
     private static void ApplyKindFilters(
         HashSet<DescriptorRef> includedRefs, HashSet<DescriptorRef> focusSet,
-        MetadataContextPackRequest request, DescriptorTopologySnapshot topology,
+        MetadataContextPackRequest request, MetadataContextDescriptorSource source,
         List<MetadataContextPackDiagnostic> diagnostics)
     {
         // Check if any focus descriptor would be filtered out
         foreach (var focusRef in focusSet)
         {
-            var node = topology.FindNode(focusRef);
-            if (node is null) continue;
+            var resolved = source.Resolve(focusRef);
+            var kind = resolved.Descriptor?.Kind ?? resolved.TopologyNode?.Kind;
+            if (kind is null) continue;
 
-            var kind = node.Kind;
             var wouldBeExcluded = false;
 
-            if (request.IncludeKinds is not null && !request.IncludeKinds.Contains(kind))
+            if (request.IncludeKinds is not null && !request.IncludeKinds.Contains(kind.Value))
                 wouldBeExcluded = true;
-            if (request.ExcludeKinds is not null && request.ExcludeKinds.Contains(kind))
+            if (request.ExcludeKinds is not null && request.ExcludeKinds.Contains(kind.Value))
                 wouldBeExcluded = true;
 
             if (wouldBeExcluded)
@@ -456,16 +379,16 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
         {
             if (focusSet.Contains(ref_)) continue;
 
-            var node = topology.FindNode(ref_);
-            if (node is null) continue;
+            var resolved = source.Resolve(ref_);
+            var kind = resolved.Descriptor?.Kind ?? resolved.TopologyNode?.Kind;
+            if (kind is null) continue;
 
-            var kind = node.Kind;
-            if (request.IncludeKinds is not null && !request.IncludeKinds.Contains(kind))
+            if (request.IncludeKinds is not null && !request.IncludeKinds.Contains(kind.Value))
             {
                 toRemove.Add(ref_);
                 continue;
             }
-            if (request.ExcludeKinds is not null && request.ExcludeKinds.Contains(kind))
+            if (request.ExcludeKinds is not null && request.ExcludeKinds.Contains(kind.Value))
             {
                 toRemove.Add(ref_);
             }
@@ -529,26 +452,30 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
 
     private static List<MetadataContextPackRelationshipEntry> CollectRelationshipEntries(
         HashSet<DescriptorRef> includedRefs, List<DescriptorEdge> includedEdges,
-        DescriptorTopologySnapshot topology)
+        MetadataContextDescriptorSource source)
     {
         var entries = new List<MetadataContextPackRelationshipEntry>();
         var seen = new HashSet<(DescriptorRef, DescriptorRef, RelationshipKind)>();
 
         foreach (var edge in includedEdges)
         {
-            // Only include edges where both endpoints are in the included set
-            var fromResolved = topology.FindNode(edge.From);
-            var toResolved = topology.FindNode(edge.To);
-            if (fromResolved is null || toResolved is null) continue;
-            if (!includedRefs.Contains(fromResolved.Ref) || !includedRefs.Contains(toResolved.Ref)) continue;
+            // Pack closure invariant: every relationship endpoint must exist in the descriptor set
+            var fromResolved = source.Resolve(edge.From);
+            var toResolved = source.Resolve(edge.To);
 
-            var key = (fromResolved.Ref, toResolved.Ref, edge.Kind);
+            var fromRef = fromResolved.TopologyNode?.Ref;
+            var toRef = toResolved.TopologyNode?.Ref;
+
+            if (fromRef is null || toRef is null) continue;
+            if (!includedRefs.Contains(fromRef.Value) || !includedRefs.Contains(toRef.Value)) continue;
+
+            var key = (fromRef.Value, toRef.Value, edge.Kind);
             if (!seen.Add(key)) continue;
 
             entries.Add(new MetadataContextPackRelationshipEntry
             {
-                From = fromResolved.Ref,
-                To = toResolved.Ref,
+                From = fromRef.Value,
+                To = toRef.Value,
                 Kind = edge.Kind,
                 Role = edge.Role,
                 SourcePath = edge.SourcePath,
@@ -562,8 +489,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
 
     private List<MetadataContextPackDescriptorEntry> BuildDescriptorEntries(
         HashSet<DescriptorRef> includedRefs, HashSet<DescriptorRef> focusSet,
-        Dictionary<DescriptorRef, IDescriptor> descriptorIndex,
-        DescriptorTopologySnapshot topology,
+        MetadataContextDescriptorSource source,
         MetadataContextPackRequest request,
         List<MetadataContextPackDiagnostic> diagnostics)
     {
@@ -571,22 +497,49 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
 
         foreach (var ref_ in includedRefs)
         {
-            // Prefer topology node for Kind/Name/State — it is version-aware
-            var topologyNode = topology.FindNode(ref_);
-            var descriptor = FindDescriptor(ref_, descriptorIndex);
+            var resolved = source.Resolve(ref_);
 
-            var kind = topologyNode?.Kind ?? descriptor?.Kind ?? DescriptorKind.Schema;
-            var name = topologyNode?.Name ?? descriptor?.Name ?? ref_.Id;
-            var state = topologyNode?.State ?? descriptor?.State ?? DescriptorState.Active;
+            // DescriptorEntry is built only when resolved.Descriptor is not null.
+            // TopologyNode must not be used to fabricate descriptor entries.
+            if (resolved.Descriptor is null)
+            {
+                if (!focusSet.Contains(ref_))
+                {
+                    // Ambiguity check takes priority
+                    if (resolved.IsAmbiguousUnpinned)
+                    {
+                        diagnostics.Add(new MetadataContextPackDiagnostic
+                        {
+                            Severity = MetadataContextPackDiagnosticSeverity.Warning,
+                            Code = MetadataContextPackDiagnosticCodes.AmbiguousDescriptorRef,
+                            Message = $"Descriptor ref '{ref_.FullId}' matches multiple versions. Specify an exact version.",
+                            Subject = ref_
+                        });
+                    }
+                    else
+                    {
+                        diagnostics.Add(new MetadataContextPackDiagnostic
+                        {
+                            Severity = MetadataContextPackDiagnosticSeverity.Error,
+                            Code = MetadataContextPackDiagnosticCodes.DescriptorMissingForTopologyRef,
+                            Message = $"Topology references descriptor '{ref_.FullId}' but it is absent from descriptor inventory.",
+                            Subject = ref_
+                        });
+                    }
+                }
+                continue;
+            }
+
+            var descriptor = resolved.Descriptor;
 
             DescriptorStableHashes? hashes = null;
             if (request.IncludeStableHashes)
             {
-                if (_hashBuilder is not null && descriptor is not null)
+                if (_hashBuilder is not null)
                 {
                     hashes = _hashBuilder.Build(descriptor);
                 }
-                else if (_hashBuilder is null)
+                else
                 {
                     // Only emit once
                     if (!diagnostics.Any(d => d.Code == MetadataContextPackDiagnosticCodes.HashBuilderMissing))
@@ -606,17 +559,17 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
             {
                 governance = new MetadataContextPackGovernanceEntry
                 {
-                    State = state,
-                    RequiresReview = state == DescriptorState.Draft
+                    State = descriptor.State,
+                    RequiresReview = descriptor.State == DescriptorState.Draft
                 };
             }
 
             entries.Add(new MetadataContextPackDescriptorEntry
             {
                 Ref = ref_,
-                Kind = kind,
-                Name = name,
-                State = state,
+                Kind = descriptor.Kind,
+                Name = descriptor.Name,
+                State = descriptor.State,
                 Hashes = hashes,
                 Governance = governance,
                 IsFocus = focusSet.Contains(ref_)

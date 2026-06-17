@@ -945,6 +945,595 @@ public class MetadataContextPackBuilderTests
         pack.Descriptors[0].Ref.Should().Be(v2Ref);
     }
 
+    // ── G. DescriptorSource Resolution ──
+
+    [Fact]
+    public void Fully_Resolved_Ref_Returns_Both_TopologyNode_And_Descriptor()
+    {
+        var cap = new DescriptorRef("capability", "SubmitCap");
+
+        var topology = CreateSnapshot(
+            new[] { (cap, DescriptorKind.Capability, "SubmitCap") },
+            NoEdges);
+
+        var descriptors = CreateDescriptors(
+            (cap, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active));
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.FocusOnly,
+            FocusDescriptors = new[] { cap }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        pack.Descriptors.Should().ContainSingle();
+        pack.Descriptors[0].Ref.Should().Be(cap);
+        pack.Descriptors[0].Kind.Should().Be(DescriptorKind.Capability);
+        pack.Descriptors[0].Name.Should().Be("SubmitCap");
+        pack.Diagnostics.Should().NotContain(d =>
+            d.Code == MetadataContextPackDiagnosticCodes.DescriptorMissingForTopologyRef ||
+            d.Code == MetadataContextPackDiagnosticCodes.TopologyNodeMissingForDescriptor);
+    }
+
+    [Fact]
+    public void Topology_Only_Ref_Emits_DescriptorMissing_Error()
+    {
+        var cap = new DescriptorRef("capability", "SubmitCap");
+
+        // Node in topology but no matching descriptor in inventory
+        var topology = CreateSnapshot(
+            new[] { (cap, DescriptorKind.Capability, "SubmitCap") },
+            NoEdges);
+
+        // Empty inventory — no descriptors at all
+        var descriptors = new List<IDescriptor>();
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.FocusOnly,
+            FocusDescriptors = new[] { cap }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // Descriptor entry should NOT be fabricated from topology node
+        pack.Descriptors.Should().BeEmpty();
+        pack.Diagnostics.Should().Contain(d =>
+            d.Code == MetadataContextPackDiagnosticCodes.DescriptorMissingForTopologyRef &&
+            d.Severity == MetadataContextPackDiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void Inventory_Only_Ref_Emits_TopologyNodeMissing_Warning()
+    {
+        var cap = new DescriptorRef("capability", "SubmitCap");
+
+        // Empty topology — no nodes
+        var topology = CreateSnapshot(
+            Array.Empty<(DescriptorRef, DescriptorKind, string)>(),
+            NoEdges);
+
+        // Descriptor exists in inventory
+        var descriptors = new List<IDescriptor>
+        {
+            new InventoryOnlyDescriptor(cap, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active)
+        };
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.FocusOnly,
+            FocusDescriptors = new[] { cap }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // Inventory-only focus should still be included (no traversal possible)
+        pack.Descriptors.Should().ContainSingle();
+        pack.Descriptors[0].Ref.Should().Be(cap);
+        pack.Diagnostics.Should().Contain(d =>
+            d.Code == MetadataContextPackDiagnosticCodes.TopologyNodeMissingForDescriptor &&
+            d.Severity == MetadataContextPackDiagnosticSeverity.Warning);
+    }
+
+    [Fact]
+    public void Neither_Topology_Nor_Inventory_Ref_Treated_As_FocusNotFound()
+    {
+        var missing = new DescriptorRef("ns", "Missing");
+
+        var topology = CreateSnapshot(
+            Array.Empty<(DescriptorRef, DescriptorKind, string)>(),
+            NoEdges);
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.FocusOnly,
+            FocusDescriptors = new[] { missing }
+        };
+
+        var pack = _builder.Build(request, topology, Array.Empty<IDescriptor>());
+
+        pack.Descriptors.Should().BeEmpty();
+        pack.Diagnostics.Should().Contain(d =>
+            d.Code == MetadataContextPackDiagnosticCodes.FocusNotFound);
+    }
+
+    // ── H. Multi-Version Coexistence ──
+
+    [Fact]
+    public void MultiVersion_Focus_On_V2_Resolves_To_V2_Only()
+    {
+        var v1Ref = new DescriptorRef("capability", "SubmitCap", 1);
+        var v2Ref = new DescriptorRef("capability", "SubmitCap", 2);
+
+        var topology = CreateSnapshot(
+            new[] { (v1Ref, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active),
+                    (v2Ref, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active) },
+            NoEdges);
+
+        var v1Desc = new VersionedTestDescriptor(v1Ref, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active, 1);
+        var v2Desc = new VersionedTestDescriptor(v2Ref, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active, 2);
+        var descriptors = new List<IDescriptor> { v1Desc, v2Desc };
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.FocusOnly,
+            FocusDescriptors = new[] { v2Ref }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        pack.Descriptors.Should().ContainSingle();
+        pack.Descriptors[0].Ref.Should().Be(v2Ref);
+    }
+
+    [Fact]
+    public void MultiVersion_ImpactRadius_Traverses_Each_Version_Separately()
+    {
+        var schemaV1 = new DescriptorRef("schema", "InputSchema", 1);
+        var schemaV2 = new DescriptorRef("schema", "InputSchema", 2);
+        var cap = new DescriptorRef("capability", "SubmitCap");
+
+        var topology = CreateSnapshot(
+            new[] { (schemaV1, DescriptorKind.Schema, "InputSchema", DescriptorState.Active),
+                    (schemaV2, DescriptorKind.Schema, "InputSchema", DescriptorState.Active),
+                    (cap, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active) },
+            new (int, DescriptorRef, DescriptorRef, RelationshipKind, string?, RelationshipStrength, bool)[] {
+                (0, cap, schemaV1, RelationshipKind.Uses, null, RelationshipStrength.Strong, false),
+                (1, cap, schemaV2, RelationshipKind.Uses, null, RelationshipStrength.Strong, false)
+            });
+
+        var v1Desc = new VersionedTestDescriptor(schemaV1, DescriptorKind.Schema, "InputSchema", DescriptorState.Active, 1);
+        var v2Desc = new VersionedTestDescriptor(schemaV2, DescriptorKind.Schema, "InputSchema", DescriptorState.Active, 2);
+        var capDesc = new VersionedTestDescriptor(cap, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active, 1);
+        var descriptors = new List<IDescriptor> { v1Desc, v2Desc, capDesc };
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.ImpactRadius,
+            FocusDescriptors = new[] { cap },
+            MaxTraversalDepth = 1
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // Both v1 and v2 should appear — versions are not collapsed
+        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(
+            new[] { cap, schemaV1, schemaV2 });
+    }
+
+    [Fact]
+    public void MultiVersion_Kind_Filter_Applies_Per_Version()
+    {
+        var schemaV1 = new DescriptorRef("schema", "InputSchema", 1);
+        var schemaV2 = new DescriptorRef("schema", "InputSchema", 2);
+        var cap = new DescriptorRef("capability", "SubmitCap");
+
+        var topology = CreateSnapshot(
+            new[] { (schemaV1, DescriptorKind.Schema, "InputSchema", DescriptorState.Active),
+                    (schemaV2, DescriptorKind.Schema, "InputSchema", DescriptorState.Active),
+                    (cap, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active) },
+            new (int, DescriptorRef, DescriptorRef, RelationshipKind, string?, RelationshipStrength, bool)[] {
+                (0, cap, schemaV1, RelationshipKind.Uses, null, RelationshipStrength.Strong, false),
+                (1, cap, schemaV2, RelationshipKind.Uses, null, RelationshipStrength.Strong, false)
+            });
+
+        var v1Desc = new VersionedTestDescriptor(schemaV1, DescriptorKind.Schema, "InputSchema", DescriptorState.Active, 1);
+        var v2Desc = new VersionedTestDescriptor(schemaV2, DescriptorKind.Schema, "InputSchema", DescriptorState.Active, 2);
+        var capDesc = new VersionedTestDescriptor(cap, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active, 1);
+        var descriptors = new List<IDescriptor> { v1Desc, v2Desc, capDesc };
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.DirectDependencies,
+            FocusDescriptors = new[] { cap },
+            ExcludeKinds = new[] { DescriptorKind.Schema }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // Both v1 and v2 Schema excluded by kind filter
+        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { cap });
+    }
+
+    [Fact]
+    public void Unpinned_Ref_Single_Version_Resolves()
+    {
+        // Versioned descriptor in inventory, unpinned ref in focus
+        var versionedRef = new DescriptorRef("capability", "SubmitCap", 1);
+        var unpinnedRef = new DescriptorRef("capability", "SubmitCap");  // Version = null
+
+        var topology = CreateSnapshot(
+            new[] { (unpinnedRef, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active) },
+            NoEdges);
+
+        var v1Desc = new VersionedTestDescriptor(versionedRef, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active, 1);
+        var descriptors = new List<IDescriptor> { v1Desc };
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.FocusOnly,
+            FocusDescriptors = new[] { unpinnedRef }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        pack.Descriptors.Should().ContainSingle();
+        pack.Diagnostics.Should().NotContain(d =>
+            d.Code == MetadataContextPackDiagnosticCodes.AmbiguousDescriptorRef);
+    }
+
+    [Fact]
+    public void Unpinned_Ref_Multiple_Versions_Emits_Ambiguous_Diagnostic()
+    {
+        var v1Ref = new DescriptorRef("capability", "SubmitCap", 1);
+        var v2Ref = new DescriptorRef("capability", "SubmitCap", 2);
+        var unpinnedRef = new DescriptorRef("capability", "SubmitCap");  // Version = null
+
+        var topology = CreateSnapshot(
+            new[] { (unpinnedRef, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active) },
+            NoEdges);
+
+        var v1Desc = new VersionedTestDescriptor(v1Ref, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active, 1);
+        var v2Desc = new VersionedTestDescriptor(v2Ref, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active, 2);
+        var descriptors = new List<IDescriptor> { v1Desc, v2Desc };
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.FocusOnly,
+            FocusDescriptors = new[] { unpinnedRef }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // Unpinned ref with multiple versions should emit ambiguous diagnostic
+        pack.Diagnostics.Should().Contain(d =>
+            d.Code == MetadataContextPackDiagnosticCodes.AmbiguousDescriptorRef);
+        // No descriptor entry should be produced for the ambiguous ref
+        pack.Descriptors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Inventory_Only_Unpinned_Focus_With_Multiple_Versions_Emits_Ambiguous()
+    {
+        // Topology has no node for this ref, but inventory has v1 and v2
+        var v1Ref = new DescriptorRef("capability", "SubmitCap", 1);
+        var v2Ref = new DescriptorRef("capability", "SubmitCap", 2);
+        var unpinnedRef = new DescriptorRef("capability", "SubmitCap");
+
+        var topology = CreateSnapshot(
+            Array.Empty<(DescriptorRef, DescriptorKind, string)>(),
+            NoEdges);
+
+        var v1Desc = new VersionedTestDescriptor(v1Ref, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active, 1);
+        var v2Desc = new VersionedTestDescriptor(v2Ref, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active, 2);
+        var descriptors = new List<IDescriptor> { v1Desc, v2Desc };
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.FocusOnly,
+            FocusDescriptors = new[] { unpinnedRef }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // Should emit AMBIGUOUS, not FOCUS_NOT_FOUND
+        pack.Diagnostics.Should().Contain(d =>
+            d.Code == MetadataContextPackDiagnosticCodes.AmbiguousDescriptorRef);
+        pack.Diagnostics.Should().NotContain(d =>
+            d.Code == MetadataContextPackDiagnosticCodes.FocusNotFound);
+        pack.Descriptors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Traversal_Target_Unpinned_With_Multiple_Versions_Emits_Ambiguous()
+    {
+        var cap = new DescriptorRef("capability", "SubmitCap");
+        var v1Ref = new DescriptorRef("schema", "InputSchema", 1);
+        var v2Ref = new DescriptorRef("schema", "InputSchema", 2);
+        // Topology node is unpinned — traversal discovers this ref
+        var unpinnedSchema = new DescriptorRef("schema", "InputSchema");
+
+        var topology = CreateSnapshot(
+            new[] { (cap, DescriptorKind.Capability, "SubmitCap"),
+                    (unpinnedSchema, DescriptorKind.Schema, "InputSchema") },
+            new (int, DescriptorRef, DescriptorRef, RelationshipKind, string?, RelationshipStrength, bool)[] {
+                (0, cap, unpinnedSchema, RelationshipKind.Uses, null, RelationshipStrength.Strong, false)
+            });
+
+        // Inventory has v1 and v2 of the same schema — unpinned ref is ambiguous
+        var capDesc = new VersionedTestDescriptor(cap, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active, 1);
+        var v1Desc = new VersionedTestDescriptor(v1Ref, DescriptorKind.Schema, "InputSchema", DescriptorState.Active, 1);
+        var v2Desc = new VersionedTestDescriptor(v2Ref, DescriptorKind.Schema, "InputSchema", DescriptorState.Active, 2);
+        var descriptors = new List<IDescriptor> { capDesc, v1Desc, v2Desc };
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.DirectDependencies,
+            FocusDescriptors = new[] { cap }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // Focus cap is fully resolved — included
+        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { cap });
+        // Traversal-discovered unpinned schema with v1+v2 emits AMBIGUOUS, not DESCRIPTOR_MISSING
+        pack.Diagnostics.Should().Contain(d =>
+            d.Code == MetadataContextPackDiagnosticCodes.AmbiguousDescriptorRef);
+        pack.Diagnostics.Should().NotContain(d =>
+            d.Code == MetadataContextPackDiagnosticCodes.DescriptorMissingForTopologyRef);
+        // Relationship excluded by pack closure (schema not in descriptor entries)
+        pack.Relationships.Should().BeEmpty();
+    }
+
+    // ── I. Direction-Aware Traversal ──
+
+    [Fact]
+    public void DirectDependencies_Follows_Only_Outgoing_Edges()
+    {
+        var cap = new DescriptorRef("capability", "SubmitCap");
+        var schema = new DescriptorRef("schema", "InputSchema");
+        var workflow = new DescriptorRef("workflow", "ApprovalWf");
+
+        var topology = CreateSnapshot(
+            new[] { (cap, DescriptorKind.Capability, "SubmitCap"),
+                    (schema, DescriptorKind.Schema, "InputSchema"),
+                    (workflow, DescriptorKind.Workflow, "ApprovalWf") },
+            new (int, DescriptorRef, DescriptorRef, RelationshipKind, string?, RelationshipStrength, bool)[] {
+                // Outgoing from cap: cap → schema (Uses)
+                (0, cap, schema, RelationshipKind.Uses, null, RelationshipStrength.Strong, false),
+                // Incoming to cap: workflow → cap (Triggers) — should NOT be followed
+                (1, workflow, cap, RelationshipKind.Triggers, null, RelationshipStrength.Strong, true)
+            });
+
+        var descriptors = CreateDescriptors(
+            (cap, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active),
+            (schema, DescriptorKind.Schema, "InputSchema", DescriptorState.Active),
+            (workflow, DescriptorKind.Workflow, "ApprovalWf", DescriptorState.Active));
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.DirectDependencies,
+            FocusDescriptors = new[] { cap }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // Should include cap + schema (outgoing), but NOT workflow (incoming)
+        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { cap, schema });
+        pack.Relationships.Select(r => r.Kind).Should().BeEquivalentTo(new[] { RelationshipKind.Uses });
+    }
+
+    [Fact]
+    public void DirectDependents_Follows_Only_Incoming_Edges()
+    {
+        var cap = new DescriptorRef("capability", "SubmitCap");
+        var schema = new DescriptorRef("schema", "InputSchema");
+        var workflow = new DescriptorRef("workflow", "ApprovalWf");
+
+        var topology = CreateSnapshot(
+            new[] { (cap, DescriptorKind.Capability, "SubmitCap"),
+                    (schema, DescriptorKind.Schema, "InputSchema"),
+                    (workflow, DescriptorKind.Workflow, "ApprovalWf") },
+            new (int, DescriptorRef, DescriptorRef, RelationshipKind, string?, RelationshipStrength, bool)[] {
+                // Outgoing from cap: cap → schema (Uses) — should NOT be followed
+                (0, cap, schema, RelationshipKind.Uses, null, RelationshipStrength.Strong, false),
+                // Incoming to cap: workflow → cap (Triggers) — should be followed
+                (1, workflow, cap, RelationshipKind.Triggers, null, RelationshipStrength.Strong, true)
+            });
+
+        var descriptors = CreateDescriptors(
+            (cap, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active),
+            (schema, DescriptorKind.Schema, "InputSchema", DescriptorState.Active),
+            (workflow, DescriptorKind.Workflow, "ApprovalWf", DescriptorState.Active));
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.DirectDependents,
+            FocusDescriptors = new[] { cap }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // Should include cap + workflow (incoming), but NOT schema (outgoing)
+        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { cap, workflow });
+        pack.Relationships.Select(r => r.Kind).Should().BeEquivalentTo(new[] { RelationshipKind.Triggers });
+    }
+
+    [Fact]
+    public void RuntimeScenario_Both_Follows_Outgoing_Then_Incoming()
+    {
+        var cap = new DescriptorRef("capability", "SubmitCap");
+        var schema = new DescriptorRef("schema", "InputSchema");
+        var workflow = new DescriptorRef("workflow", "ApprovalWf");
+
+        var topology = CreateSnapshot(
+            new[] { (cap, DescriptorKind.Capability, "SubmitCap"),
+                    (schema, DescriptorKind.Schema, "InputSchema"),
+                    (workflow, DescriptorKind.Workflow, "ApprovalWf") },
+            new (int, DescriptorRef, DescriptorRef, RelationshipKind, string?, RelationshipStrength, bool)[] {
+                (0, cap, schema, RelationshipKind.Uses, null, RelationshipStrength.Strong, false),
+                (1, workflow, cap, RelationshipKind.Triggers, null, RelationshipStrength.Strong, true)
+            });
+
+        var descriptors = CreateDescriptors(
+            (cap, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active),
+            (schema, DescriptorKind.Schema, "InputSchema", DescriptorState.Active),
+            (workflow, DescriptorKind.Workflow, "ApprovalWf", DescriptorState.Active));
+
+        var recipe = new RuntimeScenarioRecipe
+        {
+            Name = "BothDirections",
+            Steps = new[]
+            {
+                new ScenarioTraversalStep
+                {
+                    FollowKind = RelationshipKind.Uses,
+                    Direction = ScenarioTraversalDirection.Both,
+                    MaxDepth = 1
+                }
+            }
+        };
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.RuntimeScenario,
+            FocusDescriptors = new[] { cap },
+            ScenarioRecipe = recipe
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // Step follows Uses in Both direction:
+        // Outgoing: cap → schema (Uses) → included
+        // Incoming: workflow → cap (Triggers) → NOT included (Kind=Triggers ≠ FollowKind=Uses)
+        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { cap, schema });
+    }
+
+    [Fact]
+    public void ImpactRadius_Bidirectional_BFS_With_Self_Cycle_Terminates()
+    {
+        var a = new DescriptorRef("ns", "A");
+        var b = new DescriptorRef("ns", "B");
+
+        // A self-references and A → B
+        var topology = CreateSnapshot(
+            new[] { (a, DescriptorKind.Capability, "A"), (b, DescriptorKind.Schema, "B") },
+            new (int, DescriptorRef, DescriptorRef, RelationshipKind, string?, RelationshipStrength, bool)[] {
+                (0, a, a, RelationshipKind.References, null, RelationshipStrength.Weak, false),
+                (1, a, b, RelationshipKind.Uses, null, RelationshipStrength.Strong, false)
+            });
+
+        var descriptors = CreateDescriptors(
+            (a, DescriptorKind.Capability, "A", DescriptorState.Active),
+            (b, DescriptorKind.Schema, "B", DescriptorState.Active));
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.ImpactRadius,
+            FocusDescriptors = new[] { a },
+            MaxTraversalDepth = 5
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // Self-cycle should not cause infinite loop
+        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { a, b });
+        // No truncation diagnostic — graph is fully explored
+        pack.Diagnostics.Should().NotContain(d => d.Code == MetadataContextPackDiagnosticCodes.TruncatedByDepth);
+    }
+
+    // ── J. Pack Closure Invariant ──
+
+    [Fact]
+    public void Missing_Inventory_Descriptor_Excludes_Relationship()
+    {
+        var cap = new DescriptorRef("capability", "SubmitCap");
+        var schema = new DescriptorRef("schema", "InputSchema");
+
+        var topology = CreateSnapshot(
+            new[] { (cap, DescriptorKind.Capability, "SubmitCap"),
+                    (schema, DescriptorKind.Schema, "InputSchema") },
+            new (int, DescriptorRef, DescriptorRef, RelationshipKind, string?, RelationshipStrength, bool)[] {
+                (0, cap, schema, RelationshipKind.Uses, null, RelationshipStrength.Strong, false)
+            });
+
+        // Only cap descriptor in inventory — schema is missing
+        var descriptors = CreateDescriptors(
+            (cap, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active));
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.DirectDependencies,
+            FocusDescriptors = new[] { cap }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // cap entry exists, schema entry is excluded (no descriptor in inventory)
+        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { cap });
+        // Relationship should be excluded by pack closure invariant (schema endpoint missing from descriptors)
+        pack.Relationships.Should().BeEmpty();
+        pack.Diagnostics.Should().Contain(d =>
+            d.Code == MetadataContextPackDiagnosticCodes.DescriptorMissingForTopologyRef);
+    }
+
+    [Fact]
+    public void Mixed_Resolved_Unresolved_Endpoints_Only_Fully_Contained_Relationships()
+    {
+        var a = new DescriptorRef("ns", "A");
+        var b = new DescriptorRef("ns", "B");
+        var c = new DescriptorRef("ns", "C");
+
+        var topology = CreateSnapshot(
+            new[] { (a, DescriptorKind.Capability, "A"),
+                    (b, DescriptorKind.Schema, "B"),
+                    (c, DescriptorKind.Event, "C") },
+            new (int, DescriptorRef, DescriptorRef, RelationshipKind, string?, RelationshipStrength, bool)[] {
+                (0, a, b, RelationshipKind.Uses, null, RelationshipStrength.Strong, false),
+                (1, a, c, RelationshipKind.Produces, null, RelationshipStrength.Weak, false)
+            });
+
+        // Only A and B descriptors in inventory — C is missing
+        var descriptors = CreateDescriptors(
+            (a, DescriptorKind.Capability, "A", DescriptorState.Active),
+            (b, DescriptorKind.Schema, "B", DescriptorState.Active));
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.DirectDependencies,
+            FocusDescriptors = new[] { a }
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // A and B entries exist, C excluded
+        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { a, b });
+        // A→B relationship preserved (both endpoints in descriptor set)
+        // A→C relationship excluded (C endpoint missing from descriptor set)
+        pack.Relationships.Should().ContainSingle();
+        pack.Relationships[0].From.Should().Be(a);
+        pack.Relationships[0].To.Should().Be(b);
+    }
+
+    private sealed class InventoryOnlyDescriptor : IDescriptor
+    {
+        private readonly DescriptorRef _ref;
+        public InventoryOnlyDescriptor(DescriptorRef ref_, DescriptorKind kind, string name, DescriptorState state)
+        {
+            _ref = ref_; Kind = kind; Name = name; State = state;
+        }
+        public string Namespace => _ref.Namespace;
+        public string Id => _ref.Id;
+        public string Name { get; }
+        public string FullId => $"{Namespace}.{Id}";
+        public DescriptorKind Kind { get; }
+        public DescriptorState State { get; }
+        public string ContractHash => "";
+        public string DefinitionHash => "";
+        public string? SupersededById => null;
+    }
+
     private sealed class VersionedTestDescriptor : IVersionedDescriptor
     {
         private readonly DescriptorRef _ref;
