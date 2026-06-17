@@ -10,8 +10,12 @@ public sealed class DefaultDescriptorDraftMaterializer : IDescriptorDraftMateria
         Draft draft,
         IReadOnlyList<IDescriptor> currentInventory)
     {
-        var proposed = new List<IDescriptor>(currentInventory);
-        var proposedDescriptor = draft.Payload.GetDescriptor();
+        var proposed = DescriptorDraftSnapshotHelper
+            .SnapshotInventory(currentInventory)
+            .ToList();
+
+        var proposedDescriptor = DescriptorDraftSnapshotHelper
+            .SnapshotDescriptor(draft.Payload.GetDescriptor());
 
         return draft.Operation switch
         {

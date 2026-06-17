@@ -1,4 +1,6 @@
 using CrestCreates.DescriptorDraft.Abstractions;
+using CrestCreates.Event.Abstractions;
+using CrestCreates.Form.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
@@ -114,5 +116,267 @@ public class DefaultDescriptorDraftMaterializerTests
 
         r.IsMaterialized.Should().BeFalse();
         r.Diagnostics.Should().Contain(d => d.Code == "UPDATE_DESCRIPTOR_EXISTS");
+    }
+
+    // --- Descriptor Reference Isolation Tests ---
+
+    [Fact]
+    public void Materialize_Does_Not_Share_Descriptor_References_With_CurrentInventory()
+    {
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var draft = CreateUpdateDraft();
+
+        var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, With(existing));
+
+        result.IsMaterialized.Should().BeTrue();
+        result.ProposedInventory[0].Should().NotBeSameAs(existing);
+    }
+
+    [Fact]
+    public void Create_Does_Not_Insert_Original_Payload_Descriptor_Reference()
+    {
+        var draft = CreateCreateDraft();
+        var payloadDescriptor = draft.Payload.GetDescriptor();
+
+        var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, Empty);
+
+        result.IsMaterialized.Should().BeTrue();
+        result.ProposedInventory[0].Should().NotBeSameAs(payloadDescriptor);
+    }
+
+    [Fact]
+    public void Update_Does_Not_Insert_Original_Payload_Descriptor_Reference()
+    {
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var draft = CreateUpdateDraft();
+        var payloadDescriptor = draft.Payload.GetDescriptor();
+
+        var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, With(existing));
+
+        result.IsMaterialized.Should().BeTrue();
+        result.ProposedInventory[0].Should().NotBeSameAs(payloadDescriptor);
+    }
+
+    [Fact]
+    public void Update_Replaces_Descriptor_Using_Cloned_Replacement()
+    {
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var draft = CreateUpdateDraft();
+
+        var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, With(existing));
+
+        result.IsMaterialized.Should().BeTrue();
+        var proposedSchema = result.ProposedInventory[0] as SchemaDescriptor;
+        proposedSchema.Should().NotBeNull();
+        proposedSchema!.Id.Should().Be("schema1");
+        proposedSchema.Version.Should().Be(2);
+        proposedSchema.Name.Should().Be("Updated");
+        proposedSchema.Should().NotBeSameAs(existing);
+    }
+
+    // --- Collection State Isolation Tests ---
+
+    [Fact]
+    public void Create_Does_Not_Share_Collection_State_With_CurrentInventory()
+    {
+        var sourceFields = new List<SchemaFieldDescriptor>
+        {
+            new() { Name = "Title", FieldType = "string" }
+        };
+        var existing = new SchemaDescriptor
+        {
+            Id = "schema1", Name = "Existing", Version = 1,
+            State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b",
+            Fields = sourceFields
+        };
+        var draft = CreateCreateDraft(id: "schema2", version: 1);
+
+        var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, With(existing));
+
+        sourceFields.Add(new SchemaFieldDescriptor { Name = "Injected", FieldType = "string" });
+
+        result.IsMaterialized.Should().BeTrue();
+        var proposedExisting = result.ProposedInventory
+            .OfType<SchemaDescriptor>()
+            .Single(x => x.Id == "schema1");
+        proposedExisting.Fields.Should().HaveCount(1);
+        proposedExisting.Fields.Should().NotContain(f => f.Name == "Injected");
+    }
+
+    [Fact]
+    public void Create_Does_Not_Share_Collection_State_With_DraftPayloadDescriptor()
+    {
+        var sourceFields = new List<SchemaFieldDescriptor>
+        {
+            new() { Name = "Title", FieldType = "string" }
+        };
+        var desc = new SchemaDescriptor
+        {
+            Id = "schema1", Name = "New", Version = 1,
+            State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b",
+            Fields = sourceFields
+        };
+        var draft = new Draft
+        {
+            TenantId = "t1", DraftId = "d1", DescriptorKind = DescriptorKind.Schema,
+            DescriptorId = "schema1", Operation = DescriptorDraftOperation.Create,
+            AuthorKind = DescriptorDraftAuthorKind.Human, AuthorId = "u1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            Payload = new SchemaDescriptorDraftPayload(desc),
+            ProposedVersion = "1"
+        };
+
+        var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, Empty);
+
+        sourceFields.Add(new SchemaFieldDescriptor { Name = "Injected", FieldType = "string" });
+
+        result.IsMaterialized.Should().BeTrue();
+        var proposedSchema = result.ProposedInventory
+            .OfType<SchemaDescriptor>()
+            .Single(x => x.Id == "schema1");
+        proposedSchema.Fields.Should().HaveCount(1);
+        proposedSchema.Fields.Should().NotContain(f => f.Name == "Injected");
+    }
+
+    [Fact]
+    public void Update_Does_Not_Share_Collection_State_With_CurrentInventory()
+    {
+        // Put mutable collection on v2 (NOT the one being replaced)
+        var sourceFields = new List<SchemaFieldDescriptor>
+        {
+            new() { Name = "Title", FieldType = "string" }
+        };
+        var v1 = new SchemaDescriptor
+        {
+            Id = "schema1", Name = "Old", Version = 1,
+            State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b"
+        };
+        var v2 = new SchemaDescriptor
+        {
+            Id = "schema2", Name = "Other", Version = 1,
+            State = DescriptorState.Active, ContractHash = "c", DefinitionHash = "d",
+            Fields = sourceFields
+        };
+        var inventory = new List<IDescriptor> { v1, v2 };
+        var draft = CreateUpdateDraft();
+
+        var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, inventory);
+
+        // Mutate the source list after materialization
+        sourceFields.Add(new SchemaFieldDescriptor { Name = "Injected", FieldType = "string" });
+
+        result.IsMaterialized.Should().BeTrue();
+        // v2 is NOT replaced by the update — its Fields should be defensively copied
+        var proposedV2 = result.ProposedInventory
+            .OfType<SchemaDescriptor>()
+            .Single(x => x.Id == "schema2");
+        proposedV2.Fields.Should().HaveCount(1);
+        proposedV2.Fields.Should().NotContain(f => f.Name == "Injected");
+    }
+
+    [Fact]
+    public void Update_Does_Not_Share_Collection_State_With_DraftPayloadDescriptor()
+    {
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var sourceFields = new List<SchemaFieldDescriptor>
+        {
+            new() { Name = "Title", FieldType = "string" }
+        };
+        var desc = new SchemaDescriptor
+        {
+            Id = "schema1", Name = "Updated", Version = 2,
+            State = DescriptorState.Active, ContractHash = "x", DefinitionHash = "y",
+            Fields = sourceFields
+        };
+        var draft = new Draft
+        {
+            TenantId = "t1", DraftId = "d2", DescriptorKind = DescriptorKind.Schema,
+            DescriptorId = "schema1", Operation = DescriptorDraftOperation.Update,
+            AuthorKind = DescriptorDraftAuthorKind.Human, AuthorId = "u1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            Payload = new SchemaDescriptorDraftPayload(desc),
+            BaseVersion = "1", ProposedVersion = "2"
+        };
+
+        var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, With(existing));
+
+        sourceFields.Add(new SchemaFieldDescriptor { Name = "Injected", FieldType = "string" });
+
+        result.IsMaterialized.Should().BeTrue();
+        var proposedSchema = result.ProposedInventory
+            .OfType<SchemaDescriptor>()
+            .Single(x => x.Id == "schema1" && x.Version == 2);
+        proposedSchema.Fields.Should().HaveCount(1);
+        proposedSchema.Fields.Should().NotContain(f => f.Name == "Injected");
+    }
+
+    [Fact]
+    public void FormFieldDescriptor_Metadata_Is_Defensively_Copied()
+    {
+        var sourceMetadata = new Dictionary<string, string>
+        {
+            ["role"] = "admin"
+        };
+        var sourceFields = new List<FormFieldDescriptor>
+        {
+            new()
+            {
+                SchemaFieldName = "title",
+                Label = "Title",
+                Metadata = sourceMetadata
+            }
+        };
+        var desc = new FormDescriptor
+        {
+            Id = "form1", Name = "TestForm", Version = 1,
+            State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b",
+            Fields = sourceFields
+        };
+        var draft = new Draft
+        {
+            TenantId = "t1", DraftId = "d1", DescriptorKind = DescriptorKind.Form,
+            DescriptorId = "form1", Operation = DescriptorDraftOperation.Create,
+            AuthorKind = DescriptorDraftAuthorKind.Human, AuthorId = "u1",
+            CreatedAt = DateTimeOffset.UtcNow,
+            Payload = new FormDescriptorDraftPayload(desc),
+            ProposedVersion = "1"
+        };
+
+        var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, Empty);
+
+        sourceMetadata["injected"] = "evil";
+
+        result.IsMaterialized.Should().BeTrue();
+        var proposedForm = result.ProposedInventory
+            .OfType<FormDescriptor>()
+            .Single(x => x.Id == "form1");
+        proposedForm.Fields[0].Metadata.Should().NotContainKey("injected");
+        proposedForm.Fields[0].Metadata.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void GeneratedEventDescriptor_In_CurrentInventory_Is_Snapshotted()
+    {
+        var sourceProducers = new List<string> { "svc-order" };
+        var generatedEvent = new GeneratedEventDescriptor
+        {
+            Id = "evt_test", Name = "TestEvent", Version = 1,
+            State = DescriptorState.Active,
+            Producers = sourceProducers
+        };
+        var draft = CreateCreateDraft(id: "schema2", version: 1);
+
+        var result = new DefaultDescriptorDraftMaterializer().Materialize(draft,
+            new List<IDescriptor> { generatedEvent });
+
+        // Mutate the source list after materialization
+        sourceProducers.Add("svc-injected");
+
+        result.IsMaterialized.Should().BeTrue();
+        var proposedEvent = result.ProposedInventory
+            .OfType<GeneratedEventDescriptor>()
+            .Single(x => x.Id == "evt_test");
+        proposedEvent.Producers.Should().HaveCount(1);
+        proposedEvent.Producers.Should().NotContain("svc-injected");
     }
 }
