@@ -1093,6 +1093,7 @@ public class MetadataContextPackBuilderTests
         var schemaV1 = new DescriptorRef("schema", "InputSchema", 1);
         var schemaV2 = new DescriptorRef("schema", "InputSchema", 2);
         var cap = new DescriptorRef("capability", "SubmitCap");
+        var capV1 = new DescriptorRef("capability", "SubmitCap", 1);
 
         var topology = CreateSnapshot(
             new[] { (schemaV1, DescriptorKind.Schema, "InputSchema", DescriptorState.Active),
@@ -1118,8 +1119,9 @@ public class MetadataContextPackBuilderTests
         var pack = _builder.Build(request, topology, descriptors);
 
         // Both v1 and v2 should appear — versions are not collapsed
+        // Unpinned cap is canonicalized to v1; schemaV1/V2 already versioned
         pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(
-            new[] { cap, schemaV1, schemaV2 });
+            new[] { capV1, schemaV1, schemaV2 });
     }
 
     [Fact]
@@ -1128,6 +1130,7 @@ public class MetadataContextPackBuilderTests
         var schemaV1 = new DescriptorRef("schema", "InputSchema", 1);
         var schemaV2 = new DescriptorRef("schema", "InputSchema", 2);
         var cap = new DescriptorRef("capability", "SubmitCap");
+        var capV1 = new DescriptorRef("capability", "SubmitCap", 1);
 
         var topology = CreateSnapshot(
             new[] { (schemaV1, DescriptorKind.Schema, "InputSchema", DescriptorState.Active),
@@ -1153,11 +1156,12 @@ public class MetadataContextPackBuilderTests
         var pack = _builder.Build(request, topology, descriptors);
 
         // Both v1 and v2 Schema excluded by kind filter
-        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { cap });
+        // Unpinned cap canonicalized to v1
+        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { capV1 });
     }
 
     [Fact]
-    public void Unpinned_Ref_Single_Version_Resolves()
+    public void Unpinned_Ref_Single_Version_Resolves_To_Canonical_Versioned_Ref()
     {
         // Versioned descriptor in inventory, unpinned ref in focus
         var versionedRef = new DescriptorRef("capability", "SubmitCap", 1);
@@ -1179,6 +1183,9 @@ public class MetadataContextPackBuilderTests
         var pack = _builder.Build(request, topology, descriptors);
 
         pack.Descriptors.Should().ContainSingle();
+        // Entry.Ref should be canonical versioned ref, not the unpinned input ref
+        pack.Descriptors[0].Ref.Should().Be(versionedRef);
+        pack.Descriptors[0].Ref.Version.Should().Be(1);
         pack.Diagnostics.Should().NotContain(d =>
             d.Code == MetadataContextPackDiagnosticCodes.AmbiguousDescriptorRef);
     }
@@ -1249,6 +1256,7 @@ public class MetadataContextPackBuilderTests
     public void Traversal_Target_Unpinned_With_Multiple_Versions_Emits_Ambiguous()
     {
         var cap = new DescriptorRef("capability", "SubmitCap");
+        var capV1 = new DescriptorRef("capability", "SubmitCap", 1);
         var v1Ref = new DescriptorRef("schema", "InputSchema", 1);
         var v2Ref = new DescriptorRef("schema", "InputSchema", 2);
         // Topology node is unpinned — traversal discovers this ref
@@ -1275,8 +1283,8 @@ public class MetadataContextPackBuilderTests
 
         var pack = _builder.Build(request, topology, descriptors);
 
-        // Focus cap is fully resolved — included
-        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { cap });
+        // Focus cap is fully resolved — included with canonical versioned ref
+        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { capV1 });
         // Traversal-discovered unpinned schema with v1+v2 emits AMBIGUOUS, not DESCRIPTOR_MISSING
         pack.Diagnostics.Should().Contain(d =>
             d.Code == MetadataContextPackDiagnosticCodes.AmbiguousDescriptorRef);
@@ -1408,6 +1416,85 @@ public class MetadataContextPackBuilderTests
         // Outgoing: cap → schema (Uses) → included
         // Incoming: workflow → cap (Triggers) → NOT included (Kind=Triggers ≠ FollowKind=Uses)
         pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(new[] { cap, schema });
+    }
+
+    [Fact]
+    public void RuntimeScenario_NextStep_Uses_Only_PreviousStep_DiscoveredNodes()
+    {
+        // Workflow → HumanTask (Triggers), Workflow → Schema (Uses)
+        // HumanTask → CapabilityA (Triggers, Outcome)
+        // Workflow also → CapabilityA (Uses) — different FollowKind, so only reachable in step 2
+        //
+        // Step 1: FollowKind=Triggers from Workflow → discovers HumanTask
+        //   (Workflow→Schema is Uses, not Triggers — skipped)
+        //   (Workflow→CapabilityA is Uses, not Triggers — skipped)
+        // Step 2: FollowKind=Uses from {HumanTask only} → discovers nothing
+        //   If boundary were {Workflow + HumanTask}, Workflow→CapabilityA (Uses) would be included
+        //
+        var workflow = new DescriptorRef("workflow", "Wf");
+        var humanTask = new DescriptorRef("humantask", "Ht");
+        var schema = new DescriptorRef("schema", "Schema");
+        var capFromWf = new DescriptorRef("capability", "CapFromWf");
+
+        var topology = CreateSnapshot(
+            new[] { (workflow, DescriptorKind.Workflow, "Wf"),
+                    (humanTask, DescriptorKind.HumanTask, "Ht"),
+                    (schema, DescriptorKind.Schema, "Schema"),
+                    (capFromWf, DescriptorKind.Capability, "CapFromWf") },
+            new (int, DescriptorRef, DescriptorRef, RelationshipKind, string?, RelationshipStrength, bool)[] {
+                // Step 1 matches: Workflow → HumanTask (Triggers)
+                (0, workflow, humanTask, RelationshipKind.Triggers, "HumanTaskStep", RelationshipStrength.Strong, true),
+                // Step 1 skips: Workflow → Schema (Uses, not Triggers)
+                (1, workflow, schema, RelationshipKind.Uses, null, RelationshipStrength.Strong, false),
+                // Step 2 would match if Workflow were in boundary: Workflow → CapFromWf (Uses)
+                (2, workflow, capFromWf, RelationshipKind.Uses, null, RelationshipStrength.Strong, false)
+            });
+
+        var descriptors = CreateDescriptors(
+            (workflow, DescriptorKind.Workflow, "Wf", DescriptorState.Active),
+            (humanTask, DescriptorKind.HumanTask, "Ht", DescriptorState.Active),
+            (schema, DescriptorKind.Schema, "Schema", DescriptorState.Active),
+            (capFromWf, DescriptorKind.Capability, "CapFromWf", DescriptorState.Active));
+
+        var recipe = new RuntimeScenarioRecipe
+        {
+            Name = "StrictStepBoundary",
+            Steps = new[]
+            {
+                new ScenarioTraversalStep
+                {
+                    FollowKind = RelationshipKind.Triggers,
+                    Direction = ScenarioTraversalDirection.Dependencies,
+                    MaxDepth = 1
+                },
+                new ScenarioTraversalStep
+                {
+                    FollowKind = RelationshipKind.Uses,
+                    Direction = ScenarioTraversalDirection.Dependencies,
+                    MaxDepth = 1
+                }
+            }
+        };
+
+        var request = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.RuntimeScenario,
+            FocusDescriptors = new[] { workflow },
+            ScenarioRecipe = recipe
+        };
+
+        var pack = _builder.Build(request, topology, descriptors);
+
+        // Step 1 (Triggers): Workflow → HumanTask. Boundary for step 2 = {HumanTask}
+        // Step 2 (Uses): HumanTask has no Uses edges → nothing discovered
+        // If boundary were {Workflow + HumanTask}, Workflow→CapFromWf (Uses) would be included
+        pack.Descriptors.Select(d => d.Ref).Should().BeEquivalentTo(
+            new[] { workflow, humanTask });
+        // Only 1 relationship: Workflow → HumanTask (Triggers)
+        // NOT Workflow→Schema or Workflow→CapFromWf
+        pack.Relationships.Should().ContainSingle();
+        pack.Relationships[0].From.Should().Be(workflow);
+        pack.Relationships[0].To.Should().Be(humanTask);
     }
 
     [Fact]

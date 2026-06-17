@@ -90,7 +90,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
                 continue;
             }
 
-            // Fully resolved
+            // Fully resolved — keep topology ref for traversal, canonicalize at output time
             foundFocusRefs.Add(resolved.TopologyNode!.Ref);
         }
 
@@ -304,6 +304,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
         foreach (var step in recipe.Steps)
         {
             var stepVisited = new HashSet<DescriptorRef>(boundary);
+            var discoveredThisStep = new HashSet<DescriptorRef>();
 
             for (int depth = 1; depth <= step.MaxDepth; depth++)
             {
@@ -327,6 +328,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
                         {
                             includedRefs.Add(visit.Target);
                             nextBoundary.Add(visit.Target);
+                            discoveredThisStep.Add(visit.Target);
                         }
                     }
                 }
@@ -335,8 +337,8 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
                 if (nextBoundary.Count > 0) maxDepthReached = depth;
             }
 
-            // Boundary for next step = all discovered nodes from this step
-            boundary = new HashSet<DescriptorRef>(stepVisited);
+            // Boundary for next step = only nodes discovered in this step, not the starting boundary
+            boundary = discoveredThisStep;
         }
 
         return maxDepthReached;
@@ -463,19 +465,23 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
             var fromResolved = source.Resolve(edge.From);
             var toResolved = source.Resolve(edge.To);
 
-            var fromRef = fromResolved.TopologyNode?.Ref;
-            var toRef = toResolved.TopologyNode?.Ref;
+            var fromCanonical = fromResolved.CanonicalRef;
+            var toCanonical = toResolved.CanonicalRef;
 
-            if (fromRef is null || toRef is null) continue;
-            if (!includedRefs.Contains(fromRef.Value) || !includedRefs.Contains(toRef.Value)) continue;
+            // Check containment using topology refs (includedRefs stores topology refs)
+            var fromTopologyRef = fromResolved.TopologyNode?.Ref ?? fromCanonical;
+            var toTopologyRef = toResolved.TopologyNode?.Ref ?? toCanonical;
 
-            var key = (fromRef.Value, toRef.Value, edge.Kind);
+            if (!includedRefs.Contains(fromTopologyRef) || !includedRefs.Contains(toTopologyRef)) continue;
+
+            // Output uses canonical versioned refs
+            var key = (fromCanonical, toCanonical, edge.Kind);
             if (!seen.Add(key)) continue;
 
             entries.Add(new MetadataContextPackRelationshipEntry
             {
-                From = fromRef.Value,
-                To = toRef.Value,
+                From = fromCanonical,
+                To = toCanonical,
                 Kind = edge.Kind,
                 Role = edge.Role,
                 SourcePath = edge.SourcePath,
@@ -566,7 +572,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
 
             entries.Add(new MetadataContextPackDescriptorEntry
             {
-                Ref = ref_,
+                Ref = resolved.CanonicalRef,
                 Kind = descriptor.Kind,
                 Name = descriptor.Name,
                 State = descriptor.State,

@@ -39,7 +39,19 @@ internal sealed class MetadataContextDescriptorSource
         var topologyNode = _topology.FindNode(reference);
         var (descriptor, isAmbiguous) = ResolveDescriptorWithAmbiguity(reference);
 
-        return new ResolvedDescriptor(reference, topologyNode, descriptor, isAmbiguous);
+        // Canonical ref: prefer descriptor's versioned identity, fall back to topology node ref, then requested ref
+        var canonicalRef = reference;
+        if (descriptor is not null)
+        {
+            var version = descriptor is IVersionedDescriptor vd ? vd.Version : (int?)null;
+            canonicalRef = new DescriptorRef(descriptor.Namespace, descriptor.Id, version);
+        }
+        else if (topologyNode is not null)
+        {
+            canonicalRef = topologyNode.Ref;
+        }
+
+        return new ResolvedDescriptor(reference, canonicalRef, topologyNode, descriptor, isAmbiguous);
     }
 
     public IEnumerable<DirectedEdgeVisit> GetDirectedEdges(
