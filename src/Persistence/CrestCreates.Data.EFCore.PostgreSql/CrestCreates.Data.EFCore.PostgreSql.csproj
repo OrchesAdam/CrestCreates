@@ -8,8 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Framework\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
-    <ProjectReference Include="..\..\Framework\CrestCreates.AspNetCore.Authentication.OpenIddict\CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="../../Framework/Web/CrestCreates.AspNetCore.Authentication.OpenIddict/CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
     <ProjectReference Include="..\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
   </ItemGroup>
 

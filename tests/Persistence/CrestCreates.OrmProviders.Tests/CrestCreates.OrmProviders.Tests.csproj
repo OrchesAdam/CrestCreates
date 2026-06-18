@@ -11,7 +11,7 @@
 
   <ItemGroup>
     <!-- 项目引用 -->
-    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
     <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
     <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.FreeSql\CrestCreates.Data.FreeSql.csproj" />
     <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.EFCore.SqlServer\CrestCreates.Data.EFCore.SqlServer.csproj" />

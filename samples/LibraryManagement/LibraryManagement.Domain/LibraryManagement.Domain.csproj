@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Import Project="..\..\..\build\CrestCreates.BuildTasks\CrestCreates.Modules.props" />
+  <Import Project="../../../src/Tooling/CrestCreates.BuildTasks/CrestCreates.Modules.props" />
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -10,9 +10,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Domain\CrestCreates.Domain.csproj" />
-    <ProjectReference Include="..\..\..\src\Metadata\CrestCreates.Metadata.Runtime\CrestCreates.Metadata.csproj" />
-    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../../src/Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
+    <ProjectReference Include="../../../src/Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\LibraryManagement.Domain.Shared\LibraryManagement.Domain.Shared.csproj" />
   </ItemGroup>
 

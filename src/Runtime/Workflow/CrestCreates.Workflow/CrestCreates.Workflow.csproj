@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CrestCreates.Workflow</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.Workflow.Abstractions\CrestCreates.Workflow.Abstractions.csproj" />
+    <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
+    <ProjectReference Include="../../../Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
+    <ProjectReference Include="../../Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
+    <ProjectReference Include="../../../Metadata/Draft/CrestCreates.Draft.Abstractions/CrestCreates.Draft.Abstractions.csproj" />
+    <ProjectReference Include="../../../Metadata/CrestCreates.Schema.Abstractions/CrestCreates.Schema.Abstractions.csproj" />
+    <ProjectReference Include="../../HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
+    <ProjectReference Include="../../Eventing/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.Workflow.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,13 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Framework\CrestCreates.Authorization.Abstractions\CrestCreates.Authorization.Abstractions.csproj" />
-    <ProjectReference Include="..\..\Framework\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.Authorization.Abstractions/CrestCreates.Authorization.Abstractions.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="..\CrestCreates.Data.Abstractions\CrestCreates.Data.Abstractions.csproj" />
-    <ProjectReference Include="..\..\Framework\CrestCreates.Domain\CrestCreates.Domain.csproj" />
-    <ProjectReference Include="..\..\Framework\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Framework\CrestCreates.Application\CrestCreates.Application.csproj" />
-    <ProjectReference Include="..\..\Core\CrestCreates.Security.Abstractions\CrestCreates.Security.Abstractions.csproj" />
+    <ProjectReference Include="../../Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
+    <ProjectReference Include="../../Framework/Ddd/CrestCreates.Application/CrestCreates.Application.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.Security.Abstractions/CrestCreates.Security.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

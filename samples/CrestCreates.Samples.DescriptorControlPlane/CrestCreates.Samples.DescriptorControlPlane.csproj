@@ -8,18 +8,18 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Metadata\CrestCreates.Metadata.Runtime\CrestCreates.Metadata.csproj" />
+    <ProjectReference Include="../../src/Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
     <ProjectReference Include="..\..\src\Metadata\CrestCreates.Schema.Abstractions\CrestCreates.Schema.Abstractions.csproj" />
-    <ProjectReference Include="..\..\src\Runtime\CrestCreates.Event.Abstractions\CrestCreates.Event.Abstractions.csproj" />
-    <ProjectReference Include="..\..\src\Runtime\CrestCreates.HumanTask.Abstractions\CrestCreates.HumanTask.Abstractions.csproj" />
-    <ProjectReference Include="..\..\src\Runtime\CrestCreates.Workflow.Abstractions\CrestCreates.Workflow.Abstractions.csproj" />
-    <ProjectReference Include="..\..\src\Framework\CrestCreates.Form.Abstractions\CrestCreates.Form.Abstractions.csproj" />
-    <ProjectReference Include="..\..\src\Runtime\CrestCreates.Capability.Abstractions\CrestCreates.Capability.Abstractions.csproj" />
-    <ProjectReference Include="..\..\src\Runtime\CrestCreates.EventBus.Abstractions\CrestCreates.EventBus.Abstractions.csproj" />
-    <ProjectReference Include="..\..\src\Runtime\CrestCreates.Capability.Runtime\CrestCreates.Capability.csproj" />
-    <ProjectReference Include="..\..\src\Runtime\CrestCreates.Workflow.Runtime\CrestCreates.Workflow.csproj" />
-    <ProjectReference Include="..\..\src\Runtime\CrestCreates.HumanTask.Runtime\CrestCreates.HumanTask.csproj" />
-    <ProjectReference Include="..\..\src\Runtime\CrestCreates.EventBus.Local\CrestCreates.EventBus.Local.csproj" />
+    <ProjectReference Include="../../src/Runtime/Eventing/CrestCreates.Event.Abstractions/CrestCreates.Event.Abstractions.csproj" />
+    <ProjectReference Include="../../src/Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
+    <ProjectReference Include="../../src/Runtime/Workflow/CrestCreates.Workflow.Abstractions/CrestCreates.Workflow.Abstractions.csproj" />
+    <ProjectReference Include="../../src/Framework/Modules/CrestCreates.Form.Abstractions/CrestCreates.Form.Abstractions.csproj" />
+    <ProjectReference Include="../../src/Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
+    <ProjectReference Include="../../src/Runtime/Eventing/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
+    <ProjectReference Include="../../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
+    <ProjectReference Include="../../src/Runtime/Workflow/CrestCreates.Workflow/CrestCreates.Workflow.csproj" />
+    <ProjectReference Include="../../src/Runtime/HumanTask/CrestCreates.HumanTask/CrestCreates.HumanTask.csproj" />
+    <ProjectReference Include="../../src/Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />
   </ItemGroup>
 
 </Project>

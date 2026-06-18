@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CrestCreates.IntegrationTests</RootNamespace>
+    <AssemblyName>CrestCreates.IntegrationTests</AssemblyName>
+    <OutputType>Library</OutputType>
+    <IsPackable>false</IsPackable>
+    <CrestCreatesCodeGeneration>false</CrestCreatesCodeGeneration>
+    <CrestCreatesDynamicApiAotGeneration>false</CrestCreatesDynamicApiAotGeneration>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../../samples/LibraryManagement/LibraryManagement.EntityFrameworkCore/LibraryManagement.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../../../samples/LibraryManagement/LibraryManagement.Web/LibraryManagement.Web.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Security/CrestCreates.Security.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.Event/CrestCreates.Event.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="OpenIddict.EntityFrameworkCore" />
+    <PackageReference Include="OpenIddict.EntityFrameworkCore.Models" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Moq" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Testcontainers" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+</Project>

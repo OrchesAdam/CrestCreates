@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
-    <ProjectReference Include="..\..\Framework\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
   </ItemGroup>
 
   <ItemGroup>

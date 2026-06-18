@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CrestCreates.AspNetCore</RootNamespace>
+    <AssemblyName>CrestCreates.AspNetCore</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="../../Ddd/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
+    <ProjectReference Include="../../Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
+    <ProjectReference Include="../../Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../Infrastructure/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
+    <ProjectReference Include="../../Infrastructure/CrestCreates.Authorization.Abstractions/CrestCreates.Authorization.Abstractions.csproj" />
+    <ProjectReference Include="../../Infrastructure/CrestCreates.Localization/CrestCreates.Localization.csproj" />
+  </ItemGroup>
+
+</Project>

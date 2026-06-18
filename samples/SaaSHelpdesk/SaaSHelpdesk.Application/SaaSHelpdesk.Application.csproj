@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Import Project="../../../build/CrestCreates.BuildTasks/CrestCreates.Modules.props" />
+  <Import Project="../../../src/Tooling/CrestCreates.BuildTasks/CrestCreates.Modules.props" />
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -9,9 +9,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Application\CrestCreates.Application.csproj" />
-    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.DynamicApi\CrestCreates.DynamicApi.csproj" />
-    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Application/CrestCreates.Application.csproj" />
+    <ProjectReference Include="../../../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
+    <ProjectReference Include="../../../src/Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Domain/SaaSHelpdesk.Domain.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Application.Contracts/SaaSHelpdesk.Application.Contracts.csproj" />
   </ItemGroup>

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CrestCreates.Metadata.ContextPack.Tests</RootNamespace>
+    <AssemblyName>CrestCreates.Metadata.ContextPack.Tests</AssemblyName>
+    <OutputType>Library</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime;build;native;contentfiles;analyzers;buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Moq" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata.ContextPack/CrestCreates.Metadata.ContextPack.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata.ContextPack.Abstractions/CrestCreates.Metadata.ContextPack.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

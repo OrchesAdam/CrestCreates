@@ -9,8 +9,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Data.Abstractions\CrestCreates.Data.Abstractions.csproj" />
-    <ProjectReference Include="..\..\Framework\CrestCreates.DataFilter\CrestCreates.DataFilter.csproj" />
-    <ProjectReference Include="..\..\Framework\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <Import Project="../../Tooling/CrestCreates.BuildTasks/CrestCreates.Modules.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CrestCreates.Web</RootNamespace>
+    <AssemblyName>CrestCreates.Web</AssemblyName>
+    <OutputType>Library</OutputType>
+    <Nullable>enable</Nullable>
+    <EnableDefaultContentItems>false</EnableDefaultContentItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Framework/Ddd/CrestCreates.Application/CrestCreates.Application.csproj" />
+    <ProjectReference Include="../../Framework/Ddd/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
+    <ProjectReference Include="../../Framework/Web/CrestCreates.AspNetCore/CrestCreates.AspNetCore.csproj" />
+    <ProjectReference Include="../../Framework/Web/CrestCreates.AspNetCore.Authentication.OpenIddict/CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.Authorization/CrestCreates.Authorization.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.Logging/CrestCreates.Logging.csproj" />
+    <ProjectReference Include="../../Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
+    <ProjectReference Include="../../Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="../../Framework/Web/CrestCreates.HealthCheck.AspNetCore/CrestCreates.HealthCheck.AspNetCore.csproj" />
+    <ProjectReference Include="../../Framework/Modules/CrestCreates.ModuleDiagnostics/CrestCreates.ModuleDiagnostics.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
+    <ProjectReference Include="..\..\Persistence\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
+    <ProjectReference Include="..\..\Persistence\CrestCreates.Data.EFCore.SqlServer\CrestCreates.Data.EFCore.SqlServer.csproj" />
+    <ProjectReference Include="../../Runtime/Eventing/CrestCreates.EventBus.Abstract/CrestCreates.EventBus.Abstract.csproj" />
+    <ProjectReference Include="../../Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.Aop/CrestCreates.Aop.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DependencyInjection.StaticAccessor.Hosting" />
+    <ProjectReference Include="../../Framework/Api/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
+  </ItemGroup>
+
+</Project>

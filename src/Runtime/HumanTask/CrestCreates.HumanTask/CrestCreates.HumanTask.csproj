@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CrestCreates.HumanTask</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.HumanTask.Abstractions\CrestCreates.HumanTask.Abstractions.csproj" />
+    <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
+    <ProjectReference Include="../../../Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
+    <ProjectReference Include="../../Eventing/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

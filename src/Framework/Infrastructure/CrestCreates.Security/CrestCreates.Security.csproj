@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.ViewFeatures" />
+    <PackageReference Include="Microsoft.AspNetCore.Antiforgery" />
+    <PackageReference Include="Microsoft.AspNetCore.HttpsPolicy" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.Security.Abstractions\CrestCreates.Security.Abstractions.csproj" />
+    <ProjectReference Include="../../Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="../../Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+  </ItemGroup>
+
+</Project>

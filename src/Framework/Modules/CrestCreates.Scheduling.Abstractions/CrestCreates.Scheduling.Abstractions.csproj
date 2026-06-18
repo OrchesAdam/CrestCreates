@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CrestCreates.Scheduling</RootNamespace>
+    <AssemblyName>CrestCreates.Scheduling.Abstractions</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="../../Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="../../Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
+  </ItemGroup>
+
+</Project>

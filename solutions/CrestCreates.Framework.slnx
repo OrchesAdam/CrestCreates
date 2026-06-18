@@ -9,56 +9,60 @@
     <File Path="../README.md" />
   </Folder>
   <Folder Name="/src/Core/">
-    <Project Path="../src/Core/CrestCreates.Aop.Abstractions/CrestCreates.Aop.Abstractions.csproj" />
-    <Project Path="../src/Core/CrestCreates.Aop/CrestCreates.Aop.csproj" />
-    <Project Path="../src/Core/CrestCreates.Caching.Abstractions/CrestCreates.Caching.Abstractions.csproj" />
-    <Project Path="../src/Core/CrestCreates.Caching/CrestCreates.Caching.csproj" />
-    <Project Path="../src/Core/CrestCreates.Configuration/CrestCreates.Configuration.csproj" />
     <Project Path="../src/Core/CrestCreates.Core.Abstractions/CrestCreates.Core.Abstractions.csproj" />
-    <Project Path="../src/Core/CrestCreates.Core.Hosting/CrestCreates.Core.Hosting.csproj" />
     <Project Path="../src/Core/CrestCreates.Core/CrestCreates.Core.csproj" />
-    <Project Path="../src/Core/CrestCreates.Exposure.Abstractions/CrestCreates.Exposure.Abstractions.csproj" />
-    <Project Path="../src/Core/CrestCreates.Logging/CrestCreates.Logging.csproj" />
-    <Project Path="../src/Core/CrestCreates.Security.Abstractions/CrestCreates.Security.Abstractions.csproj" />
-    <Project Path="../src/Core/CrestCreates.Security/CrestCreates.Security.csproj" />
-    <Project Path="../src/Core/CrestCreates.VirtualFileSystem/CrestCreates.VirtualFileSystem.csproj" />
   </Folder>
-  <Folder Name="/src/Framework/">
-    <Project Path="../src/Framework/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Application/CrestCreates.Application.csproj" />
-    <Project Path="../src/Framework/CrestCreates.AspNetCore.Authentication.OpenIddict/CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
-    <Project Path="../src/Framework/CrestCreates.AspNetCore/CrestCreates.AspNetCore.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Authorization.Abstractions/CrestCreates.Authorization.Abstractions.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Authorization/CrestCreates.Authorization.csproj" />
-    <Project Path="../src/Framework/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj" />
-    <Project Path="../src/Framework/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj" />
-    <Project Path="../src/Framework/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Domain/CrestCreates.Domain.csproj" />
-    <Project Path="../src/Framework/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
-    <Project Path="../src/Framework/CrestCreates.FileManagement/CrestCreates.FileManagement.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Form.Abstractions/CrestCreates.Form.Abstractions.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Form/CrestCreates.Form.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Forms.Framework/CrestCreates.Forms.Framework.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Framework.Abstractions/CrestCreates.Framework.Abstractions.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Framework.Hosting/CrestCreates.Framework.Hosting.csproj" />
-    <Project Path="../src/Framework/CrestCreates.HealthCheck.AspNetCore/CrestCreates.HealthCheck.AspNetCore.csproj" />
-    <Project Path="../src/Framework/CrestCreates.HealthCheck.Mvc/CrestCreates.HealthCheck.Mvc.csproj" />
-    <Project Path="../src/Framework/CrestCreates.HealthCheck/CrestCreates.HealthCheck.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Localization/CrestCreates.Localization.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
-    <Project Path="../src/Framework/CrestCreates.ModuleDiagnostics/CrestCreates.ModuleDiagnostics.csproj" />
-    <Project Path="../src/Framework/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
-    <Project Path="../src/Framework/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
-    <Project Path="../src/Framework/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Organization.Abstractions/CrestCreates.Organization.Abstractions.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Organization/CrestCreates.Organization.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Scheduling.Quartz/CrestCreates.Scheduling.Quartz.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Scheduling/CrestCreates.Scheduling.Abstractions.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Testing/CrestCreates.Testing.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Validation/CrestCreates.Validation.csproj" />
-    <Project Path="../src/Framework/CrestCreates.Web/CrestCreates.Web.csproj" />
+  <Folder Name="/src/Framework/Modularity/">
+    <Project Path="../src/Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+  </Folder>
+  <Folder Name="/src/Framework/Ddd/">
+    <Project Path="../src/Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+    <Project Path="../src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <Project Path="../src/Framework/Ddd/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
+    <Project Path="../src/Framework/Ddd/CrestCreates.Application/CrestCreates.Application.csproj" />
+  </Folder>
+  <Folder Name="/src/Framework/Infrastructure/">
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.Aop.Abstractions/CrestCreates.Aop.Abstractions.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.Aop/CrestCreates.Aop.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.Authorization.Abstractions/CrestCreates.Authorization.Abstractions.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.Authorization/CrestCreates.Authorization.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.Caching.Abstractions/CrestCreates.Caching.Abstractions.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.Caching/CrestCreates.Caching.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.Configuration/CrestCreates.Configuration.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.Localization/CrestCreates.Localization.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.Logging/CrestCreates.Logging.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.Security.Abstractions/CrestCreates.Security.Abstractions.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.Security/CrestCreates.Security.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.Validation/CrestCreates.Validation.csproj" />
+    <Project Path="../src/Framework/Infrastructure/CrestCreates.VirtualFileSystem/CrestCreates.VirtualFileSystem.csproj" />
+  </Folder>
+  <Folder Name="/src/Framework/Api/">
+    <Project Path="../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
+    <Project Path="../src/Framework/Api/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
+  </Folder>
+  <Folder Name="/src/Framework/Web/">
+    <Project Path="../src/Framework/Web/CrestCreates.AspNetCore/CrestCreates.AspNetCore.csproj" />
+    <Project Path="../src/Framework/Web/CrestCreates.AspNetCore.Authentication.OpenIddict/CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
+    <Project Path="../src/Framework/Web/CrestCreates.HealthCheck/CrestCreates.HealthCheck.csproj" />
+    <Project Path="../src/Framework/Web/CrestCreates.HealthCheck.AspNetCore/CrestCreates.HealthCheck.AspNetCore.csproj" />
+    <Project Path="../src/Framework/Web/CrestCreates.HealthCheck.Mvc/CrestCreates.HealthCheck.Mvc.csproj" />
+  </Folder>
+  <Folder Name="/src/Framework/Modules/">
+    <Project Path="../src/Framework/Modules/CrestCreates.FileManagement/CrestCreates.FileManagement.csproj" />
+    <Project Path="../src/Framework/Modules/CrestCreates.Form.Abstractions/CrestCreates.Form.Abstractions.csproj" />
+    <Project Path="../src/Framework/Modules/CrestCreates.Form/CrestCreates.Form.csproj" />
+    <Project Path="../src/Framework/Modules/CrestCreates.ModuleDiagnostics/CrestCreates.ModuleDiagnostics.csproj" />
+    <Project Path="../src/Framework/Modules/CrestCreates.Organization.Abstractions/CrestCreates.Organization.Abstractions.csproj" />
+    <Project Path="../src/Framework/Modules/CrestCreates.Organization/CrestCreates.Organization.csproj" />
+    <Project Path="../src/Framework/Modules/CrestCreates.Scheduling.Abstractions/CrestCreates.Scheduling.Abstractions.csproj" />
+    <Project Path="../src/Framework/Modules/CrestCreates.Scheduling.Quartz/CrestCreates.Scheduling.Quartz.csproj" />
+  </Folder>
+  <Folder Name="/src/Framework/Testing/">
+    <Project Path="../src/Framework/Testing/CrestCreates.Testing/CrestCreates.Testing.csproj" />
   </Folder>
   <Folder Name="/src/Metadata/">
     <Project Path="../src/Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
@@ -69,20 +73,31 @@
   <Folder Name="/tests/Boundary/">
     <Project Path="../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/CrestCreates.DependencyBoundaries.Tests.csproj" />
   </Folder>
-  <Folder Name="/tests/Framework/">
-    <Project Path="../tests/Framework/CrestCreates.Application.Tests/CrestCreates.Application.Tests.csproj" />
-    <Project Path="../tests/Framework/CrestCreates.Domain.Tests/CrestCreates.Domain.Tests.csproj" />
-    <Project Path="../tests/Framework/CrestCreates.FileManagement.Tests/CrestCreates.FileManagement.Tests.csproj" />
-    <Project Path="../tests/Framework/CrestCreates.Form.Tests/CrestCreates.Form.Tests.csproj" />
-    <Project Path="../tests/Framework/CrestCreates.Infrastructure.Tests/CrestCreates.Infrastructure.Tests.csproj" />
-    <Project Path="../tests/Framework/CrestCreates.IntegrationTests/CrestCreates.IntegrationTests.csproj" />
-    <Project Path="../tests/Framework/CrestCreates.Localization.Tests/CrestCreates.Localization.Tests.csproj" />
-    <Project Path="../tests/Framework/CrestCreates.Organization.Tests/CrestCreates.Organization.Tests.csproj" />
-    <Project Path="../tests/Framework/CrestCreates.Samples.Tests/CrestCreates.Samples.Tests.csproj" />
-    <Project Path="../tests/Framework/CrestCreates.Scheduling.IntegrationTests/CrestCreates.Scheduling.IntegrationTests.csproj" />
-    <Project Path="../tests/Framework/CrestCreates.Scheduling.Tests/CrestCreates.Scheduling.Tests.csproj" />
-    <Project Path="../tests/Framework/CrestCreates.TestBase.Tests/CrestCreates.TestBase.Tests.csproj" />
-    <Project Path="../tests/Framework/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
-    <Project Path="../tests/Framework/CrestCreates.Web.Tests/CrestCreates.Web.Tests.csproj" />
+  <Folder Name="/tests/Framework/Ddd/">
+    <Project Path="../tests/Framework/Ddd/CrestCreates.Domain.Tests/CrestCreates.Domain.Tests.csproj" />
+    <Project Path="../tests/Framework/Ddd/CrestCreates.Application.Tests/CrestCreates.Application.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Framework/Infrastructure/">
+    <Project Path="../tests/Framework/Infrastructure/CrestCreates.Infrastructure.Tests/CrestCreates.Infrastructure.Tests.csproj" />
+    <Project Path="../tests/Framework/Infrastructure/CrestCreates.Localization.Tests/CrestCreates.Localization.Tests.csproj" />
+    <Project Path="../tests/Framework/Infrastructure/CrestCreates.Logging.Tests/CrestCreates.Logging.Tests.csproj" />
+    <Project Path="../tests/Framework/Infrastructure/CrestCreates.VirtualFileSystem.Tests/CrestCreates.VirtualFileSystem.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Framework/Web/">
+    <Project Path="../tests/Framework/Web/CrestCreates.Web.Tests/CrestCreates.Web.Tests.csproj" />
+    <Project Path="../tests/Framework/Web/CrestCreates.IntegrationTests/CrestCreates.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Framework/Modules/">
+    <Project Path="../tests/Framework/Modules/CrestCreates.FileManagement.Tests/CrestCreates.FileManagement.Tests.csproj" />
+    <Project Path="../tests/Framework/Modules/CrestCreates.Form.Tests/CrestCreates.Form.Tests.csproj" />
+    <Project Path="../tests/Framework/Modules/CrestCreates.ModuleDiagnostics.Tests/CrestCreates.ModuleDiagnostics.Tests.csproj" />
+    <Project Path="../tests/Framework/Modules/CrestCreates.Organization.Tests/CrestCreates.Organization.Tests.csproj" />
+    <Project Path="../tests/Framework/Modules/CrestCreates.Scheduling.Tests/CrestCreates.Scheduling.Tests.csproj" />
+    <Project Path="../tests/Framework/Modules/CrestCreates.Scheduling.IntegrationTests/CrestCreates.Scheduling.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Framework/Testing/">
+    <Project Path="../tests/Framework/Testing/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
+    <Project Path="../tests/Framework/Testing/CrestCreates.TestBase.Tests/CrestCreates.TestBase.Tests.csproj" />
+    <Project Path="../tests/Framework/Testing/CrestCreates.Samples.Tests/CrestCreates.Samples.Tests.csproj" />
   </Folder>
 </Solution>

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../../Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="../../../Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="../../Eventing/CrestCreates.EventBus.Abstract/CrestCreates.EventBus.Abstract.csproj" />
+  </ItemGroup>
+
+</Project>

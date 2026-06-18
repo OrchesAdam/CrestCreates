@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CrestCreates.Infrastructure</RootNamespace>
+    <AssemblyName>CrestCreates.Infrastructure</AssemblyName>
+    <OutputType>Library</OutputType>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+
+    <PackageReference Include="SqlSugarCore" />
+    <PackageReference Include="FreeSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="../../Ddd/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
+    <ProjectReference Include="..\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="../../Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="..\CrestCreates.Authorization.Abstractions\CrestCreates.Authorization.Abstractions.csproj" />
+    <ProjectReference Include="../CrestCreates.Security.Abstractions/CrestCreates.Security.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Logging\**\*.cs" />
+  </ItemGroup>
+
+</Project>

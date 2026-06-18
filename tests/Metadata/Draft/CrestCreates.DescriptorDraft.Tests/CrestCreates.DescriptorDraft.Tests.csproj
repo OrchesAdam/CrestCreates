@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CrestCreates.DescriptorDraft.Tests</RootNamespace>
+    <AssemblyName>CrestCreates.DescriptorDraft.Tests</AssemblyName>
+    <OutputType>Library</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Moq" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../../src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Schema.Abstractions/CrestCreates.Schema.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Modules/CrestCreates.Form.Abstractions/CrestCreates.Form.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.Event.Abstractions/CrestCreates.Event.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Workflow/CrestCreates.Workflow.Abstractions/CrestCreates.Workflow.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
+    <ProjectReference Include="../../../Framework/Testing/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
+  </ItemGroup>
+</Project>

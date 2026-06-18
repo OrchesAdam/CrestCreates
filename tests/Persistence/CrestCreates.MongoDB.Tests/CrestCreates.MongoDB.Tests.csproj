@@ -22,10 +22,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.OrmProviders.MongoDB\CrestCreates.OrmProviders.MongoDB.csproj" />
-    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Domain\CrestCreates.Domain.csproj" />
-    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
-    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
-    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.DataFilter\CrestCreates.DataFilter.csproj" />
+    <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="../../../src/Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="../../../src/Framework/Infrastructure/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj" />
   </ItemGroup>
 
 </Project>

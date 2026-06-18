@@ -13,11 +13,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Data.Abstractions\CrestCreates.Data.Abstractions.csproj" />
-    <ProjectReference Include="..\..\Framework\CrestCreates.Domain\CrestCreates.Domain.csproj" />
-    <ProjectReference Include="..\..\Framework\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\Framework\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
-    <ProjectReference Include="..\..\Framework\CrestCreates.DataFilter\CrestCreates.DataFilter.csproj" />
-    <ProjectReference Include="..\..\Framework\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="../../Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj" />
+    <ProjectReference Include="../../Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
   </ItemGroup>
 
 </Project>

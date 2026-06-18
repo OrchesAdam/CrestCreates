@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CrestCreates.Application.Tests</RootNamespace>
+    <AssemblyName>CrestCreates.Application.Tests</AssemblyName>
+    <OutputType>Library</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Application/CrestCreates.Application.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Authorization/CrestCreates.Authorization.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Authorization.Abstractions/CrestCreates.Authorization.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.EventBus.Abstract/CrestCreates.EventBus.Abstract.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Web/CrestCreates.AspNetCore.Authentication.OpenIddict/CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Moq" />
+    <PackageReference Include="FluentAssertions" />
+  </ItemGroup>
+
+</Project>

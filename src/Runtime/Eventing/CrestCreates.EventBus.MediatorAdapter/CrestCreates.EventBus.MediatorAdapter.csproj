@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CrestCreates.EventBus.MediatorAdapter</RootNamespace>
+    <AssemblyName>CrestCreates.EventBus.MediatorAdapter</AssemblyName>
+    <OutputType>Library</OutputType>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.EventBus.Abstractions\CrestCreates.EventBus.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.EventBus.Abstract\CrestCreates.EventBus.Abstract.csproj" />
+    <ProjectReference Include="..\CrestCreates.EventBus.Local\CrestCreates.EventBus.Local.csproj" />
+    <ProjectReference Include="../../../Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Mediator.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+
+</Project>

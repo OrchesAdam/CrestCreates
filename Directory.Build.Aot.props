@@ -38,7 +38,7 @@
 
   <!-- 全局 Source Generator (Analyzer) 引用 -->
   <ItemGroup>
-    <ProjectReference Include="$(MSBuildThisFileDirectory)src\Metadata\CrestCreates.Metadata.SourceGeneration\CrestCreates.CodeGenerator.csproj"
+    <ProjectReference Include="$(MSBuildThisFileDirectory)src\Tooling\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false"
                       Condition="$(MSBuildProjectName) != 'CrestCreates.CodeGenerator' and '$(CrestCreatesCodeGeneration)' != 'false'" />
@@ -46,7 +46,7 @@
 
   <!-- 全局 ModuleDiagnostics 引用（排除 ModuleDiagnostics 自身和 Modularity 以避免循环依赖） -->
   <ItemGroup>
-    <ProjectReference Include="$(MSBuildThisFileDirectory)src\Framework\CrestCreates.ModuleDiagnostics\CrestCreates.ModuleDiagnostics.csproj"
+    <ProjectReference Include="$(MSBuildThisFileDirectory)src\Framework\Modules\CrestCreates.ModuleDiagnostics\CrestCreates.ModuleDiagnostics.csproj"
                       Condition="$(MSBuildProjectName) != 'CrestCreates.ModuleDiagnostics' and $(MSBuildProjectName) != 'CrestCreates.Modularity' and '$(TargetFramework)' != 'netstandard2.0'" />
   </ItemGroup>
 
