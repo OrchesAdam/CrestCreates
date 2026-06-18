@@ -128,6 +128,7 @@
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.Kafka/CrestCreates.EventBus.Kafka.csproj" />
   </Folder>
   <Folder Name="/src/Runtime/Audit/">
+    <Project Path="../src/Runtime/Audit/CrestCreates.AuditLogging.Abstractions/CrestCreates.AuditLogging.Abstractions.csproj" />
     <Project Path="../src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
   </Folder>
   <Folder Name="/src/Runtime/DistributedTransaction/">

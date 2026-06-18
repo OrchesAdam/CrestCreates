@@ -12,9 +12,9 @@ CrestCreates is a .NET 10 enterprise application framework (similar to ABP Frame
 
 ```bash
 dotnet build                              # Build entire solution (uses CrestCreates.slnx)
-dotnet build framework/src/CrestCreates.Domain   # Build a single project
+dotnet build src/Framework/Ddd/CrestCreates.Domain   # Build a single project
 dotnet test                               # Run all tests
-dotnet test framework/test/CrestCreates.Domain.Tests   # Run a single test project
+dotnet test tests/Framework/Ddd/CrestCreates.Domain.Tests   # Run a single test project
 dotnet test --filter "FullyQualifiedName~CrestCreates.Application.Tests.Tenants.TenantAppServiceTests"  # Run specific test class
 dotnet test --filter "FullyQualifiedName~SomeTestClass.SomeTestMethod"  # Run specific test method
 dotnet run --project samples/LibraryManagement/LibraryManagement.Web  # Run sample app
@@ -27,7 +27,7 @@ dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r win
 - Solution file: `CrestCreates.slnx` (new XML-based `.slnx` format, not `.sln`)
 - SDK: .NET 10.0.100 (`global.json`), `rollForward: latestMinor`
 - Central package management: `Directory.Packages.props` (all versions pinned)
-- AoT enabled globally via `Directory.Build.Aot.props` (except `netstandard2.0` projects and `framework/tools/`)
+- AoT enabled globally via `Directory.Build.Aot.props` (except `netstandard2.0` projects and Tooling)
 
 ## Architecture
 
@@ -37,15 +37,15 @@ This is the most critical architectural pattern to understand:
 
 **Pipeline 1 — Roslyn Source Generator** (compile-time, per-project):
 - Injected globally via `Directory.Build.Aot.props` as an Analyzer reference to every project
-- Lives in `framework/tools/CrestCreates.CodeGenerator/` (targets `netstandard2.0`)
+- Lives in `src/Tooling/CrestCreates.CodeGenerator/` (targets `netstandard2.0`)
 - Generates code into `obj/generated/CrestCreates.CodeGenerator/`
 - Generators: DynamicApi, Module, Service, Entity (DTOs, repositories, mappings, permissions, validators, query builders)
 
 **Pipeline 2 — MSBuild Tasks** (build-time, cross-project):
-- Lives in `build/CrestCreates.BuildTasks/`
+- Lives in `src/Tooling/CrestCreates.BuildTasks/`
 - 4 tasks: `ScanModulesFromSource` → `CollectModuleManifests` → `GenerateAggregatedModuleCode` → `ScanEntityPermissions`
 - Outputs: `ModuleManifest.json`, `AggregatedModuleManifest.json`, `ModuleAutoInitializer.g.cs`, `EntityPermissionsManifest.json`
-- Sample projects import `build/CrestCreates.BuildTasks/CrestCreates.Modules.props` to activate
+- Sample projects import `src/Tooling/CrestCreates.BuildTasks/CrestCreates.Modules.props` to activate
 
 ### Key Attributes Driving Code Generation
 
@@ -99,28 +99,60 @@ public class LoanAppService : CrestAppServiceBase<Loan, Guid, LoanDto, CreateLoa
 ### Dependency Direction (Strict)
 
 ```
-Domain.Shared ← Domain ← Application.Contracts ← Application
-                                ↓                      ↓
-                          Infrastructure          OrmProviders.*
-                                ↓                      ↓
-                          Web/AspNetCore ←──────────(implements)
+Core ← Core.Abstractions
+  ↑
+Framework/Ddd: Domain.Shared ← Domain ← Application.Contracts ← Application
+Framework/Infrastructure: Aop, Caching, Security, Localization, MultiTenancy, Authorization...
+Framework/Api: DynamicApi, OpenApi
+Framework/Web: AspNetCore, HealthCheck
+  ↑
+Metadata: Metadata.Abstractions ← Metadata, ContextPack, Schema, Snapshot
+Metadata/Draft: DescriptorDraft, Draft
+  ↑
+Runtime: Capability, Workflow, HumanTask, Agent, Eventing, Audit, DistributedTransaction
+  ↑
+Persistence: Data.EFCore, Data.FreeSql, Data.SqlSugar, MongoDB
+  ↑
+Platform: Web, Platform.AspNetCore, Platform.All (composition entry points)
+Tooling: CodeGenerator, BuildTasks
+Integrations: PluginSystem, ExternalApi, LegacyDatabase
 ```
 
-- Contracts never depend on Application implementations
-- Domain never depends on Web
-- Infrastructure implements, never defines core business abstractions
-- Do not put domain abstractions in Web, application orchestration in repositories, or platform capabilities as sample-specific code
+**Dependency boundaries** (enforced by `tests/Boundary/CrestCreates.DependencyBoundaries.Tests`):
+- Core must not reference upper layers
+- Metadata.Abstractions must not reference Framework, Runtime, Persistence, Platform
+- Runtime must not reference Framework/Api, Framework/Web, Platform
+- Runtime must not reference concrete ORM providers (FreeSql, SqlSugar)
+- Persistence must not reference Runtime implementations
+- Tooling must not reference concrete Runtime implementations
 
 ### Project Layout
 
-All framework source projects are **flattened** under `framework/src/` — no nested subdirectories per module. Each folder matches the project name exactly (e.g., `framework/src/CrestCreates.DynamicApi/`).
+Source projects are organized by layer with subdirectories per capability domain:
 
 ```
-framework/src/     → 46 framework projects (flattened)
-framework/test/    → 22 test projects
-framework/tools/   → CodeGenerator (Roslyn source generator)
-build/             → BuildTasks (MSBuild tasks)
-samples/LibraryManagement/  → DDD sample (6 projects following strict layering)
+src/Core/                     → Core.Abstractions, Core
+src/Framework/Modularity/     → Modularity
+src/Framework/Ddd/            → Domain.Shared, Domain, Application.Contracts, Application
+src/Framework/Infrastructure/ → Aop, Caching, Security, Localization, MultiTenancy, Authorization, etc.
+src/Framework/Api/            → DynamicApi, OpenApi
+src/Framework/Web/            → AspNetCore, HealthCheck, Authentication
+src/Framework/Modules/        → FileManagement, Form, Organization, Scheduling, ModuleDiagnostics
+src/Framework/Testing/        → Testing
+src/Metadata/                 → Metadata.Abstractions, Metadata, ContextPack, Schema, Snapshot
+src/Metadata/Draft/           → DescriptorDraft, Draft
+src/Runtime/Capability/       → Capability.Abstractions, Capability
+src/Runtime/Workflow/         → Workflow.Abstractions, Workflow
+src/Runtime/HumanTask/        → HumanTask.Abstractions, HumanTask
+src/Runtime/Agent/            → Agent.Abstractions, Agent.Runtime, Agent.ControlPlane
+src/Runtime/Eventing/         → Event, EventBus (Local, Kafka, RabbitMQ, EventStore, etc.)
+src/Runtime/Audit/            → AuditLogging.Abstractions, AuditLogging
+src/Runtime/DistributedTransaction/ → DistributedTransaction, CAP
+src/Persistence/              → Data.EFCore, Data.FreeSql, Data.SqlSugar, MongoDB, etc.
+src/Platform/                 → Web, Platform, Platform.AspNetCore, Platform.All, etc.
+src/Tooling/                  → CodeGenerator, BuildTasks, Metadata.Analyzers
+src/Integrations/             → PluginSystem, ExternalApi, LegacyDatabase
+tests/                        → Mirror src/ structure with Boundary/Framework/Metadata/Runtime/Persistence/Tooling
 ```
 
 ## Key Principles
@@ -156,7 +188,7 @@ If 1, 2, 4, or 5 are unfavorable, stop and redesign.
 ## Testing
 
 - Framework: xUnit 2.9.3, FluentAssertions, Moq, AutoFixture
-- Test base classes in `framework/test/CrestCreates.TestBase/`: `TestBase` → `DomainTestBase` → `IntegrationTestBase` → `ApiTestBase<TStartup>`
+- Test base classes in `tests/Framework/Testing/CrestCreates.TestBase/`: `TestBase` → `DomainTestBase` → `IntegrationTestBase` → `ApiTestBase<TStartup>`
 - Integration tests use `WebApplicationFactory<Program>` with per-test PostgreSQL schema isolation (`itest_{guid}`)
 - Tests must verify the "real main chain", not legacy paths
 - Prefer real integration tests for: auth chain, tenant chain, Dynamic API main chain, Setting Management
@@ -174,7 +206,7 @@ Design specifications are located at `docs/superpowers/specs/`. These documents 
 - Class names: must be nouns or noun phrases
 - Async methods: must end with `Async`
 - Private fields: `_camelCase`
-- Namespaces: avoid conflicts with third-party libraries (e.g., `CrestCreates.OrmProviders.EFCore`, not `CrestCreates.Infrastructure.EntityFrameworkCore`)
+- Namespaces: avoid conflicts with third-party libraries (e.g., `CrestCreates.Data.EFCore`, not `CrestCreates.Infrastructure.EntityFrameworkCore`)
 - Comments: only explain complex logic or design intent, no obvious comments
 
 ## File Deletion Rule

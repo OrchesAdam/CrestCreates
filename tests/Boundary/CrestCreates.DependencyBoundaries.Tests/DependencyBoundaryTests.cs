@@ -19,8 +19,8 @@ public class DependencyBoundaryTests
     {
         AssertNoDirectProjectReferences(
             "src/Metadata/CrestCreates.Metadata.Abstractions",
-            "Metadata.Abstractions must remain descriptor contracts only.",
-            new[] { "src/Runtime", "src/Framework", "src/Persistence", "src/Platform" });
+            "Metadata.Abstractions must remain descriptor contracts only — no Framework, Runtime, Persistence, or Platform.",
+            new[] { "src/Framework", "src/Runtime", "src/Persistence", "src/Platform" });
     }
 
     [Fact]
@@ -29,7 +29,17 @@ public class DependencyBoundaryTests
         AssertNoDirectProjectReferences(
             "src/Runtime",
             "Runtime projects must not reference API/Web framework packages or Platform composition.",
-            new[] { "src/Framework/CrestCreates.DynamicApi", "src/Framework/CrestCreates.OpenApi", "src/Framework/CrestCreates.AspNetCore", "src/Framework/CrestCreates.Web", "src/Platform" });
+            new[]
+            {
+                "src/Framework/Api/CrestCreates.DynamicApi",
+                "src/Framework/Api/CrestCreates.OpenApi",
+                "src/Framework/Web/CrestCreates.AspNetCore",
+                "src/Framework/Web/CrestCreates.AspNetCore.Authentication.OpenIddict",
+                "src/Framework/Web/CrestCreates.HealthCheck",
+                "src/Framework/Web/CrestCreates.HealthCheck.AspNetCore",
+                "src/Framework/Web/CrestCreates.HealthCheck.Mvc",
+                "src/Platform"
+            });
     }
 
     [Fact]
@@ -47,7 +57,12 @@ public class DependencyBoundaryTests
         AssertNoDirectProjectReferences(
             "src/Persistence",
             "Persistence projects must not own runtime store contracts.",
-            new[] { "src/Runtime/CrestCreates.Workflow", "src/Runtime/CrestCreates.Agent", "src/Runtime/CrestCreates.HumanTask" });
+            new[]
+            {
+                "src/Runtime/Workflow/CrestCreates.Workflow",
+                "src/Runtime/Agent/CrestCreates.Agent.Runtime",
+                "src/Runtime/HumanTask/CrestCreates.HumanTask"
+            });
     }
 
     [Fact]
@@ -58,14 +73,14 @@ public class DependencyBoundaryTests
             "Tooling may reference abstractions but must not reference concrete runtime implementations.",
             new[]
             {
-                "src/Runtime/CrestCreates.Capability.Runtime",
-                "src/Runtime/CrestCreates.Workflow.Runtime",
-                "src/Runtime/CrestCreates.HumanTask.Runtime",
-                "src/Runtime/CrestCreates.EventBus.Local",
-                "src/Runtime/CrestCreates.EventBus.Local.Channel",
-                "src/Runtime/CrestCreates.EventBus.Kafka",
-                "src/Runtime/CrestCreates.EventBus.RabbitMQ",
-                "src/Runtime/CrestCreates.Audit.Runtime"
+                "src/Runtime/Capability/CrestCreates.Capability",
+                "src/Runtime/Workflow/CrestCreates.Workflow",
+                "src/Runtime/HumanTask/CrestCreates.HumanTask",
+                "src/Runtime/Eventing/CrestCreates.EventBus.Local",
+                "src/Runtime/Eventing/CrestCreates.EventBus.Local.Channel",
+                "src/Runtime/Eventing/CrestCreates.EventBus.Kafka",
+                "src/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ",
+                "src/Runtime/Audit/CrestCreates.AuditLogging"
             },
             allowMissingRoot: true);
     }

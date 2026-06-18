@@ -21,8 +21,8 @@ dotnet build
 dotnet test
 
 # 构建/测试单个项目
-dotnet build framework/src/CrestCreates.Domain
-dotnet test framework/test/CrestCreates.Domain.Tests
+dotnet build src/Framework/Ddd/CrestCreates.Domain
+dotnet test tests/Framework/Ddd/CrestCreates.Domain.Tests
 
 # 运行单个测试
 dotnet test --filter "FullyQualifiedName~CrestCreates.Application.Tests.Tenants.TenantAppServiceTests"
@@ -41,18 +41,12 @@ dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r win
 - SDK: .NET 10.0.100，`rollForward: latestMinor`（见 `global.json`）
 - 解决方案: `CrestCreates.slnx`（XML 格式的新方案，不是 `.sln`）
 - 中央包管理: `Directory.Packages.props`，所有 NuGet 版本集中管理
-- CodeGenerator 在 `framework/tools/`（非 `framework/src/`），target 为 `netstandard2.0`；`framework/src/` 下有一个同名空壳项目（Exe stub），忽略即可
-- BuildTasks 在 `build/CrestCreates.BuildTasks/`，target 为 `net10.0`（注意不是 netstandard2.0）
+- CodeGenerator 在 `src/Tooling/CrestCreates.CodeGenerator/`，target 为 `netstandard2.0`
+- BuildTasks 在 `src/Tooling/CrestCreates.BuildTasks/`，target 为 `net10.0`（注意不是 netstandard2.0）
 - AoT 配置在 `Directory.Build.Aot.props`，默认 `trim` 模式；显式 AoT 需 `-p:CrestCreatesPublishMode=aot`
 - 测试项目在 `Directory.Build.targets` 中强制关闭 Trim/AoT（Moq/DynamicProxy 不兼容）
 - Source Generator 可通过 `-p:CrestCreatesCodeGeneration=false` 全局禁用（见 `Directory.Build.Aot.props`）
 - Source Generator 输出到 `obj/{config}/{tfm}/source-generators/`（见 `Directory.Build.targets` 的 `CompilerGeneratedFilesOutputPath`）
-
-**.slnx 与磁盘不一致的项目**：以下项目存在于磁盘但不在 `CrestCreates.slnx` 中，`dotnet build`（solution 级）不会构建它们：
-- `CrestCreates.ModuleDiagnostics` — 通过 `Directory.Build.Aot.props` 全局注入，无需 slnx 引用
-- `CrestCreates.OrmProviders.MongoDB` / `CrestCreates.PluginSystem` — 存在于 `framework/src/` 但未加入 slnx
-- `CrestCreates.Blazor` — 空目录（无 .csproj），忽略
-- 部分测试项目（`BuildTasks.Tests`、`Localization.Tests`、`ModuleDiagnostics.Tests`、`MongoDB.Tests`、`TestBase.Tests`）也不在 slnx 中
 
 ---
 
@@ -94,51 +88,87 @@ dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r win
 
 ```
 CrestCreates/
-├── framework/
-│   ├── src/              # 框架源码（扁平化布局，与 .slnx 虚拟文件夹映射）
-│   ├── test/             # 测试项目
-│   └── tools/            # CodeGenerator（Roslyn Source Generator，target netstandard2.0）
-├── build/                # BuildTasks（MSBuild 跨项目代码生成，target net10.0）
+├── src/
+│   ├── Core/                    # 核心抽象（Core.Abstractions + Core）
+│   ├── Framework/
+│   │   ├── Modularity/          # 模块系统
+│   │   ├── Ddd/                 # Domain.Shared, Domain, Application.Contracts, Application
+│   │   ├── Infrastructure/      # 基础设施：Aop, Caching, Configuration, Security, Localization 等
+│   │   ├── Api/                 # DynamicApi, OpenApi
+│   │   ├── Web/                 # AspNetCore, HealthCheck, Authentication
+│   │   ├── Modules/             # 业务模块：FileManagement, Form, Organization, Scheduling 等
+│   │   └── Testing/             # 测试基础设施
+│   ├── Metadata/
+│   │   ├── (flat)               # Metadata.Abstractions, Metadata, ContextPack, Schema, Snapshot
+│   │   └── Draft/               # DescriptorDraft, Draft（草稿/预发布状态）
+│   ├── Runtime/
+│   │   ├── Capability/          # Capability.Abstractions + Capability
+│   │   ├── Workflow/            # Workflow.Abstractions + Workflow
+│   │   ├── HumanTask/           # HumanTask.Abstractions + HumanTask
+│   │   ├── Agent/               # Agent.Abstractions, Agent.Runtime, Agent.ControlPlane
+│   │   ├── Eventing/            # Event, EventBus (Local, Kafka, RabbitMQ, EventStore 等)
+│   │   ├── Audit/               # AuditLogging.Abstractions + AuditLogging
+│   │   └── DistributedTransaction/ # DistributedTransaction + CAP
+│   ├── Persistence/             # Data.*, DbContextProvider, MongoDB
+│   ├── Platform/                # 组合入口：Web, Platform, Platform.AspNetCore, Platform.All 等
+│   ├── Tooling/                 # CodeGenerator, Metadata.Analyzers, BuildTasks
+│   └── Integrations/            # PluginSystem, Integration.ExternalApi, Integration.LegacyDatabase
+├── tests/
+│   ├── Boundary/                # 依赖边界测试
+│   ├── Framework/               # Ddd, Infrastructure, Web, Modules, Testing
+│   ├── Metadata/                # Core, Draft
+│   ├── Runtime/                 # Capability, Workflow, HumanTask, Agent, Eventing, Audit 等
+│   ├── Persistence/             # OrmProviders, MongoDB, Database.Migrations
+│   ├── Tooling/                 # BuildTasks, CodeGenerator
+│   └── (sample-specific tests)
 ├── samples/
-│   ├── LibraryManagement/  # DDD 示例应用（6 项目：Domain.Shared/Domain/App.Contracts/App/EFCore/Web）
-│   └── SaaSHelpdesk/     # DDD 示例应用（7 项目：同上 + Tests）
+│   ├── LibraryManagement/       # DDD 示例应用（6 项目）
+│   └── SaaSHelpdesk/           # DDD 示例应用（7 项目）
 ├── docs/
-│   ├── design/           # 设计文档
-│   ├── Feature/          # 功能文档
-│   ├── review/           # 评审文档
-│   └── superpowers/      # 设计规格（specs/）和工作计划（plans/）
-├── 99_RecycleBin/        # 软删除回收站（文件删除规则见下）
-├── CrestCreates.slnx     # 解决方案（.slnx XML 格式，非 .sln）
-├── Directory.Build.props # 全局构建配置（net10.0, Nullable, 中央包管理）
-├── Directory.Build.Aot.props # Trim / NativeAOT 发布模式配置 + SG 全局注入 + ModuleDiagnostics 全局注入
-├── Directory.Build.targets   # 测试项目 Trim/AoT 禁用 + SG 输出路径
-├── Directory.Packages.props  # 中央包版本管理
-├── global.json           # SDK 版本锁定
-├── nuget.config          # NuGet 源配置（仅 nuget.org）
-├── memory.md             # 平台闭环状态记录（关键决策和未完成工作）
-├── AGENTS.md             # 本文件
-├── CLAUDE.md             # Claude Code 用指令文件
+│   ├── design/                  # 设计文档
+│   ├── Feature/                 # 功能文档
+│   ├── review/                  # 评审文档
+│   └── superpowers/             # 设计规格（specs/）和工作计划（plans/）
+├── 99_RecycleBin/               # 软删除回收站（文件删除规则见下）
+├── solutions/                   # 分层 .slnx 文件（CrestCreates.All.slnx 为规范文件）
+├── CrestCreates.slnx            # 主解决方案（.slnx XML 格式，非 .sln）
+├── Directory.Build.props        # 全局构建配置（net10.0, Nullable, 中央包管理）
+├── Directory.Build.Aot.props    # Trim / NativeAOT 发布模式配置 + SG 全局注入 + ModuleDiagnostics 全局注入
+├── Directory.Build.targets      # 测试项目 Trim/AoT 禁用 + SG 输出路径
+├── Directory.Packages.props     # 中央包版本管理
+├── global.json                  # SDK 版本锁定
+├── nuget.config                 # NuGet 源配置（仅 nuget.org）
+├── memory.md                    # 平台闭环状态记录（关键决策和未完成工作）
+├── AGENTS.md                    # 本文件
+├── CLAUDE.md                    # Claude Code 用指令文件
 └── .github/copilot-instructions.md  # GitHub Copilot 用指令文件（部分过时，见下方警告）
 ```
 
-**注意**：`.github/copilot-instructions.md` 中的部分信息已过时（如使用 `OrmProviders.*` 命名、`ModuleA/ModuleB` 示例模块不存在等），不要以此为准。
-
-**命名陷阱**：`CrestCreates.Scheduling/` 目录下的 csproj 实际名为 `CrestCreates.Scheduling.Abstractions.csproj`（目录名 ≠ 项目名），在 slnx 中引用的是 `framework/src/CrestCreates.Scheduling/CrestCreates.Scheduling.Abstractions.csproj`。
+**注意**：`.github/copilot-instructions.md` 中的部分信息已过时（如使用 `OrmProviders.*` 命名、`ModuleA/ModuleB` 示例模块不存在、仍引用旧 `framework/src/` 路径等），不要以此为准。
 
 ### .slnx 虚拟文件夹组织
 
-`.slnx` 将扁平化的 `framework/src/` 按功能分组：
-- `/src/core/` — 核心框架项目
-- `/src/modules/Authentication/` — `CrestCreates.AspNetCore.Authentication.OpenIddict`
-- `/src/modules/Authorization/` — `CrestCreates.Authorization`
-- `/src/modules/EventBus/` — Kafka, RabbitMQ, Local, EventStore, DeadLetter 等
-- `/src/modules/Data/` — Data.Core, Data.EFCore, Data.FreeSql, Data.SqlSugar 及各数据库 Provider
-- `/src/modules/SchedulingJob/` — `CrestCreates.Scheduling.Quartz`
-- `/src/modules/HealthCheck/` — AspNetCore, Mvc
-- `/src/modules/DistributedTransaction/` — CAP
-- `/src/samples/` — `CrestCreates.Web` + LibraryManagement + SaaSHelpdesk
-- `/src/test/` — 所有测试项目
-- `/src/tools/` — CodeGenerator
+`.slnx` 按 `src/` 下的层级结构分组：
+- `/src/Core/` — 核心抽象（Core.Abstractions, Core）
+- `/src/Framework/Modularity/` — 模块系统
+- `/src/Framework/Ddd/` — DDD 分层（Domain.Shared, Domain, Application.Contracts, Application）
+- `/src/Framework/Infrastructure/` — 基础设施（Aop, Caching, Security, Localization 等）
+- `/src/Framework/Api/` — DynamicApi, OpenApi
+- `/src/Framework/Web/` — AspNetCore, HealthCheck
+- `/src/Framework/Modules/` — 业务模块
+- `/src/Metadata/` — 元数据核心
+- `/src/Metadata/Draft/` — 草稿/预发布状态
+- `/src/Runtime/Capability/` — 能力运行时
+- `/src/Runtime/Workflow/` — 工作流运行时
+- `/src/Runtime/HumanTask/` — 人工任务运行时
+- `/src/Runtime/Agent/` — Agent 运行时
+- `/src/Runtime/Eventing/` — 事件总线
+- `/src/Runtime/Audit/` — 审计日志
+- `/src/Persistence/` — 数据访问
+- `/src/Platform/` — 组合入口
+- `/src/Tooling/` — CodeGenerator, BuildTasks
+- `/src/Integrations/` — 外部集成
+- `/tests/` — 按同层分组
 
 ### 重要约定
 
@@ -180,7 +210,7 @@ BuildTasks 有 4 个 Task：
 - 编译前链：`ScanModulesFromSource` → `CollectModuleManifests` → `GenerateAggregatedModuleCode`（在 `CoreCompile` 前顺序执行）
 - 编译后：`ScanEntityPermissions`（`AfterTargets="Build"`，不在编译前链中）
 
-使用者需 import `build/CrestCreates.BuildTasks/CrestCreates.Modules.props`。
+使用者需 import `src/Tooling/CrestCreates.BuildTasks/CrestCreates.Modules.props`。
 
 **注意**：Controller 生成器（`ControllerSourceGenerator`、`CrudControllerSourceGenerator`）已标记 `[Obsolete]`，主链使用 `DynamicApiAotSourceGenerator` 生成的 Minimal API 端点。不存在独立的 QueryBuilder Source Generator。
 
@@ -225,17 +255,32 @@ BuildTasks 有 4 个 Task：
 ## 分层与依赖方向
 
 ```
-Domain.Shared ← Domain ← Application.Contracts ← Application
-                                ↓                      ↓
-                          Infrastructure          Data.* (ORM Providers)
-                                ↓                      ↓
-                          Web/AspNetCore ←──────────(implements)
+Core ← Core.Abstractions
+  ↑
+Framework/Ddd: Domain.Shared ← Domain ← Application.Contracts ← Application
+Framework/Infrastructure: Aop, Caching, Security, Localization, MultiTenancy, Authorization...
+Framework/Api: DynamicApi, OpenApi
+Framework/Web: AspNetCore, HealthCheck
+  ↑
+Metadata: Metadata.Abstractions ← Metadata, ContextPack, Schema, Snapshot
+Metadata/Draft: DescriptorDraft, Draft
+  ↑
+Runtime: Capability, Workflow, HumanTask, Agent, Eventing, Audit, DistributedTransaction
+  ↑
+Persistence: Data.EFCore, Data.FreeSql, Data.SqlSugar, MongoDB
+  ↑
+Platform: Web, Platform.AspNetCore, Platform.All (组合入口)
+Tooling: CodeGenerator, BuildTasks
+Integrations: PluginSystem, ExternalApi, LegacyDatabase
 ```
 
-- Contracts 不依赖 Application 实现
-- Domain 不依赖 Web
-- Infrastructure 是实现，不应反过来定义核心业务抽象
-- ORM Provider 项目命名已从 `OrmProviders.*` 迁移到 `Data.*`（如 `CrestCreates.Data.EFCore`、`CrestCreates.Data.FreeSql`、`CrestCreates.Data.SqlSugar`）
+**依赖边界**（由 `tests/Boundary/CrestCreates.DependencyBoundaries.Tests` 强制执行）：
+- Core 不引用上层（Framework, Metadata, Runtime, Persistence, Platform）
+- Metadata.Abstractions 不引用 Framework, Runtime, Persistence, Platform
+- Runtime 不引用 Framework/Api, Framework/Web, Platform
+- Runtime 不引用具体 ORM Provider（FreeSql, SqlSugar）
+- Persistence 不引用 Runtime 具体实现（Workflow, Agent, HumanTask）
+- Tooling 不引用 Runtime 具体实现
 
 不要：把领域抽象塞进 Web 层、把应用编排逻辑塞进仓储、把平台能力实现成 sample 特例。
 
@@ -268,7 +313,7 @@ Domain.Shared ← Domain ← Application.Contracts ← Application
 
 - 框架：xUnit 2.9.3 + FluentAssertions + Moq + AutoFixture
 - 集成测试：`WebApplicationFactory<Program>` + Testcontainers PostgreSQL，每测试独立 schema（`itest_{guid}`）
-- 测试基类在 `framework/test/CrestCreates.TestBase/`，层次结构为扁平型（非线性链式）：
+- 测试基类在 `tests/Framework/Testing/CrestCreates.TestBase/`，层次结构为扁平型（非线性链式）：
   ```
   TestBase                      ← 根基类（IFixture, IServiceProvider, mock 注册）
   ├── DomainTestBase            ← 直接继承 TestBase
@@ -306,8 +351,9 @@ Domain.Shared ← Domain ← Application.Contracts ← Application
 - 平台状态记录：`memory.md`
 - 设计规格：`docs/superpowers/specs/`
 - 示例项目：`samples/LibraryManagement/`、`samples/SaaSHelpdesk/`
-- 模块发现 props：`build/CrestCreates.BuildTasks/CrestCreates.Modules.props`
+- 模块发现 props：`src/Tooling/CrestCreates.BuildTasks/CrestCreates.Modules.props`
+- 依赖边界测试：`tests/Boundary/CrestCreates.DependencyBoundaries.Tests/`
 
 ---
 
-**最后更新**: 2026-06-15
+**最后更新**: 2026-06-18

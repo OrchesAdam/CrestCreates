@@ -9,7 +9,6 @@
     <InternalsVisibleTo Include="CrestCreates.DescriptorDraft" />
     <InternalsVisibleTo Include="CrestCreates.DescriptorDraft.Tests" />
     <ProjectReference Include="../../CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
-    <ProjectReference Include="../../../Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
     <ProjectReference Include="../../CrestCreates.Schema.Abstractions/CrestCreates.Schema.Abstractions.csproj" />
     <ProjectReference Include="../../../Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
     <ProjectReference Include="../../../Framework/Modules/CrestCreates.Form.Abstractions/CrestCreates.Form.Abstractions.csproj" />

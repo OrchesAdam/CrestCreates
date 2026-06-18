@@ -16,6 +16,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.AuditLogging.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../CrestCreates.AuditLogging.Abstractions/CrestCreates.AuditLogging.Abstractions.csproj" />
     <ProjectReference Include="../../../Framework/Infrastructure/CrestCreates.Authorization.Abstractions/CrestCreates.Authorization.Abstractions.csproj" />
     <ProjectReference Include="../../../Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
     <ProjectReference Include="../../../Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />

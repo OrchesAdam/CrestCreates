@@ -17,7 +17,7 @@
     <ProjectReference Include="../../Infrastructure/CrestCreates.Authorization.Abstractions/CrestCreates.Authorization.Abstractions.csproj" />
     <ProjectReference Include="../../Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="../../Infrastructure/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
-    <ProjectReference Include="../../../Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
+    <ProjectReference Include="../../../Runtime/Audit/CrestCreates.AuditLogging.Abstractions/CrestCreates.AuditLogging.Abstractions.csproj" />
     <ProjectReference Include="../../Infrastructure/CrestCreates.Security.Abstractions/CrestCreates.Security.Abstractions.csproj" />
   </ItemGroup>
 
