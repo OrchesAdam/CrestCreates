@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CrestCreates.Agent.ControlPlane</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.Agent.ControlPlane.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.Agent.ControlPlane.Abstractions\CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Metadata.Abstractions\CrestCreates.Metadata.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Metadata.ContextPack\CrestCreates.Metadata.ContextPack.csproj" />
+    <ProjectReference Include="..\..\Framework\CrestCreates.DescriptorDraft\CrestCreates.DescriptorDraft.csproj" />
+  </ItemGroup>
+</Project>

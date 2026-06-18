@@ -434,6 +434,43 @@ This thread achieved the following:
 - **Workflow step ordering**: Steps are hashed in list order (NOT sorted by Id), because step order is semantically meaningful for workflow execution.
 - **Design spec**: GitHub issue #29.
 
+### Agent Control Plane Tool Surface (Phase 7c, 2026-06-18)
+
+- **Two new projects** under `src/Metadata/`:
+  - `CrestCreates.Agent.ControlPlane.Abstractions` — all public types, interfaces, enums
+  - `CrestCreates.Agent.ControlPlane` — default implementations
+- **One new test project** under `tests/Metadata/`:
+  - `CrestCreates.Agent.ControlPlane.Tests` — 127 tests, all passing
+
+- **Core abstractions** (30 tool manifest entries, AOT-safe, no runtime reflection):
+  - `IAgentControlPlaneToolService` — facade interface with 30 tool methods across 6 waves
+  - `AgentToolInvocationContext` — tenant, actor, correlation, tool name, invocation source
+  - `AgentToolResult<T>` — strongly typed result with Status/Diagnostics/AuditRecord
+  - `AgentToolResultStatus` — Success/Denied/Failed/NotFound/InvalidRequest
+  - `AgentToolAuthorizationPolicy` — AllowAll/ReadOnly/RuntimeDenied
+  - `IAgentToolAuthorizationService` + `DefaultAgentToolAuthorizationService` — permission check, runtime execution prefix denied
+  - `IAgentToolManifestProvider` + `StaticAgentToolManifestProvider` — hardcoded 30-tool manifest
+  - `IAgentToolInvocationAuditor` + `InMemoryAgentToolInvocationAuditor` — audit recording
+  - `AgentToolInvocationAuditRecord` — full touch-point tracking (descriptors, drafts, reviews, fix proposals, package previews, activation requests)
+
+- **Permission boundary**: every tool invocation → manifest lookup → permission check → service invocation → audit recording
+- **Runtime boundary**: Agent CANNOT approve, activate, execute runtime handlers, mutate runtime registries, or become governance authority
+- **Activation is handoff only**: `SubmitActivationRequest` creates a `Submitted` record, does not execute activation. `Approved`/`Rejected` are terminal states. No `ApproveActivationRequest` tool exists.
+- **Fix proposals are suggestions**: `ApplyFixProposalToDraft` only updates draft, never patches active descriptors
+- **Review pass ≠ activation approval**
+
+- **Wave 1** (Context Read): GetDescriptorByRef, SearchDescriptors, ListDescriptorRelationships, GetTopologySummary, BuildMetadataContextPack, BuildRuntimeScenarioContextPack
+- **Wave 2** (Draft): CreateDescriptorDraft, UpdateDescriptorDraft, GetDescriptorDraft, ListDescriptorDrafts, CancelDescriptorDraft, CompareDescriptorDraft
+- **Wave 3** (Review): ValidateDescriptorDraft, ReviewDescriptorDraft, GetDraftReviewResult, ListDraftReviewResults, ExplainDiagnostics
+- **Wave 4** (Fix Proposal): SuggestDescriptorDraftFixes, GetFixProposal, ListFixProposals, ApplyFixProposalToDraft
+- **Wave 5** (Package Preview): PreviewDescriptorPackage, BuildPackageEvidencePreview, BuildActivationReadinessPreview, GetPackagePreview
+- **Wave 6** (Activation Handoff): SubmitActivationRequest, GetActivationRequestStatus, CancelActivationRequest
+
+- **127 tests across 8 test classes**: StaticManifest (10), Authorization (10), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), Wave1-6 (12+12+10+9+10+12)
+- **Design spec**: `docs/superpowers/specs/2026-06-18-phase-7c-agent-control-plane-tool-surface-design.md`
+- **Implementation plan**: `docs/superpowers/plans/2026-06-18-phase-7c-agent-control-plane-tool-surface.md`
+- **Caveat**: No DI extension method yet (no `AddAgentControlPlane()`). No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface.
+
 ---
 
 ## Recommended Next Thread Entry Prompt

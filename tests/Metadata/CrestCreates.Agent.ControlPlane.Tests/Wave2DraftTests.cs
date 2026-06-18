@@ -1,0 +1,258 @@
+using Xunit;
+using Moq;
+using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Metadata.Abstractions;
+using FluentAssertions;
+
+using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
+using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
+
+namespace CrestCreates.Agent.ControlPlane.Tests;
+
+public class Wave2DraftTests : AgentControlPlaneTestBase
+{
+    [Fact]
+    public async Task CreateDescriptorDraft_Creates_Draft_With_Correct_Properties()
+    {
+        var service = CreateService();
+        var context = CreateContext("CreateDescriptorDraft");
+        var request = new CreateDescriptorDraftRequest
+        {
+            DescriptorKind = DescriptorKind.Event,
+            DescriptorId = "test.desc-001",
+            Operation = DraftAbstractions.DescriptorDraftOperation.Create,
+            Payload = new TestDraftPayload(DescriptorKind.Event, "test.desc-001", "TestEvent"),
+            ProposedVersion = "1",
+            Intent = "Create new event"
+        };
+
+        DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var result = await service.CreateDescriptorDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Value.Should().NotBeNull();
+        result.Value!.DescriptorKind.Should().Be(DescriptorKind.Event);
+        result.Value.DescriptorId.Should().Be("test.desc-001");
+        result.Value.Operation.Should().Be(DraftAbstractions.DescriptorDraftOperation.Create);
+        result.Value.TenantId.Should().Be(TestTenantId);
+        result.Value.Status.Should().Be(DraftAbstractions.DescriptorDraftStatus.Created);
+        result.Value.DraftId.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task CreateDescriptorDraft_Audit_Records_TouchedDraftIds()
+    {
+        var service = CreateService();
+        var context = CreateContext("CreateDescriptorDraft");
+        var request = new CreateDescriptorDraftRequest
+        {
+            DescriptorKind = DescriptorKind.Event,
+            DescriptorId = "test.desc-001",
+            Operation = DraftAbstractions.DescriptorDraftOperation.Create,
+            Payload = new TestDraftPayload(DescriptorKind.Event, "test.desc-001", "Test")
+        };
+
+        DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await service.CreateDescriptorDraftAsync(context, request);
+
+	        InMemoryAuditor.GetAllRecords().Should().Contain(r =>
+	            r.TouchedDraftIds != null && r.TouchedDraftIds.Count > 0);
+    }
+
+    [Fact]
+    public async Task UpdateDescriptorDraft_Updates_Existing_Draft()
+    {
+        var service = CreateService();
+        var context = CreateContext("UpdateDescriptorDraft");
+        var existing = CreateTestDraft();
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(existing));
+        DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var request = new UpdateDescriptorDraftRequest
+        {
+            DraftId = "draft-001",
+            Intent = "Updated intent",
+            Rationale = "Fixed something"
+        };
+
+        var result = await service.UpdateDescriptorDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Value!.Intent.Should().Be("Updated intent");
+        result.Value.Rationale.Should().Be("Fixed something");
+    }
+
+    [Fact]
+    public async Task UpdateDescriptorDraft_Returns_NotFound_When_Draft_Missing()
+    {
+        var service = CreateService();
+        var context = CreateContext("UpdateDescriptorDraft");
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "nonexistent", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(null));
+
+        var request = new UpdateDescriptorDraftRequest { DraftId = "nonexistent" };
+
+        var result = await service.UpdateDescriptorDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.NotFound);
+    }
+
+    [Fact]
+    public async Task UpdateDescriptorDraft_Preserves_Unchanged_Fields()
+    {
+        var service = CreateService();
+        var context = CreateContext("UpdateDescriptorDraft");
+        var existing = CreateTestDraft();
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(existing));
+        DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var request = new UpdateDescriptorDraftRequest { DraftId = "draft-001", Intent = "Updated intent" };
+
+        var result = await service.UpdateDescriptorDraftAsync(context, request);
+
+        result.Value!.Intent.Should().Be("Updated intent");
+        result.Value.Rationale.Should().Be(existing.Rationale);
+    }
+
+    [Fact]
+    public async Task GetDescriptorDraft_Returns_Draft_When_Found()
+    {
+        var service = CreateService();
+        var context = CreateContext("GetDescriptorDraft");
+        var draft = CreateTestDraft();
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(draft));
+
+        var result = await service.GetDescriptorDraftAsync(context, "draft-001");
+
+        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Value!.DraftId.Should().Be("draft-001");
+    }
+
+    [Fact]
+    public async Task GetDescriptorDraft_Returns_NotFound_When_Missing()
+    {
+        var service = CreateService();
+        var context = CreateContext("GetDescriptorDraft");
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "nonexistent", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(null));
+
+        var result = await service.GetDescriptorDraftAsync(context, "nonexistent");
+
+        result.Status.Should().Be(AgentToolResultStatus.NotFound);
+    }
+
+    [Fact]
+    public async Task ListDescriptorDrafts_Returns_Drafts_For_Tenant()
+    {
+        var service = CreateService();
+        var context = CreateContext("ListDescriptorDrafts");
+        var drafts = new List<Draft> { CreateTestDraft(), CreateTestDraft(draftId: "draft-002") };
+
+        DraftStoreMock.Setup(s => s.ListAsync(TestTenantId, null, It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<IReadOnlyList<Draft>>(drafts.AsReadOnly()));
+
+        var result = await service.ListDescriptorDraftsAsync(context, null);
+
+        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Value!.TotalCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task CancelDescriptorDraft_Sets_Status_To_Cancelled()
+    {
+        var service = CreateService();
+        var context = CreateContext("CancelDescriptorDraft");
+        var draft = CreateTestDraft();
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(draft));
+        DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var result = await service.CancelDescriptorDraftAsync(context, "draft-001");
+
+        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Value!.Status.Should().Be(DraftAbstractions.DescriptorDraftStatus.Cancelled);
+    }
+
+    [Fact]
+    public async Task CancelDescriptorDraft_Returns_NotFound_When_Missing()
+    {
+        var service = CreateService();
+        var context = CreateContext("CancelDescriptorDraft");
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "nonexistent", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(null));
+
+        var result = await service.CancelDescriptorDraftAsync(context, "nonexistent");
+
+        result.Status.Should().Be(AgentToolResultStatus.NotFound);
+    }
+
+    [Fact]
+    public async Task CompareDescriptorDraft_Returns_Comparison_With_Active()
+    {
+        var service = CreateService();
+        var context = CreateContext("CompareDescriptorDraft");
+        var draft = CreateTestDraft();
+        var activeDescriptor = CreateTestDescriptor();
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(draft));
+        DescriptorCatalogMock.Setup(c => c.Get(draft.DescriptorId)).Returns(activeDescriptor);
+
+        var result = await service.CompareDescriptorDraftAsync(context, "draft-001");
+
+        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Value!.Draft.Should().Be(draft);
+        result.Value.CurrentActiveDescriptor.Should().Be(activeDescriptor);
+    }
+
+    [Fact]
+    public async Task CompareDescriptorDraft_Returns_NotFound_When_Draft_Missing()
+    {
+        var service = CreateService();
+        var context = CreateContext("CompareDescriptorDraft");
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "nonexistent", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(null));
+
+        var result = await service.CompareDescriptorDraftAsync(context, "nonexistent");
+
+        result.Status.Should().Be(AgentToolResultStatus.NotFound);
+    }
+
+    [Fact]
+    public async Task Drafts_Are_Tenant_Isolated()
+    {
+        var service = CreateService();
+        var contextA = CreateContext("GetDescriptorDraft", tenantId: "tenant-A");
+        var contextB = CreateContext("GetDescriptorDraft", tenantId: "tenant-B");
+        var draftA = CreateTestDraft(draftId: "draft-A", tenantId: "tenant-A");
+
+        DraftStoreMock.Setup(s => s.GetAsync("tenant-A", "draft-A", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(draftA));
+        DraftStoreMock.Setup(s => s.GetAsync("tenant-B", "draft-A", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(null));
+
+        var resultA = await service.GetDescriptorDraftAsync(contextA, "draft-A");
+        var resultB = await service.GetDescriptorDraftAsync(contextB, "draft-A");
+
+        resultA.Status.Should().Be(AgentToolResultStatus.Success);
+        resultB.Status.Should().Be(AgentToolResultStatus.NotFound);
+    }
+}

@@ -86,6 +86,8 @@
     <Project Path="src/Integrations/CrestCreates.PluginSystem/CrestCreates.PluginSystem.csproj" />
   </Folder>
   <Folder Name="/src/Metadata/">
+    <Project Path="src/Metadata/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
+    <Project Path="src/Metadata/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj" />
     <Project Path="src/Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
     <Project Path="src/Metadata/CrestCreates.Metadata.Analyzers/CrestCreates.Metadata.Analyzers.csproj" />
     <Project Path="src/Metadata/CrestCreates.Metadata.ContextPack.Abstractions/CrestCreates.Metadata.ContextPack.Abstractions.csproj" />
@@ -170,6 +172,7 @@
     <Project Path="tests/Framework/CrestCreates.Web.Tests/CrestCreates.Web.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Metadata/">
+    <Project Path="tests/Metadata/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj" />
     <Project Path="tests/Metadata/CrestCreates.BuildTasks.Tests/CrestCreates.BuildTasks.Tests.csproj" />
     <Project Path="tests/Metadata/CrestCreates.CodeGenerator.Tests/CrestCreates.CodeGenerator.Tests.csproj" />
     <Project Path="tests/Metadata/CrestCreates.Metadata.ContextPack.Tests/CrestCreates.Metadata.ContextPack.Tests.csproj" />
