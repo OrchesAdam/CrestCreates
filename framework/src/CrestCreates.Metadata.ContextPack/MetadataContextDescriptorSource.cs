@@ -85,9 +85,9 @@ internal sealed class MetadataContextDescriptorSource
 
     private (IDescriptor? Descriptor, bool IsAmbiguous) ResolveDescriptorWithAmbiguity(DescriptorRef reference)
     {
-        // Version-pinned lookup: exact match
-        if (reference.Version.HasValue && _versionedIndex.TryGetValue(reference, out var exact))
-            return (exact, false);
+        // Version-pinned lookup: exact match only — never fallback to unpinned when version is specified
+        if (reference.Version.HasValue)
+            return _versionedIndex.TryGetValue(reference, out var exact) ? (exact, false) : (null, false);
 
         // Unpinned lookup
         var identity = new DescriptorIdentity(reference.Namespace, reference.Id);
