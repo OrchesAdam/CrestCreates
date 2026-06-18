@@ -26,6 +26,12 @@ using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.Settings;
 using CrestCreates.Data.EFCore.UnitOfWork;
+using CrestCreates.Event.Abstractions;
+using CrestCreates.Event;
+using CrestCreates.EventBus.Abstractions;
+using CrestCreates.EventBus.Local;
+using CrestCreates.Security.Abstractions;
+using CrestCreates.Security.Modules;
 using Microsoft.EntityFrameworkCore;
 using LibraryManagement.EntityFrameworkCore;
 using LibraryManagement.Domain.Repositories;
@@ -262,7 +268,8 @@ public sealed class LibraryManagementWebApplicationFactory
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
-        builder.ConfigureAppConfiguration((_, configurationBuilder) =>
+        IConfiguration? hostConfiguration = null;
+        builder.ConfigureAppConfiguration((context, configurationBuilder) =>
         {
             configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -275,6 +282,7 @@ public sealed class LibraryManagementWebApplicationFactory
                 ["CrestLogging:EnableFile"] = "false",
                 ["AuditLogging:IsEnabledForGetRequests"] = "true"
             });
+            hostConfiguration = configurationBuilder.Build();
         });
 
         builder.ConfigureTestServices(services =>
@@ -372,6 +380,16 @@ public sealed class LibraryManagementWebApplicationFactory
             services.AddScoped<ITenantSchemaMigrator, NoOpTenantMigrationRunner>();
             services.AddScoped<ITenantMigrationRunner, NoOpTenantMigrationRunner>();
             services.AddScoped<ITenantInitializationStore, NoOpTenantInitializationStore>();
+
+            // Security & event bus services — normally registered by SecurityModule / AddCrestWeb
+            // but not included in LibraryManagement's generated ModuleAutoInitializer.
+            new SecurityModule(hostConfiguration!).OnConfigureServices(services);
+            services.AddSingleton<IEventValidator, PassThroughEventValidator>();
+            services.AddSingleton<LocalEventBusOptions>();
+            services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
+            services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
+            services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
+            services.AddScoped<IDomainEventPublisher, DomainEventPublisher>();
         });
     }
 

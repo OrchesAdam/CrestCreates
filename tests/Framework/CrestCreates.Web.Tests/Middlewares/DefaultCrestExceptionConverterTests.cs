@@ -110,6 +110,7 @@ public class DefaultCrestExceptionConverterTests
     [Fact]
     public void Convert_WithExceptionResources_UsesResourceOverLocalizationService()
     {
+        using var _ = new CultureScope("zh-CN");
         var resourcesWithOverride = new CrestExceptionLocalizationResources(
             new Dictionary<string, IReadOnlyDictionary<string, string>>
             {

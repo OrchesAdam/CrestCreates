@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Application\CrestCreates.Application.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.DynamicApi\CrestCreates.DynamicApi.csproj" />
     <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\LibraryManagement.Domain\LibraryManagement.Domain.csproj" />
     <ProjectReference Include="..\LibraryManagement.Application.Contracts\LibraryManagement.Application.Contracts.csproj" />
