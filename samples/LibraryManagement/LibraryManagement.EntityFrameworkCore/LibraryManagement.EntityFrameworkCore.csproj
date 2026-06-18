@@ -9,10 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\framework\src\CrestCreates.AuditLogging\CrestCreates.AuditLogging.csproj" />
-    <ProjectReference Include="..\..\..\framework\src\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
-    <ProjectReference Include="..\..\..\framework\src\CrestCreates.Data.EFCore.PostgreSql\CrestCreates.Data.EFCore.PostgreSql.csproj" />
-    <ProjectReference Include="..\..\..\framework\src\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="..\..\..\src\Runtime\CrestCreates.Audit.Runtime\CrestCreates.AuditLogging.csproj" />
+    <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.EFCore.PostgreSql\CrestCreates.Data.EFCore.PostgreSql.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\LibraryManagement.Application\LibraryManagement.Application.csproj" />
     <ProjectReference Include="..\LibraryManagement.Domain\LibraryManagement.Domain.csproj" />
   </ItemGroup>

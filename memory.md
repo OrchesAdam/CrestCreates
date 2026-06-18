@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-06-13
+Last Updated: 2026-06-18
 
 ## Purpose
 
@@ -218,6 +218,20 @@ This thread achieved the following:
    - Setting reuse
    - `TenantId` canonical multi-tenancy semantics
 
+10. Reorganized the repository into layer-oriented physical roots:
+    - `src/Core`
+    - `src/Metadata`
+    - `src/Framework`
+    - `src/Runtime`
+    - `src/Persistence`
+    - `src/Integrations`
+    - `src/Platform`
+    - `tests/*`
+    - `solutions/*`
+11. Added new focused solution files under `solutions/`, with `solutions/CrestCreates.All.slnx` as the canonical full solution.
+12. Preserved existing public namespaces and project identities during the physical move to avoid coupling folder migration with API breakage.
+13. Added dependency-boundary tests for Core/Metadata/Runtime project-reference constraints.
+
 ---
 
 ## Known Important Decisions
@@ -429,4 +443,3 @@ If a future thread should resume from this state, use a prompt like:
 > Read `/memory.md` first. Continue from the current CrestCreates platform status. Treat completed items as closed unless you find contradictory code. Focus on unresolved work only.
 
 ---
-

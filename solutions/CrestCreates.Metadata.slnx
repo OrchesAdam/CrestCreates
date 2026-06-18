@@ -1,0 +1,59 @@
+<Solution>
+  <Folder Name="/assets/">
+    <File Path="../AGENTS.md" />
+    <File Path="../Directory.Build.Aot.props" />
+    <File Path="../Directory.Build.props" />
+    <File Path="../Directory.Build.targets" />
+    <File Path="../Directory.Packages.props" />
+    <File Path="../memory.md" />
+    <File Path="../README.md" />
+  </Folder>
+  <Folder Name="/build/">
+    <Project Path="../build/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj" />
+  </Folder>
+  <Folder Name="/src/Core/">
+    <Project Path="../src/Core/CrestCreates.Aop.Abstractions/CrestCreates.Aop.Abstractions.csproj" />
+    <Project Path="../src/Core/CrestCreates.Aop/CrestCreates.Aop.csproj" />
+    <Project Path="../src/Core/CrestCreates.Caching.Abstractions/CrestCreates.Caching.Abstractions.csproj" />
+    <Project Path="../src/Core/CrestCreates.Caching/CrestCreates.Caching.csproj" />
+    <Project Path="../src/Core/CrestCreates.Configuration/CrestCreates.Configuration.csproj" />
+    <Project Path="../src/Core/CrestCreates.Core.Abstractions/CrestCreates.Core.Abstractions.csproj" />
+    <Project Path="../src/Core/CrestCreates.Core.Hosting/CrestCreates.Core.Hosting.csproj" />
+    <Project Path="../src/Core/CrestCreates.Core/CrestCreates.Core.csproj" />
+    <Project Path="../src/Core/CrestCreates.Exposure.Abstractions/CrestCreates.Exposure.Abstractions.csproj" />
+    <Project Path="../src/Core/CrestCreates.Logging/CrestCreates.Logging.csproj" />
+    <Project Path="../src/Core/CrestCreates.Security.Abstractions/CrestCreates.Security.Abstractions.csproj" />
+    <Project Path="../src/Core/CrestCreates.Security/CrestCreates.Security.csproj" />
+    <Project Path="../src/Core/CrestCreates.VirtualFileSystem/CrestCreates.VirtualFileSystem.csproj" />
+  </Folder>
+  <Folder Name="/src/Metadata/">
+    <Project Path="../src/Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
+    <Project Path="../src/Metadata/CrestCreates.Metadata.Analyzers/CrestCreates.Metadata.Analyzers.csproj" />
+    <Project Path="../src/Metadata/CrestCreates.Metadata.ContextPack.Abstractions/CrestCreates.Metadata.ContextPack.Abstractions.csproj" />
+    <Project Path="../src/Metadata/CrestCreates.Metadata.ContextPack/CrestCreates.Metadata.ContextPack.csproj" />
+    <Project Path="../src/Metadata/CrestCreates.Metadata.Runtime/CrestCreates.Metadata.csproj" />
+    <Project Path="../src/Metadata/CrestCreates.Metadata.SourceGeneration/CrestCreates.CodeGenerator.csproj" />
+    <Project Path="../src/Metadata/CrestCreates.Metadata.Testing/CrestCreates.Metadata.Testing.csproj" />
+    <Project Path="../src/Metadata/CrestCreates.Schema.Abstractions/CrestCreates.Schema.Abstractions.csproj" />
+    <Project Path="../src/Metadata/CrestCreates.Schema/CrestCreates.Schema.csproj" />
+    <Project Path="../src/Metadata/CrestCreates.Snapshot.Abstractions/CrestCreates.Snapshot.Abstractions.csproj" />
+    <Project Path="../src/Metadata/CrestCreates.Snapshot/CrestCreates.Snapshot.csproj" />
+  </Folder>
+  <Folder Name="/tests/Boundary/">
+    <Project Path="../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/CrestCreates.DependencyBoundaries.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Core/">
+    <Project Path="../tests/Core/CrestCreates.Exposure.Tests/CrestCreates.Exposure.Tests.csproj" />
+    <Project Path="../tests/Core/CrestCreates.Logging.Tests/CrestCreates.Logging.Tests.csproj" />
+    <Project Path="../tests/Core/CrestCreates.VirtualFileSystem.Tests/CrestCreates.VirtualFileSystem.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Metadata/">
+    <Project Path="../tests/Metadata/CrestCreates.BuildTasks.Tests/CrestCreates.BuildTasks.Tests.csproj" />
+    <Project Path="../tests/Metadata/CrestCreates.CodeGenerator.Tests/CrestCreates.CodeGenerator.Tests.csproj" />
+    <Project Path="../tests/Metadata/CrestCreates.Metadata.ContextPack.Tests/CrestCreates.Metadata.ContextPack.Tests.csproj" />
+    <Project Path="../tests/Metadata/CrestCreates.Metadata.Tests/CrestCreates.Metadata.Tests.csproj" />
+    <Project Path="../tests/Metadata/CrestCreates.ModuleDiagnostics.Tests/CrestCreates.ModuleDiagnostics.Tests.csproj" />
+    <Project Path="../tests/Metadata/CrestCreates.Schema.Tests/CrestCreates.Schema.Tests.csproj" />
+    <Project Path="../tests/Metadata/CrestCreates.Snapshot.Tests/CrestCreates.Snapshot.Tests.csproj" />
+  </Folder>
+</Solution>

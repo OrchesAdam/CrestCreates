@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="$(MSBuildThisFileDirectory)..\..\..\build\CrestCreates.BuildTasks\CrestCreates.Modules.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Rougamo.Extensions.DependencyInjection.Microsoft" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Framework\CrestCreates.Authorization.Abstractions\CrestCreates.Authorization.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Framework\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+    <ProjectReference Include="..\..\Framework\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="..\..\Framework\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
+  </ItemGroup>
+
+</Project>

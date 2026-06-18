@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CrestCreates.OrmProviders.MongoDB</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MongoDB.Driver" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CrestCreates.Data.Abstractions\CrestCreates.Data.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Framework\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+    <ProjectReference Include="..\..\Framework\CrestCreates.Infrastructure\CrestCreates.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Framework\CrestCreates.MultiTenancy.Abstract\CrestCreates.MultiTenancy.Abstract.csproj" />
+    <ProjectReference Include="..\..\Framework\CrestCreates.DataFilter\CrestCreates.DataFilter.csproj" />
+    <ProjectReference Include="..\..\Framework\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+  </ItemGroup>
+
+</Project>

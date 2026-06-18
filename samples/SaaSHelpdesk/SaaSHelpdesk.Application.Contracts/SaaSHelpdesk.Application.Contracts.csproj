@@ -9,8 +9,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../../framework/src/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Application.Contracts\CrestCreates.Application.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Domain/SaaSHelpdesk.Domain.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Domain.Shared/SaaSHelpdesk.Domain.Shared.csproj" />
   </ItemGroup>

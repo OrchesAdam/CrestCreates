@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CrestCreates.OrmProviders.Tests</RootNamespace>
+    <AssemblyName>CrestCreates.OrmProviders.Tests</AssemblyName>
+    <OutputType>Library</OutputType>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 项目引用 -->
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+    <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.FreeSql\CrestCreates.Data.FreeSql.csproj" />
+    <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.EFCore.SqlServer\CrestCreates.Data.EFCore.SqlServer.csproj" />
+    <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.SqlSugar\CrestCreates.Data.SqlSugar.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 包引用 -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Moq" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="FreeSql.Provider.Sqlite" />
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

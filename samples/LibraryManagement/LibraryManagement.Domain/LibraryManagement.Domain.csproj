@@ -10,9 +10,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\framework\src\CrestCreates.Domain\CrestCreates.Domain.csproj" />
-    <ProjectReference Include="..\..\..\framework\src\CrestCreates.Metadata\CrestCreates.Metadata.csproj" />
-    <ProjectReference Include="..\..\..\framework\src\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+    <ProjectReference Include="..\..\..\src\Metadata\CrestCreates.Metadata.Runtime\CrestCreates.Metadata.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\LibraryManagement.Domain.Shared\LibraryManagement.Domain.Shared.csproj" />
   </ItemGroup>
 

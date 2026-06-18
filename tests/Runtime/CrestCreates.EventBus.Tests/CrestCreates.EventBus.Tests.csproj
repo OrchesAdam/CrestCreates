@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <GenerateRuntimeConfigDevFile>true</GenerateRuntimeConfigDevFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Azure.Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Runtime\CrestCreates.EventBus.Abstractions\CrestCreates.EventBus.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.Abstractions\CrestCreates.Data.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+    <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.SqlSugar\CrestCreates.Data.SqlSugar.csproj" />
+    <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.FreeSql\CrestCreates.Data.FreeSql.csproj" />
+    <ProjectReference Include="..\..\..\src\Runtime\CrestCreates.EventBus.Abstract\CrestCreates.EventBus.Abstract.csproj" />
+    <ProjectReference Include="..\..\..\src\Runtime\CrestCreates.Event\CrestCreates.Event.csproj" />
+    <ProjectReference Include="..\..\..\src\Runtime\CrestCreates.EventBus.Local\CrestCreates.EventBus.Local.csproj" />
+    <ProjectReference Include="..\..\..\src\Runtime\CrestCreates.EventBus.Local.Channel\CrestCreates.EventBus.Local.Channel.csproj" />
+    <ProjectReference Include="..\..\..\src\Runtime\CrestCreates.EventBus.MediatorAdapter\CrestCreates.EventBus.MediatorAdapter.csproj" />
+  </ItemGroup>
+
+</Project>

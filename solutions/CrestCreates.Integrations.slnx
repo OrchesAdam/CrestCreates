@@ -1,0 +1,32 @@
+<Solution>
+  <Folder Name="/assets/">
+    <File Path="../AGENTS.md" />
+    <File Path="../Directory.Build.Aot.props" />
+    <File Path="../Directory.Build.props" />
+    <File Path="../Directory.Build.targets" />
+    <File Path="../Directory.Packages.props" />
+    <File Path="../memory.md" />
+    <File Path="../README.md" />
+  </Folder>
+  <Folder Name="/src/Integrations/">
+    <Project Path="../src/Integrations/CrestCreates.Integration.Abstractions/CrestCreates.Integration.Abstractions.csproj" />
+    <Project Path="../src/Integrations/CrestCreates.Integration.ExternalApi/CrestCreates.Integration.ExternalApi.csproj" />
+    <Project Path="../src/Integrations/CrestCreates.Integration.LegacyDatabase/CrestCreates.Integration.LegacyDatabase.csproj" />
+    <Project Path="../src/Integrations/CrestCreates.PluginSystem/CrestCreates.PluginSystem.csproj" />
+  </Folder>
+  <Folder Name="/src/Persistence/">
+    <Project Path="../src/Persistence/CrestCreates.Data.Abstractions/CrestCreates.Data.Abstractions.csproj" />
+    <Project Path="../src/Persistence/CrestCreates.Data.Core/CrestCreates.Data.Core.csproj" />
+    <Project Path="../src/Persistence/CrestCreates.Data.EFCore.MySql/CrestCreates.Data.EFCore.MySql.csproj" />
+    <Project Path="../src/Persistence/CrestCreates.Data.EFCore.PostgreSql/CrestCreates.Data.EFCore.PostgreSql.csproj" />
+    <Project Path="../src/Persistence/CrestCreates.Data.EFCore.SqlServer/CrestCreates.Data.EFCore.SqlServer.csproj" />
+    <Project Path="../src/Persistence/CrestCreates.Data.EFCore/CrestCreates.Data.EFCore.csproj" />
+    <Project Path="../src/Persistence/CrestCreates.Data.FreeSql/CrestCreates.Data.FreeSql.csproj" />
+    <Project Path="../src/Persistence/CrestCreates.Data.SqlSugar/CrestCreates.Data.SqlSugar.csproj" />
+    <Project Path="../src/Persistence/CrestCreates.DbContextProvider.Abstract/CrestCreates.DbContextProvider.Abstract.csproj" />
+    <Project Path="../src/Persistence/CrestCreates.OrmProviders.MongoDB/CrestCreates.OrmProviders.MongoDB.csproj" />
+  </Folder>
+  <Folder Name="/tests/Boundary/">
+    <Project Path="../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/CrestCreates.DependencyBoundaries.Tests.csproj" />
+  </Folder>
+</Solution>

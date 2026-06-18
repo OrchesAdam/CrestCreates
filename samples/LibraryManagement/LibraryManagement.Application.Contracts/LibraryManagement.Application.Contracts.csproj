@@ -9,8 +9,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\framework\src\CrestCreates.Application.Contracts\CrestCreates.Application.Contracts.csproj" />
-    <ProjectReference Include="..\..\..\framework\src\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Application.Contracts\CrestCreates.Application.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
     <ProjectReference Include="..\LibraryManagement.Domain\LibraryManagement.Domain.csproj" />
     <ProjectReference Include="..\LibraryManagement.Domain.Shared\LibraryManagement.Domain.Shared.csproj" />
   </ItemGroup>

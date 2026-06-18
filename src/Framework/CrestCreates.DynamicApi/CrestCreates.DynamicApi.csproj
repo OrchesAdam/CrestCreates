@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <NoWarn>$(NoWarn);NU1510</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.OpenApi" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Core\CrestCreates.Aop\CrestCreates.Aop.csproj" />
+    <ProjectReference Include="..\CrestCreates.Application.Contracts\CrestCreates.Application.Contracts.csproj" />
+    <ProjectReference Include="..\CrestCreates.Authorization.Abstractions\CrestCreates.Authorization.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="..\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="..\..\Persistence\CrestCreates.Data.Abstractions\CrestCreates.Data.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Validation\CrestCreates.Validation.csproj" />
+    <ProjectReference Include="..\..\Runtime\CrestCreates.Capability.Abstractions\CrestCreates.Capability.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Metadata\CrestCreates.Metadata.Abstractions\CrestCreates.Metadata.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

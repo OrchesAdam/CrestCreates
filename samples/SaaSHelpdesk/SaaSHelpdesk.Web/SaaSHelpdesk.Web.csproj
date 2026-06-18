@@ -9,20 +9,20 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../../framework/src/CrestCreates.Web/CrestCreates.Web.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.AspNetCore/CrestCreates.AspNetCore.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.AspNetCore.Authentication.OpenIddict/CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.Application/CrestCreates.Application.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.Authorization/CrestCreates.Authorization.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.Logging/CrestCreates.Logging.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.Scheduling.Quartz/CrestCreates.Scheduling.Quartz.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.Security/CrestCreates.Security.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.Domain/CrestCreates.Domain.csproj" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.HealthCheck.AspNetCore/CrestCreates.HealthCheck.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Web\CrestCreates.Web.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.AspNetCore\CrestCreates.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.AspNetCore.Authentication.OpenIddict\CrestCreates.AspNetCore.Authentication.OpenIddict.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Application\CrestCreates.Application.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Authorization\CrestCreates.Authorization.csproj" />
+    <ProjectReference Include="..\..\..\src\Core\CrestCreates.Logging\CrestCreates.Logging.csproj" />
+    <ProjectReference Include="..\..\..\src\Runtime\CrestCreates.Audit.Runtime\CrestCreates.AuditLogging.csproj" />
+    <ProjectReference Include="..\..\..\src\Runtime\CrestCreates.EventBus.Local\CrestCreates.EventBus.Local.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Scheduling.Quartz\CrestCreates.Scheduling.Quartz.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Modularity\CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.MultiTenancy\CrestCreates.MultiTenancy.csproj" />
+    <ProjectReference Include="..\..\..\src\Core\CrestCreates.Security\CrestCreates.Security.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Domain\CrestCreates.Domain.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.HealthCheck.AspNetCore\CrestCreates.HealthCheck.AspNetCore.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Domain.Shared/SaaSHelpdesk.Domain.Shared.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Domain/SaaSHelpdesk.Domain.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Application.Contracts/SaaSHelpdesk.Application.Contracts.csproj" />
@@ -32,7 +32,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
-    <ProjectReference Include="../../../framework/src/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.OpenApi\CrestCreates.OpenApi.csproj" />
   </ItemGroup>
 
 </Project>

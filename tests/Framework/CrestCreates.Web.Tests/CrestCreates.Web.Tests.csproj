@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <NoWarn>$(NoWarn);NU1504;NU1510</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.DynamicApi\CrestCreates.DynamicApi.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.AspNetCore\CrestCreates.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.MultiTenancy\CrestCreates.MultiTenancy.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Web\CrestCreates.Web.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Domain.Shared\CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\CrestCreates.Localization\CrestCreates.Localization.csproj" />
+  </ItemGroup>
+
+
+</Project>
