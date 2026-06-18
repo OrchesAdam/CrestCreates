@@ -243,6 +243,31 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
     }
 
     [Fact]
+    public async Task SubmitActivationRequest_Rejects_PackagePreview_Draft_Mismatch()
+    {
+        // Create package preview for draft-001
+        var (service, packagePreviewId) = await CreateServiceWithPackagePreview();
+        var context = CreateContext("SubmitActivationRequest");
+
+        // Set up draft-002 (a different draft)
+        var otherDraft = CreateTestDraft(draftId: "draft-002");
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-002", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(otherDraft));
+
+        // Submit activation for draft-002 using package preview from draft-001
+        var request = new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-002",
+            PackagePreviewId = packagePreviewId
+        };
+
+        var result = await service.SubmitActivationRequestAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "ACTIVATION_PACKAGE_PREVIEW_DRAFT_MISMATCH");
+    }
+
+    [Fact]
     public async Task SubmitActivationRequest_Rejects_NonExistent_EvidencePreview()
     {
         var service = CreateService();

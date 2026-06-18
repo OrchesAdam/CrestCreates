@@ -352,7 +352,7 @@ public class Wave1ContextReadTests : AgentControlPlaneTestBase
     }
 
     [Fact]
-    public async Task GetDescriptorByRef_Unpinned_Ambiguous_Returns_Warning_Diagnostic()
+    public async Task GetDescriptorByRef_Unpinned_Ambiguous_Returns_InvalidRequest()
     {
         var service = CreateService();
         var context = CreateContext("GetDescriptorByRef");
@@ -365,9 +365,27 @@ public class Wave1ContextReadTests : AgentControlPlaneTestBase
 
         var result = await service.GetDescriptorByRefAsync(context, descRef);
 
-        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Value.Should().BeNull();
         result.Diagnostics.Should().Contain(d => d.Code == "DESCRIPTOR_REF_AMBIGUOUS");
-        // Should return the latest active version as best match
+        // Diagnostic should list candidate versions
+        result.Diagnostics.Should().Contain(d => d.Code == "DESCRIPTOR_REF_AMBIGUOUS" && d.Message.Contains("1, 2"));
+    }
+
+    [Fact]
+    public async Task GetDescriptorByRef_Unpinned_Single_Version_Resolves_To_Versioned_Ref()
+    {
+        var service = CreateService();
+        var context = CreateContext("GetDescriptorByRef");
+        var descRef = CreateDescriptorRef("test", "desc-001"); // no version
+
+        var v2 = new TestVersionedDescriptor("test", "desc-001", version: 2, name: "V2");
+
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns([v2]);
+
+        var result = await service.GetDescriptorByRefAsync(context, descRef);
+
+        result.Status.Should().Be(AgentToolResultStatus.Success);
         result.Value!.Ref.Version.Should().Be(2);
     }
 

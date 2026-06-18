@@ -41,9 +41,18 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     // Local stores for review results, fix proposals, package previews, activation requests
     private readonly ConcurrentDictionary<(string TenantId, string Id), DraftReviewResult> _reviewResults = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), FixProposal> _fixProposals = new();
-    private readonly ConcurrentDictionary<(string TenantId, string Id), DraftPackagePreview> _packagePreviews = new();
+    private readonly ConcurrentDictionary<(string TenantId, string Id), PackagePreviewEntry> _packagePreviews = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), PackageEvidencePreview> _evidencePreviews = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), ActivationRequest> _activationRequests = new();
+
+    /// <summary>
+    /// Wraps a DraftPackagePreview with its originating DraftId and TenantId
+    /// so that activation requests can validate draft-match for package preview refs.
+    /// </summary>
+    private sealed record PackagePreviewEntry(
+        string DraftId,
+        string TenantId,
+        DraftPackagePreview Preview);
 
     public DefaultAgentControlPlaneToolService(
         IAgentToolManifestProvider manifestProvider,
@@ -208,10 +217,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     {
         return await ExecuteAsync(context, AgentToolPermissionName.DescriptorRead, async () =>
         {
-            // Version-aware resolution: build topology to resolve refs with version semantics
+            // Version-aware resolution: resolve refs with version semantics
             var allDescriptors = _descriptorCatalog.GetAll().ToList();
             IDescriptor? descriptor;
-            List<AgentToolDiagnostic> versionDiagnostics = [];
 
             if (descriptorRef.Version.HasValue)
             {
@@ -231,23 +239,28 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
                 if (matches.Count > 1)
                 {
-                    // Ambiguous unpinned ref — multiple versions exist
-                    versionDiagnostics.Add(new AgentToolDiagnostic
+                    // Ambiguous unpinned ref — multiple versions exist.
+                    // Do not guess; require the caller to specify a version.
+                    var candidateVersions = matches
+                        .Where(d => d is IVersionedDescriptor)
+                        .Select(d => ((IVersionedDescriptor)d).Version)
+                        .OrderBy(v => v)
+                        .ToList();
+                    var versionList = candidateVersions.Count > 0
+                        ? string.Join(", ", candidateVersions)
+                        : "(non-versioned descriptors)";
+                    var ambiguousDiag = new AgentToolDiagnostic
                     {
                         Code = "DESCRIPTOR_REF_AMBIGUOUS",
-                        Severity = AgentToolDiagnosticSeverity.Warning,
-                        Message = $"Descriptor ref '{descriptorRef.FullId}' is ambiguous: {matches.Count} versions found. Specify a version to disambiguate."
-                    });
-                    // Return the latest active version as the best match
-                    descriptor = matches
-                        .Where(d => d.State == DescriptorState.Active)
-                        .OrderByDescending(d => d is IVersionedDescriptor vd ? vd.Version : 0)
-                        .FirstOrDefault() ?? matches.First();
+                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Message = $"Descriptor ref '{descriptorRef.FullId}' is ambiguous: {matches.Count} versions found ({versionList}). Specify a version to disambiguate."
+                    };
+                    var ambiguousAudit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [ambiguousDiag]);
+                    await _auditor.RecordAsync(ambiguousAudit);
+                    return AgentToolResult<DescriptorInfo>.InvalidRequest([ambiguousDiag], ambiguousAudit);
                 }
-                else
-                {
-                    descriptor = matches.FirstOrDefault();
-                }
+
+                descriptor = matches.FirstOrDefault();
             }
 
             if (descriptor is null)
@@ -272,10 +285,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 DefinitionHash = descriptor.DefinitionHash
             };
 
-            var audit = BuildAudit(context, AgentToolResultStatus.Success, versionDiagnostics);
+            var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
             audit = audit with { TouchedDescriptorRefs = [resolvedRef] };
             await _auditor.RecordAsync(audit);
-            return AgentToolResult<DescriptorInfo>.Success(info, versionDiagnostics, audit);
+            return AgentToolResult<DescriptorInfo>.Success(info, audit);
         });
     }
 
@@ -927,7 +940,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             };
 
             var previewId = Guid.NewGuid().ToString("N");
-            _packagePreviews[(context.TenantId, previewId)] = preview;
+            _packagePreviews[(context.TenantId, previewId)] = new PackagePreviewEntry(draftId, context.TenantId, preview);
 
             var audit2 = BuildAudit(context, AgentToolResultStatus.Success, []);
             audit2 = audit2 with
@@ -1073,7 +1086,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     {
         return await ExecuteAsync(context, AgentToolPermissionName.PackagePreview, async () =>
         {
-            if (!_packagePreviews.TryGetValue((context.TenantId, previewId), out var preview))
+            if (!_packagePreviews.TryGetValue((context.TenantId, previewId), out var entry))
             {
                 return await RecordAndReturn(context,
                     AgentToolResult<DraftPackagePreview>.NotFound($"Package preview '{previewId}' not found."));
@@ -1082,7 +1095,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
             audit = audit with { TouchedPackagePreviewIds = [previewId] };
             await _auditor.RecordAsync(audit);
-            return AgentToolResult<DraftPackagePreview>.Success(preview, audit);
+            return AgentToolResult<DraftPackagePreview>.Success(entry.Preview, audit);
         });
     }
 
@@ -1143,7 +1156,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
             if (request.PackagePreviewId is not null)
             {
-                if (!_packagePreviews.TryGetValue((context.TenantId, request.PackagePreviewId), out _))
+                if (!_packagePreviews.TryGetValue((context.TenantId, request.PackagePreviewId), out var packageRef))
                 {
                     refDiagnostics.Add(new AgentToolDiagnostic
                     {
@@ -1152,7 +1165,15 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                         Message = $"Referenced package preview '{request.PackagePreviewId}' not found for this tenant."
                     });
                 }
-                // Package previews are not directly keyed by DraftId, so we cannot check draft match here
+                else if (packageRef.DraftId != request.DraftId)
+                {
+                    refDiagnostics.Add(new AgentToolDiagnostic
+                    {
+                        Code = "ACTIVATION_PACKAGE_PREVIEW_DRAFT_MISMATCH",
+                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Message = $"Referenced package preview '{request.PackagePreviewId}' belongs to draft '{packageRef.DraftId}', not '{request.DraftId}'."
+                    });
+                }
             }
 
             if (request.EvidencePreviewId is not null)
