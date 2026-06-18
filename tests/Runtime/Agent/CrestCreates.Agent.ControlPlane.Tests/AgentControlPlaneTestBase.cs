@@ -209,6 +209,30 @@ public sealed class TestDescriptor : IDescriptor
 }
 
 /// <summary>
+/// Test-only IVersionedDescriptor implementation for version-aware test scenarios.
+/// </summary>
+public sealed class TestVersionedDescriptor : IVersionedDescriptor
+{
+    public string Namespace { get; init; } = "test";
+    public string Id { get; init; } = "desc-001";
+    public string Name { get; init; } = "TestVersionedDescriptor";
+    public DescriptorKind Kind { get; init; } = DescriptorKind.Event;
+    public DescriptorState State { get; init; } = DescriptorState.Active;
+    public string ContractHash { get; init; } = "ch-001";
+    public string DefinitionHash { get; init; } = "dh-001";
+    public string? SupersededById { get; init; }
+    public int Version { get; init; } = 1;
+
+    public TestVersionedDescriptor(string ns = "test", string id = "desc-001", int version = 1, string name = "TestVersionedDescriptor")
+    {
+        Namespace = ns;
+        Id = id;
+        Version = version;
+        Name = name;
+    }
+}
+
+/// <summary>
 /// Test-only DescriptorDraftPayload for mock-free test scenarios.
 /// Must be a record since DescriptorDraftPayload is an abstract record.
 /// </summary>

@@ -10,6 +10,9 @@ public sealed record AgentToolResult<T> where T : class
     public static AgentToolResult<T> Success(T value, AgentToolInvocationAuditRecord? audit = null)
         => new() { Status = AgentToolResultStatus.Success, Value = value, Diagnostics = Array.Empty<AgentToolDiagnostic>(), AuditRecord = audit };
 
+    public static AgentToolResult<T> Success(T value, IReadOnlyList<AgentToolDiagnostic> diagnostics, AgentToolInvocationAuditRecord? audit = null)
+        => new() { Status = AgentToolResultStatus.Success, Value = value, Diagnostics = diagnostics, AuditRecord = audit };
+
     public static AgentToolResult<T> Denied(IReadOnlyList<AgentToolDiagnostic> diagnostics, AgentToolInvocationAuditRecord? audit = null)
         => new() { Status = AgentToolResultStatus.Denied, Value = null, Diagnostics = diagnostics, AuditRecord = audit };
 

@@ -17,14 +17,14 @@ namespace CrestCreates.Agent.ControlPlane.Tests;
 public class PermissionBoundaryTests : AgentControlPlaneTestBase
 {
     [Fact]
-    public async Task Unknown_Tool_Name_Returns_Failed_With_ToolNotFound_Diagnostic()
+    public async Task Unknown_Tool_Name_Returns_NotFound_With_ToolNotFound_Diagnostic()
     {
         var service = CreateServiceWithMocks();
         var context = CreateContext("NonExistentTool");
 
         var result = await service.GetDescriptorByRefAsync(context, CreateDescriptorRef());
 
-        result.Status.Should().Be(AgentToolResultStatus.Failed);
+        result.Status.Should().Be(AgentToolResultStatus.NotFound);
         result.Diagnostics.Should().Contain(d => d.Code == "TOOL_NOT_FOUND");
     }
 
@@ -137,9 +137,9 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
         var service = CreateService();
         var context = CreateContext("GetDescriptorByRef");
         var descRef = CreateDescriptorRef();
+        var descriptor = CreateTestDescriptor();
 
-        DescriptorCatalogMock.Setup(c => c.Get(descRef.FullId))
-            .Returns(CreateTestDescriptor());
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns([descriptor]);
 
         await service.GetDescriptorByRefAsync(context, descRef);
 
@@ -155,8 +155,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
         var context = CreateContext("GetDescriptorByRef");
         var descRef = CreateDescriptorRef();
 
-        DescriptorCatalogMock.Setup(c => c.Get(descRef.FullId))
-            .Returns((IDescriptor?)null);
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns([]);
 
         var result = await service.GetDescriptorByRefAsync(context, descRef);
 
@@ -185,7 +184,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
         var svc = CreateService(auditor: auditor);
         var successCtx = CreateContext("GetDescriptorByRef");
         var descRef = CreateDescriptorRef();
-        DescriptorCatalogMock.Setup(c => c.Get(descRef.FullId)).Returns(CreateTestDescriptor());
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns([CreateTestDescriptor()]);
         await svc.GetDescriptorByRefAsync(successCtx, descRef);
 
         auditor.GetAllRecords().Should().HaveCountGreaterThanOrEqualTo(2);
@@ -198,8 +197,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
         var context = CreateContext("GetDescriptorByRef", tenantId: "tenant-ABC");
         var descRef = CreateDescriptorRef();
 
-        DescriptorCatalogMock.Setup(c => c.Get(descRef.FullId))
-            .Returns(CreateTestDescriptor());
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns([CreateTestDescriptor()]);
 
         await service.GetDescriptorByRefAsync(context, descRef);
 
@@ -214,8 +212,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
         var context = CreateContext("GetDescriptorByRef", actorId: "actor-XYZ");
         var descRef = CreateDescriptorRef();
 
-        DescriptorCatalogMock.Setup(c => c.Get(descRef.FullId))
-            .Returns(CreateTestDescriptor());
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns([CreateTestDescriptor()]);
 
         await service.GetDescriptorByRefAsync(context, descRef);
 
@@ -246,7 +243,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
             .Setup(a => a.AuthorizeAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<AgentToolPermissionRequirement>()))
             .Returns(Task.FromResult(AgentToolAuthorizationResult.Allowed()));
 
-        DescriptorCatalogMock.Setup(c => c.Get(It.IsAny<string>()))
+        DescriptorCatalogMock.Setup(c => c.GetAll())
             .Throws(new InvalidOperationException("Catalog failure"));
 
         var result = await service.GetDescriptorByRefAsync(context, CreateDescriptorRef());

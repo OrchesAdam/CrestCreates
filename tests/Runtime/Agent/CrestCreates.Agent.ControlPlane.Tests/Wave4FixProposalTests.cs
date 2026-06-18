@@ -156,6 +156,64 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
     }
 
     [Fact]
+    public async Task ApplyFixProposalToDraft_Applies_Scalar_Field_Actions()
+    {
+        var service = CreateService();
+        var context = CreateContext("SuggestDescriptorDraftFixes");
+        var draft = CreateTestDraft();
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(draft));
+        DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Use RATIONALE_EMPTY — generates a fix for Rationale (a mutable scalar field)
+        var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
+            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "RATIONALE_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, Message = "Rationale is empty" });
+        DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
+
+        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(context, "draft-001");
+        var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
+
+        var applyRequest = new ApplyFixProposalRequest { ProposalId = proposalId, DraftId = "draft-001" };
+        var applyResult = await service.ApplyFixProposalToDraftAsync(context, applyRequest);
+
+        applyResult.Status.Should().Be(AgentToolResultStatus.Success);
+        applyResult.Value!.DraftId.Should().Be("draft-001");
+        // Rationale should have been updated by the fix action
+        applyResult.Value.Rationale.Should().Be("(provide rationale)");
+        // FIX_ACTIONS_APPLIED diagnostic should be present
+        applyResult.Diagnostics.Should().Contain(d => d.Code == "FIX_ACTIONS_APPLIED");
+    }
+
+    [Fact]
+    public async Task ApplyFixProposalToDraft_Records_Applied_And_Skipped_Diagnostics()
+    {
+        var service = CreateService();
+        var context = CreateContext("SuggestDescriptorDraftFixes");
+        var draft = CreateTestDraft();
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(draft));
+        DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // DRAFT_ID_EMPTY generates a fix for DraftId (identity field — will be skipped)
+        var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
+            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });
+        DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
+
+        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(context, "draft-001");
+        var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
+
+        var applyRequest = new ApplyFixProposalRequest { ProposalId = proposalId, DraftId = "draft-001" };
+        var applyResult = await service.ApplyFixProposalToDraftAsync(context, applyRequest);
+
+        // DraftId is an identity field, so the action should be skipped
+        applyResult.Diagnostics.Should().Contain(d => d.Code == "FIX_ACTIONS_SKIPPED");
+    }
+
+    [Fact]
     public async Task ApplyFixProposalToDraft_Returns_NotFound_When_Proposal_Missing()
     {
         var service = CreateService();

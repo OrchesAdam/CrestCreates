@@ -42,6 +42,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly ConcurrentDictionary<(string TenantId, string Id), DraftReviewResult> _reviewResults = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), FixProposal> _fixProposals = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), DraftPackagePreview> _packagePreviews = new();
+    private readonly ConcurrentDictionary<(string TenantId, string Id), PackageEvidencePreview> _evidencePreviews = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), ActivationRequest> _activationRequests = new();
 
     public DefaultAgentControlPlaneToolService(
@@ -89,12 +90,18 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var notFoundDiag = new AgentToolDiagnostic
             {
                 Code = "TOOL_NOT_FOUND",
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = AgentToolDiagnosticSeverity.Warning,
                 Message = $"Tool '{context.ToolName}' is not a known Agent Control Plane tool."
             };
-            var notFoundAudit = BuildAudit(context, AgentToolResultStatus.Failed, [notFoundDiag]);
+            var notFoundAudit = BuildAudit(context, AgentToolResultStatus.NotFound, [notFoundDiag]);
             await _auditor.RecordAsync(notFoundAudit);
-            return AgentToolResult<T>.Failed([notFoundDiag], notFoundAudit);
+            return new AgentToolResult<T>
+            {
+                Status = AgentToolResultStatus.NotFound,
+                Value = null,
+                Diagnostics = [notFoundDiag],
+                AuditRecord = notFoundAudit
+            };
         }
 
         // 2. Permission check
@@ -201,7 +208,48 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     {
         return await ExecuteAsync(context, AgentToolPermissionName.DescriptorRead, async () =>
         {
-            var descriptor = _descriptorCatalog.Get(descriptorRef.FullId);
+            // Version-aware resolution: build topology to resolve refs with version semantics
+            var allDescriptors = _descriptorCatalog.GetAll().ToList();
+            IDescriptor? descriptor;
+            List<AgentToolDiagnostic> versionDiagnostics = [];
+
+            if (descriptorRef.Version.HasValue)
+            {
+                // Version-pinned: match Namespace + Id + Version (IVersionedDescriptor)
+                descriptor = allDescriptors.FirstOrDefault(d =>
+                    d.Namespace == descriptorRef.Namespace &&
+                    d.Id == descriptorRef.Id &&
+                    d is IVersionedDescriptor vd &&
+                    vd.Version == descriptorRef.Version.Value);
+            }
+            else
+            {
+                // Unpinned: match Namespace + Id, check for ambiguity
+                var matches = allDescriptors
+                    .Where(d => d.Namespace == descriptorRef.Namespace && d.Id == descriptorRef.Id)
+                    .ToList();
+
+                if (matches.Count > 1)
+                {
+                    // Ambiguous unpinned ref — multiple versions exist
+                    versionDiagnostics.Add(new AgentToolDiagnostic
+                    {
+                        Code = "DESCRIPTOR_REF_AMBIGUOUS",
+                        Severity = AgentToolDiagnosticSeverity.Warning,
+                        Message = $"Descriptor ref '{descriptorRef.FullId}' is ambiguous: {matches.Count} versions found. Specify a version to disambiguate."
+                    });
+                    // Return the latest active version as the best match
+                    descriptor = matches
+                        .Where(d => d.State == DescriptorState.Active)
+                        .OrderByDescending(d => d is IVersionedDescriptor vd ? vd.Version : 0)
+                        .FirstOrDefault() ?? matches.First();
+                }
+                else
+                {
+                    descriptor = matches.FirstOrDefault();
+                }
+            }
+
             if (descriptor is null)
             {
                 return await RecordAndReturn(context,
@@ -209,9 +257,14 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                         $"Descriptor '{descriptorRef.FullId}' not found."));
             }
 
+            // Use the resolved descriptor's actual ref (with correct version)
+            var resolvedRef = descriptor is IVersionedDescriptor vdesc
+                ? new DescriptorRef(descriptor.Namespace, descriptor.Id, vdesc.Version)
+                : new DescriptorRef(descriptor.Namespace, descriptor.Id);
+
             var info = new DescriptorInfo
             {
-                Ref = descriptorRef,
+                Ref = resolvedRef,
                 Kind = descriptor.Kind,
                 Name = descriptor.Name,
                 State = descriptor.State,
@@ -219,10 +272,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 DefinitionHash = descriptor.DefinitionHash
             };
 
-            var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
-            audit = audit with { TouchedDescriptorRefs = [descriptorRef] };
+            var audit = BuildAudit(context, AgentToolResultStatus.Success, versionDiagnostics);
+            audit = audit with { TouchedDescriptorRefs = [resolvedRef] };
             await _auditor.RecordAsync(audit);
-            return AgentToolResult<DescriptorInfo>.Success(info, audit);
+            return AgentToolResult<DescriptorInfo>.Success(info, versionDiagnostics, audit);
         });
     }
 
@@ -246,14 +299,21 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var wasTruncated = totalCount > request.MaxResults;
             var truncated = results.Take(request.MaxResults).ToList();
 
-            var infos = truncated.Select(d => new DescriptorInfo
+            var infos = truncated.Select(d =>
             {
-                Ref = new DescriptorRef(d.Namespace, d.Id),
-                Kind = d.Kind,
-                Name = d.Name,
-                State = d.State,
-                ContractHash = d.ContractHash,
-                DefinitionHash = d.DefinitionHash
+                // Preserve version in DescriptorRef for versioned descriptors
+                var refWithVersion = d is IVersionedDescriptor vd
+                    ? new DescriptorRef(d.Namespace, d.Id, vd.Version)
+                    : new DescriptorRef(d.Namespace, d.Id);
+                return new DescriptorInfo
+                {
+                    Ref = refWithVersion,
+                    Kind = d.Kind,
+                    Name = d.Name,
+                    State = d.State,
+                    ContractHash = d.ContractHash,
+                    DefinitionHash = d.DefinitionHash
+                };
             }).ToList().AsReadOnly();
 
             var searchResult = new DescriptorSearchResult
@@ -282,20 +342,31 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     {
         return await ExecuteAsync(context, AgentToolPermissionName.DescriptorRead, async () =>
         {
-            var descriptor = _descriptorCatalog.Get(descriptorRef.FullId);
-            if (descriptor is null)
+            // Use topology for reliable relationship discovery.
+            // Direct extraction from a single descriptor misses incoming edges
+            // from other descriptors (dependents owned by other descriptors).
+            var allDescriptors = _descriptorCatalog.GetAll().ToList();
+            var topology = _topologyBuilder.Build(allDescriptors.AsReadOnly());
+
+            if (!topology.Contains(descriptorRef))
             {
                 return await RecordAndReturn(context,
                     AgentToolResult<DescriptorRelationshipsResult>.NotFound(
-                        $"Descriptor '{descriptorRef.FullId}' not found."));
+                        $"Descriptor '{descriptorRef.FullId}' not found in topology."));
             }
 
-            var relationships = _relationshipProvider.GetRelationships(descriptor);
-            var dependencies = relationships
-                .Where(r => r.From.Equals(descriptorRef) || r.From.FullId == descriptorRef.FullId)
+            var node = topology.FindNode(descriptorRef)!; // Guaranteed non-null after Contains check
+
+            // Dependencies: outgoing edges from subject (what this descriptor depends on)
+            var dependencies = node.OutgoingEdgeIndices
+                .Select(i => topology.Edges[i])
+                .Select(e => new DescriptorRelationship(e.From, e.To, e.Kind, e.Role, e.SourcePath, e.Strength, e.IsRuntimeBinding))
                 .ToList().AsReadOnly();
-            var dependents = relationships
-                .Where(r => r.To.Equals(descriptorRef) || r.To.FullId == descriptorRef.FullId)
+
+            // Dependents: incoming edges to subject (what depends on this descriptor)
+            var dependents = node.IncomingEdgeIndices
+                .Select(i => topology.Edges[i])
+                .Select(e => new DescriptorRelationship(e.From, e.To, e.Kind, e.Role, e.SourcePath, e.Strength, e.IsRuntimeBinding))
                 .ToList().AsReadOnly();
 
             var result = new DescriptorRelationshipsResult
@@ -755,21 +826,58 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             }
 
             // Apply fix proposal to draft (creates updated revision only, never patches active descriptors)
-            var updated = draft with
+            // First apply proposal-level rationale as baseline, then apply individual actions
+            // (actions take precedence over proposal-level rationale for the same field).
+            // Payload-level mutations require typed payload support not yet available;
+            // those actions are recorded but not applied automatically.
+            var updatedDraft = draft;
+
+            // Record rationale from the proposal as baseline
+            if (proposal.Rationale is not null)
+                updatedDraft = updatedDraft with { Rationale = proposal.Rationale };
+
+            var appliedPaths = new List<string>();
+            var skippedPaths = new List<string>();
+
+            foreach (var action in proposal.Actions)
             {
-                Rationale = proposal.Rationale ?? draft.Rationale
-            };
+                var applied = ApplyActionToDraft(ref updatedDraft, action);
+                if (applied)
+                    appliedPaths.Add(action.Path);
+                else
+                    skippedPaths.Add(action.Path);
+            }
 
-            await _draftStore.SaveAsync(updated, ct);
+            await _draftStore.SaveAsync(updatedDraft, ct);
 
-            var successAudit = BuildAudit(context, AgentToolResultStatus.Success, []);
+            var successDiags = new List<AgentToolDiagnostic>();
+            if (appliedPaths.Count > 0)
+            {
+                successDiags.Add(new AgentToolDiagnostic
+                {
+                    Code = "FIX_ACTIONS_APPLIED",
+                    Severity = AgentToolDiagnosticSeverity.Info,
+                    Message = $"Applied {appliedPaths.Count} action(s) to draft fields: {string.Join(", ", appliedPaths)}."
+                });
+            }
+            if (skippedPaths.Count > 0)
+            {
+                successDiags.Add(new AgentToolDiagnostic
+                {
+                    Code = "FIX_ACTIONS_SKIPPED",
+                    Severity = AgentToolDiagnosticSeverity.Warning,
+                    Message = $"Skipped {skippedPaths.Count} action(s) requiring payload mutation (not yet supported): {string.Join(", ", skippedPaths)}. Apply these manually."
+                });
+            }
+
+            var successAudit = BuildAudit(context, AgentToolResultStatus.Success, successDiags);
             successAudit = successAudit with
             {
                 TouchedDraftIds = [request.DraftId],
                 TouchedFixProposalIds = [request.ProposalId]
             };
             await _auditor.RecordAsync(successAudit);
-            return AgentToolResult<Draft>.Success(updated, successAudit);
+            return AgentToolResult<Draft>.Success(updatedDraft, successDiags, successAudit);
         });
     }
 
@@ -877,8 +985,16 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 Diagnostics = reviewResult.Diagnostics.Select(MapFromDraftDiagnostic).ToList().AsReadOnly()
             };
 
+            // Store evidence preview for later retrieval and activation reference validation
+            var evidencePreviewId = Guid.NewGuid().ToString("N");
+            _evidencePreviews[(context.TenantId, evidencePreviewId)] = result;
+
             var audit = BuildAudit(context, AgentToolResultStatus.Success, result.Diagnostics);
-            audit = audit with { TouchedDraftIds = [draftId] };
+            audit = audit with
+            {
+                TouchedDraftIds = [draftId],
+                TouchedPackagePreviewIds = [evidencePreviewId]
+            };
             await _auditor.RecordAsync(audit);
             return AgentToolResult<PackageEvidencePreview>.Success(result, audit);
         });
@@ -1000,6 +1116,74 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 return AgentToolResult<ActivationRequest>.InvalidRequest([diag], audit);
             }
 
+            // Validate that referenced artifacts exist, belong to this tenant, and match the draft
+            var refDiagnostics = new List<AgentToolDiagnostic>();
+
+            if (request.ReviewResultId is not null)
+            {
+                if (!_reviewResults.TryGetValue((context.TenantId, request.ReviewResultId), out var reviewRef))
+                {
+                    refDiagnostics.Add(new AgentToolDiagnostic
+                    {
+                        Code = "ACTIVATION_REVIEW_RESULT_NOT_FOUND",
+                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Message = $"Referenced review result '{request.ReviewResultId}' not found for this tenant."
+                    });
+                }
+                else if (reviewRef.DraftId != request.DraftId)
+                {
+                    refDiagnostics.Add(new AgentToolDiagnostic
+                    {
+                        Code = "ACTIVATION_REVIEW_RESULT_DRAFT_MISMATCH",
+                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Message = $"Referenced review result '{request.ReviewResultId}' belongs to draft '{reviewRef.DraftId}', not '{request.DraftId}'."
+                    });
+                }
+            }
+
+            if (request.PackagePreviewId is not null)
+            {
+                if (!_packagePreviews.TryGetValue((context.TenantId, request.PackagePreviewId), out _))
+                {
+                    refDiagnostics.Add(new AgentToolDiagnostic
+                    {
+                        Code = "ACTIVATION_PACKAGE_PREVIEW_NOT_FOUND",
+                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Message = $"Referenced package preview '{request.PackagePreviewId}' not found for this tenant."
+                    });
+                }
+                // Package previews are not directly keyed by DraftId, so we cannot check draft match here
+            }
+
+            if (request.EvidencePreviewId is not null)
+            {
+                if (!_evidencePreviews.TryGetValue((context.TenantId, request.EvidencePreviewId), out var evidenceRef))
+                {
+                    refDiagnostics.Add(new AgentToolDiagnostic
+                    {
+                        Code = "ACTIVATION_EVIDENCE_PREVIEW_NOT_FOUND",
+                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Message = $"Referenced evidence preview '{request.EvidencePreviewId}' not found for this tenant."
+                    });
+                }
+                else if (evidenceRef.DraftId != request.DraftId)
+                {
+                    refDiagnostics.Add(new AgentToolDiagnostic
+                    {
+                        Code = "ACTIVATION_EVIDENCE_PREVIEW_DRAFT_MISMATCH",
+                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Message = $"Referenced evidence preview '{request.EvidencePreviewId}' belongs to draft '{evidenceRef.DraftId}', not '{request.DraftId}'."
+                    });
+                }
+            }
+
+            if (refDiagnostics.Count > 0)
+            {
+                var refAudit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, refDiagnostics);
+                await _auditor.RecordAsync(refAudit);
+                return AgentToolResult<ActivationRequest>.InvalidRequest(refDiagnostics, refAudit);
+            }
+
             var activationRequest = new ActivationRequest
             {
                 RequestId = Guid.NewGuid().ToString("N"),
@@ -1082,6 +1266,34 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     }
 
     // ── Mappers ──
+
+    /// <summary>
+    /// Applies a single fix proposal action to a draft's scalar fields.
+    /// Returns true if the action was applied, false if it requires payload-level
+    /// mutation that is not yet supported by the typed payload infrastructure.
+    /// </summary>
+    private static bool ApplyActionToDraft(ref Draft draft, FixProposalAction action)
+    {
+        if (action.ActionKind != FixProposalActionKind.Set)
+            return false; // Remove/Add not yet supported for draft fields
+
+        return action.Path switch
+        {
+            "Intent" => ApplySetField(ref draft, d => d with { Intent = action.ProposedValue }),
+            "Rationale" => ApplySetField(ref draft, d => d with { Rationale = action.ProposedValue }),
+            "ProposedVersion" => ApplySetField(ref draft, d => d with { ProposedVersion = action.ProposedValue }),
+            "CorrelationId" => ApplySetField(ref draft, d => d with { CorrelationId = action.ProposedValue }),
+            // DraftId, DescriptorId, AuthorId, TenantId are identity fields — not mutable via fix proposals
+            // Payload paths require typed payload support — deferred
+            _ => false
+        };
+    }
+
+    private static bool ApplySetField(ref Draft draft, Func<Draft, Draft> updater)
+    {
+        draft = updater(draft);
+        return true;
+    }
 
     private static DraftAbstractions.DescriptorDraftAuthorKind MapActorKind(AgentToolActorKind kind) => kind switch
     {
@@ -1186,6 +1398,28 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 CurrentValue = "",
                 ProposedValue = "(must be specified)",
                 Description = "Provide an AuthorId."
+            });
+        }
+        else if (diagnostic.Code == "RATIONALE_EMPTY")
+        {
+            actions.Add(new FixProposalAction
+            {
+                Path = "Rationale",
+                ActionKind = FixProposalActionKind.Set,
+                CurrentValue = "",
+                ProposedValue = "(provide rationale)",
+                Description = "Provide a rationale for the draft."
+            });
+        }
+        else if (diagnostic.Code == "INTENT_EMPTY")
+        {
+            actions.Add(new FixProposalAction
+            {
+                Path = "Intent",
+                ActionKind = FixProposalActionKind.Set,
+                CurrentValue = "",
+                ProposedValue = "(provide intent)",
+                Description = "Provide an intent for the draft."
             });
         }
 
