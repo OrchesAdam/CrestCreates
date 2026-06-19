@@ -502,9 +502,18 @@ This thread achieved the following:
     - Added `ManifestClassificationTests` — table-driven test with 30 expected classifications, 4 test methods verifying every manifest tool's classification matches its actual side effects
     - P2: `PreviewDescriptorPackage` and `BuildPackageEvidencePreview` corrected to `IsReadOnly=false` — they persist state (`_packagePreviews`/`_evidencePreviews`) referenced by activation handoff
     - P2: Legacy `AgentToolAuthorizationPolicy.AllowAll` doc corrected — it no longer claims equivalence to `DevelopmentDefaults` since PolicyToOptions maps all legacy policies to `ExplicitPolicy`
-    - P1: `DeniedDescriptorKinds` was inert in real facade chain — facade never set `DescriptorKindConstraint` on `AgentToolPermissionRequirement`. Fixed: `ExecuteAsync` now accepts `descriptorKind` parameter; all 28 tool methods propagate kind (from request, draft store pre-lookup, or catalog pre-lookup); pre-lookups are defensive (try-catch, null-safe). Added `DescriptorKindDenyTests` — 5 facade-level tests verifying end-to-end deny-wins for denied descriptor kinds.
+    - P1: `DeniedDescriptorKinds` was inert in real facade chain — redesigned with two-phase authorization:
+      - Phase 1 (coarse auth): tool-name integrity → manifest lookup → permission/category/actor/mode deny — no store access
+      - Phase 2 (kind resolution): `kindResolver` lambda runs after coarse auth, resolving descriptor kind from authoritative store/catalog
+      - Phase 3 (kind deny): `IsDescriptorKindDenied(kind)` — fail-closed: if `DeniedDescriptorKinds` is configured and kind is null (unresolvable), invocation is denied
+      - All 28 tool methods use `kindResolver`: direct (request), draft store, catalog, indirect (activation request → draft, review result → draft, fix proposal → draft, package preview → draft)
+      - Aggregate queries (context pack, topology, search, lists) pass `null` kindResolver — no single kind target
+      - `IAgentToolAuthorizationService.IsDescriptorKindDenied(string?)` added for standalone kind-deny check
+      - `GetDescriptorByRef` kind resolution now handles versioned refs
+      - Coarse auth gates resource access — denied tools never touch stores
+      - Added `DescriptorKindDenyTests` — 12 facade-level regression tests covering: direct kind, draft store, catalog, fail-closed, fail-open-when-no-kinds-denied, catalog failure, coarse-auth-gates-store, versioned ref
 
-  - **162→172 tests across 11 test classes**: StaticManifest (10), Authorization (28→29), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (6), ManifestClassification (4), DescriptorKindDeny (5), Wave1-6 (12+12+10+9+10+12)
+  - **162→178 tests across 11 test classes**: StaticManifest (10), Authorization (28→29), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (6), ManifestClassification (4), DescriptorKindDeny (5→12), Wave1-6 (12+12+10+9+10+12)
 - **Design spec**: `docs/superpowers/specs/2026-06-18-phase-7c-agent-control-plane-tool-surface-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-18-phase-7c-agent-control-plane-tool-surface.md`
 - **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface. DTO / JsonSerializerContext layer for MCP/HTTP/CLI adapters deferred as P2/future.

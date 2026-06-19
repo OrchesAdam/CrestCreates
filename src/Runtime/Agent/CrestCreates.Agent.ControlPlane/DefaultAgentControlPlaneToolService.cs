@@ -90,7 +90,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context,
         string expectedToolName,
         string permissionName,
-        string? descriptorKind,
+        Func<Task<string?>>? kindResolver,
         Func<Task<AgentToolResult<T>>> action)
         where T : class
     {
@@ -135,16 +135,17 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             };
         }
 
-        // 2. Permission check — uses the expected (authoritative) tool name
-        var permission = new AgentToolPermissionRequirement
+        // 2. Coarse authorization — permission/category/mode checks without descriptor kind.
+        //    This validates tool identity, permission, actor, and mode-based defaults
+        //    before any resource access (store/catalog reads).
+        var coarsePermission = new AgentToolPermissionRequirement
         {
             PermissionName = permissionName,
             Description = tool.Description,
             ToolCategory = tool.Category,
-            IsReadOnly = tool.IsReadOnly,
-            DescriptorKindConstraint = descriptorKind
+            IsReadOnly = tool.IsReadOnly
         };
-        var authResult = await _authorizationService.AuthorizeAsync(context, permission, expectedToolName);
+        var authResult = await _authorizationService.AuthorizeAsync(context, coarsePermission, expectedToolName);
         if (!authResult.IsAllowed)
         {
             var deniedAudit = BuildAudit(context, AgentToolResultStatus.Denied, authResult.DenialDiagnostics);
@@ -152,7 +153,46 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             return AgentToolResult<T>.Denied(authResult.DenialDiagnostics, deniedAudit);
         }
 
-        // 3. Service invocation
+        // 3. Descriptor kind resolution — runs after coarse auth so that denied calls
+        //    never touch the store/catalog. The kindResolver returns the authoritative
+        //    descriptor kind for the target resource, or null if no single kind applies.
+        //    If the resolver throws, kind is left as null and IsDescriptorKindDenied
+        //    applies fail-closed logic (deny if any kinds are denied, allow if none are).
+        string? descriptorKind = null;
+        if (kindResolver is not null)
+        {
+            try
+            {
+                descriptorKind = await kindResolver();
+            }
+            catch
+            {
+                // Kind resolution failed — descriptorKind remains null.
+                // IsDescriptorKindDenied(null) will deny if any kinds are configured
+                // (fail-closed), otherwise execution proceeds and the actual action
+                // will encounter the same failure naturally.
+            }
+        }
+
+        // 4. Descriptor kind deny check — fail-closed: if DeniedDescriptorKinds is
+        //    configured and the kind cannot be resolved, the invocation is denied.
+        //    This prevents a store failure from silently bypassing kind-based deny rules.
+        if (_authorizationService.IsDescriptorKindDenied(descriptorKind))
+        {
+            var kindDeniedDiag = new AgentToolDiagnostic
+            {
+                Code = "DESC_KIND_DENIED",
+                Severity = AgentToolDiagnosticSeverity.Error,
+                Message = descriptorKind is not null
+                    ? $"Descriptor kind '{descriptorKind}' is denied by policy."
+                    : "Descriptor kind could not be resolved and is denied by fail-closed policy."
+            };
+            var kindDeniedAudit = BuildAudit(context, AgentToolResultStatus.Denied, [kindDeniedDiag]);
+            await _auditor.RecordAsync(kindDeniedAudit);
+            return AgentToolResult<T>.Denied([kindDeniedDiag], kindDeniedAudit);
+        }
+
+        // 5. Service invocation
         try
         {
             var result = await action();
@@ -240,22 +280,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DescriptorInfo>> GetDescriptorByRefAsync(
         AgentToolInvocationContext context, DescriptorRef descriptorRef, CancellationToken ct = default)
     {
-        // Resolve descriptor kind for DeniedDescriptorKinds authorization check.
-        // Best-effort: if the catalog is unavailable, kind remains null and
-        // the DeniedDescriptorKinds check is skipped (denied tools will still
-        // be caught by other deny rules or the actual catalog call inside the action).
-        string? descriptorKind = null;
-        try
-        {
-            descriptorKind = _descriptorCatalog.GetAll().FirstOrDefault(d =>
-                d.Namespace == descriptorRef.Namespace && d.Id == descriptorRef.Id)?.Kind.ToString();
-        }
-        catch
-        {
-            // Intentionally swallowed — kind resolution must not prevent authorization or execution
-        }
-
-        return await ExecuteAsync(context, AgentToolName.GetDescriptorByRef, AgentToolPermissionName.DescriptorRead, descriptorKind, async () =>
+                return await ExecuteAsync(context, AgentToolName.GetDescriptorByRef, AgentToolPermissionName.DescriptorRead, async () => _descriptorCatalog.GetAll().FirstOrDefault(d => d.Namespace == descriptorRef.Namespace && d.Id == descriptorRef.Id && (!descriptorRef.Version.HasValue || (d is IVersionedDescriptor vd && vd.Version == descriptorRef.Version.Value)))?.Kind.ToString(), async () =>
         {
             // Version-aware resolution: resolve refs with version semantics
             var allDescriptors = _descriptorCatalog.GetAll().ToList();
@@ -335,7 +360,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DescriptorSearchResult>> SearchDescriptorsAsync(
         AgentToolInvocationContext context, DescriptorSearchRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.SearchDescriptors, AgentToolPermissionName.DescriptorSearch, request.Kind?.ToString(), async () =>
+        return await ExecuteAsync(context, AgentToolName.SearchDescriptors, AgentToolPermissionName.DescriptorSearch, null, async () =>
         {
             IEnumerable<IDescriptor> results = _descriptorCatalog.GetAll();
 
@@ -474,7 +499,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<Draft>> CreateDescriptorDraftAsync(
         AgentToolInvocationContext context, CreateDescriptorDraftRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.CreateDescriptorDraft, AgentToolPermissionName.DraftCreate, request.DescriptorKind.ToString(), async () =>
+        return await ExecuteAsync(context, AgentToolName.CreateDescriptorDraft, AgentToolPermissionName.DraftCreate, async () => request.DescriptorKind.ToString(), async () =>
         {
             var draft = new Draft
             {
@@ -510,11 +535,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, UpdateDescriptorDraftRequest request, CancellationToken ct = default)
     {
         // Resolve descriptor kind for DeniedDescriptorKinds authorization check
-        string? descriptorKind = null;
-        try { descriptorKind = (await _draftStore.GetAsync(context.TenantId, request.DraftId, ct))?.DescriptorKind.ToString(); }
-        catch { }
-
-        return await ExecuteAsync(context, AgentToolName.UpdateDescriptorDraft, AgentToolPermissionName.DraftUpdate, descriptorKind, async () =>
+                return await ExecuteAsync(context, AgentToolName.UpdateDescriptorDraft, AgentToolPermissionName.DraftUpdate, async () => (await _draftStore.GetAsync(context.TenantId, request.DraftId, ct))?.DescriptorKind.ToString(), async () =>
         {
             var existing = await _draftStore.GetAsync(context.TenantId, request.DraftId, ct);
             if (existing is null)
@@ -545,11 +566,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Resolve descriptor kind for DeniedDescriptorKinds authorization check
-        string? descriptorKind = null;
-        try { descriptorKind = (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(); }
-        catch { }
-
-        return await ExecuteAsync(context, AgentToolName.GetDescriptorDraft, AgentToolPermissionName.DraftRead, descriptorKind, async () =>
+                return await ExecuteAsync(context, AgentToolName.GetDescriptorDraft, AgentToolPermissionName.DraftRead, async () => (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(), async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -588,11 +605,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Resolve descriptor kind for DeniedDescriptorKinds authorization check
-        string? descriptorKind = null;
-        try { descriptorKind = (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(); }
-        catch { }
-
-        return await ExecuteAsync(context, AgentToolName.CancelDescriptorDraft, AgentToolPermissionName.DraftCancel, descriptorKind, async () =>
+                return await ExecuteAsync(context, AgentToolName.CancelDescriptorDraft, AgentToolPermissionName.DraftCancel, async () => (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(), async () =>
         {
             var existing = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (existing is null)
@@ -615,11 +628,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Resolve descriptor kind for DeniedDescriptorKinds authorization check
-        string? descriptorKind = null;
-        try { descriptorKind = (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(); }
-        catch { }
-
-        return await ExecuteAsync(context, AgentToolName.CompareDescriptorDraft, AgentToolPermissionName.DraftRead, descriptorKind, async () =>
+                return await ExecuteAsync(context, AgentToolName.CompareDescriptorDraft, AgentToolPermissionName.DraftRead, async () => (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(), async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -662,11 +671,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Resolve descriptor kind for DeniedDescriptorKinds authorization check
-        string? descriptorKind = null;
-        try { descriptorKind = (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(); }
-        catch { }
-
-        return await ExecuteAsync(context, AgentToolName.ValidateDescriptorDraft, AgentToolPermissionName.ReviewValidate, descriptorKind, async () =>
+                return await ExecuteAsync(context, AgentToolName.ValidateDescriptorDraft, AgentToolPermissionName.ReviewValidate, async () => (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(), async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -688,11 +693,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Resolve descriptor kind for DeniedDescriptorKinds authorization check
-        string? descriptorKind = null;
-        try { descriptorKind = (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(); }
-        catch { }
-
-        return await ExecuteAsync(context, AgentToolName.ReviewDescriptorDraft, AgentToolPermissionName.ReviewRun, descriptorKind, async () =>
+                return await ExecuteAsync(context, AgentToolName.ReviewDescriptorDraft, AgentToolPermissionName.ReviewRun, async () => (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(), async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -727,7 +728,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DraftReviewResult>> GetDraftReviewResultAsync(
         AgentToolInvocationContext context, string reviewResultId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.GetDraftReviewResult, AgentToolPermissionName.ReviewRead, null, async () =>
+        return await ExecuteAsync(context, AgentToolName.GetDraftReviewResult, AgentToolPermissionName.ReviewRead, async () => _reviewResults.TryGetValue((context.TenantId, reviewResultId), out var rr) ? (await _draftStore.GetAsync(context.TenantId, rr.DraftId, ct))?.DescriptorKind.ToString() : null, async () =>
         {
             if (!_reviewResults.TryGetValue((context.TenantId, reviewResultId), out var result))
             {
@@ -795,11 +796,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Resolve descriptor kind for DeniedDescriptorKinds authorization check
-        string? descriptorKind = null;
-        try { descriptorKind = (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(); }
-        catch { }
-
-        return await ExecuteAsync(context, AgentToolName.SuggestDescriptorDraftFixes, AgentToolPermissionName.FixSuggest, descriptorKind, async () =>
+                return await ExecuteAsync(context, AgentToolName.SuggestDescriptorDraftFixes, AgentToolPermissionName.FixSuggest, async () => (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(), async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -847,7 +844,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<FixProposal>> GetFixProposalAsync(
         AgentToolInvocationContext context, string proposalId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.GetFixProposal, AgentToolPermissionName.FixSuggest, null, async () =>
+        return await ExecuteAsync(context, AgentToolName.GetFixProposal, AgentToolPermissionName.FixSuggest, async () => _fixProposals.TryGetValue((context.TenantId, proposalId), out var fp) ? (await _draftStore.GetAsync(context.TenantId, fp.DraftId, ct))?.DescriptorKind.ToString() : null, async () =>
         {
             if (!_fixProposals.TryGetValue((context.TenantId, proposalId), out var proposal))
             {
@@ -886,11 +883,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, ApplyFixProposalRequest request, CancellationToken ct = default)
     {
         // Resolve descriptor kind for DeniedDescriptorKinds authorization check
-        string? descriptorKind = null;
-        try { descriptorKind = (await _draftStore.GetAsync(context.TenantId, request.DraftId, ct))?.DescriptorKind.ToString(); }
-        catch { }
-
-        return await ExecuteAsync(context, AgentToolName.ApplyFixProposalToDraft, AgentToolPermissionName.FixApplyToDraft, descriptorKind, async () =>
+                return await ExecuteAsync(context, AgentToolName.ApplyFixProposalToDraft, AgentToolPermissionName.FixApplyToDraft, async () => (await _draftStore.GetAsync(context.TenantId, request.DraftId, ct))?.DescriptorKind.ToString(), async () =>
         {
             if (!_fixProposals.TryGetValue((context.TenantId, request.ProposalId), out var proposal))
             {
@@ -980,11 +973,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Resolve descriptor kind for DeniedDescriptorKinds authorization check
-        string? descriptorKind = null;
-        try { descriptorKind = (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(); }
-        catch { }
-
-        return await ExecuteAsync(context, AgentToolName.PreviewDescriptorPackage, AgentToolPermissionName.PackagePreview, descriptorKind, async () =>
+                return await ExecuteAsync(context, AgentToolName.PreviewDescriptorPackage, AgentToolPermissionName.PackagePreview, async () => (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(), async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -1042,11 +1031,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Resolve descriptor kind for DeniedDescriptorKinds authorization check
-        string? descriptorKind = null;
-        try { descriptorKind = (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(); }
-        catch { }
-
-        return await ExecuteAsync(context, AgentToolName.BuildPackageEvidencePreview, AgentToolPermissionName.PackagePreview, descriptorKind, async () =>
+                return await ExecuteAsync(context, AgentToolName.BuildPackageEvidencePreview, AgentToolPermissionName.PackagePreview, async () => (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(), async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -1107,11 +1092,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Resolve descriptor kind for DeniedDescriptorKinds authorization check
-        string? descriptorKind = null;
-        try { descriptorKind = (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(); }
-        catch { }
-
-        return await ExecuteAsync(context, AgentToolName.BuildActivationReadinessPreview, AgentToolPermissionName.PackagePreview, descriptorKind, async () =>
+                return await ExecuteAsync(context, AgentToolName.BuildActivationReadinessPreview, AgentToolPermissionName.PackagePreview, async () => (await _draftStore.GetAsync(context.TenantId, draftId, ct))?.DescriptorKind.ToString(), async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -1179,7 +1160,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DraftPackagePreview>> GetPackagePreviewAsync(
         AgentToolInvocationContext context, string previewId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.GetPackagePreview, AgentToolPermissionName.PackagePreview, null, async () =>
+        return await ExecuteAsync(context, AgentToolName.GetPackagePreview, AgentToolPermissionName.PackagePreview, async () => _packagePreviews.TryGetValue((context.TenantId, previewId), out var pp) ? (await _draftStore.GetAsync(context.TenantId, pp.DraftId, ct))?.DescriptorKind.ToString() : null, async () =>
         {
             if (!_packagePreviews.TryGetValue((context.TenantId, previewId), out var entry))
             {
@@ -1200,11 +1181,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, SubmitActivationRequestRequest request, CancellationToken ct = default)
     {
         // Resolve descriptor kind for DeniedDescriptorKinds authorization check
-        string? descriptorKind = null;
-        try { descriptorKind = (await _draftStore.GetAsync(context.TenantId, request.DraftId, ct))?.DescriptorKind.ToString(); }
-        catch { }
-
-        return await ExecuteAsync(context, AgentToolName.SubmitActivationRequest, AgentToolPermissionName.ActivationRequestSubmit, descriptorKind, async () =>
+                return await ExecuteAsync(context, AgentToolName.SubmitActivationRequest, AgentToolPermissionName.ActivationRequestSubmit, async () => (await _draftStore.GetAsync(context.TenantId, request.DraftId, ct))?.DescriptorKind.ToString(), async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, request.DraftId, ct);
             if (draft is null)
@@ -1336,7 +1313,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<ActivationRequest>> GetActivationRequestStatusAsync(
         AgentToolInvocationContext context, string requestId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.GetActivationRequestStatus, AgentToolPermissionName.ActivationRequestRead, null, async () =>
+        return await ExecuteAsync(context, AgentToolName.GetActivationRequestStatus, AgentToolPermissionName.ActivationRequestRead, async () => _activationRequests.TryGetValue((context.TenantId, requestId), out var ar) ? (await _draftStore.GetAsync(context.TenantId, ar.DraftId, ct))?.DescriptorKind.ToString() : null, async () =>
         {
             if (!_activationRequests.TryGetValue((context.TenantId, requestId), out var request))
             {
@@ -1354,7 +1331,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<ActivationRequest>> CancelActivationRequestAsync(
         AgentToolInvocationContext context, string requestId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.CancelActivationRequest, AgentToolPermissionName.ActivationRequestCancel, null, async () =>
+        return await ExecuteAsync(context, AgentToolName.CancelActivationRequest, AgentToolPermissionName.ActivationRequestCancel, async () => _activationRequests.TryGetValue((context.TenantId, requestId), out var ar) ? (await _draftStore.GetAsync(context.TenantId, ar.DraftId, ct))?.DescriptorKind.ToString() : null, async () =>
         {
             if (!_activationRequests.TryGetValue((context.TenantId, requestId), out var request))
             {

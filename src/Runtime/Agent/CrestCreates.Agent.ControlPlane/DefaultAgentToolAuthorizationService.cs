@@ -260,4 +260,17 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
             DeniedActorKinds = policy.DeniedActorKinds
         };
     }
+
+    public bool IsDescriptorKindDenied(string? descriptorKind)
+    {
+        // If no descriptor kinds are denied, nothing is denied
+        if (_options.DeniedDescriptorKinds.Count == 0)
+            return false;
+
+        // Fail-closed: if kind is unknown and any kinds are denied, treat as denied
+        if (descriptorKind is null)
+            return true;
+
+        return _options.DeniedDescriptorKinds.Contains(descriptorKind);
+    }
 }
