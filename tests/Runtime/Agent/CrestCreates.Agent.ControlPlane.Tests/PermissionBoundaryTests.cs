@@ -101,9 +101,9 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
     }
 
     [Fact]
-    public async Task ReadOnly_Policy_Denies_DraftCreate()
+    public async Task ProductionDefaults_Denies_DraftCreate()
     {
-        var service = CreateService(policy: AgentToolAuthorizationPolicy.ReadOnly);
+        var service = CreateService(AgentToolAuthorizationOptions.ProductionDefaults);
         var context = CreateContext("CreateDescriptorDraft");
         var request = new CreateDescriptorDraftRequest
         {
@@ -119,9 +119,9 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
     }
 
     [Fact]
-    public async Task ReadOnly_Policy_Denies_ActivationRequestSubmit()
+    public async Task ProductionDefaults_Denies_ActivationRequestSubmit()
     {
-        var service = CreateService(policy: AgentToolAuthorizationPolicy.ReadOnly);
+        var service = CreateService(AgentToolAuthorizationOptions.ProductionDefaults);
         var context = CreateContext("SubmitActivationRequest");
         var request = new SubmitActivationRequestRequest
         {
@@ -172,7 +172,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
         var auditor = new InMemoryAgentToolInvocationAuditor();
 
         // Denied invocation
-        var deniedSvc = CreateService(policy: AgentToolAuthorizationPolicy.ReadOnly, auditor: auditor);
+        var deniedSvc = CreateService(AgentToolAuthorizationOptions.ProductionDefaults, auditor);
         var deniedCtx = CreateContext("CreateDescriptorDraft");
         var deniedReq = new CreateDescriptorDraftRequest
         {

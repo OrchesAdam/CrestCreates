@@ -377,13 +377,30 @@ public class AuthorizationTests
     // ── Legacy policy compatibility ──
 
     [Fact]
-    public async Task LegacyPolicy_AllowAll_Converts_To_DevelopmentAllowAll()
+    public async Task LegacyPolicy_AllowAll_Converts_To_ExplicitPolicy_WithReadOnlyDefault()
     {
+        // Legacy AgentToolAuthorizationPolicy.AllowAll (empty deny sets) no longer maps
+        // to DevelopmentAllowAll. It maps to ExplicitPolicy with read-only defaults,
+        // ensuring that mutating tools require explicit opt-in even through legacy path.
         var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationPolicy.AllowAll);
         var context = CreateCtx("CreateDescriptorDraft");
         var perm = MutatingPerm(AgentToolPermissionName.DraftCreate, AgentToolCategory.Draft);
 
         var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
+
+        // Legacy AllowAll no longer grants mutation — must use DevelopmentDefaults explicitly
+        result.IsAllowed.Should().BeFalse();
+        result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "MUTATION_DENIED");
+    }
+
+    [Fact]
+    public async Task LegacyPolicy_AllowAll_Allows_ReadOnlyTools()
+    {
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationPolicy.AllowAll);
+        var context = CreateCtx("GetDescriptorByRef");
+        var perm = ReadPerm(AgentToolPermissionName.DescriptorRead, AgentToolCategory.Context);
+
+        var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
 
         result.IsAllowed.Should().BeTrue();
     }

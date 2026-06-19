@@ -48,14 +48,15 @@ public class ToolNameBoundaryTests : AgentControlPlaneTestBase
     [Fact]
     public async Task DeniedToolName_CannotBeBypassed_BySpoofedContextToolName()
     {
-        // If "SubmitActivationRequest" is in the DeniedToolNames policy,
+        // If "SubmitActivationRequest" is in the DeniedToolNames options,
         // a caller cannot bypass the deny by spoofing context.ToolName.
         // The authorization service now uses the authoritative expectedToolName.
-        var policy = new AgentToolAuthorizationPolicy
+        var options = new AgentToolAuthorizationOptions
         {
+            Mode = AgentToolAuthorizationMode.DevelopmentAllowAll,
             DeniedToolNames = { "SubmitActivationRequest" }
         };
-        var service = CreateService(policy: policy);
+        var service = CreateService(options);
 
         // Context has the correct tool name — the authorization check must still deny it
         var context = CreateContext("SubmitActivationRequest");

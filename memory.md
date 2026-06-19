@@ -494,7 +494,14 @@ This thread achieved the following:
 - **Wave 5** (Package Preview): PreviewDescriptorPackage, BuildPackageEvidencePreview, BuildActivationReadinessPreview, GetPackagePreview
 - **Wave 6** (Activation Handoff): SubmitActivationRequest, GetActivationRequestStatus, CancelActivationRequest
 
-- **162 tests across 9 test classes**: StaticManifest (10), Authorization (28), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (6), Wave1-6 (12+12+10+9+10+12)
+  - **Code Review Finding Fixes** (2026-06-19):
+    - P1: `ReviewDescriptorDraft` corrected to `IsReadOnly=false` — it persists review results and changes draft status to Reviewed
+    - P2: `SuggestDescriptorDraftFixes` corrected to `IsReadOnly=false` — it creates and persists fix proposals
+    - P2: Legacy empty `AgentToolAuthorizationPolicy` no longer silently maps to `DevelopmentAllowAll`; all legacy policies now map to `ExplicitPolicy` with read-only defaults
+    - P2: Manifest permissions now carry `ToolCategory` and `IsReadOnly` metadata so adapters consuming the manifest directly can make category-aware authorization decisions
+    - Added `ManifestClassificationTests` — table-driven test with 30 expected classifications, 4 test methods verifying every manifest tool's classification matches its actual side effects
+
+  - **162→167 tests across 10 test classes**: StaticManifest (10), Authorization (28→29), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (6), ManifestClassification (4), Wave1-6 (12+12+10+9+10+12)
 - **Design spec**: `docs/superpowers/specs/2026-06-18-phase-7c-agent-control-plane-tool-surface-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-18-phase-7c-agent-control-plane-tool-surface.md`
 - **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface. DTO / JsonSerializerContext layer for MCP/HTTP/CLI adapters deferred as P2/future.

@@ -43,11 +43,9 @@ public abstract class AgentControlPlaneTestBase
     /// Mocks are used for all downstream services.
     /// </summary>
     protected DefaultAgentControlPlaneToolService CreateService(
-        AgentToolAuthorizationPolicy? policy = null,
         InMemoryAgentToolInvocationAuditor? auditor = null)
     {
-        var authPolicy = policy ?? AgentToolAuthorizationPolicy.AllowAll;
-        var authzService = new DefaultAgentToolAuthorizationService(authPolicy);
+        var authzService = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationOptions.DevelopmentDefaults);
         var actualAuditor = auditor ?? InMemoryAuditor;
 
         return new DefaultAgentControlPlaneToolService(

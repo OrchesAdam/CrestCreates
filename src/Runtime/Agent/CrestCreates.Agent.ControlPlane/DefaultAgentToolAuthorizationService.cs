@@ -244,16 +244,10 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
     /// </summary>
     private static AgentToolAuthorizationOptions PolicyToOptions(AgentToolAuthorizationPolicy policy)
     {
-        // AllowAll (all deny sets empty) → DevelopmentAllowAll
-        if (policy.DeniedPermissionNames.Count == 0 &&
-            policy.DeniedDescriptorKinds.Count == 0 &&
-            policy.DeniedToolNames.Count == 0 &&
-            policy.DeniedActorKinds.Count == 0)
-        {
-            return AgentToolAuthorizationOptions.DevelopmentDefaults;
-        }
-
-        // Generic policy → ExplicitPolicy with deny lists forwarded
+        // Legacy policy → ExplicitPolicy with deny lists forwarded.
+        // An empty policy is no longer implicitly DevelopmentAllowAll because that
+        // would allow mutating tools without explicit opt-in. Callers who want
+        // DevelopmentAllowAll must use AgentToolAuthorizationOptions.DevelopmentDefaults.
         return new AgentToolAuthorizationOptions
         {
             Mode = AgentToolAuthorizationMode.ExplicitPolicy,
