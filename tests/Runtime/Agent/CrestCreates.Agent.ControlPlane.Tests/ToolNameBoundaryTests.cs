@@ -121,6 +121,35 @@ public class ToolNameBoundaryTests : AgentControlPlaneTestBase
     }
 
     [Fact]
+    public async Task SubmitActivationRequest_WithSpoofedContextToolName_IsRejected_BeforeAuthorization()
+    {
+        // Facade-level regression test: a spoofed context.ToolName must be rejected
+        // at the facade (before authorization), and the audit record must contain
+        // the authoritative expected tool name — not the caller-supplied spoofed name.
+        var auditor = new InMemoryAgentToolInvocationAuditor();
+        var service = CreateService(auditor: auditor);
+        var spoofedContext = CreateContext("BuildMetadataContextPack");
+
+        var request = new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001",
+            ReviewResultId = "review-001"
+        };
+
+        var result = await service.SubmitActivationRequestAsync(spoofedContext, request);
+
+        // Rejected at facade level before authorization is reached
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "TOOL_NAME_MISMATCH");
+        result.Status.Should().NotBe(AgentToolResultStatus.Denied);
+
+        // Audit record uses the authoritative tool name, not the spoofed one
+        auditor.GetAllRecords().Should().Contain(r =>
+            r.Context.ToolName == "SubmitActivationRequest" &&
+            r.ResultStatus == AgentToolResultStatus.InvalidRequest);
+    }
+
+    [Fact]
     public async Task ManifestLookup_UsesExpectedToolName()
     {
         // When context.ToolName matches expectedToolName, manifest lookup proceeds
