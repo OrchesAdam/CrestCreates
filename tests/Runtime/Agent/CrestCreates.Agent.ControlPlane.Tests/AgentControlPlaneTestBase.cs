@@ -39,7 +39,7 @@ public abstract class AgentControlPlaneTestBase
 
     /// <summary>
     /// Creates a DefaultAgentControlPlaneToolService with real manifest provider,
-    /// real authorization service (AllowAll policy), and in-memory auditor.
+    /// real authorization service (DevelopmentDefaults — allows all tools), and in-memory auditor.
     /// Mocks are used for all downstream services.
     /// </summary>
     protected DefaultAgentControlPlaneToolService CreateService(
@@ -48,6 +48,33 @@ public abstract class AgentControlPlaneTestBase
     {
         var authPolicy = policy ?? AgentToolAuthorizationPolicy.AllowAll;
         var authzService = new DefaultAgentToolAuthorizationService(authPolicy);
+        var actualAuditor = auditor ?? InMemoryAuditor;
+
+        return new DefaultAgentControlPlaneToolService(
+            new StaticAgentToolManifestProvider(),
+            authzService,
+            actualAuditor,
+            DraftStoreMock.Object,
+            DraftValidatorMock.Object,
+            DraftReviewServiceMock.Object,
+            DraftMaterializerMock.Object,
+            ContextPackBuilderMock.Object,
+            DescriptorCatalogMock.Object,
+            RelationshipProviderMock.Object,
+            TopologyBuilderMock.Object,
+            PackageBuilderMock.Object,
+            NullLogger<DefaultAgentControlPlaneToolService>.Instance);
+    }
+
+    /// <summary>
+    /// Creates a DefaultAgentControlPlaneToolService with the specified authorization options.
+    /// Uses real manifest provider and in-memory auditor.
+    /// </summary>
+    protected DefaultAgentControlPlaneToolService CreateService(
+        AgentToolAuthorizationOptions options,
+        InMemoryAgentToolInvocationAuditor? auditor = null)
+    {
+        var authzService = new DefaultAgentToolAuthorizationService(options);
         var actualAuditor = auditor ?? InMemoryAuditor;
 
         return new DefaultAgentControlPlaneToolService(

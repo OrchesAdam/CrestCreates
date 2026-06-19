@@ -138,7 +138,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         var permission = new AgentToolPermissionRequirement
         {
             PermissionName = permissionName,
-            Description = tool.Description
+            Description = tool.Description,
+            ToolCategory = tool.Category,
+            IsReadOnly = tool.IsReadOnly
         };
         var authResult = await _authorizationService.AuthorizeAsync(context, permission, expectedToolName);
         if (!authResult.IsAllowed)

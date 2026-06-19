@@ -5,17 +5,21 @@ using FluentAssertions;
 namespace CrestCreates.Agent.ControlPlane.Tests;
 
 /// <summary>
-/// Tests for the default authorization service and policy.
-/// Verifies: runtime execution always denied, policy-based deny, agent intent ignored.
+/// Tests for the mode-driven authorization service.
+/// Verifies: runtime execution always denied, mode-based defaults, explicit
+/// allow/deny rules, deny-overrides-allow, category-aware decisions,
+/// agent intent ignored, legacy policy compatibility.
 /// </summary>
 public class AuthorizationTests
 {
+    // ── DevelopmentAllowAll mode ──
+
     [Fact]
-    public async Task AllowAll_Policy_Allows_ControlPlane_Permission()
+    public async Task DevelopmentAllowAll_Allows_ControlPlane_Permission()
     {
-        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationPolicy.AllowAll);
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationOptions.DevelopmentDefaults);
         var context = CreateCtx("GetDescriptorByRef");
-        var perm = Perm(AgentToolPermissionName.DescriptorRead);
+        var perm = ReadPerm(AgentToolPermissionName.DescriptorRead, AgentToolCategory.Context);
 
         var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
 
@@ -23,9 +27,23 @@ public class AuthorizationTests
     }
 
     [Fact]
-    public async Task Runtime_Execution_Always_Denied_Even_With_AllowAll_Policy()
+    public async Task DevelopmentAllowAll_Allows_Mutating_Tool()
     {
-        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationPolicy.AllowAll);
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationOptions.DevelopmentDefaults);
+        var context = CreateCtx("CreateDescriptorDraft");
+        var perm = MutatingPerm(AgentToolPermissionName.DraftCreate, AgentToolCategory.Draft);
+
+        var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
+
+        result.IsAllowed.Should().BeTrue();
+    }
+
+    // ── Runtime execution always denied ──
+
+    [Fact]
+    public async Task Runtime_Execution_Always_Denied_Even_With_DevelopmentAllowAll()
+    {
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationOptions.DevelopmentDefaults);
         var context = CreateCtx("ExecuteRuntimeHandler");
         var perm = Perm("agent.runtime.execute");
 
@@ -38,7 +56,7 @@ public class AuthorizationTests
     [Fact]
     public async Task Runtime_Execution_Prefix_Always_Denied()
     {
-        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationPolicy.AllowAll);
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationOptions.DevelopmentDefaults);
         var context = CreateCtx("AnyTool");
         var perm = Perm("agent.runtime.whatever");
 
@@ -47,37 +65,40 @@ public class AuthorizationTests
         result.IsAllowed.Should().BeFalse();
     }
 
+    // ── ExplicitPolicy mode — category defaults ──
+
     [Fact]
-    public async Task ReadOnly_Policy_Denies_DraftCreate()
+    public async Task ProductionDefaults_Denies_MutatingTools_WithoutExplicitPermission()
     {
-        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationPolicy.ReadOnly);
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationOptions.ProductionDefaults);
         var context = CreateCtx("CreateDescriptorDraft");
-        var perm = Perm(AgentToolPermissionName.DraftCreate);
+        var perm = MutatingPerm(AgentToolPermissionName.DraftCreate, AgentToolCategory.Draft);
 
         var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
 
         result.IsAllowed.Should().BeFalse();
-        result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "PERMISSION_DENIED");
+        result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "MUTATION_DENIED");
     }
 
     [Fact]
-    public async Task ReadOnly_Policy_Denies_ActivationRequestSubmit()
+    public async Task ProductionDefaults_Denies_ActivationHandoffTools_WithoutExplicitPermission()
     {
-        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationPolicy.ReadOnly);
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationOptions.ProductionDefaults);
         var context = CreateCtx("SubmitActivationRequest");
-        var perm = Perm(AgentToolPermissionName.ActivationRequestSubmit);
+        var perm = MutatingPerm(AgentToolPermissionName.ActivationRequestSubmit, AgentToolCategory.ActivationHandoff);
 
         var result = await service.AuthorizeAsync(context, perm, "SubmitActivationRequest");
 
         result.IsAllowed.Should().BeFalse();
+        result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "ACTIVATION_HANDOFF_DENIED");
     }
 
     [Fact]
-    public async Task ReadOnly_Policy_Allows_DescriptorRead()
+    public async Task ProductionDefaults_Allows_ReadOnlyTools()
     {
-        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationPolicy.ReadOnly);
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationOptions.ProductionDefaults);
         var context = CreateCtx("GetDescriptorByRef");
-        var perm = Perm(AgentToolPermissionName.DescriptorRead);
+        var perm = ReadPerm(AgentToolPermissionName.DescriptorRead, AgentToolCategory.Context);
 
         var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
 
@@ -85,15 +106,106 @@ public class AuthorizationTests
     }
 
     [Fact]
-    public async Task DeniedToolName_Blocks_Access()
+    public async Task ProductionDefaults_Denies_ActivationHandoff_ReadTools()
     {
-        var policy = new AgentToolAuthorizationPolicy
+        // Even read-only activation handoff tools (GetActivationRequestStatus) are denied
+        // because the ActivationHandoff category requires explicit permission.
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationOptions.ProductionDefaults);
+        var context = CreateCtx("GetActivationRequestStatus");
+        var perm = ReadPerm(AgentToolPermissionName.ActivationRequestRead, AgentToolCategory.ActivationHandoff);
+
+        var result = await service.AuthorizeAsync(context, perm, "GetActivationRequestStatus");
+
+        result.IsAllowed.Should().BeFalse();
+        result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "ACTIVATION_HANDOFF_DENIED");
+    }
+
+    // ── DevelopmentAllowAll policy (from issue requirement) ──
+
+    [Fact]
+    public async Task DevelopmentPolicy_Allows_AllTools_For_TestHarness()
+    {
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationOptions.DevelopmentDefaults);
+        var context = CreateCtx("SubmitActivationRequest");
+        var perm = MutatingPerm(AgentToolPermissionName.ActivationRequestSubmit, AgentToolCategory.ActivationHandoff);
+
+        var result = await service.AuthorizeAsync(context, perm, "SubmitActivationRequest");
+
+        result.IsAllowed.Should().BeTrue();
+    }
+
+    // ── Explicit allow rules ──
+
+    [Fact]
+    public async Task ExplicitPolicy_Can_Allow_CreateDescriptorDraft()
+    {
+        var options = new AgentToolAuthorizationOptions
         {
+            Mode = AgentToolAuthorizationMode.ExplicitPolicy,
+            AllowReadOnlyToolsByDefault = true,
+            AllowMutationToolsByDefault = false,
+            AllowedPermissions = { AgentToolPermissionName.DraftCreate }
+        };
+        var service = new DefaultAgentToolAuthorizationService(options);
+        var context = CreateCtx("CreateDescriptorDraft");
+        var perm = MutatingPerm(AgentToolPermissionName.DraftCreate, AgentToolCategory.Draft);
+
+        var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
+
+        result.IsAllowed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ExplicitPolicy_Can_Allow_SubmitActivationRequest()
+    {
+        var options = new AgentToolAuthorizationOptions
+        {
+            Mode = AgentToolAuthorizationMode.ExplicitPolicy,
+            AllowReadOnlyToolsByDefault = true,
+            AllowMutationToolsByDefault = false,
+            AllowedPermissions = { AgentToolPermissionName.ActivationRequestSubmit }
+        };
+        var service = new DefaultAgentToolAuthorizationService(options);
+        var context = CreateCtx("SubmitActivationRequest");
+        var perm = MutatingPerm(AgentToolPermissionName.ActivationRequestSubmit, AgentToolCategory.ActivationHandoff);
+
+        var result = await service.AuthorizeAsync(context, perm, "SubmitActivationRequest");
+
+        result.IsAllowed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ExplicitPolicy_AllowedToolName_Grants_Access()
+    {
+        var options = new AgentToolAuthorizationOptions
+        {
+            Mode = AgentToolAuthorizationMode.ExplicitPolicy,
+            AllowReadOnlyToolsByDefault = false,
+            AllowedToolNames = { "GetDescriptorByRef" }
+        };
+        var service = new DefaultAgentToolAuthorizationService(options);
+        var context = CreateCtx("GetDescriptorByRef");
+        var perm = ReadPerm(AgentToolPermissionName.DescriptorRead, AgentToolCategory.Context);
+
+        var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
+
+        result.IsAllowed.Should().BeTrue();
+    }
+
+    // ── Deny overrides allow ──
+
+    [Fact]
+    public async Task DeniedToolName_Overrides_AllowedPermission()
+    {
+        var options = new AgentToolAuthorizationOptions
+        {
+            Mode = AgentToolAuthorizationMode.DevelopmentAllowAll,
+            AllowedPermissions = { AgentToolPermissionName.DraftCreate },
             DeniedToolNames = { "CreateDescriptorDraft" }
         };
-        var service = new DefaultAgentToolAuthorizationService(policy);
+        var service = new DefaultAgentToolAuthorizationService(options);
         var context = CreateCtx("CreateDescriptorDraft");
-        var perm = Perm(AgentToolPermissionName.DraftCreate);
+        var perm = MutatingPerm(AgentToolPermissionName.DraftCreate, AgentToolCategory.Draft);
 
         var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
 
@@ -102,37 +214,90 @@ public class AuthorizationTests
     }
 
     [Fact]
-    public async Task DeniedToolName_Uses_ExpectedToolName_Not_ContextToolName()
+    public async Task DeniedPermission_Overrides_AllowedToolName()
     {
-        // If context.ToolName is spoofed but expectedToolName is the real tool name,
-        // the authorization service must use the authoritative expectedToolName.
-        var policy = new AgentToolAuthorizationPolicy
+        var options = new AgentToolAuthorizationOptions
         {
+            Mode = AgentToolAuthorizationMode.DevelopmentAllowAll,
+            AllowedToolNames = { "CreateDescriptorDraft" },
+            DeniedPermissions = { AgentToolPermissionName.DraftCreate }
+        };
+        var service = new DefaultAgentToolAuthorizationService(options);
+        var context = CreateCtx("CreateDescriptorDraft");
+        var perm = MutatingPerm(AgentToolPermissionName.DraftCreate, AgentToolCategory.Draft);
+
+        var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
+
+        result.IsAllowed.Should().BeFalse();
+        result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "PERMISSION_DENIED");
+    }
+
+    // ── DenyAll mode ──
+
+    [Fact]
+    public async Task DenyAll_Denies_ReadOnlyTool_WithoutExplicitAllow()
+    {
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationOptions.LockedDown);
+        var context = CreateCtx("GetDescriptorByRef");
+        var perm = ReadPerm(AgentToolPermissionName.DescriptorRead, AgentToolCategory.Context);
+
+        var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
+
+        result.IsAllowed.Should().BeFalse();
+        result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "NOT_EXPLICITLY_ALLOWED");
+    }
+
+    [Fact]
+    public async Task DenyAll_Allows_When_ExplicitPermissionGranted()
+    {
+        var options = new AgentToolAuthorizationOptions
+        {
+            Mode = AgentToolAuthorizationMode.DenyAll,
+            AllowedPermissions = { AgentToolPermissionName.DescriptorRead }
+        };
+        var service = new DefaultAgentToolAuthorizationService(options);
+        var context = CreateCtx("GetDescriptorByRef");
+        var perm = ReadPerm(AgentToolPermissionName.DescriptorRead, AgentToolCategory.Context);
+
+        var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
+
+        result.IsAllowed.Should().BeTrue();
+    }
+
+    // ── Tool name integrity ──
+
+    [Fact]
+    public async Task Authorization_Uses_ExpectedToolName_Not_ContextToolName()
+    {
+        var options = new AgentToolAuthorizationOptions
+        {
+            Mode = AgentToolAuthorizationMode.DevelopmentAllowAll,
             DeniedToolNames = { "SubmitActivationRequest" }
         };
-        var service = new DefaultAgentToolAuthorizationService(policy);
+        var service = new DefaultAgentToolAuthorizationService(options);
 
-        // Caller tries to spoof: context says "BuildMetadataContextPack" but the real tool is "SubmitActivationRequest"
         var spoofedContext = CreateCtx("BuildMetadataContextPack");
-        var perm = Perm(AgentToolPermissionName.ActivationRequestSubmit);
+        var perm = MutatingPerm(AgentToolPermissionName.ActivationRequestSubmit, AgentToolCategory.ActivationHandoff);
 
         var result = await service.AuthorizeAsync(spoofedContext, perm, "SubmitActivationRequest");
 
-        // Must deny based on the authoritative expectedToolName, not the spoofed context
         result.IsAllowed.Should().BeFalse();
         result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "TOOL_DENIED");
     }
 
+    // ── Denied descriptor kind / actor kind ──
+
     [Fact]
     public async Task DeniedActorKind_Blocks_Access()
     {
-        var policy = new AgentToolAuthorizationPolicy
+        var options = new AgentToolAuthorizationOptions
         {
+            Mode = AgentToolAuthorizationMode.DevelopmentAllowAll,
             DeniedActorKinds = { AgentToolActorKind.Agent }
         };
-        var service = new DefaultAgentToolAuthorizationService(policy);
+        var service = new DefaultAgentToolAuthorizationService(options);
         var context = CreateCtx("GetDescriptorByRef", actorKind: AgentToolActorKind.Agent);
-        var perm = Perm(AgentToolPermissionName.DescriptorRead);
+        var perm = ReadPerm(AgentToolPermissionName.DescriptorRead, AgentToolCategory.Context);
 
         var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
 
@@ -143,16 +308,19 @@ public class AuthorizationTests
     [Fact]
     public async Task DeniedDescriptorKind_Blocks_Access()
     {
-        var policy = new AgentToolAuthorizationPolicy
+        var options = new AgentToolAuthorizationOptions
         {
+            Mode = AgentToolAuthorizationMode.DevelopmentAllowAll,
             DeniedDescriptorKinds = { "Event" }
         };
-        var service = new DefaultAgentToolAuthorizationService(policy);
+        var service = new DefaultAgentToolAuthorizationService(options);
         var context = CreateCtx("CreateDescriptorDraft");
         var perm = new AgentToolPermissionRequirement
         {
             PermissionName = AgentToolPermissionName.DraftCreate,
-            DescriptorKindConstraint = "Event"
+            DescriptorKindConstraint = "Event",
+            ToolCategory = AgentToolCategory.Draft,
+            IsReadOnly = false
         };
 
         var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
@@ -161,35 +329,150 @@ public class AuthorizationTests
         result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "DESC_KIND_DENIED");
     }
 
+    // ── Agent intent ignored ──
+
     [Fact]
     public async Task Agent_Intent_Does_Not_Affect_Authorization()
     {
-        // Even if agent declares "activation" intent in trace attributes, authorization must not change
-        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationPolicy.AllowAll);
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationOptions.DevelopmentDefaults);
         var context = CreateCtx("GetDescriptorByRef", traceAttributes: new Dictionary<string, string>
         {
             { "intent", "activate" },
             { "goal", "approve-draft" }
         });
-        var perm = Perm(AgentToolPermissionName.DescriptorRead);
+        var perm = ReadPerm(AgentToolPermissionName.DescriptorRead, AgentToolCategory.Context);
 
         var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
 
         result.IsAllowed.Should().BeTrue();
-        // The point is: intent did not cause denial or special behavior
+    }
+
+    // ── Default constructor ──
+
+    [Fact]
+    public async Task Default_Ctor_Uses_ProductionDefaults()
+    {
+        var service = new DefaultAgentToolAuthorizationService();
+        var context = CreateCtx("CreateDescriptorDraft");
+        var perm = MutatingPerm(AgentToolPermissionName.DraftCreate, AgentToolCategory.Draft);
+
+        var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
+
+        // Production defaults deny mutating tools
+        result.IsAllowed.Should().BeFalse();
     }
 
     [Fact]
-    public async Task Default_Ctor_Uses_AllowAll_Policy()
+    public async Task Default_Ctor_Allows_ReadOnlyTools()
     {
         var service = new DefaultAgentToolAuthorizationService();
         var context = CreateCtx("GetDescriptorByRef");
-        var perm = Perm(AgentToolPermissionName.DescriptorRead);
+        var perm = ReadPerm(AgentToolPermissionName.DescriptorRead, AgentToolCategory.Context);
 
         var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
 
         result.IsAllowed.Should().BeTrue();
     }
+
+    // ── Legacy policy compatibility ──
+
+    [Fact]
+    public async Task LegacyPolicy_AllowAll_Converts_To_DevelopmentAllowAll()
+    {
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationPolicy.AllowAll);
+        var context = CreateCtx("CreateDescriptorDraft");
+        var perm = MutatingPerm(AgentToolPermissionName.DraftCreate, AgentToolCategory.Draft);
+
+        var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
+
+        result.IsAllowed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task LegacyPolicy_ReadOnly_Denies_DraftCreate()
+    {
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationPolicy.ReadOnly);
+        var context = CreateCtx("CreateDescriptorDraft");
+        var perm = MutatingPerm(AgentToolPermissionName.DraftCreate, AgentToolCategory.Draft);
+
+        var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
+
+        result.IsAllowed.Should().BeFalse();
+        result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "PERMISSION_DENIED");
+    }
+
+    [Fact]
+    public async Task LegacyPolicy_ReadOnly_Allows_DescriptorRead()
+    {
+        var service = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationPolicy.ReadOnly);
+        var context = CreateCtx("GetDescriptorByRef");
+        var perm = ReadPerm(AgentToolPermissionName.DescriptorRead, AgentToolCategory.Context);
+
+        var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
+
+        result.IsAllowed.Should().BeTrue();
+    }
+
+    // ── Category toggle: AllowMutationToolsByDefault ──
+
+    [Fact]
+    public async Task AllowMutationToolsByDefault_True_Allows_DraftCreate()
+    {
+        var options = new AgentToolAuthorizationOptions
+        {
+            Mode = AgentToolAuthorizationMode.ExplicitPolicy,
+            AllowReadOnlyToolsByDefault = true,
+            AllowMutationToolsByDefault = true,
+            AllowActivationHandoffToolsByDefault = false
+        };
+        var service = new DefaultAgentToolAuthorizationService(options);
+        var context = CreateCtx("CreateDescriptorDraft");
+        var perm = MutatingPerm(AgentToolPermissionName.DraftCreate, AgentToolCategory.Draft);
+
+        var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
+
+        result.IsAllowed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task AllowActivationHandoffToolsByDefault_True_Allows_SubmitActivation()
+    {
+        var options = new AgentToolAuthorizationOptions
+        {
+            Mode = AgentToolAuthorizationMode.ExplicitPolicy,
+            AllowReadOnlyToolsByDefault = true,
+            AllowMutationToolsByDefault = false,
+            AllowActivationHandoffToolsByDefault = true
+        };
+        var service = new DefaultAgentToolAuthorizationService(options);
+        var context = CreateCtx("SubmitActivationRequest");
+        var perm = MutatingPerm(AgentToolPermissionName.ActivationRequestSubmit, AgentToolCategory.ActivationHandoff);
+
+        var result = await service.AuthorizeAsync(context, perm, "SubmitActivationRequest");
+
+        result.IsAllowed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task AllowActivationHandoffToolsByDefault_True_Also_Allows_ReadTools_In_Category()
+    {
+        var options = new AgentToolAuthorizationOptions
+        {
+            Mode = AgentToolAuthorizationMode.ExplicitPolicy,
+            AllowReadOnlyToolsByDefault = true,
+            AllowMutationToolsByDefault = false,
+            AllowActivationHandoffToolsByDefault = true
+        };
+        var service = new DefaultAgentToolAuthorizationService(options);
+        var context = CreateCtx("GetActivationRequestStatus");
+        var perm = ReadPerm(AgentToolPermissionName.ActivationRequestRead, AgentToolCategory.ActivationHandoff);
+
+        var result = await service.AuthorizeAsync(context, perm, "GetActivationRequestStatus");
+
+        result.IsAllowed.Should().BeTrue();
+    }
+
+    // ── Helpers ──
 
     private static AgentToolInvocationContext CreateCtx(
         string toolName,
@@ -210,4 +493,10 @@ public class AuthorizationTests
 
     private static AgentToolPermissionRequirement Perm(string name, string? desc = null)
         => new() { PermissionName = name, Description = desc };
+
+    private static AgentToolPermissionRequirement ReadPerm(string name, AgentToolCategory category)
+        => new() { PermissionName = name, ToolCategory = category, IsReadOnly = true };
+
+    private static AgentToolPermissionRequirement MutatingPerm(string name, AgentToolCategory category)
+        => new() { PermissionName = name, ToolCategory = category, IsReadOnly = false };
 }

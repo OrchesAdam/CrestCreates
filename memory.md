@@ -1,7 +1,6 @@
 # CrestCreates Progress Memory
 
 Last Updated: 2026-06-19
-
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -447,9 +446,12 @@ This thread achieved the following:
   - `AgentToolInvocationContext` — tenant, actor, correlation, tool name, invocation source
   - `AgentToolResult<T>` — strongly typed result with Status/Diagnostics/AuditRecord
   - `AgentToolResultStatus` — Success/SucceededWithDiagnostics/Denied/Failed/NotFound/InvalidRequest
-  - `AgentToolAuthorizationPolicy` — AllowAll/ReadOnly/ProductionDefaults
+  - `AgentToolAuthorizationPolicy` — AllowAll/ReadOnly/ProductionDefaults (legacy, superseded by AgentToolAuthorizationOptions)
+  - `AgentToolAuthorizationMode` — DevelopmentAllowAll/ExplicitPolicy/DenyAll
+  - `AgentToolAuthorizationOptions` — mode-driven options with category-aware defaults (AllowReadOnlyToolsByDefault, AllowMutationToolsByDefault, AllowActivationHandoffToolsByDefault), explicit allow/deny lists
   - `AgentToolName` — 28 canonical tool name constants (single source of truth)
-  - `IAgentToolAuthorizationService` + `DefaultAgentToolAuthorizationService` — permission check, runtime execution prefix denied, tool-name deny uses authoritative expectedToolName
+  - `AgentToolPermissionRequirement` — extended with ToolCategory and IsReadOnly for category-aware authorization
+  - `IAgentToolAuthorizationService` + `DefaultAgentToolAuthorizationService` — mode-driven authorization: DevelopmentAllowAll/ExplicitPolicy/DenyAll, category-aware defaults, deny-overrides-allow, legacy policy compatibility
   - `IAgentToolManifestProvider` + `StaticAgentToolManifestProvider` — hardcoded 30-tool manifest
   - `IAgentToolInvocationAuditor` + `InMemoryAgentToolInvocationAuditor` — audit recording
   - `AgentToolInvocationAuditRecord` — full touch-point tracking (descriptors, drafts, reviews, fix proposals, package previews, activation requests)
@@ -466,6 +468,19 @@ This thread achieved the following:
   - `ProductionDefaults` authorization policy — denies DraftCreate/Update/Cancel, FixApplyToDraft, ActivationRequestSubmit/Cancel; allows read/context/review-suggest/package-preview tools
   - Default `AddAgentControlPlane()` DI registration uses `ProductionDefaults` instead of `AllowAll` (use `AllowAll` explicitly for dev/test)
 
+- **Authorization Policy Hardening — Issue #40** (2026-06-19):
+  - New `AgentToolAuthorizationMode` enum: DevelopmentAllowAll, ExplicitPolicy, DenyAll
+  - New `AgentToolAuthorizationOptions` record with category-aware defaults:
+    - `AllowReadOnlyToolsByDefault` (true by default)
+    - `AllowMutationToolsByDefault` (false by default)
+    - `AllowActivationHandoffToolsByDefault` (false by default)
+    - `AllowedPermissions` / `DeniedPermissions` / `AllowedToolNames` / `DeniedToolNames` — deny always overrides allow
+  - `AgentToolPermissionRequirement` extended with `ToolCategory` and `IsReadOnly` for category-aware decisions
+  - `DefaultAgentToolAuthorizationService` rewritten: mode-driven, category-aware, deny-overrides-allow
+  - Legacy `AgentToolAuthorizationPolicy` still accepted via compatibility constructor (PolicyToOptions conversion)
+  - DI: `AddAgentControlPlane()` overload accepting `AgentToolAuthorizationOptions`
+  - 28 authorization tests covering: mode-based defaults, explicit allow/deny, deny-overrides-allow, category toggles, legacy compatibility, DenyAll mode, tool name integrity
+
 - **Permission boundary**: every tool invocation → tool name integrity check → manifest lookup → permission check → service invocation → audit recording
 - **Runtime boundary**: Agent CANNOT approve, activate, execute runtime handlers, mutate runtime registries, or become governance authority
 - **Activation is handoff only**: `SubmitActivationRequest` creates a `Submitted` record, does not execute activation. `Approved`/`Rejected` are terminal states. No `ApproveActivationRequest` tool exists.
@@ -479,7 +494,7 @@ This thread achieved the following:
 - **Wave 5** (Package Preview): PreviewDescriptorPackage, BuildPackageEvidencePreview, BuildActivationReadinessPreview, GetPackagePreview
 - **Wave 6** (Activation Handoff): SubmitActivationRequest, GetActivationRequestStatus, CancelActivationRequest
 
-- **145 tests across 9 test classes**: StaticManifest (10), Authorization (11), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (5), Wave1-6 (12+12+10+9+10+12)
+- **162 tests across 9 test classes**: StaticManifest (10), Authorization (28), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (6), Wave1-6 (12+12+10+9+10+12)
 - **Design spec**: `docs/superpowers/specs/2026-06-18-phase-7c-agent-control-plane-tool-surface-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-18-phase-7c-agent-control-plane-tool-surface.md`
 - **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface. DTO / JsonSerializerContext layer for MCP/HTTP/CLI adapters deferred as P2/future.
