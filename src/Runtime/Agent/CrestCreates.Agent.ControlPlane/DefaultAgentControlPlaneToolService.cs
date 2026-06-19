@@ -88,19 +88,40 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
     private async Task<AgentToolResult<T>> ExecuteAsync<T>(
         AgentToolInvocationContext context,
+        string expectedToolName,
         string permissionName,
         Func<Task<AgentToolResult<T>>> action)
         where T : class
     {
-        // 1. Manifest lookup
-        var tool = _manifestProvider.GetToolByName(context.ToolName);
+        // 0. Tool name integrity check: the caller-supplied ToolName must match
+        //    the expected tool name for this facade method. This prevents a caller
+        //    from invoking SubmitActivationRequestAsync with context.ToolName = "BuildMetadataContextPack",
+        //    which would cause manifest lookup, tool-name deny policy, and audit to
+        //    record the wrong tool — a Control Plane policy boundary vulnerability.
+        if (!StringComparer.Ordinal.Equals(context.ToolName, expectedToolName))
+        {
+            var mismatchDiag = new AgentToolDiagnostic
+            {
+                Code = "TOOL_NAME_MISMATCH",
+                Severity = AgentToolDiagnosticSeverity.Blocker,
+                Message = $"Invocation context tool '{context.ToolName}' does not match expected tool '{expectedToolName}'."
+            };
+            // Audit uses the expected (authoritative) tool name, not the caller-supplied one
+            var mismatchAudit = BuildAudit(context with { ToolName = expectedToolName },
+                AgentToolResultStatus.InvalidRequest, [mismatchDiag]);
+            await _auditor.RecordAsync(mismatchAudit);
+            return AgentToolResult<T>.InvalidRequest([mismatchDiag], mismatchAudit);
+        }
+
+        // 1. Manifest lookup — uses the expected (authoritative) tool name
+        var tool = _manifestProvider.GetToolByName(expectedToolName);
         if (tool is null)
         {
             var notFoundDiag = new AgentToolDiagnostic
             {
                 Code = "TOOL_NOT_FOUND",
                 Severity = AgentToolDiagnosticSeverity.Warning,
-                Message = $"Tool '{context.ToolName}' is not a known Agent Control Plane tool."
+                Message = $"Tool '{expectedToolName}' is not a known Agent Control Plane tool."
             };
             var notFoundAudit = BuildAudit(context, AgentToolResultStatus.NotFound, [notFoundDiag]);
             await _auditor.RecordAsync(notFoundAudit);
@@ -113,13 +134,13 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             };
         }
 
-        // 2. Permission check
+        // 2. Permission check — uses the expected (authoritative) tool name
         var permission = new AgentToolPermissionRequirement
         {
             PermissionName = permissionName,
             Description = tool.Description
         };
-        var authResult = await _authorizationService.AuthorizeAsync(context, permission);
+        var authResult = await _authorizationService.AuthorizeAsync(context, permission, expectedToolName);
         if (!authResult.IsAllowed)
         {
             var deniedAudit = BuildAudit(context, AgentToolResultStatus.Denied, authResult.DenialDiagnostics);
@@ -135,12 +156,12 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Tool '{ToolName}' invocation failed", context.ToolName);
+            _logger.LogError(ex, "Tool '{ToolName}' invocation failed", expectedToolName);
             var errorDiag = new AgentToolDiagnostic
             {
                 Code = "TOOL_INVOCATION_FAILED",
                 Severity = AgentToolDiagnosticSeverity.Error,
-                Message = $"Tool '{context.ToolName}' invocation failed: {ex.Message}"
+                Message = $"Tool '{expectedToolName}' invocation failed: {ex.Message}"
             };
             var errorAudit = BuildAudit(context, AgentToolResultStatus.Failed, [errorDiag]);
             await _auditor.RecordAsync(errorAudit);
@@ -179,7 +200,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<MetadataContextPack>> BuildMetadataContextPackAsync(
         AgentToolInvocationContext context, MetadataContextPackRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.ContextRead, async () =>
+        return await ExecuteAsync(context, AgentToolName.BuildMetadataContextPack, AgentToolPermissionName.ContextRead, async () =>
         {
             var descriptors = _descriptorCatalog.GetAll().ToList();
             var topology = _topologyBuilder.Build(descriptors);
@@ -197,7 +218,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<MetadataContextPack>> BuildRuntimeScenarioContextPackAsync(
         AgentToolInvocationContext context, MetadataContextPackRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.ContextRead, async () =>
+        return await ExecuteAsync(context, AgentToolName.BuildRuntimeScenarioContextPack, AgentToolPermissionName.ContextRead, async () =>
         {
             var descriptors = _descriptorCatalog.GetAll().ToList();
             var topology = _topologyBuilder.Build(descriptors);
@@ -215,7 +236,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DescriptorInfo>> GetDescriptorByRefAsync(
         AgentToolInvocationContext context, DescriptorRef descriptorRef, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.DescriptorRead, async () =>
+        return await ExecuteAsync(context, AgentToolName.GetDescriptorByRef, AgentToolPermissionName.DescriptorRead, async () =>
         {
             // Version-aware resolution: resolve refs with version semantics
             var allDescriptors = _descriptorCatalog.GetAll().ToList();
@@ -295,7 +316,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DescriptorSearchResult>> SearchDescriptorsAsync(
         AgentToolInvocationContext context, DescriptorSearchRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.DescriptorSearch, async () =>
+        return await ExecuteAsync(context, AgentToolName.SearchDescriptors, AgentToolPermissionName.DescriptorSearch, async () =>
         {
             IEnumerable<IDescriptor> results = _descriptorCatalog.GetAll();
 
@@ -353,7 +374,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DescriptorRelationshipsResult>> ListDescriptorRelationshipsAsync(
         AgentToolInvocationContext context, DescriptorRef descriptorRef, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.DescriptorRead, async () =>
+        return await ExecuteAsync(context, AgentToolName.ListDescriptorRelationships, AgentToolPermissionName.DescriptorRead, async () =>
         {
             // Use topology for reliable relationship discovery.
             // Direct extraction from a single descriptor misses incoming edges
@@ -399,7 +420,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<TopologySummaryResult>> GetTopologySummaryAsync(
         AgentToolInvocationContext context, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.ContextRead, async () =>
+        return await ExecuteAsync(context, AgentToolName.GetTopologySummary, AgentToolPermissionName.ContextRead, async () =>
         {
             var descriptors = _descriptorCatalog.GetAll().ToList();
             var topology = _topologyBuilder.Build(descriptors);
@@ -434,7 +455,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<Draft>> CreateDescriptorDraftAsync(
         AgentToolInvocationContext context, CreateDescriptorDraftRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.DraftCreate, async () =>
+        return await ExecuteAsync(context, AgentToolName.CreateDescriptorDraft, AgentToolPermissionName.DraftCreate, async () =>
         {
             var draft = new Draft
             {
@@ -469,7 +490,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<Draft>> UpdateDescriptorDraftAsync(
         AgentToolInvocationContext context, UpdateDescriptorDraftRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.DraftUpdate, async () =>
+        return await ExecuteAsync(context, AgentToolName.UpdateDescriptorDraft, AgentToolPermissionName.DraftUpdate, async () =>
         {
             var existing = await _draftStore.GetAsync(context.TenantId, request.DraftId, ct);
             if (existing is null)
@@ -499,7 +520,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<Draft>> GetDescriptorDraftAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.DraftRead, async () =>
+        return await ExecuteAsync(context, AgentToolName.GetDescriptorDraft, AgentToolPermissionName.DraftRead, async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -518,7 +539,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DescriptorDraftListResult>> ListDescriptorDraftsAsync(
         AgentToolInvocationContext context, DraftAbstractions.DraftQuery? query, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.DraftList, async () =>
+        return await ExecuteAsync(context, AgentToolName.ListDescriptorDrafts, AgentToolPermissionName.DraftList, async () =>
         {
             var drafts = await _draftStore.ListAsync(context.TenantId, query, ct);
             var result = new DescriptorDraftListResult
@@ -537,7 +558,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<Draft>> CancelDescriptorDraftAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.DraftCancel, async () =>
+        return await ExecuteAsync(context, AgentToolName.CancelDescriptorDraft, AgentToolPermissionName.DraftCancel, async () =>
         {
             var existing = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (existing is null)
@@ -559,7 +580,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DraftComparisonResult>> CompareDescriptorDraftAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.DraftRead, async () =>
+        return await ExecuteAsync(context, AgentToolName.CompareDescriptorDraft, AgentToolPermissionName.DraftRead, async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -601,7 +622,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DraftValidationResult>> ValidateDescriptorDraftAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.ReviewValidate, async () =>
+        return await ExecuteAsync(context, AgentToolName.ValidateDescriptorDraft, AgentToolPermissionName.ReviewValidate, async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -622,7 +643,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DraftReviewResult>> ReviewDescriptorDraftAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.ReviewRun, async () =>
+        return await ExecuteAsync(context, AgentToolName.ReviewDescriptorDraft, AgentToolPermissionName.ReviewRun, async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -657,7 +678,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DraftReviewResult>> GetDraftReviewResultAsync(
         AgentToolInvocationContext context, string reviewResultId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.ReviewRead, async () =>
+        return await ExecuteAsync(context, AgentToolName.GetDraftReviewResult, AgentToolPermissionName.ReviewRead, async () =>
         {
             if (!_reviewResults.TryGetValue((context.TenantId, reviewResultId), out var result))
             {
@@ -675,7 +696,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<ReviewResultListResult>> ListDraftReviewResultsAsync(
         AgentToolInvocationContext context, string? draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.ReviewRead, async () =>
+        return await ExecuteAsync(context, AgentToolName.ListDraftReviewResults, AgentToolPermissionName.ReviewRead, async () =>
         {
             var results = _reviewResults
                 .Where(kvp => kvp.Key.TenantId == context.TenantId)
@@ -696,7 +717,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DiagnosticExplanation>> ExplainDiagnosticsAsync(
         AgentToolInvocationContext context, ExplainDiagnosticsRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.DiagnosticExplain, async () =>
+        return await ExecuteAsync(context, AgentToolName.ExplainDiagnostics, AgentToolPermissionName.DiagnosticExplain, async () =>
         {
             var entries = request.Diagnostics.Select(d => new DiagnosticExplanationEntry
             {
@@ -724,7 +745,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<FixProposalListResult>> SuggestDescriptorDraftFixesAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.FixSuggest, async () =>
+        return await ExecuteAsync(context, AgentToolName.SuggestDescriptorDraftFixes, AgentToolPermissionName.FixSuggest, async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -772,7 +793,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<FixProposal>> GetFixProposalAsync(
         AgentToolInvocationContext context, string proposalId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.FixSuggest, async () =>
+        return await ExecuteAsync(context, AgentToolName.GetFixProposal, AgentToolPermissionName.FixSuggest, async () =>
         {
             if (!_fixProposals.TryGetValue((context.TenantId, proposalId), out var proposal))
             {
@@ -790,7 +811,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<FixProposalListResult>> ListFixProposalsAsync(
         AgentToolInvocationContext context, string? draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.FixSuggest, async () =>
+        return await ExecuteAsync(context, AgentToolName.ListFixProposals, AgentToolPermissionName.FixSuggest, async () =>
         {
             var proposals = _fixProposals
                 .Where(kvp => kvp.Key.TenantId == context.TenantId)
@@ -810,7 +831,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<Draft>> ApplyFixProposalToDraftAsync(
         AgentToolInvocationContext context, ApplyFixProposalRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.FixApplyToDraft, async () =>
+        return await ExecuteAsync(context, AgentToolName.ApplyFixProposalToDraft, AgentToolPermissionName.FixApplyToDraft, async () =>
         {
             if (!_fixProposals.TryGetValue((context.TenantId, request.ProposalId), out var proposal))
             {
@@ -899,7 +920,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DraftPackagePreview>> PreviewDescriptorPackageAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.PackagePreview, async () =>
+        return await ExecuteAsync(context, AgentToolName.PreviewDescriptorPackage, AgentToolPermissionName.PackagePreview, async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -956,7 +977,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<PackageEvidencePreview>> BuildPackageEvidencePreviewAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.PackagePreview, async () =>
+        return await ExecuteAsync(context, AgentToolName.BuildPackageEvidencePreview, AgentToolPermissionName.PackagePreview, async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -1016,7 +1037,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<ActivationReadinessPreview>> BuildActivationReadinessPreviewAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.PackagePreview, async () =>
+        return await ExecuteAsync(context, AgentToolName.BuildActivationReadinessPreview, AgentToolPermissionName.PackagePreview, async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
             if (draft is null)
@@ -1084,7 +1105,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DraftPackagePreview>> GetPackagePreviewAsync(
         AgentToolInvocationContext context, string previewId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.PackagePreview, async () =>
+        return await ExecuteAsync(context, AgentToolName.GetPackagePreview, AgentToolPermissionName.PackagePreview, async () =>
         {
             if (!_packagePreviews.TryGetValue((context.TenantId, previewId), out var entry))
             {
@@ -1104,7 +1125,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<ActivationRequest>> SubmitActivationRequestAsync(
         AgentToolInvocationContext context, SubmitActivationRequestRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.ActivationRequestSubmit, async () =>
+        return await ExecuteAsync(context, AgentToolName.SubmitActivationRequest, AgentToolPermissionName.ActivationRequestSubmit, async () =>
         {
             var draft = await _draftStore.GetAsync(context.TenantId, request.DraftId, ct);
             if (draft is null)
@@ -1236,7 +1257,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<ActivationRequest>> GetActivationRequestStatusAsync(
         AgentToolInvocationContext context, string requestId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.ActivationRequestRead, async () =>
+        return await ExecuteAsync(context, AgentToolName.GetActivationRequestStatus, AgentToolPermissionName.ActivationRequestRead, async () =>
         {
             if (!_activationRequests.TryGetValue((context.TenantId, requestId), out var request))
             {
@@ -1254,7 +1275,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<ActivationRequest>> CancelActivationRequestAsync(
         AgentToolInvocationContext context, string requestId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolPermissionName.ActivationRequestCancel, async () =>
+        return await ExecuteAsync(context, AgentToolName.CancelActivationRequest, AgentToolPermissionName.ActivationRequestCancel, async () =>
         {
             if (!_activationRequests.TryGetValue((context.TenantId, requestId), out var request))
             {

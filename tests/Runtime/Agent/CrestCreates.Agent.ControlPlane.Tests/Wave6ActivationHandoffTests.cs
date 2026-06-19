@@ -313,7 +313,7 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
     public async Task GetActivationRequestStatus_Returns_Request()
     {
         var (service, reviewResultId) = await CreateServiceWithReviewResult();
-        var context = CreateContext("SubmitActivationRequest");
+        var submitContext = CreateContext("SubmitActivationRequest");
 
         var request = new SubmitActivationRequestRequest
         {
@@ -321,11 +321,12 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
             ReviewResultId = reviewResultId
         };
 
-        var submitResult = await service.SubmitActivationRequestAsync(context, request);
+        var submitResult = await service.SubmitActivationRequestAsync(submitContext, request);
         var requestId = submitResult.Value!.RequestId;
 
-        // Retrieve status
-        var statusResult = await service.GetActivationRequestStatusAsync(context, requestId);
+        // Retrieve status — use correct tool name for GetActivationRequestStatus
+        var statusContext = CreateContext("GetActivationRequestStatus");
+        var statusResult = await service.GetActivationRequestStatusAsync(statusContext, requestId);
 
         statusResult.Status.Should().Be(AgentToolResultStatus.Success);
         statusResult.Value!.RequestId.Should().Be(requestId);
@@ -347,7 +348,7 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
     public async Task CancelActivationRequest_Cancels_Submitted_Request()
     {
         var (service, reviewResultId) = await CreateServiceWithReviewResult();
-        var context = CreateContext("SubmitActivationRequest");
+        var submitContext = CreateContext("SubmitActivationRequest");
 
         var request = new SubmitActivationRequestRequest
         {
@@ -355,11 +356,12 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
             ReviewResultId = reviewResultId
         };
 
-        var submitResult = await service.SubmitActivationRequestAsync(context, request);
+        var submitResult = await service.SubmitActivationRequestAsync(submitContext, request);
         var requestId = submitResult.Value!.RequestId;
 
-        // Cancel
-        var cancelResult = await service.CancelActivationRequestAsync(context, requestId);
+        // Cancel — use correct tool name for CancelActivationRequest
+        var cancelContext = CreateContext("CancelActivationRequest");
+        var cancelResult = await service.CancelActivationRequestAsync(cancelContext, requestId);
 
         cancelResult.Status.Should().Be(AgentToolResultStatus.Success);
         cancelResult.Value!.Status.Should().Be(ActivationRequestStatus.Cancelled);
@@ -385,7 +387,7 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
         // a Submitted request works, and document that Approved/Rejected are
         // the terminal states that would block cancellation.
         var (service, reviewResultId) = await CreateServiceWithReviewResult();
-        var context = CreateContext("SubmitActivationRequest");
+        var submitContext = CreateContext("SubmitActivationRequest");
 
         var request = new SubmitActivationRequestRequest
         {
@@ -393,11 +395,12 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
             ReviewResultId = reviewResultId
         };
 
-        var submitResult = await service.SubmitActivationRequestAsync(context, request);
+        var submitResult = await service.SubmitActivationRequestAsync(submitContext, request);
         var requestId = submitResult.Value!.RequestId;
 
         // Cancel the Submitted request — should succeed
-        var cancelResult = await service.CancelActivationRequestAsync(context, requestId);
+        var cancelContext = CreateContext("CancelActivationRequest");
+        var cancelResult = await service.CancelActivationRequestAsync(cancelContext, requestId);
         cancelResult.Status.Should().Be(AgentToolResultStatus.Success);
         cancelResult.Value!.Status.Should().Be(ActivationRequestStatus.Cancelled);
 

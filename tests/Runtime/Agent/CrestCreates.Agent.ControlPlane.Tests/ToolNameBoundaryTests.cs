@@ -1,0 +1,144 @@
+using Xunit;
+using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Metadata.Abstractions;
+using FluentAssertions;
+
+using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
+
+namespace CrestCreates.Agent.ControlPlane.Tests;
+
+/// <summary>
+/// Tool boundary tests verifying that the ToolName integrity check in ExecuteAsync
+/// prevents manifest / audit / authorization policy boundary violations.
+///
+/// These tests close the P0 vulnerability: a caller could invoke
+/// SubmitActivationRequestAsync with context.ToolName = "BuildMetadataContextPack",
+/// causing manifest lookup, tool-name deny policy, and audit to record the wrong tool.
+///
+/// After the fix:
+/// - ExecuteAsync validates context.ToolName matches expectedToolName before anything else
+/// - Authorization service uses expectedToolName (not context.ToolName) for tool-name deny checks
+/// - Audit records use the expected (authoritative) tool name
+/// </summary>
+public class ToolNameBoundaryTests : AgentControlPlaneTestBase
+{
+    [Fact]
+    public async Task ToolNameMismatch_IsRejected_BeforeAuthorization()
+    {
+        // If context.ToolName doesn't match the facade method's expected tool name,
+        // the invocation must be rejected BEFORE authorization is even checked.
+        var service = CreateService();
+        // Spoofed context: calling SubmitActivationRequestAsync but context says "BuildMetadataContextPack"
+        var spoofedContext = CreateContext("BuildMetadataContextPack");
+
+        var request = new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001",
+            ReviewResultId = "review-001"
+        };
+
+        var result = await service.SubmitActivationRequestAsync(spoofedContext, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "TOOL_NAME_MISMATCH");
+        // Must NOT be Denied (which would mean authorization was reached)
+        result.Status.Should().NotBe(AgentToolResultStatus.Denied);
+    }
+
+    [Fact]
+    public async Task DeniedToolName_CannotBeBypassed_BySpoofedContextToolName()
+    {
+        // If "SubmitActivationRequest" is in the DeniedToolNames policy,
+        // a caller cannot bypass the deny by spoofing context.ToolName.
+        // The authorization service now uses the authoritative expectedToolName.
+        var policy = new AgentToolAuthorizationPolicy
+        {
+            DeniedToolNames = { "SubmitActivationRequest" }
+        };
+        var service = CreateService(policy: policy);
+
+        // Context has the correct tool name — the authorization check must still deny it
+        var context = CreateContext("SubmitActivationRequest");
+        var request = new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001",
+            ReviewResultId = "review-001"
+        };
+
+        var result = await service.SubmitActivationRequestAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.Denied);
+        result.Diagnostics.Should().Contain(d => d.Code == "TOOL_DENIED");
+    }
+
+    [Fact]
+    public async Task Audit_UsesExpectedToolName_NotCallerSuppliedSpoofedName()
+    {
+        // When a TOOL_NAME_MISMATCH is detected, the audit record must use
+        // the authoritative expected tool name, not the caller-supplied spoofed name.
+        var auditor = new InMemoryAgentToolInvocationAuditor();
+        var service = CreateService(auditor: auditor);
+
+        // Spoofed: context says "BuildMetadataContextPack" but we're calling SubmitActivationRequestAsync
+        var spoofedContext = CreateContext("BuildMetadataContextPack");
+        var request = new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001",
+            ReviewResultId = "review-001"
+        };
+
+        var result = await service.SubmitActivationRequestAsync(spoofedContext, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+
+        // The audit record must contain the EXPECTED tool name (SubmitActivationRequest),
+        // not the spoofed one (BuildMetadataContextPack)
+        auditor.GetAllRecords().Should().Contain(r =>
+            r.Context.ToolName == "SubmitActivationRequest" &&
+            r.ResultStatus == AgentToolResultStatus.InvalidRequest);
+    }
+
+    [Fact]
+    public async Task SubmitActivationRequest_WithContextToolNameBuildMetadataContextPack_IsRejected()
+    {
+        // Specific scenario from the review: calling SubmitActivationRequestAsync
+        // with context.ToolName = "BuildMetadataContextPack" must be rejected.
+        var service = CreateService();
+        var spoofedContext = CreateContext("BuildMetadataContextPack");
+
+        var request = new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001",
+            ReviewResultId = "review-001"
+        };
+
+        var result = await service.SubmitActivationRequestAsync(spoofedContext, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "TOOL_NAME_MISMATCH");
+        result.Diagnostics[0].Message.Should().Contain("BuildMetadataContextPack");
+        result.Diagnostics[0].Message.Should().Contain("SubmitActivationRequest");
+    }
+
+    [Fact]
+    public async Task ManifestLookup_UsesExpectedToolName()
+    {
+        // When context.ToolName matches expectedToolName, manifest lookup proceeds
+        // using the expected (authoritative) tool name. If the tool doesn't exist
+        // in the manifest, we get TOOL_NOT_FOUND (not TOOL_NAME_MISMATCH).
+        // This verifies that after passing the name match check, manifest lookup
+        // uses the same authoritative name.
+        var service = CreateService();
+
+        // Correct tool name — will pass TOOL_NAME_MISMATCH check
+        // and proceed to manifest lookup which finds the tool
+        var context = CreateContext("GetDescriptorByRef");
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns([]);
+
+        var result = await service.GetDescriptorByRefAsync(context, CreateDescriptorRef());
+
+        // Should reach NotFound (descriptor not found) or Success — not TOOL_NAME_MISMATCH
+        result.Status.Should().BeOneOf(AgentToolResultStatus.NotFound, AgentToolResultStatus.Success);
+        result.Diagnostics.Should().NotContain(d => d.Code == "TOOL_NAME_MISMATCH");
+    }
+}

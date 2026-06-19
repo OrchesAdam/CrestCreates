@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-06-18
+Last Updated: 2026-06-19
 
 ## Purpose
 
@@ -436,24 +436,37 @@ This thread achieved the following:
 
 ### Agent Control Plane Tool Surface (Phase 7c, 2026-06-18)
 
-- **Two new projects** under `src/Metadata/`:
+- **Two new projects** under `src/Runtime/Agent/`:
   - `CrestCreates.Agent.ControlPlane.Abstractions` — all public types, interfaces, enums
   - `CrestCreates.Agent.ControlPlane` — default implementations
-- **One new test project** under `tests/Metadata/`:
-  - `CrestCreates.Agent.ControlPlane.Tests` — 127 tests, all passing
+- **One new test project** under `tests/Runtime/Agent/`:
+  - `CrestCreates.Agent.ControlPlane.Tests` — 145 tests, all passing
 
 - **Core abstractions** (30 tool manifest entries, AOT-safe, no runtime reflection):
   - `IAgentControlPlaneToolService` — facade interface with 30 tool methods across 6 waves
   - `AgentToolInvocationContext` — tenant, actor, correlation, tool name, invocation source
   - `AgentToolResult<T>` — strongly typed result with Status/Diagnostics/AuditRecord
-  - `AgentToolResultStatus` — Success/Denied/Failed/NotFound/InvalidRequest
-  - `AgentToolAuthorizationPolicy` — AllowAll/ReadOnly/RuntimeDenied
-  - `IAgentToolAuthorizationService` + `DefaultAgentToolAuthorizationService` — permission check, runtime execution prefix denied
+  - `AgentToolResultStatus` — Success/SucceededWithDiagnostics/Denied/Failed/NotFound/InvalidRequest
+  - `AgentToolAuthorizationPolicy` — AllowAll/ReadOnly/ProductionDefaults
+  - `AgentToolName` — 28 canonical tool name constants (single source of truth)
+  - `IAgentToolAuthorizationService` + `DefaultAgentToolAuthorizationService` — permission check, runtime execution prefix denied, tool-name deny uses authoritative expectedToolName
   - `IAgentToolManifestProvider` + `StaticAgentToolManifestProvider` — hardcoded 30-tool manifest
   - `IAgentToolInvocationAuditor` + `InMemoryAgentToolInvocationAuditor` — audit recording
   - `AgentToolInvocationAuditRecord` — full touch-point tracking (descriptors, drafts, reviews, fix proposals, package previews, activation requests)
 
-- **Permission boundary**: every tool invocation → manifest lookup → permission check → service invocation → audit recording
+- **P0 Security Fix — ToolName Integrity** (2026-06-19):
+  - `ExecuteAsync<T>` now accepts `expectedToolName` parameter and validates `context.ToolName == expectedToolName` before manifest lookup, authorization, or action execution
+  - If mismatch: returns `InvalidRequest` with `TOOL_NAME_MISMATCH` diagnostic, creates audit record with authoritative tool name
+  - All 22 tool methods pass `AgentToolName.XXX` constants as expectedToolName
+  - Authorization service uses `expectedToolName` (not `context.ToolName`) for tool-name deny checks
+  - 5 boundary tests: ToolNameMismatch_IsRejected_BeforeAuthorization, DeniedToolName_CannotBeBypassed_BySpoofedContextToolName, Audit_UsesExpectedToolName_NotCallerSuppliedSpoofedName, SubmitActivationRequest_WithContextToolNameBuildMetadataContextPack_IsRejected, ManifestLookup_UsesExpectedToolName
+
+- **P1 Changes** (2026-06-19):
+  - `SucceededWithDiagnostics` status added to `AgentToolResultStatus` — for tool results that succeeded but produced diagnostics the caller should acknowledge
+  - `ProductionDefaults` authorization policy — denies DraftCreate/Update/Cancel, FixApplyToDraft, ActivationRequestSubmit/Cancel; allows read/context/review-suggest/package-preview tools
+  - Default `AddAgentControlPlane()` DI registration uses `ProductionDefaults` instead of `AllowAll` (use `AllowAll` explicitly for dev/test)
+
+- **Permission boundary**: every tool invocation → tool name integrity check → manifest lookup → permission check → service invocation → audit recording
 - **Runtime boundary**: Agent CANNOT approve, activate, execute runtime handlers, mutate runtime registries, or become governance authority
 - **Activation is handoff only**: `SubmitActivationRequest` creates a `Submitted` record, does not execute activation. `Approved`/`Rejected` are terminal states. No `ApproveActivationRequest` tool exists.
 - **Fix proposals are suggestions**: `ApplyFixProposalToDraft` only updates draft, never patches active descriptors
@@ -466,10 +479,10 @@ This thread achieved the following:
 - **Wave 5** (Package Preview): PreviewDescriptorPackage, BuildPackageEvidencePreview, BuildActivationReadinessPreview, GetPackagePreview
 - **Wave 6** (Activation Handoff): SubmitActivationRequest, GetActivationRequestStatus, CancelActivationRequest
 
-- **127 tests across 8 test classes**: StaticManifest (10), Authorization (10), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), Wave1-6 (12+12+10+9+10+12)
+- **145 tests across 9 test classes**: StaticManifest (10), Authorization (11), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (5), Wave1-6 (12+12+10+9+10+12)
 - **Design spec**: `docs/superpowers/specs/2026-06-18-phase-7c-agent-control-plane-tool-surface-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-18-phase-7c-agent-control-plane-tool-surface.md`
-- **Caveat**: No DI extension method yet (no `AddAgentControlPlane()`). No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface.
+- **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface. DTO / JsonSerializerContext layer for MCP/HTTP/CLI adapters deferred as P2/future.
 
 ---
 

@@ -13,6 +13,16 @@ public sealed record AgentToolResult<T> where T : class
     public static AgentToolResult<T> Success(T value, IReadOnlyList<AgentToolDiagnostic> diagnostics, AgentToolInvocationAuditRecord? audit = null)
         => new() { Status = AgentToolResultStatus.Success, Value = value, Diagnostics = diagnostics, AuditRecord = audit };
 
+    /// <summary>
+    /// Creates a result indicating the tool invocation succeeded but produced
+    /// diagnostics that the caller should acknowledge. Use this when the operation
+    /// completed but warnings or informational diagnostics were generated that
+    /// affect how the result should be interpreted (e.g., CTXPACK_TRUNCATED_BY_COUNT,
+    /// CTXPACK_AMBIGUOUS_DESCRIPTOR_REF, FIX_ACTIONS_SKIPPED).
+    /// </summary>
+    public static AgentToolResult<T> SucceededWithDiagnostics(T value, IReadOnlyList<AgentToolDiagnostic> diagnostics, AgentToolInvocationAuditRecord? audit = null)
+        => new() { Status = AgentToolResultStatus.SucceededWithDiagnostics, Value = value, Diagnostics = diagnostics, AuditRecord = audit };
+
     public static AgentToolResult<T> Denied(IReadOnlyList<AgentToolDiagnostic> diagnostics, AgentToolInvocationAuditRecord? audit = null)
         => new() { Status = AgentToolResultStatus.Denied, Value = null, Diagnostics = diagnostics, AuditRecord = audit };
 

@@ -19,6 +19,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
     public Task<AgentToolAuthorizationResult> AuthorizeAsync(
         AgentToolInvocationContext context,
         AgentToolPermissionRequirement permission,
+        string expectedToolName,
         CancellationToken ct = default)
     {
         // 1. Runtime execution is always denied
@@ -58,15 +59,18 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                 }));
         }
 
-        // 4. Check deny list by tool name (from context)
-        if (_policy.DeniedToolNames.Contains(context.ToolName))
+        // 4. Check deny list by tool name — uses the authoritative expectedToolName,
+        //    not the caller-supplied context.ToolName which may have been spoofed.
+        //    (ToolName mismatch is caught earlier by ExecuteAsync, but defense-in-depth
+        //    means the authorization service also uses the authoritative name.)
+        if (_policy.DeniedToolNames.Contains(expectedToolName))
         {
             return Task.FromResult(AgentToolAuthorizationResult.Denied(
                 new AgentToolDiagnostic
                 {
                     Code = "TOOL_DENIED",
                     Severity = AgentToolDiagnosticSeverity.Error,
-                    Message = $"Tool '{context.ToolName}' is denied by policy."
+                    Message = $"Tool '{expectedToolName}' is denied by policy."
                 }));
         }
 

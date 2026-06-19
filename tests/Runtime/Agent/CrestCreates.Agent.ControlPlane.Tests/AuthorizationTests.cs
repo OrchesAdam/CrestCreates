@@ -17,7 +17,7 @@ public class AuthorizationTests
         var context = CreateCtx("GetDescriptorByRef");
         var perm = Perm(AgentToolPermissionName.DescriptorRead);
 
-        var result = await service.AuthorizeAsync(context, perm);
+        var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
 
         result.IsAllowed.Should().BeTrue();
     }
@@ -29,7 +29,7 @@ public class AuthorizationTests
         var context = CreateCtx("ExecuteRuntimeHandler");
         var perm = Perm("agent.runtime.execute");
 
-        var result = await service.AuthorizeAsync(context, perm);
+        var result = await service.AuthorizeAsync(context, perm, "ExecuteRuntimeHandler");
 
         result.IsAllowed.Should().BeFalse();
         result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "RUNTIME_EXECUTION_DENIED");
@@ -42,7 +42,7 @@ public class AuthorizationTests
         var context = CreateCtx("AnyTool");
         var perm = Perm("agent.runtime.whatever");
 
-        var result = await service.AuthorizeAsync(context, perm);
+        var result = await service.AuthorizeAsync(context, perm, "AnyTool");
 
         result.IsAllowed.Should().BeFalse();
     }
@@ -54,7 +54,7 @@ public class AuthorizationTests
         var context = CreateCtx("CreateDescriptorDraft");
         var perm = Perm(AgentToolPermissionName.DraftCreate);
 
-        var result = await service.AuthorizeAsync(context, perm);
+        var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
 
         result.IsAllowed.Should().BeFalse();
         result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "PERMISSION_DENIED");
@@ -67,7 +67,7 @@ public class AuthorizationTests
         var context = CreateCtx("SubmitActivationRequest");
         var perm = Perm(AgentToolPermissionName.ActivationRequestSubmit);
 
-        var result = await service.AuthorizeAsync(context, perm);
+        var result = await service.AuthorizeAsync(context, perm, "SubmitActivationRequest");
 
         result.IsAllowed.Should().BeFalse();
     }
@@ -79,7 +79,7 @@ public class AuthorizationTests
         var context = CreateCtx("GetDescriptorByRef");
         var perm = Perm(AgentToolPermissionName.DescriptorRead);
 
-        var result = await service.AuthorizeAsync(context, perm);
+        var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
 
         result.IsAllowed.Should().BeTrue();
     }
@@ -95,8 +95,30 @@ public class AuthorizationTests
         var context = CreateCtx("CreateDescriptorDraft");
         var perm = Perm(AgentToolPermissionName.DraftCreate);
 
-        var result = await service.AuthorizeAsync(context, perm);
+        var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
 
+        result.IsAllowed.Should().BeFalse();
+        result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "TOOL_DENIED");
+    }
+
+    [Fact]
+    public async Task DeniedToolName_Uses_ExpectedToolName_Not_ContextToolName()
+    {
+        // If context.ToolName is spoofed but expectedToolName is the real tool name,
+        // the authorization service must use the authoritative expectedToolName.
+        var policy = new AgentToolAuthorizationPolicy
+        {
+            DeniedToolNames = { "SubmitActivationRequest" }
+        };
+        var service = new DefaultAgentToolAuthorizationService(policy);
+
+        // Caller tries to spoof: context says "BuildMetadataContextPack" but the real tool is "SubmitActivationRequest"
+        var spoofedContext = CreateCtx("BuildMetadataContextPack");
+        var perm = Perm(AgentToolPermissionName.ActivationRequestSubmit);
+
+        var result = await service.AuthorizeAsync(spoofedContext, perm, "SubmitActivationRequest");
+
+        // Must deny based on the authoritative expectedToolName, not the spoofed context
         result.IsAllowed.Should().BeFalse();
         result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "TOOL_DENIED");
     }
@@ -112,7 +134,7 @@ public class AuthorizationTests
         var context = CreateCtx("GetDescriptorByRef", actorKind: AgentToolActorKind.Agent);
         var perm = Perm(AgentToolPermissionName.DescriptorRead);
 
-        var result = await service.AuthorizeAsync(context, perm);
+        var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
 
         result.IsAllowed.Should().BeFalse();
         result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "ACTOR_KIND_DENIED");
@@ -133,7 +155,7 @@ public class AuthorizationTests
             DescriptorKindConstraint = "Event"
         };
 
-        var result = await service.AuthorizeAsync(context, perm);
+        var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
 
         result.IsAllowed.Should().BeFalse();
         result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "DESC_KIND_DENIED");
@@ -151,7 +173,7 @@ public class AuthorizationTests
         });
         var perm = Perm(AgentToolPermissionName.DescriptorRead);
 
-        var result = await service.AuthorizeAsync(context, perm);
+        var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
 
         result.IsAllowed.Should().BeTrue();
         // The point is: intent did not cause denial or special behavior
@@ -164,7 +186,7 @@ public class AuthorizationTests
         var context = CreateCtx("GetDescriptorByRef");
         var perm = Perm(AgentToolPermissionName.DescriptorRead);
 
-        var result = await service.AuthorizeAsync(context, perm);
+        var result = await service.AuthorizeAsync(context, perm, "GetDescriptorByRef");
 
         result.IsAllowed.Should().BeTrue();
     }

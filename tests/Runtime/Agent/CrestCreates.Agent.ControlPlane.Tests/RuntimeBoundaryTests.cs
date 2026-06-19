@@ -79,7 +79,7 @@ public class RuntimeBoundaryTests : AgentControlPlaneTestBase
             PermissionName = "agent.runtime.execute"
         };
 
-        var result = await service.AuthorizeAsync(context, perm);
+        var result = await service.AuthorizeAsync(context, perm, "AnyTool");
 
         result.IsAllowed.Should().BeFalse();
         result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "RUNTIME_EXECUTION_DENIED");

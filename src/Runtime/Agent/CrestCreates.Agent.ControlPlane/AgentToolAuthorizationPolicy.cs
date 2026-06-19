@@ -16,6 +16,7 @@ public sealed record AgentToolAuthorizationPolicy
     /// Default policy that allows all Control Plane permissions.
     /// Runtime execution permissions are still denied by the authorization service
     /// regardless of policy configuration.
+    /// Suitable for development and test environments only.
     /// </summary>
     public static AgentToolAuthorizationPolicy AllowAll => new();
 
@@ -31,6 +32,26 @@ public sealed record AgentToolAuthorizationPolicy
             AgentToolPermissionName.DraftUpdate,
             AgentToolPermissionName.DraftCancel,
             AgentToolPermissionName.ReviewRun,
+            AgentToolPermissionName.FixApplyToDraft,
+            AgentToolPermissionName.ActivationRequestSubmit,
+            AgentToolPermissionName.ActivationRequestCancel
+        }
+    };
+
+    /// <summary>
+    /// Production-safe default policy that denies mutating/handoff tools
+    /// unless explicitly configured. Read-only and context tools are allowed.
+    /// Suitable as the default for production environments where agents
+    /// should not be able to create, update, cancel drafts, apply fixes,
+    /// or submit/cancel activation requests without explicit policy configuration.
+    /// </summary>
+    public static AgentToolAuthorizationPolicy ProductionDefaults => new()
+    {
+        DeniedPermissionNames = new HashSet<string>(StringComparer.Ordinal)
+        {
+            AgentToolPermissionName.DraftCreate,
+            AgentToolPermissionName.DraftUpdate,
+            AgentToolPermissionName.DraftCancel,
             AgentToolPermissionName.FixApplyToDraft,
             AgentToolPermissionName.ActivationRequestSubmit,
             AgentToolPermissionName.ActivationRequestCancel

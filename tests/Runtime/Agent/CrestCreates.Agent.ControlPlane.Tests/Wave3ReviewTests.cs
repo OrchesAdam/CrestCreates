@@ -179,7 +179,7 @@ public class Wave3ReviewTests : AgentControlPlaneTestBase
     public async Task GetDraftReviewResult_Returns_Stored_Result()
     {
         var service = CreateService();
-        var context = CreateContext("ReviewDescriptorDraft");
+        var reviewContext = CreateContext("ReviewDescriptorDraft");
         var draft = CreateTestDraft();
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -199,7 +199,7 @@ public class Wave3ReviewTests : AgentControlPlaneTestBase
         DraftReviewServiceMock.Setup(r => r.ReviewAsync(draft, It.IsAny<IReadOnlyList<IDescriptor>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(reviewResult);
 
-        var reviewOutcome = await service.ReviewDescriptorDraftAsync(context, "draft-001");
+        var reviewOutcome = await service.ReviewDescriptorDraftAsync(reviewContext, "draft-001");
         reviewOutcome.Status.Should().Be(AgentToolResultStatus.Success);
 
         var auditRecord = InMemoryAuditor.GetAllRecords().First(r =>
@@ -207,7 +207,8 @@ public class Wave3ReviewTests : AgentControlPlaneTestBase
             r.TouchedReviewResultIds is not null);
 
         var reviewResultId = auditRecord.TouchedReviewResultIds!.First();
-        var getResult = await service.GetDraftReviewResultAsync(context, reviewResultId);
+        var getContext = CreateContext("GetDraftReviewResult");
+        var getResult = await service.GetDraftReviewResultAsync(getContext, reviewResultId);
 
         getResult.Status.Should().Be(AgentToolResultStatus.Success);
         getResult.Value!.DraftId.Should().Be("draft-001");
@@ -228,7 +229,7 @@ public class Wave3ReviewTests : AgentControlPlaneTestBase
     public async Task ListDraftReviewResults_Returns_Results_For_Tenant()
     {
         var service = CreateService();
-        var context = CreateContext("ReviewDescriptorDraft");
+        var reviewContext = CreateContext("ReviewDescriptorDraft");
         var draft = CreateTestDraft();
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -248,9 +249,10 @@ public class Wave3ReviewTests : AgentControlPlaneTestBase
         DraftReviewServiceMock.Setup(r => r.ReviewAsync(draft, It.IsAny<IReadOnlyList<IDescriptor>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(reviewResult);
 
-        await service.ReviewDescriptorDraftAsync(context, "draft-001");
+        await service.ReviewDescriptorDraftAsync(reviewContext, "draft-001");
 
-        var listResult = await service.ListDraftReviewResultsAsync(context, null);
+        var listContext = CreateContext("ListDraftReviewResults");
+        var listResult = await service.ListDraftReviewResultsAsync(listContext, null);
 
         listResult.Status.Should().Be(AgentToolResultStatus.Success);
         listResult.Value!.Results.Should().NotBeEmpty();

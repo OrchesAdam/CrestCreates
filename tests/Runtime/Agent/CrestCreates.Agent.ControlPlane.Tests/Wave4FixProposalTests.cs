@@ -76,7 +76,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
     public async Task GetFixProposal_Returns_Stored_Proposal()
     {
         var service = CreateService();
-        var context = CreateContext("SuggestDescriptorDraftFixes");
+        var suggestContext = CreateContext("SuggestDescriptorDraftFixes");
         var draft = CreateTestDraft();
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -86,10 +86,11 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
             new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
-        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(context, "draft-001");
+        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
         var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
 
-        var getResult = await service.GetFixProposalAsync(context, proposalId);
+        var getContext = CreateContext("GetFixProposal");
+        var getResult = await service.GetFixProposalAsync(getContext, proposalId);
 
         getResult.Status.Should().Be(AgentToolResultStatus.Success);
         getResult.Value!.ProposalId.Should().Be(proposalId);
@@ -110,7 +111,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
     public async Task ListFixProposals_Returns_Proposals_For_Draft()
     {
         var service = CreateService();
-        var context = CreateContext("SuggestDescriptorDraftFixes");
+        var suggestContext = CreateContext("SuggestDescriptorDraftFixes");
         var draft = CreateTestDraft();
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -120,9 +121,10 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
             new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
-        await service.SuggestDescriptorDraftFixesAsync(context, "draft-001");
+        await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
 
-        var listResult = await service.ListFixProposalsAsync(context, "draft-001");
+        var listContext = CreateContext("ListFixProposals");
+        var listResult = await service.ListFixProposalsAsync(listContext, "draft-001");
 
         listResult.Status.Should().Be(AgentToolResultStatus.Success);
         listResult.Value!.Proposals.Should().NotBeEmpty();
@@ -133,7 +135,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
     public async Task ApplyFixProposalToDraft_Updates_Draft_Only()
     {
         var service = CreateService();
-        var context = CreateContext("SuggestDescriptorDraftFixes");
+        var suggestContext = CreateContext("SuggestDescriptorDraftFixes");
         var draft = CreateTestDraft();
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -145,11 +147,12 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
             new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
-        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(context, "draft-001");
+        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
         var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
 
+        var applyContext = CreateContext("ApplyFixProposalToDraft");
         var applyRequest = new ApplyFixProposalRequest { ProposalId = proposalId, DraftId = "draft-001" };
-        var applyResult = await service.ApplyFixProposalToDraftAsync(context, applyRequest);
+        var applyResult = await service.ApplyFixProposalToDraftAsync(applyContext, applyRequest);
 
         applyResult.Status.Should().Be(AgentToolResultStatus.Success);
         applyResult.Value!.DraftId.Should().Be("draft-001");
@@ -159,7 +162,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
     public async Task ApplyFixProposalToDraft_Applies_Scalar_Field_Actions()
     {
         var service = CreateService();
-        var context = CreateContext("SuggestDescriptorDraftFixes");
+        var suggestContext = CreateContext("SuggestDescriptorDraftFixes");
         var draft = CreateTestDraft();
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -172,11 +175,12 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
             new DraftAbstractions.DescriptorDraftDiagnostic { Code = "RATIONALE_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, Message = "Rationale is empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
-        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(context, "draft-001");
+        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
         var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
 
+        var applyContext = CreateContext("ApplyFixProposalToDraft");
         var applyRequest = new ApplyFixProposalRequest { ProposalId = proposalId, DraftId = "draft-001" };
-        var applyResult = await service.ApplyFixProposalToDraftAsync(context, applyRequest);
+        var applyResult = await service.ApplyFixProposalToDraftAsync(applyContext, applyRequest);
 
         applyResult.Status.Should().Be(AgentToolResultStatus.Success);
         applyResult.Value!.DraftId.Should().Be("draft-001");
@@ -190,7 +194,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
     public async Task ApplyFixProposalToDraft_Records_Applied_And_Skipped_Diagnostics()
     {
         var service = CreateService();
-        var context = CreateContext("SuggestDescriptorDraftFixes");
+        var suggestContext = CreateContext("SuggestDescriptorDraftFixes");
         var draft = CreateTestDraft();
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -203,11 +207,12 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
             new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
-        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(context, "draft-001");
+        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
         var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
 
+        var applyContext = CreateContext("ApplyFixProposalToDraft");
         var applyRequest = new ApplyFixProposalRequest { ProposalId = proposalId, DraftId = "draft-001" };
-        var applyResult = await service.ApplyFixProposalToDraftAsync(context, applyRequest);
+        var applyResult = await service.ApplyFixProposalToDraftAsync(applyContext, applyRequest);
 
         // DraftId is an identity field, so the action should be skipped
         applyResult.Diagnostics.Should().Contain(d => d.Code == "FIX_ACTIONS_SKIPPED");
@@ -228,7 +233,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
     public async Task ApplyFixProposalToDraft_Rejects_Proposal_DraftId_Mismatch()
     {
         var service = CreateService();
-        var context = CreateContext("SuggestDescriptorDraftFixes");
+        var suggestContext = CreateContext("SuggestDescriptorDraftFixes");
         var draft = CreateTestDraft();
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -238,15 +243,16 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
             new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
-        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(context, "draft-001");
+        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
         var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
 
         // Make draft disappear for apply
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-002", It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult<Draft?>(CreateTestDraft(draftId: "draft-002")));
 
+        var applyContext = CreateContext("ApplyFixProposalToDraft");
         var request = new ApplyFixProposalRequest { ProposalId = proposalId, DraftId = "draft-002" };
-        var result = await service.ApplyFixProposalToDraftAsync(context, request);
+        var result = await service.ApplyFixProposalToDraftAsync(applyContext, request);
 
         result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
         result.Diagnostics.Should().Contain(d => d.Code == "PROPOSAL_DRAFT_MISMATCH");
@@ -256,7 +262,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
     public async Task ApplyFixProposal_Never_Patches_Active_Descriptors()
     {
         var service = CreateService();
-        var context = CreateContext("SuggestDescriptorDraftFixes");
+        var suggestContext = CreateContext("SuggestDescriptorDraftFixes");
         var draft = CreateTestDraft();
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -268,11 +274,12 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
             new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
-        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(context, "draft-001");
+        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
         var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
 
+        var applyContext = CreateContext("ApplyFixProposalToDraft");
         var request = new ApplyFixProposalRequest { ProposalId = proposalId, DraftId = "draft-001" };
-        await service.ApplyFixProposalToDraftAsync(context, request);
+        await service.ApplyFixProposalToDraftAsync(applyContext, request);
 
         DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
         // DescriptorCatalog has no mutation methods — structural invariant

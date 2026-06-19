@@ -245,7 +245,7 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
     public async Task GetPackagePreview_Returns_Stored_Preview()
     {
         var service = CreateService();
-        var context = CreateContext("PreviewDescriptorPackage");
+        var previewContext = CreateContext("PreviewDescriptorPackage");
         var draft = CreateTestDraft();
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -258,7 +258,7 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
         SetupPackageBuilder();
 
         // Create preview
-        var previewResult = await service.PreviewDescriptorPackageAsync(context, "draft-001");
+        var previewResult = await service.PreviewDescriptorPackageAsync(previewContext, "draft-001");
         previewResult.Status.Should().Be(AgentToolResultStatus.Success);
 
         // Get the preview ID from audit
@@ -267,8 +267,9 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
             r.TouchedPackagePreviewIds != null);
         var previewId = auditRecord.TouchedPackagePreviewIds!.First();
 
-        // Retrieve
-        var getResult = await service.GetPackagePreviewAsync(context, previewId);
+        // Retrieve — use correct tool name for GetPackagePreview
+        var getContext = CreateContext("GetPackagePreview");
+        var getResult = await service.GetPackagePreviewAsync(getContext, previewId);
 
         getResult.Status.Should().Be(AgentToolResultStatus.Success);
         getResult.Value!.ManifestHash.Should().NotBeNullOrEmpty();

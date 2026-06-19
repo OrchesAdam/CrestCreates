@@ -17,15 +17,18 @@ namespace CrestCreates.Agent.ControlPlane.Tests;
 public class PermissionBoundaryTests : AgentControlPlaneTestBase
 {
     [Fact]
-    public async Task Unknown_Tool_Name_Returns_NotFound_With_ToolNotFound_Diagnostic()
+    public async Task ToolName_Mismatch_Is_Rejected_Before_Manifest_Lookup()
     {
+        // If context.ToolName does not match the expected tool name for the facade method,
+        // the invocation is rejected with TOOL_NAME_MISMATCH before any manifest lookup,
+        // authorization, or action execution occurs.
         var service = CreateServiceWithMocks();
         var context = CreateContext("NonExistentTool");
 
         var result = await service.GetDescriptorByRefAsync(context, CreateDescriptorRef());
 
-        result.Status.Should().Be(AgentToolResultStatus.NotFound);
-        result.Diagnostics.Should().Contain(d => d.Code == "TOOL_NOT_FOUND");
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "TOOL_NAME_MISMATCH");
     }
 
     [Fact]
@@ -48,7 +51,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
             });
 
         AuthorizationServiceMock
-            .Setup(a => a.AuthorizeAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<AgentToolPermissionRequirement>()))
+            .Setup(a => a.AuthorizeAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<AgentToolPermissionRequirement>(), It.IsAny<string>()))
             .Returns(Task.FromResult(AgentToolAuthorizationResult.Denied(new AgentToolDiagnostic
             {
                 Code = "PERMISSION_DENIED",
@@ -82,7 +85,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
             });
 
         AuthorizationServiceMock
-            .Setup(a => a.AuthorizeAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<AgentToolPermissionRequirement>()))
+            .Setup(a => a.AuthorizeAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<AgentToolPermissionRequirement>(), It.IsAny<string>()))
             .Returns(Task.FromResult(AgentToolAuthorizationResult.Denied(new AgentToolDiagnostic
             {
                 Code = "PERMISSION_DENIED",
@@ -240,7 +243,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
             });
 
         AuthorizationServiceMock
-            .Setup(a => a.AuthorizeAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<AgentToolPermissionRequirement>()))
+            .Setup(a => a.AuthorizeAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<AgentToolPermissionRequirement>(), It.IsAny<string>()))
             .Returns(Task.FromResult(AgentToolAuthorizationResult.Allowed()));
 
         DescriptorCatalogMock.Setup(c => c.GetAll())
