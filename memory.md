@@ -502,8 +502,9 @@ This thread achieved the following:
     - Added `ManifestClassificationTests` — table-driven test with 30 expected classifications, 4 test methods verifying every manifest tool's classification matches its actual side effects
     - P2: `PreviewDescriptorPackage` and `BuildPackageEvidencePreview` corrected to `IsReadOnly=false` — they persist state (`_packagePreviews`/`_evidencePreviews`) referenced by activation handoff
     - P2: Legacy `AgentToolAuthorizationPolicy.AllowAll` doc corrected — it no longer claims equivalence to `DevelopmentDefaults` since PolicyToOptions maps all legacy policies to `ExplicitPolicy`
+    - P1: `DeniedDescriptorKinds` was inert in real facade chain — facade never set `DescriptorKindConstraint` on `AgentToolPermissionRequirement`. Fixed: `ExecuteAsync` now accepts `descriptorKind` parameter; all 28 tool methods propagate kind (from request, draft store pre-lookup, or catalog pre-lookup); pre-lookups are defensive (try-catch, null-safe). Added `DescriptorKindDenyTests` — 5 facade-level tests verifying end-to-end deny-wins for denied descriptor kinds.
 
-  - **162→167 tests across 10 test classes**: StaticManifest (10), Authorization (28→29), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (6), ManifestClassification (4), Wave1-6 (12+12+10+9+10+12)
+  - **162→172 tests across 11 test classes**: StaticManifest (10), Authorization (28→29), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (6), ManifestClassification (4), DescriptorKindDeny (5), Wave1-6 (12+12+10+9+10+12)
 - **Design spec**: `docs/superpowers/specs/2026-06-18-phase-7c-agent-control-plane-tool-surface-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-18-phase-7c-agent-control-plane-tool-surface.md`
 - **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface. DTO / JsonSerializerContext layer for MCP/HTTP/CLI adapters deferred as P2/future.
