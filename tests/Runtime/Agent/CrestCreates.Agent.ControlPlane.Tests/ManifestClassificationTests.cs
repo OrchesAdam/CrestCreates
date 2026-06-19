@@ -58,9 +58,10 @@ public class ManifestClassificationTests
         (AgentToolName.ListFixProposals, true, AgentToolCategory.FixProposal),
         (AgentToolName.ApplyFixProposalToDraft, false, AgentToolCategory.FixProposal),
 
-        // Package Preview — all read-only
-        (AgentToolName.PreviewDescriptorPackage, true, AgentToolCategory.PackagePreview),
-        (AgentToolName.BuildPackageEvidencePreview, true, AgentToolCategory.PackagePreview),
+        // Package Preview — PreviewDescriptorPackage and BuildPackageEvidencePreview persist state
+        // referenced by activation handoff; BuildActivationReadinessPreview and GetPackagePreview are read-only
+        (AgentToolName.PreviewDescriptorPackage, false, AgentToolCategory.PackagePreview),
+        (AgentToolName.BuildPackageEvidencePreview, false, AgentToolCategory.PackagePreview),
         (AgentToolName.BuildActivationReadinessPreview, true, AgentToolCategory.PackagePreview),
         (AgentToolName.GetPackagePreview, true, AgentToolCategory.PackagePreview),
 

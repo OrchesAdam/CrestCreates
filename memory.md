@@ -500,6 +500,8 @@ This thread achieved the following:
     - P2: Legacy empty `AgentToolAuthorizationPolicy` no longer silently maps to `DevelopmentAllowAll`; all legacy policies now map to `ExplicitPolicy` with read-only defaults
     - P2: Manifest permissions now carry `ToolCategory` and `IsReadOnly` metadata so adapters consuming the manifest directly can make category-aware authorization decisions
     - Added `ManifestClassificationTests` — table-driven test with 30 expected classifications, 4 test methods verifying every manifest tool's classification matches its actual side effects
+    - P2: `PreviewDescriptorPackage` and `BuildPackageEvidencePreview` corrected to `IsReadOnly=false` — they persist state (`_packagePreviews`/`_evidencePreviews`) referenced by activation handoff
+    - P2: Legacy `AgentToolAuthorizationPolicy.AllowAll` doc corrected — it no longer claims equivalence to `DevelopmentDefaults` since PolicyToOptions maps all legacy policies to `ExplicitPolicy`
 
   - **162→167 tests across 10 test classes**: StaticManifest (10), Authorization (28→29), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (6), ManifestClassification (4), Wave1-6 (12+12+10+9+10+12)
 - **Design spec**: `docs/superpowers/specs/2026-06-18-phase-7c-agent-control-plane-tool-surface-design.md`

@@ -208,18 +208,18 @@ public sealed class StaticAgentToolManifestProvider : IAgentToolManifestProvider
             new()
             {
                 Name = AgentToolName.PreviewDescriptorPackage,
-                Description = "Preview a descriptor package for a draft. Read/evidence generation only.",
+                Description = "Preview a descriptor package for a draft. Persists package preview for activation handoff reference.",
                 Category = AgentToolCategory.PackagePreview,
-                Permissions = [Perm(AgentToolPermissionName.PackagePreview, AgentToolCategory.PackagePreview, true)],
-                AllowedActors = allActors, IsReadOnly = true, MutatesRuntimeRegistry = false
+                Permissions = [Perm(AgentToolPermissionName.PackagePreview, AgentToolCategory.PackagePreview, false)],
+                AllowedActors = allActors, IsReadOnly = false, MutatesRuntimeRegistry = false
             },
             new()
             {
                 Name = AgentToolName.BuildPackageEvidencePreview,
-                Description = "Build a package evidence preview for a draft. Evidence only, not activation.",
+                Description = "Build a package evidence preview for a draft. Persists evidence for activation handoff reference.",
                 Category = AgentToolCategory.PackagePreview,
-                Permissions = [Perm(AgentToolPermissionName.PackagePreview, AgentToolCategory.PackagePreview, true)],
-                AllowedActors = allActors, IsReadOnly = true, MutatesRuntimeRegistry = false
+                Permissions = [Perm(AgentToolPermissionName.PackagePreview, AgentToolCategory.PackagePreview, false)],
+                AllowedActors = allActors, IsReadOnly = false, MutatesRuntimeRegistry = false
             },
             new()
             {
