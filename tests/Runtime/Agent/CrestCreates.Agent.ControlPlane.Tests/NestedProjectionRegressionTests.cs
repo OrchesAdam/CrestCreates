@@ -844,4 +844,82 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
                 };
             });
     }
+
+    // ── Finding: ReviewDescriptorDraft must pass visible inventory to ReviewAsync ──
+
+    /// <summary>
+    /// Verifies that ReviewDescriptorDraftAsync passes only visible descriptors
+    /// (not the full catalog) to the review service. This prevents denied
+    /// descriptors from influencing review computation before projection.
+    /// </summary>
+    [Fact]
+    public async Task ReviewDescriptorDraft_UsesVisibleInventoryForReview()
+    {
+        var draft = CreateTestDraft(kind: DescriptorKind.Event);
+        SetupDraftStoreGetReturns(draft);
+        SetupCatalogGetAllReturns(
+            CreateTestDescriptor("ns", "desc-001", DescriptorKind.Event),
+            CreateTestDescriptor("ns", "desc-002", DescriptorKind.Capability));
+
+        // Capture the inventory argument passed to ReviewAsync
+        IReadOnlyList<IDescriptor>? capturedInventory = null;
+        DraftReviewServiceMock
+            .Setup(r => r.ReviewAsync(It.IsAny<Draft>(), It.IsAny<IReadOnlyList<IDescriptor>>(), It.IsAny<CancellationToken>()))
+            .Callback<Draft, IReadOnlyList<IDescriptor>, CancellationToken>((_, inventory, _) =>
+                capturedInventory = inventory)
+            .ReturnsAsync((Draft d, IReadOnlyList<IDescriptor> _, CancellationToken __) =>
+                new DescriptorDraftReviewResult
+                {
+                    DraftId = d.DraftId,
+                    TenantId = d.TenantId,
+                    ValidationResult = DescriptorDraftValidationResult.Success(),
+                    ProposedInventory = Array.Empty<IDescriptor>(),
+                    ImpactAnalysisResult = new DescriptorImpactAnalysisReport
+                    {
+                        ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
+                        AffectedDescriptors = Array.Empty<AffectedDescriptor>(),
+                        Paths = Array.Empty<DescriptorImpactPath>(),
+                        MaxSeverity = DescriptorImpactSeverity.Low,
+                        Diagnostics = Array.Empty<DescriptorImpactDiagnostic>()
+                    },
+                    CompatibilityResult = new DescriptorCompatibilityReport
+                    {
+                        ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
+                        ImpactReport = new DescriptorImpactAnalysisReport
+                        {
+                            ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
+                            AffectedDescriptors = Array.Empty<AffectedDescriptor>(),
+                            Paths = Array.Empty<DescriptorImpactPath>(),
+                            MaxSeverity = DescriptorImpactSeverity.Low,
+                            Diagnostics = Array.Empty<DescriptorImpactDiagnostic>()
+                        },
+                        Findings = Array.Empty<DescriptorCompatibilityFinding>(),
+                        MaxLevel = DescriptorCompatibilityLevel.Compatible,
+                        Diagnostics = Array.Empty<DescriptorCompatibilityDiagnostic>()
+                    },
+                    GovernanceDecision = new DescriptorLifecycleGovernanceReport
+                    {
+                        Decisions = Array.Empty<DescriptorLifecycleDecision>(),
+                        MaxDecision = DescriptorLifecycleDecisionKind.Allowed,
+                        PackageFindings = Array.Empty<DescriptorLifecycleFinding>()
+                    },
+                    Diagnostics = Array.Empty<DescriptorDraftDiagnostic>(),
+                    IsActivationEligible = true
+                });
+
+        var options = AgentToolAuthorizationOptions.DevelopmentDefaults with
+        {
+            DeniedDescriptorKinds = ["Capability"]
+        };
+        var service = CreateService(options);
+
+        var context = CreateContext(AgentToolName.ReviewDescriptorDraft);
+        await service.ReviewDescriptorDraftAsync(context, draft.DraftId);
+
+        capturedInventory.Should().NotBeNull();
+        capturedInventory!.Should().OnlyContain(d => d.Kind != DescriptorKind.Capability,
+            "denied kinds must not be passed to ReviewAsync");
+        capturedInventory.Should().Contain(d => d.Kind == DescriptorKind.Event,
+            "allowed kinds must be included in the review inventory");
+    }
 }

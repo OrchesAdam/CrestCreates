@@ -1015,7 +1015,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 return await RecordAggregateFailure<DraftReviewResult>(context, "AUTHORIZATION_CONTEXT_UNAVAILABLE", ct);
             var universe = universeResult.Universe!;
 
-            var reviewResult = await _draftReviewService.ReviewAsync(snapshot.Draft, currentInventory, ct);
+            var reviewResult = await _draftReviewService.ReviewAsync(snapshot.Draft, universe.VisibleDescriptors, ct);
 
             // Project nested review data through visibility.
             // Null return means projection failure — caller must return
@@ -1496,7 +1496,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 return await RecordAggregateFailure<PackageEvidencePreview>(context, "AUTHORIZATION_CONTEXT_UNAVAILABLE", ct);
             var universe = universeResult.Universe!;
 
-            var reviewResult = await _draftReviewService.ReviewAsync(draft, currentInventory, ct);
+            var reviewResult = await _draftReviewService.ReviewAsync(draft, universe.VisibleDescriptors, ct);
 
             // If review validation failed, evidence cannot be meaningfully computed.
             // Return Failed instead of producing a misleading zero-value evidence preview.

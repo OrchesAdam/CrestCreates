@@ -234,8 +234,31 @@ internal sealed class AgentDraftArtifactVisibilityProjector
         PackageEvidencePreview source,
         AgentVisibleDescriptorUniverse universe)
     {
+        // When there are no findings, the evidence summary fields must still
+        // be reset to safe defaults — they may have been computed from the
+        // full (unfiltered) inventory by the package builder.
         if (source.Evidence.NormalizedFindings.Count == 0)
-            return source;
+        {
+            return source with
+            {
+                Evidence = new DescriptorPackageEvidence
+                {
+                    NormalizedFindings = Array.Empty<EvidenceFinding>(),
+                    TopologyNodeCount = 0,
+                    TopologyEdgeCount = 0,
+                    ImpactPathCount = 0,
+                    MaxImpactSeverity = DescriptorImpactSeverity.None,
+                    MaxCompatibilityLevel = DescriptorCompatibilityLevel.Compatible,
+                    MaxLifecycleDecision = DescriptorLifecycleDecisionKind.Allowed,
+                    RequiresReview = false,
+                    IsBlocked = false,
+                    PackageFindingCount = 0,
+                    BreakingFindingCount = 0,
+                    SecuritySensitiveFindingCount = 0,
+                    UnsupportedFindingCount = 0
+                }
+            };
+        }
 
         var refLookup = new VisibleRefLookup(universe);
 
