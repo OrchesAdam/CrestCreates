@@ -18,6 +18,15 @@ namespace CrestCreates.Agent.ControlPlane.Abstractions;
 ///   <item>Runtime execution tools (<c>agent.runtime.*</c>) are always denied
 ///         regardless of configuration</item>
 /// </list>
+///
+/// <para>Descriptor kind visibility:</para>
+/// <list type="bullet">
+///   <item>In closed-world modes (ExplicitPolicy, DenyAll), only kinds listed in
+///         <see cref="AllowedDescriptorKinds"/> are visible; empty means no descriptor is visible</item>
+///   <item>In open-world mode (DevelopmentAllowAll), all valid kinds are visible unless
+///         explicitly listed in <see cref="DeniedDescriptorKinds"/></item>
+///   <item><see cref="DeniedDescriptorKinds"/> always wins over <see cref="AllowedDescriptorKinds"/></item>
+/// </list>
 /// </summary>
 public sealed record AgentToolAuthorizationOptions
 {
@@ -55,7 +64,17 @@ public sealed record AgentToolAuthorizationOptions
     public HashSet<string> DeniedToolNames { get; init; } = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Descriptor kinds that are always denied.
+    /// Descriptor kinds that are explicitly allowed for visibility.
+    /// In closed-world modes (ExplicitPolicy, DenyAll), only kinds in this set are visible;
+    /// an empty set means no descriptor kind is visible.
+    /// In open-world mode (DevelopmentAllowAll), this set is ignored — all valid kinds
+    /// are visible unless denied.
+    /// </summary>
+    public HashSet<string> AllowedDescriptorKinds { get; init; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Descriptor kinds that are always denied, overriding any allow rule.
+    /// Deny always wins.
     /// </summary>
     public HashSet<string> DeniedDescriptorKinds { get; init; } = new(StringComparer.Ordinal);
 
@@ -92,6 +111,8 @@ public sealed record AgentToolAuthorizationOptions
     /// <summary>
     /// Options that allow all tools. Suitable for development and test environments only.
     /// Runtime execution tools are still denied by the authorization service.
+    /// Descriptor kind visibility is open-world: all valid kinds are visible unless
+    /// explicitly denied via <see cref="DeniedDescriptorKinds"/>.
     /// </summary>
     public static AgentToolAuthorizationOptions DevelopmentDefaults => new()
     {
@@ -102,6 +123,8 @@ public sealed record AgentToolAuthorizationOptions
     /// Production-safe defaults: read-only/context tools allowed, mutating and
     /// activation handoff tools require explicit permission grants.
     /// This is the framework default for <see cref="AgentToolAuthorizationMode.ExplicitPolicy"/>.
+    /// Descriptor kind visibility is closed-world: <see cref="AllowedDescriptorKinds"/>
+    /// must be populated; empty means no descriptor is visible.
     /// </summary>
     public static AgentToolAuthorizationOptions ProductionDefaults => new()
     {
@@ -113,6 +136,8 @@ public sealed record AgentToolAuthorizationOptions
 
     /// <summary>
     /// Maximum lockdown: all tools denied unless explicitly allowed.
+    /// Descriptor kind visibility is closed-world: <see cref="AllowedDescriptorKinds"/>
+    /// must be populated; empty means no descriptor is visible.
     /// </summary>
     public static AgentToolAuthorizationOptions LockedDown => new()
     {

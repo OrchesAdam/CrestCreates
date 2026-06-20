@@ -116,6 +116,9 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult<Draft?>(draft));
+        // Required for batch owner resolution in list
+        DraftStoreMock.Setup(s => s.ListAsync(TestTenantId, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([draft]);
 
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
             new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });

@@ -45,7 +45,8 @@ public abstract class AgentControlPlaneTestBase
     protected DefaultAgentControlPlaneToolService CreateService(
         InMemoryAgentToolInvocationAuditor? auditor = null)
     {
-        var authzService = new DefaultAgentToolAuthorizationService(AgentToolAuthorizationOptions.DevelopmentDefaults);
+        var options = AgentToolAuthorizationOptions.DevelopmentDefaults;
+        var authzService = new DefaultAgentToolAuthorizationService(options);
         var actualAuditor = auditor ?? InMemoryAuditor;
 
         return new DefaultAgentControlPlaneToolService(
@@ -61,7 +62,8 @@ public abstract class AgentControlPlaneTestBase
             RelationshipProviderMock.Object,
             TopologyBuilderMock.Object,
             PackageBuilderMock.Object,
-            NullLogger<DefaultAgentControlPlaneToolService>.Instance);
+            NullLogger<DefaultAgentControlPlaneToolService>.Instance,
+            authorizationOptions: options);
     }
 
     /// <summary>
@@ -88,7 +90,8 @@ public abstract class AgentControlPlaneTestBase
             RelationshipProviderMock.Object,
             TopologyBuilderMock.Object,
             PackageBuilderMock.Object,
-            NullLogger<DefaultAgentControlPlaneToolService>.Instance);
+            NullLogger<DefaultAgentControlPlaneToolService>.Instance,
+            authorizationOptions: options);
     }
 
     /// <summary>
@@ -109,7 +112,8 @@ public abstract class AgentControlPlaneTestBase
             RelationshipProviderMock.Object,
             TopologyBuilderMock.Object,
             PackageBuilderMock.Object,
-            NullLogger<DefaultAgentControlPlaneToolService>.Instance);
+            NullLogger<DefaultAgentControlPlaneToolService>.Instance,
+            authorizationOptions: AgentToolAuthorizationOptions.DevelopmentDefaults);
     }
 
     protected static AgentToolInvocationContext CreateContext(

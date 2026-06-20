@@ -237,6 +237,9 @@ public class Wave3ReviewTests : AgentControlPlaneTestBase
         DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         DescriptorCatalogMock.Setup(c => c.GetAll()).Returns(new List<IDescriptor>());
+        // Required for batch owner resolution in list
+        DraftStoreMock.Setup(s => s.ListAsync(TestTenantId, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([draft]);
 
         var reviewResult = new DraftAbstractions.DescriptorDraftReviewResult
         {
@@ -264,6 +267,10 @@ public class Wave3ReviewTests : AgentControlPlaneTestBase
         var service = CreateService();
         var context = CreateContext("ExplainDiagnostics");
 
+        // Set up a draft so ExplainDiagnostics can verify the owning draft exists
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateTestDraft(draftId: "draft-001", kind: DescriptorKind.Schema));
+
         var request = new ExplainDiagnosticsRequest
         {
             Diagnostics = new List<AgentToolDiagnostic>
@@ -281,7 +288,7 @@ public class Wave3ReviewTests : AgentControlPlaneTestBase
         result.Value.Explanations[0].Code.Should().Be("DRAFT_ID_EMPTY");
         result.Value.Explanations[0].Explanation.Should().NotBeNullOrEmpty();
         result.Value.Explanations[0].Remediation.Should().NotBeNullOrEmpty();
-        result.Value.Explanations[1].Explanation.Should().Contain("No detailed explanation");
+        result.Value.Explanations[1].Explanation.Should().Contain("No explanation");
     }
 
     [Fact]

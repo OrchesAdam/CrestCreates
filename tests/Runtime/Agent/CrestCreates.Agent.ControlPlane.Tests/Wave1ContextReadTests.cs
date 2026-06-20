@@ -368,8 +368,11 @@ public class Wave1ContextReadTests : AgentControlPlaneTestBase
         result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
         result.Value.Should().BeNull();
         result.Diagnostics.Should().Contain(d => d.Code == "DESCRIPTOR_REF_AMBIGUOUS");
-        // Diagnostic should list candidate versions
-        result.Diagnostics.Should().Contain(d => d.Code == "DESCRIPTOR_REF_AMBIGUOUS" && d.Message.Contains("1, 2"));
+        // The ambiguous error must NOT list candidate versions — that would
+        // leak existence information before the kind visibility check.
+        result.Diagnostics.Should().Contain(d => d.Code == "DESCRIPTOR_REF_AMBIGUOUS"
+            && !d.Message.Contains("1,")
+            && !d.Message.Contains("2,"));
     }
 
     [Fact]

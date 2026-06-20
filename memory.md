@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-06-19
+Last Updated: 2026-06-20
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -230,6 +230,13 @@ This thread achieved the following:
 11. Added new focused solution files under `solutions/`, with `solutions/CrestCreates.All.slnx` as the canonical full solution.
 12. Preserved existing public namespaces and project identities during the physical move to avoid coupling folder migration with API breakage.
 13. Added dependency-boundary tests for Core/Metadata/Runtime project-reference constraints.
+14. Agent Control Plane descriptor visibility closure (Issue #40) — multiple review rounds:
+    - Audited PR-A/PR-B/PR-C implementation against design spec — identified 10 findings (2 critical, 3 medium, 4 low, 1 build); fixed all 10
+    - First external code review (8 findings: 4 P1, 4 P2) — all verified and fixed: nested projection defense-in-depth, visible-universe-first package construction, explicit denied kind → Denied, single DI policy truth, null-on-projection-failure, audit dedup, two-pass anti-probing resolver, memory.md accuracy
+    - Second review (9 findings: 5 P1, 4 P2) — 2026-06-20: all 9 resolved (nested projection, readiness, draft-kind deny, comparison validation, package projector new-descriptor fix, evidence filtering, audit contract, TOCTOU single-snapshot, memory.md accuracy)
+    - Third review (7 findings: 4 P1, 3 P2) — 2026-06-20: resolved with recursive nested projection, (Ns,Id) identity model, namespace-aware comparison, invalid vs denied error code split, and 8 regression tests (226 total)
+    - Fourth review (8 findings: 4 P1, 4 P2) — 2026-06-20: derived summaries leaking through MaxSeverity/MaxLevel/MaxDecision/evidence maxima, version-ignoring identity (v1 visible makes denied v2 visible), BaseVersion ignored in draft comparison, projection failure silently persisted as mutation success, package bare-ID contract limitation (deferred), empty paths leaking traversal existence, test coverage gaps, memory.md test count inconsistency. All resolved except P2 package contract (deferred as type-design issue beyond projector scope).
+    - 226 ControlPlane + 7 Boundary tests pass, full solution build 0 errors
 
 ---
 
@@ -513,7 +520,27 @@ This thread achieved the following:
       - Coarse auth gates resource access — denied tools never touch stores
       - Added `DescriptorKindDenyTests` — 12 facade-level regression tests covering: direct kind, draft store, catalog, fail-closed, fail-open-when-no-kinds-denied, catalog failure, coarse-auth-gates-store, versioned ref
 
-  - **162→178 tests across 11 test classes**: StaticManifest (10), Authorization (28→29), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (6), ManifestClassification (4), DescriptorKindDeny (5→12), Wave1-6 (12+12+10+9+10+12)
+  - **Descriptor Visibility Closure — Issue #40** (2026-06-20, review-hardened):
+    - **Production closed-world semantics**: Empty `AllowedDescriptorKinds` = nothing visible; open-world development permits valid kinds unless explicitly denied
+    - **Deny-wins semantics**: `DeniedDescriptorKinds` always overrides `AllowedDescriptorKinds` — no allow-list escape hatch
+    - **Explicit denied kind → Denied (not empty Success)**: Per spec §6.2, when a caller explicitly supplies a denied DescriptorKind filter, the response is `Denied` with `DESC_KIND_DENIED`, not an empty `Success`
+    - **30-tool full coverage**: All 30 manifest tools now enforce visibility via `_resourceResolver` + `DenyIfInvisible` pipeline
+    - **9 resource shapes covered**: None, DirectKind, SingleDescriptor, SingleDraft, Aggregate, Graph, ContextPack, Indirect, Nested — bidirectionally mapped per tool
+    - **Owner-kind resolution for indirect artifacts**: Reviews, proposals, previews, activations inherit visibility from their owning Draft's `DescriptorKind` — no orphaned visibility gaps
+    - **Two-pass ref resolution (anti-probing)**: `AgentControlPlaneResourceResolver.ResolveDescriptor(ref, scope)` resolves version-pinned and unambiguous refs against the full catalog (so denied kinds resolve to snapshots for Denied responses), but resolves ambiguous unpinned refs against visible descriptors only (preventing denied version count leakage)
+    - **Visible-universe-first package construction**: `PreviewDescriptorPackageAsync` and `BuildPackageEvidencePreviewAsync` build the visible universe BEFORE constructing packages, so package hashes are derived from visible descriptors only — no hash side-channel
+    - **Nested projection (defense-in-depth)**: `AgentDraftArtifactVisibilityProjector.ProjectReview` filters `ProposedInventory` and `Diagnostics` (omits diagnostics with denied DescriptorKind). Topology/Impact/Compatibility/Governance are retained as-is in the review result — the primary defense is that packages and context packs are built from visible descriptors only. `ProjectPackage` returns null on projection failure instead of a malformed object. `ProjectEvidence` passes through (safe because evidence is built from visible-only package)
+    - **AoT-safe kind validation**: `AgentDescriptorKindPolicyEvaluator.IsValidDescriptorKind` — range-based check (Schema=0 to HumanTask=5) replacing `Enum.IsDefined`
+    - **TryCreate error handling**: `AgentVisibleDescriptorUniverse.TryCreate` returns `UniverseCreationResult` (Created/InvalidKindDetected) instead of throwing `InvalidOperationException`
+    - **Audit persistence + dedup**: `ExecuteAsync` pipeline persists `result.AuditRecord` if present; `InMemoryAgentToolInvocationAuditor` deduplicates by `AuditId` to prevent double-write artifacts
+    - **Single DI policy truth**: All three `AddAgentControlPlane` overloads register `AgentToolAuthorizationOptions` as singleton and construct `DefaultAgentControlPlaneToolService` via `ActivatorUtilities.CreateInstance` — legacy policy overload converts to options before registration
+    - **Storage migration**: `_packagePreviews`/`_evidencePreviews`/`_activationRequests` changed from bare entry types to owner-bearing snapshot types (`PackagePreviewResourceSnapshot`, `EvidencePreviewResourceSnapshot`, `ActivationResourceSnapshot`)
+    - **Dead code removed**: `ExplainCode`, `SuggestRemediation`, `SuggestFixTools` static methods
+    - **237 ControlPlane tests + 7 Boundary tests pass**, full solution build 0 errors (19 NestedProjectionRegression)
+    - **Design spec**: `docs/superpowers/specs/2026-06-19-agent-descriptor-kind-visibility-closure-design.md`
+    - **Implementation plans**: PR-A (`plans/2026-06-19-agent-visibility-pr-a-policy-pipeline.md`), PR-B (`plans/2026-06-19-agent-visibility-pr-b-aggregate-graph-context.md`), PR-C (`plans/2026-06-19-agent-visibility-pr-c-indirect-nested.md`)
+
+  - **162→233 tests across 12 test classes**: StaticManifest (10), Authorization (29), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (6), ManifestClassification (4), DescriptorKindDeny (12), Wave1-6 (12+12+10+9+10+12), VisibilityCoverage (1), DraftArtifactVisibilityProjector (7), VisibleDescriptorUniverse (8), DescriptorKindPolicyEvaluator (4), NestedProjectionRegression (19)
 - **Design spec**: `docs/superpowers/specs/2026-06-18-phase-7c-agent-control-plane-tool-surface-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-18-phase-7c-agent-control-plane-tool-surface.md`
 - **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface. DTO / JsonSerializerContext layer for MCP/HTTP/CLI adapters deferred as P2/future.

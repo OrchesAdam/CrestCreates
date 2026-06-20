@@ -306,8 +306,12 @@ public class AuthorizationTests
     }
 
     [Fact]
-    public async Task DeniedDescriptorKind_Blocks_Access()
+    public async Task AuthorizationService_Does_Not_Check_DescriptorKind()
     {
+        // Descriptor kind visibility is no longer checked by the authorization
+        // service — it's handled by DenyIfInvisible in the tool service pipeline
+        // after resource resolution. The authorization service checks only
+        // permissions, tool names, actor kinds, and mode-based defaults.
         var options = new AgentToolAuthorizationOptions
         {
             Mode = AgentToolAuthorizationMode.DevelopmentAllowAll,
@@ -318,15 +322,15 @@ public class AuthorizationTests
         var perm = new AgentToolPermissionRequirement
         {
             PermissionName = AgentToolPermissionName.DraftCreate,
-            DescriptorKindConstraint = "Event",
             ToolCategory = AgentToolCategory.Draft,
             IsReadOnly = false
         };
 
+        // The authorization service should allow this — it no longer checks
+        // descriptor kinds. The kind check happens later in DenyIfInvisible.
         var result = await service.AuthorizeAsync(context, perm, "CreateDescriptorDraft");
 
-        result.IsAllowed.Should().BeFalse();
-        result.DenialDiagnostics.Should().ContainSingle(d => d.Code == "DESC_KIND_DENIED");
+        result.IsAllowed.Should().BeTrue();
     }
 
     // ── Agent intent ignored ──

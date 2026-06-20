@@ -8,7 +8,7 @@ namespace CrestCreates.Agent.ControlPlane;
 /// <para>Authorization decision flow:</para>
 /// <list type="number">
 ///   <item>Runtime execution (<c>agent.runtime.*</c>) is always denied</item>
-///   <item>Explicit deny rules (DeniedPermissions, DeniedToolNames, DeniedDescriptorKinds, DeniedActorKinds)
+///   <item>Explicit deny rules (DeniedPermissions, DeniedToolNames, DeniedActorKinds)
 ///         always win — deny overrides allow</item>
 ///   <item>Mode-based default stance is applied</item>
 ///   <item>Explicit allow rules (AllowedPermissions, AllowedToolNames) grant access
@@ -16,6 +16,10 @@ namespace CrestCreates.Agent.ControlPlane;
 ///   <item>Category defaults (AllowReadOnlyToolsByDefault, AllowMutationToolsByDefault,
 ///         AllowActivationHandoffToolsByDefault) are evaluated in ExplicitPolicy mode</item>
 /// </list>
+///
+/// <para>Descriptor kind visibility (DeniedDescriptorKinds, AllowedDescriptorKinds) is
+/// evaluated separately by <see cref="AgentDescriptorKindPolicyEvaluator"/> after coarse
+/// authorization succeeds, not by this service.</para>
 ///
 /// <para>Agent intent (TraceAttributes) does NOT affect authorization decisions.</para>
 /// </summary>
@@ -68,19 +72,6 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                     Code = "PERMISSION_DENIED",
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Permission '{permission.PermissionName}' is denied by policy."
-                }));
-        }
-
-        if (_options.DeniedDescriptorKinds.Count > 0 &&
-            permission.DescriptorKindConstraint is not null &&
-            _options.DeniedDescriptorKinds.Contains(permission.DescriptorKindConstraint))
-        {
-            return Task.FromResult(AgentToolAuthorizationResult.Denied(
-                new AgentToolDiagnostic
-                {
-                    Code = "DESC_KIND_DENIED",
-                    Severity = AgentToolDiagnosticSeverity.Error,
-                    Message = $"Descriptor kind '{permission.DescriptorKindConstraint}' is denied by policy."
                 }));
         }
 
@@ -259,18 +250,5 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
             DeniedToolNames = policy.DeniedToolNames,
             DeniedActorKinds = policy.DeniedActorKinds
         };
-    }
-
-    public bool IsDescriptorKindDenied(string? descriptorKind)
-    {
-        // If no descriptor kinds are denied, nothing is denied
-        if (_options.DeniedDescriptorKinds.Count == 0)
-            return false;
-
-        // Fail-closed: if kind is unknown and any kinds are denied, treat as denied
-        if (descriptorKind is null)
-            return true;
-
-        return _options.DeniedDescriptorKinds.Contains(descriptorKind);
     }
 }

@@ -29,10 +29,7 @@ public class DescriptorKindDenyTests : AgentControlPlaneTestBase
     /// </summary>
     private static AgentToolAuthorizationOptions OptionsWithEventDenied => new()
     {
-        Mode = AgentToolAuthorizationMode.ExplicitPolicy,
-        AllowReadOnlyToolsByDefault = true,
-        AllowMutationToolsByDefault = true,
-        AllowActivationHandoffToolsByDefault = true,
+        Mode = AgentToolAuthorizationMode.DevelopmentAllowAll,
         DeniedDescriptorKinds = new HashSet<string>(StringComparer.Ordinal) { "Event" }
     };
 
@@ -151,8 +148,11 @@ public class DescriptorKindDenyTests : AgentControlPlaneTestBase
     [Fact]
     public async Task DraftOperation_UnresolvableKind_IsDenied_FailClosed()
     {
-        // When the draft doesn't exist, the kindResolver returns null.
-        // With DeniedDescriptorKinds configured, null kind → deny (fail-closed).
+        // In the new pipeline, kind resolution runs inside the action.
+        // If the draft doesn't exist, the snapshot resolver returns NotFound
+        // BEFORE any kind check — the resource must be resolved before kind
+        // visibility is evaluated. Unlike the old kindResolver path, a missing
+        // resource is reported as NotFound, not retroactively denied.
         var service = CreateService(OptionsWithEventDenied);
         var context = CreateContext("GetDescriptorDraft");
 
@@ -161,8 +161,7 @@ public class DescriptorKindDenyTests : AgentControlPlaneTestBase
 
         var result = await service.GetDescriptorDraftAsync(context, "nonexistent");
 
-        result.Status.Should().Be(AgentToolResultStatus.Denied);
-        result.Diagnostics.Should().Contain(d => d.Code == "DESC_KIND_DENIED");
+        result.Status.Should().Be(AgentToolResultStatus.NotFound);
     }
 
     [Fact]
@@ -184,8 +183,12 @@ public class DescriptorKindDenyTests : AgentControlPlaneTestBase
     [Fact]
     public async Task CatalogFailure_IsDenied_FailClosed()
     {
-        // When the catalog throws, kindResolver fails, kind is null,
-        // and fail-closed applies if DeniedDescriptorKinds is configured.
+        // In the new pipeline, resource resolution runs inside the action,
+        // not as a separate kindResolver step. A catalog exception is caught
+        // by ExecuteAsync's try/catch and returned as TOOL_INVOCATION_FAILED.
+        // The fail-closed behavior (denying when kind can't be resolved) is
+        // now handled by DenyIfInvisible AFTER successful resolution, so
+        // resolution failures propagate as invocation failures.
         var service = CreateService(OptionsWithEventDenied);
         var context = CreateContext("GetDescriptorByRef");
 
@@ -194,8 +197,8 @@ public class DescriptorKindDenyTests : AgentControlPlaneTestBase
 
         var result = await service.GetDescriptorByRefAsync(context, CreateDescriptorRef());
 
-        result.Status.Should().Be(AgentToolResultStatus.Denied);
-        result.Diagnostics.Should().Contain(d => d.Code == "DESC_KIND_DENIED");
+        result.Status.Should().Be(AgentToolResultStatus.Failed);
+        result.Diagnostics.Should().Contain(d => d.Code == "TOOL_INVOCATION_FAILED");
     }
 
     [Fact]
@@ -260,8 +263,11 @@ public class DescriptorKindDenyTests : AgentControlPlaneTestBase
         var service = CreateService(OptionsWithEventDenied);
         var context = CreateContext("GetDescriptorByRef");
 
-        // Set up catalog with an Event descriptor (versioned)
-        var versionedDesc = CreateTestDescriptor(kind: DescriptorKind.Event);
+        // Set up catalog with a versioned Event descriptor
+        var versionedDesc = new TestVersionedDescriptor(ns: "test", id: "desc-001", version: 1, name: "EventDescriptor")
+        {
+            Kind = DescriptorKind.Event
+        };
         DescriptorCatalogMock.Setup(c => c.GetAll())
             .Returns([versionedDesc]);
 
