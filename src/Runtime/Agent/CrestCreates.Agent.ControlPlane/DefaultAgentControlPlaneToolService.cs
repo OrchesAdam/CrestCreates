@@ -1407,7 +1407,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 return await RecordAggregateFailure<DraftPackagePreview>(context, "AUTHORIZATION_CONTEXT_UNAVAILABLE", ct);
             var universe = universeResult.Universe!;
 
-            var materializationResult = _draftMaterializer.Materialize(draft, currentInventory);
+            var materializationResult = _draftMaterializer.Materialize(draft, universe.VisibleDescriptors);
             if (!materializationResult.IsMaterialized)
             {
                 var failDiags = materializationResult.Diagnostics.Select(MapFromDraftDiagnostic).ToList();

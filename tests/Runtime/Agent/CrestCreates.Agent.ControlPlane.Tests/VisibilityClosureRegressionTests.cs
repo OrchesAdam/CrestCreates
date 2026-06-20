@@ -884,6 +884,49 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
             "validation early-stop must not produce misleading Success");
     }
 
+    // ── Gap 11: PreviewDescriptorPackage uses visible inventory for materialization ──
+
+    /// <summary>
+    /// PreviewDescriptorPackageAsync must pass only visible descriptors to the
+    /// materializer. A regression that passes the full catalog would allow denied
+    /// descriptors to influence materialization success/failure, diagnostics,
+    /// replacement logic, and duplicate/version conflict detection.
+    /// </summary>
+    [Fact]
+    public async Task PreviewDescriptorPackage_UsesVisibleInventoryForMaterialization()
+    {
+        var draft = CreateTestDraft(kind: DescriptorKind.Event);
+        SetupDraftStoreGetReturns(draft);
+        SetupCatalogGetAllReturns(
+            CreateTestDescriptor("ns", "desc-001", DescriptorKind.Event),
+            CreateTestDescriptor("ns", "desc-002", DescriptorKind.Capability));
+
+        // Capture the inventory argument passed to Materialize
+        IReadOnlyList<IDescriptor>? capturedInventory = null;
+        DraftMaterializerMock
+            .Setup(m => m.Materialize(It.IsAny<Draft>(), It.IsAny<IReadOnlyList<IDescriptor>>()))
+            .Callback<Draft, IReadOnlyList<IDescriptor>>((_, inventory) =>
+                capturedInventory = inventory)
+            .Returns(DraftAbstractions.DescriptorDraftMaterializationResult.Success(
+                new List<IDescriptor> { CreateTestDescriptor("ns", "desc-001", DescriptorKind.Event) }.AsReadOnly()));
+
+        SetupPackageBuilder();
+
+        var options = AgentToolAuthorizationOptions.DevelopmentDefaults with
+        {
+            DeniedDescriptorKinds = ["Capability"]
+        };
+        var service = CreateService(options);
+
+        var context = CreateContext(AgentToolName.PreviewDescriptorPackage);
+        var result = await service.PreviewDescriptorPackageAsync(context, draft.DraftId);
+
+        result.Status.Should().Be(AgentToolResultStatus.Success);
+        capturedInventory.Should().NotBeNull();
+        capturedInventory!.Should().OnlyContain(d => d.Kind != DescriptorKind.Capability,
+            "materializer must receive only visible descriptors, not the full catalog");
+    }
+
     // ── Helper overrides ──
 
     private void SetupDraftStoreGetReturns(Draft draft)
