@@ -86,7 +86,11 @@ internal sealed class AgentDraftArtifactVisibilityProjector
             materializationResult = materializationResult with { ProposedInventory = filteredInv };
         }
 
-        // Topology — rebuild from visible descriptors only
+        // Topology — rebuild from visible descriptors only when source
+        // topology exists and needs visibility filtering. Do NOT rebuild
+        // when source topology is null — that indicates the review did not
+        // produce topology (validation early-stop, materialization failure),
+        // and inventing one would disguise a failure state as normal.
         DescriptorTopologySnapshot? topology = source.TopologySnapshot;
         if (topology is not null && universe.VisibleDescriptors.Count < universe.AllTenantDescriptors.Count)
         {
@@ -126,8 +130,23 @@ internal sealed class AgentDraftArtifactVisibilityProjector
             packagePreview = projectedPkg;
         }
 
+        // Re-derive IsActivationEligible from projected data only.
+        // The source value was computed against the full inventory; denied
+        // descriptors may have produced blockers that are no longer visible.
+        var isActivationEligible = source.IsActivationEligible; // default
+        if (governance is not null)
+        {
+            isActivationEligible = governance.MaxDecision == DescriptorLifecycleDecisionKind.Allowed
+                && diagnostics.All(d => d.Severity != DescriptorDraftDiagnosticSeverity.Error);
+        }
+        else if (diagnostics.Count > 0)
+        {
+            isActivationEligible = diagnostics.All(d => d.Severity != DescriptorDraftDiagnosticSeverity.Error);
+        }
+
         return source with
         {
+            IsActivationEligible = isActivationEligible,
             ProposedInventory = proposedInventory,
             Diagnostics = diagnostics,
             MaterializationResult = materializationResult,
@@ -232,30 +251,88 @@ internal sealed class AgentDraftArtifactVisibilityProjector
 
         // Recalculate all derived fields from filtered data — denied entries
         // must not influence counts, maxima, or boolean flags.
+        // Recompute ALL derived fields from filtered findings only.
+        // Fields that cannot be reliably recomputed from the flat finding
+        // list use safe defaults — fail closed rather than copy from source.
+
+        var topologyFindings = filteredFindings.Where(f =>
+            StringComparer.Ordinal.Equals(f.Source, "topology")).ToList();
+        var impactFindings = filteredFindings.Where(f =>
+            StringComparer.Ordinal.Equals(f.Source, "impact")).ToList();
+        var compatibilityFindings = filteredFindings.Where(f =>
+            StringComparer.Ordinal.Equals(f.Source, "compatibility")).ToList();
+        var lifecycleFindings = filteredFindings.Where(f =>
+            StringComparer.Ordinal.Equals(f.Source, "lifecycle")).ToList();
+
         var filteredEvidence = new DescriptorPackageEvidence
         {
-            TopologyNodeCount = source.Evidence.TopologyNodeCount,
-            TopologyEdgeCount = source.Evidence.TopologyEdgeCount,
-            TopologyDiagnosticCounts = source.Evidence.TopologyDiagnosticCounts,
-            HasTopologyErrors = source.Evidence.HasTopologyErrors,
-            MaxImpactSeverity = source.Evidence.MaxImpactSeverity,
-            AffectedDescriptorCount = source.Evidence.AffectedDescriptorCount,
-            ImpactPathCount = source.Evidence.ImpactPathCount,
-            ImpactDiagnosticCounts = source.Evidence.ImpactDiagnosticCounts,
-            MaxCompatibilityLevel = source.Evidence.MaxCompatibilityLevel,
-            MaxLifecycleDecision = source.Evidence.MaxLifecycleDecision,
-            NormalizedFindings = filteredFindings,
+            // Topology — recompute from filtered topology findings
+            TopologyNodeCount = 0, // Cannot recompute from flat findings; safe default
+            TopologyEdgeCount = 0, // Cannot recompute from flat findings; safe default
+            TopologyDiagnosticCounts = topologyFindings
+                .GroupBy(f => new { f.Severity, f.Code })
+                .Select(g => new EvidenceFindingCount
+                {
+                    Severity = g.Key.Severity,
+                    Code = g.Key.Code,
+                    Count = g.Count()
+                })
+                .ToList().AsReadOnly(),
+            HasTopologyErrors = topologyFindings.Any(f =>
+                StringComparer.Ordinal.Equals(f.Severity, "Error")),
+
+            // Impact — recompute from filtered impact findings
+            MaxImpactSeverity =
+                impactFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Critical")) ? DescriptorImpactSeverity.Critical :
+                impactFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "High")) ? DescriptorImpactSeverity.High :
+                impactFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Medium")) ? DescriptorImpactSeverity.Medium :
+                impactFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Low")) ? DescriptorImpactSeverity.Low :
+                impactFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Info")) ? DescriptorImpactSeverity.Info :
+                DescriptorImpactSeverity.None,
+            AffectedDescriptorCount = impactFindings
+                .Where(f => f.Subject is not null)
+                .Select(f => f.Subject!)
+                .Distinct()
+                .Count(),
+            ImpactPathCount = 0, // Cannot recompute from flat findings; safe default
+            ImpactDiagnosticCounts = impactFindings
+                .GroupBy(f => new { f.Severity, f.Code })
+                .Select(g => new EvidenceFindingCount
+                {
+                    Severity = g.Key.Severity,
+                    Code = g.Key.Code,
+                    Count = g.Count()
+                })
+                .ToList().AsReadOnly(),
+
+            // Compatibility — recompute from filtered compatibility findings
+            MaxCompatibilityLevel =
+                compatibilityFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Breaking")) ? DescriptorCompatibilityLevel.Breaking :
+                compatibilityFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "SecuritySensitive")) ? DescriptorCompatibilityLevel.SecuritySensitive :
+                compatibilityFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Risky")) ? DescriptorCompatibilityLevel.Risky :
+                compatibilityFindings.Count > 0 && compatibilityFindings.All(f => StringComparer.Ordinal.Equals(f.Severity, "Unsupported")) ? DescriptorCompatibilityLevel.Unsupported :
+                DescriptorCompatibilityLevel.Compatible,
             BreakingFindingCount = filteredFindings.Count(f =>
                 StringComparer.Ordinal.Equals(f.Severity, "Breaking")),
             SecuritySensitiveFindingCount = filteredFindings.Count(f =>
                 StringComparer.Ordinal.Equals(f.Severity, "SecuritySensitive")),
             UnsupportedFindingCount = filteredFindings.Count(f =>
                 StringComparer.Ordinal.Equals(f.Severity, "Unsupported")),
+
+            // Lifecycle — recompute from filtered lifecycle findings
+            MaxLifecycleDecision =
+                lifecycleFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Blocker")) ? DescriptorLifecycleDecisionKind.Blocked :
+                lifecycleFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Review")) ? DescriptorLifecycleDecisionKind.ReviewRequired :
+                DescriptorLifecycleDecisionKind.Allowed,
             RequiresReview = filteredFindings.Any(f =>
                 StringComparer.Ordinal.Equals(f.Severity, "Breaking") ||
                 StringComparer.Ordinal.Equals(f.Severity, "SecuritySensitive")),
-            IsBlocked = source.Evidence.IsBlocked,
-            PackageFindingCount = filteredFindings.Count
+            IsBlocked = lifecycleFindings.Any(f =>
+                StringComparer.Ordinal.Equals(f.Severity, "Blocker")),
+            PackageFindingCount = filteredFindings.Count,
+
+            // Unified
+            NormalizedFindings = filteredFindings
         };
 
         return source with { Evidence = filteredEvidence };

@@ -1498,12 +1498,46 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
             var reviewResult = await _draftReviewService.ReviewAsync(draft, currentInventory, ct);
 
+            // If review validation failed, evidence cannot be meaningfully computed.
+            // Return Failed instead of producing a misleading zero-value evidence preview.
+            if (!reviewResult.ValidationResult.IsValid)
+            {
+                var validationDiag = new AgentToolDiagnostic
+                {
+                    Code = "REVIEW_VALIDATION_FAILED",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = "Review validation failed; evidence preview cannot be computed."
+                };
+                var failedAudit = BuildAudit(context, AgentToolResultStatus.Failed, [validationDiag]) with
+                {
+                    TouchedDraftIds = [draftId]
+                };
+                await _auditor.RecordAsync(failedAudit, ct);
+                return AgentToolResult<PackageEvidencePreview>.Failed([validationDiag], failedAudit);
+            }
+
             // Project review through visibility before building package
             var projectedReview = _artifactProjector.ProjectReview(reviewResult, scope, universe);
             if (projectedReview is null)
             {
                 return await RecordAggregateFailure<PackageEvidencePreview>(
                     context, "PACKAGE_PROJECTION_FAILURE", ct);
+            }
+
+            // If materialization failed, the proposed inventory is not available.
+            // Return Failed instead of falling back to currentInventory, which would
+            // produce a misleading evidence preview that doesn't reflect the draft.
+            if (projectedReview.MaterializationResult is not null
+                && !projectedReview.MaterializationResult.IsMaterialized)
+            {
+                var matDiags = projectedReview.MaterializationResult.Diagnostics
+                    .Select(MapFromDraftDiagnostic).ToList();
+                var matAudit = BuildAudit(context, AgentToolResultStatus.Failed, matDiags) with
+                {
+                    TouchedDraftIds = [draftId]
+                };
+                await _auditor.RecordAsync(matAudit, ct);
+                return AgentToolResult<PackageEvidencePreview>.Failed(matDiags, matAudit);
             }
 
             // Build the package from visible descriptors only — hashes and evidence
@@ -1519,7 +1553,11 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 CreatedBy = draft.AuthorId,
                 Source = draft.Source,
                 CreatedAt = draft.CreatedAt,
-                Descriptors = filteredInventory
+                Descriptors = filteredInventory,
+                TopologySnapshot = projectedReview.TopologySnapshot,
+                ImpactReport = projectedReview.ImpactAnalysisResult,
+                CompatibilityReport = projectedReview.CompatibilityResult,
+                GovernanceReport = projectedReview.GovernanceDecision
             };
 
             var pkg = _packageBuilder.Build(pkgRequest);
