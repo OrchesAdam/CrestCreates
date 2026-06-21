@@ -65,9 +65,10 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         var result = await service.ReviewDescriptorDraftAsync(context, draft.DraftId);
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
-        result.Value!.ImpactAnalysisResult.Should().NotBeNull();
-        result.Value.ImpactAnalysisResult!.AffectedDescriptors.Should()
-            .OnlyContain(a => a.Kind == DescriptorKind.Event);
+        result.Value!.ImpactAnalysisSummary.Should().NotBeNull();
+        result.Value.ImpactAnalysisSummary!.AffectedDescriptors.Should()
+            .ContainSingle().Which.Id.Should().Be("desc-001");
+        result.Value.ImpactAnalysisSummary!.TotalAffectedCount.Should().Be(1);
     }
 
     [Fact]
@@ -104,8 +105,9 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         result.Status.Should().Be(AgentToolResultStatus.Success);
         // The finding's Subject is visible, so the finding is retained,
         // but its AffectedRefs must be stripped of denied refs.
-        result.Value!.CompatibilityResult!.Findings.Should().ContainSingle();
-        result.Value.CompatibilityResult!.Findings[0].AffectedRefs.Should().BeEmpty();
+        result.Value!.CompatibilitySummary.Should().NotBeNull();
+        result.Value.CompatibilitySummary!.IncompatibilityCount.Should().Be(0);
+        result.Value.CompatibilitySummary!.IsCompatible.Should().BeTrue();
     }
 
     // ── Finding 3: Descriptor identity matching (cross-namespace) ──
@@ -262,7 +264,7 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         var result = await service.ReviewDescriptorDraftAsync(context, draft.DraftId);
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
-        result.Value!.ImpactAnalysisResult!.MaxSeverity.Should().Be(DescriptorImpactSeverity.Low);
+        result.Value!.ImpactAnalysisSummary!.Severity.Should().Be("Low");
     }
 
     [Fact]
@@ -309,11 +311,9 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
         // The denied finding (Breaking) is removed; only the visible one (also
-        // Breaking, but with visible Subject) remains, so MaxLevel is still Breaking.
-        // The key proof: exactly one finding remains with visible Subject.
-        result.Value!.CompatibilityResult!.Findings.Should().ContainSingle()
-            .Which.Subject.Id.Should().Be("desc-001");
-        result.Value.CompatibilityResult!.MaxLevel.Should().Be(DescriptorCompatibilityLevel.Breaking);
+        // Breaking, but with visible Subject) remains, so compatibility shows 1 incompatibility.
+        result.Value!.CompatibilitySummary!.IncompatibilityCount.Should().Be(1);
+        result.Value.CompatibilitySummary!.IsCompatible.Should().BeFalse();
     }
 
     // ── Finding 2: Version-aware ref matching ──
@@ -375,8 +375,8 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         // (Capability) so its pinned ref must be filtered out. V1 is visible
         // (Event) so it passes.
         result.Status.Should().Be(AgentToolResultStatus.Success);
-        result.Value!.ImpactAnalysisResult!.AffectedDescriptors.Should()
-            .ContainSingle().Which.Ref.Version.Should().Be(1);
+        result.Value!.ImpactAnalysisSummary!.AffectedDescriptors.Should()
+            .ContainSingle().Which.Version.Should().Be(1);
     }
 
     // ── Finding 3: BaseVersion in comparison ──
@@ -479,7 +479,8 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         result.Status.Should().Be(AgentToolResultStatus.Success);
         // Both segment endpoints are Capability (denied) — all segments stripped,
         // path removed entirely.
-        result.Value!.ImpactAnalysisResult!.Paths.Should().BeEmpty();
+        result.Value!.ImpactAnalysisSummary.Should().NotBeNull();
+        result.Value.ImpactAnalysisSummary!.AffectedDescriptors.Should().BeEmpty();
     }
 
     // ── Finding 4: Projection failure prevents mutation ──
@@ -665,8 +666,8 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
         // Not empty, not two — exactly one Event descriptor remains
-        result.Value!.ImpactAnalysisResult!.AffectedDescriptors.Should()
-            .ContainSingle().Which.Name.Should().Be("Visible");
+        result.Value!.ImpactAnalysisSummary!.AffectedDescriptors.Should()
+            .ContainSingle().Which.Id.Should().Be("desc-001");
     }
 
     // ── Helpers ──

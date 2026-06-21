@@ -110,7 +110,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
             DescriptorKind = DescriptorKind.Event,
             DescriptorId = "test.desc-001",
             Operation = DraftAbstractions.DescriptorDraftOperation.Create,
-            Payload = new TestDraftPayload(DescriptorKind.Event, "test.desc-001", "Test")
+            Payload = CreateTestPayloadDto(DescriptorKind.Event, "test.desc-001", "Test")
         };
 
         var result = await service.CreateDescriptorDraftAsync(context, request);
@@ -179,7 +179,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
             DescriptorKind = DescriptorKind.Event,
             DescriptorId = "test.desc-001",
             Operation = DraftAbstractions.DescriptorDraftOperation.Create,
-            Payload = new TestDraftPayload(DescriptorKind.Event, "test.desc-001", "Test")
+            Payload = CreateTestPayloadDto(DescriptorKind.Event, "test.desc-001", "Test")
         };
         await deniedSvc.CreateDescriptorDraftAsync(deniedCtx, deniedReq);
 

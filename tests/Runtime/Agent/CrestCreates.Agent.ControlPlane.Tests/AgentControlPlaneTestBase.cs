@@ -3,6 +3,7 @@ using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 using CrestCreates.Metadata.ContextPack.Abstractions;
+using CrestCreates.Metadata;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -180,6 +181,38 @@ public abstract class AgentControlPlaneTestBase
             CreatedAt = DateTimeOffset.UtcNow,
             Payload = new TestDraftPayload(kind, descriptorId, "TestDraft"),
             Status = status
+        };
+    }
+
+    /// <summary>
+    /// Creates an AgentDraftPayloadDto for use in CreateDescriptorDraftRequest
+    /// and UpdateDescriptorDraftRequest payloads. This replaces direct
+    /// TestDraftPayload usage in request DTO construction.
+    /// TestDraftPayload remains in use for internal Draft store objects.
+    /// </summary>
+    protected static AgentDraftPayloadDto CreateTestPayloadDto(DescriptorKind kind, string id, string name)
+    {
+        return new AgentDraftPayloadDto
+        {
+            Discriminator = kind,
+            Capability = kind == DescriptorKind.Capability
+                ? new AgentCapabilityDraftPayloadDto { Name = name, CapabilityKind = "Action", RiskLevel = "Low" }
+                : null,
+            Workflow = kind == DescriptorKind.Workflow
+                ? new AgentWorkflowDraftPayloadDto { Name = name }
+                : null,
+            HumanTask = kind == DescriptorKind.HumanTask
+                ? new AgentHumanTaskDraftPayloadDto { Name = name }
+                : null,
+            Form = kind == DescriptorKind.Form
+                ? new AgentFormDraftPayloadDto { Name = name }
+                : null,
+            Event = kind == DescriptorKind.Event
+                ? new AgentEventDraftPayloadDto { Name = name }
+                : null,
+            Schema = kind == DescriptorKind.Schema
+                ? new AgentSchemaDraftPayloadDto { Name = name }
+                : null,
         };
     }
 

@@ -46,7 +46,7 @@ public class DescriptorKindDenyTests : AgentControlPlaneTestBase
             DescriptorKind = DescriptorKind.Event,
             DescriptorId = "test.desc-001",
             Operation = DraftAbstractions.DescriptorDraftOperation.Create,
-            Payload = new TestDraftPayload(DescriptorKind.Event, "test.desc-001", "TestEvent")
+            Payload = CreateTestPayloadDto(DescriptorKind.Event, "test.desc-001", "TestEvent")
         };
 
         var result = await service.CreateDescriptorDraftAsync(context, request);
@@ -66,7 +66,7 @@ public class DescriptorKindDenyTests : AgentControlPlaneTestBase
             DescriptorKind = DescriptorKind.Schema,
             DescriptorId = "test.desc-002",
             Operation = DraftAbstractions.DescriptorDraftOperation.Create,
-            Payload = new TestDraftPayload(DescriptorKind.Schema, "test.desc-002", "TestSchema")
+            Payload = CreateTestPayloadDto(DescriptorKind.Schema, "test.desc-002", "TestSchema")
         };
 
         DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
@@ -99,7 +99,7 @@ public class DescriptorKindDenyTests : AgentControlPlaneTestBase
             DescriptorKind = DescriptorKind.Event,
             DescriptorId = "test.desc-001",
             Operation = DraftAbstractions.DescriptorDraftOperation.Create,
-            Payload = new TestDraftPayload(DescriptorKind.Event, "test.desc-001", "TestEvent")
+            Payload = CreateTestPayloadDto(DescriptorKind.Event, "test.desc-001", "TestEvent")
         };
 
         var result = await service.CreateDescriptorDraftAsync(context, request);
@@ -242,7 +242,7 @@ public class DescriptorKindDenyTests : AgentControlPlaneTestBase
             DescriptorKind = DescriptorKind.Event,
             DescriptorId = "test.desc-001",
             Operation = DraftAbstractions.DescriptorDraftOperation.Create,
-            Payload = new TestDraftPayload(DescriptorKind.Event, "test.desc-001", "TestEvent")
+            Payload = CreateTestPayloadDto(DescriptorKind.Event, "test.desc-001", "TestEvent")
         };
 
         var result = await service.CreateDescriptorDraftAsync(context, request);

@@ -205,7 +205,7 @@ public class RuntimeBoundaryTests : AgentControlPlaneTestBase
             DescriptorKind = DescriptorKind.Event,
             DescriptorId = "test.d1",
             Operation = DraftAbstractions.DescriptorDraftOperation.Create,
-            Payload = new TestDraftPayload(DescriptorKind.Event, "test.d1", "Test")
+            Payload = CreateTestPayloadDto(DescriptorKind.Event, "test.d1", "Test")
         };
 
         var result = await service.CreateDescriptorDraftAsync(context, request);

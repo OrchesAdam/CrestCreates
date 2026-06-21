@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-06-20
+Last Updated: 2026-06-21
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -446,20 +446,20 @@ This thread achieved the following:
   - `CrestCreates.Agent.ControlPlane.Abstractions` — all public types, interfaces, enums
   - `CrestCreates.Agent.ControlPlane` — default implementations
 - **One new test project** under `tests/Runtime/Agent/`:
-  - `CrestCreates.Agent.ControlPlane.Tests` — 145 tests, all passing
+  - `CrestCreates.Agent.ControlPlane.Tests` — 276 tests, all passing
 
-- **Core abstractions** (30 tool manifest entries, AOT-safe, no runtime reflection):
-  - `IAgentControlPlaneToolService` — facade interface with 30 tool methods across 6 waves
+- **Core abstractions** (32 tool manifest entries, AOT-safe, no runtime reflection):
+  - `IAgentControlPlaneToolService` — facade interface with 32 tool methods across 7 waves
   - `AgentToolInvocationContext` — tenant, actor, correlation, tool name, invocation source
   - `AgentToolResult<T>` — strongly typed result with Status/Diagnostics/AuditRecord
   - `AgentToolResultStatus` — Success/SucceededWithDiagnostics/Denied/Failed/NotFound/InvalidRequest
   - `AgentToolAuthorizationPolicy` — AllowAll/ReadOnly/ProductionDefaults (legacy, superseded by AgentToolAuthorizationOptions)
   - `AgentToolAuthorizationMode` — DevelopmentAllowAll/ExplicitPolicy/DenyAll
   - `AgentToolAuthorizationOptions` — mode-driven options with category-aware defaults (AllowReadOnlyToolsByDefault, AllowMutationToolsByDefault, AllowActivationHandoffToolsByDefault), explicit allow/deny lists
-  - `AgentToolName` — 28 canonical tool name constants (single source of truth)
+  - `AgentToolName` — 30 canonical tool name constants (single source of truth)
   - `AgentToolPermissionRequirement` — extended with ToolCategory and IsReadOnly for category-aware authorization
   - `IAgentToolAuthorizationService` + `DefaultAgentToolAuthorizationService` — mode-driven authorization: DevelopmentAllowAll/ExplicitPolicy/DenyAll, category-aware defaults, deny-overrides-allow, legacy policy compatibility
-  - `IAgentToolManifestProvider` + `StaticAgentToolManifestProvider` — hardcoded 30-tool manifest
+  - `IAgentToolManifestProvider` + `StaticAgentToolManifestProvider` — hardcoded 32-tool manifest
   - `IAgentToolInvocationAuditor` + `InMemoryAgentToolInvocationAuditor` — audit recording
   - `AgentToolInvocationAuditRecord` — full touch-point tracking (descriptors, drafts, reviews, fix proposals, package previews, activation requests)
 
@@ -500,6 +500,7 @@ This thread achieved the following:
 - **Wave 4** (Fix Proposal): SuggestDescriptorDraftFixes, GetFixProposal, ListFixProposals, ApplyFixProposalToDraft
 - **Wave 5** (Package Preview): PreviewDescriptorPackage, BuildPackageEvidencePreview, BuildActivationReadinessPreview, GetPackagePreview
 - **Wave 6** (Activation Handoff): SubmitActivationRequest, GetActivationRequestStatus, CancelActivationRequest
+- **Wave 7** (Manifest Query): ListAgentTools, GetAgentToolDescriptor
 
   - **Code Review Finding Fixes** (2026-06-19):
     - P1: `ReviewDescriptorDraft` corrected to `IsReadOnly=false` — it persists review results and changes draft status to Reviewed
@@ -513,7 +514,7 @@ This thread achieved the following:
       - Phase 1 (coarse auth): tool-name integrity → manifest lookup → permission/category/actor/mode deny — no store access
       - Phase 2 (kind resolution): `kindResolver` lambda runs after coarse auth, resolving descriptor kind from authoritative store/catalog
       - Phase 3 (kind deny): `IsDescriptorKindDenied(kind)` — fail-closed: if `DeniedDescriptorKinds` is configured and kind is null (unresolvable), invocation is denied
-      - All 28 tool methods use `kindResolver`: direct (request), draft store, catalog, indirect (activation request → draft, review result → draft, fix proposal → draft, package preview → draft)
+      - All 30 tool methods use `kindResolver`: direct (request), draft store, catalog, indirect (activation request → draft, review result → draft, fix proposal → draft, package preview → draft)
       - Aggregate queries (context pack, topology, search, lists) pass `null` kindResolver — no single kind target
       - `IAgentToolAuthorizationService.IsDescriptorKindDenied(string?)` added for standalone kind-deny check
       - `GetDescriptorByRef` kind resolution now handles versioned refs
@@ -536,14 +537,38 @@ This thread achieved the following:
     - **Single DI policy truth**: All three `AddAgentControlPlane` overloads register `AgentToolAuthorizationOptions` as singleton and construct `DefaultAgentControlPlaneToolService` via `ActivatorUtilities.CreateInstance` — legacy policy overload converts to options before registration
     - **Storage migration**: `_packagePreviews`/`_evidencePreviews`/`_activationRequests` changed from bare entry types to owner-bearing snapshot types (`PackagePreviewResourceSnapshot`, `EvidencePreviewResourceSnapshot`, `ActivationResourceSnapshot`)
     - **Dead code removed**: `ExplainCode`, `SuggestRemediation`, `SuggestFixTools` static methods
-    - **237 ControlPlane tests + 7 Boundary tests pass**, full solution build 0 errors (19 NestedProjectionRegression)
+    - **276 ControlPlane tests + 7 Boundary tests pass**, full solution build 0 errors
     - **Design spec**: `docs/superpowers/specs/2026-06-19-agent-descriptor-kind-visibility-closure-design.md`
     - **Implementation plans**: PR-A (`plans/2026-06-19-agent-visibility-pr-a-policy-pipeline.md`), PR-B (`plans/2026-06-19-agent-visibility-pr-b-aggregate-graph-context.md`), PR-C (`plans/2026-06-19-agent-visibility-pr-c-indirect-nested.md`)
 
-  - **162→233 tests across 12 test classes**: StaticManifest (10), Authorization (29), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (6), ManifestClassification (4), DescriptorKindDeny (12), Wave1-6 (12+12+10+9+10+12), VisibilityCoverage (1), DraftArtifactVisibilityProjector (7), VisibleDescriptorUniverse (8), DescriptorKindPolicyEvaluator (4), NestedProjectionRegression (19)
+  - **162→276 tests across 17 test classes**: StaticManifest (10), Authorization (29), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (6), ManifestClassification (4), DescriptorKindDeny (12), Wave1-6 (12+12+10+9+10+12), VisibilityCoverage (1), DraftArtifactVisibilityProjector (7), VisibleDescriptorUniverse (8), DescriptorKindPolicyEvaluator (4), NestedProjectionRegression (19)
 - **Design spec**: `docs/superpowers/specs/2026-06-18-phase-7c-agent-control-plane-tool-surface-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-18-phase-7c-agent-control-plane-tool-surface.md`
-- **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface. DTO / JsonSerializerContext layer for MCP/HTTP/CLI adapters deferred as P2/future.
+  - **Tool DTO & JSON Contract — Issue #41** (2026-06-21):
+    - **P0 Projection DTOs** (replacing unsafe upstream types in tool contracts):
+      - `DescriptorSummaryDto` — replaces `IDescriptor?` in `DraftComparisonResult.CurrentActiveDescriptor`
+      - `AgentDescriptorDraftDto` — replaces `DescriptorDraft` in all tool results; nested `AgentDraftPayloadDto` with discriminator + 6 optional sub-records (Capability/Workflow/HumanTask/Form/Event/Schema)
+      - `AgentReviewResultDto` — replaces `DescriptorDraftReviewResult` in all tool results; includes `ProposedInventorySummary`, `TopologySummary`, `ImpactAnalysisSummary`, `CompatibilitySummary`, `GovernanceSummary`
+      - `AgentDraftPayloadDto` — nested one-of shape: `Discriminator` + `Capability?`/`Workflow?`/`HumanTask?`/`Form?`/`Event?`/`Schema?` sub-records; invariant: only the sub-record matching Discriminator may be non-null
+    - **Request-side closure**: `CreateDescriptorDraftRequest.Payload` and `UpdateDescriptorDraftRequest.Payload` changed from `DescriptorDraftPayload` to `AgentDraftPayloadDto`
+    - **Source-Generated JSON Contract**:
+      - `AgentControlPlaneToolJsonSerializerContext` — registers all 32 tool request/result DTOs + stable upstream value objects + temporary upstream aggregates
+      - `AgentControlPlaneContractVersion.Current = "7c.v1"` — machine-readable contract version
+      - `AgentControlPlaneToolJsonSerializerOptionsFactory.CreateDefault()` — pre-configured `JsonSerializerOptions` using source-generated metadata
+    - **Projection helpers** (in `CrestCreates.Agent.ControlPlane/Projections/`):
+      - `DescriptorSummaryDtoProjection.FromDescriptor(IDescriptor?)` — safe `IDescriptor` → `DescriptorSummaryDto` mapping
+      - `AgentDescriptorDraftDtoProjection.FromDraft(DescriptorDraft)` / `ToDomainPayload(AgentDraftPayloadDto)` — bidirectional draft mapping; `ToDomainPayload` enforces discriminator invariant (throws on mismatch)
+      - `AgentReviewResultDtoProjection.Project(DescriptorDraftReviewResult, deniedKinds?)` — review result projection with optional denied-kind filtering for visibility closure
+    - **FromDraft uses IDescriptor interface** (not concrete casts): `MapPayload` sub-mappers accept `IDescriptor` and use safe `as` casts for kind-specific properties, enabling test descriptors and future descriptor types
+    - **Boundary constraint tests**: recursive type graph check — no `IDescriptor`, `IServiceProvider`, `object`/`dynamic`/`JsonElement` in any DTO property chain (including nested generics, collections, nullable)
+    - **Semantic preservation tests**: round-trip serialization, context pack ref preservation, review diagnostics preservation, fix proposal risk/approval semantics, activation request handoff-only invariant, payload discriminator invariant
+    - **Visibility closure regression test**: `AgentReviewResultDtoProjection_DeniedKinds_DoNot_Appear_In_ProjectedSummary` — denied kinds filtered from ProposedInventory, Topology, ImpactAnalysis
+    - **Manifest set-equality coverage tests**: 4 tests verifying manifest tool names = contract registrations = JsonTypeInfo set; facade vs manifest query tool distinction; no orphan contract types
+    - **276 ControlPlane tests + 7 Boundary tests pass**, full solution build 0 errors
+    - **Design spec**: `docs/superpowers/specs/2026-06-21-phase-7c-tool-dto-json-contract-design.md`
+    - **Implementation plan**: `docs/superpowers/plans/2026-06-21-phase-7c-tool-dto-json-contract.md`
+
+  - **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface.
 
 ---
 

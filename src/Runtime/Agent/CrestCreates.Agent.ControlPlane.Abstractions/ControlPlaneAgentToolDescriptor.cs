@@ -1,3 +1,5 @@
+using CrestCreates.Agent.ControlPlane.Abstractions.Json;
+
 namespace CrestCreates.Agent.ControlPlane.Abstractions;
 
 /// <summary>
@@ -16,4 +18,10 @@ public sealed record AgentToolDescriptor
     public required IReadOnlyList<AgentToolActorKind> AllowedActors { get; init; }
     public bool IsReadOnly { get; init; }
     public bool MutatesRuntimeRegistry { get; init; }
+
+    /// <summary>
+    /// Contract version this tool descriptor conforms to.
+    /// Adapters use this to determine serialization and behavior expectations.
+    /// </summary>
+    public string ContractVersion { get; init; } = AgentControlPlaneContractVersion.Current;
 }

@@ -44,17 +44,17 @@ public interface IAgentControlPlaneToolService
 
     // ── Wave 2 — Draft ──
 
-    Task<AgentToolResult<DraftAbstractions.DescriptorDraft>> CreateDescriptorDraftAsync(
+    Task<AgentToolResult<AgentDescriptorDraftDto>> CreateDescriptorDraftAsync(
         AgentToolInvocationContext context,
         CreateDescriptorDraftRequest request,
         CancellationToken ct = default);
 
-    Task<AgentToolResult<DraftAbstractions.DescriptorDraft>> UpdateDescriptorDraftAsync(
+    Task<AgentToolResult<AgentDescriptorDraftDto>> UpdateDescriptorDraftAsync(
         AgentToolInvocationContext context,
         UpdateDescriptorDraftRequest request,
         CancellationToken ct = default);
 
-    Task<AgentToolResult<DraftAbstractions.DescriptorDraft>> GetDescriptorDraftAsync(
+    Task<AgentToolResult<AgentDescriptorDraftDto>> GetDescriptorDraftAsync(
         AgentToolInvocationContext context,
         string draftId,
         CancellationToken ct = default);
@@ -64,7 +64,7 @@ public interface IAgentControlPlaneToolService
         DraftAbstractions.DraftQuery? query,
         CancellationToken ct = default);
 
-    Task<AgentToolResult<DraftAbstractions.DescriptorDraft>> CancelDescriptorDraftAsync(
+    Task<AgentToolResult<AgentDescriptorDraftDto>> CancelDescriptorDraftAsync(
         AgentToolInvocationContext context,
         string draftId,
         CancellationToken ct = default);
@@ -81,12 +81,12 @@ public interface IAgentControlPlaneToolService
         string draftId,
         CancellationToken ct = default);
 
-    Task<AgentToolResult<DraftAbstractions.DescriptorDraftReviewResult>> ReviewDescriptorDraftAsync(
+    Task<AgentToolResult<AgentReviewResultDto>> ReviewDescriptorDraftAsync(
         AgentToolInvocationContext context,
         string draftId,
         CancellationToken ct = default);
 
-    Task<AgentToolResult<DraftAbstractions.DescriptorDraftReviewResult>> GetDraftReviewResultAsync(
+    Task<AgentToolResult<AgentReviewResultDto>> GetDraftReviewResultAsync(
         AgentToolInvocationContext context,
         string reviewResultId,
         CancellationToken ct = default);
@@ -118,7 +118,7 @@ public interface IAgentControlPlaneToolService
         string? draftId,
         CancellationToken ct = default);
 
-    Task<AgentToolResult<DraftAbstractions.DescriptorDraft>> ApplyFixProposalToDraftAsync(
+    Task<AgentToolResult<AgentDescriptorDraftDto>> ApplyFixProposalToDraftAsync(
         AgentToolInvocationContext context,
         ApplyFixProposalRequest request,
         CancellationToken ct = default);

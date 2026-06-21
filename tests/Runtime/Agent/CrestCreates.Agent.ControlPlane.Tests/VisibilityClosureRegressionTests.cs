@@ -1,4 +1,5 @@
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Projections;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
@@ -304,10 +305,10 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
         var result = await service.ReviewDescriptorDraftAsync(context, draft.DraftId);
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
-        // After filtering all denied-kind findings, MaxLevel must be Compatible
-        result.Value!.CompatibilityResult.MaxLevel.Should().Be(DescriptorCompatibilityLevel.Compatible,
-            "empty compatibility findings after filtering must default to Compatible, not Unsupported");
-        result.Value!.CompatibilityResult.Findings.Should().BeEmpty(
+        // After filtering all denied-kind findings, compatibility must show no incompatibilities
+        result.Value!.CompatibilitySummary.IsCompatible.Should().BeTrue(
+            "empty compatibility findings after filtering must default to Compatible");
+        result.Value!.CompatibilitySummary.IncompatibilityCount.Should().Be(0,
             "denied-kind compatibility findings must be filtered out");
     }
 
@@ -925,6 +926,164 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
         capturedInventory.Should().NotBeNull();
         capturedInventory!.Should().OnlyContain(d => d.Kind != DescriptorKind.Capability,
             "materializer must receive only visible descriptors, not the full catalog");
+    }
+
+    // ── Gap 12: AgentReviewResultDtoProjection — denied kinds don't leak into projected DTO ──
+
+    /// <summary>
+    /// When a DescriptorDraftReviewResult contains denied-kind descriptors in
+    /// ProposedInventory, TopologySnapshot, and ImpactAnalysisResult, the
+    /// projection must NOT expose them in the summary DTO fields. This ensures
+    /// the projection does not re-introduce hidden-universe derived values.
+    /// </summary>
+    [Fact]
+    public void AgentReviewResultDtoProjection_DeniedKinds_DoNot_Appear_In_ProjectedSummary()
+    {
+        const DescriptorKind deniedKind = DescriptorKind.Schema;
+        const string deniedNs = "ns";
+        const string deniedId = "schema-desc-001";
+
+        // ── Descriptors for ProposedInventory ──
+        var visibleDescriptor = CreateTestDescriptor("ns", "desc-001", DescriptorKind.Event);
+        var deniedDescriptor = CreateTestDescriptor(deniedNs, deniedId, deniedKind);
+
+        // ── TopologySnapshot with nodes of both visible and denied kinds ──
+        var visibleNode = new DescriptorNode
+        {
+            Ref = new DescriptorRef("ns", "desc-001"),
+            Kind = DescriptorKind.Event,
+            Name = "VisibleNode",
+            State = DescriptorState.Active,
+            OutgoingEdgeIndices = new HashSet<int> { 0, 1 },
+            IncomingEdgeIndices = new HashSet<int> { 0 }
+        };
+        var deniedNode = new DescriptorNode
+        {
+            Ref = new DescriptorRef(deniedNs, deniedId),
+            Kind = deniedKind,
+            Name = "DeniedNode",
+            State = DescriptorState.Active,
+            OutgoingEdgeIndices = new HashSet<int>(),
+            IncomingEdgeIndices = new HashSet<int> { 1 }
+        };
+
+        var nodes = new Dictionary<DescriptorRef, DescriptorNode>
+        {
+            [visibleNode.Ref] = visibleNode,
+            [deniedNode.Ref] = deniedNode
+        };
+
+        // Edges: visible→visible (should survive filtering), visible→denied (must be filtered out)
+        var visibleToVisibleEdge = new DescriptorEdge
+        {
+            Index = 0,
+            From = visibleNode.Ref,
+            To = visibleNode.Ref,
+            Kind = RelationshipKind.DependsOn,
+            Strength = RelationshipStrength.Strong,
+            IsRuntimeBinding = false
+        };
+        var visibleToDeniedEdge = new DescriptorEdge
+        {
+            Index = 1,
+            From = visibleNode.Ref,
+            To = deniedNode.Ref,
+            Kind = RelationshipKind.Uses,
+            Strength = RelationshipStrength.Strong,
+            IsRuntimeBinding = false
+        };
+        var edges = new List<DescriptorEdge> { visibleToVisibleEdge, visibleToDeniedEdge };
+
+        var topologySnapshot = new DescriptorTopologySnapshot(
+            nodes,
+            edges,
+            new DescriptorTopologyDiagnostics { All = Array.Empty<DescriptorTopologyDiagnostic>() },
+            new Dictionary<DescriptorIdentity, List<(DescriptorRef, DescriptorEdge)>>(),
+            new Dictionary<(DescriptorIdentity, int), List<(DescriptorRef, DescriptorEdge)>>(),
+            new Dictionary<DescriptorIdentity, List<(DescriptorRef, DescriptorEdge)>>(),
+            DateTimeOffset.UtcNow);
+
+        // ── ImpactAnalysisResult with affected descriptors of both kinds ──
+        var visibleAffected = new AffectedDescriptor
+        {
+            Ref = new DescriptorRef("ns", "desc-001"),
+            Kind = DescriptorKind.Event,
+            Name = "VisibleAffected",
+            Severity = DescriptorImpactSeverity.Low,
+            RuntimeAreas = Array.Empty<DescriptorImpactRuntimeArea>(),
+            Paths = Array.Empty<DescriptorImpactPath>()
+        };
+        var deniedAffected = new AffectedDescriptor
+        {
+            Ref = new DescriptorRef(deniedNs, deniedId),
+            Kind = deniedKind,
+            Name = "DeniedAffected",
+            Severity = DescriptorImpactSeverity.High,
+            RuntimeAreas = Array.Empty<DescriptorImpactRuntimeArea>(),
+            Paths = Array.Empty<DescriptorImpactPath>()
+        };
+
+        var impactReport = new DescriptorImpactAnalysisReport
+        {
+            ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
+            AffectedDescriptors = new[] { visibleAffected, deniedAffected },
+            Paths = Array.Empty<DescriptorImpactPath>(),
+            MaxSeverity = DescriptorImpactSeverity.High,
+            Diagnostics = Array.Empty<DescriptorImpactDiagnostic>()
+        };
+
+        // ── Full review result ──
+        var source = new DescriptorDraftReviewResult
+        {
+            DraftId = "draft-gap12-001",
+            TenantId = TestTenantId,
+            ValidationResult = DescriptorDraftValidationResult.Success(),
+            ProposedInventory = new IDescriptor[] { visibleDescriptor, deniedDescriptor },
+            TopologySnapshot = topologySnapshot,
+            ImpactAnalysisResult = impactReport,
+            CompatibilityResult = new DescriptorCompatibilityReport
+            {
+                ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
+                ImpactReport = impactReport,
+                Findings = Array.Empty<DescriptorCompatibilityFinding>(),
+                MaxLevel = DescriptorCompatibilityLevel.Compatible,
+                Diagnostics = Array.Empty<DescriptorCompatibilityDiagnostic>()
+            },
+            GovernanceDecision = new DescriptorLifecycleGovernanceReport
+            {
+                Decisions = Array.Empty<DescriptorLifecycleDecision>(),
+                MaxDecision = DescriptorLifecycleDecisionKind.Allowed,
+                PackageFindings = Array.Empty<DescriptorLifecycleFinding>()
+            },
+            Diagnostics = Array.Empty<DescriptorDraftDiagnostic>(),
+            IsActivationEligible = true
+        };
+
+        // ── Act: project to AgentReviewResultDto with denied kinds ──
+        var deniedKinds = new HashSet<DescriptorKind> { deniedKind };
+        var result = AgentReviewResultDtoProjection.Project(source, deniedKinds);
+
+        // ── Assert: denied kinds must NOT appear in projected summaries ──
+        result.ProposedInventorySummary.Should().NotBeNull();
+        result.ProposedInventorySummary!.CountsByKind.Should().NotContainKey(deniedKind,
+            "projection must not expose denied-kind counts in ProposedInventorySummary");
+
+        result.TopologySummary.Should().NotBeNull();
+        result.TopologySummary!.NodeCountsByKind.Should().NotContainKey(deniedKind,
+            "projection must not expose denied-kind nodes in TopologySummary");
+        // Edge counts must also be filtered: the visible→visible edge survives,
+        // the visible→denied edge must be filtered out because denied nodes are invisible.
+        result.TopologySummary.TotalEdgeCount.Should().Be(1,
+            "only the visible→visible edge should survive, the visible→denied edge must be filtered");
+        result.TopologySummary.EdgeCountsByKind.Should().ContainKey(RelationshipKind.DependsOn,
+            "visible→visible edge kind must survive filtering");
+        result.TopologySummary.EdgeCountsByKind.Should().NotContainKey(RelationshipKind.Uses,
+            "visible→denied edge kind must not appear in filtered topology");
+
+        result.ImpactAnalysisSummary.Should().NotBeNull();
+        result.ImpactAnalysisSummary!.AffectedDescriptors.Should()
+            .NotContain(r => r.Id == deniedId && r.Namespace == deniedNs,
+                "projection must not expose denied-kind affected descriptor refs in ImpactAnalysisSummary");
     }
 
     // ── Helper overrides ──

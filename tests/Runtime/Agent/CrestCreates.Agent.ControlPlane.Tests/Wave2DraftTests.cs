@@ -21,7 +21,7 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
             DescriptorKind = DescriptorKind.Event,
             DescriptorId = "test.desc-001",
             Operation = DraftAbstractions.DescriptorDraftOperation.Create,
-            Payload = new TestDraftPayload(DescriptorKind.Event, "test.desc-001", "TestEvent"),
+            Payload = CreateTestPayloadDto(DescriptorKind.Event, "test.desc-001", "TestEvent"),
             ProposedVersion = "1",
             Intent = "Create new event"
         };
@@ -51,7 +51,7 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
             DescriptorKind = DescriptorKind.Event,
             DescriptorId = "test.desc-001",
             Operation = DraftAbstractions.DescriptorDraftOperation.Create,
-            Payload = new TestDraftPayload(DescriptorKind.Event, "test.desc-001", "Test")
+            Payload = CreateTestPayloadDto(DescriptorKind.Event, "test.desc-001", "Test")
         };
 
         DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
@@ -218,8 +218,10 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
         var result = await service.CompareDescriptorDraftAsync(context, "draft-001");
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
-        result.Value!.Draft.Should().Be(draft);
-        result.Value.CurrentActiveDescriptor.Should().Be(activeDescriptor);
+        result.Value!.Draft.DraftId.Should().Be(draft.DraftId);
+        result.Value!.Draft.DescriptorKind.Should().Be(draft.DescriptorKind);
+        result.Value.CurrentActiveDescriptor.Should().NotBeNull();
+        result.Value.CurrentActiveDescriptor!.Name.Should().Be(activeDescriptor.Name);
     }
 
     [Fact]
@@ -234,6 +236,93 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
         var result = await service.CompareDescriptorDraftAsync(context, "nonexistent");
 
         result.Status.Should().Be(AgentToolResultStatus.NotFound);
+    }
+
+    [Fact]
+    public async Task CreateDescriptorDraft_KindDiscriminatorMismatch_Returns_InvalidRequest()
+    {
+        var service = CreateService();
+        var context = CreateContext("CreateDescriptorDraft");
+        var request = new CreateDescriptorDraftRequest
+        {
+            DescriptorKind = DescriptorKind.Event,
+            DescriptorId = "test.desc-001",
+            Operation = DraftAbstractions.DescriptorDraftOperation.Create,
+            Payload = CreateTestPayloadDto(DescriptorKind.Schema, "test.desc-001", "TestSchema"),
+            ProposedVersion = "1",
+            Intent = "Create with mismatched payload"
+        };
+
+        var result = await service.CreateDescriptorDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "KindDiscriminatorMismatch");
+    }
+
+    [Fact]
+    public async Task UpdateDescriptorDraft_KindDiscriminatorMismatch_Returns_InvalidRequest()
+    {
+        var service = CreateService();
+        var context = CreateContext("UpdateDescriptorDraft");
+        var existing = CreateTestDraft(kind: DescriptorKind.Event);
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(existing));
+
+        var request = new UpdateDescriptorDraftRequest
+        {
+            DraftId = "draft-001",
+            Payload = CreateTestPayloadDto(DescriptorKind.Schema, "test.desc-001", "TestSchema")
+        };
+
+        var result = await service.UpdateDescriptorDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "KindDiscriminatorMismatch");
+    }
+
+    [Fact]
+    public async Task CreateDescriptorDraft_MatchingKindDiscriminator_Succeeds()
+    {
+        var service = CreateService();
+        var context = CreateContext("CreateDescriptorDraft");
+        var request = new CreateDescriptorDraftRequest
+        {
+            DescriptorKind = DescriptorKind.Event,
+            DescriptorId = "test.desc-001",
+            Operation = DraftAbstractions.DescriptorDraftOperation.Create,
+            Payload = CreateTestPayloadDto(DescriptorKind.Event, "test.desc-001", "TestEvent"),
+            ProposedVersion = "1",
+            Intent = "Create with matching payload"
+        };
+
+        DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var result = await service.CreateDescriptorDraftAsync(context, request);
+
+        result.Status.Should().NotBe(AgentToolResultStatus.InvalidRequest);
+    }
+
+    [Fact]
+    public async Task UpdateDescriptorDraft_KindDiscriminatorMismatch_DoesNot_SaveAsync()
+    {
+        var service = CreateService();
+        var context = CreateContext("UpdateDescriptorDraft");
+        var existing = CreateTestDraft(kind: DescriptorKind.Event);
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(existing));
+
+        var request = new UpdateDescriptorDraftRequest
+        {
+            DraftId = "draft-001",
+            Payload = CreateTestPayloadDto(DescriptorKind.Schema, "test.desc-001", "TestSchema")
+        };
+
+        _ = await service.UpdateDescriptorDraftAsync(context, request);
+
+        DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Projections;
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
@@ -11,7 +12,6 @@ using DraftValidator = CrestCreates.DescriptorDraft.Abstractions.IDescriptorDraf
 using DraftReviewService = CrestCreates.DescriptorDraft.Abstractions.IDescriptorDraftReviewService;
 using DraftMaterializer = CrestCreates.DescriptorDraft.Abstractions.IDescriptorDraftMaterializer;
 using DraftValidationResult = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraftValidationResult;
-using DraftReviewResult = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraftReviewResult;
 using DraftPackagePreview = CrestCreates.DescriptorDraft.Abstractions.DescriptorPackagePreview;
 
 namespace CrestCreates.Agent.ControlPlane;
@@ -671,15 +671,33 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
     // ── Wave 2 — Draft ──
 
-    public async Task<AgentToolResult<Draft>> CreateDescriptorDraftAsync(
+    public async Task<AgentToolResult<AgentDescriptorDraftDto>> CreateDescriptorDraftAsync(
         AgentToolInvocationContext context, CreateDescriptorDraftRequest request, CancellationToken ct = default)
     {
         return await ExecuteAsync(context, AgentToolName.CreateDescriptorDraft, AgentToolPermissionName.DraftCreate, async (scope, ct) =>
         {
             // Kind visibility check on the request's declared kind
-            var denyResult = DenyIfInvisible<Draft>(context, scope, request.DescriptorKind);
+            var denyResult = DenyIfInvisible<AgentDescriptorDraftDto>(context, scope, request.DescriptorKind);
             if (denyResult is not null)
                 return denyResult;
+
+            // Consistency check: declared kind must match payload discriminator
+            if (request.DescriptorKind != request.Payload.Discriminator)
+            {
+                return await RecordAndReturn(context,
+                    AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest(
+                    [
+                        new AgentToolDiagnostic
+                        {
+                            Code = "KindDiscriminatorMismatch",
+                            Message = $"DescriptorKind ({request.DescriptorKind}) does not match Payload.Discriminator ({request.Payload.Discriminator}). " +
+                                      "The declared kind and payload type must be consistent.",
+                            Severity = AgentToolDiagnosticSeverity.Error,
+                        }
+                    ]));
+            }
+
+            var domainPayload = AgentDescriptorDraftDtoProjection.ToDomainPayload(request.Payload);
 
             var draft = new Draft
             {
@@ -691,7 +709,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 AuthorKind = MapActorKind(context.ActorKind),
                 AuthorId = context.ActorId,
                 CreatedAt = DateTimeOffset.UtcNow,
-                Payload = request.Payload,
+                Payload = domainPayload,
                 BaseVersion = request.BaseVersion,
                 ProposedVersion = request.ProposedVersion,
                 Intent = request.Intent,
@@ -707,11 +725,12 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
             audit = audit with { TouchedDraftIds = [draft.DraftId] };
             await _auditor.RecordAsync(audit, ct);
-            return AgentToolResult<Draft>.Success(draft, audit);
+            var dto = AgentDescriptorDraftDtoProjection.FromDraft(draft);
+            return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, audit);
         }, ct);
     }
 
-    public async Task<AgentToolResult<Draft>> UpdateDescriptorDraftAsync(
+    public async Task<AgentToolResult<AgentDescriptorDraftDto>> UpdateDescriptorDraftAsync(
         AgentToolInvocationContext context, UpdateDescriptorDraftRequest request, CancellationToken ct = default)
     {
         // Complete — SingleDraft: snapshot reuse via _resourceResolver
@@ -722,20 +741,40 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (resolution.Status == ResourceResolutionStatus.NotFound)
             {
                 return await RecordAndReturn(context,
-                    AgentToolResult<Draft>.NotFound($"Draft '{request.DraftId}' not found."));
+                    AgentToolResult<AgentDescriptorDraftDto>.NotFound($"Draft '{request.DraftId}' not found."));
             }
 
             var snapshot = resolution.Snapshot!;
 
             // Kind visibility check on the resolved snapshot
-            var denyResult = DenyIfInvisible<Draft>(context, scope, snapshot.Draft.DescriptorKind);
+            var denyResult = DenyIfInvisible<AgentDescriptorDraftDto>(context, scope, snapshot.Draft.DescriptorKind);
             if (denyResult is not null)
                 return denyResult;
+
+            // Consistency check: if payload provided, its discriminator must match the draft's kind
+            if (request.Payload is not null && snapshot.Draft.DescriptorKind != request.Payload.Discriminator)
+            {
+                return await RecordAndReturn(context,
+                    AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest(
+                    [
+                        new AgentToolDiagnostic
+                        {
+                            Code = "KindDiscriminatorMismatch",
+                            Message = $"Draft DescriptorKind ({snapshot.Draft.DescriptorKind}) does not match Payload.Discriminator ({request.Payload.Discriminator}). " +
+                                      "The payload type must be consistent with the draft's declared kind.",
+                            Severity = AgentToolDiagnosticSeverity.Error,
+                        }
+                    ]));
+            }
+
+            var domainPayload = request.Payload is not null 
+                ? AgentDescriptorDraftDtoProjection.MergeToDomainPayload(snapshot.Draft.Payload, request.Payload) 
+                : null;
 
             // Execute from snapshot — no second store read
             var updated = snapshot.Draft with
             {
-                Payload = request.Payload ?? snapshot.Draft.Payload,
+                Payload = domainPayload ?? snapshot.Draft.Payload,
                 ProposedVersion = request.ProposedVersion ?? snapshot.Draft.ProposedVersion,
                 Intent = request.Intent ?? snapshot.Draft.Intent,
                 Rationale = request.Rationale ?? snapshot.Draft.Rationale,
@@ -747,11 +786,12 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
             audit = audit with { TouchedDraftIds = [updated.DraftId] };
             await _auditor.RecordAsync(audit, ct);
-            return AgentToolResult<Draft>.Success(updated, audit);
+            var dto = AgentDescriptorDraftDtoProjection.FromDraft(updated);
+            return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, audit);
         }, ct);
     }
 
-    public async Task<AgentToolResult<Draft>> GetDescriptorDraftAsync(
+    public async Task<AgentToolResult<AgentDescriptorDraftDto>> GetDescriptorDraftAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Complete — SingleDraft: snapshot reuse via _resourceResolver
@@ -762,13 +802,13 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (resolution.Status == ResourceResolutionStatus.NotFound)
             {
                 return await RecordAndReturn(context,
-                    AgentToolResult<Draft>.NotFound($"Draft '{draftId}' not found."));
+                    AgentToolResult<AgentDescriptorDraftDto>.NotFound($"Draft '{draftId}' not found."));
             }
 
             var snapshot = resolution.Snapshot!;
 
             // Kind visibility check on the resolved snapshot
-            var denyResult = DenyIfInvisible<Draft>(context, scope, snapshot.Draft.DescriptorKind);
+            var denyResult = DenyIfInvisible<AgentDescriptorDraftDto>(context, scope, snapshot.Draft.DescriptorKind);
             if (denyResult is not null)
                 return denyResult;
 
@@ -776,7 +816,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
             audit = audit with { TouchedDraftIds = [draftId] };
             await _auditor.RecordAsync(audit, ct);
-            return AgentToolResult<Draft>.Success(snapshot.Draft, audit);
+            var dto = AgentDescriptorDraftDtoProjection.FromDraft(snapshot.Draft);
+            return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, audit);
         }, ct);
     }
 
@@ -820,7 +861,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var visible = scope.Filter(drafts, d => d.DescriptorKind);
             var result = new DescriptorDraftListResult
             {
-                Drafts = visible,
+                Drafts = visible.Select(AgentDescriptorDraftDtoProjection.FromDraft).ToList().AsReadOnly(),
                 TotalCount = visible.Count
             };
 
@@ -834,7 +875,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         }, ct);
     }
 
-    public async Task<AgentToolResult<Draft>> CancelDescriptorDraftAsync(
+    public async Task<AgentToolResult<AgentDescriptorDraftDto>> CancelDescriptorDraftAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Complete — SingleDraft: snapshot reuse via _resourceResolver
@@ -845,13 +886,13 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (resolution.Status == ResourceResolutionStatus.NotFound)
             {
                 return await RecordAndReturn(context,
-                    AgentToolResult<Draft>.NotFound($"Draft '{draftId}' not found."));
+                    AgentToolResult<AgentDescriptorDraftDto>.NotFound($"Draft '{draftId}' not found."));
             }
 
             var snapshot = resolution.Snapshot!;
 
             // Kind visibility check on the resolved snapshot
-            var denyResult = DenyIfInvisible<Draft>(context, scope, snapshot.Draft.DescriptorKind);
+            var denyResult = DenyIfInvisible<AgentDescriptorDraftDto>(context, scope, snapshot.Draft.DescriptorKind);
             if (denyResult is not null)
                 return denyResult;
 
@@ -862,7 +903,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
             audit = audit with { TouchedDraftIds = [draftId] };
             await _auditor.RecordAsync(audit, ct);
-            return AgentToolResult<Draft>.Success(cancelled, audit);
+            var dto = AgentDescriptorDraftDtoProjection.FromDraft(cancelled);
+            return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, audit);
         }, ct);
     }
 
@@ -942,8 +984,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
             var result = new DraftComparisonResult
             {
-                Draft = snapshot.Draft,
-                CurrentActiveDescriptor = visibleActive,
+                Draft = AgentDescriptorDraftDtoProjection.FromDraft(snapshot.Draft),
+                CurrentActiveDescriptor = DescriptorSummaryDtoProjection.FromDescriptor(visibleActive),
                 Differences = differences.AsReadOnly()
             };
 
@@ -987,7 +1029,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         }, ct);
     }
 
-    public async Task<AgentToolResult<DraftReviewResult>> ReviewDescriptorDraftAsync(
+    public async Task<AgentToolResult<AgentReviewResultDto>> ReviewDescriptorDraftAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         return await ExecuteAsync(context, AgentToolName.ReviewDescriptorDraft, AgentToolPermissionName.ReviewRun, async (scope, ct) =>
@@ -996,12 +1038,12 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (resolution.Status == ResourceResolutionStatus.NotFound)
             {
                 return await RecordAndReturn(context,
-                    AgentToolResult<DraftReviewResult>.NotFound($"Draft '{draftId}' not found."));
+                    AgentToolResult<AgentReviewResultDto>.NotFound($"Draft '{draftId}' not found."));
             }
 
             var snapshot = resolution.Snapshot!;
 
-            var denyResult = DenyIfInvisible<DraftReviewResult>(context, scope, snapshot.Draft.DescriptorKind);
+            var denyResult = DenyIfInvisible<AgentReviewResultDto>(context, scope, snapshot.Draft.DescriptorKind);
             if (denyResult is not null)
                 return denyResult;
 
@@ -1012,7 +1054,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             // filtered through the visible descriptor identities.
             var universeResult = AgentVisibleDescriptorUniverse.TryCreate(currentInventory, scope);
             if (!universeResult.IsSuccess)
-                return await RecordAggregateFailure<DraftReviewResult>(context, "AUTHORIZATION_CONTEXT_UNAVAILABLE", ct);
+                return await RecordAggregateFailure<AgentReviewResultDto>(context, "AUTHORIZATION_CONTEXT_UNAVAILABLE", ct);
             var universe = universeResult.Universe!;
 
             var reviewResult = await _draftReviewService.ReviewAsync(snapshot.Draft, universe.VisibleDescriptors, ct);
@@ -1023,7 +1065,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var projectedReview = _artifactProjector.ProjectReview(reviewResult, scope, universe);
             if (projectedReview is null)
             {
-                return await RecordAggregateFailure<DraftReviewResult>(
+                return await RecordAggregateFailure<AgentReviewResultDto>(
                     context, "PACKAGE_PROJECTION_FAILURE", ct);
             }
 
@@ -1040,11 +1082,12 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 TouchedReviewResultIds = [reviewId]
             };
             await _auditor.RecordAsync(audit, ct);
-            return AgentToolResult<DraftReviewResult>.Success(projectedReview, audit);
+            var reviewDto = AgentReviewResultDtoProjection.Project(projectedReview);
+            return AgentToolResult<AgentReviewResultDto>.Success(reviewDto, audit);
         }, ct);
     }
 
-    public async Task<AgentToolResult<DraftReviewResult>> GetDraftReviewResultAsync(
+    public async Task<AgentToolResult<AgentReviewResultDto>> GetDraftReviewResultAsync(
         AgentToolInvocationContext context, string reviewResultId, CancellationToken ct = default)
     {
         return await ExecuteAsync(context, AgentToolName.GetDraftReviewResult, AgentToolPermissionName.ReviewRead, async (scope, ct) =>
@@ -1052,10 +1095,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (!_reviewResults.TryGetValue((context.TenantId, reviewResultId), out var snapshot))
             {
                 return await RecordAndReturn(context,
-                    AgentToolResult<DraftReviewResult>.NotFound($"Review result '{reviewResultId}' not found."));
+                    AgentToolResult<AgentReviewResultDto>.NotFound($"Review result '{reviewResultId}' not found."));
             }
 
-            var denyResult = DenyIfInvisible<DraftReviewResult>(context, scope, snapshot.Owner.DescriptorKind);
+            var denyResult = DenyIfInvisible<AgentReviewResultDto>(context, scope, snapshot.Owner.DescriptorKind);
             if (denyResult is not null)
                 return denyResult;
 
@@ -1064,7 +1107,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 TouchedReviewResultIds = [reviewResultId]
             };
             await _auditor.RecordAsync(audit, ct);
-            return AgentToolResult<DraftReviewResult>.Success(snapshot.Review, audit);
+            var reviewDto = AgentReviewResultDtoProjection.Project(snapshot.Review);
+            return AgentToolResult<AgentReviewResultDto>.Success(reviewDto, audit);
         }, ct);
     }
 
@@ -1110,7 +1154,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 .Select(r => r.Value.Review)
                 .ToList().AsReadOnly();
 
-            var result = new ReviewResultListResult { Results = visible };
+            var result = new ReviewResultListResult { Results = visible.Select(AgentReviewResultDtoProjection.Project).ToList().AsReadOnly() };
 
             var diags = scope.IsRestricted ? SecurityTrimmedDiagnostics : [];
             var audit = BuildAudit(context, AgentToolResultStatus.Success, diags);
@@ -1286,7 +1330,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         }, ct);
     }
 
-    public async Task<AgentToolResult<Draft>> ApplyFixProposalToDraftAsync(
+    public async Task<AgentToolResult<AgentDescriptorDraftDto>> ApplyFixProposalToDraftAsync(
         AgentToolInvocationContext context, ApplyFixProposalRequest request, CancellationToken ct = default)
     {
         // Complete — Indirect: owner-kind visibility + snapshot reuse
@@ -1295,10 +1339,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (!_fixProposals.TryGetValue((context.TenantId, request.ProposalId), out var proposalSnapshot))
             {
                 return await RecordAndReturn(context,
-                    AgentToolResult<Draft>.NotFound($"Fix proposal '{request.ProposalId}' not found."));
+                    AgentToolResult<AgentDescriptorDraftDto>.NotFound($"Fix proposal '{request.ProposalId}' not found."));
             }
 
-            var denyResult = DenyIfInvisible<Draft>(context, scope, proposalSnapshot.Owner.DescriptorKind);
+            var denyResult = DenyIfInvisible<AgentDescriptorDraftDto>(context, scope, proposalSnapshot.Owner.DescriptorKind);
             if (denyResult is not null)
                 return denyResult;
 
@@ -1306,7 +1350,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (draftResolution.Status == ResourceResolutionStatus.NotFound)
             {
                 return await RecordAndReturn(context,
-                    AgentToolResult<Draft>.NotFound($"Draft '{request.DraftId}' not found."));
+                    AgentToolResult<AgentDescriptorDraftDto>.NotFound($"Draft '{request.DraftId}' not found."));
             }
 
             var draft = draftResolution.Snapshot!.Draft;
@@ -1321,7 +1365,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 };
                 var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [mismatchDiag]);
                 await _auditor.RecordAsync(audit, ct);
-                return AgentToolResult<Draft>.InvalidRequest([mismatchDiag], audit);
+                return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([mismatchDiag], audit);
             }
 
             var updatedDraft = draft;
@@ -1370,7 +1414,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 TouchedFixProposalIds = [request.ProposalId]
             };
             await _auditor.RecordAsync(successAudit, ct);
-            return AgentToolResult<Draft>.Success(updatedDraft, successDiags, successAudit);
+            var dto = AgentDescriptorDraftDtoProjection.FromDraft(updatedDraft);
+            return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, successDiags, successAudit);
         }, ct);
     }
 
