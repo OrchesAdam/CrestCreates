@@ -258,6 +258,15 @@ internal sealed class ContractModelBuilder
                         .FirstOrDefault(kvp => kvp.Key == "Name").Value.Value?.ToString();
             }
 
+            // ADP006: RequiredOnCreate is only valid on EditableScalar or EditableReference
+            if (isRequiredOnCreate && classification != FieldClassification.EditableScalar && classification != FieldClassification.EditableReference)
+            {
+                _context.ReportDiagnostic(AgentDraftContractDiagnostics.Create(
+                    AgentDraftContractDiagnostics.InvalidRequiredOnCreate,
+                    property.Locations.FirstOrDefault(),
+                    property.Name, kindName));
+            }
+
             var contractName = contractNameOverride ?? property.Name;
 
             // Extract Preserve data
@@ -309,6 +318,20 @@ internal sealed class ContractModelBuilder
                 PreserveReason = preserveReason,
                 UnsupportedReason = unsupportedReason
             });
+        }
+
+        // ADP008: Check for duplicate ContractNames within the same kind
+        var contractNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var field in fields)
+        {
+            if (!contractNames.Add(field.ContractName))
+            {
+                var specProp = specSymbol.GetMembers(field.PropertyName).FirstOrDefault();
+                _context.ReportDiagnostic(AgentDraftContractDiagnostics.Create(
+                    AgentDraftContractDiagnostics.InvalidContractName,
+                    specProp?.Locations.FirstOrDefault(),
+                    field.ContractName, field.PropertyName, kindName));
+            }
         }
 
         // Sort by classification order, then by contract name for determinism

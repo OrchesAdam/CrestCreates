@@ -6,8 +6,14 @@ namespace CrestCreates.Agent.ControlPlane.Abstractions;
 /// <summary>
 /// Adapter-safe projection of DescriptorDraft.
 /// Replaces DescriptorDraft in all tool results and request DTOs.
-/// Payload uses AgentDraftPayloadDto (nested one-of) instead of
-/// abstract DescriptorDraftPayload.
+/// Payload uses generated AgentDraftPayloadDto (source-generated from
+/// CrestCreates.Agent.DraftContracts specs) instead of abstract DescriptorDraftPayload.
+///
+/// Ownership note (#42): The draft payload contract (AgentDraftPayloadDto,
+/// AgentDraftPayloadPatchDto, projection/merge logic) is fully source-generated
+/// by AgentDraftContractGenerator. This DTO wraps the generated payload but is
+/// itself a ControlPlane Tool DTO — not generated. Future work may migrate this
+/// wrapper into DraftContracts.Dto as well, but for 7c.v1 it remains here.
 /// </summary>
 public sealed record AgentDescriptorDraftDto
 {

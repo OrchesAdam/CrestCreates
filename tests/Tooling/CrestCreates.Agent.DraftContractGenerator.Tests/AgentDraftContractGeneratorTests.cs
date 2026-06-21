@@ -620,6 +620,121 @@ public class AgentDraftContractGeneratorTests
     }
 
     // ──────────────────────────────────────────────────────────────
+    // Test 12: ADP003 — Multiple classifications on one property
+    // ──────────────────────────────────────────────────────────────
+
+    private const string MultipleClassificationsSource = """
+        using CrestCreates.Metadata.Abstractions;
+        using CrestCreates.Agent.DraftContracts.Specs;
+
+        namespace TestSpecs;
+
+        [AgentDraftContractSpec(Kind = DescriptorKind.Capability)]
+        public sealed class DoubleClassifiedSpec
+        {
+            [AgentDraftField]
+            [AgentDraftReference]
+            public string Name { get; init; } = string.Empty;
+        }
+        """;
+
+    [Fact]
+    public void Diagnostic_ADPC003_For_Multiple_Classifications()
+    {
+        var (_, diagnostics) = RunGenerator(MultipleClassificationsSource);
+
+        diagnostics.Should().Contain(d =>
+            d.Id == "ADP003" &&
+            d.Severity == DiagnosticSeverity.Error &&
+            d.GetMessage().Contains("Name"));
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Test 13: ADP006 — RequiredOnCreate on non-EditableScalar/EditableReference
+    // ──────────────────────────────────────────────────────────────
+
+    private const string InvalidRequiredOnCreateSource = """
+        using CrestCreates.Metadata.Abstractions;
+        using CrestCreates.Agent.DraftContracts.Specs;
+
+        namespace TestSpecs;
+
+        [AgentDraftContractSpec(Kind = DescriptorKind.Capability)]
+        public sealed class InvalidRequiredSpec
+        {
+            [AgentDraftField]
+            public string Name { get; init; } = string.Empty;
+
+            // RequiredOnCreate on a Preserve field is invalid
+            [AgentDraftPreserve(Reason = "test", CreateStrategy = PreserveCreateStrategy.CreateDefault)]
+            [AgentDraftRequiredOnCreate]
+            public string? SupersededById { get; init; }
+        }
+        """;
+
+    [Fact]
+    public void Diagnostic_ADPC006_For_Invalid_RequiredOnCreate()
+    {
+        var (_, diagnostics) = RunGenerator(InvalidRequiredOnCreateSource);
+
+        diagnostics.Should().Contain(d =>
+            d.Id == "ADP006" &&
+            d.Severity == DiagnosticSeverity.Error &&
+            d.GetMessage().Contains("SupersededById"));
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Test 14: ADP008 — Duplicate ContractName
+    // ──────────────────────────────────────────────────────────────
+
+    private const string DuplicateContractNameSource = """
+        using CrestCreates.Metadata.Abstractions;
+        using CrestCreates.Agent.DraftContracts.Specs;
+
+        namespace TestSpecs;
+
+        [AgentDraftContractSpec(Kind = DescriptorKind.Capability)]
+        public sealed class DuplicateNameSpec
+        {
+            [AgentDraftField]
+            public string Name { get; init; } = string.Empty;
+
+            [AgentDraftField]
+            [AgentDraftContractName(Name = "Name")]
+            public DescriptorState State { get; init; }
+        }
+        """;
+
+    [Fact]
+    public void Diagnostic_ADPC008_For_Duplicate_ContractName()
+    {
+        var (_, diagnostics) = RunGenerator(DuplicateContractNameSource);
+
+        diagnostics.Should().Contain(d =>
+            d.Id == "ADP008" &&
+            d.Severity == DiagnosticSeverity.Error);
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Test 15: ADP005, ADP007, ADP009 — Defense-in-depth diagnostics
+    // ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Defense_In_Depth_Diagnostics_Are_Defined()
+    {
+        // ADP005, ADP007, ADP009 are defense-in-depth diagnostics that cannot be
+        // triggered through normal C# compilation because the attribute system
+        // prevents the invalid states they detect. They exist as safety nets for
+        // future spec evolution. Verify they are not spuriously emitted when
+        // specs are valid.
+        var (_, diagnostics) = RunGenerator(AllSixKindsSource);
+
+        diagnostics.Should().NotContain(d => d.Id == "ADP005");
+        diagnostics.Should().NotContain(d => d.Id == "ADP007");
+        diagnostics.Should().NotContain(d => d.Id == "ADP009");
+    }
+
+    // ──────────────────────────────────────────────────────────────
     // Utility
     // ──────────────────────────────────────────────────────────────
 
