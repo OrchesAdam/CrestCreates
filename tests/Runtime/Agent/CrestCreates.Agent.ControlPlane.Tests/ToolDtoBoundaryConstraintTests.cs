@@ -3,6 +3,7 @@ using System.Text.Json;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using CrestCreates.Agent.ControlPlane.Projections;
+using CrestCreates.Agent.DraftContracts.Dto;
 using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -12,6 +13,7 @@ using FluentAssertions;
 using Xunit;
 
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
+using AgentDraftContractErrorCodes = CrestCreates.Agent.DraftContracts.Dto.AgentDraftContractErrorCodes;
 
 namespace CrestCreates.Agent.ControlPlane.Tests;
 
@@ -276,14 +278,14 @@ public class ToolDtoBoundaryConstraintTests
 
         payloadProp.Should().NotBeNull("UpdateDescriptorDraftRequest must have Payload property");
         payloadProp!.PropertyType.Should().Be(
-            typeof(AgentDraftPayloadDto),
-            "UpdateDescriptorDraftRequest.Payload must be AgentDraftPayloadDto, not DescriptorDraftPayload");
+            typeof(AgentDraftPayloadPatchDto),
+            "UpdateDescriptorDraftRequest.Payload must be AgentDraftPayloadPatchDto, not DescriptorDraftPayload or AgentDraftPayloadDto");
         // Verify nullable annotation
         var nullableContext = new NullabilityInfoContext();
         var nullabilityInfo = nullableContext.Create(payloadProp);
         nullabilityInfo.ReadState.Should().Be(
             NullabilityState.Nullable,
-            "UpdateDescriptorDraftRequest.Payload must be nullable (AgentDraftPayloadDto?)");
+            "UpdateDescriptorDraftRequest.Payload must be nullable (AgentDraftPayloadPatchDto?)");
     }
 
     // ── Test 7: DescriptorPackagePreview unsafe type check ────────────
@@ -426,18 +428,19 @@ public class ToolDtoBoundaryConstraintTests
         isValid2.Should().BeFalse(
             "mixed-kind payload (Workflow + HumanTask populated) must be rejected");
 
-        // Event discriminator with no matching sub-record populated
-        // Currently the generated Create method uses dto.Event! without a null check,
-        // so mismatched discriminator+payload causes NullReferenceException.
+        // Event discriminator with no matching sub-record populated.
+        // Discriminator-aware validation now catches this at TryValidatePayload,
+        // so Create returns failure instead of NRE.
         var mismatchedPayload = new AgentDraftPayloadDto
         {
             Discriminator = DescriptorKind.Event,
             Capability = new AgentCapabilityDraftPayloadDto { CapabilityKind = CapabilityKind.Command, RiskLevel = CapabilityRiskLevel.Low, State = DescriptorState.Active },
         };
 
-        var act3 = () => AgentDraftPayloadProjection.Create(mismatchedPayload);
-        act3.Should().Throw<NullReferenceException>(
-            "mismatched payload (Event discriminator but Capability populated) triggers NullReferenceException in generated projection");
+        var result3 = AgentDraftPayloadProjection.Create(mismatchedPayload);
+        result3.IsSuccess.Should().BeFalse(
+            "mismatched payload (Event discriminator but Capability populated) must be rejected");
+        result3.Errors.Should().Contain(e => e.Code == AgentDraftContractErrorCodes.DiscriminatorMismatch);
     }
 
     private static void AssertValidDiscriminator(

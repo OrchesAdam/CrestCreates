@@ -310,115 +310,6 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             Message = error.Message,
         };
 
-    /// <summary>
-    /// Wraps an <see cref="AgentDraftPayloadDto"/> in an <see cref="AgentDraftPayloadPatchDto"/>
-    /// with all ChangedFields flags set (full-replace semantics for updates).
-    /// </summary>
-    private static AgentDraftPayloadPatchDto BuildPatch(AgentDraftPayloadDto dto)
-    {
-        return dto.Discriminator switch
-        {
-            DescriptorKind.Capability => new AgentDraftPayloadPatchDto
-            {
-                Discriminator = dto.Discriminator,
-                Capability = new AgentCapabilityDraftPayloadPatchDto
-                {
-                    Payload = dto.Capability!,
-                    ChangedFields = AgentCapabilityDraftChangedField.CapabilityKind
-                        | AgentCapabilityDraftChangedField.Consumes
-                        | AgentCapabilityDraftChangedField.ContractHash
-                        | AgentCapabilityDraftChangedField.DefinitionHash
-                        | AgentCapabilityDraftChangedField.InputSchema
-                        | AgentCapabilityDraftChangedField.Name
-                        | AgentCapabilityDraftChangedField.OutputSchema
-                        | AgentCapabilityDraftChangedField.Produces
-                        | AgentCapabilityDraftChangedField.RiskLevel
-                        | AgentCapabilityDraftChangedField.State
-                        | AgentCapabilityDraftChangedField.Version,
-                },
-            },
-            DescriptorKind.Event => new AgentDraftPayloadPatchDto
-            {
-                Discriminator = dto.Discriminator,
-                Event = new AgentEventDraftPayloadPatchDto
-                {
-                    Payload = dto.Event!,
-                    ChangedFields = AgentEventDraftChangedField.Category
-                        | AgentEventDraftChangedField.ChangeKind
-                        | AgentEventDraftChangedField.ContractHash
-                        | AgentEventDraftChangedField.DefinitionHash
-                        | AgentEventDraftChangedField.Importance
-                        | AgentEventDraftChangedField.Name
-                        | AgentEventDraftChangedField.PayloadSchema
-                        | AgentEventDraftChangedField.Semantic
-                        | AgentEventDraftChangedField.State
-                        | AgentEventDraftChangedField.Version,
-                },
-            },
-            DescriptorKind.Form => new AgentDraftPayloadPatchDto
-            {
-                Discriminator = dto.Discriminator,
-                Form = new AgentFormDraftPayloadPatchDto
-                {
-                    Payload = dto.Form!,
-                    ChangedFields = AgentFormDraftChangedField.ContractHash
-                        | AgentFormDraftChangedField.DefinitionHash
-                        | AgentFormDraftChangedField.FormSchema
-                        | AgentFormDraftChangedField.Name
-                        | AgentFormDraftChangedField.State
-                        | AgentFormDraftChangedField.Version,
-                },
-            },
-            DescriptorKind.HumanTask => new AgentDraftPayloadPatchDto
-            {
-                Discriminator = dto.Discriminator,
-                HumanTask = new AgentHumanTaskDraftPayloadPatchDto
-                {
-                    Payload = dto.HumanTask!,
-                    ChangedFields = AgentHumanTaskDraftChangedField.AssigneeStrategy
-                        | AgentHumanTaskDraftChangedField.ContractHash
-                        | AgentHumanTaskDraftChangedField.DefinitionHash
-                        | AgentHumanTaskDraftChangedField.InputSchema
-                        | AgentHumanTaskDraftChangedField.Interaction
-                        | AgentHumanTaskDraftChangedField.Name
-                        | AgentHumanTaskDraftChangedField.OutputSchema
-                        | AgentHumanTaskDraftChangedField.State
-                        | AgentHumanTaskDraftChangedField.Timeout
-                        | AgentHumanTaskDraftChangedField.Version,
-                },
-            },
-            DescriptorKind.Schema => new AgentDraftPayloadPatchDto
-            {
-                Discriminator = dto.Discriminator,
-                Schema = new AgentSchemaDraftPayloadPatchDto
-                {
-                    Payload = dto.Schema!,
-                    ChangedFields = AgentSchemaDraftChangedField.ChangeKind
-                        | AgentSchemaDraftChangedField.ContractHash
-                        | AgentSchemaDraftChangedField.DefinitionHash
-                        | AgentSchemaDraftChangedField.Name
-                        | AgentSchemaDraftChangedField.State
-                        | AgentSchemaDraftChangedField.Version,
-                },
-            },
-            DescriptorKind.Workflow => new AgentDraftPayloadPatchDto
-            {
-                Discriminator = dto.Discriminator,
-                Workflow = new AgentWorkflowDraftPayloadPatchDto
-                {
-                    Payload = dto.Workflow!,
-                    ChangedFields = AgentWorkflowDraftChangedField.ContractHash
-                        | AgentWorkflowDraftChangedField.DefinitionHash
-                        | AgentWorkflowDraftChangedField.Name
-                        | AgentWorkflowDraftChangedField.State
-                        | AgentWorkflowDraftChangedField.VariableSchema
-                        | AgentWorkflowDraftChangedField.Version,
-                },
-            },
-            _ => throw new NotSupportedException($"Unsupported descriptor kind for patch: {dto.Discriminator}."),
-        };
-    }
-
     // ── Aggregate visibility helpers ──
 
     /// <summary>
@@ -944,22 +835,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     ]));
             }
 
-            // One-of invariant check on payload if provided
-            if (request.Payload is not null)
-            {
-                var (isUpdValid, updValidationError) = AgentDraftPayloadProjection.TryValidatePayload(request.Payload);
-                if (!isUpdValid)
-                {
-                    return await RecordAndReturn(context,
-                        AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([ConvertErrorToDiagnostic(updValidationError!)]));
-                }
-            }
-
             DraftAbstractions.DescriptorDraftPayload? domainPayload = null;
             if (request.Payload is not null)
             {
-                var patch = BuildPatch(request.Payload);
-                var mergeResult = AgentDraftPayloadProjection.Merge(patch, snapshot.Draft.Payload);
+                var mergeResult = AgentDraftPayloadProjection.Merge(request.Payload, snapshot.Draft.Payload);
                 if (!mergeResult.IsSuccess)
                 {
                     return await RecordAndReturn(context,

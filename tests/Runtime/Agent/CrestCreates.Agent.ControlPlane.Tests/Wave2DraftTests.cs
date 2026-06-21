@@ -1,10 +1,13 @@
 using Xunit;
 using Moq;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
+using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
+using CrestCreates.Agent.DraftContracts.Dto;
 using AgentDraftContractErrorCodes = CrestCreates.Agent.DraftContracts.Dto.AgentDraftContractErrorCodes;
 
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
@@ -275,7 +278,15 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
         var request = new UpdateDescriptorDraftRequest
         {
             DraftId = "draft-001",
-            Payload = CreateTestPayloadDto(DescriptorKind.Schema, "test.desc-001", "TestSchema")
+            Payload = new AgentDraftPayloadPatchDto
+            {
+                Discriminator = DescriptorKind.Schema,
+                Schema = new AgentSchemaDraftPayloadPatchDto
+                {
+                    Payload = CreateTestPayloadDto(DescriptorKind.Schema, "test.desc-001", "TestSchema").Schema!,
+                    ChangedFields = AgentSchemaDraftChangedField.Name,
+                },
+            },
         };
 
         var result = await service.UpdateDescriptorDraftAsync(context, request);
@@ -320,7 +331,15 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
         var request = new UpdateDescriptorDraftRequest
         {
             DraftId = "draft-001",
-            Payload = CreateTestPayloadDto(DescriptorKind.Schema, "test.desc-001", "TestSchema")
+            Payload = new AgentDraftPayloadPatchDto
+            {
+                Discriminator = DescriptorKind.Schema,
+                Schema = new AgentSchemaDraftPayloadPatchDto
+                {
+                    Payload = CreateTestPayloadDto(DescriptorKind.Schema, "test.desc-001", "TestSchema").Schema!,
+                    ChangedFields = AgentSchemaDraftChangedField.Name,
+                },
+            },
         };
 
         _ = await service.UpdateDescriptorDraftAsync(context, request);
@@ -385,7 +404,7 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
     {
         var service = CreateService();
         var context = CreateContext("UpdateDescriptorDraft");
-        var existing = CreateTestDraft(kind: DescriptorKind.Event);
+        var existing = CreateTestDraft(kind: DescriptorKind.Workflow);
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult<Draft?>(existing));
@@ -393,13 +412,16 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
         var request = new UpdateDescriptorDraftRequest
         {
             DraftId = "draft-001",
-            Payload = new AgentDraftPayloadDto
+            Payload = new AgentDraftPayloadPatchDto
             {
-                Discriminator = DescriptorKind.Event,
-                Event = new AgentEventDraftPayloadDto { Name = "TestEvent", State = DescriptorState.Active, Category = EventCategory.Domain, Semantic = EventSemantic.Fact, Importance = EventImportance.Operational, ChangeKind = SchemaChangeKind.Additive },
-                Schema = new AgentSchemaDraftPayloadDto { Name = "TestSchema", State = DescriptorState.Active, ChangeKind = SchemaChangeKind.Additive },
-                // Both Event and Schema populated — violates one-of invariant
-            }
+                Discriminator = DescriptorKind.Workflow,
+                Capability = new AgentCapabilityDraftPayloadPatchDto
+                {
+                    Payload = new AgentCapabilityDraftPayloadDto { Name = "test", CapabilityKind = CapabilityKind.Command, RiskLevel = CapabilityRiskLevel.Low, State = DescriptorState.Active },
+                    ChangedFields = AgentCapabilityDraftChangedField.Name,
+                },
+                // Capability branch populated but Discriminator is Workflow — violates ValidatePatchDiscriminator
+            },
         };
 
         var result = await service.UpdateDescriptorDraftAsync(context, request);
@@ -451,5 +473,77 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
 
         resultA.Status.Should().Be(AgentToolResultStatus.Success);
         resultB.Status.Should().Be(AgentToolResultStatus.NotFound);
+    }
+
+    // ── Discriminator-aware TryValidatePayload tests ──
+
+    [Fact]
+    public void Create_DiscriminatorWorkflow_WithCapabilityBranch_Returns_DiscriminatorMismatch()
+    {
+        var dto = new AgentDraftPayloadDto
+        {
+            Discriminator = DescriptorKind.Workflow,
+            Capability = new AgentCapabilityDraftPayloadDto
+            {
+                Name = "test",
+                CapabilityKind = CapabilityKind.Command,
+                RiskLevel = CapabilityRiskLevel.Low,
+                State = DescriptorState.Active
+            }
+        };
+        var (isValid, error) = AgentDraftPayloadProjection.TryValidatePayload(dto);
+        isValid.Should().BeFalse();
+        error!.Code.Should().Be(AgentDraftContractErrorCodes.DiscriminatorMismatch);
+    }
+
+    [Fact]
+    public void Create_DiscriminatorSet_ButMatchingBranchMissing_Returns_DiscriminatorMismatch()
+    {
+        var dto = new AgentDraftPayloadDto
+        {
+            Discriminator = DescriptorKind.Workflow,
+            // Workflow is null, no branches populated
+        };
+        var (isValid, error) = AgentDraftPayloadProjection.TryValidatePayload(dto);
+        isValid.Should().BeFalse();
+        error!.Code.Should().Be(AgentDraftContractErrorCodes.DiscriminatorMismatch);
+    }
+
+    [Fact]
+    public void Merge_DiscriminatorWorkflow_WithCapabilityPatchBranch_Returns_DiscriminatorMismatch()
+    {
+        var patch = new global::CrestCreates.Agent.DraftContracts.Dto.AgentDraftPayloadPatchDto
+        {
+            Discriminator = DescriptorKind.Workflow,
+            Capability = new global::CrestCreates.Agent.DraftContracts.Dto.AgentCapabilityDraftPayloadPatchDto
+            {
+                Payload = new AgentCapabilityDraftPayloadDto
+                {
+                    Name = "test",
+                    CapabilityKind = CapabilityKind.Command,
+                    RiskLevel = CapabilityRiskLevel.Low,
+                    State = DescriptorState.Active
+                },
+                ChangedFields = global::CrestCreates.Agent.DraftContracts.Dto.AgentCapabilityDraftChangedField.Name
+            }
+        };
+        var existing = new DraftAbstractions.WorkflowDescriptorDraftPayload(new WorkflowDescriptor { Name = "existing" });
+        var result = AgentDraftPayloadProjection.Merge(patch, existing);
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Code == AgentDraftContractErrorCodes.DiscriminatorMismatch);
+    }
+
+    [Fact]
+    public void Merge_DiscriminatorSet_ButMatchingPatchBranchMissing_Returns_DiscriminatorMismatch()
+    {
+        var patch = new global::CrestCreates.Agent.DraftContracts.Dto.AgentDraftPayloadPatchDto
+        {
+            Discriminator = DescriptorKind.Workflow,
+            // Workflow patch is null
+        };
+        var existing = new DraftAbstractions.WorkflowDescriptorDraftPayload(new WorkflowDescriptor { Name = "existing" });
+        var result = AgentDraftPayloadProjection.Merge(patch, existing);
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Code == AgentDraftContractErrorCodes.DiscriminatorMismatch);
     }
 }

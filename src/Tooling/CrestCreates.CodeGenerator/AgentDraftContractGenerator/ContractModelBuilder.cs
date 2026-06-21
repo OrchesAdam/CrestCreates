@@ -28,6 +28,14 @@ internal sealed class ContractModelBuilder
         "Capability", "Workflow", "HumanTask", "Form", "Event", "Schema"
     };
 
+    // Properties on IDescriptor that are identity/infrastructure — never editable, never need classification
+    private static readonly HashSet<string> InfrastructureProperties = new(StringComparer.Ordinal)
+    {
+        "Namespace",  // Registry domain, computed from descriptor type
+        "Id",         // Immutable identity
+        "Kind",       // Computed descriptor kind discriminator, never editable
+    };
+
     // Validates that KindName is one of the known descriptor kinds.
     private static bool IsKnownKind(string kindName)
     {
@@ -50,13 +58,27 @@ internal sealed class ContractModelBuilder
 
     public ContractModel? Build(ImmutableArray<SpecClassInfo> specs)
     {
+        var specKinds = new HashSet<string>(StringComparer.Ordinal);
         var kinds = new List<ContractKindSpec>();
 
         foreach (var spec in specs)
         {
+            specKinds.Add(spec.KindName);
             var kindSpec = BuildKindSpec(spec);
             if (kindSpec is not null)
                 kinds.Add(kindSpec);
+        }
+
+        // ADP001: Check for known kinds that have no spec class
+        foreach (var knownKind in KnownKinds)
+        {
+            if (!specKinds.Contains(knownKind))
+            {
+                _context.ReportDiagnostic(AgentDraftContractDiagnostics.Create(
+                    AgentDraftContractDiagnostics.NoSpecForDescriptor,
+                    null,
+                    knownKind));
+            }
         }
 
         if (kinds.Count == 0) return null;
@@ -91,6 +113,53 @@ internal sealed class ContractModelBuilder
         if (descriptorType is null || payloadType is null) return null;
 
         var fields = BuildFields(spec.Symbol, kindName);
+
+        // ── Descriptor closure validation ──
+        // Every public persistent property on the descriptor type must be classified in the spec.
+        var classifiedNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var f in fields)
+            classifiedNames.Add(f.PropertyName);
+
+        // (a) Descriptor properties not classified in the spec → ADP002
+        foreach (var member in descriptorType.GetMembers())
+        {
+            if (member is not IPropertySymbol prop) continue;
+            if (prop.IsStatic || prop.IsImplicitlyDeclared) continue;
+            if (prop.DeclaredAccessibility != Accessibility.Public) continue;
+            if (InfrastructureProperties.Contains(prop.Name)) continue;
+
+            if (!classifiedNames.Contains(prop.Name))
+            {
+                _context.ReportDiagnostic(AgentDraftContractDiagnostics.Create(
+                    AgentDraftContractDiagnostics.NoClassification,
+                    prop.Locations.FirstOrDefault(),
+                    prop.Name, kindName));
+            }
+        }
+
+        // (b) Spec property names that don't exist on descriptor type → ADP010
+        var descriptorPropertyNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var member in descriptorType.GetMembers())
+        {
+            if (member is IPropertySymbol prop && !prop.IsStatic && !prop.IsImplicitlyDeclared
+                && prop.DeclaredAccessibility == Accessibility.Public
+                && !InfrastructureProperties.Contains(prop.Name))
+            {
+                descriptorPropertyNames.Add(prop.Name);
+            }
+        }
+
+        foreach (var fieldName in classifiedNames)
+        {
+            if (!descriptorPropertyNames.Contains(fieldName))
+            {
+                var specProp = spec.Symbol.GetMembers(fieldName).FirstOrDefault();
+                _context.ReportDiagnostic(AgentDraftContractDiagnostics.Create(
+                    AgentDraftContractDiagnostics.UnsupportedReference,
+                    specProp?.Locations.FirstOrDefault(),
+                    fieldName, fieldName, kindName));
+            }
+        }
 
         return new ContractKindSpec
         {

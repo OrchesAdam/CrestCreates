@@ -40,7 +40,7 @@ public class ProjectionValidationTests
         isValid.Should().BeFalse();
         error.Should().NotBeNull();
         error!.Code.Should().Be(AgentDraftContractErrorCodes.DiscriminatorMismatch);
-        error.Message.Should().Contain("no matching payload branch");
+        error.Message.Should().Contain("matching branch is not populated");
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public class ProjectionValidationTests
         isValid.Should().BeFalse();
         error.Should().NotBeNull();
         error!.Code.Should().Be(AgentDraftContractErrorCodes.DiscriminatorMismatch);
-        error.Message.Should().Contain("Multiple payload branches");
+        error.Message.Should().Contain("other branches are populated");
     }
 
     [Fact]

@@ -16,6 +16,7 @@ internal sealed class AgentDraftContractProjectionWriter
         WriteFromDomain(sb, model);
         WriteCreate(sb, model);
         WriteMerge(sb, model);
+        WriteValidatePatchDiscriminator(sb, model);
         WriteTryValidatePayload(sb, model);
 
         sb.AppendLine("}");
@@ -336,17 +337,11 @@ internal sealed class AgentDraftContractProjectionWriter
         sb.AppendLine("            return AgentDraftContractResult<DescriptorDraftPayload>.Failure(new AgentDraftContractError { Code = AgentDraftContractErrorCodes.NullPayload, Message = \"Existing payload is null.\" });");
         sb.AppendLine();
 
-        // Validate one-of on patch
-        sb.AppendLine("        // Validate patch discriminator matches exactly one populated branch");
-        sb.AppendLine("        int populated = 0;");
-
-        foreach (var kind in model.Kinds)
-            sb.AppendLine($"        if (patch.{kind.KindName} is not null) populated++;");
-
-        sb.AppendLine("        if (populated == 0)");
-        sb.AppendLine("            return AgentDraftContractResult<DescriptorDraftPayload>.Failure(new AgentDraftContractError { Code = AgentDraftContractErrorCodes.DiscriminatorMismatch, Message = \"Patch discriminator is set but no matching payload branch is populated.\" });");
-        sb.AppendLine("        if (populated > 1)");
-        sb.AppendLine("            return AgentDraftContractResult<DescriptorDraftPayload>.Failure(new AgentDraftContractError { Code = AgentDraftContractErrorCodes.DiscriminatorMismatch, Message = \"Multiple patch branches are populated. Only one is allowed.\" });");
+        // Validate patch discriminator matches exactly one populated branch matching the discriminator
+        sb.AppendLine("        // Validate patch discriminator matches exactly one populated branch matching the discriminator");
+        sb.AppendLine("        var patchValidation = ValidatePatchDiscriminator(patch);");
+        sb.AppendLine("        if (!patchValidation.IsValid)");
+        sb.AppendLine("            return AgentDraftContractResult<DescriptorDraftPayload>.Failure(patchValidation.Error!);");
         sb.AppendLine();
 
         sb.AppendLine("        return patch.Discriminator switch");
@@ -458,19 +453,57 @@ internal sealed class AgentDraftContractProjectionWriter
         sb.AppendLine("        if (dto is null)");
         sb.AppendLine("            return (false, new AgentDraftContractError { Code = AgentDraftContractErrorCodes.NullPayload, Message = \"Payload is null.\" });");
         sb.AppendLine();
-        sb.AppendLine("        int populated = 0;");
+        sb.AppendLine("        return dto.Discriminator switch");
+        sb.AppendLine("        {");
 
         foreach (var kind in model.Kinds)
-            sb.AppendLine($"        if (dto.{kind.KindName} is not null) populated++;");
+        {
+            // Build the "other branches are null" condition
+            var otherBranchChecks = model.Kinds
+                .Where(k => k.KindName != kind.KindName)
+                .Select(k => $"dto.{k.KindName} is null")
+                .ToList();
+            var othersNull = otherBranchChecks.Count > 0
+                ? string.Join(" && ", otherBranchChecks)
+                : "true";
 
+            sb.AppendLine($"            DescriptorKind.{kind.KindName} => dto.{kind.KindName} is not null && {othersNull}");
+            sb.AppendLine($"                ? (true, null)");
+            sb.AppendLine($"                : (false, new AgentDraftContractError {{ Code = AgentDraftContractErrorCodes.DiscriminatorMismatch, Message = \"Discriminator is {kind.KindName} but the matching branch is not populated or other branches are populated.\" }}),");
+        }
+
+        sb.AppendLine("            _ => (false, new AgentDraftContractError { Code = AgentDraftContractErrorCodes.UnsupportedKind, Message = $\"Unsupported descriptor kind: {dto.Discriminator}.\" }),");
+        sb.AppendLine("        };");
+        sb.AppendLine("    }");
+    }
+
+    private void WriteValidatePatchDiscriminator(StringBuilder sb, ContractModel model)
+    {
+        sb.AppendLine("    // ── ValidatePatchDiscriminator ──");
         sb.AppendLine();
-        sb.AppendLine("        if (populated == 0)");
-        sb.AppendLine("            return (false, new AgentDraftContractError { Code = AgentDraftContractErrorCodes.DiscriminatorMismatch, Message = \"Discriminator is set but no matching payload branch is populated.\" });");
-        sb.AppendLine();
-        sb.AppendLine("        if (populated > 1)");
-        sb.AppendLine("            return (false, new AgentDraftContractError { Code = AgentDraftContractErrorCodes.DiscriminatorMismatch, Message = \"Multiple payload branches are populated. Only one is allowed.\" });");
-        sb.AppendLine();
-        sb.AppendLine("        return (true, null);");
+        sb.AppendLine("    private static (bool IsValid, AgentDraftContractError? Error) ValidatePatchDiscriminator(AgentDraftPayloadPatchDto patch)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        return patch.Discriminator switch");
+        sb.AppendLine("        {");
+
+        foreach (var kind in model.Kinds)
+        {
+            // Build the "other branches are null" condition
+            var otherBranchChecks = model.Kinds
+                .Where(k => k.KindName != kind.KindName)
+                .Select(k => $"patch.{k.KindName} is null")
+                .ToList();
+            var othersNull = otherBranchChecks.Count > 0
+                ? string.Join(" && ", otherBranchChecks)
+                : "true";
+
+            sb.AppendLine($"            DescriptorKind.{kind.KindName} => patch.{kind.KindName} is not null && {othersNull}");
+            sb.AppendLine($"                ? (true, null)");
+            sb.AppendLine($"                : (false, new AgentDraftContractError {{ Code = AgentDraftContractErrorCodes.DiscriminatorMismatch, Message = \"Patch discriminator is {kind.KindName} but the matching branch is not populated or other branches are populated.\" }}),");
+        }
+
+        sb.AppendLine("            _ => (false, new AgentDraftContractError { Code = AgentDraftContractErrorCodes.UnsupportedKind, Message = $\"Unsupported descriptor kind: {patch.Discriminator}.\" }),");
+        sb.AppendLine("        };");
         sb.AppendLine("    }");
     }
 

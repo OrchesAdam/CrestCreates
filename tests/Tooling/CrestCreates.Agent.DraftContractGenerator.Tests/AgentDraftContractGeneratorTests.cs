@@ -454,6 +454,172 @@ public class AgentDraftContractGeneratorTests
     }
 
     // ──────────────────────────────────────────────────────────────
+    // Test 9: ADP001 — missing spec for a known kind
+    // ──────────────────────────────────────────────────────────────
+
+    private const string MissingSchemaKindSource = """
+        using CrestCreates.Metadata.Abstractions;
+        using CrestCreates.Event.Abstractions;
+        using CrestCreates.HumanTask.Abstractions;
+        using CrestCreates.Form.Abstractions;
+        using CrestCreates.Workflow.Abstractions;
+        using CrestCreates.Capability.Abstractions;
+        using CrestCreates.Agent.DraftContracts.Specs;
+
+        namespace TestSpecs;
+
+        [AgentDraftContractSpec(Kind = DescriptorKind.Capability)]
+        public sealed class CapabilityTestSpec2
+        {
+            [AgentDraftField]
+            public string Name { get; init; } = string.Empty;
+
+            [AgentDraftPreserve(Reason = "test", CreateStrategy = PreserveCreateStrategy.CreateDefault)]
+            public int Version { get; init; }
+        }
+
+        [AgentDraftContractSpec(Kind = DescriptorKind.Event)]
+        public sealed class EventTestSpec2
+        {
+            [AgentDraftField]
+            public string Name { get; init; } = string.Empty;
+
+            [AgentDraftPreserve(Reason = "test", CreateStrategy = PreserveCreateStrategy.CreateDefault)]
+            public int Version { get; init; }
+        }
+
+        [AgentDraftContractSpec(Kind = DescriptorKind.Form)]
+        public sealed class FormTestSpec2
+        {
+            [AgentDraftField]
+            public string Name { get; init; } = string.Empty;
+
+            [AgentDraftPreserve(Reason = "test", CreateStrategy = PreserveCreateStrategy.CreateDefault)]
+            public int Version { get; init; }
+        }
+
+        [AgentDraftContractSpec(Kind = DescriptorKind.HumanTask)]
+        public sealed class HumanTaskTestSpec2
+        {
+            [AgentDraftField]
+            public string Name { get; init; } = string.Empty;
+
+            [AgentDraftPreserve(Reason = "test", CreateStrategy = PreserveCreateStrategy.CreateDefault)]
+            public int Version { get; init; }
+        }
+
+        [AgentDraftContractSpec(Kind = DescriptorKind.Workflow)]
+        public sealed class WorkflowTestSpec2
+        {
+            [AgentDraftField]
+            public string Name { get; init; } = string.Empty;
+
+            [AgentDraftPreserve(Reason = "test", CreateStrategy = PreserveCreateStrategy.CreateDefault)]
+            public int Version { get; init; }
+        }
+        """;
+
+    [Fact]
+    public void Missing_Kind_Triggers_ADP001()
+    {
+        var (_, diagnostics) = RunGenerator(MissingSchemaKindSource);
+
+        // Schema kind is missing — ADP001 should fire
+        diagnostics.Should().Contain(d =>
+            d.Id == "ADP001" &&
+            d.Severity == DiagnosticSeverity.Error &&
+            d.GetMessage().Contains("Schema"));
+
+        // Other kinds should NOT have ADP001
+        diagnostics.Where(d => d.Id == "ADP001").Should().HaveCount(1);
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Test 10: ADP002 closure validation — descriptor property not in spec
+    // ──────────────────────────────────────────────────────────────
+
+    private const string MissingDescriptorPropertySource = """
+        using CrestCreates.Metadata.Abstractions;
+        using CrestCreates.Event.Abstractions;
+        using CrestCreates.Schema.Abstractions;
+        using CrestCreates.Agent.DraftContracts.Specs;
+
+        namespace TestSpecs;
+
+        [AgentDraftContractSpec(Kind = DescriptorKind.Event)]
+        public sealed class IncompleteEventSpec
+        {
+            [AgentDraftField]
+            public string Name { get; init; } = string.Empty;
+
+            [AgentDraftField]
+            public DescriptorState State { get; init; }
+
+            [AgentDraftField]
+            public EventCategory Category { get; init; }
+        }
+        """;
+
+    [Fact]
+    public void Descriptor_Property_Not_In_Spec_Triggers_ADP002()
+    {
+        var (_, diagnostics) = RunGenerator(MissingDescriptorPropertySource);
+
+        // The real EventDescriptor has many more properties than the spec classifies.
+        // Closure validation should emit ADP002 for each unclassified descriptor property.
+        var adp002Diags = diagnostics.Where(d => d.Id == "ADP002").ToList();
+
+        adp002Diags.Should().NotBeEmpty("descriptor properties missing from spec should trigger ADP002");
+
+        // Should include at least one known descriptor property like "Importance" or "Version"
+        adp002Diags.Should().Contain(d => d.GetMessage().Contains("Version"),
+            "Version is on EventDescriptor but not classified in the incomplete spec");
+
+        // The spec-level ADP002 for UnclassifiedProp should NOT be present (we don't have one)
+        adp002Diags.Should().NotContain(d => d.GetMessage().Contains("UnclassifiedProp"));
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Test 11: ADP010 — spec property not on descriptor type
+    // ──────────────────────────────────────────────────────────────
+
+    private const string SpecPropertyNotOnDescriptorSource = """
+        using CrestCreates.Metadata.Abstractions;
+        using CrestCreates.Event.Abstractions;
+        using CrestCreates.Schema.Abstractions;
+        using CrestCreates.Agent.DraftContracts.Specs;
+
+        namespace TestSpecs;
+
+        [AgentDraftContractSpec(Kind = DescriptorKind.Event)]
+        public sealed class ExtraPropertySpec
+        {
+            [AgentDraftField]
+            public string Name { get; init; } = string.Empty;
+
+            [AgentDraftField]
+            public DescriptorState State { get; init; }
+
+            // This property exists on the spec but NOT on EventDescriptor
+            [AgentDraftField]
+            public string NotARealDescriptorProperty { get; init; } = string.Empty;
+        }
+        """;
+
+    [Fact]
+    public void Spec_Property_Not_On_Descriptor_Triggers_ADP010()
+    {
+        var (_, diagnostics) = RunGenerator(SpecPropertyNotOnDescriptorSource);
+
+        // ADP010 should fire for NotARealDescriptorProperty which is classified
+        // in the spec but doesn't exist on EventDescriptor
+        diagnostics.Should().Contain(d =>
+            d.Id == "ADP010" &&
+            d.Severity == DiagnosticSeverity.Error &&
+            d.GetMessage().Contains("NotARealDescriptorProperty"));
+    }
+
+    // ──────────────────────────────────────────────────────────────
     // Utility
     // ──────────────────────────────────────────────────────────────
 

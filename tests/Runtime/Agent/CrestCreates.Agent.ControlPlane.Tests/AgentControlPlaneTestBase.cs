@@ -196,9 +196,9 @@ public abstract class AgentControlPlaneTestBase
 
     /// <summary>
     /// Creates an AgentDraftPayloadDto for use in CreateDescriptorDraftRequest
-    /// and UpdateDescriptorDraftRequest payloads. This replaces direct
-    /// TestDraftPayload usage in request DTO construction.
-    /// TestDraftPayload remains in use for internal Draft store objects.
+    /// payloads. UpdateDescriptorDraftRequest uses AgentDraftPayloadPatchDto
+    /// (constructed inline in tests). TestDraftPayload remains in use for
+    /// internal Draft store objects.
     /// </summary>
     protected static AgentDraftPayloadDto CreateTestPayloadDto(DescriptorKind kind, string id, string name)
     {
