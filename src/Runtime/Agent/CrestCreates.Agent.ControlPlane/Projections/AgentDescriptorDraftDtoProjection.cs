@@ -197,6 +197,55 @@ internal static class AgentDescriptorDraftDtoProjection
         };
     }
 
+    // ── One-of validation ──────────────────────────────────────────
+
+    /// <summary>
+    /// Validates the one-of invariant of AgentDraftPayloadDto without throwing.
+    /// Returns (true, null) if valid; (false, diagnostic) if invalid.
+    /// </summary>
+    public static (bool IsValid, AgentToolDiagnostic? Diagnostic) TryValidatePayload(AgentDraftPayloadDto payload)
+    {
+        var kind = payload.Discriminator;
+        bool hasCap = payload.Capability is not null;
+        bool hasWorkflow = payload.Workflow is not null;
+        bool hasHumanTask = payload.HumanTask is not null;
+        bool hasForm = payload.Form is not null;
+        bool hasEvent = payload.Event is not null;
+        bool hasSchema = payload.Schema is not null;
+
+        bool match = kind switch
+        {
+            DescriptorKind.Capability => hasCap && !hasWorkflow && !hasHumanTask && !hasForm && !hasEvent && !hasSchema,
+            DescriptorKind.Workflow => hasWorkflow && !hasCap && !hasHumanTask && !hasForm && !hasEvent && !hasSchema,
+            DescriptorKind.HumanTask => hasHumanTask && !hasCap && !hasWorkflow && !hasForm && !hasEvent && !hasSchema,
+            DescriptorKind.Form => hasForm && !hasCap && !hasWorkflow && !hasHumanTask && !hasEvent && !hasSchema,
+            DescriptorKind.Event => hasEvent && !hasCap && !hasWorkflow && !hasHumanTask && !hasForm && !hasSchema,
+            DescriptorKind.Schema => hasSchema && !hasCap && !hasWorkflow && !hasHumanTask && !hasForm && !hasEvent,
+            _ => false,
+        };
+
+        if (!match)
+        {
+            var populated = new List<string>();
+            if (hasCap) populated.Add(nameof(payload.Capability));
+            if (hasWorkflow) populated.Add(nameof(payload.Workflow));
+            if (hasHumanTask) populated.Add(nameof(payload.HumanTask));
+            if (hasForm) populated.Add(nameof(payload.Form));
+            if (hasEvent) populated.Add(nameof(payload.Event));
+            if (hasSchema) populated.Add(nameof(payload.Schema));
+
+            return (false, new AgentToolDiagnostic
+            {
+                Code = "InvalidPayloadOneOf",
+                Message = $"Discriminator '{kind}' does not match the populated sub-record(s): [{string.Join(", ", populated)}]. " +
+                          "Exactly one sub-record matching the Discriminator must be non-null; all others must be null.",
+                Severity = AgentToolDiagnosticSeverity.Error,
+            });
+        }
+
+        return (true, null);
+    }
+
     // ── ToDomainPayload ────────────────────────────────────────────
 
     public static DraftAbstractions.DescriptorDraftPayload ToDomainPayload(AgentDraftPayloadDto dto)

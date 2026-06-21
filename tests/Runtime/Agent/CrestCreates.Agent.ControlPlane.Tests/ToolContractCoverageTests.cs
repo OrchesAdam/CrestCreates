@@ -370,6 +370,55 @@ public class ToolContractCoverageTests
             $"Missing: {string.Join("; ", missingTypeInfos)}");
     }
 
+    // ── Test 3b ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Helper to detect whether a type is a compiler-generated record.
+    /// Records have a compiler-generated &lt;Clone&gt;$ method.
+    /// </summary>
+    private static bool IsRecordType(Type type)
+    {
+        return type.GetMethod("<Clone>$", BindingFlags.Instance | BindingFlags.Public) is not null;
+    }
+
+    /// <summary>
+    /// Verifies that every public sealed record DTO type in the ControlPlane.Abstractions
+    /// assembly has a corresponding <see cref="JsonTypeInfo"/> property in
+    /// <see cref="AgentControlPlaneToolJsonSerializerContext"/>.
+    ///
+    /// This catches DTOs that should have a <see cref="JsonTypeInfo"/> but were
+    /// missed by the source generator (e.g., a new DTO added without a corresponding
+    /// <see cref="JsonSerializableAttribute"/>).
+    /// </summary>
+    [Fact]
+    public void AllPublicToolContractDtos_Have_JsonTypeInfo()
+    {
+        var abstractionsAssembly = typeof(AgentControlPlaneToolJsonSerializerContext).Assembly;
+
+        var dtoTypes = abstractionsAssembly.GetTypes()
+            .Where(t => t.IsPublic && t.IsSealed && !t.IsValueType)
+            .Where(t => !t.IsGenericTypeDefinition) // Exclude open generics (concrete instantiations are checked)
+            .Where(t => t.Namespace?.StartsWith("CrestCreates.Agent.ControlPlane.Abstractions") == true)
+            .Where(t => IsRecordType(t))
+            // Exclude known non-serialization types (authorization config/result, etc.)
+            .Where(t => t != typeof(AgentToolAuthorizationOptions)
+                     && t != typeof(AgentToolAuthorizationResult))
+            .ToList();
+
+        var jsonTypeInfoTypes = typeof(AgentControlPlaneToolJsonSerializerContext)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Where(p => p.PropertyType.IsGenericType
+                        && p.PropertyType.GetGenericTypeDefinition() == typeof(JsonTypeInfo<>))
+            .Select(p => p.PropertyType.GetGenericArguments()[0])
+            .ToHashSet();
+
+        var missing = dtoTypes.Where(t => !jsonTypeInfoTypes.Contains(t)).ToList();
+
+        missing.Should().BeEmpty(
+            "all public sealed record DTOs in ControlPlane.Abstractions must have a JsonTypeInfo registration. " +
+            $"Missing: {string.Join(", ", missing.Select(t => t.Name))}");
+    }
+
     // ── Test 4 ─────────────────────────────────────────────────────────
 
     /// <summary>

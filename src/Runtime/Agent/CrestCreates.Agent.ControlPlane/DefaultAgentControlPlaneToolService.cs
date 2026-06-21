@@ -697,6 +697,14 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     ]));
             }
 
+            // One-of invariant check: discriminator must match exactly one populated sub-record
+            var (isValid, validationDiagnostic) = AgentDescriptorDraftDtoProjection.TryValidatePayload(request.Payload);
+            if (!isValid)
+            {
+                return await RecordAndReturn(context,
+                    AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([validationDiagnostic!]));
+            }
+
             var domainPayload = AgentDescriptorDraftDtoProjection.ToDomainPayload(request.Payload);
 
             var draft = new Draft
@@ -765,6 +773,17 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                             Severity = AgentToolDiagnosticSeverity.Error,
                         }
                     ]));
+            }
+
+            // One-of invariant check on payload if provided
+            if (request.Payload is not null)
+            {
+                var (isValid, validationDiagnostic) = AgentDescriptorDraftDtoProjection.TryValidatePayload(request.Payload);
+                if (!isValid)
+                {
+                    return await RecordAndReturn(context,
+                        AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([validationDiagnostic!]));
+                }
             }
 
             var domainPayload = request.Payload is not null 

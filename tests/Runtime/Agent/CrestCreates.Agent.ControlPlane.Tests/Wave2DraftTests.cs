@@ -326,6 +326,111 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
     }
 
     [Fact]
+    public async Task CreateDescriptorDraft_MissingMatchingPayloadBranch_Returns_InvalidRequest()
+    {
+        var service = CreateService();
+        var context = CreateContext("CreateDescriptorDraft");
+        var request = new CreateDescriptorDraftRequest
+        {
+            DescriptorKind = DescriptorKind.Event,
+            DescriptorId = "test.desc-001",
+            Operation = DraftAbstractions.DescriptorDraftOperation.Create,
+            Payload = new AgentDraftPayloadDto
+            {
+                Discriminator = DescriptorKind.Event,
+                // Event is null — no sub-record populated despite Discriminator=Event
+            },
+            ProposedVersion = "1",
+            Intent = "Create with missing payload branch"
+        };
+
+        var result = await service.CreateDescriptorDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "InvalidPayloadOneOf");
+    }
+
+    [Fact]
+    public async Task CreateDescriptorDraft_MixedPayloadBranches_Returns_InvalidRequest()
+    {
+        var service = CreateService();
+        var context = CreateContext("CreateDescriptorDraft");
+        var request = new CreateDescriptorDraftRequest
+        {
+            DescriptorKind = DescriptorKind.Event,
+            DescriptorId = "test.desc-001",
+            Operation = DraftAbstractions.DescriptorDraftOperation.Create,
+            Payload = new AgentDraftPayloadDto
+            {
+                Discriminator = DescriptorKind.Event,
+                Event = new AgentEventDraftPayloadDto { Name = "TestEvent" },
+                Schema = new AgentSchemaDraftPayloadDto { Name = "TestSchema" },
+                // Both Event and Schema populated — violates one-of invariant
+            },
+            ProposedVersion = "1",
+            Intent = "Create with mixed payload branches"
+        };
+
+        var result = await service.CreateDescriptorDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "InvalidPayloadOneOf");
+    }
+
+    [Fact]
+    public async Task UpdateDescriptorDraft_MixedPayloadBranches_Returns_InvalidRequest()
+    {
+        var service = CreateService();
+        var context = CreateContext("UpdateDescriptorDraft");
+        var existing = CreateTestDraft(kind: DescriptorKind.Event);
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(existing));
+
+        var request = new UpdateDescriptorDraftRequest
+        {
+            DraftId = "draft-001",
+            Payload = new AgentDraftPayloadDto
+            {
+                Discriminator = DescriptorKind.Event,
+                Event = new AgentEventDraftPayloadDto { Name = "TestEvent" },
+                Schema = new AgentSchemaDraftPayloadDto { Name = "TestSchema" },
+                // Both Event and Schema populated — violates one-of invariant
+            }
+        };
+
+        var result = await service.UpdateDescriptorDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "InvalidPayloadOneOf");
+    }
+
+    [Fact]
+    public async Task InvalidPayload_DoesNot_SaveAsync()
+    {
+        var service = CreateService();
+        var context = CreateContext("CreateDescriptorDraft");
+        var request = new CreateDescriptorDraftRequest
+        {
+            DescriptorKind = DescriptorKind.Event,
+            DescriptorId = "test.desc-001",
+            Operation = DraftAbstractions.DescriptorDraftOperation.Create,
+            Payload = new AgentDraftPayloadDto
+            {
+                Discriminator = DescriptorKind.Event,
+                // Event is null — missing matching branch
+            },
+            ProposedVersion = "1",
+            Intent = "Create with invalid one-of"
+        };
+
+        _ = await service.CreateDescriptorDraftAsync(context, request);
+
+        // SaveAsync must NOT be called when validation fails
+        DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task Drafts_Are_Tenant_Isolated()
     {
         var service = CreateService();
