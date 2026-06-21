@@ -415,7 +415,7 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         draft = draft with { BaseVersion = "1" };
         SetupDraftStoreGetReturns(draft);
         // Catalog returns v1 descriptor matching draft payload namespace + BaseVersion
-        var v1Descriptor = new TestVersionedDescriptor("test", "desc-001", version: 1, "V1Desc")
+        var v1Descriptor = new TestVersionedDescriptor("event", "desc-001", version: 1, "V1Desc")
         {
             Kind = DescriptorKind.Event,
             State = DescriptorState.Active
@@ -609,7 +609,7 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         SetupDraftStoreGetReturns(draft);
         // Catalog returns v2 descriptor — normally would mismatch, but null
         // BaseVersion skips version check entirely
-        var v2Descriptor = new TestVersionedDescriptor("test", "desc-001", version: 2, "V2Desc")
+        var v2Descriptor = new TestVersionedDescriptor("event", "desc-001", version: 2, "V2Desc")
         {
             Kind = DescriptorKind.Event,
             State = DescriptorState.Active

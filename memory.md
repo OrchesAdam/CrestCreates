@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-06-21
+Last Updated: 2026-06-22
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -544,29 +544,58 @@ This thread achieved the following:
   - **162→276 tests across 17 test classes**: StaticManifest (10), Authorization (29), InMemoryAuditor (6), PermissionBoundary (10), RuntimeBoundary (10), ToolNameBoundary (6), ManifestClassification (4), DescriptorKindDeny (12), Wave1-6 (12+12+10+9+10+12), VisibilityCoverage (1), DraftArtifactVisibilityProjector (7), VisibleDescriptorUniverse (8), DescriptorKindPolicyEvaluator (4), NestedProjectionRegression (19)
 - **Design spec**: `docs/superpowers/specs/2026-06-18-phase-7c-agent-control-plane-tool-surface-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-18-phase-7c-agent-control-plane-tool-surface.md`
-  - **Tool DTO & JSON Contract — Issue #41** (2026-06-21):
-    - **P0 Projection DTOs** (replacing unsafe upstream types in tool contracts):
-      - `DescriptorSummaryDto` — replaces `IDescriptor?` in `DraftComparisonResult.CurrentActiveDescriptor`
-      - `AgentDescriptorDraftDto` — replaces `DescriptorDraft` in all tool results; nested `AgentDraftPayloadDto` with discriminator + 6 optional sub-records (Capability/Workflow/HumanTask/Form/Event/Schema)
-      - `AgentReviewResultDto` — replaces `DescriptorDraftReviewResult` in all tool results; includes `ProposedInventorySummary`, `TopologySummary`, `ImpactAnalysisSummary`, `CompatibilitySummary`, `GovernanceSummary`
-      - `AgentDraftPayloadDto` — nested one-of shape: `Discriminator` + `Capability?`/`Workflow?`/`HumanTask?`/`Form?`/`Event?`/`Schema?` sub-records; invariant: only the sub-record matching Discriminator may be non-null
-    - **Request-side closure**: `CreateDescriptorDraftRequest.Payload` and `UpdateDescriptorDraftRequest.Payload` changed from `DescriptorDraftPayload` to `AgentDraftPayloadDto`
-    - **Source-Generated JSON Contract**:
-      - `AgentControlPlaneToolJsonSerializerContext` — registers all 32 tool request/result DTOs + stable upstream value objects + temporary upstream aggregates
-      - `AgentControlPlaneContractVersion.Current = "7c.v1"` — machine-readable contract version
-      - `AgentControlPlaneToolJsonSerializerOptionsFactory.CreateDefault()` — pre-configured `JsonSerializerOptions` using source-generated metadata
-    - **Projection helpers** (in `CrestCreates.Agent.ControlPlane/Projections/`):
-      - `DescriptorSummaryDtoProjection.FromDescriptor(IDescriptor?)` — safe `IDescriptor` → `DescriptorSummaryDto` mapping
-      - `AgentDescriptorDraftDtoProjection.FromDraft(DescriptorDraft)` / `ToDomainPayload(AgentDraftPayloadDto)` — bidirectional draft mapping; `ToDomainPayload` enforces discriminator invariant (throws on mismatch)
-      - `AgentReviewResultDtoProjection.Project(DescriptorDraftReviewResult, deniedKinds?)` — review result projection with optional denied-kind filtering for visibility closure
-    - **FromDraft uses IDescriptor interface** (not concrete casts): `MapPayload` sub-mappers accept `IDescriptor` and use safe `as` casts for kind-specific properties, enabling test descriptors and future descriptor types
-    - **Boundary constraint tests**: recursive type graph check — no `IDescriptor`, `IServiceProvider`, `object`/`dynamic`/`JsonElement` in any DTO property chain (including nested generics, collections, nullable)
-    - **Semantic preservation tests**: round-trip serialization, context pack ref preservation, review diagnostics preservation, fix proposal risk/approval semantics, activation request handoff-only invariant, payload discriminator invariant
-    - **Visibility closure regression test**: `AgentReviewResultDtoProjection_DeniedKinds_DoNot_Appear_In_ProjectedSummary` — denied kinds filtered from ProposedInventory, Topology, ImpactAnalysis
-    - **Manifest set-equality coverage tests**: 4 tests verifying manifest tool names = contract registrations = JsonTypeInfo set; facade vs manifest query tool distinction; no orphan contract types
-    - **276 ControlPlane tests + 7 Boundary tests pass**, full solution build 0 errors
-    - **Design spec**: `docs/superpowers/specs/2026-06-21-phase-7c-tool-dto-json-contract-design.md`
-    - **Implementation plan**: `docs/superpowers/plans/2026-06-21-phase-7c-tool-dto-json-contract.md`
+   - **Tool DTO & JSON Contract — Issue #41** (2026-06-21):
+     - **P0 Projection DTOs** (replacing unsafe upstream types in tool contracts):
+       - `DescriptorSummaryDto` — replaces `IDescriptor?` in `DraftComparisonResult.CurrentActiveDescriptor`
+       - `AgentDescriptorDraftDto` — replaces `DescriptorDraft` in all tool results; nested `AgentDraftPayloadDto` with discriminator + 6 optional sub-records (Capability/Workflow/HumanTask/Form/Event/Schema)
+       - `AgentReviewResultDto` — replaces `DescriptorDraftReviewResult` in all tool results; includes `ProposedInventorySummary`, `TopologySummary`, `ImpactAnalysisSummary`, `CompatibilitySummary`, `GovernanceSummary`
+       - `AgentDraftPayloadDto` — nested one-of shape: `Discriminator` + `Capability?`/`Workflow?`/`HumanTask?`/`Form?`/`Event?`/`Schema?` sub-records; invariant: only the sub-record matching Discriminator may be non-null
+     - **Request-side closure**: `CreateDescriptorDraftRequest.Payload` and `UpdateDescriptorDraftRequest.Payload` changed from `DescriptorDraftPayload` to `AgentDraftPayloadDto`
+     - **Source-Generated JSON Contract**:
+       - `AgentControlPlaneToolJsonSerializerContext` — registers all 32 tool request/result DTOs + stable upstream value objects + temporary upstream aggregates
+       - `AgentControlPlaneContractVersion.Current = "7c.v1"` — machine-readable contract version
+       - `AgentControlPlaneToolJsonSerializerOptionsFactory.CreateDefault()` — pre-configured `JsonSerializerOptions` using source-generated metadata
+     - **Projection helpers** (in `CrestCreates.Agent.ControlPlane/Projections/`):
+       - `DescriptorSummaryDtoProjection.FromDescriptor(IDescriptor?)` — safe `IDescriptor` → `DescriptorSummaryDto` mapping
+       - `AgentDescriptorDraftDtoProjection.FromDraft(DescriptorDraft)` / `ToDomainPayload(AgentDraftPayloadDto)` — bidirectional draft mapping; `ToDomainPayload` enforces discriminator invariant (throws on mismatch)
+       - `AgentReviewResultDtoProjection.Project(DescriptorDraftReviewResult, deniedKinds?)` — review result projection with optional denied-kind filtering for visibility closure
+     - **FromDraft uses IDescriptor interface** (not concrete casts): `MapPayload` sub-mappers accept `IDescriptor` and use safe `as` casts for kind-specific properties, enabling test descriptors and future descriptor types
+     - **Boundary constraint tests**: recursive type graph check — no `IDescriptor`, `IServiceProvider`, `object`/`dynamic`/`JsonElement` in any DTO property chain (including nested generics, collections, nullable)
+     - **Semantic preservation tests**: round-trip serialization, context pack ref preservation, review diagnostics preservation, fix proposal risk/approval semantics, activation request handoff-only invariant, payload discriminator invariant
+     - **Visibility closure regression test**: `AgentReviewResultDtoProjection_DeniedKinds_DoNot_Appear_In_ProjectedSummary` — denied kinds filtered from ProposedInventory, Topology, ImpactAnalysis
+     - **Manifest set-equality coverage tests**: 4 tests verifying manifest tool names = contract registrations = JsonTypeInfo set; facade vs manifest query tool distinction; no orphan contract types
+     - **276 ControlPlane tests + 7 Boundary tests pass**, full solution build 0 errors
+     - **Design spec**: `docs/superpowers/specs/2026-06-21-phase-7c-tool-dto-json-contract-design.md`
+     - **Implementation plan**: `docs/superpowers/plans/2026-06-21-phase-7c-tool-dto-json-contract.md`
+
+   - **Code Review Fix — #41 Round 1** (2026-06-21):
+     - P1-1: `DescriptorKind == Payload.Discriminator` consistency check in Create/Update — mismatch returns `InvalidRequest` + `KindDiscriminatorMismatch` diagnostic
+     - P1-2: DTO→domain mapping silently dropped fields — added missing reference fields (InputSchema/OutputSchema/FormSchema → `DescriptorRef?`, VariableSchema/Interaction/Timeout/PayloadSchema/Importance/ChangeKind); `MergeToDomainPayload` for updates (merge semantics, not replace); Version → `int?`
+     - P2-3: Coverage gate rewritten to detect missing request type registrations; manifest/contract set-equality assertions
+     - P2-4: `AgentToolDescriptor.ContractVersion` defaults to `AgentControlPlaneContractVersion.Current`
+     - P2-5: Topology edge filtering — `MapTopologySnapshot` filters edges by visible node refs; edge count assertions
+     - **280 ControlPlane tests + 7 Boundary tests pass**
+
+   - **Code Review Fix — #41 Round 2** (2026-06-21):
+     - P0: `TryValidatePayload` — non-throwing one-of validation before `ToDomainPayload`/`MergeToDomainPayload`; invalid payloads return `InvalidRequest` + `InvalidPayloadOneOf` diagnostic, not `Failed`
+     - P1: `AllPublicToolContractDtos_Have_JsonTypeInfo` — reflection-based coverage gate verifying all public sealed records in Abstractions have JsonTypeInfo registrations
+     - 4 new discriminator invariant tests (missing branch, mixed branches Create+Update, SaveAsync never called)
+     - **285 ControlPlane tests + 7 Boundary tests pass**
+
+   - **Draft Payload Contract Source Generator — Issue #42** (2026-06-21):
+     - **New project**: `CrestCreates.Agent.DraftContracts` — source-generated DTO + projection + manifest types from contract spec files
+     - **New generator**: `AgentDraftContractGenerator` in `CrestCreates.CodeGenerator` — reads `[AgentDraftContractSpec]` attributes + per-kind spec files, generates:
+       - `Agent*DraftPayloadDto` — 6 payload DTOs with typed fields matching domain descriptor properties
+       - `Agent*DraftPatchDto` — 6 patch DTOs (all fields optional) for update/merge operations
+       - `Agent*ChangedFields` — 6 changed-field tracking enums for merge semantics
+       - `AgentDraftPayloadProjection` — static projection class with `FromDomain`, `Create`, `Merge`, `TryValidatePayload` methods
+       - `AgentDraftContractManifest` — static manifest class listing all contract types for coverage gates
+     - **Contract spec files**: 6 per-kind spec files in `CrestCreates.Agent.DraftContracts/ContractSpecs/` classifying every field as Required/Optional/SchemaRef/Enum/Collection/Navigation/Calculated with domain mapping metadata
+     - **Diagnostic descriptors**: ADP001–ADP010 covering spec validation errors (missing spec, unknown kind, duplicate field, missing kind accessor, etc.)
+     - **Migration**: Hand-written `AgentDescriptorDraftDtoProjection.cs` (670 lines) → generated `AgentDraftPayloadProjection.g.cs` (558 lines); 7 hand-written DTO files in Abstractions → project reference to DraftContracts + global using aliases
+     - **285 ControlPlane tests + 21 DraftContracts integration tests + 8 generator unit tests + 7 Boundary tests pass** (321 total)
+     - **Design spec**: `docs/superpowers/specs/2026-06-21-phase-7c-agent-draft-payload-contract-source-generator-design.md`
+     - **Implementation plan**: `docs/superpowers/plans/2026-06-21-phase-7c-agent-draft-payload-contract-source-generator.md`
 
   - **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface.
 

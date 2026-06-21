@@ -1,8 +1,11 @@
 using Xunit;
 using Moq;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Event.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
+using AgentDraftContractErrorCodes = CrestCreates.Agent.DraftContracts.Dto.AgentDraftContractErrorCodes;
 
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
@@ -209,7 +212,7 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
         var service = CreateService();
         var context = CreateContext("CompareDescriptorDraft");
         var draft = CreateTestDraft();
-        var activeDescriptor = CreateTestDescriptor();
+        var activeDescriptor = CreateTestDescriptor(ns: "event");
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult<Draft?>(draft));
@@ -347,7 +350,7 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
         var result = await service.CreateDescriptorDraftAsync(context, request);
 
         result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
-        result.Diagnostics.Should().Contain(d => d.Code == "InvalidPayloadOneOf");
+        result.Diagnostics.Should().Contain(d => d.Code == AgentDraftContractErrorCodes.DiscriminatorMismatch);
     }
 
     [Fact]
@@ -363,8 +366,8 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
             Payload = new AgentDraftPayloadDto
             {
                 Discriminator = DescriptorKind.Event,
-                Event = new AgentEventDraftPayloadDto { Name = "TestEvent" },
-                Schema = new AgentSchemaDraftPayloadDto { Name = "TestSchema" },
+                Event = new AgentEventDraftPayloadDto { Name = "TestEvent", State = DescriptorState.Active, Category = EventCategory.Domain, Semantic = EventSemantic.Fact, Importance = EventImportance.Operational, ChangeKind = SchemaChangeKind.Additive },
+                Schema = new AgentSchemaDraftPayloadDto { Name = "TestSchema", State = DescriptorState.Active, ChangeKind = SchemaChangeKind.Additive },
                 // Both Event and Schema populated — violates one-of invariant
             },
             ProposedVersion = "1",
@@ -374,7 +377,7 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
         var result = await service.CreateDescriptorDraftAsync(context, request);
 
         result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
-        result.Diagnostics.Should().Contain(d => d.Code == "InvalidPayloadOneOf");
+        result.Diagnostics.Should().Contain(d => d.Code == AgentDraftContractErrorCodes.DiscriminatorMismatch);
     }
 
     [Fact]
@@ -393,8 +396,8 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
             Payload = new AgentDraftPayloadDto
             {
                 Discriminator = DescriptorKind.Event,
-                Event = new AgentEventDraftPayloadDto { Name = "TestEvent" },
-                Schema = new AgentSchemaDraftPayloadDto { Name = "TestSchema" },
+                Event = new AgentEventDraftPayloadDto { Name = "TestEvent", State = DescriptorState.Active, Category = EventCategory.Domain, Semantic = EventSemantic.Fact, Importance = EventImportance.Operational, ChangeKind = SchemaChangeKind.Additive },
+                Schema = new AgentSchemaDraftPayloadDto { Name = "TestSchema", State = DescriptorState.Active, ChangeKind = SchemaChangeKind.Additive },
                 // Both Event and Schema populated — violates one-of invariant
             }
         };
@@ -402,7 +405,7 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
         var result = await service.UpdateDescriptorDraftAsync(context, request);
 
         result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
-        result.Diagnostics.Should().Contain(d => d.Code == "InvalidPayloadOneOf");
+        result.Diagnostics.Should().Contain(d => d.Code == AgentDraftContractErrorCodes.DiscriminatorMismatch);
     }
 
     [Fact]

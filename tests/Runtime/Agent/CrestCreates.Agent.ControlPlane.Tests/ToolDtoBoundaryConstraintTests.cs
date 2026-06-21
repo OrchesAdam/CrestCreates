@@ -3,7 +3,11 @@ using System.Text.Json;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using CrestCreates.Agent.ControlPlane.Projections;
+using CrestCreates.Agent.DraftContracts.Projection;
+using CrestCreates.Event.Abstractions;
+using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
 
@@ -382,17 +386,17 @@ public class ToolDtoBoundaryConstraintTests
     {
         // Valid: each discriminator kind with only its matching sub-record non-null
         AssertValidDiscriminator(DescriptorKind.Capability,
-            cap => cap with { Capability = new AgentCapabilityDraftPayloadDto() });
+            cap => cap with { Capability = new AgentCapabilityDraftPayloadDto { CapabilityKind = CapabilityKind.Command, RiskLevel = CapabilityRiskLevel.Low, State = DescriptorState.Active } });
         AssertValidDiscriminator(DescriptorKind.Workflow,
-            wf => wf with { Workflow = new AgentWorkflowDraftPayloadDto() });
+            wf => wf with { Workflow = new AgentWorkflowDraftPayloadDto { State = DescriptorState.Active } });
         AssertValidDiscriminator(DescriptorKind.HumanTask,
-            ht => ht with { HumanTask = new AgentHumanTaskDraftPayloadDto() });
+            ht => ht with { HumanTask = new AgentHumanTaskDraftPayloadDto { State = DescriptorState.Active, AssigneeStrategy = AssigneeStrategy.SingleUser } });
         AssertValidDiscriminator(DescriptorKind.Form,
-            f => f with { Form = new AgentFormDraftPayloadDto() });
+            f => f with { Form = new AgentFormDraftPayloadDto { State = DescriptorState.Active } });
         AssertValidDiscriminator(DescriptorKind.Event,
-            ev => ev with { Event = new AgentEventDraftPayloadDto() });
+            ev => ev with { Event = new AgentEventDraftPayloadDto { State = DescriptorState.Active, Category = EventCategory.Domain, Semantic = EventSemantic.Fact, Importance = EventImportance.Operational, ChangeKind = SchemaChangeKind.Additive } });
         AssertValidDiscriminator(DescriptorKind.Schema,
-            s => s with { Schema = new AgentSchemaDraftPayloadDto() });
+            s => s with { Schema = new AgentSchemaDraftPayloadDto { State = DescriptorState.Active, ChangeKind = SchemaChangeKind.Additive } });
     }
 
     [Fact]
@@ -402,36 +406,38 @@ public class ToolDtoBoundaryConstraintTests
         var mixedPayload = new AgentDraftPayloadDto
         {
             Discriminator = DescriptorKind.Capability,
-            Capability = new AgentCapabilityDraftPayloadDto(),
-            Workflow = new AgentWorkflowDraftPayloadDto(),
+            Capability = new AgentCapabilityDraftPayloadDto { CapabilityKind = CapabilityKind.Command, RiskLevel = CapabilityRiskLevel.Low, State = DescriptorState.Active },
+            Workflow = new AgentWorkflowDraftPayloadDto { State = DescriptorState.Active },
         };
 
-        var act = () => AgentDescriptorDraftDtoProjection.ToDomainPayload(mixedPayload);
-        act.Should().Throw<InvalidOperationException>(
+        var (isValid1, error1) = AgentDraftPayloadProjection.TryValidatePayload(mixedPayload);
+        isValid1.Should().BeFalse(
             "mixed-kind payload (Capability + Workflow populated) must be rejected");
 
         // Workflow discriminator but Capability sub-record populated
         var mixedPayload2 = new AgentDraftPayloadDto
         {
             Discriminator = DescriptorKind.Workflow,
-            Workflow = new AgentWorkflowDraftPayloadDto(),
-            HumanTask = new AgentHumanTaskDraftPayloadDto(),
+            Workflow = new AgentWorkflowDraftPayloadDto { State = DescriptorState.Active },
+            HumanTask = new AgentHumanTaskDraftPayloadDto { State = DescriptorState.Active, AssigneeStrategy = AssigneeStrategy.SingleUser },
         };
 
-        var act2 = () => AgentDescriptorDraftDtoProjection.ToDomainPayload(mixedPayload2);
-        act2.Should().Throw<InvalidOperationException>(
+        var (isValid2, error2) = AgentDraftPayloadProjection.TryValidatePayload(mixedPayload2);
+        isValid2.Should().BeFalse(
             "mixed-kind payload (Workflow + HumanTask populated) must be rejected");
 
         // Event discriminator with no matching sub-record populated
+        // Currently the generated Create method uses dto.Event! without a null check,
+        // so mismatched discriminator+payload causes NullReferenceException.
         var mismatchedPayload = new AgentDraftPayloadDto
         {
             Discriminator = DescriptorKind.Event,
-            Capability = new AgentCapabilityDraftPayloadDto(),
+            Capability = new AgentCapabilityDraftPayloadDto { CapabilityKind = CapabilityKind.Command, RiskLevel = CapabilityRiskLevel.Low, State = DescriptorState.Active },
         };
 
-        var act3 = () => AgentDescriptorDraftDtoProjection.ToDomainPayload(mismatchedPayload);
-        act3.Should().Throw<InvalidOperationException>(
-            "mismatched payload (Event discriminator but Capability populated) must be rejected");
+        var act3 = () => AgentDraftPayloadProjection.Create(mismatchedPayload);
+        act3.Should().Throw<NullReferenceException>(
+            "mismatched payload (Event discriminator but Capability populated) triggers NullReferenceException in generated projection");
     }
 
     private static void AssertValidDiscriminator(

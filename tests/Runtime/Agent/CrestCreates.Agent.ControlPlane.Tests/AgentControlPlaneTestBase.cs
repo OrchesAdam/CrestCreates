@@ -1,9 +1,13 @@
 using CrestCreates.Agent.ControlPlane;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.DraftContracts.Projection;
+using CrestCreates.Event.Abstractions;
+using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 using CrestCreates.Metadata.ContextPack.Abstractions;
 using CrestCreates.Metadata;
+using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -169,6 +173,12 @@ public abstract class AgentControlPlaneTestBase
         DraftAbstractions.DescriptorDraftOperation operation = DraftAbstractions.DescriptorDraftOperation.Create,
         DraftAbstractions.DescriptorDraftStatus status = DraftAbstractions.DescriptorDraftStatus.Created)
     {
+        var payloadDto = CreateTestPayloadDto(kind, descriptorId, "TestDraft");
+        var createResult = AgentDraftPayloadProjection.Create(payloadDto);
+        var domainPayload = createResult.IsSuccess
+            ? createResult.Value!
+            : (DraftAbstractions.DescriptorDraftPayload)new TestDraftPayload(kind, descriptorId, "TestDraft");
+
         return new Draft
         {
             TenantId = tenantId,
@@ -179,7 +189,7 @@ public abstract class AgentControlPlaneTestBase
             AuthorKind = DraftAbstractions.DescriptorDraftAuthorKind.Agent,
             AuthorId = TestActorId,
             CreatedAt = DateTimeOffset.UtcNow,
-            Payload = new TestDraftPayload(kind, descriptorId, "TestDraft"),
+            Payload = domainPayload,
             Status = status
         };
     }
@@ -196,22 +206,22 @@ public abstract class AgentControlPlaneTestBase
         {
             Discriminator = kind,
             Capability = kind == DescriptorKind.Capability
-                ? new AgentCapabilityDraftPayloadDto { Name = name, CapabilityKind = "Action", RiskLevel = "Low" }
+                ? new AgentCapabilityDraftPayloadDto { Name = name, CapabilityKind = CapabilityKind.Command, RiskLevel = CapabilityRiskLevel.Low, State = DescriptorState.Active }
                 : null,
             Workflow = kind == DescriptorKind.Workflow
-                ? new AgentWorkflowDraftPayloadDto { Name = name }
+                ? new AgentWorkflowDraftPayloadDto { Name = name, State = DescriptorState.Active }
                 : null,
             HumanTask = kind == DescriptorKind.HumanTask
-                ? new AgentHumanTaskDraftPayloadDto { Name = name }
+                ? new AgentHumanTaskDraftPayloadDto { Name = name, State = DescriptorState.Active, AssigneeStrategy = AssigneeStrategy.SingleUser, Interaction = new DescriptorRef("form", "default-interaction", 1) }
                 : null,
             Form = kind == DescriptorKind.Form
-                ? new AgentFormDraftPayloadDto { Name = name }
+                ? new AgentFormDraftPayloadDto { Name = name, State = DescriptorState.Active, FormSchema = new DescriptorRef("schema", "default-form-schema", 1) }
                 : null,
             Event = kind == DescriptorKind.Event
-                ? new AgentEventDraftPayloadDto { Name = name }
+                ? new AgentEventDraftPayloadDto { Name = name, State = DescriptorState.Active, Category = EventCategory.Domain, Semantic = EventSemantic.Fact, Importance = EventImportance.Operational, ChangeKind = SchemaChangeKind.Additive, PayloadSchema = new DescriptorRef("schema", "default-event-payload", 1) }
                 : null,
             Schema = kind == DescriptorKind.Schema
-                ? new AgentSchemaDraftPayloadDto { Name = name }
+                ? new AgentSchemaDraftPayloadDto { Name = name, State = DescriptorState.Active, ChangeKind = SchemaChangeKind.Additive }
                 : null,
         };
     }

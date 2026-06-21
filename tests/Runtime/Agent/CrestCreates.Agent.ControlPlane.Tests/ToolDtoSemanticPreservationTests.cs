@@ -2,8 +2,12 @@ using System.Reflection;
 using System.Text.Json;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
+using CrestCreates.Agent.DraftContracts.Projection;
+using CrestCreates.Event.Abstractions;
+using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.ContextPack.Abstractions;
+using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
 
@@ -531,9 +535,9 @@ public class ToolDtoSemanticPreservationTests
                 Capability = new AgentCapabilityDraftPayloadDto
                 {
                     Name = "TestCapability",
-                    CapabilityKind = "Action",
-                    RiskLevel = "Low",
-                    Categories = new[] { "core", "security" },
+                    CapabilityKind = CapabilityKind.Command,
+                    RiskLevel = CapabilityRiskLevel.Low,
+                    State = DescriptorState.Active,
                     Version = 1
                 }
             },
@@ -559,9 +563,8 @@ public class ToolDtoSemanticPreservationTests
         roundTripped.Payload.Discriminator.Should().Be(DescriptorKind.Capability);
         roundTripped.Payload.Capability.Should().NotBeNull();
         roundTripped.Payload.Capability!.Name.Should().Be("TestCapability");
-        roundTripped.Payload.Capability.CapabilityKind.Should().Be("Action");
-        roundTripped.Payload.Capability.RiskLevel.Should().Be("Low");
-        roundTripped.Payload.Capability.Categories.Should().BeEquivalentTo("core", "security");
+        roundTripped.Payload.Capability.CapabilityKind.Should().Be(CapabilityKind.Command);
+        roundTripped.Payload.Capability.RiskLevel.Should().Be(CapabilityRiskLevel.Low);
         roundTripped.Payload.Capability.Version.Should().Be(1);
         roundTripped.Payload.Workflow.Should().BeNull();
         roundTripped.Payload.HumanTask.Should().BeNull();
@@ -590,21 +593,16 @@ public class ToolDtoSemanticPreservationTests
             Capability = new AgentCapabilityDraftPayloadDto
             {
                 Name = "TestCapability",
-                DisplayName = "Test Capability",
-                State = "Active",
+                State = DescriptorState.Active,
                 InputSchema = new DescriptorRef("schema", "input-schema-1", 1),
                 OutputSchema = new DescriptorRef("schema", "output-schema-1", 1),
-                CapabilityKind = "Action",
-                Categories = new[] { "core", "security" },
+                CapabilityKind = CapabilityKind.Command,
+                RiskLevel = CapabilityRiskLevel.Medium,
                 Produces = new[] { new DescriptorRef("test", "output-1", 1) },
                 Consumes = new[] { new DescriptorRef("test", "input-1", 2) },
-                SemanticTags = new[] { "auth", "login" },
-                Permissions = new[] { "read", "write" },
-                RiskLevel = "Medium",
                 ContractHash = "ch-cap-001",
                 DefinitionHash = "dh-cap-001",
                 Version = 2,
-                DescriptorRef = new DescriptorRef("test.ns", "source-cap", 1)
             }
         };
 
@@ -615,16 +613,14 @@ public class ToolDtoSemanticPreservationTests
 
         var cap = roundTripped.Capability!;
         cap.Name.Should().Be("TestCapability");
-        cap.DisplayName.Should().Be("Test Capability");
-        cap.State.Should().Be("Active");
+        cap.State.Should().Be(DescriptorState.Active);
         cap.InputSchema.Should().NotBeNull();
         cap.InputSchema!.Value.Id.Should().Be("input-schema-1");
         cap.InputSchema.Value.Version.Should().Be(1);
         cap.OutputSchema.Should().NotBeNull();
         cap.OutputSchema!.Value.Id.Should().Be("output-schema-1");
         cap.OutputSchema.Value.Version.Should().Be(1);
-        cap.CapabilityKind.Should().Be("Action");
-        cap.Categories.Should().BeEquivalentTo("core", "security");
+        cap.CapabilityKind.Should().Be(CapabilityKind.Command);
         cap.Produces.Should().NotBeNull();
         cap.Produces!.Should().HaveCount(1);
         cap.Produces[0].Namespace.Should().Be("test");
@@ -632,14 +628,10 @@ public class ToolDtoSemanticPreservationTests
         cap.Consumes.Should().NotBeNull();
         cap.Consumes!.Should().HaveCount(1);
         cap.Consumes[0].Id.Should().Be("input-1");
-        cap.SemanticTags.Should().BeEquivalentTo("auth", "login");
-        cap.Permissions.Should().BeEquivalentTo("read", "write");
-        cap.RiskLevel.Should().Be("Medium");
+        cap.RiskLevel.Should().Be(CapabilityRiskLevel.Medium);
         cap.ContractHash.Should().Be("ch-cap-001");
         cap.DefinitionHash.Should().Be("dh-cap-001");
         cap.Version.Should().Be(2);
-        cap.DescriptorRef.Should().NotBeNull();
-        cap.DescriptorRef!.Value.FullId.Should().Be("test.ns.source-cap");
 
         // Other sub-records must remain null
         roundTripped.Workflow.Should().BeNull();
@@ -699,23 +691,24 @@ public class ToolDtoSemanticPreservationTests
     private static AgentCapabilityDraftPayloadDto BuildSampleCapabilityPayload() => new()
     {
         Name = "TestCapability",
-        CapabilityKind = "Action",
-        RiskLevel = "Low",
-        Categories = new[] { "core" },
+        CapabilityKind = CapabilityKind.Command,
+        RiskLevel = CapabilityRiskLevel.Low,
+        State = DescriptorState.Active,
         Version = 1
     };
 
     private static AgentWorkflowDraftPayloadDto BuildSampleWorkflowPayload() => new()
     {
         Name = "TestWorkflow",
-        State = "Draft",
+        State = DescriptorState.Draft,
         VariableSchema = new DescriptorRef("schema", "wf-schema-1", 1),
     };
 
     private static AgentHumanTaskDraftPayloadDto BuildSampleHumanTaskPayload() => new()
     {
         Name = "TestHumanTask",
-        State = "Draft",
+        State = DescriptorState.Draft,
+        AssigneeStrategy = AssigneeStrategy.SingleUser,
         InputSchema = new DescriptorRef("schema", "ht-input-schema", 1),
         OutputSchema = new DescriptorRef("schema", "ht-output-schema", 1),
         Interaction = new DescriptorRef("form", "ht-interaction", 1),
@@ -725,24 +718,25 @@ public class ToolDtoSemanticPreservationTests
     private static AgentFormDraftPayloadDto BuildSampleFormPayload() => new()
     {
         Name = "TestForm",
-        State = "Draft",
+        State = DescriptorState.Draft,
     };
 
     private static AgentEventDraftPayloadDto BuildSampleEventPayload() => new()
     {
         Name = "TestEvent",
-        EventKind = "DomainEvent",
-        State = "Draft",
+        State = DescriptorState.Draft,
+        Category = EventCategory.Domain,
+        Semantic = EventSemantic.Fact,
+        Importance = EventImportance.Business,
+        ChangeKind = SchemaChangeKind.Additive,
         PayloadSchema = new DescriptorRef("schema", "evt-payload-schema", 1),
-        Importance = "High",
-        ChangeKind = "Additive",
     };
 
     private static AgentSchemaDraftPayloadDto BuildSampleSchemaPayload() => new()
     {
         Name = "TestSchema",
-        SchemaKind = "JsonSchema",
-        State = "Draft"
+        State = DescriptorState.Draft,
+        ChangeKind = SchemaChangeKind.Additive
     };
 
     private static AgentReviewResultDto BuildSampleReviewResultDto() => new()
