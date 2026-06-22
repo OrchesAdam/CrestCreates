@@ -305,8 +305,11 @@ internal sealed class AgentDraftContractProjectionWriter
             return "null";
         }
 
-        if (type.SpecialType == SpecialType.System_String || type.NullableAnnotation == NullableAnnotation.Annotated)
-            return "default!";
+        if (type.SpecialType == SpecialType.System_String)
+            return "null!"; // string is non-nullable reference type in init context, null! allows default
+
+        if (type.NullableAnnotation == NullableAnnotation.Annotated)
+            return "null"; // nullable reference type — use null, not default!
 
         if (IsCollectionType(type))
             return $"System.Array.Empty<{GetElementTypeFqn(type)}>()";
