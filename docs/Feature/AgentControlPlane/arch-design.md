@@ -1,6 +1,6 @@
 # Tool DTO & JSON Contract — Architecture Design
 
-> **Date:** 2026-06-21 | **Status:** Implemented | **Phase 7c**
+> **Date:** 2026-06-22 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator)**
 
 ## 1. 概述 (Overview)
 
@@ -9,6 +9,9 @@ Phase 7c 在 Agent Control Plane 与外部协议适配器（MCP、HTTP、SignalR
 核心交付物：
 - **32 个 Tool DTO** — 统一的密封 record 类型，代替所有领域类型
 - **Source-Generated JSON Contract** — `AgentControlPlaneToolJsonSerializerContext`，AoT 兼容
+- **Source-Generated Payload DTOs (New in #42)** — `AgentDraftPayloadDto` 和 6 个子 record 由 `AgentDraftContractGenerator` 在 `CrestCreates.CodeGenerator` 中生成
+- **Source-Generated Patch DTOs (New in #42)** — `AgentDraftPayloadPatchDto` 和 `Agent{Kind}DraftChangedField` 枚举用于 Update 操作的字段级合并
+- **Source-Generated Projection (New in #42)** — `AgentDraftPayloadProjection` 提供 `Create`、`FromDomain`、`Merge` 方法，替代手写 payload 投影
 - **Projection Helpers** — 领域 ←→ DTO 的双向投影，位于 ControlPlane 项目
 - **Contract Version** — `AgentControlPlaneContractVersion.Current = "7c.v1"`
 
@@ -60,9 +63,10 @@ Protocol Adapters (MCP / HTTP / SignalR)
 
 | 项目 | 内容 |
 |------|------|
-| `CrestCreates.Agent.ControlPlane.Abstractions` | DTO 定义、JSON 序列化上下文、契约版本、工具描述符、工具名称常量 |
-| `CrestCreates.Agent.ControlPlane` | Projection Helpers（领域 → DTO / DTO → 领域）、工具服务实现、权限/审计/可见性基础设施 |
-| `CrestCreates.Agent.ControlPlane.Tests` | 280 个测试覆盖 DTO 边界约束、语义保持、可见性闭包、契约覆盖、区分器一致性 |
+| `CrestCreates.Agent.DraftContracts` | Spec 文件（`[AgentDraftContractSpec]`、`[AgentDraftField]` 等）、引用 `CrestCreates.CodeGenerator` → 生成 payload DTO、patch DTO、changed-field 枚举、投影类、manifest |
+| `CrestCreates.Agent.ControlPlane.Abstractions` | Tool DTO（请求/结果类型）、JSON 序列化上下文、契约版本、工具描述符、工具名称常量；payload DTO 类型通过 global using 别名映射到 DraftContracts 生成类型 |
+| `CrestCreates.Agent.ControlPlane` | Wrapper 投影（`AgentDescriptorDraftDtoProjection`）、`AgentDraftPayloadProjection` 的调用者、工具服务实现、权限/审计/可见性基础设施 |
+| `CrestCreates.Agent.ControlPlane.Tests` | 298 个 ControlPlane 测试 + 34 个 DraftContracts 测试 + 15 个 Generator 测试 + 7 个 Boundary 测试 = **354 个测试** |
 
 ---
 
@@ -99,10 +103,17 @@ Protocol Adapters (MCP / HTTP / SignalR)
 │  AgentControlPlane  (Projection Layer)                           │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐    │
-│  │  AgentDescriptorDraftDtoProjection (bidirectional)         │    │
+│  │  AgentDescriptorDraftDtoProjection (wrapper)               │    │
 │  │  ├── FromDraft(DescriptorDraft) → AgentDescriptorDraftDto │    │
-│  │  ├── ToDomainPayload(AgentDraftPayloadDto) → Payload     │    │
-│  │  └── MergeToDomainPayload(existing, dto) → Payload       │    │
+│  │  └── delegates payload ops to AgentDraftPayloadProjection │    │
+│  └──────────────────────────────────────────────────────────┘    │
+│                                                                   │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │  AgentDraftPayloadProjection (source-generated) [New!]    │    │
+│  │  ├── FromDomain(payload) → AgentDraftPayloadDto          │    │
+│  │  ├── Create(dto) → DescriptorDraftPayload                │    │
+│  │  ├── Merge(patch, existing) → ContractResult<Payload>    │    │
+│  │  └── TryValidatePayload(dto) → (bool, Error?)            │    │
 │  └──────────────────────────────────────────────────────────┘    │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐    │
@@ -113,6 +124,24 @@ Protocol Adapters (MCP / HTTP / SignalR)
 │  ┌──────────────────────────────────────────────────────────┐    │
 │  │  AgentReviewResultDtoProjection                           │    │
 │  │  └── Project(source, deniedKinds?) → AgentReviewResultDto │    │
+│  └──────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────┘
+                           ↑ (references generated types)
+┌──────────────────────────────────────────────────────────────────┐
+│  CrestCreates.Agent.DraftContracts  (Source-Generated Types)      │
+│                                                                   │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │  Spec Files (attributes on descriptor types)               │    │
+│  │  └── [AgentDraftContractSpec], [AgentDraftField], ...      │    │
+│  └──────────────────────────────────────────────────────────┘    │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │  AgentDraftContractGenerator (in CrestCreates.CodeGenerator)│    │
+│  │  └── Reads spec files → generates:                        │    │
+│  │      ├── AgentDraftPayloadDto (+ 6 sub-records)           │    │
+│  │      ├── AgentDraftPayloadPatchDto (+ 6 patch branches)   │    │
+│  │      ├── Agent{Kind}DraftChangedField ([Flags] enums)     │    │
+│  │      ├── AgentDraftPayloadProjection                      │    │
+│  │      └── AgentDraftContractManifest                       │    │
 │  └──────────────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -131,13 +160,19 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 
 | 组件 | 所在项目 | 职责 | 状态 |
 |------|---------|------|------|
-| `AgentDraftPayloadDto` | Abstractions/ToolDtos | 嵌套 one-of 负载 DTO，6 个子 record | **Implemented** |
-| `AgentCapabilityDraftPayloadDto` | Abstractions/ToolDtos | Capability 元数据 DTO | **Implemented** |
-| `AgentWorkflowDraftPayloadDto` | Abstractions/ToolDtos | Workflow 元数据 DTO | **Implemented** |
-| `AgentHumanTaskDraftPayloadDto` | Abstractions/ToolDtos | HumanTask 元数据 DTO | **Implemented** |
-| `AgentFormDraftPayloadDto` | Abstractions/ToolDtos | Form 元数据 DTO | **Implemented** |
-| `AgentEventDraftPayloadDto` | Abstractions/ToolDtos | Event 元数据 DTO | **Implemented** |
-| `AgentSchemaDraftPayloadDto` | Abstractions/ToolDtos | Schema 元数据 DTO | **Implemented** |
+| `AgentDraftPayloadDto` | DraftContracts/Dto (Generated) | 嵌套 one-of 负载 DTO，6 个子 record，由 `AgentDraftContractGenerator` 生成 | **Implemented (#42)** |
+| `AgentCapabilityDraftPayloadDto` | DraftContracts/Dto (Generated) | Capability 元数据 DTO，由 Spec 文件驱动生成 | **Implemented (#42)** |
+| `AgentWorkflowDraftPayloadDto` | DraftContracts/Dto (Generated) | Workflow 元数据 DTO，由 Spec 文件驱动生成 | **Implemented (#42)** |
+| `AgentHumanTaskDraftPayloadDto` | DraftContracts/Dto (Generated) | HumanTask 元数据 DTO，由 Spec 文件驱动生成 | **Implemented (#42)** |
+| `AgentFormDraftPayloadDto` | DraftContracts/Dto (Generated) | Form 元数据 DTO，由 Spec 文件驱动生成 | **Implemented (#42)** |
+| `AgentEventDraftPayloadDto` | DraftContracts/Dto (Generated) | Event 元数据 DTO，由 Spec 文件驱动生成 | **Implemented (#42)** |
+| `AgentSchemaDraftPayloadDto` | DraftContracts/Dto (Generated) | Schema 元数据 DTO，由 Spec 文件驱动生成 | **Implemented (#42)** |
+| `AgentDraftPayloadPatchDto` | DraftContracts/Dto (Generated) | Update 用 patch DTO，6 个分支全部 nullable，附带 ChangedFields | **Implemented (#42)** |
+| `Agent{Kind}DraftChangedField` | DraftContracts/Dto (Generated) | `[Flags]` 枚举，指定哪些字段在 patch 中被修改 | **Implemented (#42)** |
+| `AgentDraftPayloadProjection` | DraftContracts/Projection (Generated) | payload 操作投影：`FromDomain`、`Create`、`Merge`、`TryValidatePayload` | **Implemented (#42)** |
+| `AgentDraftContractManifest` | DraftContracts/Manifest (Generated) | `SupportedKinds`、`ContractVersion`("7c.v1")、per-kind 字段元数据 | **Implemented (#42)** |
+| `AgentDraftContractSpec` / `AgentDraftField` / etc. | DraftContracts/Specs | Spec 特性属性，声明 descriptor 属性在契约中的分类 | **Implemented (#42)** |
+| `CapabilityContractSpec` / `WorkflowContractSpec` / etc. | DraftContracts/Specs | 每种 descriptor kind 的 spec 文件，使用 spec 属性描述字段 | **Implemented (#42)** |
 | `AgentDescriptorDraftDto` | Abstractions/ToolDtos | DescriptorDraft 投影 DTO，替换 DraftComparisonResult 中的 DescriptorDraft | **Implemented** |
 | `DescriptorSummaryDto` | Abstractions/ToolDtos | IDescriptor 摘要 DTO，替换 DraftComparisonResult 中的 IDescriptor? | **Implemented** |
 | `AgentReviewResultDto` | Abstractions/ToolDtos | ReviewResult 投影 DTO，含 6 个摘要子 DTO | **Implemented** |
@@ -148,7 +183,7 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `AgentCompatibilitySummaryDto` | Abstractions/ToolDtos | 兼容性摘要 | **Implemented** |
 | `AgentGovernanceSummaryDto` | Abstractions/ToolDtos | 治理决策摘要 | **Implemented** |
 | `CreateDescriptorDraftRequest` | Abstractions | 创建草稿请求（含 `AgentDraftPayloadDto`） | **Implemented** |
-| `UpdateDescriptorDraftRequest` | Abstractions | 更新草稿请求（含 `AgentDraftPayloadDto?`） | **Implemented** |
+| `UpdateDescriptorDraftRequest` | Abstractions | 更新草稿请求（含 `AgentDraftPayloadPatchDto?`） | **Implemented (#42)** |
 | `AgentControlPlaneToolJsonSerializerContext` | Abstractions/Json | Source-generated JSON 序列化上下文，注册所有 Root DTO + 稳定值对象 | **Implemented** |
 | `AgentControlPlaneToolJsonSerializerOptions` | Abstractions/Json | `CreateDefault()` 工厂方法 | **Implemented** |
 | `AgentControlPlaneContractVersion` | Abstractions/Json | `Current = "7c.v1"` | **Implemented** |
@@ -157,7 +192,7 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `AgentToolCategory` | Abstractions | 7 个工具分类枚举 | **Implemented** |
 | `AgentToolResult<T>` | Abstractions | 泛型工具结果包装（Success/Denied/Failed/InvalidRequest/NotFound） | **Implemented** |
 | `DescriptorSummaryDtoProjection` | ControlPlane/Projections | `FromDescriptor(IDescriptor)` | **Implemented** |
-| `AgentDescriptorDraftDtoProjection` | ControlPlane/Projections | `FromDraft` / `ToDomainPayload` / `MergeToDomainPayload` | **Implemented** |
+| `AgentDescriptorDraftDtoProjection` | ControlPlane/Projections | `FromDraft` / 委托 `AgentDraftPayloadProjection` 处理 payload 操作 | **Implemented** |
 | `AgentReviewResultDtoProjection` | ControlPlane/Projections | `Project`（含可见性过滤） | **Implemented** |
 | `StaticAgentToolManifestProvider` | ControlPlane | 静态工具描述符声明（32 个工具） | **Implemented** |
 
@@ -215,7 +250,11 @@ DTO 必须遵守以下约束，确保任何协议适配器都能安全使用：
 
 ## 6. AgentDraftPayloadDto 设计 (Nested One-Of Pattern)
 
+> **注意 (#42)**：`AgentDraftPayloadDto` 及其 6 个子 record 现在是 source-generated 类型，由 `CrestCreates.CodeGenerator` 中的 `AgentDraftContractGenerator` 生成。生成器读取 `DraftContracts/Specs/` 下的 spec 文件（如 `CapabilityContractSpec.cs`），这些文件通过 `[AgentDraftField]`、`[AgentDraftReference]`、`[AgentDraftPreserve]` 等特性声明每个 descriptor 类型中属于契约的字段。
+
 ### 6.1 结构
+
+生成的 `AgentDraftPayloadDto` 结构与手写时一致：
 
 ```csharp
 public sealed record AgentDraftPayloadDto
@@ -230,9 +269,11 @@ public sealed record AgentDraftPayloadDto
 }
 ```
 
+类型通过 `CrestCreates.Agent.ControlPlane.Abstractions` 中的 global using 别名暴露给消费者，因此使用 `new AgentDraftPayloadDto()` 的代码不需要修改。
+
 ### 6.2 不变式
 
-**区分器必须匹配唯一非空的子 record**。如果 `Discriminator` 与填充的子 record 不一致，则视为无效请求。投影层在 `ToDomainPayload` 和 `MergeToDomainPayload` 中执行验证：
+**区分器必须匹配唯一非空的子 record**。如果 `Discriminator` 与填充的子 record 不一致，则视为无效请求。投影层通过 `TryValidatePayload` 执行验证：
 
 ```csharp
 // ValidateDiscriminator 内部的逻辑（每个 Kind 独立检查）
@@ -241,7 +282,7 @@ DescriptorKind.Workflow  → hasWorkflow && !hasCap && !hasHumanTask && !hasForm
 // ... 其余 Kind 同理
 ```
 
-违反不变式时抛出 `InvalidOperationException`，消息包含区分器信息。在工具服务层面，转化为 `AgentToolResult<T>.InvalidRequest` 并附带 `KindDiscriminatorMismatch` 诊断码。
+违反不变式时 `TryValidatePayload` 返回 `(false, AgentDraftContractError)` 并附带 `ADPC002 (DiscriminatorMismatch)` 错误码。在工具服务层面，转化为 `AgentToolResult<T>.InvalidRequest` 并附带 `KindDiscriminatorMismatch` 诊断码。
 
 ### 6.3 子 record 字段（元数据级契约）
 
@@ -258,6 +299,58 @@ DescriptorKind.Workflow  → hasWorkflow && !hasCap && !hasHumanTask && !hasForm
 
 > 所有枚举值在 DTO 层使用 `string?` 表示，避免协议适配器依赖领域枚举程序集。投影层在 domain ↔ DTO 转换时进行 string ↔ enum 转换。
 
+### 6.4 AgentDraftPayloadPatchDto — Update 用 Patch DTO
+
+> **New in #42**：Update 操作不再使用 `AgentDraftPayloadDto`，改用 `AgentDraftPayloadPatchDto`。
+
+Patch DTO 与 create DTO 结构相同，但所有字段均为 nullable，并且在构造时需要同时指定 `ChangedFields`（使用 `[Flags]` 枚举）：
+
+```csharp
+// 生成的 Patch DTO 结构（每个描述符 kind 均有独立分支）
+public sealed record AgentDraftPayloadPatchDto
+{
+    public required DescriptorKind Discriminator { get; init; }
+    public required IReadOnlySet<Enum> ChangedFields { get; init; }
+    public AgentCapabilityDraftPayloadPatchDto? Capability { get; init; }
+    public AgentWorkflowDraftPayloadPatchDto? Workflow { get; init; }
+    public AgentHumanTaskDraftPayloadPatchDto? HumanTask { get; init; }
+    public AgentFormDraftPayloadPatchDto? Form { get; init; }
+    public AgentEventDraftPayloadPatchDto? Event { get; init; }
+    public AgentSchemaDraftPayloadPatchDto? Schema { get; init; }
+}
+```
+
+每个分支 DTO 的字段与 create DTO 同名但全部可空。例如 `AgentCapabilityDraftPayloadPatchDto` 中 `Name` 为 `string?`（create DTO 中为 `required string`）。
+
+#### Patch 合并语义
+
+投影层 `Merge` 方法执行以下逻辑：
+
+| 场景 | 行为 |
+|------|------|
+| 字段在 `ChangedFields` 中 + DTO 值非 null | 更新为该值 |
+| 字段在 `ChangedFields` 中 + DTO 值为 null（可空字段） | 清除为 null |
+| 字段在 `ChangedFields` 中 + DTO 值为 null（非可空字段） | 返回 `ADPC007` 错误 |
+| 字段**不在** `ChangedFields` 中 | 保留现有值 |
+| `ChangedFields` 包含未知 bit | 返回 `ADPC005` 错误 |
+| `ChangedFields` 为空 | 返回 `ADPC004` 错误 |
+| Preserve 字段（在 spec 中标记为 `[AgentDraftPreserve]`） | 忽略 `ChangedFields`，始终从现有值复制 |
+
+### 6.5 ChangedField 枚举
+
+每个描述符 kind 有独立 `[Flags]` 枚举：
+
+| 枚举 | 字段 |
+|------|------|
+| `AgentCapabilityDraftChangedField` | `Name`, `State`, `ContractHash`, `DefinitionHash`, `Version`, `CapabilityKind`, `InputSchema`, `OutputSchema`, `Categories`, `Produces`, `Consumes`, `SemanticTags`, `Permissions`, `RiskLevel` |
+| `AgentWorkflowDraftChangedField` | `Name`, `State`, `ContractHash`, `DefinitionHash`, `Version`, `VariableSchema` |
+| `AgentHumanTaskDraftChangedField` | `Name`, `State`, `ContractHash`, `DefinitionHash`, `Version`, `AssignmentStrategy`, `InputSchema`, `OutputSchema`, `Interaction`, `Timeout` |
+| `AgentFormDraftChangedField` | `Name`, `State`, `ContractHash`, `DefinitionHash`, `Version`, `FormSchema` |
+| `AgentEventDraftChangedField` | `Name`, `State`, `ContractHash`, `DefinitionHash`, `Version`, `EventKind`, `EventType`, `PayloadSchema`, `Importance`, `ChangeKind` |
+| `AgentSchemaDraftChangedField` | `Name`, `State`, `ContractHash`, `DefinitionHash`, `Version`, `SchemaKind` |
+
+所有 kind 共享的公共字段：`Name`, `State`, `ContractHash`, `DefinitionHash`, `Version`。Kind 特有字段如 `CapabilityKind`、`InputSchema`、`Steps`、`PayloadSchema` 等仅出现在对应枚举中。
+
 ---
 
 ## 7. 投影策略 (Projection Strategy)
@@ -265,10 +358,13 @@ DescriptorKind.Workflow  → hasWorkflow && !hasCap && !hasHumanTask && !hasForm
 ### 7.1 设计原则
 
 - **无统一映射器接口** — 不引入 `IMapper<TSource, TDest>`。投影是静态方法，在真实的边界交叉点书写。
-- **投影在 ControlPlane 项目**，不在 Abstractions — 因为投影依赖领域类型（CapabilityDescriptor、WorkflowDescriptor 等），这些在 Abstractions 不可见。
-- **C+ 方法** — 既有代码生成（DTO 定义在 Abstractions）又有静态映射（投影在 ControlPlane），但不存在"双轨"运行时反射回退。
+- **Payload 投影在 DraftContracts (Generated)** — payload DTO 的投影由 `AgentDraftContractGenerator` 在编译期生成，输出为 `AgentDraftPayloadProjection`。这消除了 payload DTO 投影的手写维护。
+- **Wrapper 投影在 ControlPlane** — `AgentDescriptorDraftDtoProjection`（包装 DTO 投影）仍位于 ControlPlane 项目，因为其依赖 `DescriptorDraft` 等领域类型。但它将 payload 操作委托给生成的 `AgentDraftPayloadProjection`。
+- **无运行时反射** —所有投影路径在编译期完全确定。
 
 ### 7.2 FromDraft（领域 → DTO）
+
+领域 → DTO 的投影仍然由 ControlPlane 中的 hand-written projection 处理：
 
 ```csharp
 // DescriptorDraft → AgentDescriptorDraftDto
@@ -281,32 +377,55 @@ public static DescriptorSummaryDto? FromDescriptor(IDescriptor? descriptor)
 public static AgentReviewResultDto Project(DescriptorDraftReviewResult source, IReadOnlySet<DescriptorKind>? deniedKinds)
 ```
 
-MapPayload 内部使用 `IDescriptor` 接口（非具体类型转换），通过 `kind switch` 分发到具体子映射器，确保对每种 DescriptorKind 都有确定性的映射路径。
+Payload 子映射通过 `kind switch` 分发，但现在 DTO 是 source-generated 类型。`FromDraft` 内部调用 `AgentDraftPayloadProjection.FromDomain(payload)` 将领域 payload 转换为 DTO。
 
-### 7.3 ToDomainPayload（DTO → 领域，用于 Create）
+### 7.3 Create — DTO → 领域负载（用于 Create）
+
+生成的 `AgentDraftPayloadProjection` 提供 Create 方法，替代原来的 `ToDomainPayload`：
 
 ```csharp
 // AgentDraftPayloadDto → DescriptorDraftPayload（全新构造）
-public static DescriptorDraftPayload ToDomainPayload(AgentDraftPayloadDto dto)
+public static DescriptorDraftPayload Create(AgentDraftPayloadDto dto)
 ```
 
-验证区分器，然后根据 `Discriminator` 创建对应的领域 payload。DTO 中的 `DescriptorRef` 映射为领域实体 ID 和 `VersionedDescriptorRef<T>`。
+验证区分器，然后根据 `Discriminator` 创建对应的领域 payload。DTO 中的 `DescriptorRef` 映射为领域实体 ID 和 `VersionedDescriptorRef<T>`。如果区分器不匹配，返回 `ADPC002` 错误（而非抛异常）。
 
-### 7.4 MergeToDomainPayload（DTO → 领域，用于 Update）
+### 7.4 Merge — DTO → 领域负载（用于 Update）
+
+生成的 `AgentDraftPayloadProjection` 提供 Merge 方法，替代原来的 `MergeToDomainPayload`：
 
 ```csharp
-// AgentDraftPayloadDto + 现有 payload → 合并后的 DescriptorDraftPayload
-public static DescriptorDraftPayload MergeToDomainPayload(
+// AgentDraftPayloadPatchDto + 现有 payload → 合并结果
+public static AgentDraftContractResult<DescriptorDraftPayload> Merge(
     DescriptorDraftPayload existing,
+    AgentDraftPayloadPatchDto patch)
+```
+
+**返回类型 `AgentDraftContractResult<T>`** 是一个 sealed record，包含：
+- `T? Value` — 合并成功时的领域 payload
+- `AgentDraftContractError? Error` — 合并失败时的错误信息（含错误码）
+
+**合并语义**：只有 `ChangedFields` 中标记的字段才被更新。领域子结构（Steps、Fields、ValidationRules、Outcomes、Permissions 等）从现有 payload 原样保留。
+
+| 场景 | 行为 |
+|------|------|
+| 字段在 `ChangedFields` 中 + DTO 值非 null | 更新为该值 |
+| 字段在 `ChangedFields` 中 + DTO 值为 null（可空字段） | 清除为 null |
+| 字段在 `ChangedFields` 中 + DTO 值为 null（非可空字段） | 返回 `ADPC007` (NonNullableFieldNull) |
+| 字段不在 `ChangedFields` 中 | 现有值保持不变 |
+| `ChangedFields` 包含未知 bit | 返回 `ADPC005` (UnknownChangedField) |
+| `ChangedFields` 为空 | 返回 `ADPC004` (EmptyChangedFields) |
+| Preserve 字段 | 始终从现有值复制，忽略 `ChangedFields` |
+
+### 7.5 TryValidatePayload — 区分器验证
+
+```csharp
+// 验证 payload 区分器匹配且无歧义
+public static (bool IsValid, AgentDraftContractError? Error) TryValidatePayload(
     AgentDraftPayloadDto dto)
 ```
 
-**合并语义**：DTO 只覆盖元数据级字段（Name、State、Schema 引用、ContractHash 等）。DTO 中未表示的领域子结构（Steps、Fields、ValidationRules、Outcomes、Permissions 等）从现有 payload 原样保留。
-
-关键字段的空值处理：
-- `dto.Name ?? existing.Name` — DTO 为 null 时保留现有值
-- `dto.ContractHash ?? existing.ContractHash`
-- `dto.InputSchema is { } ischema ? new VersionedDescriptorRef(...) : existing.InputSchema` — null 保留，非 null 替换
+与 Create 不同，此方法仅执行验证而不创建领域对象，适用于需要在创建前先验证 payload 的场景。
 
 ---
 
@@ -354,9 +473,12 @@ public sealed record AgentToolDescriptor
 | DTO 是密封 record | 支持值语义、AoT 安全、JSON 友好 |
 | 所有枚举在 DTO 层是 `string?` | 避免适配器引用领域枚举程序集 |
 | 子结构的 Steps/Fields/ValidationRules 不在 7c.v1 中 | 这是元数据级契约，全量子结构在后续契约扩展 |
-| 投影在 ControlPlane，不在 Abstractions | 投影依赖领域类型，Abstractions 是零依赖层 |
+| Payload DTO 由 Source Generator 生成 | 通过 Spec 文件声明式定义，消除手写 DTO 与领域模型的不一致 |
+| Patch DTO 在 Update 中使用 | `ChangedFields` 枚举标记受影响的字段，非标记字段保留现有值 |
+| 投影分层：payload 投影生成的，wrapper 投影手写 | Generated `AgentDraftPayloadProjection` 在 DraftContracts；手写 `AgentDescriptorDraftDtoProjection` 在 ControlPlane |
 | 区分器必须匹配子 record | 防止歧义：一个 payload 只能有一个非空子 record |
-| Update 使用合并语义 | DTO 不表示的内容必须从领域保留 |
+| Update 使用字段级合并语义（PatchDto） | 只有 `ChangedFields` 中标记的字段被更新，其他保留 |
+| Preserve 字段始终从现有值复制 | 标记为 `[AgentDraftPreserve]` 的字段不受 `ChangedFields` 影响 |
 | 静态投影，无反射 | 每个 DescriptorKind 有确定性 switch 分支 |
 | JSON Context 注册所有 Root DTO | 确保 Source Generator 覆盖完整的工具表面 |
 | ContractVersion 在每个工具描述符中 | 适配器可以在运行时检查兼容性 |
@@ -367,7 +489,9 @@ public sealed record AgentToolDescriptor
 
 | Phase | 能力 | 状态 |
 |-------|------|------|
-| **7c** | Tool DTO & JSON Contract（当前） | **Implemented** |
+| **7c** | Tool DTO & JSON Contract + AgentDraftContract Generator | **Implemented (#41 DTO Design + #42 Source Generator)** |
+| 7c-sub | #41: Tool DTO, JSON Context, Projection 基础 | Implemented |
+| 7c-sub | #42: AgentDraftContract Generator, Patch DTO, ChangedField enums, Projection 生成 | Implemented |
 | 7b | LLM Bootstrap（Prompt 模板、LLM Provider、Draft Builder） | Future |
 | 7d | MCP Projection（将 Phase 7c DTO 投影到 Model Context Protocol） | Future |
 | 7e | Activation Workflow（已审查的草稿 → 运行时激活） | Future |

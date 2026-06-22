@@ -1,6 +1,6 @@
 # Tool DTO & JSON Contract — Usage Guide
 
-> **Date:** 2026-06-21 | **Status:** Implemented | **Phase 7c**
+> **Date:** 2026-06-22 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator)**
 
 ## 1. 快速开始 (Quick Start)
 
@@ -167,6 +167,8 @@ public sealed record AgentToolResult<T> where T : class
 
 ## 3. AgentDraftPayloadDto 使用 (Usage)
 
+> **注意 (#42)**：`AgentDraftPayloadDto`、其 6 个子 record、`AgentDraftPayloadPatchDto` 以及 ChangedField 枚举现在由 `CrestCreates.CodeGenerator` 中的 `AgentDraftContractGenerator` 编译期生成，不再是手写类型。类型通过 `CrestCreates.Agent.ControlPlane.Abstractions` 中的 global using 别名暴露，因此客户端代码使用 `new AgentDraftPayloadDto()` 的语法完全不变。
+
 ### 3.1 构造负载
 
 每个描述符类型有对应的子 record。以下是 6 种负载构造示例：
@@ -318,6 +320,55 @@ var valid = new AgentDraftPayloadDto
 };
 ```
 
+### 3.3 AgentDraftPayloadPatchDto — 构造 Update 负载
+
+> **New in #42**：Update 操作使用 `AgentDraftPayloadPatchDto` 而非 `AgentDraftPayloadDto`。Patch DTO 所有字段均为 nullable，配合 `ChangedFields` 枚举实现字段级合并。
+
+```csharp
+// Capability Update 示例 — 只更新 Name 和 State
+var capabilityPatch = new AgentDraftPayloadPatchDto
+{
+    Discriminator = DescriptorKind.Capability,
+    ChangedFields = new HashSet<Enum>
+    {
+        AgentCapabilityDraftChangedField.Name,
+        AgentCapabilityDraftChangedField.State
+    },
+    Capability = new AgentCapabilityDraftPayloadPatchDto
+    {
+        Name = "UpdatedCapability",
+        State = "Active"
+        // DescriptorRef, ContractHash 等未设置 → 在 Merge 中保留现有值
+    }
+};
+
+// Workflow Update 示例 — 清除 InputSchema
+var workflowPatch = new AgentDraftPayloadPatchDto
+{
+    Discriminator = DescriptorKind.Workflow,
+    ChangedFields = new HashSet<Enum>
+    {
+        AgentWorkflowDraftChangedField.InputSchema
+    },
+    Workflow = new AgentWorkflowDraftPayloadPatchDto
+    {
+        InputSchema = null  // 显式置空
+    }
+};
+```
+
+#### Patch 合并语义
+
+| 场景 | 结果 |
+|------|------|
+| 字段在 `ChangedFields` + DTO 非 null | 更新为该值 |
+| 字段在 `ChangedFields` + DTO null（可空字段） | 清除为 null |
+| 字段在 `ChangedFields` + DTO null（非可空字段） | ❌ `ADPC007` (NonNullableFieldNull) |
+| 字段**不在** `ChangedFields` 中 | 保留现有值 |
+| `ChangedFields` 含未知 bit | ❌ `ADPC005` (UnknownChangedField) |
+| `ChangedFields` 为空 | ❌ `ADPC004` (EmptyChangedFields) |
+| 标记为 `[AgentDraftPreserve]` 的字段 | 始终从现有值复制 |
+
 ---
 
 ## 4. JSON 序列化 (JSON Serialization)
@@ -401,39 +452,58 @@ AgentReviewResultDto reviewDto = AgentReviewResultDtoProjection.Project(reviewRe
 DescriptorSummaryDto? summary = DescriptorSummaryDtoProjection.FromDescriptor(descriptor);
 ```
 
-### 5.2 ToDomainPayload — DTO → 领域负载（Create 操作）
+### 5.2 Create — DTO → 领域负载（Create 操作）
+
+> **Updated in #42**：payload 投影已迁移到生成的 `AgentDraftPayloadProjection`。`AgentDescriptorDraftDtoProjection` 将 payload 操作委托给新投影。
 
 ```csharp
+using CrestCreates.Agent.DraftContracts.Projection;
+
 // 从 CreateDescriptorDraftRequest 提取 Payload，转换为领域负载
-DescriptorDraftPayload domainPayload = AgentDescriptorDraftDtoProjection.ToDomainPayload(request.Payload);
+DescriptorDraftPayload domainPayload = AgentDraftPayloadProjection.Create(request.Payload);
 ```
 
-此方法验证区分器不变式，然后根据 `Discriminator` 创建对应的 `CapabilityDescriptorDraftPayload` / `WorkflowDescriptorDraftPayload` / 等。
+此方法验证区分器不变式。如果区分器不匹配，返回 `ADPC002 (DiscriminatorMismatch)` 错误。验证通过后根据 `Discriminator` 创建对应的 `CapabilityDescriptorDraftPayload` / `WorkflowDescriptorDraftPayload` / 等。
 
-### 5.3 MergeToDomainPayload — DTO → 领域负载（Update 操作）
+### 5.3 Merge — DTO → 领域负载（Update 操作）
+
+> **Updated in #42**：payload 合并已迁移到生成的 `AgentDraftPayloadProjection`。Merge 使用 `AgentDraftPayloadPatchDto` 而非 `AgentDraftPayloadDto`，返回 `AgentDraftContractResult<T>` 而非直接返回 payload。
 
 ```csharp
+using CrestCreates.Agent.DraftContracts.Projection;
+
 // 从现有草稿加载领域负载，与 UpdateDescriptorDraftRequest.Payload 合并
 DescriptorDraftPayload existingPayload = draftStore.Load(draftId).Payload;
-DescriptorDraftPayload mergedPayload = AgentDescriptorDraftDtoProjection.MergeToDomainPayload(
-    existingPayload, updateRequest.Payload!);
+AgentDraftContractResult<DescriptorDraftPayload> result =
+    AgentDraftPayloadProjection.Merge(existingPayload, updateRequest.Payload!);
+
+if (result.Error is not null)
+{
+    // 合并失败 — 处理错误（ADPC004 / ADPC005 / ADPC007）
+    return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest(
+        new AgentToolDiagnostic
+        {
+            Code = result.Error.Code,       // 如 "ADPC005"
+            Severity = AgentToolDiagnosticSeverity.Error,
+            Message = result.Error.Message
+        });
+}
+
+// 合并成功 — result.Value 包含合并后的领域 payload
+DescriptorDraftPayload mergedPayload = result.Value;
 ```
 
-**合并语义**：DTO 只覆盖元数据级字段（Name、State、Schema 引用等）。以下领域子结构从现有 payload 保留：
-- Capability: 全部保留（DTO 元数据级，Steps 等不存在于 7c.v1）
-- Workflow: `Steps`、`DefaultVariableScope`
-- HumanTask: `Permissions`、`Outcomes`（+ 全部保留的元数据级）
-- Form: `Fields`、`LayoutColumns`
-- Event: 全部覆盖（无子结构需要保留）
-- Schema: `Fields`、`ValidationRules`、`References`
+**合并语义**：只有 `ChangedFields` 中标记的字段才被更新。领域子结构（Steps、Fields、ValidationRules、Outcomes、Permissions 等）从现有 payload 原样保留。Preserve 字段（标记为 `[AgentDraftPreserve]`）始终从现有值复制，不受 `ChangedFields` 影响。
 
 ### 5.4 何时使用哪个
 
 | 场景 | 使用 |
 |------|------|
 | 从领域加载数据并返回给适配器 | `FromDraft` / `Project` |
-| 从适配器接收 Create 请求并转换为领域对象 | `ToDomainPayload` |
-| 从适配器接收 Update 请求并合并到现有草稿 | `MergeToDomainPayload` |
+| 从适配器接收 Create 请求并转换为领域对象 | `AgentDraftPayloadProjection.Create` |
+| 从适配器接收 Update 请求并合并到现有草稿 | `AgentDraftPayloadProjection.Merge` |
+| 将领域 payload 转换为 DTO | `AgentDraftPayloadProjection.FromDomain` |
+| 验证 payload 区分器一致性 | `AgentDraftPayloadProjection.TryValidatePayload` |
 | 将 `IDescriptor` 转换为 DTO 摘要 | `FromDescriptor` |
 | 将 ReviewResult 返回给适配器，需过滤不可见种类 | `Project(source, deniedKinds)` |
 
@@ -586,7 +656,7 @@ public void AgentDraftPayloadDto_serializes_and_deserializes_capability()
 [InlineData(DescriptorKind.Capability, nameof(AgentDraftPayloadDto.Capability))]
 [InlineData(DescriptorKind.Workflow,  nameof(AgentDraftPayloadDto.Workflow))]
 // ...
-public void ValidateDiscriminator_throws_when_kind_mismatches(
+public void ValidateDiscriminator_returns_error_when_kind_mismatches(
     DescriptorKind discriminator, string populatedProperty)
 {
     var dto = new AgentDraftPayloadDto
@@ -597,9 +667,10 @@ public void ValidateDiscriminator_throws_when_kind_mismatches(
         // 故意只填充不匹配的 Capability
     };
 
-    Action act = () => AgentDescriptorDraftDtoProjection.ToDomainPayload(dto);
-    act.Should().Throw<InvalidOperationException>()
-        .WithMessage("*Discriminator*does not match*");
+    var (isValid, error) = AgentDraftPayloadProjection.TryValidatePayload(dto);
+    isValid.Should().BeFalse();
+    error.Should().NotBeNull();
+    error.Code.Should().Be("ADPC002");
 }
 ```
 
@@ -614,7 +685,7 @@ public void denied_kinds_are_filtered_from_review_result()
 
     var dto = AgentReviewResultDtoProjection.Project(reviewResult, deniedKinds);
 
-    // 验证所有摘要中不包含 Schema k__ind 的引用
+    // 验证所有摘要中不包含 Schema kind 的引用
     dto.ProposedInventorySummary.Should().NotBeNull();
     dto.ProposedInventorySummary.DescriptorRefs
         .Should().NotContain(r => r.Namespace == "schema");
@@ -647,9 +718,100 @@ public void all_tool_request_types_are_in_json_context()
 }
 ```
 
+### 9.5 Patch 合并测试模式
+
+验证 Patch Merge 的字段级合并语义：
+
+```csharp
+[Fact]
+public void Merge_only_updates_changed_fields()
+{
+    var existing = CreateSampleCapabilityPayload();
+    var patch = new AgentDraftPayloadPatchDto
+    {
+        Discriminator = DescriptorKind.Capability,
+        ChangedFields = new HashSet<Enum> { AgentCapabilityDraftChangedField.Name },
+        Capability = new AgentCapabilityDraftPayloadPatchDto
+        {
+            Name = "NewName"
+            // State, ContractHash 等未设置
+        }
+    };
+
+    var result = AgentDraftPayloadProjection.Merge(existing, patch);
+
+    result.Error.Should().BeNull();
+    result.Value.Should().NotBeNull();
+    result.Value.Name.Should().Be("NewName");           // 更新
+    result.Value.State.Should().Be(existing.State);      // 保留
+    result.Value.ContractHash.Should().Be(existing.ContractHash); // 保留
+}
+
+[Fact]
+public void Merge_empty_changed_fields_returns_ADPC004()
+{
+    var result = AgentDraftPayloadProjection.Merge(existing, new AgentDraftPayloadPatchDto
+    {
+        Discriminator = DescriptorKind.Capability,
+        ChangedFields = new HashSet<Enum>(), // 空！
+        Capability = new AgentCapabilityDraftPayloadPatchDto()
+    });
+
+    result.Error.Should().NotBeNull();
+    result.Error.Code.Should().Be("ADPC004"); // EmptyChangedFields
+}
+```
+
+### 9.6 生成器诊断回归测试
+
+确保 Spec 文件完整性，防止意外遗漏字段分类：
+
+```csharp
+[Fact]
+public void all_properties_are_classified_in_capability_spec()
+{
+    // 通过分析 Spec 特性与 descriptor 类型的属性对比
+    // 确保每个属性都有 [AgentDraftField] / [AgentDraftReference] /
+    // [AgentDraftPreserve] / [AgentDraftUnsupported] 之一
+}
+
+[Fact]
+public void contract_manifest_includes_all_six_kinds()
+{
+    Assert.Equal(6, AgentDraftContractManifest.SupportedKinds.Count);
+    Assert.Contains(DescriptorKind.Capability, AgentDraftContractManifest.SupportedKinds);
+    Assert.Contains(DescriptorKind.Workflow, AgentDraftContractManifest.SupportedKinds);
+    Assert.Contains(DescriptorKind.HumanTask, AgentDraftContractManifest.SupportedKinds);
+    Assert.Contains(DescriptorKind.Form, AgentDraftContractManifest.SupportedKinds);
+    Assert.Contains(DescriptorKind.Event, AgentDraftContractManifest.SupportedKinds);
+    Assert.Contains(DescriptorKind.Schema, AgentDraftContractManifest.SupportedKinds);
+}
+```
+
 ---
 
-## 10. 未来：LLM 集成 (Future: LLM Integration)
+## 10. Generator 编译期诊断 (Compile-Time Diagnostics)
+
+> **New in #42**：`AgentDraftContractGenerator` 在编译期执行 spec 文件验证。以下诊断在构建时报告为警告或错误：
+
+| 诊断码 | 严重度 | 说明 |
+|--------|--------|------|
+| ADP001 | Error | Missing spec class for a known descriptor kind |
+| ADP002 | Error | Descriptor property not classified in spec |
+| ADP003 | Error | Multiple primary classifications for a property |
+| ADP004 | Warning | Preserve field without reason |
+| ADP005 | Warning | Missing preserve create strategy |
+| ADP006 | Warning | Invalid RequiredOnCreate |
+| ADP007 | Error | Nullable/collection conflict |
+| ADP008 | Error | Duplicate ContractName |
+| ADP009 | Warning | Unstable contract |
+| ADP010 | Info | Spec property not found on descriptor type |
+
+当构建出现 ADP001/ADP002/ADP003/ADP007/ADP008 错误时，生成器不会输出任何 payload DTO，确保运行时代码不会引用不完整的生成类型。
+
+---
+
+## 11. 未来：LLM 集成 (Future: LLM Integration)
 
 Phase 7b（LLM Bootstrap Plane）将在此 DTO 边界之上构建。LLM 集成将使用相同的 Tool DTO 与 Control Plane 交互：
 
