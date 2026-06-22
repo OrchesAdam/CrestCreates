@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+using System.Text;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 
 namespace CrestCreates.Agent.ControlPlane;
@@ -43,17 +43,34 @@ public sealed class DefaultDescriptorReviewMessageTemplateCatalog
         ["report.package_preview.none"] = "No package preview available.",
     };
 
-    private static readonly Regex ParameterPattern = new(@"\{(\w+)\}", RegexOptions.Compiled);
-
+    /// <summary>
+    /// Deterministic placeholder replacer — replaces {Key} tokens without Regex,
+    /// ensuring AOT compatibility (no RegexOptions.Compiled / runtime IL emit).
+    /// </summary>
     public string Format(string messageTemplateId, IReadOnlyDictionary<string, string> parameters)
     {
         if (!Templates.TryGetValue(messageTemplateId, out var template))
             return $"[Unknown template: {messageTemplateId}]";
 
-        return ParameterPattern.Replace(template, match =>
+        // Hand-written replacer for {Word} placeholders — avoids Regex for AOT safety
+        var result = new StringBuilder(template.Length);
+        var i = 0;
+        while (i < template.Length)
         {
-            var key = match.Groups[1].Value;
-            return parameters.TryGetValue(key, out var value) ? value : match.Value;
-        });
+            if (template[i] == '{')
+            {
+                var end = template.IndexOf('}', i + 1);
+                if (end > i)
+                {
+                    var key = template.Substring(i + 1, end - i - 1);
+                    result.Append(parameters.TryGetValue(key, out var value) ? value : template.AsSpan(i, end - i + 1));
+                    i = end + 1;
+                    continue;
+                }
+            }
+            result.Append(template[i]);
+            i++;
+        }
+        return result.ToString();
     }
 }

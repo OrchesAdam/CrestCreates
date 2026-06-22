@@ -21,6 +21,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
             new DefaultAgentToolAuthorizationService(options));
         services.TryAddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
+        services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
         services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
         services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
@@ -43,6 +44,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
             new DefaultAgentToolAuthorizationService(options));
         services.TryAddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
+        services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
         services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
         services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
@@ -71,6 +73,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
             new DefaultAgentToolAuthorizationService(options));
         services.TryAddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
+        services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
         services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
         services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();

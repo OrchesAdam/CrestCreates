@@ -533,12 +533,103 @@ public class Phase7dFixProposalTests : AgentControlPlaneTestBase
         var proposal = result.Value.Proposals[0];
         proposal.Kind.Should().Be(FixProposalKind.MarkRequiresReview,
             "unknown diagnostic codes fall back to MarkRequiresReview");
-        proposal.IsExecutable.Should().BeTrue(
-            "the proposal is marked executable (actual implementation behavior)");
-        proposal.RequiresManualAction.Should().BeFalse(
-            "manual action is not required (actual implementation behavior)");
+        proposal.Applicability.Should().Be(FixProposalApplicability.ManualActionRequired,
+            "unknown diagnostics have no executable actions");
+        proposal.IsExecutable.Should().BeFalse(
+            "proposals without actions are not executable");
+        proposal.RequiresManualAction.Should().BeTrue(
+            "unknown diagnostics require manual intervention");
         proposal.Actions.Should().BeEmpty(
             "GenerateFixActions returns empty list for unknown diagnostic codes");
+    }
+
+    // ── Review Fix: Empty-action proposal rejected ──
+
+    [Fact]
+    public async Task ApplyFixProposalToDraft_EmptyActionProposal_Returns_InvalidRequest()
+    {
+        var service = CreateService();
+        var draft = CreateTestDraft();
+        var proposal = CreateMinimalFixProposal(actions: []);
+
+        SetupDraftStore(draft);
+        InsertFixProposal(service, proposal, draft);
+
+        var context = CreateContext("ApplyFixProposalToDraft");
+        var request = new ApplyFixProposalRequest { ProposalId = proposal.Id, DraftId = proposal.DraftId };
+        var result = await service.ApplyFixProposalToDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "FIX_PROPOSAL_HAS_NO_ACTIONS");
+
+        DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── Review Fix: RemoveValue/AddValue rejected as unsupported ──
+
+    [Theory]
+    [InlineData(FixProposalActionKind.RemoveValue)]
+    [InlineData(FixProposalActionKind.AddValue)]
+    public async Task ApplyFixProposalToDraft_RemoveOrAddValue_Returns_UnsupportedFixActionKind(FixProposalActionKind kind)
+    {
+        var service = CreateService();
+        var draft = CreateTestDraft();
+        var proposal = CreateMinimalFixProposal(actions: new List<FixProposalAction>
+        {
+            new()
+            {
+                Kind = kind,
+                TargetPath = "Rationale",
+                ProposedValue = JsonSerializer.SerializeToElement("value"),
+                IsExecutable = true,
+                SafetyLevel = FixProposalActionSafetyLevel.Safe
+            }
+        });
+
+        SetupDraftStore(draft);
+        InsertFixProposal(service, proposal, draft);
+
+        var context = CreateContext("ApplyFixProposalToDraft");
+        var request = new ApplyFixProposalRequest { ProposalId = proposal.Id, DraftId = proposal.DraftId };
+        var result = await service.ApplyFixProposalToDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "UNSUPPORTED_FIX_ACTION_KIND");
+
+        DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── Review Fix: Boundary violation with TargetDescriptorId + registry path ──
+
+    [Fact]
+    public async Task ApplyFixProposalToDraft_BoundaryViolation_Returns_TargetBoundaryViolation()
+    {
+        var service = CreateService();
+        var draft = CreateTestDraft();
+        var proposal = CreateMinimalFixProposal(actions: new List<FixProposalAction>
+        {
+            new()
+            {
+                Kind = FixProposalActionKind.SetValue,
+                TargetPath = "registry.field",
+                TargetDescriptorId = "desc-001",
+                ProposedValue = JsonSerializer.SerializeToElement("value"),
+                IsExecutable = true,
+                SafetyLevel = FixProposalActionSafetyLevel.Safe
+            }
+        });
+
+        SetupDraftStore(draft);
+        InsertFixProposal(service, proposal, draft);
+
+        var context = CreateContext("ApplyFixProposalToDraft");
+        var request = new ApplyFixProposalRequest { ProposalId = proposal.Id, DraftId = proposal.DraftId };
+        var result = await service.ApplyFixProposalToDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "FIX_ACTION_TARGET_BOUNDARY_VIOLATION");
+
+        DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ── Helpers ──

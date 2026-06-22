@@ -15,10 +15,14 @@ namespace CrestCreates.Agent.ControlPlane;
 public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewReportBuilder
 {
     private readonly IDescriptorReviewMessageTemplateCatalog _templateCatalog;
+    private readonly TimeProvider _clock;
 
-    public DefaultDescriptorReviewReportBuilder(IDescriptorReviewMessageTemplateCatalog templateCatalog)
+    public DefaultDescriptorReviewReportBuilder(
+        IDescriptorReviewMessageTemplateCatalog templateCatalog,
+        TimeProvider? clock = null)
     {
         _templateCatalog = templateCatalog ?? throw new ArgumentNullException(nameof(templateCatalog));
+        _clock = clock ?? TimeProvider.System;
     }
 
     public DescriptorReviewReportDto Build(DescriptorReviewReportBuildRequest request)
@@ -65,7 +69,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             reviewResult, recommendationsSection, governanceSection,
             diagnosticsSection, requiredHumanReviewSection, activationEligibilitySection);
 
-        var generatedAt = DateTimeOffset.UtcNow;
+        var generatedAt = _clock.GetUtcNow();
 
         return new DescriptorReviewReportDto
         {
