@@ -80,6 +80,7 @@ public class MergeProjectionTests
             RiskLevel = CapabilityRiskLevel.Low,
             State = DescriptorState.Active,
             Name = "DifferentName",       // different but NOT in ChangedFields
+            ContractHash = "new-ch",      // explicit value, non-nullable field requires non-null
         };
 
         var patch = new AgentDraftPayloadPatchDto
@@ -97,7 +98,7 @@ public class MergeProjectionTests
 
         var merged = (CapabilityDescriptorDraftPayload)result.Value!;
         merged.Descriptor.Name.Should().Be("ExistingName");       // preserved (not changed)
-        merged.Descriptor.ContractHash.Should().Be(string.Empty);  // changed, patch has default null → ""
+        merged.Descriptor.ContractHash.Should().Be("new-ch");     // changed to explicit value
     }
 
     /// <summary>
@@ -114,6 +115,8 @@ public class MergeProjectionTests
             CapabilityKind = CapabilityKind.Command,
             RiskLevel = CapabilityRiskLevel.High,
             State = DescriptorState.Active,
+            Name = "UpdatedName",
+            Version = 10,
         };
 
         var patch = new AgentDraftPayloadPatchDto

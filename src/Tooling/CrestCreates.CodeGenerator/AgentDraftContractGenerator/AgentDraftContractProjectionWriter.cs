@@ -375,10 +375,29 @@ internal sealed class AgentDraftContractProjectionWriter
         sb.AppendLine($"        if (patch.ChangedFields == {changedFieldEnum}.None)");
         sb.AppendLine("            return AgentDraftContractResult<DescriptorDraftPayload>.Failure(new AgentDraftContractError { Code = AgentDraftContractErrorCodes.EmptyChangedFields, Message = \"ChangedFields is empty. At least one field must be specified for merge.\" });");
         sb.AppendLine();
+
         sb.AppendLine("        var cf = patch.ChangedFields;");
+
+        // P0-4: Validate no unknown ChangedFields bits
+        var editableFields = kind.Fields
+            .Where(f => f.Classification == FieldClassification.EditableScalar || f.Classification == FieldClassification.EditableReference)
+            .ToList();
+        var allKnownExpr = editableFields.Count > 0
+            ? string.Join(" | ", editableFields.Select(f => $"{changedFieldEnum}.{f.ContractName}"))
+            : $"{changedFieldEnum}.None";
+        sb.AppendLine();
+        sb.AppendLine("        // Validate ChangedFields has no unknown bits");
+        sb.AppendLine($"        var unknown = cf & ~({allKnownExpr});");
+        sb.AppendLine($"        if (unknown != {changedFieldEnum}.None)");
+        sb.AppendLine("            return AgentDraftContractResult<DescriptorDraftPayload>.Failure(new AgentDraftContractError { Code = AgentDraftContractErrorCodes.UnknownChangedField, Message = $\"ChangedFields contains unknown bits: {unknown}.\" });");
+        sb.AppendLine();
+
         sb.AppendLine("        var existing = existingPayload.Descriptor;");
         sb.AppendLine("        var dto = patch.Payload;");
         sb.AppendLine();
+
+        // P0-5: Validate non-nullable fields not set to null
+        WriteMergeValidationPhase(sb, kind, changedFieldEnum);
 
         sb.AppendLine($"        var merged = new {descriptorTypeFqn}");
         sb.AppendLine("        {");
@@ -415,32 +434,105 @@ internal sealed class AgentDraftContractProjectionWriter
 
         return cat switch
         {
-            FieldCategory.StringToNullable =>
-                $"{flagCheck} ? ({patchAccess} ?? string.Empty) : {existingAccess}",
+            // String — nullable domain: null clears to null; non-nullable: null already rejected by validation
+            FieldCategory.StringToNullable when field.IsNullable =>
+                $"{flagCheck} ? {patchAccess} : {existingAccess}",
+            FieldCategory.StringToNullable when !field.IsNullable =>
+                $"{flagCheck} ? {patchAccess}! : {existingAccess}",
 
-            FieldCategory.IntToNullable =>
-                $"{flagCheck} ? ({patchAccess} ?? 0) : {existingAccess}",
+            // Int — nullable domain: null clears to null; non-nullable: null already rejected by validation
+            FieldCategory.IntToNullable when field.IsNullable =>
+                $"{flagCheck} ? {patchAccess} : {existingAccess}",
+            FieldCategory.IntToNullable when !field.IsNullable =>
+                $"{flagCheck} ? {patchAccess}!.Value : {existingAccess}",
 
-            FieldCategory.BoolToNullable =>
-                $"{flagCheck} ? ({patchAccess} ?? false) : {existingAccess}",
+            // Bool — same pattern as Int
+            FieldCategory.BoolToNullable when field.IsNullable =>
+                $"{flagCheck} ? {patchAccess} : {existingAccess}",
+            FieldCategory.BoolToNullable when !field.IsNullable =>
+                $"{flagCheck} ? {patchAccess}!.Value : {existingAccess}",
 
+            // TimeSpan—always nullable domain (TimeSpan?); null string clears to null
             FieldCategory.TimeSpanToString =>
                 $"{flagCheck} ? (!string.IsNullOrEmpty({patchAccess}) && System.TimeSpan.TryParse({patchAccess}, out var ts_{EscapeVarName(field.PropertyName)}) ? ts_{EscapeVarName(field.PropertyName)} : null) : {existingAccess}",
 
-            FieldCategory.EnumToEnum =>
-                $"{flagCheck} ? ({(field.IsNullable ? $"{patchAccess} ?? default" : patchAccess)}) : {existingAccess}",
+            // Enum — nullable domain: null clears; non-nullable: DTO is required, can't be null
+            FieldCategory.EnumToEnum when field.IsNullable =>
+                $"{flagCheck} ? {patchAccess} : {existingAccess}",
+            FieldCategory.EnumToEnum when !field.IsNullable =>
+                $"{flagCheck} ? {patchAccess} : {existingAccess}",
 
-            FieldCategory.VersionedRefToRef =>
-                $"{flagCheck} ? ({patchAccess}.HasValue ? new {GetVersionedRefTypeName(field)}({patchAccess}.Value.Id, {patchAccess}.Value.Version ?? 1) : {(field.IsNullable ? "null" : "default")}) : {existingAccess}",
+            // VersionedRef — nullable: null clears; non-nullable: null already rejected by validation
+            FieldCategory.VersionedRefToRef when field.IsNullable =>
+                $"{flagCheck} ? ({patchAccess}.HasValue ? new {GetVersionedRefTypeName(field)}({patchAccess}.Value.Id, {patchAccess}.Value.Version ?? 1) : null) : {existingAccess}",
+            FieldCategory.VersionedRefToRef when !field.IsNullable =>
+                $"{flagCheck} ? new {GetVersionedRefTypeName(field)}({patchAccess}!.Value.Id, {patchAccess}.Value.Version ?? 1) : {existingAccess}",
 
+            // EventRef collection — null means empty (special collection semantics, not an error)
             FieldCategory.EventRefCollectionToRefArray =>
                 $"{flagCheck} ? ({patchAccess} is not null ? {patchAccess}.Select(r => new EventRef(r.Namespace, r.Id, r.Version)).ToArray() : System.Array.Empty<EventRef>()) : {existingAccess}",
 
-            FieldCategory.FallbackNullable =>
-                $"{flagCheck} ? ({patchAccess} ?? default!) : {existingAccess}",
+            // Fallback — nullable: null clears; non-nullable: null already rejected by validation
+            FieldCategory.FallbackNullable when field.IsNullable =>
+                $"{flagCheck} ? {patchAccess} : {existingAccess}",
+            FieldCategory.FallbackNullable when !field.IsNullable =>
+                $"{flagCheck} ? {patchAccess}! : {existingAccess}",
 
             _ => $"{flagCheck} ? {patchAccess} : {existingAccess}",
         };
+    }
+
+    /// <summary>
+    /// Generates null-validation for non-nullable editable fields.
+    /// If a non-nullable domain field has its ChangedFlag set and the DTO value is null,
+    /// the merge must return ADPC007 (NonNullableFieldNull).
+    /// 
+    /// Excludes: enums (DTO is non-nullable required), collections (null → empty is valid).
+    /// </summary>
+    private void WriteMergeValidationPhase(StringBuilder sb, ContractKindSpec kind, string changedFieldEnum)
+    {
+        var editableFields = kind.Fields
+            .Where(f => f.Classification == FieldClassification.EditableScalar || f.Classification == FieldClassification.EditableReference)
+            .ToList();
+
+        // Only validate non-nullable domain fields whose DTO can actually be null.
+        // Skip: enums (DTO is non-nullable required), collections (null → empty is valid).
+        var nonNullableFields = editableFields
+            .Where(f => !f.IsNullable)
+            .Where(f =>
+            {
+                var cat = CategorizeField(f);
+                if (cat == FieldCategory.EnumToEnum) return false;          // DTO is non-nullable required
+                if (cat == FieldCategory.EventRefCollectionToRefArray) return false; // null → empty
+                return true;
+            })
+            .ToList();
+
+        if (nonNullableFields.Count == 0)
+            return;
+
+        sb.AppendLine("        // Validate non-nullable fields are not set to null");
+
+        foreach (var field in nonNullableFields)
+        {
+            var flagCheck = $"cf.HasFlag({changedFieldEnum}.{field.ContractName})";
+            var patchAccess = $"dto.{field.ContractName}";
+            var cat = CategorizeField(field);
+
+            string nullCheck = cat switch
+            {
+                FieldCategory.StringToNullable => $"{patchAccess} is null",
+                FieldCategory.IntToNullable => $"!{patchAccess}.HasValue",
+                FieldCategory.BoolToNullable => $"!{patchAccess}.HasValue",
+                FieldCategory.VersionedRefToRef => $"!{patchAccess}.HasValue",
+                _ => $"{patchAccess} is null",
+            };
+
+            sb.AppendLine($"        if ({flagCheck} && {nullCheck})");
+            sb.AppendLine($"            return AgentDraftContractResult<DescriptorDraftPayload>.Failure(new AgentDraftContractError {{ Code = AgentDraftContractErrorCodes.NonNullableFieldNull, Message = \"Field '{field.ContractName}' is non-nullable but received null.\" }});");
+        }
+
+        sb.AppendLine();
     }
 
     // ──────────────────────────────────────────────────────────────
