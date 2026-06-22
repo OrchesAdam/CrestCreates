@@ -62,7 +62,27 @@ public class ToolDtoSemanticPreservationTests
         // FixProposal
         var fixProposal = BuildSampleFixProposal();
         var fixRoundTripped = RoundTrip(fixProposal);
-        fixRoundTripped.Should().BeEquivalentTo(fixProposal);
+        // JsonElement structs are not compared by content by BeEquivalentTo, so compare explicitly
+        fixRoundTripped.Id.Should().Be(fixProposal.Id);
+        fixRoundTripped.DraftId.Should().Be(fixProposal.DraftId);
+        fixRoundTripped.TenantId.Should().Be(fixProposal.TenantId);
+        fixRoundTripped.Kind.Should().Be(fixProposal.Kind);
+        fixRoundTripped.Title.Should().Be(fixProposal.Title);
+        fixRoundTripped.Explanation.Should().Be(fixProposal.Explanation);
+        fixRoundTripped.ReasonCode.Should().Be(fixProposal.ReasonCode);
+        fixRoundTripped.Applicability.Should().Be(fixProposal.Applicability);
+        fixRoundTripped.IsExecutable.Should().Be(fixProposal.IsExecutable);
+        fixRoundTripped.RequiresManualAction.Should().Be(fixProposal.RequiresManualAction);
+        fixRoundTripped.RequiresHumanReview.Should().Be(fixProposal.RequiresHumanReview);
+        fixRoundTripped.BlocksActivationUntilResolved.Should().Be(fixProposal.BlocksActivationUntilResolved);
+        fixRoundTripped.RiskLevel.Should().Be(fixProposal.RiskLevel);
+        fixRoundTripped.Actions.Should().HaveCount(fixProposal.Actions.Count);
+        fixRoundTripped.Actions[0].Kind.Should().Be(fixProposal.Actions[0].Kind);
+        fixRoundTripped.Actions[0].TargetPath.Should().Be(fixProposal.Actions[0].TargetPath);
+        fixRoundTripped.Actions[0].CurrentValue!.Value.GetString().Should().Be(fixProposal.Actions[0].CurrentValue!.Value.GetString());
+        fixRoundTripped.Actions[0].ProposedValue!.Value.GetString().Should().Be(fixProposal.Actions[0].ProposedValue!.Value.GetString());
+        fixRoundTripped.Actions[0].Description.Should().Be(fixProposal.Actions[0].Description);
+        fixRoundTripped.CreatedAt.Should().Be(fixProposal.CreatedAt);
 
         // ActivationRequest
         var activationRequest = BuildSampleActivationRequest();
@@ -124,10 +144,18 @@ public class ToolDtoSemanticPreservationTests
         var govRoundTripped = RoundTrip(govSummary);
         govRoundTripped.Should().BeEquivalentTo(govSummary);
 
-        // FixProposalListResult
+        // FixProposalListResult — contains FixProposal with JsonElement values, compare explicitly
         var fixListResult = BuildSampleFixProposalListResult();
         var fixListRoundTripped = RoundTrip(fixListResult);
-        fixListRoundTripped.Should().BeEquivalentTo(fixListResult);
+        fixListRoundTripped.Proposals.Should().HaveCount(1);
+        var fp = fixListRoundTripped.Proposals[0];
+        var expectedFp = fixListResult.Proposals[0];
+        fp.Id.Should().Be(expectedFp.Id);
+        fp.DraftId.Should().Be(expectedFp.DraftId);
+        fp.RiskLevel.Should().Be(expectedFp.RiskLevel);
+        fp.Actions.Should().HaveCount(1);
+        fp.Actions[0].CurrentValue!.Value.GetString().Should().Be("OldName");
+        fp.Actions[0].ProposedValue!.Value.GetString().Should().Be("NewName");
 
         // AgentToolDiagnostic
         var diagnostic = BuildSampleToolDiagnostic();
@@ -350,27 +378,40 @@ public class ToolDtoSemanticPreservationTests
     {
         var fixProposal = new FixProposal
         {
-            ProposalId = "fix-high-risk",
+            Id = "fix-high-risk",
             DraftId = "draft-001",
             TenantId = "tenant-001",
+            Kind = FixProposalKind.CreateMissingDescriptor,
+            Title = "Fix high risk contract hash",
+            Explanation = "Contract hash must be updated to reflect breaking change",
+            ReasonCode = "CONTRACT_BREAKING_CHANGE",
+            Applicability = FixProposalApplicability.CurrentMutableDraft,
+            IsExecutable = true,
+            RequiresManualAction = false,
+            RequiresHumanReview = true,
+            BlocksActivationUntilResolved = false,
+            ContractVersion = AgentControlPlaneContractVersion.Current,
             RiskLevel = FixProposalRiskLevel.High,
-            RequiresHumanApproval = true,
             Actions = new[]
             {
                 new FixProposalAction
                 {
-                    Path = "contractHash",
-                    ActionKind = FixProposalActionKind.Set,
-                    CurrentValue = "old-hash-abc123",
-                    ProposedValue = "new-hash-def456",
+                    Kind = FixProposalActionKind.SetValue,
+                    TargetPath = "contractHash",
+                    CurrentValue = JsonSerializer.SerializeToElement("old-hash-abc123"),
+                    ProposedValue = JsonSerializer.SerializeToElement("new-hash-def456"),
+                    IsExecutable = true,
+                    SafetyLevel = FixProposalActionSafetyLevel.Safe,
                     Description = "Update contract hash to reflect breaking change"
                 },
                 new FixProposalAction
                 {
-                    Path = "version",
-                    ActionKind = FixProposalActionKind.Set,
-                    CurrentValue = "2",
-                    ProposedValue = "3",
+                    Kind = FixProposalActionKind.SetValue,
+                    TargetPath = "version",
+                    CurrentValue = JsonSerializer.SerializeToElement("2"),
+                    ProposedValue = JsonSerializer.SerializeToElement("3"),
+                    IsExecutable = true,
+                    SafetyLevel = FixProposalActionSafetyLevel.Safe,
                     Description = "Bump major version for breaking change"
                 }
             },
@@ -390,17 +431,17 @@ public class ToolDtoSemanticPreservationTests
         var roundTripped = RoundTrip(fixProposal);
 
         roundTripped.RiskLevel.Should().Be(FixProposalRiskLevel.High);
-        roundTripped.RequiresHumanApproval.Should().BeTrue();
+        roundTripped.RequiresHumanReview.Should().BeTrue();
         roundTripped.Actions.Should().HaveCount(2);
-        roundTripped.Actions[0].Path.Should().Be("contractHash");
-        roundTripped.Actions[0].ActionKind.Should().Be(FixProposalActionKind.Set);
-        roundTripped.Actions[0].CurrentValue.Should().Be("old-hash-abc123");
-        roundTripped.Actions[0].ProposedValue.Should().Be("new-hash-def456");
-        roundTripped.Actions[1].Path.Should().Be("version");
-        roundTripped.Actions[1].CurrentValue.Should().Be("2");
-        roundTripped.Actions[1].ProposedValue.Should().Be("3");
+        roundTripped.Actions[0].TargetPath.Should().Be("contractHash");
+        roundTripped.Actions[0].Kind.Should().Be(FixProposalActionKind.SetValue);
+        roundTripped.Actions[0].CurrentValue!.Value.GetString().Should().Be("old-hash-abc123");
+        roundTripped.Actions[0].ProposedValue!.Value.GetString().Should().Be("new-hash-def456");
+        roundTripped.Actions[1].TargetPath.Should().Be("version");
+        roundTripped.Actions[1].CurrentValue!.Value.GetString().Should().Be("2");
+        roundTripped.Actions[1].ProposedValue!.Value.GetString().Should().Be("3");
         roundTripped.Rationale.Should().Be("Contract hash must be updated to reflect the changed schema");
-        roundTripped.ProposalId.Should().Be("fix-high-risk");
+        roundTripped.Id.Should().Be("fix-high-risk");
     }
 
     // ── Test 5: ActivationRequestDto_Remains_HandoffOnly ──
@@ -644,9 +685,9 @@ public class ToolDtoSemanticPreservationTests
     // ── Test 10: ContractVersion_Is_7c_v1 ──
 
     [Fact]
-    public void ContractVersion_Is_7c_v1()
+    public void ContractVersion_Is_7d_v1()
     {
-        AgentControlPlaneContractVersion.Current.Should().Be("7c.v1");
+        AgentControlPlaneContractVersion.Current.Should().Be("7d.v1");
     }
 
     // ── Helper: DescriptorRef round-trip (value type) ──
@@ -767,19 +808,30 @@ public class ToolDtoSemanticPreservationTests
 
     private static FixProposal BuildSampleFixProposal() => new()
     {
-        ProposalId = "fix-001",
+        Id = "fix-001",
         DraftId = "draft-001",
         TenantId = "tenant-001",
+        Kind = FixProposalKind.CreateMissingDescriptor,
+        Title = "Test fix proposal",
+        Explanation = "Test explanation for sample",
+        ReasonCode = "TEST_REASON",
+        Applicability = FixProposalApplicability.CurrentMutableDraft,
+        IsExecutable = true,
+        RequiresManualAction = false,
+        RequiresHumanReview = false,
+        BlocksActivationUntilResolved = false,
+        ContractVersion = AgentControlPlaneContractVersion.Current,
         RiskLevel = FixProposalRiskLevel.Low,
-        RequiresHumanApproval = false,
         Actions = new[]
         {
             new FixProposalAction
             {
-                Path = "name",
-                ActionKind = FixProposalActionKind.Set,
-                CurrentValue = "OldName",
-                ProposedValue = "NewName",
+                Kind = FixProposalActionKind.SetValue,
+                TargetPath = "name",
+                CurrentValue = JsonSerializer.SerializeToElement("OldName"),
+                ProposedValue = JsonSerializer.SerializeToElement("NewName"),
+                IsExecutable = true,
+                SafetyLevel = FixProposalActionSafetyLevel.Safe,
                 Description = "Rename descriptor"
             }
         },

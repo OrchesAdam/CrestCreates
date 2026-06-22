@@ -1,3 +1,5 @@
+using CrestCreates.Agent.ControlPlane.Abstractions.Json;
+using System.Text.Json;
 using Xunit;
 using Moq;
 using CrestCreates.Agent.ControlPlane.Abstractions;
@@ -21,12 +23,13 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult<Draft?>(draft));
 
+        // RATIONALE_EMPTY generates a fix for Rationale (an allowed mutable draft field)
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
             new DraftAbstractions.DescriptorDraftDiagnostic
             {
-                Code = "DRAFT_ID_EMPTY",
-                Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error,
-                Message = "Draft ID must not be empty"
+                Code = "RATIONALE_EMPTY",
+                Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning,
+                Message = "Rationale must not be empty"
             });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
@@ -35,8 +38,8 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
         result.Status.Should().Be(AgentToolResultStatus.Success);
         result.Value!.Proposals.Should().NotBeEmpty();
         result.Value.Proposals[0].DraftId.Should().Be("draft-001");
-        result.Value.Proposals[0].RiskLevel.Should().Be(FixProposalRiskLevel.High);
-        result.Value.Proposals[0].RequiresHumanApproval.Should().BeTrue();
+        result.Value.Proposals[0].Kind.Should().Be(FixProposalKind.SetRequiredField);
+        result.Value.Proposals[0].RequiresHumanReview.Should().BeFalse();
     }
 
     [Fact]
@@ -83,17 +86,17 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
             .Returns(Task.FromResult<Draft?>(draft));
 
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
-            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });
+            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "RATIONALE_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, Message = "Empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
         var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
-        var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
+        var proposalId = suggestResult.Value!.Proposals[0].Id;
 
         var getContext = CreateContext("GetFixProposal");
         var getResult = await service.GetFixProposalAsync(getContext, proposalId);
 
         getResult.Status.Should().Be(AgentToolResultStatus.Success);
-        getResult.Value!.ProposalId.Should().Be(proposalId);
+        getResult.Value!.Id.Should().Be(proposalId);
     }
 
     [Fact]
@@ -120,8 +123,9 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
         DraftStoreMock.Setup(s => s.ListAsync(TestTenantId, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync([draft]);
 
+        // RATIONALE_EMPTY generates a fix for Rationale (an allowed mutable draft field)
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
-            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });
+            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "RATIONALE_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, Message = "Empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
         await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
@@ -146,12 +150,13 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
         DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        // RATIONALE_EMPTY generates a fix for Rationale (an allowed mutable draft field)
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
-            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });
+            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "RATIONALE_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, Message = "Rationale is empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
         var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
-        var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
+        var proposalId = suggestResult.Value!.Proposals[0].Id;
 
         var applyContext = CreateContext("ApplyFixProposalToDraft");
         var applyRequest = new ApplyFixProposalRequest { ProposalId = proposalId, DraftId = "draft-001" };
@@ -179,7 +184,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
         var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
-        var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
+        var proposalId = suggestResult.Value!.Proposals[0].Id;
 
         var applyContext = CreateContext("ApplyFixProposalToDraft");
         var applyRequest = new ApplyFixProposalRequest { ProposalId = proposalId, DraftId = "draft-001" };
@@ -197,7 +202,6 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
     public async Task ApplyFixProposalToDraft_Records_Applied_And_Skipped_Diagnostics()
     {
         var service = CreateService();
-        var suggestContext = CreateContext("SuggestDescriptorDraftFixes");
         var draft = CreateTestDraft();
 
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -205,20 +209,24 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
         DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        // DRAFT_ID_EMPTY generates a fix for DraftId (identity field — will be skipped)
-        var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
-            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });
-        DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
-
-        var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
-        var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
+        // Insert a fix proposal manually with a non-allowed target path
+        var proposal = InsertFixProposal(service, TestTenantId, "fp-skipped", draft, new FixProposalAction
+        {
+            Kind = FixProposalActionKind.SetValue,
+            TargetPath = "ForbiddenField", // not in allowedPaths
+            CurrentValue = JsonSerializer.SerializeToElement(""),
+            ProposedValue = JsonSerializer.SerializeToElement("value"),
+            IsExecutable = true,
+            SafetyLevel = FixProposalActionSafetyLevel.Safe
+        });
 
         var applyContext = CreateContext("ApplyFixProposalToDraft");
-        var applyRequest = new ApplyFixProposalRequest { ProposalId = proposalId, DraftId = "draft-001" };
+        var applyRequest = new ApplyFixProposalRequest { ProposalId = proposal.Id, DraftId = "draft-001" };
         var applyResult = await service.ApplyFixProposalToDraftAsync(applyContext, applyRequest);
 
-        // DraftId is an identity field, so the action should be skipped
-        applyResult.Diagnostics.Should().Contain(d => d.Code == "FIX_ACTIONS_SKIPPED");
+        // ForbiddenField is not an allowed draft field target — rejected
+        applyResult.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        applyResult.Diagnostics.Should().Contain(d => d.Code == "FIX_ACTION_TARGET_NOT_ALLOWED");
     }
 
     [Fact]
@@ -243,11 +251,11 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
             .Returns(Task.FromResult<Draft?>(draft));
 
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
-            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });
+            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "RATIONALE_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, Message = "Empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
         var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
-        var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
+        var proposalId = suggestResult.Value!.Proposals[0].Id;
 
         // Make draft disappear for apply
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-002", It.IsAny<CancellationToken>()))
@@ -273,12 +281,13 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
         DraftStoreMock.Setup(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        // RATIONALE_EMPTY generates a fix for Rationale (an allowed draft field)
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
-            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, Message = "Empty" });
+            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "RATIONALE_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, Message = "Rationale is empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
         var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
-        var proposalId = suggestResult.Value!.Proposals[0].ProposalId;
+        var proposalId = suggestResult.Value!.Proposals[0].Id;
 
         var applyContext = CreateContext("ApplyFixProposalToDraft");
         var request = new ApplyFixProposalRequest { ProposalId = proposalId, DraftId = "draft-001" };
@@ -286,5 +295,41 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
 
         DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
         // DescriptorCatalog has no mutation methods — structural invariant
+    }
+
+    private static FixProposal InsertFixProposal(
+        DefaultAgentControlPlaneToolService service,
+        string tenantId,
+        string proposalId,
+        Draft draft,
+        FixProposalAction action)
+    {
+        var proposal = new FixProposal
+        {
+            Id = proposalId,
+            Kind = FixProposalKind.SetRequiredField,
+            Title = "Test fix",
+            Explanation = "Test",
+            ReasonCode = "TEST",
+            DraftId = draft.DraftId,
+            TenantId = tenantId,
+            Applicability = FixProposalApplicability.CurrentMutableDraft,
+            IsExecutable = true,
+            RequiresManualAction = false,
+            RequiresHumanReview = false,
+            BlocksActivationUntilResolved = false,
+            RiskLevel = FixProposalRiskLevel.Low,
+            ContractVersion = AgentControlPlaneContractVersion.Current,
+            Actions = [action],
+            Diagnostics = [],
+            CreatedAt = DateTimeOffset.UtcNow,
+            Rationale = "Test rationale"
+        };
+
+        var fieldInfo = typeof(DefaultAgentControlPlaneToolService)
+            .GetField("_fixProposals", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        dynamic dict = fieldInfo!.GetValue(service)!;
+        dict[(tenantId, proposalId)] = new FixProposalResourceSnapshot(proposal, draft);
+        return proposal;
     }
 }

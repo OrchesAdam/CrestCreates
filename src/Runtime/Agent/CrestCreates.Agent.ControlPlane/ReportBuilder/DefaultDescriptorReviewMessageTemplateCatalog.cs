@@ -1,0 +1,59 @@
+using System.Text.RegularExpressions;
+using CrestCreates.Agent.ControlPlane.Abstractions;
+
+namespace CrestCreates.Agent.ControlPlane;
+
+public sealed class DefaultDescriptorReviewMessageTemplateCatalog
+    : IDescriptorReviewMessageTemplateCatalog
+{
+    public string TemplateVersion => "7d.v1";
+
+    private static readonly Dictionary<string, string> Templates = new(StringComparer.Ordinal)
+    {
+        ["report.activation.eligible"] = "Draft is eligible for activation handoff.",
+        ["report.activation.blocked"] = "Draft is not eligible: {BlockingReasons}.",
+        ["report.governance.approved"] = "Governance decision: approved. {Rationale}",
+        ["report.governance.rejected"] = "Governance decision: rejected. {Rationale}",
+        ["report.governance.review_required"] = "Governance decision: review required. {Rationale}",
+        ["report.diagnostics.missing_ref"] = "Descriptor '{DescriptorId}' references missing '{ReferenceId}'.",
+        ["report.compatibility.schema"] = "Schema change is incompatible: {Details}.",
+        ["report.summary.valid"] = "Draft validation passed with {DiagnosticCount} diagnostics.",
+        ["report.summary.invalid"] = "Draft validation failed with {ErrorCount} errors and {BlockerCount} blockers.",
+        ["report.human_review.required"] = "Human review required: {Reason}.",
+        ["report.recommendation.no_action"] = "No action required at this time.",
+        ["report.recommendation.activation_handoff"] = "Draft is ready for activation handoff.",
+        ["report.recommendation.human_review"] = "Human review is required before proceeding.",
+        ["report.recommendation.apply_fix"] = "Fix proposal available: {FixProposalId}.",
+        ["report.recommendation.revise_draft"] = "Draft needs revision before proceeding.",
+        ["report.recommendation.cancel_draft"] = "Draft should be cancelled.",
+        ["report.package.available"] = "Package preview available with {DescriptorCount} descriptors.",
+        ["report.hashes.computed"] = "Stable hashes computed for {HashCount} items.",
+        ["report.draft_identity.info"] = "Draft '{DraftId}' of kind '{DescriptorKind}', operation {Operation}, status {Status}.",
+        ["report.proposed_changes.materialized"] = "Materialization produced {ProposedCount} proposed descriptors.",
+        ["report.proposed_changes.failed"] = "Materialization failed: {Reason}.",
+        ["report.impact.affected"] = "Impact analysis found {AffectedCount} affected descriptors.",
+        ["report.impact.none"] = "No descriptors affected by this draft.",
+        ["report.dependency.summary"] = "Topology: {NodeCount} nodes, {EdgeCount} edges.",
+        ["report.compatibility.compatible"] = "All {DescriptorCount} descriptors are compatible.",
+        ["report.compatibility.incompatible"] = "{IncompatibleCount} of {TotalCount} descriptors are incompatible.",
+        ["report.diagnostics.count"] = "{TotalCount} diagnostics: {InfoCount} info, {WarningCount} warnings, {ErrorCount} errors, {BlockerCount} blockers.",
+        ["report.stable_hashes.present"] = "Stable hashes available for {HashCount} items.",
+        ["report.stable_hashes.none"] = "No stable hashes computed.",
+        ["report.package_preview.present"] = "Package preview with {DescriptorCount} descriptors, {HashCount} hashes.",
+        ["report.package_preview.none"] = "No package preview available.",
+    };
+
+    private static readonly Regex ParameterPattern = new(@"\{(\w+)\}", RegexOptions.Compiled);
+
+    public string Format(string messageTemplateId, IReadOnlyDictionary<string, string> parameters)
+    {
+        if (!Templates.TryGetValue(messageTemplateId, out var template))
+            return $"[Unknown template: {messageTemplateId}]";
+
+        return ParameterPattern.Replace(template, match =>
+        {
+            var key = match.Groups[1].Value;
+            return parameters.TryGetValue(key, out var value) ? value : match.Value;
+        });
+    }
+}

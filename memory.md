@@ -594,8 +594,30 @@ This thread achieved the following:
      - **Diagnostic descriptors**: ADP001–ADP010 covering spec validation errors (missing spec, unknown kind, duplicate field, missing kind accessor, etc.)
      - **Migration**: Hand-written `AgentDescriptorDraftDtoProjection.cs` (670 lines) → generated `AgentDraftPayloadProjection.g.cs` (558 lines); 7 hand-written DTO files in Abstractions → project reference to DraftContracts + global using aliases
      - **285 ControlPlane tests + 21 DraftContracts integration tests + 8 generator unit tests + 7 Boundary tests pass** (321 total)
-     - **Design spec**: `docs/superpowers/specs/2026-06-21-phase-7c-agent-draft-payload-contract-source-generator-design.md`
-     - **Implementation plan**: `docs/superpowers/plans/2026-06-21-phase-7c-agent-draft-payload-contract-source-generator.md`
+      - **Design spec**: `docs/superpowers/specs/2026-06-21-phase-7c-agent-draft-payload-contract-source-generator-design.md`
+      - **Implementation plan**: `docs/superpowers/plans/2026-06-21-phase-7c-agent-draft-payload-contract-source-generator.md`
+
+    - **Review Report & Fix Proposal Contract — Phase 7d** (2026-06-22):
+      - **Review Report DTOs** (5 new types): `DescriptorReviewReportDto` (13 typed sections + top-level Recommendations), `DescriptorReviewReportSectionDto` (Kind, SectionId, Title, Order, IsEmpty, OverallSeverity, Items), `DescriptorReviewReportItemDto` (ItemId, ReasonCode, MessageTemplateId, Message, Severity, Parameters, RelatedDiagnosticIds, RelatedDescriptorIds), `DescriptorReviewRecommendationDto` (RecommendationId, ReasonCode, Message, Kind, IsActionable, RelatedItemIds), `DescriptorReviewReportBuildRequest` (ReviewResult, Draft, VisibilityApplied)
+      - **New enums**: `DescriptorReviewReportSectionKind` (13 values), `DescriptorReviewSeverity` (Info/Warning/Error/Blocker), `DescriptorReviewRecommendationKind` (6 values including RequestActivationHandoff), `DescriptorReviewReportFormat` (Markdown/PlainText)
+      - **FixProposal contract upgrade** (breaking): `FixProposal` gains Kind, Title, Explanation, ReasonCode, Applicability, IsExecutable, RequiresManualAction, BlocksActivationUntilResolved, ContractVersion; `FixProposalAction` gains TargetPath (was Path), Kind (was ActionKind), JsonElement? CurrentValue/ProposedValue (was string), IsExecutable, SafetyLevel
+      - **New enums**: `FixProposalKind` (8 values incl. FlagUnsafeExpansion), `FixProposalApplicability` (4 values incl. CurrentMutableDraft), `FixProposalActionSafetyLevel` (4 values), `FixProposalActionKind` expanded to 10 (SetValue/RemoveValue/AddValue + 7 new)
+      - **Report Builder**: `IDescriptorReviewReportBuilder`/`DefaultDescriptorReviewReportBuilder` (1,046 lines) — 13 Build*Section methods, SHA256 ReportId, fail-fast on VisibilityApplied=false, deterministic recommendations from typed state
+      - **Report Renderer**: `IDescriptorReviewReportRenderer`/`DefaultDescriptorReviewReportRenderer` — Markdown + PlainText, reads DTO Message directly, no external services/LLM
+      - **Message Template Catalog**: `IDescriptorReviewMessageTemplateCatalog`/`DefaultDescriptorReviewMessageTemplateCatalog` — 31 templates, regex-based parameter substitution, TemplateVersion="7d.v1"
+      - **Service integration**: `BuildDescriptorReviewReportAsync` + `RenderDescriptorReviewReportAsync` (2 new tools), ContractVersion validation on render, single-action constraint on ApplyFixProposal (UnsupportedMultiActionFixProposal diagnostic)
+      - **Contract version**: bumped to "7d.v1"
+      - **Tool count**: 30 → 32 (BuildDescriptorReviewReport + RenderDescriptorReviewReport)
+      - **Test suites**: 6 new test files, 53 new tests total:
+        - DescriptorReviewReportBuilderTests (13): visibility guard, 13 sections, ordering, diagnostics, hashes, governance, recommendations
+        - DescriptorReviewReportRendererTests (7): Markdown/PlainText, empty sections, determinism, DTO message usage
+        - DescriptorReviewMessageTemplateCatalogTests (8): known/unknown templates, parameter substitution, version
+        - Phase7dFixProposalTests (12): IsExecutable aggregation, ContractVersion, JsonElement round-trip, single-action constraint, unsafe/unsupported rejection
+        - Phase7dServiceIntegrationTests (8): Build/Render service methods, contract version validation, access control
+        - Phase7dCoverageTests (5): visibility leakage, builder fail-fast, renderer determinism, tool count
+      - **349 ControlPlane tests + 7 Boundary tests pass** (356 total)
+      - **Design spec**: `docs/superpowers/specs/2026-06-22-phase-7d-review-report-fix-proposal-design.md`
+      - **Implementation plan**: `docs/superpowers/plans/2026-06-22-phase-7d-review-report-fix-proposal.md`
 
   - **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface.
 

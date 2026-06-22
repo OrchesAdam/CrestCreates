@@ -15,7 +15,8 @@ namespace CrestCreates.Agent.ControlPlane;
 
 internal sealed record ReviewResourceSnapshot(
     DraftReviewResult Review,
-    Draft Owner);
+    Draft Owner,
+    DateTimeOffset CreatedAt);
 
 internal sealed record FixProposalResourceSnapshot(
     FixProposal Proposal,
@@ -37,6 +38,10 @@ internal sealed record EvidencePreviewEntry(
 
 internal sealed record EvidencePreviewResourceSnapshot(
     EvidencePreviewEntry Evidence,
+    Draft Owner);
+
+internal sealed record ReportResourceSnapshot(
+    DescriptorReviewReportDto Report,
     Draft Owner);
 
 internal sealed record ActivationResourceSnapshot(

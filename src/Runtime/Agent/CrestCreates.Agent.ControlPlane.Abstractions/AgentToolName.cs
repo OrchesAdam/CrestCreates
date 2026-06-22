@@ -32,6 +32,10 @@ public static class AgentToolName
     public const string ListDraftReviewResults = nameof(ListDraftReviewResults);
     public const string ExplainDiagnostics = nameof(ExplainDiagnostics);
 
+    // ── Review Report (Phase 7d) ──
+    public const string BuildDescriptorReviewReport = nameof(BuildDescriptorReviewReport);
+    public const string RenderDescriptorReviewReport = nameof(RenderDescriptorReviewReport);
+
     // ── Fix Proposal ──
     public const string SuggestDescriptorDraftFixes = nameof(SuggestDescriptorDraftFixes);
     public const string GetFixProposal = nameof(GetFixProposal);

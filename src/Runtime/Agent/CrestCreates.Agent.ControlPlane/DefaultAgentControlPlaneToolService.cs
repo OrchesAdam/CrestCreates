@@ -1,5 +1,7 @@
 ﻿using System.Collections.Concurrent;
+using System.Text.Json;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using CrestCreates.Agent.ControlPlane.Projections;
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Agent.DraftContracts.Dto;
@@ -46,6 +48,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly AgentDraftArtifactVisibilityProjector _artifactProjector;
     private readonly AgentDiagnosticExplanationPolicy _explanationPolicy = new();
     private readonly Func<AgentToolAuthorizationOptions> _optionsFactory;
+    private readonly IDescriptorReviewReportBuilder _reportBuilder;
+    private readonly IDescriptorReviewReportRenderer _reportRenderer;
 
     // Local stores for review results, fix proposals, package previews, activation requests
     // Keyed by (TenantId, ArtifactId) for tenant isolation.
@@ -55,6 +59,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly ConcurrentDictionary<(string TenantId, string Id), PackagePreviewResourceSnapshot> _packagePreviews = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), EvidencePreviewResourceSnapshot> _evidencePreviews = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), ActivationResourceSnapshot> _activationRequests = new();
+    private readonly ConcurrentDictionary<(string TenantId, string Id), ReportResourceSnapshot> _reports = new();
 
     public DefaultAgentControlPlaneToolService(
         IAgentToolManifestProvider manifestProvider,
@@ -70,6 +75,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         IDescriptorTopologyBuilder topologyBuilder,
         IDescriptorPackageBuilder packageBuilder,
         ILogger<DefaultAgentControlPlaneToolService> logger,
+        IDescriptorReviewReportBuilder reportBuilder,
+        IDescriptorReviewReportRenderer reportRenderer,
         AgentToolAuthorizationOptions? authorizationOptions = null)
     {
         _manifestProvider = manifestProvider;
@@ -85,6 +92,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         _topologyBuilder = topologyBuilder;
         _packageBuilder = packageBuilder;
         _logger = logger;
+        _reportBuilder = reportBuilder;
+        _reportRenderer = reportRenderer;
         _resourceResolver = new AgentControlPlaneResourceResolver(draftStore, descriptorCatalog);
         _topologyProjector = new AgentTopologyVisibilityProjector();
         _artifactProjector = new AgentDraftArtifactVisibilityProjector(_topologyProjector, topologyBuilder);
@@ -1171,7 +1180,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             }
 
             var reviewId = Guid.NewGuid().ToString("N");
-            _reviewResults[(context.TenantId, reviewId)] = new ReviewResourceSnapshot(projectedReview, snapshot.Draft);
+            _reviewResults[(context.TenantId, reviewId)] = new ReviewResourceSnapshot(projectedReview, snapshot.Draft, DateTimeOffset.UtcNow);
 
             var reviewed = snapshot.Draft with { Status = DraftAbstractions.DescriptorDraftStatus.Reviewed };
             await _draftStore.SaveAsync(reviewed, ct);
@@ -1302,6 +1311,104 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         }, ct);
     }
 
+    // ── Wave 3d — Review Report (Phase 7d) ──
+
+    public async Task<AgentToolResult<DescriptorReviewReportDto>> BuildDescriptorReviewReportAsync(
+        AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
+    {
+        return await ExecuteAsync(context, AgentToolName.BuildDescriptorReviewReport,
+            AgentToolPermissionName.ReviewReportBuild, async (scope, ct) =>
+        {
+            var draftResolution = await _resourceResolver.ResolveDraftAsync(context.TenantId, draftId, ct);
+            if (draftResolution.Status == ResourceResolutionStatus.NotFound)
+                return await RecordAndReturn(context,
+                    AgentToolResult<DescriptorReviewReportDto>.NotFound($"Draft '{draftId}' not found."));
+
+            var snapshot = draftResolution.Snapshot!;
+            var denyResult = DenyIfInvisible<DescriptorReviewReportDto>(context, scope, snapshot.Draft.DescriptorKind);
+            if (denyResult is not null) return denyResult;
+
+            // Find the latest review result for this draft (most recent by timestamp)
+            var reviewSnapshot = _reviewResults.Values
+                .Where(r => r.Owner.DraftId == draftId && r.Owner.TenantId == context.TenantId)
+                .OrderByDescending(r => r.CreatedAt)
+                .FirstOrDefault();
+            if (reviewSnapshot is null)
+            {
+                var noReviewDiag = new AgentToolDiagnostic
+                {
+                    Code = "NO_REVIEW_RESULT",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = $"No review result found for draft '{draftId}'. Run ReviewDescriptorDraft first."
+                };
+                var noReviewAudit = BuildAudit(context, AgentToolResultStatus.Failed, [noReviewDiag]);
+                await _auditor.RecordAsync(noReviewAudit, ct);
+                return AgentToolResult<DescriptorReviewReportDto>.Failed([noReviewDiag], noReviewAudit);
+            }
+
+            var request = new DescriptorReviewReportBuildRequest
+            {
+                ReviewResult = reviewSnapshot.Review,
+                Draft = snapshot.Draft,
+                VisibilityApplied = true
+            };
+
+            var report = _reportBuilder.Build(request);
+            _reports[(context.TenantId, report.ReportId)] = new ReportResourceSnapshot(report, snapshot.Draft);
+
+            var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
+            await _auditor.RecordAsync(audit, ct);
+            return AgentToolResult<DescriptorReviewReportDto>.Success(report, [], audit);
+        }, ct);
+    }
+
+    public async Task<AgentToolResult<string>> RenderDescriptorReviewReportAsync(
+        AgentToolInvocationContext context, DescriptorReviewReportDto report,
+        DescriptorReviewReportFormat format, CancellationToken ct = default)
+    {
+        return await ExecuteAsync(context, AgentToolName.RenderDescriptorReviewReport,
+            AgentToolPermissionName.ReviewReportRender, async (scope, ct) =>
+        {
+            // Validate contract version
+            if (report.ContractVersion != AgentControlPlaneContractVersion.Current)
+            {
+                var diag = new AgentToolDiagnostic
+                {
+                    Code = "UNSUPPORTED_REPORT_CONTRACT_VERSION",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = $"Report contract version '{report.ContractVersion}' is not supported. Current: '{AgentControlPlaneContractVersion.Current}'."
+                };
+                var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [diag]);
+                await _auditor.RecordAsync(audit, ct);
+                return AgentToolResult<string>.InvalidRequest([diag], audit);
+            }
+
+            var rendered = format switch
+            {
+                DescriptorReviewReportFormat.Markdown => _reportRenderer.RenderMarkdown(report),
+                DescriptorReviewReportFormat.PlainText => _reportRenderer.RenderPlainText(report),
+                _ => null
+            };
+
+            if (rendered is null)
+            {
+                var diag = new AgentToolDiagnostic
+                {
+                    Code = "UNSUPPORTED_REPORT_FORMAT",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = $"Report format '{format}' is not supported."
+                };
+                var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [diag]);
+                await _auditor.RecordAsync(audit, ct);
+                return AgentToolResult<string>.InvalidRequest([diag], audit);
+            }
+
+            var successAudit = BuildAudit(context, AgentToolResultStatus.Success, []);
+            await _auditor.RecordAsync(successAudit, ct);
+            return AgentToolResult<string>.Success(rendered, [], successAudit);
+        }, ct);
+    }
+
     // ── Wave 4 — Fix Proposal ──
 
     public async Task<AgentToolResult<FixProposalListResult>> SuggestDescriptorDraftFixesAsync(
@@ -1324,17 +1431,26 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var validationResult = _draftValidator.Validate(snapshot.Draft);
             var proposals = new List<FixProposal>();
 
-            foreach (var diag in validationResult.Diagnostics)
+            foreach (var diag in validationResult.Diagnostics.Where(d => !IsIdentityFieldDiagnostic(d.Code)))
             {
                 var proposalId = Guid.NewGuid().ToString("N");
                 var proposal = new FixProposal
                 {
-                    ProposalId = proposalId,
+                    Id = proposalId,
+                    Kind = MapDiagnosticToFixProposalKind(diag.Code),
+                    Title = $"Fix: {diag.Code}",
+                    Explanation = $"Auto-generated fix for draft diagnostic '{diag.Code}': {diag.Message}",
+                    ReasonCode = diag.Code,
                     DraftId = draftId,
                     TenantId = context.TenantId,
-                    RiskLevel = MapDiagnosticToRiskLevel(diag.Severity),
-                    RequiresHumanApproval = diag.Severity is DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error
+                    Applicability = FixProposalApplicability.CurrentMutableDraft,
+                    IsExecutable = true,
+                    RequiresManualAction = false,
+                    RequiresHumanReview = diag.Severity is DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error
                         or DraftAbstractions.DescriptorDraftDiagnosticSeverity.Blocker,
+                    BlocksActivationUntilResolved = false,
+                    RiskLevel = MapDiagnosticToRiskLevel(diag.Severity),
+                    ContractVersion = AgentControlPlaneContractVersion.Current,
                     Actions = GenerateFixActions(diag),
                     Diagnostics = [MapFromDraftDiagnostic(diag)],
                     CreatedAt = DateTimeOffset.UtcNow,
@@ -1349,7 +1465,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var audit = BuildAudit(context, AgentToolResultStatus.Success, []) with
             {
                 TouchedDraftIds = [draftId],
-                TouchedFixProposalIds = proposals.Select(p => p.ProposalId).ToList().AsReadOnly()
+                TouchedFixProposalIds = proposals.Select(p => p.Id).ToList().AsReadOnly()
             };
             await _auditor.RecordAsync(audit, ct);
             return AgentToolResult<FixProposalListResult>.Success(result, audit);
@@ -1455,35 +1571,134 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             }
 
             var draft = draftResolution.Snapshot!.Draft;
+            var proposal = proposalSnapshot.Proposal;
 
-            if (proposalSnapshot.Proposal.DraftId != request.DraftId)
+            if (proposal.DraftId != request.DraftId)
             {
                 var mismatchDiag = new AgentToolDiagnostic
                 {
                     Code = "PROPOSAL_DRAFT_MISMATCH",
                     Severity = AgentToolDiagnosticSeverity.Error,
-                    Message = $"Fix proposal '{request.ProposalId}' is for draft '{proposalSnapshot.Proposal.DraftId}', not '{request.DraftId}'."
+                    Message = $"Fix proposal '{request.ProposalId}' is for draft '{proposal.DraftId}', not '{request.DraftId}'."
                 };
                 var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [mismatchDiag]);
                 await _auditor.RecordAsync(audit, ct);
                 return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([mismatchDiag], audit);
             }
 
+            // Single-action constraint: multi-action proposals are not supported
+            if (proposal.Actions.Count > 1)
+            {
+                var multiActionDiag = new AgentToolDiagnostic
+                {
+                    Code = "UNSUPPORTED_MULTI_ACTION_FIX_PROPOSAL",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = $"Fix proposal '{request.ProposalId}' contains {proposal.Actions.Count} actions. Only single-action fix proposals are supported."
+                };
+                var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [multiActionDiag]);
+                await _auditor.RecordAsync(audit, ct);
+                return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([multiActionDiag], audit);
+            }
+
+            // Check applicability — only CurrentMutableDraft proposals can be applied
+            if (proposal.Applicability != FixProposalApplicability.CurrentMutableDraft)
+            {
+                var applicabilityDiag = new AgentToolDiagnostic
+                {
+                    Code = "FIX_PROPOSAL_NOT_APPLICABLE",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = $"Fix proposal applicability is '{proposal.Applicability}', but only '{FixProposalApplicability.CurrentMutableDraft}' proposals can be applied."
+                };
+                var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [applicabilityDiag]);
+                await _auditor.RecordAsync(audit, ct);
+                return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([applicabilityDiag], audit);
+            }
+
             var updatedDraft = draft;
 
-            if (proposalSnapshot.Proposal.Rationale is not null)
-                updatedDraft = updatedDraft with { Rationale = proposalSnapshot.Proposal.Rationale };
+            if (proposal.Rationale is not null)
+                updatedDraft = updatedDraft with { Rationale = proposal.Rationale };
 
             var appliedPaths = new List<string>();
             var skippedPaths = new List<string>();
 
-            foreach (var action in proposalSnapshot.Proposal.Actions)
+            if (proposal.Actions.Count == 1)
             {
-                var applied = ApplyActionToDraft(ref updatedDraft, action);
-                if (applied)
-                    appliedPaths.Add(action.Path);
+                var action = proposal.Actions[0];
+
+                if (!action.IsExecutable)
+                {
+                    var nonExecDiag = new AgentToolDiagnostic
+                    {
+                        Code = "NON_EXECUTABLE_FIX_ACTION",
+                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Message = $"Fix action for target '{action.TargetPath}' is not executable."
+                    };
+                    var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [nonExecDiag]);
+                    await _auditor.RecordAsync(audit, ct);
+                    return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([nonExecDiag], audit);
+                }
+
+                if (action.Kind is not FixProposalActionKind.SetValue
+                    and not FixProposalActionKind.RemoveValue
+                    and not FixProposalActionKind.AddValue)
+                {
+                    var unsupportedKindDiag = new AgentToolDiagnostic
+                    {
+                        Code = "UNSUPPORTED_FIX_ACTION_KIND",
+                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Message = $"Fix action kind '{action.Kind}' is not supported for draft field mutation."
+                    };
+                    var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [unsupportedKindDiag]);
+                    await _auditor.RecordAsync(audit, ct);
+                    return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([unsupportedKindDiag], audit);
+                }
+
+                if (action.SafetyLevel == FixProposalActionSafetyLevel.Unsafe)
+                {
+                    var unsafeDiag = new AgentToolDiagnostic
+                    {
+                        Code = "UNSAFE_FIX_ACTION_REJECTED",
+                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Message = $"Fix action for target '{action.TargetPath}' has Unsafe safety level and is rejected."
+                    };
+                    var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [unsafeDiag]);
+                    await _auditor.RecordAsync(audit, ct);
+                    return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([unsafeDiag], audit);
+                }
+
+                var allowedPaths = new HashSet<string>(StringComparer.Ordinal)
+                    { "Intent", "Rationale", "ProposedVersion", "CorrelationId" };
+                if (!allowedPaths.Contains(action.TargetPath))
+                {
+                    var targetDiag = new AgentToolDiagnostic
+                    {
+                        Code = "FIX_ACTION_TARGET_NOT_ALLOWED",
+                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Message = $"Fix action target '{action.TargetPath}' is not an allowed draft field."
+                    };
+                    var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [targetDiag]);
+                    await _auditor.RecordAsync(audit, ct);
+                    return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([targetDiag], audit);
+                }
+
+                if (action.Kind == FixProposalActionKind.SetValue)
+                {
+                    var value = action.ProposedValue?.GetString();
+                    updatedDraft = action.TargetPath switch
+                    {
+                        "Intent" => updatedDraft with { Intent = value },
+                        "Rationale" => updatedDraft with { Rationale = value },
+                        "ProposedVersion" => updatedDraft with { ProposedVersion = value },
+                        "CorrelationId" => updatedDraft with { CorrelationId = value },
+                        _ => updatedDraft
+                    };
+                    appliedPaths.Add(action.TargetPath);
+                }
                 else
-                    skippedPaths.Add(action.Path);
+                {
+                    skippedPaths.Add(action.TargetPath);
+                }
             }
 
             await _draftStore.SaveAsync(updatedDraft, ct);
@@ -2090,15 +2305,15 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     /// </summary>
     private static bool ApplyActionToDraft(ref Draft draft, FixProposalAction action)
     {
-        if (action.ActionKind != FixProposalActionKind.Set)
+        if (action.Kind != FixProposalActionKind.SetValue)
             return false; // Remove/Add not yet supported for draft fields
 
-        return action.Path switch
+        return action.TargetPath switch
         {
-            "Intent" => ApplySetField(ref draft, d => d with { Intent = action.ProposedValue }),
-            "Rationale" => ApplySetField(ref draft, d => d with { Rationale = action.ProposedValue }),
-            "ProposedVersion" => ApplySetField(ref draft, d => d with { ProposedVersion = action.ProposedValue }),
-            "CorrelationId" => ApplySetField(ref draft, d => d with { CorrelationId = action.ProposedValue }),
+            "Intent" => ApplySetField(ref draft, d => d with { Intent = action.ProposedValue?.GetString() }),
+            "Rationale" => ApplySetField(ref draft, d => d with { Rationale = action.ProposedValue?.GetString() }),
+            "ProposedVersion" => ApplySetField(ref draft, d => d with { ProposedVersion = action.ProposedValue?.GetString() }),
+            "CorrelationId" => ApplySetField(ref draft, d => d with { CorrelationId = action.ProposedValue?.GetString() }),
             // DraftId, DescriptorId, AuthorId, TenantId are identity fields — not mutable via fix proposals
             // Payload paths require typed payload support — deferred
             _ => false
@@ -2178,52 +2393,30 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         _ => FixProposalRiskLevel.Medium
     };
 
+    private static bool IsIdentityFieldDiagnostic(string code) =>
+        code is "DRAFT_ID_EMPTY" or "DESCRIPTOR_ID_EMPTY" or "AUTHOR_ID_EMPTY";
+
+    private static FixProposalKind MapDiagnosticToFixProposalKind(string diagnosticCode) => diagnosticCode switch
+    {
+        "RATIONALE_EMPTY" or "INTENT_EMPTY" => FixProposalKind.SetRequiredField,
+        _ => FixProposalKind.MarkRequiresReview
+    };
+
     private static IReadOnlyList<FixProposalAction> GenerateFixActions(
         DraftAbstractions.DescriptorDraftDiagnostic diagnostic)
     {
         var actions = new List<FixProposalAction>();
 
-        if (diagnostic.Code == "DRAFT_ID_EMPTY")
+        if (diagnostic.Code == "RATIONALE_EMPTY")
         {
             actions.Add(new FixProposalAction
             {
-                Path = "DraftId",
-                ActionKind = FixProposalActionKind.Set,
-                CurrentValue = "",
-                ProposedValue = "(auto-generated)",
-                Description = "Set DraftId to a generated value."
-            });
-        }
-        else if (diagnostic.Code == "DESCRIPTOR_ID_EMPTY")
-        {
-            actions.Add(new FixProposalAction
-            {
-                Path = "DescriptorId",
-                ActionKind = FixProposalActionKind.Set,
-                CurrentValue = "",
-                ProposedValue = "(must be specified)",
-                Description = "Provide a DescriptorId."
-            });
-        }
-        else if (diagnostic.Code == "AUTHOR_ID_EMPTY")
-        {
-            actions.Add(new FixProposalAction
-            {
-                Path = "AuthorId",
-                ActionKind = FixProposalActionKind.Set,
-                CurrentValue = "",
-                ProposedValue = "(must be specified)",
-                Description = "Provide an AuthorId."
-            });
-        }
-        else if (diagnostic.Code == "RATIONALE_EMPTY")
-        {
-            actions.Add(new FixProposalAction
-            {
-                Path = "Rationale",
-                ActionKind = FixProposalActionKind.Set,
-                CurrentValue = "",
-                ProposedValue = "(provide rationale)",
+                Kind = FixProposalActionKind.SetValue,
+                TargetPath = "Rationale",
+                CurrentValue = JsonSerializer.SerializeToElement(""),
+                ProposedValue = JsonSerializer.SerializeToElement("(provide rationale)"),
+                IsExecutable = true,
+                SafetyLevel = FixProposalActionSafetyLevel.Safe,
                 Description = "Provide a rationale for the draft."
             });
         }
@@ -2231,10 +2424,12 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         {
             actions.Add(new FixProposalAction
             {
-                Path = "Intent",
-                ActionKind = FixProposalActionKind.Set,
-                CurrentValue = "",
-                ProposedValue = "(provide intent)",
+                Kind = FixProposalActionKind.SetValue,
+                TargetPath = "Intent",
+                CurrentValue = JsonSerializer.SerializeToElement(""),
+                ProposedValue = JsonSerializer.SerializeToElement("(provide intent)"),
+                IsExecutable = true,
+                SafetyLevel = FixProposalActionSafetyLevel.Safe,
                 Description = "Provide an intent for the draft."
             });
         }

@@ -82,6 +82,22 @@ namespace CrestCreates.Agent.ControlPlane.Abstractions.Json;
 [JsonSerializable(typeof(AgentToolDescriptor))]
 [JsonSerializable(typeof(IReadOnlyList<AgentToolDescriptor>))]
 
+// ── Wave 8 — Review Report (Phase 7d) ──────────────────────────────────
+[JsonSerializable(typeof(AgentToolResult<DescriptorReviewReportDto>))]
+[JsonSerializable(typeof(DescriptorReviewReportDto))]
+[JsonSerializable(typeof(DescriptorReviewReportSectionDto))]
+[JsonSerializable(typeof(DescriptorReviewReportItemDto))]
+[JsonSerializable(typeof(DescriptorReviewRecommendationDto))]
+[JsonSerializable(typeof(DescriptorReviewReportBuildRequest))]
+[JsonSerializable(typeof(DescriptorReviewReportSectionKind))]
+[JsonSerializable(typeof(DescriptorReviewSeverity))]
+[JsonSerializable(typeof(DescriptorReviewRecommendationKind))]
+[JsonSerializable(typeof(DescriptorReviewReportFormat))]
+[JsonSerializable(typeof(FixProposalKind))]
+[JsonSerializable(typeof(FixProposalApplicability))]
+[JsonSerializable(typeof(FixProposalActionSafetyLevel))]
+[JsonSerializable(typeof(System.Text.Json.JsonElement))]
+
 // ── Stable upstream value objects ──────────────────────────────────────
 [JsonSerializable(typeof(DescriptorKind))]
 [JsonSerializable(typeof(DescriptorState))]

@@ -1,6 +1,6 @@
-# Tool DTO & JSON Contract — Usage Guide
+# Tool DTO, JSON Contract & Review Report — Usage Guide
 
-> **Date:** 2026-06-22 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator)**
+> **Date:** 2026-06-22 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal)**
 
 ## 1. 快速开始 (Quick Start)
 
@@ -130,7 +130,19 @@ public sealed record AgentToolResult<T> where T : class
 - `AgentCompatibilitySummaryDto? CompatibilitySummary`
 - `AgentGovernanceSummaryDto? GovernanceSummary`
 
-### 2.5 Wave 4 — Fix Proposal（4 tools）
+### 2.5 Wave 3.5 — ReviewReport (New in Phase 7d)
+
+| 工具名 | 请求类型 | 结果类型 (AgentToolResult<>) |
+|--------|---------|---------------------------|
+| `BuildDescriptorReviewReport` | `string draftId` | `DescriptorReviewReportDto` |
+| `RenderDescriptorReviewReport` | `DescriptorReviewReportDto` + `DescriptorReviewReportFormat` | `string` |
+
+**DescriptorReviewReportDto** 包含 13 个固定 Section，3 个核心子 DTO：
+- 13 × `DescriptorReviewReportSectionDto` — 每个含 Kind、SectionId、Title、Order、IsEmpty、OverallSeverity、Items
+- `DescriptorReviewReportItemDto` — 含 ReasonCode、MessageTemplateId、Message、Severity、Parameters、RelatedDescriptorIds
+- `DescriptorReviewRecommendationDto` — 含 Kind (RequestActivationHandoff / RequestHumanReview / ApplyFixProposal / ReviseDraft / CancelDraft / NoAction)、IsActionable
+
+### 2.6 Wave 4 — Fix Proposal（4 tools）
 
 | 工具名 | 请求类型 | 结果类型 (AgentToolResult<>) |
 |--------|---------|---------------------------|
@@ -139,7 +151,7 @@ public sealed record AgentToolResult<T> where T : class
 | `ListFixProposals` | `DescriptorRef` | `FixProposalListResult` |
 | `ApplyFixProposalToDraft` | `ApplyFixProposalRequest` | `AgentDescriptorDraftDto` |
 
-### 2.6 Wave 5 — Package Preview（4 tools）
+### 2.7 Wave 5 — Package Preview（4 tools）
 
 | 工具名 | 请求类型 | 结果类型 (AgentToolResult<>) |
 |--------|---------|---------------------------|
@@ -148,7 +160,7 @@ public sealed record AgentToolResult<T> where T : class
 | `BuildActivationReadinessPreview` | `DescriptorRef` | `ActivationReadinessPreview` |
 | `GetPackagePreview` | `DescriptorRef` | `DescriptorPackagePreview` |
 
-### 2.7 Wave 6 — Activation Handoff（3 tools）
+### 2.8 Wave 6 — Activation Handoff（3 tools）
 
 | 工具名 | 请求类型 | 结果类型 (AgentToolResult<>) |
 |--------|---------|---------------------------|
@@ -156,7 +168,7 @@ public sealed record AgentToolResult<T> where T : class
 | `GetActivationRequestStatus` | `DescriptorRef` | `ActivationRequest` |
 | `CancelActivationRequest` | `DescriptorRef` | `ActivationRequest` |
 
-### 2.8 Wave 7 — Manifest（2 tools）
+### 2.9 Wave 7 — Manifest（2 tools）
 
 | 工具名 | 请求类型 | 结果类型 |
 |--------|---------|---------|
@@ -552,7 +564,7 @@ if (request.DescriptorKind != request.Payload.Discriminator)
 
 ```csharp
 string version = AgentControlPlaneContractVersion.Current;
-// => "7c.v1"
+// => "7d.v1"
 ```
 
 ### 7.2 从 Manifest 查询版本
@@ -567,9 +579,9 @@ foreach (var tool in allTools)
     Console.WriteLine($"{tool.Name}: contract={tool.ContractVersion}");
 }
 // 输出示例:
-//   BuildMetadataContextPack: contract=7c.v1
-//   CreateDescriptorDraft: contract=7c.v1
-//   ListAgentTools: contract=7c.v1
+//   BuildMetadataContextPack: contract=7d.v1
+//   CreateDescriptorDraft: contract=7d.v1
+//   ListAgentTools: contract=7d.v1
 //   ...
 ```
 
@@ -578,10 +590,10 @@ foreach (var tool in allTools)
 ```csharp
 // 适配器在连接时检查契约版本兼容性
 var toolDescriptor = manifestProvider.GetToolByName("CreateDescriptorDraft");
-if (toolDescriptor?.ContractVersion != "7c.v1")
+if (toolDescriptor?.ContractVersion != "7d.v1")
 {
     // 版本不匹配 — 适配器可能需要升级或降级策略
-    throw new AdapterException($"Expected contract 7c.v1, got {toolDescriptor?.ContractVersion}");
+    throw new AdapterException($"Expected contract 7d.v1, got {toolDescriptor?.ContractVersion}");
 }
 ```
 
@@ -694,14 +706,14 @@ public void denied_kinds_are_filtered_from_review_result()
 
 ### 9.4 契约覆盖测试
 
-确保所有 32 个工具在 Manifest 和 JSON Context 中都已注册：
+确保所有 34 个工具在 Manifest 和 JSON Context 中都已注册：
 
 ```csharp
 [Fact]
-public void all_32_tools_are_registered_in_manifest()
+public void all_34_tools_are_registered_in_manifest()
 {
     var manifest = new StaticAgentToolManifestProvider();
-    manifest.GetAllTools().Should().HaveCount(32);
+    manifest.GetAllTools().Should().HaveCount(34);
 }
 
 [Fact]
@@ -713,7 +725,7 @@ public void all_tool_request_types_are_in_json_context()
     serializables.Select(a => a.Type)
         .Should().Contain(typeof(CreateDescriptorDraftRequest))
         .And.Contain(typeof(UpdateDescriptorDraftRequest))
-        // ... 验证所有 32 个工具的类型
+        // ... 验证所有 34 个工具的类型
         ;
 }
 ```
@@ -788,6 +800,97 @@ public void contract_manifest_includes_all_six_kinds()
 }
 ```
 
+### 9.7 Review Report Builder/Renderer 测试模式 (New in Phase 7d)
+
+验证审查报告 Builder 和 Renderer 的正确性：
+
+```csharp
+[Fact]
+public void Build_AllSections_AlwaysPresent()
+{
+    var request = CreateSampleBuildRequest(VisibilityApplied: true);
+    var report = _builder.Build(request);
+
+    report.SummarySection.Should().NotBeNull();
+    report.DraftIdentitySection.Should().NotBeNull();
+    report.ProposedChangesSection.Should().NotBeNull();
+    report.ImpactAnalysisSection.Should().NotBeNull();
+    report.DependencySummarySection.Should().NotBeNull();
+    report.CompatibilitySection.Should().NotBeNull();
+    report.GovernanceSection.Should().NotBeNull();
+    report.RequiredHumanReviewSection.Should().NotBeNull();
+    report.ActivationEligibilitySection.Should().NotBeNull();
+    report.DiagnosticsSection.Should().NotBeNull();
+    report.RecommendationsSection.Should().NotBeNull();
+    report.PackagePreviewSection.Should().NotBeNull();
+    report.StableHashesSection.Should().NotBeNull();
+    // 13 sections always present, empty sections have IsEmpty=true
+}
+
+[Fact]
+public void RenderMarkdown_Deterministic()
+{
+    var report = CreateSampleReport();
+    var options = AgentControlPlaneToolJsonSerializerOptions.CreateDefault();
+
+    var output1 = _renderer.RenderMarkdown(report);
+    var output2 = _renderer.RenderMarkdown(report);
+
+    output1.Should().Be(output2); // Same DTO → same output
+}
+
+[Fact]
+public void RenderDescriptorReviewReport_RejectsUnsupportedContractVersion()
+{
+    var report = CreateSampleReport() with { ContractVersion = "6a.v1" };
+
+    // 在工具服务层面验证
+    var format = DescriptorReviewReportFormat.Markdown;
+    // Should return UnsupportedReportContractVersion diagnostic
+}
+
+[Fact]
+public void Build_VisibilityAppliedFalse_ThrowsInvalidOperationException()
+{
+    var request = CreateSampleBuildRequest(VisibilityApplied: false);
+    Action act = () => _builder.Build(request);
+    act.Should().Throw<InvalidOperationException>();
+}
+
+[Fact]
+public void FixProposal_IsExecutable_AggregationRule()
+{
+    var proposal = new FixProposal
+    {
+        Id = "fix_1",
+        DraftId = "draft_1",
+        TenantId = "tenant_1",
+        Kind = FixProposalKind.SetRequiredField,
+        Title = "Set Rationale",
+        Explanation = "Rationale field is empty",
+        ReasonCode = "RATIONALE_EMPTY",
+        Applicability = FixProposalApplicability.CurrentMutableDraft,
+        IsExecutable = true, // Aggregation: Applicability==CurrentMutableDraft && All(IsExecutable)
+        RequiresManualAction = false,
+        RequiresHumanReview = false,
+        BlocksActivationUntilResolved = false,
+        RiskLevel = FixProposalRiskLevel.Low,
+        Actions = new[] { new FixProposalAction
+        {
+            Kind = FixProposalActionKind.SetValue,
+            TargetPath = "$.Rationale",
+            IsExecutable = true,
+            SafetyLevel = FixProposalActionSafetyLevel.Safe
+        }},
+        Diagnostics = [],
+        CreatedAt = DateTimeOffset.UtcNow,
+        ContractVersion = AgentControlPlaneContractVersion.Current
+    };
+
+    proposal.IsExecutable.Should().BeTrue();
+}
+```
+
 ---
 
 ## 10. Generator 编译期诊断 (Compile-Time Diagnostics)
@@ -811,7 +914,364 @@ public void contract_manifest_includes_all_six_kinds()
 
 ---
 
-## 11. 未来：LLM 集成 (Future: LLM Integration)
+## 11. Review Report 使用 (Review Report Usage) (Phase 7d)
+
+### 11.1 构建审查报告
+
+使用 `BuildDescriptorReviewReportAsync` 从草稿审查结果构建结构化报告：
+
+```csharp
+using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.ToolDtos;
+
+// 构建审查报告（需要先有审查结果）
+var reportResult = await toolService.BuildDescriptorReviewReportAsync(
+    context,
+    draftId: "draft_cap_123",
+    ct: cancellationToken);
+
+if (reportResult.Status == AgentToolResultStatus.Success && reportResult.Value is not null)
+{
+    var report = reportResult.Value;
+    Console.WriteLine($"Report {report.ReportId} generated at {report.GeneratedAt}");
+    Console.WriteLine($"Contract: {report.ContractVersion}, Template: {report.TemplateVersion}");
+
+    // 检查推荐
+    foreach (var rec in report.Recommendations)
+    {
+        Console.WriteLine($"[{rec.Kind}] {rec.Message} (actionable: {rec.IsActionable})");
+    }
+}
+```
+
+### 11.2 渲染审查报告
+
+使用 `RenderDescriptorReviewReportAsync` 将 DTO 渲染为 Markdown 或 PlainText：
+
+```csharp
+// 渲染为 Markdown
+var markdownResult = await toolService.RenderDescriptorReviewReportAsync(
+    context,
+    report,
+    DescriptorReviewReportFormat.Markdown,
+    ct: cancellationToken);
+
+if (markdownResult.Status == AgentToolResultStatus.Success)
+{
+    Console.WriteLine(markdownResult.Value);
+    // 输出示例：
+    // # Review Report: draft_cap_123
+    // ## Summary
+    // Draft validation passed with 3 diagnostics.
+    // ## Draft Identity
+    // - DraftId: draft_cap_123
+    // - DescriptorKind: Capability
+    // ...
+}
+```
+
+**注意**：`RenderDescriptorReviewReportAsync` 直接接受 `DescriptorReviewReportDto`，而非 `reportId`。报告 DTO 是权威制品；内部 `_reports` 字典是可选临时缓存。`RenderStoredDescriptorReviewReportAsync` 内部存在但**不作为工具暴露**。
+
+### 11.3 报告结构概览
+
+`DescriptorReviewReportDto` 包含 13 个固定 Section：
+
+| Section | Kind | 描述 |
+|---------|------|------|
+| SummarySection | Summary=1 | 聚合严重级别计数、激活资格概述 |
+| DraftIdentitySection | DraftIdentity=2 | 草稿身份信息（DraftId、DescriptorKind、Operation 等） |
+| ProposedChangesSection | ProposedChanges=3 | 提议库存变更 |
+| ImpactAnalysisSection | ImpactAnalysis=4 | 影响分析摘要 |
+| DependencySummarySection | DependencySummary=5 | 依赖图节点/边概览 |
+| CompatibilitySection | Compatibility=6 | 兼容性评估 |
+| GovernanceSection | Governance=7 | 治理决策与理由 |
+| RequiredHumanReviewSection | RequiredHumanReview=8 | 需要人工关注的诊断 |
+| ActivationEligibilitySection | ActivationEligibility=9 | 激活资格状态（仅解释，非门控） |
+| DiagnosticsSection | Diagnostics=10 | 按严重级别分组的所有诊断 |
+| RecommendationsSection | Recommendations=11 | 人读的推荐动作 |
+| PackagePreviewSection | PackagePreview=12 | 包预览哈希 |
+| StableHashesSection | StableHashes=13 | 稳定哈希值 |
+
+每个 Section 的可选性由 `IsEmpty` 标记。Renderer 可选择隐藏空 Section。
+
+### 11.4 ContractVersion 验证
+
+渲染时验证输入 DTO 的 `ContractVersion` 是否匹配当前版本：
+
+```csharp
+// 在 DefaultAgentControlPlaneToolService 内部
+if (report.ContractVersion != AgentControlPlaneContractVersion.Current)
+{
+    return AgentToolResult<string>.InvalidRequest(
+    [
+        new AgentToolDiagnostic
+        {
+            Code = "UNSUPPORTED_REPORT_CONTRACT_VERSION",
+            Severity = AgentToolDiagnosticSeverity.Error,
+            Message = $"Report contract version '{report.ContractVersion}' does not match current '{AgentControlPlaneContractVersion.Current}'."
+        }
+    ]);
+}
+```
+
+---
+
+## 12. Fix Proposal 使用 — 升级版 (Fix Proposal Usage — Updated) (Phase 7d)
+
+### 12.1 FixProposal 升级概览
+
+Phase 7d 对 `FixProposal` 和 `FixProposalAction` 进行了破坏性契约升级：
+
+| 变化 | 旧 (Phase 7c) | 新 (Phase 7d) |
+|------|---------------|---------------|
+| 提案 ID | `ProposalId` | `Id` |
+| 提案种类 | 无 | `FixProposalKind`（9 值） |
+| 适用性 | 无 | `FixProposalApplicability`（4 值） |
+| 可执行性 | 无 | `IsExecutable`（聚合规则） |
+| 动作路径 | `Path` | `TargetPath` |
+| 值类型 | `string` | `JsonElement?` |
+| 动作种类 | 3 值（Set/Remove/Add） | 10 值（SetValue 至 ManualActionRequired） |
+| 安全级别 | 无 | `FixProposalActionSafetyLevel`（4 值） |
+| 契约版本 | 无 | `ContractVersion` |
+
+### 12.2 使用 JsonElement? 值
+
+`FixProposalAction.CurrentValue` 和 `ProposedValue` 现在是 `JsonElement?`：
+
+```csharp
+// 构建 FixProposal 时使用 JsonSerializer.SerializeToElement
+using System.Text.Json;
+
+var action = new FixProposalAction
+{
+    Kind = FixProposalActionKind.SetValue,
+    TargetPath = "$.Rationale",
+    CurrentValue = JsonSerializer.SerializeToElement(""),        // 当前值为空字符串
+    ProposedValue = JsonSerializer.SerializeToElement("Added rationale for activation readiness"),
+    IsExecutable = true,
+    SafetyLevel = FixProposalActionSafetyLevel.Safe,
+    Description = "Set Rationale to non-empty value"
+};
+
+// 读取时使用 JsonElement 的标准 API
+if (action.ProposedValue.HasValue)
+{
+    string proposedString = action.ProposedValue.Value.GetString() ?? "";
+    Console.WriteLine($"Proposed value: {proposedString}");
+}
+```
+
+**注意**：始终通过 `JsonSerializer.SerializeToElement(...)` 创建。必要时使用 `.Clone()` 避免 `JsonDocument` 生命周期问题。
+
+### 12.3 FixProposalKind 9 值
+
+| 值 | 枚举 | 说明 |
+|----|------|------|
+| 1 | `CreateMissingDescriptor` | 创建引用的缺失描述符 |
+| 2 | `ReplaceMissingReference` | 替换损坏的引用 |
+| 3 | `RemoveInvalidRelationship` | 移除无效关系 |
+| 4 | `AddRequiredBindingMetadata` | 添加必需的绑定元数据 |
+| 5 | `SplitBreakingChangeIntoCompatibleChange` | 将破坏性变更拆分为兼容变更 |
+| 6 | `MarkRequiresReview` | 标记需要审查（默认映射） |
+| 7 | `FlagUnsafeExpansion` | 标记不安全扩展（不拒绝） |
+| 8 | `SuggestVersionBump` | 建议版本号提升 |
+| 9 | `SetRequiredField` | 设置必需的字段（由 MapDiagnosticToFixProposalKind 映射） |
+
+### 12.4 MapDiagnosticToFixProposalKind
+
+| 诊断码 | 映射 Kind | 说明 |
+|---|---|---|
+| `RATIONALE_EMPTY` | `SetRequiredField` | 草稿缺少 Rationale 字段 |
+| `INTENT_EMPTY` | `SetRequiredField` | 草稿缺少 Intent 字段 |
+| 其他诊断 | `MarkRequiresReview` | 默认映射 |
+
+### 12.5 ApplyFixProposalToDraftAsync — 单动作限制
+
+Phase 7d 仅支持单动作可执行提案。多动作提案被拒绝以避免部分应用：
+
+```csharp
+// ✅ 支持：单动作提案
+var singleActionResult = await toolService.ApplyFixProposalToDraftAsync(
+    context,
+    new ApplyFixProposalRequest
+    {
+        DraftId = "draft_cap_123",
+        FixProposalId = "fix_1"
+    },
+    ct);
+
+// ❌ 拒绝：多动作提案 → UnsupportedMultiActionFixProposal diagnostic
+// ❌ 拒绝：Applicability != CurrentMutableDraft → diagnostic
+// ❌ 拒绝：action.IsExecutable == false → NonExecutableFixAction diagnostic
+// ❌ 拒绝：不支持的 action.Kind → UnsupportedFixActionKind diagnostic
+// ❌ 拒绝：SafetyLevel == Unsafe → UnsafeFixActionRejected diagnostic
+// ❌ 拒绝：目标为活跃注册表 → FixActionTargetBoundaryViolation diagnostic
+```
+
+#### 6 个运行时诊断码
+
+| 诊断码 | 说明 |
+|--------|------|
+| `NonExecutableFixAction` | 动作不可执行（IsExecutable=false） |
+| `UnsupportedMultiActionFixProposal` | 多动作提案不受支持 |
+| `UnsupportedFixActionKind` | 不支持的 FixProposalActionKind |
+| `UnsafeFixActionRejected` | SafetyLevel=Unsafe 的动作被拒绝 |
+| `FixActionTargetBoundaryViolation` | 目标为活跃描述符/注册表 |
+| `FixActionTargetNotAllowed` | 目标路径不在允许集合中 |
+
+### 12.6 IsExecutable 聚合规则
+
+```
+FixProposal.IsExecutable =
+    Applicability == FixProposalApplicability.CurrentMutableDraft
+    && Actions.All(a => a.IsExecutable)
+```
+
+Builder 强制此规则。混合可执行/不可执行动作的提案为不可执行。
+
+### 12.7 BlocksActivationUntilResolved
+
+这是**解释字段**，不是门控决策。Phase 7d 不拥有激活阻塞权限。激活门控属于 Phase 7e 或后续阶段。
+
+---
+
+## 13. Builder/Renderer 扩展 (Builder/Renderer Extension) (Phase 7d)
+
+### 13.1 自定义 Builder
+
+实现 `IDescriptorReviewReportBuilder` 以提供自定义报告构建逻辑：
+
+```csharp
+using CrestCreates.Agent.ControlPlane.Abstractions.ToolDtos;
+using CrestCreates.Agent.ControlPlane;
+
+public sealed class CustomReviewReportBuilder : IDescriptorReviewReportBuilder
+{
+    private readonly TimeProvider _clock;
+    private readonly IDescriptorReviewMessageTemplateCatalog _templateCatalog;
+
+    public CustomReviewReportBuilder(
+        TimeProvider clock,
+        IDescriptorReviewMessageTemplateCatalog templateCatalog)
+    {
+        _clock = clock;
+        _templateCatalog = templateCatalog;
+    }
+
+    public DescriptorReviewReportDto Build(DescriptorReviewReportBuildRequest request)
+    {
+        // Fail-fast: 必须预先应用可见性过滤
+        if (!request.VisibilityApplied)
+        {
+            throw new InvalidOperationException(
+                "DescriptorReviewReportBuilder requires a visibility-projected review result. " +
+                "Call with VisibilityApplied=true after applying denied descriptor kind filtering.");
+        }
+
+        // 自定义构建 13 个 Section 的逻辑
+        // 通过 _templateCatalog.Format(templateId, parameters) 填充 Message
+        // ReportId = 稳定 hash(TenantId + DraftId + DraftVersion + ReviewResultId + ContractVersion + TemplateVersion)
+        // ...
+    }
+}
+
+// DI 注册
+services.AddSingleton<IDescriptorReviewReportBuilder, CustomReviewReportBuilder>();
+```
+
+**关键约束**：
+- Builder 是投影层，不是可见性/编辑层 — 使用预先过滤的输入
+- Builder 使用 `TimeProvider` 实现确定性时间戳
+- Builder 使用 `IDescriptorReviewMessageTemplateCatalog`，不直接硬编码措辞字符串
+- ReportId 通过 `IDescriptorStableHashBuilder` 生成稳定 SHA256
+
+### 13.2 自定义 Renderer
+
+实现 `IDescriptorReviewReportRenderer` 提供自定义投影格式：
+
+```csharp
+public sealed class HtmlReviewReportRenderer : IDescriptorReviewReportRenderer
+{
+    public string RenderMarkdown(DescriptorReviewReportDto report)
+    {
+        // 从 DTO 读取 Message 字段，不重新生成文本
+        // 不访问注册表、目录或外部服务
+        // ...
+    }
+
+    public string RenderPlainText(DescriptorReviewReportDto report)
+    {
+        // 同上，纯文本输出
+        // ...
+    }
+}
+
+// DI 注册
+services.AddSingleton<IDescriptorReviewReportRenderer, HtmlReviewReportRenderer>();
+```
+
+**Renderer 硬性约束**：
+- 仅读取 `DescriptorReviewReportDto` — 不访问注册表、目录或外部服务
+- 使用 DTO 的 `Message` 字段 — 不通过 TemplateCatalog 重新生成文本
+- **不执行**可见性过滤、治理决策、激活决策
+- **不执行**运行时注册表变异、处理程序执行或 LLM 调用
+- **确定性输出**：相同 DTO → 相同输出
+- 输入 DTO 的 `ContractVersion` 由工具服务在调用前验证
+
+### 13.3 自定义 Message Template Catalog
+
+实现 `IDescriptorReviewMessageTemplateCatalog` 提供自定义措辞：
+
+```csharp
+public sealed class LocalizedTemplateCatalog : IDescriptorReviewMessageTemplateCatalog
+{
+    private readonly IReadOnlyDictionary<string, string> _templates;
+
+    public LocalizedTemplateCatalog()
+    {
+        _templates = new Dictionary<string, string>
+        {
+            ["report.activation.eligible"] = "草稿可进行激活交接。",
+            ["report.governance.approved"] = "治理决策：已批准。{Rationale}",
+            ["report.diagnostics.missing_ref"] = "描述符 '{DescriptorId}' 引用了缺失的 '{ReferenceId}'。",
+            // ... 31 个模板，使用 {Param} 格式占位符
+        };
+    }
+
+    public string Format(string messageTemplateId, IReadOnlyDictionary<string, string> parameters)
+    {
+        if (!_templates.TryGetValue(messageTemplateId, out var template))
+        {
+            return $"[unknown template: {messageTemplateId}]";
+        }
+
+        // 正则替换 {ParamName} → 参数值
+        return Regex.Replace(template, @"\{(\w+)\}", match =>
+            parameters.GetValueOrDefault(match.Groups[1].Value, match.Value));
+    }
+}
+
+// DI 注册
+services.AddSingleton<IDescriptorReviewMessageTemplateCatalog, LocalizedTemplateCatalog>();
+```
+
+**约束**：
+- 模板版本必须在 `TemplateVersion` 中追踪（当前 `"7d.v1"`）
+- 未知模板 ID 返回 fallback 消息，不抛异常
+- 相同 templateId + 参数 → 相同输出
+
+### 13.4 DI 注册汇总
+
+```csharp
+// Phase 7d 默认注册
+services.AddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
+services.AddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
+services.AddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
+```
+
+---
+
+## 14. 未来：LLM 集成 (Future: LLM Integration)
 
 Phase 7b（LLM Bootstrap Plane）将在此 DTO 边界之上构建。LLM 集成将使用相同的 Tool DTO 与 Control Plane 交互：
 

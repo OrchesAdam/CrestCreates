@@ -88,6 +88,10 @@ internal static class AgentToolVisibilityCoverage
         new(AgentToolName.GetActivationRequestStatus, AgentToolResourceShape.Indirect),
         new(AgentToolName.CancelActivationRequest, AgentToolResourceShape.Indirect),
 
+        // ── Review Report (Phase 7d) ──
+        new(AgentToolName.BuildDescriptorReviewReport, AgentToolResourceShape.Indirect),
+        new(AgentToolName.RenderDescriptorReviewReport, AgentToolResourceShape.Indirect),
+
         // ── Manifest ──
         new(AgentToolName.ListAgentTools, AgentToolResourceShape.None),
         new(AgentToolName.GetAgentToolDescriptor, AgentToolResourceShape.None)

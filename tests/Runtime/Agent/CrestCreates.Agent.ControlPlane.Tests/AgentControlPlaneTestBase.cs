@@ -36,6 +36,8 @@ public abstract class AgentControlPlaneTestBase
     protected readonly Mock<IDescriptorRelationshipProvider> RelationshipProviderMock = new();
     protected readonly Mock<IDescriptorTopologyBuilder> TopologyBuilderMock = new();
     protected readonly Mock<IDescriptorPackageBuilder> PackageBuilderMock = new();
+    protected readonly Mock<IDescriptorReviewReportBuilder> ReportBuilderMock = new();
+    protected readonly Mock<IDescriptorReviewReportRenderer> ReportRendererMock = new();
     protected readonly InMemoryAgentToolInvocationAuditor InMemoryAuditor = new();
 
     protected const string TestTenantId = "tenant-001";
@@ -68,6 +70,8 @@ public abstract class AgentControlPlaneTestBase
             TopologyBuilderMock.Object,
             PackageBuilderMock.Object,
             NullLogger<DefaultAgentControlPlaneToolService>.Instance,
+            ReportBuilderMock.Object,
+            ReportRendererMock.Object,
             authorizationOptions: options);
     }
 
@@ -96,6 +100,8 @@ public abstract class AgentControlPlaneTestBase
             TopologyBuilderMock.Object,
             PackageBuilderMock.Object,
             NullLogger<DefaultAgentControlPlaneToolService>.Instance,
+            ReportBuilderMock.Object,
+            ReportRendererMock.Object,
             authorizationOptions: options);
     }
 
@@ -118,6 +124,8 @@ public abstract class AgentControlPlaneTestBase
             TopologyBuilderMock.Object,
             PackageBuilderMock.Object,
             NullLogger<DefaultAgentControlPlaneToolService>.Instance,
+            ReportBuilderMock.Object,
+            ReportRendererMock.Object,
             authorizationOptions: AgentToolAuthorizationOptions.DevelopmentDefaults);
     }
 

@@ -7,17 +7,17 @@ namespace CrestCreates.Agent.ControlPlane.Tests;
 /// <summary>
 /// Tests for the static tool manifest provider.
 /// Verifies: deterministic manifest, no runtime discovery, AOT safety,
-/// all 30 tools declared, correct categories and permissions.
+/// all 32 tools declared, correct categories and permissions.
 /// </summary>
 public class StaticManifestTests : AgentControlPlaneTestBase
 {
     private readonly StaticAgentToolManifestProvider _provider = new();
 
     [Fact]
-    public void GetAllTools_Returns_30_Tools()
+    public void GetAllTools_Returns_32_Tools()
     {
         var tools = _provider.GetAllTools();
-        tools.Should().HaveCount(30);
+        tools.Should().HaveCount(32);
     }
 
     [Fact]
@@ -83,6 +83,7 @@ public class StaticManifestTests : AgentControlPlaneTestBase
         categories.Should().Contain(AgentToolCategory.Context);
         categories.Should().Contain(AgentToolCategory.Draft);
         categories.Should().Contain(AgentToolCategory.Review);
+        categories.Should().Contain(AgentToolCategory.ReviewReport);
         categories.Should().Contain(AgentToolCategory.FixProposal);
         categories.Should().Contain(AgentToolCategory.PackagePreview);
         categories.Should().Contain(AgentToolCategory.ActivationHandoff);
@@ -96,6 +97,7 @@ public class StaticManifestTests : AgentControlPlaneTestBase
         tools.Count(t => t.Category == AgentToolCategory.Context).Should().Be(6);
         tools.Count(t => t.Category == AgentToolCategory.Draft).Should().Be(6);
         tools.Count(t => t.Category == AgentToolCategory.Review).Should().Be(5);
+        tools.Count(t => t.Category == AgentToolCategory.ReviewReport).Should().Be(2);
         tools.Count(t => t.Category == AgentToolCategory.FixProposal).Should().Be(4);
         tools.Count(t => t.Category == AgentToolCategory.PackagePreview).Should().Be(4);
         tools.Count(t => t.Category == AgentToolCategory.ActivationHandoff).Should().Be(3);

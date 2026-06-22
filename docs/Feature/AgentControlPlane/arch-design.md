@@ -1,19 +1,25 @@
-# Tool DTO & JSON Contract — Architecture Design
+# Tool DTO, JSON Contract & Review Report — Architecture Design
 
-> **Date:** 2026-06-22 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator)**
+> **Date:** 2026-06-22 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal)**
 
 ## 1. 概述 (Overview)
 
 Phase 7c 在 Agent Control Plane 与外部协议适配器（MCP、HTTP、SignalR）之间引入了一个纯 DTO 序列化边界。所有工具请求/结果类型都通过**密封 record DTO** 暴露，不再暴露领域内部的 `IDescriptor`、`IServiceProvider`、`JsonElement` 或运行时处理程序类型。
 
+Phase 7d 在 Phase 7c DTO 边界之上增加了审查报告（Review Report）与修复提案（Fix Proposal）契约层。审查报告将审查结果转换为结构化、确定性、人工/Agent 可读的报告；修复提案契约升级使提案能表达结构化值变更、种类标签和安全等级。审查报告无治理决定权、无激活决定权、无运行时注册表变异能力。
+
 核心交付物：
-- **32 个 Tool DTO** — 统一的密封 record 类型，代替所有领域类型
+- **34 个 Tool DTO** — 统一的密封 record 类型，代替所有领域类型（新增 2 个：BuildDescriptorReviewReport、RenderDescriptorReviewReport）
 - **Source-Generated JSON Contract** — `AgentControlPlaneToolJsonSerializerContext`，AoT 兼容
 - **Source-Generated Payload DTOs (New in #42)** — `AgentDraftPayloadDto` 和 6 个子 record 由 `AgentDraftContractGenerator` 在 `CrestCreates.CodeGenerator` 中生成
 - **Source-Generated Patch DTOs (New in #42)** — `AgentDraftPayloadPatchDto` 和 `Agent{Kind}DraftChangedField` 枚举用于 Update 操作的字段级合并
 - **Source-Generated Projection (New in #42)** — `AgentDraftPayloadProjection` 提供 `Create`、`FromDomain`、`Merge` 方法，替代手写 payload 投影
 - **Projection Helpers** — 领域 ←→ DTO 的双向投影，位于 ControlPlane 项目
-- **Contract Version** — `AgentControlPlaneContractVersion.Current = "7c.v1"`
+- **Contract Version** — `AgentControlPlaneContractVersion.Current = "7d.v1"`
+- **Review Report DTO & Builder (Phase 7d)** — `DescriptorReviewReportDto`（13 个固定 Section）、`IDescriptorReviewReportBuilder` + `DefaultDescriptorReviewReportBuilder`
+- **Review Report Renderer (Phase 7d)** — `IDescriptorReviewReportRenderer` + `DefaultDescriptorReviewReportRenderer`，Markdown/PlainText 确定性投影
+- **Message Template Catalog (Phase 7d)** — `IDescriptorReviewMessageTemplateCatalog` + `DefaultDescriptorReviewMessageTemplateCatalog`，31 个确定性模板
+- **Fix Proposal Contract Upgrade (Phase 7d)** — `FixProposalKind`（9 值）、`FixProposalActionKind`（10 值）、`FixProposalApplicability`（4 值）、`FixProposalActionSafetyLevel`（4 值）、`JsonElement?` 值类型
 
 ### 1.1 目标
 
@@ -39,7 +45,7 @@ Protocol Adapters (MCP / HTTP / SignalR)
 │   └───────────────────────────────────────┘  │
 │   ┌───────────────────────────────────────┐  │
 │   │ Tool Request/Result DTOs              │  │
-│   │ (32 sealed records)                   │  │
+│   │ (34 sealed records)                   │  │
 │   └───────────────────────────────────────┘  │
 └─────────────────────────────────────────────┘
          ↓
@@ -66,7 +72,7 @@ Protocol Adapters (MCP / HTTP / SignalR)
 | `CrestCreates.Agent.DraftContracts` | Spec 文件（`[AgentDraftContractSpec]`、`[AgentDraftField]` 等）、引用 `CrestCreates.CodeGenerator` → 生成 payload DTO、patch DTO、changed-field 枚举、投影类、manifest |
 | `CrestCreates.Agent.ControlPlane.Abstractions` | Tool DTO（请求/结果类型）、JSON 序列化上下文、契约版本、工具描述符、工具名称常量；payload DTO 类型通过 global using 别名映射到 DraftContracts 生成类型 |
 | `CrestCreates.Agent.ControlPlane` | Wrapper 投影（`AgentDescriptorDraftDtoProjection`）、`AgentDraftPayloadProjection` 的调用者、工具服务实现、权限/审计/可见性基础设施 |
-| `CrestCreates.Agent.ControlPlane.Tests` | 298 个 ControlPlane 测试 + 34 个 DraftContracts 测试 + 15 个 Generator 测试 + 7 个 Boundary 测试 = **354 个测试** |
+| `CrestCreates.Agent.ControlPlane.Tests` | 366 个 ControlPlane 测试（含 DraftContracts + Generator）+ 7 个 Boundary 测试 = **373 个测试** |
 
 ---
 
@@ -82,7 +88,7 @@ Protocol Adapters (MCP / HTTP / SignalR)
 │  │  AgentControlPlaneToolJsonSerializerContext ([JsonCtx])   │    │
 │  │  ┌──────────────┐ ┌────────────────┐ ┌──────────────┐    │    │
 │  │  │ Root DTOs    │ │ Stable VOs     │ │ Base Types   │    │    │
-│  │  │ (32 tools)   │ │ (DescriptorRef,│ │ (AgentTool-  │    │    │
+│  │  │ (34 tools)   │ │ (DescriptorRef,│ │ (AgentTool-  │    │    │
 │  │  │              │ │  DescriptorKind,│ │  Result<T>,   │    │    │
 │  │  │              │ │  ...)          │ │  Diagnostic)  │    │    │
 │  │  └──────────────┘ └────────────────┘ └──────────────┘    │    │
@@ -95,7 +101,7 @@ Protocol Adapters (MCP / HTTP / SignalR)
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐    │
 │  │  Contract Version                                         │    │
-│  │  AgentControlPlaneContractVersion.Current = "7c.v1"       │    │
+│  │  AgentControlPlaneContractVersion.Current = "7d.v1"       │    │
 │  └──────────────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────────┘
                            ↓ (deserialize)
@@ -170,7 +176,7 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `AgentDraftPayloadPatchDto` | DraftContracts/Dto (Generated) | Update 用 patch DTO，6 个分支全部 nullable，附带 ChangedFields | **Implemented (#42)** |
 | `Agent{Kind}DraftChangedField` | DraftContracts/Dto (Generated) | `[Flags]` 枚举，指定哪些字段在 patch 中被修改 | **Implemented (#42)** |
 | `AgentDraftPayloadProjection` | DraftContracts/Projection (Generated) | payload 操作投影：`FromDomain`、`Create`、`Merge`、`TryValidatePayload` | **Implemented (#42)** |
-| `AgentDraftContractManifest` | DraftContracts/Manifest (Generated) | `SupportedKinds`、`ContractVersion`("7c.v1")、per-kind 字段元数据 | **Implemented (#42)** |
+| `AgentDraftContractManifest` | DraftContracts/Manifest (Generated) | `SupportedKinds`、`ContractVersion`("7d.v1")、per-kind 字段元数据 | **Implemented (#42)** |
 | `AgentDraftContractSpec` / `AgentDraftField` / etc. | DraftContracts/Specs | Spec 特性属性，声明 descriptor 属性在契约中的分类 | **Implemented (#42)** |
 | `CapabilityContractSpec` / `WorkflowContractSpec` / etc. | DraftContracts/Specs | 每种 descriptor kind 的 spec 文件，使用 spec 属性描述字段 | **Implemented (#42)** |
 | `AgentDescriptorDraftDto` | Abstractions/ToolDtos | DescriptorDraft 投影 DTO，替换 DraftComparisonResult 中的 DescriptorDraft | **Implemented** |
@@ -186,23 +192,45 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `UpdateDescriptorDraftRequest` | Abstractions | 更新草稿请求（含 `AgentDraftPayloadPatchDto?`） | **Implemented (#42)** |
 | `AgentControlPlaneToolJsonSerializerContext` | Abstractions/Json | Source-generated JSON 序列化上下文，注册所有 Root DTO + 稳定值对象 | **Implemented** |
 | `AgentControlPlaneToolJsonSerializerOptions` | Abstractions/Json | `CreateDefault()` 工厂方法 | **Implemented** |
-| `AgentControlPlaneContractVersion` | Abstractions/Json | `Current = "7c.v1"` | **Implemented** |
+| `AgentControlPlaneContractVersion` | Abstractions/Json | `Current = "7d.v1"` | **Implemented** |
 | `AgentToolDescriptor.ContractVersion` | Abstractions | 工具描述符上的契约版本字段 | **Implemented** |
-| `AgentToolName` | Abstractions | 32 个工具名称常量 | **Implemented** |
-| `AgentToolCategory` | Abstractions | 7 个工具分类枚举 | **Implemented** |
+| `AgentToolName` | Abstractions | 34 个工具名称常量 | **Implemented** |
+| `AgentToolCategory` | Abstractions | 8 个工具分类枚举 | **Implemented** |
 | `AgentToolResult<T>` | Abstractions | 泛型工具结果包装（Success/Denied/Failed/InvalidRequest/NotFound） | **Implemented** |
 | `DescriptorSummaryDtoProjection` | ControlPlane/Projections | `FromDescriptor(IDescriptor)` | **Implemented** |
 | `AgentDescriptorDraftDtoProjection` | ControlPlane/Projections | `FromDraft` / 委托 `AgentDraftPayloadProjection` 处理 payload 操作 | **Implemented** |
 | `AgentReviewResultDtoProjection` | ControlPlane/Projections | `Project`（含可见性过滤） | **Implemented** |
-| `StaticAgentToolManifestProvider` | ControlPlane | 静态工具描述符声明（32 个工具） | **Implemented** |
+| `StaticAgentToolManifestProvider` | ControlPlane | 静态工具描述符声明（34 个工具） | **Implemented** |
+| `DescriptorReviewReportDto` | Abstractions/ToolDtos | 13 固定 Section 审查报告 DTO，含 Recommendations、源绑定字段 | **Implemented (Phase 7d)** |
+| `DescriptorReviewReportSectionDto` | Abstractions/ToolDtos | 审查报告 Section DTO，含 Kind、SectionId、IsEmpty、Items | **Implemented (Phase 7d)** |
+| `DescriptorReviewReportItemDto` | Abstractions/ToolDtos | 审查报告条目 DTO，含 ReasonCode、Message、Severity、Parameters | **Implemented (Phase 7d)** |
+| `DescriptorReviewRecommendationDto` | Abstractions/ToolDtos | 机器可解析的推荐动作 DTO，含 Kind、IsActionable、RelatedItemIds | **Implemented (Phase 7d)** |
+| `DescriptorReviewReportBuildRequest` | ControlPlane | Builder 请求包装，含 ReviewResult、Draft、VisibilityApplied | **Implemented (Phase 7d)** |
+| `DescriptorReviewReportSectionKind` | Abstractions | 13 值枚举：Summary=1 至 StableHashes=13 | **Implemented (Phase 7d)** |
+| `DescriptorReviewSeverity` | Abstractions | 4 值枚举：Info=1, Warning=2, Error=3, Blocker=4 | **Implemented (Phase 7d)** |
+| `DescriptorReviewRecommendationKind` | Abstractions | 6 值枚举：RequestActivationHandoff=1 至 NoAction=6 | **Implemented (Phase 7d)** |
+| `DescriptorReviewReportFormat` | Abstractions | 2 值枚举：Markdown=1, PlainText=2 | **Implemented (Phase 7d)** |
+| `IDescriptorReviewReportBuilder` | ControlPlane | Builder 接口，`Build(DescriptorReviewReportBuildRequest)` | **Implemented (Phase 7d)** |
+| `DefaultDescriptorReviewReportBuilder` | ControlPlane | 默认 Builder，13 个 Build*Section 方法，TimeProvider 注入，SHA256 ReportId | **Implemented (Phase 7d)** |
+| `IDescriptorReviewReportRenderer` | ControlPlane | Renderer 接口，`RenderMarkdown` + `RenderPlainText` | **Implemented (Phase 7d)** |
+| `DefaultDescriptorReviewReportRenderer` | ControlPlane | 默认 Renderer，DTO-only，ContractVersion 验证，无外部依赖 | **Implemented (Phase 7d)** |
+| `IDescriptorReviewMessageTemplateCatalog` | ControlPlane | 消息模板目录接口，`Format(templateId, parameters)` | **Implemented (Phase 7d)** |
+| `DefaultDescriptorReviewMessageTemplateCatalog` | ControlPlane | 31 个确定性模板，regex 替换，TemplateVersion="7d.v1" | **Implemented (Phase 7d)** |
+| `FixProposal (upgraded)` | Abstractions | 新增 Kind、Title、Explanation、Applicability、IsExecutable、ContractVersion 等；ProposalId→Id | **Implemented (Phase 7d)** |
+| `FixProposalAction (upgraded)` | Abstractions | Path→TargetPath；CurrentValue/ProposedValue string→JsonElement?；新增 IsExecutable、SafetyLevel | **Implemented (Phase 7d)** |
+| `FixProposalKind` | Abstractions | 9 值枚举：CreateMissingDescriptor=1 至 SetRequiredField=9 | **Implemented (Phase 7d)** |
+| `FixProposalActionKind` | Abstractions | 10 值枚举：SetValue=1 至 ManualActionRequired=10 | **Implemented (Phase 7d)** |
+| `FixProposalApplicability` | Abstractions | 4 值枚举：CurrentMutableDraft=1 至 NotApplicable=4 | **Implemented (Phase 7d)** |
+| `FixProposalActionSafetyLevel` | Abstractions | 4 值枚举：Safe=1 至 Unsafe=4 | **Implemented (Phase 7d)** |
 
-### 4.1 工具覆盖 (32 Tools)
+### 4.1 工具覆盖 (34 Tools)
 
 | Wave | 分类 | 工具数 | 范围 |
 |------|------|--------|------|
 | Wave 1 | Context / Read | 6 | BuildMetadataContextPack, BuildRuntimeScenarioContextPack, GetDescriptorByRef, SearchDescriptors, ListDescriptorRelationships, GetTopologySummary |
 | Wave 2 | Draft | 6 | CreateDescriptorDraft, UpdateDescriptorDraft, GetDescriptorDraft, ListDescriptorDrafts, CancelDescriptorDraft, CompareDescriptorDraft |
 | Wave 3 | Review | 5 | ValidateDescriptorDraft, ReviewDescriptorDraft, GetDraftReviewResult, ListDraftReviewResults, ExplainDiagnostics |
+| Wave 3.5 | ReviewReport | 2 | BuildDescriptorReviewReport, RenderDescriptorReviewReport |
 | Wave 4 | Fix Proposal | 4 | SuggestDescriptorDraftFixes, GetFixProposal, ListFixProposals, ApplyFixProposalToDraft |
 | Wave 5 | Package Preview | 4 | PreviewDescriptorPackage, BuildPackageEvidencePreview, BuildActivationReadinessPreview, GetPackagePreview |
 | Wave 6 | Activation Handoff | 3 | SubmitActivationRequest, GetActivationRequestStatus, CancelActivationRequest |
@@ -436,7 +464,7 @@ public static (bool IsValid, AgentDraftContractError? Error) TryValidatePayload(
 ```csharp
 public static class AgentControlPlaneContractVersion
 {
-    public const string Current = "7c.v1";
+    public const string Current = "7d.v1";
 }
 ```
 
@@ -458,10 +486,10 @@ public sealed record AgentToolDescriptor
 
 | 场景 | 版本升级 | 说明 |
 |------|---------|------|
-| 兼容新增（添加可选字段） | 次要升级 (`7c.v2`) | 现有适配器无感知 |
-| 兼容变更（添加新 DTO） | 次要升级 (`7c.v2`) | 需要新的 JSON 上下文注册 |
-| 破坏性变更（移除/重命名字段） | 主要升级 (`7d.v1`) | 适配器必须同步升级 |
-| 引入全量子结构 | 主要升级（`7d.v1` 或更高） | Sub-record 字段扩展 |
+| 兼容新增（添加可选字段） | 次要升级 (`7d.v2`) | 现有适配器无感知 |
+| 兼容变更（添加新 DTO） | 次要升级 (`7d.v2`) | 需要新的 JSON 上下文注册 |
+| 破坏性变更（移除/重命名字段） | 主要升级 (`7e.v1`) | 适配器必须同步升级 |
+| 引入全量子结构 | 主要升级（`7e.v1` 或更高） | Sub-record 字段扩展 |
 
 ---
 
@@ -492,11 +520,11 @@ public sealed record AgentToolDescriptor
 | **7c** | Tool DTO & JSON Contract + AgentDraftContract Generator | **Implemented (#41 DTO Design + #42 Source Generator)** |
 | 7c-sub | #41: Tool DTO, JSON Context, Projection 基础 | Implemented |
 | 7c-sub | #42: AgentDraftContract Generator, Patch DTO, ChangedField enums, Projection 生成 | Implemented |
+| **7d** | Tool DTO, JSON Contract & Review Report — Review Report DTO, Builder, Renderer, Fix Proposal Contract Upgrade (#16) | **Implemented** |
 | 7b | LLM Bootstrap（Prompt 模板、LLM Provider、Draft Builder） | Future |
-| 7d | MCP Projection（将 Phase 7c DTO 投影到 Model Context Protocol） | Future |
 | 7e | Activation Workflow（已审查的草稿 → 运行时激活） | Future |
-| 7a | Descriptor Draft Runtime（存储、验证、物化、审查） | Implemented |
 | 7f | Continuous Improvement Loop（运行时反馈 → prompt 优化） | Future |
+| 7a | Descriptor Draft Runtime（存储、验证、物化、审查） | Implemented |
 
 ### 10.1 Phase 7b — LLM Bootstrap Plane
 
@@ -508,3 +536,408 @@ Phase 7b 将引入 LLM 驱动的描述符草稿生成。核心组件已设计但
 - `DescriptorDraftBuilder` — 将 LLM 结构化输出转换为 `DescriptorDraft` 实例
 
 LLM 生成的草稿将经过与人工草稿相同的 `IDescriptorDraftValidator` 验证管道，确保一致性。
+
+---
+
+## 11. Review Report & Fix Proposal (Phase 7d)
+
+> **Phase 7d** 在 Phase 7c DTO 边界之上新增了审查报告（Review Report）与修复提案（Fix Proposal）契约层。审查报告是将审查结果转换为结构化、确定性、可读报告的构建+渲染管道；修复提案契约升级使提案能表达结构化值变更、种类标签和安全等级。
+
+### 11.1 Review Report 架构
+
+审查报告的核心原则是**结构化 DTO 是权威制品**，Markdown/PlainText 是确定性投影，不是决策输入。
+
+#### DescriptorReviewReportDto
+
+```csharp
+public sealed record DescriptorReviewReportDto
+{
+    public required string ReportId { get; init; }                // 稳定 hash
+    public required string DraftId { get; init; }
+    public required string TenantId { get; init; }
+    public required string ReviewResultId { get; init; }          // 源绑定：绑定到哪个审查结果
+    public required string DraftVersion { get; init; }            // 源绑定：绑定到哪个草稿修订版
+    public required string SourceReviewHash { get; init; }        // 审查结果的稳定身份
+    public required string TemplateVersion { get; init; }         // 消息模板目录版本
+    public required DateTimeOffset GeneratedAt { get; init; }
+    public required string ContractVersion { get; init; } = AgentControlPlaneContractVersion.Current;
+
+    // 机器可解析的推荐动作 — Agent 读取此字段，而非 Section Items
+    public required IReadOnlyList<DescriptorReviewRecommendationDto> Recommendations { get; init; }
+
+    // 13 个固定 Section — 始终存在，可为空 (IsEmpty = true)
+    public required DescriptorReviewReportSectionDto SummarySection { get; init; }
+    public required DescriptorReviewReportSectionDto DraftIdentitySection { get; init; }
+    public required DescriptorReviewReportSectionDto ProposedChangesSection { get; init; }
+    public required DescriptorReviewReportSectionDto ImpactAnalysisSection { get; init; }
+    public required DescriptorReviewReportSectionDto DependencySummarySection { get; init; }
+    public required DescriptorReviewReportSectionDto CompatibilitySection { get; init; }
+    public required DescriptorReviewReportSectionDto GovernanceSection { get; init; }
+    public required DescriptorReviewReportSectionDto RequiredHumanReviewSection { get; init; }
+    public required DescriptorReviewReportSectionDto ActivationEligibilitySection { get; init; }
+    public required DescriptorReviewReportSectionDto DiagnosticsSection { get; init; }
+    public required DescriptorReviewReportSectionDto RecommendationsSection { get; init; }
+    public required DescriptorReviewReportSectionDto PackagePreviewSection { get; init; }
+    public required DescriptorReviewReportSectionDto StableHashesSection { get; init; }
+}
+```
+
+#### DescriptorReviewReportSectionDto
+
+```csharp
+public sealed record DescriptorReviewReportSectionDto
+{
+    public required DescriptorReviewReportSectionKind Kind { get; init; }
+    public required string SectionId { get; init; }               // 稳定小写外部 ID（如 "summary"、"draft_identity"）
+    public required string Title { get; init; }
+    public required int Order { get; init; }                      // 确定性规范顺序
+    public required bool IsEmpty { get; init; }                   // Renderer 可隐藏空 Section
+    public required DescriptorReviewSeverity OverallSeverity { get; init; }
+    public required IReadOnlyList<DescriptorReviewReportItemDto> Items { get; init; }
+}
+```
+
+#### DescriptorReviewReportItemDto
+
+```csharp
+public sealed record DescriptorReviewReportItemDto
+{
+    public required string ItemId { get; init; }
+    public required string ReasonCode { get; init; }
+    public required string MessageTemplateId { get; init; }
+    public required string Message { get; init; }                 // 确定性规范文本
+    public required DescriptorReviewSeverity Severity { get; init; }
+    public IReadOnlyDictionary<string, string> Parameters { get; init; } = new(StringComparer.Ordinal);
+    public IReadOnlyList<string> RelatedDiagnosticIds { get; init; } = [];
+    public IReadOnlyList<string> RelatedDescriptorIds { get; init; } = [];
+}
+```
+
+#### DescriptorReviewRecommendationDto
+
+```csharp
+public sealed record DescriptorReviewRecommendationDto
+{
+    public required string RecommendationId { get; init; }
+    public required string ReasonCode { get; init; }
+    public required string Message { get; init; }
+    public required DescriptorReviewRecommendationKind Kind { get; init; }
+    public required bool IsActionable { get; init; }
+    public IReadOnlyList<string> RelatedItemIds { get; init; } = [];
+}
+```
+
+#### 关键枚举
+
+| 枚举 | 值 | 说明 |
+|------|-----|------|
+| `DescriptorReviewReportSectionKind` | Summary=1, DraftIdentity=2, ProposedChanges=3, ImpactAnalysis=4, DependencySummary=5, Compatibility=6, Governance=7, RequiredHumanReview=8, ActivationEligibility=9, Diagnostics=10, Recommendations=11, PackagePreview=12, StableHashes=13 | 13 种固定 Section 类型 |
+| `DescriptorReviewSeverity` | Info=1, Warning=2, Error=3, Blocker=4 | 严重级别 |
+| `DescriptorReviewRecommendationKind` | RequestActivationHandoff=1, RequestHumanReview=2, ApplyFixProposal=3, ReviseDraft=4, CancelDraft=5, NoAction=6 | 推荐动作种类 |
+| `DescriptorReviewReportFormat` | Markdown=1, PlainText=2 | 渲染输出格式 |
+
+#### 关键设计决策
+
+1. **结构化 DTO 是权威制品**。Markdown/PlainText 是确定性投影，不是决策输入。
+2. **13 个固定 Section** 始终存在。`IsEmpty` 标记允许 Renderer 隐藏空 Section。
+3. **ReasonCode + MessageTemplateId + Parameters** 实现确定性文本生成，无需 LLM。
+4. **RelatedDiagnosticIds / RelatedDescriptorIds** 支持修复提案关联和追溯。
+5. **DescriptorReviewRecommendationKind.RequestActivationHandoff** — Phase 7d 不拥有激活权限；这是交接请求，不是激活决策。
+6. **Section 顺序**由 `DescriptorReviewReportSectionKind` 声明顺序决定（Summary=1 至 StableHashes=13）。Builder 按此顺序发出 Section；测试验证顺序稳定性。
+7. **SectionId 是小写稳定 ID**（如 `summary`、`draft_identity`），与枚举名称解耦。
+8. **源绑定**：`ReviewResultId`、`DraftVersion`、`SourceReviewHash` 将报告绑定到特定审查结果和草稿修订版，防止过期报告与当前状态混淆。
+9. **推荐位于顶层**：`Recommendations` 列表是报告 DTO 的一等字段，供机器解析。`RecommendationsSection` 提供人读条目。
+10. **ReportId 生成**：`(TenantId + DraftId + DraftVersion + ReviewResultId + ContractVersion + TemplateVersion)` 的稳定 SHA256 哈希，使用 `IDescriptorStableHashBuilder` 模式。
+
+### 11.2 Builder/Renderer 架构
+
+#### Request 对象
+
+```csharp
+public sealed record DescriptorReviewReportBuildRequest
+{
+    public required DescriptorDraftReviewResult ReviewResult { get; init; }
+    public required DescriptorDraft Draft { get; init; }
+    public required bool VisibilityApplied { get; init; }
+}
+```
+
+#### Builder 接口与实现
+
+```csharp
+public interface IDescriptorReviewReportBuilder
+{
+    DescriptorReviewReportDto Build(DescriptorReviewReportBuildRequest request);
+}
+
+// CrestCreates.Agent.ControlPlane 中：
+internal sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewReportBuilder
+{
+    private readonly TimeProvider _clock;
+    private readonly IDescriptorReviewMessageTemplateCatalog _templateCatalog;
+
+    public DefaultDescriptorReviewReportBuilder(
+        TimeProvider clock,
+        IDescriptorReviewMessageTemplateCatalog templateCatalog)
+    {
+        _clock = clock;
+        _templateCatalog = templateCatalog;
+    }
+
+    public DescriptorReviewReportDto Build(DescriptorReviewReportBuildRequest request)
+    {
+        // Fail-fast: Builder 是投影层，不是可见性/编辑层
+        if (!request.VisibilityApplied)
+        {
+            throw new InvalidOperationException(
+                "DescriptorReviewReportBuilder requires a visibility-projected review result.");
+        }
+
+        // 构建 13 个 Section
+        // 派生 Recommendations
+        // 通过 _templateCatalog.Format(templateId, parameters) 填充 Message
+        // ReportId = 稳定 hash(TenantId + DraftId + DraftVersion + ReviewResultId + ContractVersion + TemplateVersion)
+    }
+}
+```
+
+#### 13 个 Section 映射
+
+| Section Kind | 数据源 | 逻辑 |
+|---|---|---|
+| Summary | reviewResult 整体 | 聚合严重级别计数、激活资格、治理决策 |
+| DraftIdentity | draft | DraftId、DescriptorKind、Operation、AuthorKind、Intent、Status |
+| ProposedChanges | reviewResult.MaterializationResult | 提议库存引用、物化状态 |
+| ImpactAnalysis | reviewResult.ImpactAnalysisResult | 受影响描述符数量/严重级别、依赖链 |
+| DependencySummary | reviewResult.TopologySnapshot | 按种类节点/边计数、上游/下游摘要 |
+| Compatibility | reviewResult.CompatibilityResult | 兼容/不兼容计数、不兼容详情 |
+| Governance | reviewResult.GovernanceDecision | 决策、理由、批准状态 |
+| RequiredHumanReview | reviewResult.Diagnostics + Governance | 需要人工关注的 Blocker/Error 诊断 |
+| ActivationEligibility | reviewResult.IsActivationEligible | 资格状态、阻塞原因 — **仅解释，非门控** |
+| Diagnostics | reviewResult.Diagnostics | 按严重级别分组的所有诊断 |
+| Recommendations | 从所有 Section 派生 | 基于严重级别 + 治理 + 资格的下一步动作 |
+| PackagePreview | reviewResult.PackagePreview | 哈希、描述符计数 |
+| StableHashes | reviewResult.StableHashes | 所有哈希值 |
+
+#### Message Template Catalog
+
+```csharp
+public interface IDescriptorReviewMessageTemplateCatalog
+{
+    string Format(string messageTemplateId, IReadOnlyDictionary<string, string> parameters);
+}
+```
+
+Builder 决定 ReasonCode / MessageTemplateId / Parameters。MessageTemplateCatalog 将它们格式化为规范文本。这防止 Builder 变成投影 + 措辞 + 渲染器混合体。
+
+31 个确定性模板示例：
+
+| ReasonCode | MessageTemplateId | Message |
+|---|---|---|
+| `ACTIVATION_ELIGIBLE` | `report.activation.eligible` | `"Draft is eligible for activation handoff."` |
+| `ACTIVATION_BLOCKED` | `report.activation.blocked` | `"Draft is not eligible: {BlockingReasons}."` |
+| `GOVERNANCE_APPROVED` | `report.governance.approved` | `"Governance decision: approved. {Rationale}"` |
+| `GOVERNANCE_REJECTED` | `report.governance.rejected` | `"Governance decision: rejected. {Rationale}"` |
+| `GOVERNANCE_REVIEW_REQUIRED` | `report.governance.review_required` | `"Governance decision: review required. {Rationale}"` |
+| `MISSING_REFERENCE` | `report.diagnostics.missing_ref` | `"Descriptor '{DescriptorId}' references missing '{ReferenceId}'."` |
+| `SCHEMA_INCOMPATIBLE` | `report.compatibility.schema` | `"Schema change is incompatible: {Details}."` |
+| `DRAFT_VALID` | `report.summary.valid` | `"Draft validation passed with {DiagnosticCount} diagnostics."` |
+| `DRAFT_INVALID` | `report.summary.invalid` | `"Draft validation failed with {ErrorCount} errors and {BlockerCount} blockers."` |
+| `HUMAN_REVIEW_REQUIRED` | `report.human_review.required` | `"Human review required: {Reason}."` |
+| `NO_ACTION` | `report.recommendation.no_action` | `"No action required at this time."` |
+
+#### Renderer 接口与约束
+
+```csharp
+public interface IDescriptorReviewReportRenderer
+{
+    string RenderMarkdown(DescriptorReviewReportDto report);
+    string RenderPlainText(DescriptorReviewReportDto report);
+}
+```
+
+**Renderer 硬性约束**：
+- 仅读取 `DescriptorReviewReportDto` — 不访问注册表、目录或外部服务
+- 使用 DTO 的 `Message` 字段 — 不通过 TemplateCatalog 重新生成文本
+- **不执行**可见性过滤、治理决策、激活决策
+- **不执行**运行时注册表变异、处理程序执行或 LLM 调用
+- **确定性输出**：相同 DTO → 相同输出
+
+#### 边界声明
+
+> Builder 产生权威结构化报告和确定性条目消息。Renderer 从该 DTO 产生确定性 Markdown/PlainText 投影。MessageTemplateCatalog 将 ReasonCode+Parameters 格式化为规范 Message。Builder 和 Renderer 均不执行可见性过滤、治理决策、激活决策、运行时注册表变异、处理程序执行或 LLM 调用。
+
+### 11.3 Fix Proposal 契约升级
+
+#### 破坏性变更概览
+
+| 类型 | 变更 |
+|---|---|
+| `FixProposal` | 新增 Kind、Title、Explanation、ReasonCode、Applicability、IsExecutable、RequiresManualAction、BlocksActivationUntilResolved、RelatedDiagnosticIds、RelatedDescriptorIds、ContractVersion；ProposalId → Id |
+| `FixProposalAction` | Path → TargetPath；新增 TargetDescriptorId；CurrentValue/ProposedValue string → JsonElement?；新增 IsExecutable、SafetyLevel |
+| `FixProposalActionKind` | 从 3 值扩展到 10 值 |
+| 新增 `FixProposalKind` | 9 种修复种类 |
+| 新增 `FixProposalApplicability` | 4 种适用性级别 |
+| 新增 `FixProposalActionSafetyLevel` | 4 种安全级别 |
+
+#### FixProposal（升级后）
+
+```csharp
+public sealed record FixProposal
+{
+    public required string Id { get; init; }                           // 原 ProposalId
+    public required string DraftId { get; init; }
+    public required string TenantId { get; init; }
+    public required FixProposalKind Kind { get; init; }                // NEW
+    public required string Title { get; init; }                        // NEW
+    public required string Explanation { get; init; }                  // NEW
+    public required string ReasonCode { get; init; }                   // NEW
+    public required FixProposalApplicability Applicability { get; init; } // NEW
+    public required bool IsExecutable { get; init; }                   // NEW
+    public required bool RequiresManualAction { get; init; }           // NEW
+    public required bool RequiresHumanReview { get; init; }            // 保留
+    public required bool BlocksActivationUntilResolved { get; init; }  // NEW — 仅解释，非门控
+    public required FixProposalRiskLevel RiskLevel { get; init; }
+    public IReadOnlyList<string> RelatedDiagnosticIds { get; init; } = [];  // NEW
+    public IReadOnlyList<string> RelatedDescriptorIds { get; init; } = [];  // NEW
+    public required IReadOnlyList<FixProposalAction> Actions { get; init; }
+    public required IReadOnlyList<AgentToolDiagnostic> Diagnostics { get; init; }
+    public required DateTimeOffset CreatedAt { get; init; }
+    public string? Rationale { get; init; }
+    public required string ContractVersion { get; init; } = AgentControlPlaneContractVersion.Current; // NEW
+}
+```
+
+#### IsExecutable 聚合规则
+
+```
+FixProposal.IsExecutable =
+    Applicability == FixProposalApplicability.CurrentMutableDraft
+    && Actions.All(a => a.IsExecutable)
+```
+
+Builder 强制此规则。混合可执行/不可执行动作的提案为不可执行。
+
+#### FixProposalAction（升级后）
+
+```csharp
+public sealed record FixProposalAction
+{
+    public required FixProposalActionKind Kind { get; init; }
+    public required string TargetPath { get; init; }                // 原 Path
+    public string? TargetDescriptorId { get; init; }                // NEW
+    public JsonElement? CurrentValue { get; init; }                 // 原 string → JsonElement?
+    public JsonElement? ProposedValue { get; init; }                // 原 string → JsonElement?
+    public required bool IsExecutable { get; init; }                // NEW
+    public required FixProposalActionSafetyLevel SafetyLevel { get; init; } // NEW
+    public string? Description { get; init; }
+}
+```
+
+**JsonElement 用法**：始终通过 `JsonSerializer.SerializeToElement(...)` 创建。必要时使用 `.Clone()` 避免 `JsonDocument` 生命周期问题。`FixProposalAction` 和 `JsonElement` 均需注册到 source-generated JSON 上下文。
+
+#### 新增枚举
+
+| 枚举 | 值 | 说明 |
+|---|---|---|
+| `FixProposalKind` | 9 值：CreateMissingDescriptor=1, ReplaceMissingReference=2, RemoveInvalidRelationship=3, AddRequiredBindingMetadata=4, SplitBreakingChangeIntoCompatibleChange=5, MarkRequiresReview=6, FlagUnsafeExpansion=7, SuggestVersionBump=8, SetRequiredField=9 | 修复提案种类。SetRequiredField 由 `MapDiagnosticToFixProposalKind` 对 RATIONALE_EMPTY/INTENT_EMPTY 诊断映射而来 |
+| `FixProposalActionKind` | 10 值：SetValue=1, RemoveValue=2, AddValue=3, MergeObject=4, ReplaceReference=5, RemoveRelationship=6, AddRequiredBindingMetadata=7, SuggestVersionBump=8, MarkRequiresReview=9, ManualActionRequired=10 | 修复动作种类 |
+| `FixProposalApplicability` | 4 值：CurrentMutableDraft=1, RequiresNewDraftRevision=2, ManualActionRequired=3, NotApplicable=4 | 提案适用性 |
+| `FixProposalActionSafetyLevel` | 4 值：Safe=1, LowRisk=2, RequiresReview=3, Unsafe=4 | 动作安全级别 |
+
+#### MapDiagnosticToFixProposalKind
+
+| 诊断码 | 映射 FixProposalKind | 说明 |
+|---|---|---|
+| RATIONALE_EMPTY | SetRequiredField | 草稿缺少 Rationale 字段 |
+| INTENT_EMPTY | SetRequiredField | 草稿缺少 Intent 字段 |
+| (其他诊断) | MarkRequiresReview | 默认映射：标记为需要人工或系统审查 |
+
+#### ApplyFixProposalToDraftAsync 运行时规则
+
+| 条件 | 结果诊断码 |
+|---|---|
+| `action.IsExecutable == false` | NonExecutableFixAction |
+| `proposal.Actions.Count > 1` | UnsupportedMultiActionFixProposal |
+| `action.Kind` 不在支持的子集中 | UnsupportedFixActionKind |
+| `action.SafetyLevel == Unsafe` | UnsafeFixActionRejected |
+| 目标是活跃描述符 / 运行时注册表 | FixActionTargetBoundaryViolation |
+| 目标路径不在允许集合中 | FixActionTargetNotAllowed |
+
+**多动作策略**：Phase 7d 仅支持单动作可执行提案。`ApplyFixProposalToDraftAsync` 拒绝 `Actions.Count > 1` 的提案，通过 `UnsupportedMultiActionFixProposal` 诊断。多动作支持需要原子回滚（快照/克隆），延迟到后续阶段。这比在没有实现的情况下声称原子性更诚实。
+
+**BlocksActivationUntilResolved**：这是**解释字段**，不是门控决策。它表示修复提案识别了会阻塞激活的问题，但实际激活门控属于 Phase 7e 或后续阶段。Phase 7d 不拥有激活阻塞权限。
+
+### 11.4 工具表面更新
+
+#### 2 个新增工具（Wave 3.5: ReviewReport）
+
+| 工具名 | 请求类型 | 结果类型 | 权限 | 只读 |
+|---|---|---|---|---|
+| `BuildDescriptorReviewReport` | `string draftId` | `AgentToolResult<DescriptorReviewReportDto>` | agent.review.report | Yes |
+| `RenderDescriptorReviewReport` | `DescriptorReviewReportDto` + `DescriptorReviewReportFormat` | `AgentToolResult<string>` | agent.review.render | Yes |
+
+**注意**：`RenderDescriptorReviewReportAsync` 直接接受 `DescriptorReviewReportDto`，而非 `reportId`。DTO 是权威制品；`_reports` 字典是可选临时缓存。存在内部的便捷方法 `RenderStoredDescriptorReviewReportAsync(context, reportId, format)` 但**不作为工具暴露**。
+
+#### BuildDescriptorReviewReportAsync 流程
+
+```
+context + draftId
+  → ExecuteAsync (manifest → authorization → scope)
+  → ResolveDraftAsync
+  → DenyIfInvisible
+  → Lookup reviewResult from _reviewResults
+  → _reportBuilder.Build(request with reviewResult + draft + VisibilityApplied=true)
+  → Store report in _reports dictionary (optional cache)
+  → Return AgentToolResult<DescriptorReviewReportDto>
+```
+
+#### RenderDescriptorReviewReportAsync 流程
+
+```
+context + report DTO + format
+  → ExecuteAsync (仅授权检查 — 不访问注册表/缓存)
+  → Validate report.ContractVersion == AgentControlPlaneContractVersion.Current
+    (不匹配 → UnsupportedReportContractVersion diagnostic)
+  → format switch { Markdown → _renderer.RenderMarkdown, PlainText → _renderer.RenderPlainText }
+  → Return AgentToolResult<string>
+```
+
+#### DI 注册
+
+```csharp
+services.AddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
+services.AddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
+services.AddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
+```
+
+### 11.5 JSON 上下文更新
+
+`AgentControlPlaneToolJsonSerializerContext` 新增注册：
+
+- `DescriptorReviewReportDto`
+- `DescriptorReviewReportSectionDto`
+- `DescriptorReviewReportItemDto`
+- `DescriptorReviewRecommendationDto`
+- `DescriptorReviewReportBuildRequest`
+- `DescriptorReviewReportSectionKind`
+- `DescriptorReviewSeverity`
+- `DescriptorReviewRecommendationKind`
+- `DescriptorReviewReportFormat`
+- `FixProposalKind`
+- `FixProposalApplicability`
+- `FixProposalActionSafetyLevel`
+- `JsonElement`（FixProposalAction 需要）
+- 更新后的 `FixProposal` / `FixProposalAction` 注册（字段变更）
+
+### 11.6 边界声明
+
+| 边界 | 说明 |
+|---|---|
+| Builder 不执行可见性过滤 | Builder 需要预先过滤的 `DescriptorDraftReviewResult`，`VisibilityApplied=false` 时 fail-fast |
+| Renderer 不调用 LLM 或外部服务 | Renderer 仅读取 DTO，不访问注册表、目录或网络 |
+| FixProposal.BlocksActivationUntilResolved 是解释字段 | Phase 7d 不拥有激活门控权限 |
+| Phase 7d 不拥有治理权限 | 治理决策仍来自 Control Plane |
+| Phase 7d 不进行运行时注册表变异 | Fix Proposal 仅修改草稿，不变异活跃注册表 |
+| IsExecutable 聚合规则 | `FixProposal.IsExecutable = Applicability==CurrentMutableDraft && Actions.All(IsExecutable)` |
+| RequiresManualAction 一致性 | `FixProposal.RequiresManualAction == (Applicability == ManualActionRequired)` |

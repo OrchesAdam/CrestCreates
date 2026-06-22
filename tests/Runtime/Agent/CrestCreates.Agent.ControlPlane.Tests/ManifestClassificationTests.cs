@@ -50,6 +50,10 @@ public class ManifestClassificationTests
         (AgentToolName.ListDraftReviewResults, true, AgentToolCategory.Review),
         (AgentToolName.ExplainDiagnostics, true, AgentToolCategory.Review),
 
+        // Review Report — both read-only (build reads review result, render reads DTO)
+        (AgentToolName.BuildDescriptorReviewReport, true, AgentToolCategory.ReviewReport),
+        (AgentToolName.RenderDescriptorReviewReport, true, AgentToolCategory.ReviewReport),
+
         // Fix Proposal — SuggestDescriptorDraftFixes creates and persists proposals (mutating);
         // ApplyFixProposalToDraft updates draft (mutating);
         // Get/List are read-only

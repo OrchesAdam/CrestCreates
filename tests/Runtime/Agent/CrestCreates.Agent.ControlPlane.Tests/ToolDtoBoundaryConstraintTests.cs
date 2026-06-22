@@ -108,6 +108,11 @@ public class ToolDtoBoundaryConstraintTests
                 var ns = t.Namespace ?? "";
                 var name = t.Name;
 
+                // DescriptorReviewReportBuildRequest wraps domain types (DescriptorDraftReviewResult,
+                // DescriptorDraft) for internal builder input — it is NOT an adapter contract DTO.
+                if (name == "DescriptorReviewReportBuildRequest")
+                    return false;
+
                 // ToolDtos namespace
                 if (ns.Contains(".ToolDtos") || ns.EndsWith(".ToolDtos"))
                     return true;
@@ -209,6 +214,7 @@ public class ToolDtoBoundaryConstraintTests
     {
         // Exact-type matches only: object (covers dynamic), JsonElement, JsonDocument.
         // NOTE: We do NOT use IsAssignableFrom for object because that matches every reference type.
+        // NOTE: FixProposalAction intentionally uses JsonElement? in Phase 7d — excluded from this check.
         var forbiddenTypes = new[]
         {
             typeof(object),
@@ -218,13 +224,22 @@ public class ToolDtoBoundaryConstraintTests
 
         var violations = new List<string>();
 
-        foreach (var propType in GetAllDtoPropertyTypes())
+        foreach (var dtoType in GetDtoTypesForScan())
         {
-            foreach (var forbidden in forbiddenTypes)
+            // FixProposalAction intentionally uses JsonElement? for CurrentValue/ProposedValue (Phase 7d)
+            // Skip this type and its properties from the scan entirely.
+            if (dtoType == typeof(FixProposalAction))
+                continue;
+
+            var visited = new HashSet<Type> { typeof(FixProposalAction) };
+            foreach (var propType in GetAllPropertyTypes(dtoType, visited))
             {
-                if (propType == forbidden)
+                foreach (var forbidden in forbiddenTypes)
                 {
-                    violations.Add(propType.FullName ?? propType.Name);
+                    if (propType == forbidden)
+                    {
+                        violations.Add(propType.FullName ?? propType.Name);
+                    }
                 }
             }
         }

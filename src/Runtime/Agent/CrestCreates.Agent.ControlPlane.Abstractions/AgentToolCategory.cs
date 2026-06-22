@@ -8,5 +8,6 @@ public enum AgentToolCategory
     FixProposal,
     PackagePreview,
     ActivationHandoff,
-    Manifest
+    Manifest,
+    ReviewReport
 }

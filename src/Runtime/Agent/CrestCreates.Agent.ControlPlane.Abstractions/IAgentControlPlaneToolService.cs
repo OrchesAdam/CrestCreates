@@ -101,6 +101,19 @@ public interface IAgentControlPlaneToolService
         ExplainDiagnosticsRequest request,
         CancellationToken ct = default);
 
+    // ── Wave 3d — Review Report (Phase 7d) ──
+
+    Task<AgentToolResult<DescriptorReviewReportDto>> BuildDescriptorReviewReportAsync(
+        AgentToolInvocationContext context,
+        string draftId,
+        CancellationToken ct = default);
+
+    Task<AgentToolResult<string>> RenderDescriptorReviewReportAsync(
+        AgentToolInvocationContext context,
+        DescriptorReviewReportDto report,
+        DescriptorReviewReportFormat format,
+        CancellationToken ct = default);
+
     // ── Wave 4 — Fix Proposal ──
 
     Task<AgentToolResult<FixProposalListResult>> SuggestDescriptorDraftFixesAsync(

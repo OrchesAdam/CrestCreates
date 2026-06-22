@@ -21,6 +21,9 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
             new DefaultAgentToolAuthorizationService(options));
         services.TryAddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
+        services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
+        services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
+        services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
         return services;
@@ -40,6 +43,9 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
             new DefaultAgentToolAuthorizationService(options));
         services.TryAddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
+        services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
+        services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
+        services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
         return services;
@@ -65,6 +71,9 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
             new DefaultAgentToolAuthorizationService(options));
         services.TryAddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
+        services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
+        services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
+        services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
         return services;

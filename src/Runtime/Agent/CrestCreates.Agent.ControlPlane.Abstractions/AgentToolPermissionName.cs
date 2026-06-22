@@ -20,4 +20,6 @@ public static class AgentToolPermissionName
     public const string ActivationRequestSubmit = "agent.activation.request.submit";
     public const string ActivationRequestRead = "agent.activation.request.read";
     public const string ActivationRequestCancel = "agent.activation.request.cancel";
+    public const string ReviewReportBuild = "agent.review.report.build";
+    public const string ReviewReportRender = "agent.review.report.render";
 }

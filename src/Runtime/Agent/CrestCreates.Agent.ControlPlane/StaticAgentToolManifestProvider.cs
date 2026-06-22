@@ -170,6 +170,28 @@ public sealed class StaticAgentToolManifestProvider : IAgentToolManifestProvider
                 AllowedActors = allActors, IsReadOnly = true, MutatesRuntimeRegistry = false
             },
 
+            // ── Review Report (Phase 7d) ──
+            new()
+            {
+                Name = AgentToolName.BuildDescriptorReviewReport,
+                Description = "Build a structured review report from a draft review result.",
+                Category = AgentToolCategory.ReviewReport,
+                Permissions = [Perm(AgentToolPermissionName.ReviewReportBuild, AgentToolCategory.ReviewReport, true)],
+                AllowedActors = allActors,
+                IsReadOnly = true,
+                MutatesRuntimeRegistry = false
+            },
+            new()
+            {
+                Name = AgentToolName.RenderDescriptorReviewReport,
+                Description = "Render a review report as Markdown or PlainText.",
+                Category = AgentToolCategory.ReviewReport,
+                Permissions = [Perm(AgentToolPermissionName.ReviewReportRender, AgentToolCategory.ReviewReport, true)],
+                AllowedActors = allActors,
+                IsReadOnly = true,
+                MutatesRuntimeRegistry = false
+            },
+
             // ── Fix Proposal ──
             new()
             {
