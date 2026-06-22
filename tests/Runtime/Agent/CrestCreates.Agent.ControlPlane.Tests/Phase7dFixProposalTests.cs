@@ -599,10 +599,43 @@ public class Phase7dFixProposalTests : AgentControlPlaneTestBase
         DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // ── Review Fix: Boundary violation with TargetDescriptorId + registry path ──
+    // ── Review Fix: Boundary violation with TargetDescriptorId targeting another descriptor ──
 
     [Fact]
-    public async Task ApplyFixProposalToDraft_BoundaryViolation_Returns_TargetBoundaryViolation()
+    public async Task ApplyFixProposalToDraft_BoundaryViolation_TargetDescriptorId_Returns_TargetBoundaryViolation()
+    {
+        var service = CreateService();
+        var draft = CreateTestDraft();
+        var proposal = CreateMinimalFixProposal(actions: new List<FixProposalAction>
+        {
+            new()
+            {
+                Kind = FixProposalActionKind.SetValue,
+                TargetPath = "Rationale",
+                TargetDescriptorId = "other-descriptor-001",  // targets a different descriptor
+                ProposedValue = JsonSerializer.SerializeToElement("value"),
+                IsExecutable = true,
+                SafetyLevel = FixProposalActionSafetyLevel.Safe
+            }
+        });
+
+        SetupDraftStore(draft);
+        InsertFixProposal(service, proposal, draft);
+
+        var context = CreateContext("ApplyFixProposalToDraft");
+        var request = new ApplyFixProposalRequest { ProposalId = proposal.Id, DraftId = proposal.DraftId };
+        var result = await service.ApplyFixProposalToDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "FIX_ACTION_TARGET_BOUNDARY_VIOLATION");
+
+        DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── Review Fix: Boundary violation with registry/active/runtime namespace path ──
+
+    [Fact]
+    public async Task ApplyFixProposalToDraft_BoundaryViolation_RegistryPath_Returns_TargetBoundaryViolation()
     {
         var service = CreateService();
         var draft = CreateTestDraft();
@@ -612,7 +645,6 @@ public class Phase7dFixProposalTests : AgentControlPlaneTestBase
             {
                 Kind = FixProposalActionKind.SetValue,
                 TargetPath = "registry.field",
-                TargetDescriptorId = "desc-001",
                 ProposedValue = JsonSerializer.SerializeToElement("value"),
                 IsExecutable = true,
                 SafetyLevel = FixProposalActionSafetyLevel.Safe

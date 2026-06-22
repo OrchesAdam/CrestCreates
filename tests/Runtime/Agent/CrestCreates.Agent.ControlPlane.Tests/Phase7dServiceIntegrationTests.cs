@@ -148,6 +148,54 @@ public class Phase7dServiceIntegrationTests : AgentControlPlaneTestBase
         result.Value.ContractVersion.Should().Be(AgentControlPlaneContractVersion.Current);
     }
 
+    // ── Test 4b: Build uses review-time draft, not current draft ─────────────
+    // Verifies P0-1 fix: report is bound to the draft snapshot from the review,
+    // not the current (potentially modified) draft.
+
+    [Fact]
+    public async Task BuildDescriptorReviewReport_UsesReviewTimeDraft_NotCurrentDraft()
+    {
+        var service = CreateService();
+        var context = CreateContext("BuildDescriptorReviewReport");
+
+        // Create the draft as it was at review time
+        var reviewTimeDraft = CreateTestDraft(
+            draftId: "draft-001",
+            descriptorId: "desc-at-review-time",
+            operation: DraftAbstractions.DescriptorDraftOperation.Create);
+
+        // Create a different current draft (modified after review)
+        var currentDraft = CreateTestDraft(
+            draftId: "draft-001",
+            descriptorId: "desc-modified-after-review",
+            operation: DraftAbstractions.DescriptorDraftOperation.Update);
+
+        var reviewResult = CreateReviewResult();
+
+        // Populate review result with the review-time draft as the owner
+        PopulateReviewResult(service, TestTenantId, "rr-001", reviewResult, reviewTimeDraft);
+
+        // DraftStore returns the current (modified) draft
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(currentDraft));
+
+        var expectedReport = CreateMinimalReportDto("draft-001");
+        Draft? capturedDraft = null;
+        ReportBuilderMock
+            .Setup(b => b.Build(It.IsAny<DescriptorReviewReportBuildRequest>()))
+            .Callback<DescriptorReviewReportBuildRequest>(r => capturedDraft = r.Draft)
+            .Returns(expectedReport);
+
+        var result = await service.BuildDescriptorReviewReportAsync(context, "draft-001");
+
+        result.Status.Should().Be(AgentToolResultStatus.Success);
+        capturedDraft.Should().NotBeNull("the builder should have been called");
+        capturedDraft!.DescriptorId.Should().Be("desc-at-review-time",
+            "builder must receive the draft from review time, not the current draft");
+        capturedDraft.Operation.Should().Be(DraftAbstractions.DescriptorDraftOperation.Create,
+            "builder must receive the draft from review time, not the current draft");
+    }
+
     // ── Test 5: Render with invalid contract version → InvalidRequest ───────
 
     [Fact]

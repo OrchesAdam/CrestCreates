@@ -1657,15 +1657,13 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([nonExecDiag], audit);
                 }
 
-                if (action.Kind is not FixProposalActionKind.SetValue
-                    and not FixProposalActionKind.RemoveValue
-                    and not FixProposalActionKind.AddValue)
+                if (action.Kind != FixProposalActionKind.SetValue)
                 {
                     var unsupportedKindDiag = new AgentToolDiagnostic
                     {
                         Code = "UNSUPPORTED_FIX_ACTION_KIND",
                         Severity = AgentToolDiagnosticSeverity.Error,
-                        Message = $"Fix action kind '{action.Kind}' is not supported for draft field mutation."
+                        Message = $"Fix action kind '{action.Kind}' is not supported for draft field mutation. Only SetValue is currently supported."
                     };
                     var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [unsupportedKindDiag]);
                     await _auditor.RecordAsync(audit, ct);
@@ -1687,17 +1685,32 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var allowedPaths = new HashSet<string>(StringComparer.Ordinal)
                     { "Intent", "Rationale", "ProposedVersion", "CorrelationId" };
 
-                // Boundary violation: TargetDescriptorId references active/runtime registry namespace
+                // Boundary violation: TargetDescriptorId references a descriptor other than the draft itself.
+                // ApplyFixProposalToDraftAsync can only mutate the draft's own fields.
                 if (action.TargetDescriptorId is not null
-                    && (action.TargetPath.StartsWith("registry.", StringComparison.Ordinal)
-                        || action.TargetPath.StartsWith("active.", StringComparison.Ordinal)
-                        || action.TargetPath.StartsWith("runtime.", StringComparison.Ordinal)))
+                    && !string.Equals(action.TargetDescriptorId, draft.DescriptorId, StringComparison.Ordinal))
                 {
                     var boundaryDiag = new AgentToolDiagnostic
                     {
                         Code = "FIX_ACTION_TARGET_BOUNDARY_VIOLATION",
                         Severity = AgentToolDiagnosticSeverity.Error,
-                        Message = $"Fix action targets boundary-violating path '{action.TargetPath}' with TargetDescriptorId '{action.TargetDescriptorId}'. Draft fix proposals cannot mutate the active descriptor registry."
+                        Message = $"Fix action targets descriptor '{action.TargetDescriptorId}', but draft fix proposals can only mutate the draft's own fields (descriptor '{draft.DescriptorId}')."
+                    };
+                    var boundaryAudit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [boundaryDiag]);
+                    await _auditor.RecordAsync(boundaryAudit, ct);
+                    return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([boundaryDiag], boundaryAudit);
+                }
+
+                // Boundary violation: TargetPath references active/runtime registry namespace
+                if (action.TargetPath.StartsWith("registry.", StringComparison.Ordinal)
+                    || action.TargetPath.StartsWith("active.", StringComparison.Ordinal)
+                    || action.TargetPath.StartsWith("runtime.", StringComparison.Ordinal))
+                {
+                    var boundaryDiag = new AgentToolDiagnostic
+                    {
+                        Code = "FIX_ACTION_TARGET_BOUNDARY_VIOLATION",
+                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Message = $"Fix action targets boundary-violating path '{action.TargetPath}'. Draft fix proposals cannot mutate the active descriptor registry."
                     };
                     var boundaryAudit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [boundaryDiag]);
                     await _auditor.RecordAsync(boundaryAudit, ct);
@@ -1729,19 +1742,6 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                         _ => updatedDraft
                     };
                     appliedPaths.Add(action.TargetPath);
-                }
-                else
-                {
-                    // RemoveValue/AddValue are not yet supported — reject rather than silently skip
-                    var unsupportedDiag = new AgentToolDiagnostic
-                    {
-                        Code = "UNSUPPORTED_FIX_ACTION_KIND",
-                        Severity = AgentToolDiagnosticSeverity.Error,
-                        Message = $"Fix action kind '{action.Kind}' is not yet supported for draft field mutation. Only SetValue is currently supported."
-                    };
-                    var unsupportedAudit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [unsupportedDiag]);
-                    await _auditor.RecordAsync(unsupportedAudit, ct);
-                    return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([unsupportedDiag], unsupportedAudit);
                 }
             }
 
