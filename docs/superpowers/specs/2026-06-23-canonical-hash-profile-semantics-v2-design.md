@@ -50,9 +50,19 @@ If optional fields are simply removed from `ContractHash` without changing the c
 4. **No compatibility shims for old hash values.** Shape-version bumps are enough.
 5. **No runtime reflection or dynamic discovery.** Union exhaustiveness and profile correctness are compile-time diagnostics.
 
-## 4. Union Profile v2
+## 4. Semantic Guardrails
 
-### 4.1 Attribute API
+These constraints are part of the v2 contract and should be preserved during implementation.
+
+1. **Hash change kinds are not compatibility severity.** `ContractHashChanged` and `DefinitionHashChanged` are change-set facts. They do not mean `Breaking`, `Risky`, or `Compatible` by themselves. Compatibility severity is produced only by `DescriptorCompatibilityAnalyzer` rules.
+2. **Schema ContractHash v2 is intentionally narrow.** For `SchemaDescriptor`, `ContractHash` represents the required read/write binding surface, not the full schema field surface. Optional fields remain part of the schema surface, but they are represented through `DefinitionHash` and compatibility diff.
+3. **Union exhaustiveness is compilation-scoped.** SG can prove exhaustiveness only for sealed subtypes visible in the current compilation. This is sufficient for `InteractionTarget` because the hierarchy is effectively closed in the current codebase. It is not a runtime plugin/subtype discovery guarantee.
+4. **Filter is collection-only semantic projection.** `Filter` is a compile-time-known collection element projection hook used before ordering and writing. It is not a general conditional-field system, tenant policy system, or purpose-dependent classification mechanism.
+5. **Existence and lifecycle changes win over hash comparison.** `Added`, `Removed`, `Deprecated`, `Activated`, and state transitions must be detected before hash differences. Hash comparisons only classify descriptors that exist on both sides and are not already classified by a higher-priority lifecycle change.
+
+## 5. Union Profile v2
+
+### 5.1 Attribute API
 
 Add these attributes to `CrestCreates.Metadata.Abstractions`:
 
@@ -122,7 +132,7 @@ internal sealed class CapabilityTargetCanonicalHashProfile
 }
 ```
 
-### 4.2 Field Usage
+### 5.2 Field Usage
 
 `WorkflowStep.Target` changes from `CustomWriter` to a union `ValueProfile`:
 
@@ -136,7 +146,7 @@ internal sealed class CapabilityTargetCanonicalHashProfile
 
 The generator must allow `ValueProfile` and `ElementProfile` to point either to a normal canonical hash profile or a union profile.
 
-### 4.3 Generated JSON Shape
+### 5.3 Generated JSON Shape
 
 The generated union writer uses wrapper shape:
 
@@ -156,7 +166,7 @@ The discriminator belongs to the union wrapper. The case payload belongs to the 
 
 This is a breaking shape change from the v1 hand-written `{ Kind, Id, Version }` writer.
 
-### 4.4 Generated Writer Shape
+### 5.4 Generated Writer Shape
 
 The SG generates:
 
@@ -191,9 +201,9 @@ internal static class InteractionTargetCanonicalHashWriter
 }
 ```
 
-The runtime default branch is still present as a defensive guard, but correctness is enforced by compile-time diagnostics.
+The runtime default branch is still present as a defensive guard, but correctness for effectively closed hierarchies is enforced by current-compilation diagnostics.
 
-### 4.5 Diagnostics
+### 5.5 Diagnostics
 
 Add diagnostics:
 
@@ -209,9 +219,9 @@ Add diagnostics:
 | CCHASH022 | Error | Case `ValueProfile.TargetType` does not match union case type |
 | CCHASH023 | Error | `CustomWriter` is unsupported in v2 canonical hash profiles |
 
-For exhaustiveness, the generator scans compilation symbols for sealed types whose `BaseType` chain reaches `TargetType`. v2 does not provide a non-exhaustive escape hatch.
+For exhaustiveness, the generator scans current-compilation symbols for sealed types whose `BaseType` chain reaches `TargetType`. v2 does not provide a non-exhaustive escape hatch. This is a current-compilation guarantee, not a runtime dynamic loading guarantee.
 
-### 4.6 Migration
+### 5.6 Migration
 
 1. Add union profile attributes.
 2. Extend the CanonicalHash generator model to parse normal profiles and union profiles.
@@ -222,28 +232,32 @@ For exhaustiveness, the generator scans compilation symbols for sealed types who
 7. Remove `InteractionTargetCanonicalHashWriter`.
 8. Remove or obsolete `CanonicalHashFieldAttribute.CustomWriter`; v2 SG must report CCHASH023 when it is used.
 
-## 5. Schema Compatibility Projection v2
+## 6. Schema Compatibility Projection v2
 
-### 5.1 Core Decision
+### 6.1 Core Decision
 
 Schema hash semantics are split:
 
 ```text
-ContractHash
-    required consumer contract surface fingerprint
+Schema ContractHash
+    required read/write binding surface fingerprint
 
-DefinitionHash
+Schema DefinitionHash
     full current descriptor definition fingerprint
 
 CompatibilityAnalyzer
     old/new direction-aware semantic diff
 ```
 
-`ContractHash` no longer tries to answer whether a migration is breaking. Compatibility remains the responsibility of descriptor-specific rules that compare old and new descriptors.
+For `SchemaDescriptor`, `ContractHash` no longer means the full schema field surface. It is the required binding surface used by consumers that must read/write required fields. Optional fields are excluded from Schema ContractHash v2 but included in DefinitionHash.
 
-### 5.2 Schema ContractHash v2 Shape
+This does not mean optional fields are not schema surface. Query projections, form generation, DTO generation, import/export, search indexing, AI metadata reasoning, field-level permissions, and dynamic table columns may all observe optional fields. Those changes remain visible through `DefinitionHashChanged` and are classified by descriptor-specific compatibility rules.
 
-`SchemaDescriptor.Fields` should no longer include every field in `ContractHash`. ContractHash includes required fields only:
+`ContractHash` no longer tries to answer whether a schema migration is breaking. Compatibility remains the responsibility of descriptor-specific rules that compare old and new descriptors.
+
+### 6.2 Schema ContractHash v2 Shape
+
+`SchemaDescriptor.Fields` should no longer include every field in `ContractHash`. Schema ContractHash v2 includes required fields only:
 
 ```csharp
 [CanonicalHashField(
@@ -292,7 +306,7 @@ Filter diagnostics:
 | CCHASH025 | Error | Filter type does not expose `public` or `internal static bool Include(TElement value)` |
 | CCHASH026 | Error | Filter input type does not match the collection element type |
 
-### 5.3 Schema Required Field Profile
+### 6.3 Schema Required Field Profile
 
 Add a required-field contract profile:
 
@@ -322,7 +336,7 @@ internal sealed class SchemaRequiredFieldCanonicalHashProfile
 
 `DefinitionHash` still includes all schema fields through the full `SchemaFieldCanonicalHashProfile`.
 
-### 5.4 Shape Versions
+### 6.4 Shape Versions
 
 Bump schema shape versions:
 
@@ -335,9 +349,9 @@ schema-field-definition-hash-v2
 
 Exact names may be adjusted during implementation, but the contract shape version must change because optional fields are removed from the contract payload.
 
-## 6. ChangeSet v2
+## 7. ChangeSet v2
 
-### 6.1 New Change Kind
+### 7.1 New Change Kind
 
 Add `DefinitionHashChanged`:
 
@@ -357,7 +371,9 @@ public enum DescriptorChangeKind
 
 This change kind preserves visibility into definition-only changes after they stop changing ContractHash.
 
-### 6.2 DescriptorChange Hash Metadata
+`DefinitionHashChanged` is not a compatibility severity. It is only a change fact that gives compatibility rules a chance to inspect definition-surface changes.
+
+### 7.2 DescriptorChange Hash Metadata
 
 Extend `DescriptorChange`:
 
@@ -368,11 +384,11 @@ public string? AfterDefinitionHash { get; init; }
 
 `BeforeContractHash` / `AfterContractHash` remain.
 
-### 6.3 Builder Rules
+### 7.3 Builder Rules
 
 `DescriptorChangeSetBuilder` order:
 
-1. State/removal/lifecycle transitions.
+1. Presence and lifecycle transitions: `Added`, `Removed`, `Deprecated`, `Activated`, and other state transitions.
 2. `ContractHashChanged` when `ContractHash` differs.
 3. `DefinitionHashChanged` when `ContractHash` is equal but `DefinitionHash` differs.
 4. `Updated` when both hashes are equal but name changed.
@@ -390,11 +406,11 @@ Added
 Activated
 ```
 
-The change set must populate all available before/after hash values for the emitted change.
+The change set must populate all available before/after hash values for the emitted change. Hash comparisons must not override presence or lifecycle classification.
 
-## 7. Compatibility v2
+## 8. Compatibility v2
 
-### 7.1 Schema Rule Entry
+### 8.1 Schema Rule Entry
 
 `SchemaCompatibilityRule.CanAnalyze` must include the new change kind:
 
@@ -408,11 +424,11 @@ return change.Kind is (
 
 The existing old/new semantic diff remains the authority for field-level outcomes.
 
-### 7.2 Required Outcomes
+### 8.2 Required Outcomes
 
 | Change | Hash outcome | Change kind | Compatibility outcome |
 |--------|--------------|-------------|-----------------------|
-| Optional field added | Contract same, Definition changed | DefinitionHashChanged | Compatible |
+| Optional field added | Schema required-binding Contract same, Definition changed | DefinitionHashChanged | Compatible |
 | Required field added | Contract changed | ContractHashChanged | Breaking |
 | Optional field removed | Definition changed | DefinitionHashChanged | Risky without affected consumers; Breaking with affected consumers |
 | Optional field type changed | Definition changed | DefinitionHashChanged | Breaking |
@@ -420,7 +436,7 @@ The existing old/new semantic diff remains the authority for field-level outcome
 | Required relaxed to optional | Contract changed | ContractHashChanged | Compatible |
 | Optional validation/display change | Definition changed | DefinitionHashChanged | Risky until rule categories are modeled |
 
-### 7.3 Generic Rule
+### 8.3 Generic Rule
 
 Add generic fallback behavior:
 
@@ -434,9 +450,9 @@ DefinitionHashChanged + no descriptor-specific findings
 
 Defaulting to `Risky` avoids silently approving definition-shape changes for descriptor kinds that have no semantic rule.
 
-## 8. Tests
+## 9. Tests
 
-### 8.1 Union Profile Tests
+### 9.1 Union Profile Tests
 
 Add generator tests under `tests/Tooling/CrestCreates.CodeGenerator.Tests`:
 
@@ -460,24 +476,25 @@ Add runtime hash tests:
 - Reordering workflow steps still changes ContractHash.
 - Union case JSON shape is deterministic and includes discriminator before value.
 
-### 8.2 Schema Hash Tests
+### 9.2 Schema Hash Tests
 
-- Optional field addition does not change ContractHash.
+- Optional field addition does not change Schema required-binding ContractHash.
 - Optional field addition changes DefinitionHash.
 - Required field addition changes ContractHash.
-- Optional field type change does not change ContractHash but changes DefinitionHash.
+- Optional field type change does not change Schema required-binding ContractHash but changes DefinitionHash.
 - Validation rule change changes DefinitionHash only.
 
-### 8.3 ChangeSet Tests
+### 9.3 ChangeSet Tests
 
 - Optional field addition emits `DefinitionHashChanged`.
 - Required field addition emits `ContractHashChanged`.
 - Name-only change emits `Updated`.
 - State change beats `DefinitionHashChanged`.
 - `ContractHashChanged` beats `DefinitionHashChanged`.
+- Added and Removed descriptors are classified as `Added`/`Removed`, not hash changes.
 - Definition hash values are populated on `DescriptorChange`.
 
-### 8.4 Compatibility Tests
+### 9.4 Compatibility Tests
 
 - Optional field addition with `DefinitionHashChanged` is Compatible.
 - Optional field removal with affected consumers is Breaking.
@@ -486,7 +503,7 @@ Add runtime hash tests:
 - Validation rule change is Risky until categories are modeled.
 - Generic `DefinitionHashChanged` without descriptor-specific findings is Risky.
 
-## 9. Non-goals
+## 10. Non-goals
 
 - Do not implement non-exhaustive union profiles.
 - Do not use reflection to discover union cases at runtime.
@@ -494,8 +511,11 @@ Add runtime hash tests:
 - Do not migrate package/review/report hashes in this spec.
 - Do not SG-generate compatibility analyzer rules.
 - Do not preserve v1 hash values.
+- Do not reinterpret `ContractHashChanged` or `DefinitionHashChanged` as compatibility severity.
+- Do not treat Schema ContractHash v2 as full schema surface identity.
+- Do not turn `Filter` into a general conditional field classification system.
 
-## 10. Implementation Order
+## 11. Implementation Order
 
 1. Add union profile attributes and generator models.
 2. Add union diagnostics and tests.
@@ -508,13 +528,15 @@ Add runtime hash tests:
 9. Update governance/change-set consistency tests.
 10. Update `docs/Feature/CanonicalHash/arch-design.md` and `usage-guide.md`.
 
-## 11. Acceptance Criteria
+## 12. Acceptance Criteria
 
 - `WorkflowStep.Target` is represented by a declared union profile, not a hand-written `CustomWriter`.
 - SG emits exhaustive union writer switches and compile-time diagnostics for missing cases.
 - `CustomWriter` is rejected by v2 canonical hash generator diagnostics.
-- Optional schema field addition does not change `ContractHash`.
+- Optional schema field addition does not change Schema required-binding `ContractHash`.
 - Optional schema field addition changes `DefinitionHash`.
 - Optional schema field addition still appears in change-set and compatibility/governance flow as `DefinitionHashChanged`.
 - Schema compatibility outcomes are produced by old/new semantic diff, not inferred from hash value alone.
+- `ContractHashChanged` and `DefinitionHashChanged` remain change facts; compatibility severity is emitted only by compatibility rules.
+- Added/Removed/lifecycle transitions are classified before hash comparisons.
 - Existing canonical hash AOT guarantees remain: no `JsonSerializer`, no `JsonTypeInfo`, no runtime reflection on the hash main path.
