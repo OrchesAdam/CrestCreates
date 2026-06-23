@@ -9,18 +9,23 @@ public static class DescriptorSnapshotBuilder
     public static DescriptorSnapshot TakeSnapshot(
         IGlobalDescriptorRegistry registry,
         string packageId,
-        string packageVersion)
+        string packageVersion,
+        IDescriptorStableHashBuilder hashBuilder)
     {
         var allDescriptors = registry.GetAll();
-        var entries = allDescriptors.Select(d => new SnapshotEntry
+        var entries = allDescriptors.Select(d =>
         {
-            Ref = new DescriptorRef(d.Namespace, d.Id, (d as IVersionedDescriptor)?.Version),
-            DescriptorName = d.Name,
-            Kind = d.Kind,
-            State = d.State,
-            ContractHash = d.ContractHash,
-            DefinitionHash = d.DefinitionHash,
-            SupersededById = d.SupersededById
+            var hashes = hashBuilder.Build(d);
+            return new SnapshotEntry
+            {
+                Ref = new DescriptorRef(d.Namespace, d.Id, (d as IVersionedDescriptor)?.Version),
+                DescriptorName = d.Name,
+                Kind = d.Kind,
+                State = d.State,
+                ContractHash = hashes.ContractHash.Value,
+                DefinitionHash = hashes.DefinitionHash.Value,
+                SupersededById = d.SupersededById
+            };
         }).ToList();
 
         return new DescriptorSnapshot

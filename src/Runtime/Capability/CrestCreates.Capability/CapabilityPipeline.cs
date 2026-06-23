@@ -11,17 +11,20 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
     private readonly ICapabilityRegistry _registry;
     private readonly ICapabilityHandlerResolver _handlerResolver;
     private readonly CapabilityPipelineBuilder _builder;
+    private readonly IDescriptorStableHashBuilder _hashBuilder;
 
     public CapabilityPipeline(
         IServiceProvider serviceProvider,
         ICapabilityRegistry registry,
         ICapabilityHandlerResolver handlerResolver,
-        CapabilityPipelineBuilder builder)
+        CapabilityPipelineBuilder builder,
+        IDescriptorStableHashBuilder hashBuilder)
     {
         _serviceProvider = serviceProvider;
         _registry = registry;
         _handlerResolver = handlerResolver;
         _builder = builder;
+        _hashBuilder = hashBuilder;
     }
 
     public async Task<CapabilityExecutionResult> ExecuteAsync(
@@ -47,7 +50,7 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
             CapabilityId = descriptor.Id,
             CapabilityName = descriptor.Name,
             CapabilityVersion = descriptor.Version,
-            CapabilityContractHash = descriptor.ContractHash,
+            CapabilityContractHash = _hashBuilder.Build(descriptor).ContractHash.Value,
             Input = input,
             CancellationToken = ct
         };

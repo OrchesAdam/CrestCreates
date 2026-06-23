@@ -2,10 +2,11 @@ namespace CrestCreates.Metadata.Abstractions;
 
 public enum DescriptorKind
 {
-    Schema,
-    Capability,
-    Event,
-    Workflow,
-    Form,
-    HumanTask
+    Unknown = 0,
+    Schema = 1,
+    Capability = 2,
+    Event = 3,
+    Workflow = 4,
+    Form = 5,
+    HumanTask = 6
 }

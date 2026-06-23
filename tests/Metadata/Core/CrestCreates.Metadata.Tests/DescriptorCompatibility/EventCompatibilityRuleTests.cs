@@ -19,7 +19,7 @@ public class EventCompatibilityRuleTests
         return new EventDescriptor
         {
             Id = id, Name = "TestEvent", Version = version,
-            State = DescriptorState.Active, ContractHash = "hash", DefinitionHash = "defhash",
+            State = DescriptorState.Active,
             PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor> { Id = schemaId, Version = schemaVersion },
             Category = EventCategory.Domain, Semantic = EventSemantic.Fact,
             Importance = EventImportance.Business, ChangeKind = changeKind

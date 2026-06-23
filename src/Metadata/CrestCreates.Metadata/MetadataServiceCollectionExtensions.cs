@@ -2,6 +2,7 @@ using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
+using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.DescriptorCompatibility;
 using CrestCreates.Metadata.DescriptorLifecycle;
 using Microsoft.Extensions.DependencyInjection;
@@ -61,6 +62,7 @@ public static class MetadataServiceCollectionExtensions
     public static IServiceCollection AddDescriptorStableHash(
         this IServiceCollection services)
     {
+        services.TryAddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
         services.TryAddSingleton<IDescriptorStableHashBuilder, DescriptorStableHashBuilder>();
         return services;
     }
@@ -68,6 +70,7 @@ public static class MetadataServiceCollectionExtensions
     public static IServiceCollection AddDescriptorPackaging(
         this IServiceCollection services)
     {
+        services.AddDescriptorStableHash();
         services.TryAddSingleton<IDescriptorPackageBuilder,
             DefaultDescriptorPackageBuilder>();
         services.TryAddSingleton<IDescriptorPackageDiffer,

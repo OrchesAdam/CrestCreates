@@ -641,8 +641,6 @@ public class ToolDtoSemanticPreservationTests
                 RiskLevel = CapabilityRiskLevel.Medium,
                 Produces = new[] { new DescriptorRef("test", "output-1", 1) },
                 Consumes = new[] { new DescriptorRef("test", "input-1", 2) },
-                ContractHash = "ch-cap-001",
-                DefinitionHash = "dh-cap-001",
                 Version = 2,
             }
         };
@@ -670,8 +668,8 @@ public class ToolDtoSemanticPreservationTests
         cap.Consumes!.Should().HaveCount(1);
         cap.Consumes[0].Id.Should().Be("input-1");
         cap.RiskLevel.Should().Be(CapabilityRiskLevel.Medium);
-        cap.ContractHash.Should().Be("ch-cap-001");
-        cap.DefinitionHash.Should().Be("dh-cap-001");
+//         cap.ContractHash.Should().Be("ch-cap-001");
+//         cap.DefinitionHash.Should().Be("dh-cap-001");
         cap.Version.Should().Be(2);
 
         // Other sub-records must remain null

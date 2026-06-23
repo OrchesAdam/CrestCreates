@@ -90,7 +90,7 @@ public class InMemoryDescriptorDraftStoreTests
         var descriptor = new SchemaDescriptor
         {
             Id = "schema1", Name = "Test", Version = 1,
-            State = DescriptorState.Active, ContractHash = "abc", DefinitionHash = "def",
+            State = DescriptorState.Active,
             Fields = mutableFields
         };
         var draft = new Draft

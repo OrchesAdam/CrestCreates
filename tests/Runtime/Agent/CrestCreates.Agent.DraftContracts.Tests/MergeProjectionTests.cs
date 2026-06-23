@@ -20,8 +20,6 @@ public class MergeProjectionTests
         {
             Name = "ExistingName",
             State = DescriptorState.Active,
-            ContractHash = "existing-ch",
-            DefinitionHash = "existing-dh",
             Version = 1,
             CapabilityKind = CapabilityKind.Query,
             RiskLevel = CapabilityRiskLevel.Low,
@@ -63,7 +61,7 @@ public class MergeProjectionTests
 
         var merged = (CapabilityDescriptorDraftPayload)result.Value!;
         merged.Descriptor.Name.Should().Be("NewName");                // overwritten
-        merged.Descriptor.ContractHash.Should().Be("existing-ch");    // preserved
+//         merged.Descriptor.ContractHash.Should().Be("existing-ch");    // preserved
     }
 
     /// <summary>
@@ -80,7 +78,6 @@ public class MergeProjectionTests
             RiskLevel = CapabilityRiskLevel.Low,
             State = DescriptorState.Active,
             Name = "DifferentName",       // different but NOT in ChangedFields
-            ContractHash = "new-ch",      // explicit value, non-nullable field requires non-null
         };
 
         var patch = new AgentDraftPayloadPatchDto
@@ -89,7 +86,7 @@ public class MergeProjectionTests
             Capability = new AgentCapabilityDraftPayloadPatchDto
             {
                 Payload = patchDto,
-                ChangedFields = AgentCapabilityDraftChangedField.ContractHash,  // only ContractHash
+                ChangedFields = 0,  // ContractHash was removed
             },
         };
 
@@ -98,7 +95,7 @@ public class MergeProjectionTests
 
         var merged = (CapabilityDescriptorDraftPayload)result.Value!;
         merged.Descriptor.Name.Should().Be("ExistingName");       // preserved (not changed)
-        merged.Descriptor.ContractHash.Should().Be("new-ch");     // changed to explicit value
+//         merged.Descriptor.ContractHash.Should().Be("new-ch");     // changed to explicit value
     }
 
     /// <summary>
@@ -151,8 +148,6 @@ public class MergeProjectionTests
             RiskLevel = CapabilityRiskLevel.Critical,
             State = DescriptorState.Deprecated,
             Name = "FullNewName",
-            ContractHash = "full-ch",
-            DefinitionHash = "full-dh",
             Version = 42,
             InputSchema = new DescriptorRef("schema", "merge-is", 9),
             OutputSchema = new DescriptorRef("schema", "merge-os", 10),
@@ -169,8 +164,8 @@ public class MergeProjectionTests
                 ChangedFields =
                     AgentCapabilityDraftChangedField.CapabilityKind |
                     AgentCapabilityDraftChangedField.Consumes |
-                    AgentCapabilityDraftChangedField.ContractHash |
-                    AgentCapabilityDraftChangedField.DefinitionHash |
+//                     AgentCapabilityDraftChangedField.ContractHash |
+//                     AgentCapabilityDraftChangedField.DefinitionHash |
                     AgentCapabilityDraftChangedField.InputSchema |
                     AgentCapabilityDraftChangedField.Name |
                     AgentCapabilityDraftChangedField.OutputSchema |
@@ -201,8 +196,8 @@ public class MergeProjectionTests
         var c = created.Descriptor;
         m.Name.Should().Be(c.Name);
         m.State.Should().Be(c.State);
-        m.ContractHash.Should().Be(c.ContractHash);
-        m.DefinitionHash.Should().Be(c.DefinitionHash);
+//         m.ContractHash.Should().Be(c.ContractHash);
+//         m.DefinitionHash.Should().Be(c.DefinitionHash);
         m.Version.Should().Be(c.Version);
         m.CapabilityKind.Should().Be(c.CapabilityKind);
         m.RiskLevel.Should().Be(c.RiskLevel);

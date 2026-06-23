@@ -1,6 +1,7 @@
 using CrestCreates.Form.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -9,6 +10,12 @@ namespace CrestCreates.Form.Tests;
 
 public class FormDescriptorTests
 {
+    private readonly IDescriptorStableHashBuilder _hashBuilder;
+
+    public FormDescriptorTests()
+    {
+        _hashBuilder = new DescriptorStableHashBuilder(new DefaultCanonicalHashComputer());
+    }
     [Fact]
     public void FormDescriptor_Kind_Is_Form()
     {
@@ -166,8 +173,8 @@ public class FormDescriptorTests
             }
         };
 
-        var hash1 = DescriptorHashComputer.ComputeContractHash(form1);
-        var hash2 = DescriptorHashComputer.ComputeContractHash(form2);
+        var hash1 = _hashBuilder.Build(form1).ContractHash.Value;
+        var hash2 = _hashBuilder.Build(form2).ContractHash.Value;
 
         hash1.Should().Be(hash2);
     }

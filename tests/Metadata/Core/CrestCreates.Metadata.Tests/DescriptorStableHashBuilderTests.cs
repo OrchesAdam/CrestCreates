@@ -3,6 +3,7 @@ using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
@@ -13,7 +14,13 @@ namespace CrestCreates.Metadata.Tests;
 
 public sealed class DescriptorStableHashBuilderTests
 {
-    private readonly DescriptorStableHashBuilder _builder = new();
+    private readonly DefaultCanonicalHashComputer _hashComputer = new();
+    private readonly DescriptorStableHashBuilder _builder;
+
+    public DescriptorStableHashBuilderTests()
+    {
+        _builder = new DescriptorStableHashBuilder(_hashComputer);
+    }
 
     // ── Issue #29 Acceptance Tests ──
 
@@ -467,8 +474,10 @@ public sealed class DescriptorStableHashBuilderTests
 
         var result = _builder.Build(schema);
 
-        result.ContractHash.Should().NotBeNullOrEmpty();
-        result.DefinitionHash.Should().NotBeNullOrEmpty();
+        result.ContractHash.Should().NotBeNull();
+        result.ContractHash.Value.Should().NotBeNullOrEmpty();
+        result.DefinitionHash.Should().NotBeNull();
+        result.DefinitionHash.Value.Should().NotBeNullOrEmpty();
         result.RuntimeHash.Should().BeNull("RuntimeHash is reserved for future use");
         result.BindingHash.Should().BeNull("BindingHash is reserved for future use");
     }
@@ -814,6 +823,252 @@ public sealed class DescriptorStableHashBuilderTests
         var h2 = _builder.Build(s2).DefinitionHash;
 
         h1.Should().Be(h2, "validation rules with same Name/Expression, different ErrorMessage must be order-insensitive");
+    }
+
+    // ── Domain Separation Tests (Issue #30 acceptance criteria) ──
+    // Same payload content, different metadata → different hash.
+    // This proves the canonical JSON envelope includes domain-separation metadata
+    // (ArtifactKind, DescriptorKind, Scope, Purpose) in the hash input.
+
+    [Fact]
+    public void DomainSeparation_DifferentArtifactKind_ProducesDifferentHash()
+    {
+        var schema = CreateSchema("s1", "Test", fields: new[]
+        {
+            new SchemaFieldDescriptor { Name = "Email", FieldType = "string", IsRequired = true }
+        });
+
+        var contractHash = _builder.Build(schema).ContractHash;
+        contractHash.ArtifactKind.Should().Be("Descriptor");
+
+        // ComputeFromProjection with different ArtifactKind but same payload writer
+        var original = _hashComputer.ComputeContractHash(schema, CanonicalHashScope.InternalFull);
+        var differentArtifactKind = CanonicalHashProjectionResult.Create(
+            new CanonicalHashMetadata
+            {
+                ArtifactKind = "Package",
+                DescriptorKind = null,
+                Purpose = original.Purpose,
+                Scope = original.Scope,
+                AlgorithmVersion = original.AlgorithmVersion,
+                ContractVersion = original.ContractVersion,
+                CanonicalShapeVersion = original.CanonicalShapeVersion
+            },
+            // Use a simple writer that writes the same payload content
+            writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteString("Payload", "same-content");
+                writer.WriteEndObject();
+            });
+
+        var differentHash = _hashComputer.ComputeFromProjection(differentArtifactKind);
+        differentHash.Value.Should().NotBe(original.Value,
+            "different ArtifactKind must produce different hash even with same payload content");
+    }
+
+    [Fact]
+    public void DomainSeparation_DifferentDescriptorKind_ProducesDifferentHash()
+    {
+        var schema = CreateSchema("s1", "Test");
+        var form = new FormDescriptor { Id = "s1", Name = "Test", Version = 1, State = DescriptorState.Active };
+
+        var schemaHash = _builder.Build(schema).ContractHash;
+        var formHash = _builder.Build(form).ContractHash;
+
+        schemaHash.DescriptorKind.Should().Be("Schema");
+        formHash.DescriptorKind.Should().Be("Form");
+        schemaHash.Value.Should().NotBe(formHash.Value,
+            "different DescriptorKind must produce different hash");
+    }
+
+    [Fact]
+    public void DomainSeparation_DifferentScope_ProducesDifferentHash()
+    {
+        var schema = CreateSchema("s1", "Test");
+
+        var internalHash = _hashComputer.ComputeContractHash(schema, CanonicalHashScope.InternalFull);
+        var tenantHash = _hashComputer.ComputeContractHash(schema, CanonicalHashScope.TenantVisible);
+
+        internalHash.Scope.Should().Be("InternalFull");
+        tenantHash.Scope.Should().Be("TenantVisible");
+        internalHash.Value.Should().NotBe(tenantHash.Value,
+            "different Scope must produce different hash");
+    }
+
+    [Fact]
+    public void DomainSeparation_DifferentPurpose_ProducesDifferentHash()
+    {
+        var schema = CreateSchema("s1", "Test");
+
+        var contractHash = _hashComputer.ComputeContractHash(schema, CanonicalHashScope.InternalFull);
+        var definitionHash = _hashComputer.ComputeDefinitionHash(schema, CanonicalHashScope.InternalFull);
+
+        contractHash.Purpose.Should().Be("Contract");
+        definitionHash.Purpose.Should().Be("Definition");
+        contractHash.Value.Should().NotBe(definitionHash.Value,
+            "different Purpose (Contract vs Definition) must produce different hash");
+    }
+
+    [Fact]
+    public void WorkflowStep_TargetChange_ChangesContractHash()
+    {
+        // WorkflowStep.Target must participate in ContractHash —
+        // connecting to a different capability must produce a different hash.
+        var wf1 = new WorkflowDescriptor
+        {
+            Id = "wf1", Name = "Test", Version = 1, State = DescriptorState.Active,
+            Steps = new[]
+            {
+                new WorkflowStep
+                {
+                    Id = "ws1", Name = "Step1",
+                    Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap-1", 1) }
+                }
+            }
+        };
+        var wf2 = new WorkflowDescriptor
+        {
+            Id = "wf1", Name = "Test", Version = 1, State = DescriptorState.Active,
+            Steps = new[]
+            {
+                new WorkflowStep
+                {
+                    Id = "ws1", Name = "Step1",
+                    Target = new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap-2", 1) }
+                }
+            }
+        };
+
+        var h1 = _builder.Build(wf1).ContractHash;
+        var h2 = _builder.Build(wf2).ContractHash;
+
+        h1.Value.Should().NotBe(h2.Value,
+            "different WorkflowStep.Target (different capability) must produce different ContractHash");
+    }
+
+    // ── EventDescriptor contract behavior (spec §8.2) ──
+
+    [Fact]
+    public void Changing_EventPayloadSchema_Should_ChangeContractHash()
+    {
+        var e1 = new EventDescriptor
+        {
+            Id = "e1", Name = "test.event", Version = 1,
+            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema-a", 1),
+            Category = EventCategory.Domain
+        };
+        var e2 = new EventDescriptor
+        {
+            Id = "e1", Name = "test.event", Version = 1,
+            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("schema-b", 1),
+            Category = EventCategory.Domain
+        };
+
+        var h1 = _builder.Build(e1);
+        var h2 = _builder.Build(e2);
+
+        h1.ContractHash.Should().NotBe(h2.ContractHash,
+            "changing PayloadSchema (event data contract) must change ContractHash");
+        h1.DefinitionHash.Should().NotBe(h2.DefinitionHash);
+    }
+
+    [Fact]
+    public void Changing_EventSemantic_Should_ChangeContractHash()
+    {
+        var e1 = new EventDescriptor
+        {
+            Id = "e1", Name = "test.event", Version = 1,
+            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            Semantic = EventSemantic.Fact
+        };
+        var e2 = new EventDescriptor
+        {
+            Id = "e1", Name = "test.event", Version = 1,
+            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            Semantic = EventSemantic.StateTransition
+        };
+
+        var h1 = _builder.Build(e1);
+        var h2 = _builder.Build(e2);
+
+        h1.ContractHash.Should().NotBe(h2.ContractHash,
+            "changing event semantic must change ContractHash");
+    }
+
+    [Fact]
+    public void Changing_EventImportance_Should_ChangeDefinitionHashOnly()
+    {
+        var e1 = new EventDescriptor
+        {
+            Id = "e1", Name = "test.event", Version = 1,
+            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            Importance = EventImportance.Operational
+        };
+        var e2 = new EventDescriptor
+        {
+            Id = "e1", Name = "test.event", Version = 1,
+            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            Importance = EventImportance.Critical
+        };
+
+        var h1 = _builder.Build(e1);
+        var h2 = _builder.Build(e2);
+
+        h1.ContractHash.Should().Be(h2.ContractHash,
+            "importance change is definition-only (infrastructure policy, not contract structure)");
+        h1.DefinitionHash.Should().NotBe(h2.DefinitionHash,
+            "importance change must change DefinitionHash");
+    }
+
+    [Fact]
+    public void Changing_EventChangeKind_Should_ChangeContractHash()
+    {
+        var e1 = new EventDescriptor
+        {
+            Id = "e1", Name = "test.event", Version = 1,
+            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            ChangeKind = SchemaChangeKind.Additive
+        };
+        var e2 = new EventDescriptor
+        {
+            Id = "e1", Name = "test.event", Version = 1,
+            PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>("s1", 1),
+            ChangeKind = SchemaChangeKind.Breaking
+        };
+
+        var h1 = _builder.Build(e1);
+        var h2 = _builder.Build(e2);
+
+        h1.ContractHash.Should().NotBe(h2.ContractHash,
+            "changing event ChangeKind must change ContractHash");
+    }
+
+    // ── CanonicalHashProjectionResult Invariant Tests ──
+
+    [Fact]
+    public void ProjectionResult_Create_WithNullMetadata_Throws()
+    {
+        var act = () => CanonicalHashProjectionResult.Create(null!, _ => { });
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void ProjectionResult_Create_WithNullWriter_Throws()
+    {
+        var metadata = new CanonicalHashMetadata
+        {
+            ArtifactKind = "Descriptor",
+            DescriptorKind = "Schema",
+            Purpose = "Contract",
+            Scope = "InternalFull",
+            AlgorithmVersion = "sha256-canonical-json-v1",
+            ContractVersion = "canonical-hash-v1",
+            CanonicalShapeVersion = "schema-contract-hash-v1"
+        };
+
+        var act = () => CanonicalHashProjectionResult.Create(metadata, null!);
+        act.Should().Throw<ArgumentNullException>();
     }
 
     // ── Helpers ──

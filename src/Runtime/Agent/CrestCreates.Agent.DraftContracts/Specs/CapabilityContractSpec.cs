@@ -20,12 +20,6 @@ internal sealed class CapabilityContractSpec
     public CapabilityRiskLevel RiskLevel { get; init; }
 
     [AgentDraftField]
-    public string ContractHash { get; init; } = string.Empty;
-
-    [AgentDraftField]
-    public string DefinitionHash { get; init; } = string.Empty;
-
-    [AgentDraftField]
     public int Version { get; init; }
 
     // ── EditableReference ──

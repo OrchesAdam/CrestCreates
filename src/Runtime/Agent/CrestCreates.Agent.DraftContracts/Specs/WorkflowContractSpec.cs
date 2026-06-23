@@ -14,12 +14,6 @@ internal sealed class WorkflowContractSpec
     public DescriptorState State { get; init; }
 
     [AgentDraftField]
-    public string ContractHash { get; init; } = string.Empty;
-
-    [AgentDraftField]
-    public string DefinitionHash { get; init; } = string.Empty;
-
-    [AgentDraftField]
     public int Version { get; init; }
 
     // ── EditableReference ──

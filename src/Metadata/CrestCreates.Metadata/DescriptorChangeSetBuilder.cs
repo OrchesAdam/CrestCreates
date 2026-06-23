@@ -5,6 +5,13 @@ namespace CrestCreates.Metadata;
 
 public sealed class DescriptorChangeSetBuilder : IDescriptorChangeSetBuilder
 {
+    private readonly IDescriptorStableHashBuilder _hashBuilder;
+
+    public DescriptorChangeSetBuilder(IDescriptorStableHashBuilder hashBuilder)
+    {
+        _hashBuilder = hashBuilder;
+    }
+
     public DescriptorChangeSet Build(
         IReadOnlyList<IDescriptor> before,
         IReadOnlyList<IDescriptor> after)
@@ -17,6 +24,7 @@ public sealed class DescriptorChangeSetBuilder : IDescriptorChangeSetBuilder
         foreach (var d in after)
         {
             var refKey = new DescriptorRef(d.Namespace, d.Id, (d as IVersionedDescriptor)?.Version);
+            var afterHashes = _hashBuilder.Build(d);
 
             if (!beforeByRef.TryGetValue(refKey, out var beforeDesc))
             {
@@ -25,10 +33,12 @@ public sealed class DescriptorChangeSetBuilder : IDescriptorChangeSetBuilder
                     Ref = refKey,
                     Kind = DescriptorChangeKind.Added,
                     AfterState = d.State,
-                    AfterContractHash = d.ContractHash
+                    AfterContractHash = afterHashes.ContractHash.Value
                 });
                 continue;
             }
+
+            var beforeHashes = _hashBuilder.Build(beforeDesc);
 
             var beforeState = beforeDesc.State;
             var afterState = d.State;
@@ -42,7 +52,7 @@ public sealed class DescriptorChangeSetBuilder : IDescriptorChangeSetBuilder
                 kind = DescriptorChangeKind.Activated;
             else if (beforeState != afterState)
                 kind = DescriptorChangeKind.StateChanged;
-            else if (d.ContractHash != beforeDesc.ContractHash)
+            else if (afterHashes.ContractHash != beforeHashes.ContractHash)
                 kind = DescriptorChangeKind.ContractHashChanged;
             else if (d.Name != beforeDesc.Name)
                 kind = DescriptorChangeKind.Updated;
@@ -55,8 +65,8 @@ public sealed class DescriptorChangeSetBuilder : IDescriptorChangeSetBuilder
                 Kind = kind,
                 BeforeState = beforeState,
                 AfterState = afterState,
-                BeforeContractHash = beforeDesc.ContractHash,
-                AfterContractHash = d.ContractHash
+                BeforeContractHash = beforeHashes.ContractHash.Value,
+                AfterContractHash = afterHashes.ContractHash.Value
             });
         }
 
@@ -69,12 +79,13 @@ public sealed class DescriptorChangeSetBuilder : IDescriptorChangeSetBuilder
         {
             if (!afterRefs.Contains(kv.Key))
             {
+                var beforeHashes = _hashBuilder.Build(kv.Value);
                 changes.Add(new DescriptorChange
                 {
                     Ref = kv.Key,
                     Kind = DescriptorChangeKind.Removed,
                     BeforeState = kv.Value.State,
-                    BeforeContractHash = kv.Value.ContractHash
+                    BeforeContractHash = beforeHashes.ContractHash.Value
                 });
             }
         }

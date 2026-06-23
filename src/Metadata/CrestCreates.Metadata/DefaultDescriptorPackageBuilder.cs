@@ -8,6 +8,13 @@ namespace CrestCreates.Metadata;
 
 public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
 {
+    private readonly IDescriptorStableHashBuilder _hashBuilder;
+
+    public DefaultDescriptorPackageBuilder(IDescriptorStableHashBuilder hashBuilder)
+    {
+        _hashBuilder = hashBuilder;
+    }
+
     public DescriptorPackage Build(DescriptorPackageBuildRequest request)
     {
         var createdAt = request.CreatedAt ?? DateTimeOffset.UtcNow;
@@ -81,20 +88,24 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
         };
     }
 
-    private static IReadOnlyList<DescriptorManifestEntry> BuildManifestEntries(
+    private IReadOnlyList<DescriptorManifestEntry> BuildManifestEntries(
         IReadOnlyList<IDescriptor> descriptors)
     {
         return descriptors
-            .Select(d => new DescriptorManifestEntry
+            .Select(d =>
             {
-                Ref = new DescriptorRef(d.Namespace, d.Id,
-                    (d as IVersionedDescriptor)?.Version),
-                Kind = d.Kind,
-                Name = d.Name,
-                State = d.State,
-                ContractHash = d.ContractHash,
-                DefinitionHash = d.DefinitionHash,
-                SupersededById = d.SupersededById
+                var hashes = _hashBuilder.Build(d);
+                return new DescriptorManifestEntry
+                {
+                    Ref = new DescriptorRef(d.Namespace, d.Id,
+                        (d as IVersionedDescriptor)?.Version),
+                    Kind = d.Kind,
+                    Name = d.Name,
+                    State = d.State,
+                    ContractHash = hashes.ContractHash.Value,
+                    DefinitionHash = hashes.DefinitionHash.Value,
+                    SupersededById = d.SupersededById
+                };
             })
             .OrderBy(e => e.Ref.Namespace)
             .ThenBy(e => e.Ref.Id)

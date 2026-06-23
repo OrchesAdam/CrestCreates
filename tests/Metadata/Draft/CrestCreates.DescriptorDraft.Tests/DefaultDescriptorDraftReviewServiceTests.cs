@@ -50,9 +50,7 @@ public class DefaultDescriptorDraftReviewServiceTests
             Id = descriptorId,
             Name = "Test",
             Version = 1,
-            State = DescriptorState.Active,
-            ContractHash = "abc",
-            DefinitionHash = "def"
+            State = DescriptorState.Active
         };
         return new Draft
         {
@@ -122,9 +120,7 @@ public class DefaultDescriptorDraftReviewServiceTests
             Id = "schema1",
             Name = "Existing",
             Version = 1,
-            State = DescriptorState.Active,
-            ContractHash = "x",
-            DefinitionHash = "y"
+            State = DescriptorState.Active
         };
         var currentInventory = new List<IDescriptor> { existingDescriptor };
 
@@ -172,9 +168,7 @@ public class DefaultDescriptorDraftReviewServiceTests
                 Id = "schema1",
                 Name = "Test",
                 Version = 1,
-                State = DescriptorState.Active,
-                ContractHash = "abc",
-                DefinitionHash = "def"
+                State = DescriptorState.Active
             }
         };
 
@@ -213,7 +207,31 @@ public class DefaultDescriptorDraftReviewServiceTests
         // Stable hash builder returns success
         _stableHashBuilderMock
             .Setup(h => h.Build(It.IsAny<IDescriptor>()))
-            .Returns(new DescriptorStableHashes("chash", "dhash"));
+            .Returns(new DescriptorStableHashes
+            {
+                ContractHash = new CanonicalHash
+                {
+                    Value = "chash",
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "sha256-canonical-json-v1",
+                    ArtifactKind = "Descriptor",
+                    Scope = "InternalFull",
+                    Purpose = "Contract",
+                    ContractVersion = "canonical-hash-v1",
+                    CanonicalShapeVersion = "schema-contract-hash-v1"
+                },
+                DefinitionHash = new CanonicalHash
+                {
+                    Value = "dhash",
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "sha256-canonical-json-v1",
+                    ArtifactKind = "Descriptor",
+                    Scope = "InternalFull",
+                    Purpose = "Definition",
+                    ContractVersion = "canonical-hash-v1",
+                    CanonicalShapeVersion = "schema-definition-hash-v1"
+                }
+            });
 
         var service = CreateService();
         var result = service.ReviewAsync(draft, EmptyInventory).Result;
@@ -252,9 +270,7 @@ public class DefaultDescriptorDraftReviewServiceTests
                 Id = "schema1",
                 Name = "Test",
                 Version = 1,
-                State = DescriptorState.Active,
-                ContractHash = "abc",
-                DefinitionHash = "def"
+                State = DescriptorState.Active
             }
         };
 

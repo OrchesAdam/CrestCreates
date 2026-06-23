@@ -255,8 +255,6 @@ public class AgentDraftPayloadPatchValidationTests
         {
             Name = "ExistingName",
             State = DescriptorState.Active,
-            ContractHash = "existing-ch",
-            DefinitionHash = "existing-dh",
             Version = 1,
             CapabilityKind = CapabilityKind.Query,
             RiskLevel = CapabilityRiskLevel.Low,
@@ -273,8 +271,6 @@ public class AgentDraftPayloadPatchValidationTests
         {
             Name = "ExistingEvent",
             State = DescriptorState.Active,
-            ContractHash = "event-ch",
-            DefinitionHash = "event-dh",
             Version = 1,
             Category = EventCategory.Domain,
             Semantic = EventSemantic.Fact,

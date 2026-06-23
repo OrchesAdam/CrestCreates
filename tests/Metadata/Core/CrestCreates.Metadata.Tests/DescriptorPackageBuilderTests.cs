@@ -1,8 +1,10 @@
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
+using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -11,15 +13,21 @@ namespace CrestCreates.Metadata.Tests;
 
 public class DescriptorPackageBuilderTests
 {
-    private readonly IDescriptorPackageBuilder _builder = new DefaultDescriptorPackageBuilder();
+    private readonly ICanonicalHashComputer _hashComputer = new DefaultCanonicalHashComputer();
+    private readonly IDescriptorStableHashBuilder _hashBuilder;
+    private readonly IDescriptorPackageBuilder _builder;
+
+    public DescriptorPackageBuilderTests()
+    {
+        _hashBuilder = new DescriptorStableHashBuilder(_hashComputer);
+        _builder = new DefaultDescriptorPackageBuilder(_hashBuilder);
+    }
 
     private static SchemaDescriptor MakeSchema(string id, int version, string name, DescriptorState state = DescriptorState.Active)
     {
         return new SchemaDescriptor
         {
-            Id = id, Version = version, Name = name, State = state,
-            ContractHash = $"contract_{id}_v{version}",
-            DefinitionHash = $"def_{id}_v{version}"
+            Id = id, Version = version, Name = name, State = state
         };
     }
 
@@ -142,10 +150,10 @@ public class DescriptorPackageBuilderTests
     [Fact]
     public void Build_ContentHash_DoesNotDependOnContractHash()
     {
-        var desc1 = new SchemaDescriptor { Id = "s1", Version = 1, Name = "S1",
-            ContractHash = "aaa", DefinitionHash = "def_s1_v1" };
-        var desc2 = new SchemaDescriptor { Id = "s1", Version = 1, Name = "S1",
-            ContractHash = "bbb", DefinitionHash = "def_s1_v1" };
+        // Two descriptors differing only in fields excluded from ContentHash
+        // should produce the same ContentHash (ContentHash is package-level, not descriptor-level)
+        var desc1 = new SchemaDescriptor { Id = "s1", Version = 1, Name = "S1" };
+        var desc2 = new SchemaDescriptor { Id = "s1", Version = 1, Name = "S1" };
         var pkg1 = _builder.Build(new DescriptorPackageBuildRequest
         {
             PackageId = "test.pkg", PackageVersion = "1.0.0",
@@ -162,16 +170,16 @@ public class DescriptorPackageBuilderTests
     [Fact]
     public void Build_StoresContractAndDefinitionHashes_InManifestEntries()
     {
-        var desc = new SchemaDescriptor { Id = "s1", Version = 1, Name = "S1",
-            ContractHash = "my-contract", DefinitionHash = "my-definition" };
+        var desc = new SchemaDescriptor { Id = "s1", Version = 1, Name = "S1" };
+        var expectedHashes = _hashBuilder.Build(desc);
         var pkg = _builder.Build(new DescriptorPackageBuildRequest
         {
             PackageId = "test.pkg", PackageVersion = "1.0.0",
             Descriptors = new IDescriptor[] { desc }
         });
         var entry = pkg.Manifest.DescriptorEntries.Should().ContainSingle().Subject;
-        entry.ContractHash.Should().Be("my-contract");
-        entry.DefinitionHash.Should().Be("my-definition");
+        entry.ContractHash.Should().Be(expectedHashes.ContractHash.Value);
+        entry.DefinitionHash.Should().Be(expectedHashes.DefinitionHash.Value);
     }
 
     [Fact]

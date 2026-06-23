@@ -47,8 +47,6 @@ public sealed record GeneratedEventDescriptor : IEventDescriptor, IVersionedDesc
     // ── IVersionedDescriptor ──
     public string Namespace { get; init; } = "event";
     DescriptorKind IDescriptor.Kind => DescriptorKind.Event;
-    string IDescriptor.ContractHash => string.Empty;
-    string IDescriptor.DefinitionHash => string.Empty;
     string? IDescriptor.SupersededById => null;
 
     public static string GenerateId(string name)

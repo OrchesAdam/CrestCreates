@@ -9,7 +9,12 @@ namespace CrestCreates.Metadata;
 /// AoT-safe deterministic hash computer for descriptor packages.
 /// All hashes use explicit string concatenation with delimiter escaping,
 /// null sentinels, ordinal ordering, and invariant formatting — no runtime JSON.
+///
+/// <b>Note</b>: This uses the legacy pipe-delimited hash format. Descriptor hashes
+/// now use the canonical JSON hash runtime (<see cref="ICanonicalHashComputer"/>).
+/// Package hash migration to canonical JSON is planned for v2.
 /// </summary>
+[Obsolete("Pipe-delimited hash format — migrate to ICanonicalHashComputer in v2.")]
 public static class DescriptorPackageHashComputer
 {
     private const string NullSentinel = "\\0";

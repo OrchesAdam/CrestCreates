@@ -20,7 +20,7 @@ public class CapabilityCompatibilityRuleTests
         return new CapabilityDescriptor
         {
             Id = id, Name = "TestCapability", Version = version,
-            State = DescriptorState.Active, ContractHash = "hash", DefinitionHash = "defhash",
+            State = DescriptorState.Active,
             InputSchema = inputSchemaId != null ? new VersionedDescriptorRef<SchemaDescriptor> { Id = inputSchemaId, Version = 1 } : null,
             OutputSchema = outputSchemaId != null ? new VersionedDescriptorRef<SchemaDescriptor> { Id = outputSchemaId, Version = 1 } : null,
             Permissions = permissions ?? Array.Empty<string>(), RiskLevel = riskLevel,

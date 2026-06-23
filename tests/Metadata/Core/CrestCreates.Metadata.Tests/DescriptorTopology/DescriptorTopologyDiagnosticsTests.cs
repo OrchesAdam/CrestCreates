@@ -1,6 +1,10 @@
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
+using CrestCreates.Metadata.CanonicalHashing;
+using CrestCreates.Form.Abstractions;
+using CrestCreates.Schema.Abstractions;
+using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
 using Moq;
 using Xunit;
@@ -9,28 +13,59 @@ namespace CrestCreates.Metadata.Tests.DescriptorTopology;
 
 public class DescriptorTopologyDiagnosticsTests
 {
-    private static IDescriptor MockDesc(string ns, string id, string name, DescriptorKind kind,
+    private readonly ICanonicalHashComputer _hashComputer = new DefaultCanonicalHashComputer();
+    private readonly IDescriptorStableHashBuilder _hashBuilder;
+
+    public DescriptorTopologyDiagnosticsTests()
+    {
+        _hashBuilder = new DescriptorStableHashBuilder(_hashComputer);
+    }
+
+    private static IDescriptor CreateConcreteDesc(string ns, string id, string name, DescriptorKind kind,
         DescriptorState state = DescriptorState.Active, int? version = null)
     {
-        var mock = new Mock<IDescriptor>();
-        mock.Setup(d => d.Namespace).Returns(ns);
-        mock.Setup(d => d.Id).Returns(id);
-        mock.Setup(d => d.Name).Returns(name);
-        mock.Setup(d => d.Kind).Returns(kind);
-        mock.Setup(d => d.State).Returns(state);
-        mock.Setup(d => d.ContractHash).Returns("hash");
-        mock.Setup(d => d.SupersededById).Returns((string?)null);
-        if (version.HasValue)
+        return kind switch
         {
-            mock.As<IVersionedDescriptor>().Setup(v => v.Version).Returns(version.Value);
-        }
-        return mock.Object;
+            DescriptorKind.Schema => new SchemaDescriptor
+            {
+                Id = id, Name = name,
+                Version = version ?? 0,
+                State = state, SupersededById = null,
+                ChangeKind = SchemaChangeKind.Additive,
+                Fields = [], References = [], ValidationRules = []
+            },
+            DescriptorKind.Capability => new CapabilityDescriptor
+            {
+                Id = id, Name = name,
+                Version = version ?? 0,
+                State = state, SupersededById = null,
+                CapabilityKind = CapabilityKind.Command
+            },
+            DescriptorKind.Form => new FormDescriptor
+            {
+                Id = id, Name = name,
+                Version = version ?? 0,
+                State = state, SupersededById = null,
+                Schema = default,
+                Fields = [], LayoutColumns = null
+            },
+            DescriptorKind.Workflow => new WorkflowDescriptor
+            {
+                Id = id, Name = name,
+                Version = version ?? 0,
+                State = state, SupersededById = null,
+                VariableSchema = null,
+                Steps = [],
+                DefaultVariableScope = WorkflowVariableScope.Workflow
+            },
+            _ => throw new ArgumentException($"Unsupported descriptor kind: {kind}", nameof(kind))
+        };
     }
 
     [Fact]
     public void Missing_Strong_Target_Error()
     {
-        var formDesc = MockDesc("form", "UserForm", "UserForm", DescriptorKind.Form);
+        var formDesc = CreateConcreteDesc("form", "UserForm", "UserForm", DescriptorKind.Form);
         var missingRef = new DescriptorRef("schema", "MissingSchema", null);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
@@ -42,7 +77,7 @@ public class DescriptorTopologyDiagnosticsTests
                 RelationshipStrength.Strong, false)
         });
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new[] { formDesc });
 
         var diag = snapshot.Diagnostics.All.Should().ContainSingle(d =>
@@ -53,7 +88,7 @@ public class DescriptorTopologyDiagnosticsTests
     [Fact]
     public void Missing_Weak_Target_Warning()
     {
-        var capDesc = MockDesc("capability", "CreateUser", "CreateUser", DescriptorKind.Capability);
+        var capDesc = CreateConcreteDesc("capability", "CreateUser", "CreateUser", DescriptorKind.Capability);
         var missingRef = new DescriptorRef("event", "UserCreated", null);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
@@ -65,7 +100,7 @@ public class DescriptorTopologyDiagnosticsTests
                 RelationshipStrength.Weak, false)
         });
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new[] { capDesc });
 
         var diag = snapshot.Diagnostics.All.Should().ContainSingle(d =>
@@ -75,8 +110,8 @@ public class DescriptorTopologyDiagnosticsTests
     [Fact]
     public void Strong_Cycle_Error()
     {
-        var a = MockDesc("capability", "A", "A", DescriptorKind.Capability);
-        var b = MockDesc("capability", "B", "B", DescriptorKind.Capability);
+        var a = CreateConcreteDesc("capability", "A", "A", DescriptorKind.Capability);
+        var b = CreateConcreteDesc("capability", "B", "B", DescriptorKind.Capability);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
         mockProvider.Setup(p => p.GetRelationships(a)).Returns(new[]
@@ -92,7 +127,7 @@ public class DescriptorTopologyDiagnosticsTests
                 RelationshipKind.Uses, null, null, RelationshipStrength.Strong, false)
         });
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new[] { a, b });
 
         snapshot.Diagnostics.All.Should().Contain(d => d.Code == "STRONG_CYCLE" && d.Severity == DiagnosticSeverity.Error);
@@ -101,8 +136,8 @@ public class DescriptorTopologyDiagnosticsTests
     [Fact]
     public void Weak_Cycle_No_Error()
     {
-        var a = MockDesc("capability", "A", "A", DescriptorKind.Capability);
-        var b = MockDesc("capability", "B", "B", DescriptorKind.Capability);
+        var a = CreateConcreteDesc("capability", "A", "A", DescriptorKind.Capability);
+        var b = CreateConcreteDesc("capability", "B", "B", DescriptorKind.Capability);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
         mockProvider.Setup(p => p.GetRelationships(a)).Returns(new[]
@@ -118,7 +153,7 @@ public class DescriptorTopologyDiagnosticsTests
                 RelationshipKind.References, null, "SupersededBy", RelationshipStrength.Weak, false)
         });
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new[] { a, b });
 
         snapshot.Diagnostics.All.Should().NotContain(d => d.Code == "STRONG_CYCLE");
@@ -127,12 +162,12 @@ public class DescriptorTopologyDiagnosticsTests
     [Fact]
     public void Orphan_Warning()
     {
-        var orphan = MockDesc("form", "OrphanForm", "OrphanForm", DescriptorKind.Form, DescriptorState.Active);
+        var orphan = CreateConcreteDesc("form", "OrphanForm", "OrphanForm", DescriptorKind.Form, DescriptorState.Active);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
         mockProvider.Setup(p => p.GetRelationships(orphan)).Returns(Array.Empty<DescriptorRelationship>());
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new[] { orphan });
 
         snapshot.Diagnostics.All.Should().Contain(d => d.Code == "ORPHAN" && d.Severity == DiagnosticSeverity.Warning);
@@ -141,12 +176,12 @@ public class DescriptorTopologyDiagnosticsTests
     [Fact]
     public void Orphan_Draft_Excluded()
     {
-        var draft = MockDesc("form", "DraftForm", "DraftForm", DescriptorKind.Form, DescriptorState.Draft);
+        var draft = CreateConcreteDesc("form", "DraftForm", "DraftForm", DescriptorKind.Form, DescriptorState.Draft);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
         mockProvider.Setup(p => p.GetRelationships(draft)).Returns(Array.Empty<DescriptorRelationship>());
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new[] { draft });
 
         snapshot.Diagnostics.All.Should().NotContain(d => d.Code == "ORPHAN");
@@ -155,8 +190,8 @@ public class DescriptorTopologyDiagnosticsTests
     [Fact]
     public void Exact_Duplicate_Warning()
     {
-        var a = MockDesc("capability", "A", "A", DescriptorKind.Capability);
-        var b = MockDesc("capability", "B", "B", DescriptorKind.Capability);
+        var a = CreateConcreteDesc("capability", "A", "A", DescriptorKind.Capability);
+        var b = CreateConcreteDesc("capability", "B", "B", DescriptorKind.Capability);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
         mockProvider.Setup(p => p.GetRelationships(a)).Returns(new[]
@@ -170,7 +205,7 @@ public class DescriptorTopologyDiagnosticsTests
         });
         mockProvider.Setup(p => p.GetRelationships(b)).Returns(Array.Empty<DescriptorRelationship>());
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new[] { a, b });
 
         snapshot.Diagnostics.All.Should().Contain(d => d.Code == "EXACT_DUPLICATE" && d.Severity == DiagnosticSeverity.Warning);
@@ -179,8 +214,8 @@ public class DescriptorTopologyDiagnosticsTests
     [Fact]
     public void Different_Role_Not_Duplicate()
     {
-        var a = MockDesc("capability", "A", "A", DescriptorKind.Capability);
-        var b = MockDesc("capability", "B", "B", DescriptorKind.Capability);
+        var a = CreateConcreteDesc("capability", "A", "A", DescriptorKind.Capability);
+        var b = CreateConcreteDesc("capability", "B", "B", DescriptorKind.Capability);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
         mockProvider.Setup(p => p.GetRelationships(a)).Returns(new[]
@@ -194,7 +229,7 @@ public class DescriptorTopologyDiagnosticsTests
         });
         mockProvider.Setup(p => p.GetRelationships(b)).Returns(Array.Empty<DescriptorRelationship>());
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new[] { a, b });
 
         snapshot.Diagnostics.All.Should().NotContain(d => d.Code == "EXACT_DUPLICATE");
@@ -203,10 +238,10 @@ public class DescriptorTopologyDiagnosticsTests
     [Fact]
     public void Unsupported_Reference_Warning()
     {
-        var wfDesc = MockDesc("workflow", "MyWf", "MyWf", DescriptorKind.Workflow);
+        var wfDesc = CreateConcreteDesc("workflow", "MyWf", "MyWf", DescriptorKind.Workflow);
         var swRef = new DescriptorRef("workflow", "SubWf", null);
 
-        var subWfDesc = MockDesc("workflow", "SubWf", "SubWf", DescriptorKind.Workflow);
+        var subWfDesc = CreateConcreteDesc("workflow", "SubWf", "SubWf", DescriptorKind.Workflow);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
         mockProvider.Setup(p => p.GetRelationships(wfDesc)).Returns(new[]
@@ -218,7 +253,7 @@ public class DescriptorTopologyDiagnosticsTests
         });
         mockProvider.Setup(p => p.GetRelationships(subWfDesc)).Returns(Array.Empty<DescriptorRelationship>());
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { wfDesc, subWfDesc });
 
         snapshot.Diagnostics.All.Should().Contain(d => d.Code == "UNSUPPORTED_REFERENCE" && d.Severity == DiagnosticSeverity.Warning);
@@ -227,9 +262,9 @@ public class DescriptorTopologyDiagnosticsTests
     [Fact]
     public void Unsupported_Not_Triggered_By_Weak_Alone()
     {
-        var capDesc = MockDesc("capability", "CreateUser", "CreateUser", DescriptorKind.Capability);
+        var capDesc = CreateConcreteDesc("capability", "CreateUser", "CreateUser", DescriptorKind.Capability);
 
-        var oldCapDesc = MockDesc("capability", "OldCap", "OldCap", DescriptorKind.Capability);
+        var oldCapDesc = CreateConcreteDesc("capability", "OldCap", "OldCap", DescriptorKind.Capability);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
         mockProvider.Setup(p => p.GetRelationships(capDesc)).Returns(new[]
@@ -241,7 +276,7 @@ public class DescriptorTopologyDiagnosticsTests
         });
         mockProvider.Setup(p => p.GetRelationships(oldCapDesc)).Returns(Array.Empty<DescriptorRelationship>());
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { capDesc, oldCapDesc });
 
         snapshot.Diagnostics.All.Should().NotContain(d => d.Code == "UNSUPPORTED_REFERENCE");

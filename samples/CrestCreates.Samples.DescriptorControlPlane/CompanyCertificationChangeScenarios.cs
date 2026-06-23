@@ -3,6 +3,7 @@ using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 
@@ -23,7 +24,8 @@ public record CompanyCertificationChangeScenario(
     IReadOnlyList<IDescriptor> Before,
     IReadOnlyList<IDescriptor> After)
 {
-    private static readonly DescriptorStableHashBuilder HashBuilder = new();
+    private static readonly DefaultCanonicalHashComputer HashComputer = new();
+    private static readonly DescriptorStableHashBuilder HashBuilder = new(HashComputer);
 
     //  Baseline
 
@@ -71,22 +73,6 @@ public record CompanyCertificationChangeScenario(
             References = original.References.ToArray(),
         };
 
-        var hashes = HashBuilder.Build(modified);
-        modified = new SchemaDescriptor
-        {
-            Id = modified.Id,
-            Name = modified.Name,
-            Version = modified.Version,
-            State = modified.State,
-            ChangeKind = modified.ChangeKind,
-            ContractHash = hashes.ContractHash,
-            DefinitionHash = hashes.DefinitionHash,
-            SupersededById = modified.SupersededById,
-            Fields = modified.Fields,
-            ValidationRules = modified.ValidationRules,
-            References = modified.References,
-        };
-
         var after = BuildAfter(CopyAllDescriptors(), original.Id, modified);
         return new(
             "OptionalFieldAddition: adds optional ContactEmail to SubmitInput",
@@ -121,22 +107,6 @@ public record CompanyCertificationChangeScenario(
                 .ToArray(),
             ValidationRules = original.ValidationRules.Select(CopyValidationRule).ToArray(),
             References = original.References.ToArray(),
-        };
-
-        var hashes = HashBuilder.Build(modified);
-        modified = new SchemaDescriptor
-        {
-            Id = modified.Id,
-            Name = modified.Name,
-            Version = modified.Version,
-            State = modified.State,
-            ChangeKind = modified.ChangeKind,
-            ContractHash = hashes.ContractHash,
-            DefinitionHash = hashes.DefinitionHash,
-            SupersededById = modified.SupersededById,
-            Fields = modified.Fields,
-            ValidationRules = modified.ValidationRules,
-            References = modified.References,
         };
 
         var after = BuildAfter(CopyAllDescriptors(), original.Id, modified);
@@ -175,27 +145,6 @@ public record CompanyCertificationChangeScenario(
             Consumes = original.Consumes.ToArray(),
             Categories = original.Categories.ToArray(),
             SemanticTags = original.SemanticTags.ToArray(),
-        };
-
-        var hashes = HashBuilder.Build(modified);
-        modified = new CapabilityDescriptor
-        {
-            Id = modified.Id,
-            Name = modified.Name,
-            Version = modified.Version,
-            State = modified.State,
-            ContractHash = hashes.ContractHash,
-            DefinitionHash = hashes.DefinitionHash,
-            SupersededById = modified.SupersededById,
-            CapabilityKind = modified.CapabilityKind,
-            InputSchema = modified.InputSchema,
-            OutputSchema = modified.OutputSchema,
-            Permissions = modified.Permissions,
-            RiskLevel = modified.RiskLevel,
-            Produces = modified.Produces,
-            Consumes = modified.Consumes,
-            Categories = modified.Categories,
-            SemanticTags = modified.SemanticTags,
         };
 
         var after = BuildAfter(CopyAllDescriptors(), original.Id, modified);
@@ -242,21 +191,6 @@ public record CompanyCertificationChangeScenario(
                 CopyWorkflowStep(original.Steps[1]),
                 CopyWorkflowStep(original.Steps[2]),
             },
-        };
-
-        var hashes = HashBuilder.Build(modified);
-        modified = new WorkflowDescriptor
-        {
-            Id = modified.Id,
-            Name = modified.Name,
-            Version = modified.Version,
-            State = modified.State,
-            ContractHash = hashes.ContractHash,
-            DefinitionHash = hashes.DefinitionHash,
-            SupersededById = modified.SupersededById,
-            VariableSchema = modified.VariableSchema,
-            DefaultVariableScope = modified.DefaultVariableScope,
-            Steps = modified.Steps,
         };
 
         var after = BuildAfter(CopyAllDescriptors(), original.Id, modified);
@@ -306,21 +240,6 @@ public record CompanyCertificationChangeScenario(
                 CopyWorkflowStep(original.Steps[1]),
                 CopyWorkflowStep(original.Steps[2]),
             },
-        };
-
-        var hashes = HashBuilder.Build(modified);
-        modified = new WorkflowDescriptor
-        {
-            Id = modified.Id,
-            Name = modified.Name,
-            Version = modified.Version,
-            State = modified.State,
-            ContractHash = hashes.ContractHash,
-            DefinitionHash = hashes.DefinitionHash,
-            SupersededById = modified.SupersededById,
-            VariableSchema = modified.VariableSchema,
-            DefaultVariableScope = modified.DefaultVariableScope,
-            Steps = modified.Steps,
         };
 
         var after = BuildAfter(CopyAllDescriptors(), original.Id, modified);
@@ -394,8 +313,6 @@ public record CompanyCertificationChangeScenario(
         Id = d.Id,
         Name = d.Name,
         State = d.State,
-        ContractHash = d.ContractHash,
-        DefinitionHash = d.DefinitionHash,
         SupersededById = d.SupersededById,
         Version = d.Version,
         ChangeKind = d.ChangeKind,
@@ -432,8 +349,6 @@ public record CompanyCertificationChangeScenario(
         Name = d.Name,
         State = d.State,
         SupersededById = d.SupersededById,
-        ContractHash = d.ContractHash,
-        DefinitionHash = d.DefinitionHash,
         Version = d.Version,
         Schema = d.Schema,
         Fields = d.Fields.Select(CopyFormField).ToArray(),
@@ -466,8 +381,6 @@ public record CompanyCertificationChangeScenario(
         State = d.State,
         SupersededById = d.SupersededById,
         Version = d.Version,
-        ContractHash = d.ContractHash,
-        DefinitionHash = d.DefinitionHash,
         CapabilityKind = d.CapabilityKind,
         InputSchema = d.InputSchema,
         OutputSchema = d.OutputSchema,
@@ -485,8 +398,6 @@ public record CompanyCertificationChangeScenario(
         Name = d.Name,
         State = d.State,
         SupersededById = d.SupersededById,
-        ContractHash = d.ContractHash,
-        DefinitionHash = d.DefinitionHash,
         Version = d.Version,
         PayloadSchema = d.PayloadSchema,
         Category = d.Category,
@@ -501,8 +412,6 @@ public record CompanyCertificationChangeScenario(
         Name = d.Name,
         State = d.State,
         SupersededById = d.SupersededById,
-        ContractHash = d.ContractHash,
-        DefinitionHash = d.DefinitionHash,
         Version = d.Version,
         Interaction = d.Interaction,
         InputSchema = d.InputSchema,
@@ -525,8 +434,6 @@ public record CompanyCertificationChangeScenario(
         Name = d.Name,
         State = d.State,
         SupersededById = d.SupersededById,
-        ContractHash = d.ContractHash,
-        DefinitionHash = d.DefinitionHash,
         Version = d.Version,
         VariableSchema = d.VariableSchema,
         DefaultVariableScope = d.DefaultVariableScope,

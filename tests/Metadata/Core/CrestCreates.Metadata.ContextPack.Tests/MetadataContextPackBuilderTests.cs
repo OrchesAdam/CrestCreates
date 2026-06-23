@@ -792,7 +792,33 @@ public class MetadataContextPackBuilderTests
 
         var hashBuilderMock = new Mock<IDescriptorStableHashBuilder>();
         hashBuilderMock.Setup(h => h.Build(It.IsAny<IDescriptor>()))
-            .Returns(new DescriptorStableHashes("contract", "definition"));
+            .Returns(new DescriptorStableHashes
+            {
+                ContractHash = new CanonicalHash
+                {
+                    Value = "contract",
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "sha256-pipe-delimited-v0",
+                    ArtifactKind = "Descriptor",
+                    DescriptorKind = "Schema",
+                    Scope = "InternalFull",
+                    Purpose = "Contract",
+                    ContractVersion = "0",
+                    CanonicalShapeVersion = "1"
+                },
+                DefinitionHash = new CanonicalHash
+                {
+                    Value = "definition",
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "sha256-pipe-delimited-v0",
+                    ArtifactKind = "Descriptor",
+                    DescriptorKind = "Schema",
+                    Scope = "InternalFull",
+                    Purpose = "Definition",
+                    ContractVersion = "0",
+                    CanonicalShapeVersion = "1"
+                }
+            });
 
         var builder = new DefaultMetadataContextPackBuilder(hashBuilderMock.Object);
 
@@ -822,7 +848,33 @@ public class MetadataContextPackBuilderTests
 
         var hashBuilderMock = new Mock<IDescriptorStableHashBuilder>();
         hashBuilderMock.Setup(h => h.Build(It.IsAny<IDescriptor>()))
-            .Returns(new DescriptorStableHashes("contract", "definition"));
+            .Returns(new DescriptorStableHashes
+            {
+                ContractHash = new CanonicalHash
+                {
+                    Value = "contract",
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "sha256-pipe-delimited-v0",
+                    ArtifactKind = "Descriptor",
+                    DescriptorKind = "Schema",
+                    Scope = "InternalFull",
+                    Purpose = "Contract",
+                    ContractVersion = "0",
+                    CanonicalShapeVersion = "1"
+                },
+                DefinitionHash = new CanonicalHash
+                {
+                    Value = "definition",
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "sha256-pipe-delimited-v0",
+                    ArtifactKind = "Descriptor",
+                    DescriptorKind = "Schema",
+                    Scope = "InternalFull",
+                    Purpose = "Definition",
+                    ContractVersion = "0",
+                    CanonicalShapeVersion = "1"
+                }
+            });
 
         var builder = new DefaultMetadataContextPackBuilder(hashBuilderMock.Object);
 
@@ -929,7 +981,33 @@ public class MetadataContextPackBuilderTests
         var hashBuilderMock = new Mock<IDescriptorStableHashBuilder>();
         hashBuilderMock.Setup(h => h.Build(It.IsAny<IDescriptor>()))
             .Callback<IDescriptor>(d => hashBuilderReceived = d)
-            .Returns(new DescriptorStableHashes("contract", "definition"));
+            .Returns(new DescriptorStableHashes
+            {
+                ContractHash = new CanonicalHash
+                {
+                    Value = "contract",
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "sha256-pipe-delimited-v0",
+                    ArtifactKind = "Descriptor",
+                    DescriptorKind = "Schema",
+                    Scope = "InternalFull",
+                    Purpose = "Contract",
+                    ContractVersion = "0",
+                    CanonicalShapeVersion = "1"
+                },
+                DefinitionHash = new CanonicalHash
+                {
+                    Value = "definition",
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "sha256-pipe-delimited-v0",
+                    ArtifactKind = "Descriptor",
+                    DescriptorKind = "Schema",
+                    Scope = "InternalFull",
+                    Purpose = "Definition",
+                    ContractVersion = "0",
+                    CanonicalShapeVersion = "1"
+                }
+            });
 
         var builder = new DefaultMetadataContextPackBuilder(hashBuilderMock.Object);
 
@@ -2489,7 +2567,33 @@ public class MetadataContextPackBuilderTests
         var hashBuilderMock = new Mock<IDescriptorStableHashBuilder>();
         hashBuilderMock.Setup(h => h.Build(It.IsAny<IDescriptor>()))
             .Callback<IDescriptor>(d => receivedDescriptors.Add(d))
-            .Returns(new DescriptorStableHashes("contract", "definition"));
+            .Returns(new DescriptorStableHashes
+            {
+                ContractHash = new CanonicalHash
+                {
+                    Value = "contract",
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "sha256-pipe-delimited-v0",
+                    ArtifactKind = "Descriptor",
+                    DescriptorKind = "Schema",
+                    Scope = "InternalFull",
+                    Purpose = "Contract",
+                    ContractVersion = "0",
+                    CanonicalShapeVersion = "1"
+                },
+                DefinitionHash = new CanonicalHash
+                {
+                    Value = "definition",
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "sha256-pipe-delimited-v0",
+                    ArtifactKind = "Descriptor",
+                    DescriptorKind = "Schema",
+                    Scope = "InternalFull",
+                    Purpose = "Definition",
+                    ContractVersion = "0",
+                    CanonicalShapeVersion = "1"
+                }
+            });
 
         var builder = new DefaultMetadataContextPackBuilder(hashBuilderMock.Object);
 

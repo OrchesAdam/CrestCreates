@@ -1,5 +1,6 @@
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -8,8 +9,16 @@ namespace CrestCreates.Metadata.Tests;
 
 public class DescriptorPackageDiffTests
 {
-    private readonly IDescriptorPackageBuilder _builder = new DefaultDescriptorPackageBuilder();
+    private readonly ICanonicalHashComputer _hashComputer = new DefaultCanonicalHashComputer();
+    private readonly IDescriptorStableHashBuilder _hashBuilder;
+    private readonly IDescriptorPackageBuilder _builder;
     private readonly IDescriptorPackageDiffer _differ = new DescriptorPackageDiffer();
+
+    public DescriptorPackageDiffTests()
+    {
+        _hashBuilder = new DescriptorStableHashBuilder(_hashComputer);
+        _builder = new DefaultDescriptorPackageBuilder(_hashBuilder);
+    }
 
     private DescriptorPackage BuildPackage(string pkgId, IDescriptor[] descriptors, string version = "1.0.0")
     {
@@ -23,8 +32,7 @@ public class DescriptorPackageDiffTests
     {
         return new SchemaDescriptor
         {
-            Id = id, Version = version, Name = name, State = DescriptorState.Active,
-            ContractHash = $"contract_{id}_v{version}"
+            Id = id, Version = version, Name = name, State = DescriptorState.Active
         };
     }
 
@@ -51,21 +59,22 @@ public class DescriptorPackageDiffTests
     [Fact]
     public void Diff_ChangedDescriptorHash_ProducesChangedEntry()
     {
-        var desc1a = new SchemaDescriptor { Id = "a", Version = 1, Name = "A", State = DescriptorState.Active, ContractHash = "hash-v1" };
-        var desc1b = new SchemaDescriptor { Id = "a", Version = 1, Name = "A", State = DescriptorState.Active, ContractHash = "hash-v2" };
+        var desc1a = new SchemaDescriptor { Id = "a", Version = 1, Name = "A_V1", State = DescriptorState.Active };
+        var desc1b = new SchemaDescriptor { Id = "a", Version = 1, Name = "A_V2", State = DescriptorState.Active };
         var pkg1 = BuildPackage("pkg", new IDescriptor[] { desc1a });
         var pkg2 = BuildPackage("pkg", new IDescriptor[] { desc1b });
         var diff = _differ.Diff(pkg1, pkg2);
         diff.ChangedEntries.Should().ContainSingle(e => e.Ref.Id == "a");
-        diff.ChangedEntries[0].BeforeContractHash.Should().Be("hash-v1");
-        diff.ChangedEntries[0].AfterContractHash.Should().Be("hash-v2");
+        diff.ChangedEntries[0].BeforeContractHash.Should().NotBeNullOrEmpty();
+        diff.ChangedEntries[0].AfterContractHash.Should().NotBeNullOrEmpty();
+        diff.ChangedEntries[0].BeforeContractHash.Should().NotBe(diff.ChangedEntries[0].AfterContractHash);
     }
 
     [Fact]
     public void Diff_StateChange_ProducesStateChangeEntry()
     {
-        var active = new SchemaDescriptor { Id = "a", Version = 1, Name = "A", State = DescriptorState.Active, ContractHash = "contract_a_v1" };
-        var deprecated = new SchemaDescriptor { Id = "a", Version = 1, Name = "A", State = DescriptorState.Deprecated, ContractHash = "contract_a_v1" };
+        var active = new SchemaDescriptor { Id = "a", Version = 1, Name = "A", State = DescriptorState.Active };
+        var deprecated = new SchemaDescriptor { Id = "a", Version = 1, Name = "A", State = DescriptorState.Deprecated };
         var pkg1 = BuildPackage("pkg", new IDescriptor[] { active });
         var pkg2 = BuildPackage("pkg", new IDescriptor[] { deprecated });
         var diff = _differ.Diff(pkg1, pkg2);

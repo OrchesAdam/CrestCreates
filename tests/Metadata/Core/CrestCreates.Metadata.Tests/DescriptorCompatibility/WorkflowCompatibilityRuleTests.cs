@@ -19,7 +19,7 @@ public class WorkflowCompatibilityRuleTests
         return new WorkflowDescriptor
         {
             Id = id, Name = "TestWorkflow", Version = version,
-            State = DescriptorState.Active, ContractHash = "hash", DefinitionHash = "defhash",
+            State = DescriptorState.Active,
             VariableSchema = variableSchemaId != null ? new VersionedDescriptorRef<SchemaDescriptor> { Id = variableSchemaId, Version = 1 } : null,
             Steps = steps ?? Array.Empty<WorkflowStep>(),
             DefaultVariableScope = WorkflowVariableScope.Workflow

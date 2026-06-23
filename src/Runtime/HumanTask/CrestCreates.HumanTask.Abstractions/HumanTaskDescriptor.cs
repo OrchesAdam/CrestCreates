@@ -11,8 +11,6 @@ public sealed class HumanTaskDescriptor : IVersionedDescriptor
     public string Name { get; init; } = string.Empty;
     public DescriptorState State { get; init; } = DescriptorState.Active;
     public string? SupersededById { get; init; }
-    public string ContractHash { get; init; } = string.Empty;
-    public string DefinitionHash { get; init; } = string.Empty;
     public int Version { get; init; }
 
     public VersionedDescriptorRef<IInteractionDescriptor> Interaction { get; init; }

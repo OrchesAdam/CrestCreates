@@ -1,0 +1,132 @@
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Linq;
+using System.Text;
+
+namespace CrestCreates.CodeGenerator.CanonicalHashGenerator;
+
+[Generator]
+public sealed class CanonicalHashSourceGenerator : IIncrementalGenerator
+{
+    private const string ProfileAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashProfileAttribute";
+    private const string FieldAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashFieldAttribute";
+
+    public void Initialize(IncrementalGeneratorInitializationContext context)
+    {
+        // Find all classes with [CanonicalHashProfile] attribute
+        var profileClasses = context.SyntaxProvider
+            .CreateSyntaxProvider(
+                predicate: static (node, _) => node is ClassDeclarationSyntax { AttributeLists.Count: > 0 },
+                transform: static (ctx, ct) => GetProfileClassInfo(ctx))
+            .Where(static info => info is not null);
+
+        var profilesAndCompilation = profileClasses.Collect().Combine(context.CompilationProvider);
+
+        context.RegisterSourceOutput(profilesAndCompilation, static (sourceContext, pair) =>
+        {
+            var (profileClassInfos, compilation) = pair;
+            GenerateCanonicalHashCode(sourceContext, compilation, profileClassInfos!);
+        });
+    }
+
+    private static ProfileClassInfo? GetProfileClassInfo(GeneratorSyntaxContext context)
+    {
+        var classDecl = (ClassDeclarationSyntax)context.Node;
+        var symbol = context.SemanticModel.GetDeclaredSymbol(classDecl) as INamedTypeSymbol;
+        if (symbol is null) return null;
+
+        // Check for [CanonicalHashProfile] attribute
+        var profileAttr = symbol.GetAttributes().FirstOrDefault(a =>
+            a.AttributeClass?.ToDisplayString() == ProfileAttrFullName);
+
+        if (profileAttr is null) return null;
+
+        // Find method(s) with [CanonicalHashField] attributes — just count them for CCHASH014
+        var fieldMethodCount = 0;
+
+        foreach (var member in symbol.GetMembers())
+        {
+            if (member is IMethodSymbol method)
+            {
+                var methodFieldAttrs = method.GetAttributes()
+                    .Where(a => a.AttributeClass?.ToDisplayString() == FieldAttrFullName)
+                    .ToList();
+
+                if (methodFieldAttrs.Count > 0)
+                {
+                    fieldMethodCount++;
+                }
+            }
+        }
+
+        return new ProfileClassInfo(symbol, fieldMethodCount);
+    }
+
+    private static void GenerateCanonicalHashCode(
+        SourceProductionContext context,
+        Compilation compilation,
+        ImmutableArray<ProfileClassInfo> profileClassInfos)
+    {
+        if (profileClassInfos.IsDefaultOrEmpty) return;
+
+        var modelBuilder = new CanonicalHashModelBuilder(compilation, context);
+        var profiles = modelBuilder.Build(profileClassInfos);
+
+        if (profiles is null || profiles.Count == 0) return;
+
+        if (context.CancellationToken.IsCancellationRequested) return;
+
+        // 1. Generate payload DTOs
+        var payloadWriter = new CanonicalHashPayloadWriter();
+        context.AddSource("CanonicalHashPayloads.g.cs",
+            SourceText.From(payloadWriter.Write(profiles), Encoding.UTF8));
+
+        if (context.CancellationToken.IsCancellationRequested) return;
+
+        // 2. Generate projection code
+        var projectionWriter = new CanonicalHashProjectionWriter();
+        context.AddSource("CanonicalHashProjections.g.cs",
+            SourceText.From(projectionWriter.Write(profiles), Encoding.UTF8));
+
+        if (context.CancellationToken.IsCancellationRequested) return;
+
+        // 3. Generate dispatcher
+        var dispatcherWriter = new CanonicalHashDispatcherWriter();
+        context.AddSource("CanonicalHashDispatcher.g.cs",
+            SourceText.From(dispatcherWriter.Write(profiles), Encoding.UTF8));
+
+        if (context.CancellationToken.IsCancellationRequested) return;
+
+        // 4. Generate canonical JSON writers (Utf8JsonWriter-based, no STJ/JsonTypeInfo/reflection)
+        var writerWriter = new CanonicalHashWriterWriter();
+        context.AddSource("CanonicalHashWriters.g.cs",
+            SourceText.From(writerWriter.Write(profiles), Encoding.UTF8));
+
+        if (context.CancellationToken.IsCancellationRequested) return;
+
+        // 5. Generate ContractVersions
+        var contractVersions = GenerateContractVersions(profiles);
+        context.AddSource("CanonicalHashContractVersions.g.cs",
+            SourceText.From(contractVersions, Encoding.UTF8));
+    }
+
+    private static string GenerateContractVersions(IReadOnlyList<ProfileModel> profiles)
+    {
+        var sb = new StringBuilder();
+
+        sb.AppendLine("// <auto-generated/>");
+        sb.AppendLine("#pragma warning disable");
+        sb.AppendLine();
+        sb.AppendLine("namespace CrestCreates.Metadata.CanonicalHashing.Generated;");
+        sb.AppendLine();
+        sb.AppendLine("internal static class ContractVersions");
+        sb.AppendLine("{");
+        sb.AppendLine("    public const string DescriptorHash = \"canonical-hash-v1\";");
+        sb.AppendLine("}");
+
+        return sb.ToString();
+    }
+}

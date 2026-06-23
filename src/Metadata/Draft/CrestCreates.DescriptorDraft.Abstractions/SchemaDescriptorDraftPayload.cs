@@ -16,8 +16,6 @@ public sealed record SchemaDescriptorDraftPayload(
             Id = Descriptor.Id,
             Name = Descriptor.Name,
             State = Descriptor.State,
-            ContractHash = Descriptor.ContractHash,
-            DefinitionHash = Descriptor.DefinitionHash,
             SupersededById = Descriptor.SupersededById,
             Version = Descriptor.Version,
             ChangeKind = Descriptor.ChangeKind,

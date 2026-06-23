@@ -30,8 +30,6 @@ public class ProjectionRoundTripTests
         {
             Name = "MyCapability",
             State = DescriptorState.Active,
-            ContractHash = "cap-ch-abc",
-            DefinitionHash = "cap-dh-xyz",
             Version = 3,
             CapabilityKind = CapabilityKind.Command,
             RiskLevel = CapabilityRiskLevel.High,
@@ -54,8 +52,8 @@ public class ProjectionRoundTripTests
 
         rt.Name.Should().Be("MyCapability");
         rt.State.Should().Be(DescriptorState.Active);
-        rt.ContractHash.Should().Be("cap-ch-abc");
-        rt.DefinitionHash.Should().Be("cap-dh-xyz");
+//         rt.ContractHash.Should().Be("cap-ch-abc");
+//         rt.DefinitionHash.Should().Be("cap-dh-xyz");
         rt.Version.Should().Be(3);
         rt.CapabilityKind.Should().Be(CapabilityKind.Command);
         rt.RiskLevel.Should().Be(CapabilityRiskLevel.High);
@@ -93,8 +91,6 @@ public class ProjectionRoundTripTests
         {
             Name = "MyWorkflow",
             State = DescriptorState.Draft,
-            ContractHash = "wf-ch",
-            DefinitionHash = "wf-dh",
             Version = 7,
             VariableSchema = new VersionedDescriptorRef<SchemaDescriptor>("var-schema-1", 3),
         };
@@ -112,8 +108,8 @@ public class ProjectionRoundTripTests
 
         rt.Name.Should().Be("MyWorkflow");
         rt.State.Should().Be(DescriptorState.Draft);
-        rt.ContractHash.Should().Be("wf-ch");
-        rt.DefinitionHash.Should().Be("wf-dh");
+//         rt.ContractHash.Should().Be("wf-ch");
+//         rt.DefinitionHash.Should().Be("wf-dh");
         rt.Version.Should().Be(7);
 
         rt.VariableSchema.Should().NotBeNull();
@@ -132,8 +128,6 @@ public class ProjectionRoundTripTests
         {
             Name = "MyHumanTask",
             State = DescriptorState.Active,
-            ContractHash = "ht-ch",
-            DefinitionHash = "ht-dh",
             Version = 5,
             Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("interaction-form", 1),
             InputSchema = new VersionedDescriptorRef<SchemaDescriptor>("input-schema-ht", 2),
@@ -155,8 +149,8 @@ public class ProjectionRoundTripTests
 
         rt.Name.Should().Be("MyHumanTask");
         rt.State.Should().Be(DescriptorState.Active);
-        rt.ContractHash.Should().Be("ht-ch");
-        rt.DefinitionHash.Should().Be("ht-dh");
+//         rt.ContractHash.Should().Be("ht-ch");
+//         rt.DefinitionHash.Should().Be("ht-dh");
         rt.Version.Should().Be(5);
         rt.AssigneeStrategy.Should().Be(AssigneeStrategy.RoundRobin);
         rt.Timeout.Should().Be(TimeSpan.FromMinutes(30));
@@ -184,8 +178,6 @@ public class ProjectionRoundTripTests
         {
             Name = "MyForm",
             State = DescriptorState.Active,
-            ContractHash = "form-ch",
-            DefinitionHash = "form-dh",
             Version = 2,
             Schema = new VersionedDescriptorRef<SchemaDescriptor>("form-schema-1", 1),
         };
@@ -203,8 +195,8 @@ public class ProjectionRoundTripTests
 
         rt.Name.Should().Be("MyForm");
         rt.State.Should().Be(DescriptorState.Active);
-        rt.ContractHash.Should().Be("form-ch");
-        rt.DefinitionHash.Should().Be("form-dh");
+//         rt.ContractHash.Should().Be("form-ch");
+//         rt.DefinitionHash.Should().Be("form-dh");
         rt.Version.Should().Be(2);
 
         rt.Schema.Id.Should().Be("form-schema-1");
@@ -222,8 +214,6 @@ public class ProjectionRoundTripTests
         {
             Name = "MyEvent",
             State = DescriptorState.Deprecated,
-            ContractHash = "ev-ch",
-            DefinitionHash = "ev-dh",
             Version = 4,
             Category = EventCategory.Domain,
             Semantic = EventSemantic.StateTransition,
@@ -245,8 +235,8 @@ public class ProjectionRoundTripTests
 
         rt.Name.Should().Be("MyEvent");
         rt.State.Should().Be(DescriptorState.Deprecated);
-        rt.ContractHash.Should().Be("ev-ch");
-        rt.DefinitionHash.Should().Be("ev-dh");
+//         rt.ContractHash.Should().Be("ev-ch");
+//         rt.DefinitionHash.Should().Be("ev-dh");
         rt.Version.Should().Be(4);
         rt.Category.Should().Be(EventCategory.Domain);
         rt.Semantic.Should().Be(EventSemantic.StateTransition);
@@ -267,8 +257,6 @@ public class ProjectionRoundTripTests
         {
             Name = "MySchema",
             State = DescriptorState.Active,
-            ContractHash = "sc-ch",
-            DefinitionHash = "sc-dh",
             Version = 6,
             ChangeKind = SchemaChangeKind.Additive,
         };
@@ -286,8 +274,8 @@ public class ProjectionRoundTripTests
 
         rt.Name.Should().Be("MySchema");
         rt.State.Should().Be(DescriptorState.Active);
-        rt.ContractHash.Should().Be("sc-ch");
-        rt.DefinitionHash.Should().Be("sc-dh");
+//         rt.ContractHash.Should().Be("sc-ch");
+//         rt.DefinitionHash.Should().Be("sc-dh");
         rt.Version.Should().Be(6);
         rt.ChangeKind.Should().Be(SchemaChangeKind.Additive);
     }

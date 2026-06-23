@@ -1,4 +1,6 @@
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -7,16 +9,24 @@ namespace CrestCreates.Metadata.Tests;
 
 public class DescriptorPackageSerializerTests
 {
-    private readonly IDescriptorPackageBuilder _builder = new DefaultDescriptorPackageBuilder();
+    private readonly ICanonicalHashComputer _hashComputer = new DefaultCanonicalHashComputer();
+    private readonly IDescriptorStableHashBuilder _hashBuilder;
+    private readonly IDescriptorPackageBuilder _builder;
+
+    public DescriptorPackageSerializerTests()
+    {
+        _hashBuilder = new DescriptorStableHashBuilder(_hashComputer);
+        _builder = new DefaultDescriptorPackageBuilder(_hashBuilder);
+    }
+
     private readonly IDescriptorPackageSerializer _serializer = new DescriptorPackageSerializer();
 
     private static SchemaDescriptor MakeSchema(string id, int version, string name)
     {
         return new SchemaDescriptor
         {
-            Id = id, Version = version, Name = name, State = DescriptorState.Active,
-            ContractHash = $"contract_{id}_v{version}",
-            DefinitionHash = $"def_{id}_v{version}"
+            Id = id, Version = version, Name = name,
+            State = DescriptorState.Active
         };
     }
 
@@ -87,7 +97,9 @@ public class DescriptorPackageSerializerTests
 
         var entry = deserialized!.Snapshot.Descriptors[0];
         entry.Ref.Id.Should().Be("s1");
-        entry.ContractHash.Should().Be("contract_s1_v1");
-        entry.DefinitionHash.Should().Be("def_s1_v1");
+        entry.ContractHash.Should().NotBeNullOrEmpty();
+        entry.ContractHash.Should().HaveLength(64); // SHA-256 hex
+        entry.DefinitionHash.Should().NotBeNullOrEmpty();
+        entry.DefinitionHash.Should().HaveLength(64); // SHA-256 hex
     }
 }

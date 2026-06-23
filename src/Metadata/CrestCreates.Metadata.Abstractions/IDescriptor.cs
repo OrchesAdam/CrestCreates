@@ -18,7 +18,5 @@ public interface IDescriptor
     // ── Legacy members (kept for backward compatibility) ──
     DescriptorKind Kind { get; }
     DescriptorState State { get; }
-    string ContractHash { get; }
-    string DefinitionHash { get; }
     string? SupersededById { get; }
 }

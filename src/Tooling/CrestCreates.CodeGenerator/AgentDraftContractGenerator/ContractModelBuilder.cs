@@ -34,6 +34,8 @@ internal sealed class ContractModelBuilder
         "Namespace",  // Registry domain, computed from descriptor type
         "Id",         // Immutable identity
         "Kind",       // Computed descriptor kind discriminator, never editable
+        "ContractHash",  // Computed by IDescriptorStableHashBuilder, not a descriptor property
+        "DefinitionHash", // Computed by IDescriptorStableHashBuilder, not a descriptor property
     };
 
     // Validates that KindName is one of the known descriptor kinds.
@@ -178,6 +180,9 @@ internal sealed class ContractModelBuilder
         {
             if (member is not IPropertySymbol property) continue;
             if (property.IsStatic || property.IsImplicitlyDeclared) continue;
+
+            // Skip infrastructure properties — they're computed, not from descriptor
+            if (InfrastructureProperties.Contains(property.Name)) continue;
 
             var attrs = property.GetAttributes();
 

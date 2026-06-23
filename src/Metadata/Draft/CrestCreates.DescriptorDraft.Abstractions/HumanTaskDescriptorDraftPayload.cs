@@ -17,8 +17,6 @@ public sealed record HumanTaskDescriptorDraftPayload(
             Name = Descriptor.Name,
             State = Descriptor.State,
             SupersededById = Descriptor.SupersededById,
-            ContractHash = Descriptor.ContractHash,
-            DefinitionHash = Descriptor.DefinitionHash,
             Version = Descriptor.Version,
             Interaction = Descriptor.Interaction,
             InputSchema = Descriptor.InputSchema,

@@ -17,13 +17,13 @@ public class DefaultDescriptorDraftMaterializerTests
 
     private static Draft CreateCreateDraft(string id = "schema1", int version = 1)
     {
-        var desc = new SchemaDescriptor { Id = id, Name = "Test", Version = version, State = DescriptorState.Active, ContractHash = "abc", DefinitionHash = "def" };
+        var desc = new SchemaDescriptor { Id = id, Name = "Test", Version = version, State = DescriptorState.Active };
         return new Draft { TenantId = "t1", DraftId = "d1", DescriptorKind = DescriptorKind.Schema, DescriptorId = id, Operation = DescriptorDraftOperation.Create, AuthorKind = DescriptorDraftAuthorKind.Human, AuthorId = "u1", CreatedAt = DateTimeOffset.UtcNow, Payload = new SchemaDescriptorDraftPayload(desc), ProposedVersion = version.ToString() };
     }
 
     private static Draft CreateUpdateDraft(string id = "schema1", int baseVer = 1, int proposedVer = 2)
     {
-        var desc = new SchemaDescriptor { Id = id, Name = "Updated", Version = proposedVer, State = DescriptorState.Active, ContractHash = "xyz", DefinitionHash = "uvw" };
+        var desc = new SchemaDescriptor { Id = id, Name = "Updated", Version = proposedVer, State = DescriptorState.Active };
         return new Draft { TenantId = "t1", DraftId = "d2", DescriptorKind = DescriptorKind.Schema, DescriptorId = id, Operation = DescriptorDraftOperation.Update, AuthorKind = DescriptorDraftAuthorKind.Human, AuthorId = "u1", CreatedAt = DateTimeOffset.UtcNow, Payload = new SchemaDescriptorDraftPayload(desc), BaseVersion = baseVer.ToString(), ProposedVersion = proposedVer.ToString() };
     }
 
@@ -38,7 +38,7 @@ public class DefaultDescriptorDraftMaterializerTests
 
     [Fact] public void Create_Fails_On_Existing()
     {
-        var existing = new SchemaDescriptor { Id = "schema1", Name = "X", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "X", Version = 1, State = DescriptorState.Active };
         var r = new DefaultDescriptorDraftMaterializer().Materialize(CreateCreateDraft(), With(existing));
         r.IsMaterialized.Should().BeFalse();
         r.Diagnostics.Should().Contain(d => d.Code == "CREATE_DESCRIPTOR_EXISTS");
@@ -46,7 +46,7 @@ public class DefaultDescriptorDraftMaterializerTests
 
     [Fact] public void Update_Replaces_Descriptor()
     {
-        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active };
         var r = new DefaultDescriptorDraftMaterializer().Materialize(CreateUpdateDraft(), With(existing));
         r.IsMaterialized.Should().BeTrue();
         r.ProposedInventory.Should().HaveCount(1);
@@ -62,7 +62,7 @@ public class DefaultDescriptorDraftMaterializerTests
 
     [Fact] public void Does_Not_Mutate_Source()
     {
-        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active };
         var original = With(existing);
         new DefaultDescriptorDraftMaterializer().Materialize(CreateUpdateDraft(), original);
         original.Should().HaveCount(1);
@@ -72,7 +72,7 @@ public class DefaultDescriptorDraftMaterializerTests
     [Fact] public void Create_DifferentVersion_NotDuplicate()
     {
         // Inventory has schema1 v1; creating schema1 v2 should succeed (different version)
-        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active };
         var draft = CreateCreateDraft("schema1", version: 2);
         var r = new DefaultDescriptorDraftMaterializer().Materialize(draft, With(existing));
         r.IsMaterialized.Should().BeTrue();
@@ -82,7 +82,7 @@ public class DefaultDescriptorDraftMaterializerTests
     [Fact] public void Update_WrongBaseVersion_Fails()
     {
         // Inventory has schema1 v1; updating with baseVersion=2 should fail
-        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active };
         var draft = CreateUpdateDraft("schema1", baseVer: 2, proposedVer: 3);
         var r = new DefaultDescriptorDraftMaterializer().Materialize(draft, With(existing));
         r.IsMaterialized.Should().BeFalse();
@@ -92,8 +92,8 @@ public class DefaultDescriptorDraftMaterializerTests
     [Fact] public void Update_OnlyReplaces_MatchedVersion()
     {
         // Inventory has schema1 v1 and v2; updating v1 → v3 should only replace v1
-        var v1 = new SchemaDescriptor { Id = "schema1", Name = "V1", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
-        var v2 = new SchemaDescriptor { Id = "schema1", Name = "V2", Version = 2, State = DescriptorState.Active, ContractHash = "x", DefinitionHash = "y" };
+        var v1 = new SchemaDescriptor { Id = "schema1", Name = "V1", Version = 1, State = DescriptorState.Active };
+        var v2 = new SchemaDescriptor { Id = "schema1", Name = "V2", Version = 2, State = DescriptorState.Active };
         var inventory = new List<IDescriptor> { v1, v2 };
         var draft = CreateUpdateDraft("schema1", baseVer: 1, proposedVer: 3);
         var r = new DefaultDescriptorDraftMaterializer().Materialize(draft, inventory);
@@ -107,8 +107,8 @@ public class DefaultDescriptorDraftMaterializerTests
     [Fact]
     public void Update_ToExistingProposedVersion_Fails()
     {
-        var baseItem = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
-        var conflictingItem = new SchemaDescriptor { Id = "schema1", Name = "Existing V2", Version = 2, State = DescriptorState.Active, ContractHash = "x", DefinitionHash = "y" };
+        var baseItem = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active };
+        var conflictingItem = new SchemaDescriptor { Id = "schema1", Name = "Existing V2", Version = 2, State = DescriptorState.Active };
         var inventory = new List<IDescriptor> { baseItem, conflictingItem };
         var draft = CreateUpdateDraft("schema1", baseVer: 1, proposedVer: 2);
 
@@ -123,7 +123,7 @@ public class DefaultDescriptorDraftMaterializerTests
     [Fact]
     public void Materialize_Does_Not_Share_Descriptor_References_With_CurrentInventory()
     {
-        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active };
         var draft = CreateUpdateDraft();
 
         var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, With(existing));
@@ -135,7 +135,7 @@ public class DefaultDescriptorDraftMaterializerTests
     [Fact]
     public void Create_Does_Not_Share_Existing_Descriptor_Reference_With_CurrentInventory()
     {
-        var existing = new SchemaDescriptor { Id = "schema1", Name = "Existing", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Existing", Version = 1, State = DescriptorState.Active };
         var draft = CreateCreateDraft(id: "schema2", version: 1);
 
         var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, With(existing));
@@ -150,8 +150,8 @@ public class DefaultDescriptorDraftMaterializerTests
     [Fact]
     public void Update_Does_Not_Share_NonReplaced_Descriptor_Reference_With_CurrentInventory()
     {
-        var v1 = new SchemaDescriptor { Id = "schema1", Name = "V1", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
-        var v2 = new SchemaDescriptor { Id = "schema2", Name = "V2", Version = 1, State = DescriptorState.Active, ContractHash = "c", DefinitionHash = "d" };
+        var v1 = new SchemaDescriptor { Id = "schema1", Name = "V1", Version = 1, State = DescriptorState.Active };
+        var v2 = new SchemaDescriptor { Id = "schema2", Name = "V2", Version = 1, State = DescriptorState.Active };
         var inventory = new List<IDescriptor> { v1, v2 };
         var draft = CreateUpdateDraft();
 
@@ -179,7 +179,7 @@ public class DefaultDescriptorDraftMaterializerTests
     [Fact]
     public void Update_Does_Not_Insert_Original_Payload_Descriptor_Reference()
     {
-        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active };
         var draft = CreateUpdateDraft();
         var payloadDescriptor = draft.Payload.GetDescriptor();
 
@@ -192,7 +192,7 @@ public class DefaultDescriptorDraftMaterializerTests
     [Fact]
     public void Update_Replaces_Descriptor_Using_Cloned_Replacement()
     {
-        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active };
         var draft = CreateUpdateDraft();
 
         var result = new DefaultDescriptorDraftMaterializer().Materialize(draft, With(existing));
@@ -218,7 +218,7 @@ public class DefaultDescriptorDraftMaterializerTests
         var existing = new SchemaDescriptor
         {
             Id = "schema1", Name = "Existing", Version = 1,
-            State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b",
+            State = DescriptorState.Active,
             Fields = sourceFields
         };
         var draft = CreateCreateDraft(id: "schema2", version: 1);
@@ -245,7 +245,7 @@ public class DefaultDescriptorDraftMaterializerTests
         var desc = new SchemaDescriptor
         {
             Id = "schema1", Name = "New", Version = 1,
-            State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b",
+            State = DescriptorState.Active,
             Fields = sourceFields
         };
         var draft = new Draft
@@ -281,12 +281,12 @@ public class DefaultDescriptorDraftMaterializerTests
         var v1 = new SchemaDescriptor
         {
             Id = "schema1", Name = "Old", Version = 1,
-            State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b"
+            State = DescriptorState.Active
         };
         var v2 = new SchemaDescriptor
         {
             Id = "schema2", Name = "Other", Version = 1,
-            State = DescriptorState.Active, ContractHash = "c", DefinitionHash = "d",
+            State = DescriptorState.Active,
             Fields = sourceFields
         };
         var inventory = new List<IDescriptor> { v1, v2 };
@@ -309,7 +309,7 @@ public class DefaultDescriptorDraftMaterializerTests
     [Fact]
     public void Update_Does_Not_Share_Collection_State_With_DraftPayloadDescriptor()
     {
-        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b" };
+        var existing = new SchemaDescriptor { Id = "schema1", Name = "Old", Version = 1, State = DescriptorState.Active };
         var sourceFields = new List<SchemaFieldDescriptor>
         {
             new() { Name = "Title", FieldType = "string" }
@@ -317,7 +317,7 @@ public class DefaultDescriptorDraftMaterializerTests
         var desc = new SchemaDescriptor
         {
             Id = "schema1", Name = "Updated", Version = 2,
-            State = DescriptorState.Active, ContractHash = "x", DefinitionHash = "y",
+            State = DescriptorState.Active,
             Fields = sourceFields
         };
         var draft = new Draft
@@ -361,7 +361,7 @@ public class DefaultDescriptorDraftMaterializerTests
         var desc = new FormDescriptor
         {
             Id = "form1", Name = "TestForm", Version = 1,
-            State = DescriptorState.Active, ContractHash = "a", DefinitionHash = "b",
+            State = DescriptorState.Active,
             Fields = sourceFields
         };
         var draft = new Draft

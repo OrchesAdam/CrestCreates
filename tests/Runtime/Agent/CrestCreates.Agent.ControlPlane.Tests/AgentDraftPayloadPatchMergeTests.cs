@@ -22,8 +22,6 @@ public class AgentDraftPayloadPatchMergeTests
                 Name = "OriginalName",
                 State = DescriptorState.Active,
                 Version = 5,
-                ContractHash = "original-hash",
-                DefinitionHash = "original-defhash",
                 CapabilityKind = CapabilityKind.Query,
                 RiskLevel = CapabilityRiskLevel.Medium
             }
@@ -60,8 +58,8 @@ public class AgentDraftPayloadPatchMergeTests
         result.Capability!.Name.Should().Be("UpdatedName");
         result.Capability!.State.Should().Be(DescriptorState.Active);
         result.Capability!.Version.Should().Be(5);
-        result.Capability!.ContractHash.Should().Be("original-hash");
-        result.Capability!.DefinitionHash.Should().Be("original-defhash");
+//         result.Capability!.ContractHash.Should().Be("original-hash");
+//         result.Capability!.DefinitionHash.Should().Be("original-defhash");
         result.Capability!.CapabilityKind.Should().Be(CapabilityKind.Query);
         result.Capability!.RiskLevel.Should().Be(CapabilityRiskLevel.Medium);
     }
@@ -78,7 +76,6 @@ public class AgentDraftPayloadPatchMergeTests
                 Name = "OriginalName",
                 State = DescriptorState.Draft,
                 Version = 1,
-                ContractHash = "hash1",
                 CapabilityKind = CapabilityKind.Command,
                 RiskLevel = CapabilityRiskLevel.Low
             }
@@ -120,7 +117,7 @@ public class AgentDraftPayloadPatchMergeTests
         result.Capability!.RiskLevel.Should().Be(CapabilityRiskLevel.Critical);
         // Unchanged fields preserved
         result.Capability!.State.Should().Be(DescriptorState.Draft);
-        result.Capability!.ContractHash.Should().Be("hash1");
+//         result.Capability!.ContractHash.Should().Be("hash1");
         result.Capability!.CapabilityKind.Should().Be(CapabilityKind.Command);
     }
 

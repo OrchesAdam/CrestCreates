@@ -20,7 +20,7 @@ public class HumanTaskCompatibilityRuleTests
         return new HumanTaskDescriptor
         {
             Id = id, Name = "TestTask", Version = version,
-            State = DescriptorState.Active, ContractHash = "hash", DefinitionHash = "defhash",
+            State = DescriptorState.Active,
             Interaction = new VersionedDescriptorRef<IInteractionDescriptor> { Id = interactionId, Version = 1 },
             AssigneeStrategy = assigneeStrategy, Permissions = permission,
             Outcomes = outcomes ?? Array.Empty<CompletionOutcome>()

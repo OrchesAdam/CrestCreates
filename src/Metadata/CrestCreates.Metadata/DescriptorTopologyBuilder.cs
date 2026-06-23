@@ -6,10 +6,14 @@ namespace CrestCreates.Metadata;
 internal sealed class DescriptorTopologyBuilder : IDescriptorTopologyBuilder
 {
     private readonly IDescriptorRelationshipProvider _relationshipProvider;
+    private readonly IDescriptorStableHashBuilder _hashBuilder;
 
-    public DescriptorTopologyBuilder(IDescriptorRelationshipProvider relationshipProvider)
+    public DescriptorTopologyBuilder(
+        IDescriptorRelationshipProvider relationshipProvider,
+        IDescriptorStableHashBuilder hashBuilder)
     {
         _relationshipProvider = relationshipProvider;
+        _hashBuilder = hashBuilder;
     }
 
     public DescriptorTopologySnapshot Build(IReadOnlyList<IDescriptor> descriptors)
@@ -29,7 +33,7 @@ internal sealed class DescriptorTopologyBuilder : IDescriptorTopologyBuilder
                 Kind = descriptor.Kind,
                 Name = descriptor.Name,
                 State = descriptor.State,
-                ContractHash = string.IsNullOrEmpty(descriptor.ContractHash) ? null : descriptor.ContractHash,
+                ContractHash = _hashBuilder.Build(descriptor).ContractHash.Value,
                 SupersededById = descriptor.SupersededById,
                 OutgoingEdgeIndices = new HashSet<int>(),
                 IncomingEdgeIndices = new HashSet<int>()

@@ -286,11 +286,57 @@ public class DescriptorReviewReportBuilderTests
     public void Build_StableHashesMatchSource()
     {
         var draft = CreateDraft();
-        var stableHashes = new DescriptorStableHashes(
-            "contract-hash-abc",
-            "definition-hash-def",
-            RuntimeHash: "runtime-hash-ghi",
-            BindingHash: "binding-hash-jkl");
+        var stableHashes = new DescriptorStableHashes
+        {
+            ContractHash = new CanonicalHash
+            {
+                Value = "contract-hash-abc",
+                Algorithm = "SHA-256",
+                AlgorithmVersion = "sha256-pipe-delimited-v0",
+                ArtifactKind = "Descriptor",
+                DescriptorKind = "Schema",
+                Scope = "InternalFull",
+                Purpose = "Contract",
+                ContractVersion = "0",
+                CanonicalShapeVersion = "1"
+            },
+            DefinitionHash = new CanonicalHash
+            {
+                Value = "definition-hash-def",
+                Algorithm = "SHA-256",
+                AlgorithmVersion = "sha256-pipe-delimited-v0",
+                ArtifactKind = "Descriptor",
+                DescriptorKind = "Schema",
+                Scope = "InternalFull",
+                Purpose = "Definition",
+                ContractVersion = "0",
+                CanonicalShapeVersion = "1"
+            },
+            RuntimeHash = new CanonicalHash
+            {
+                Value = "runtime-hash-ghi",
+                Algorithm = "SHA-256",
+                AlgorithmVersion = "sha256-pipe-delimited-v0",
+                ArtifactKind = "ReviewResult",
+                DescriptorKind = null,
+                Scope = "InternalFull",
+                Purpose = "SourceBinding",
+                ContractVersion = "0",
+                CanonicalShapeVersion = "1"
+            },
+            BindingHash = new CanonicalHash
+            {
+                Value = "binding-hash-jkl",
+                Algorithm = "SHA-256",
+                AlgorithmVersion = "sha256-pipe-delimited-v0",
+                ArtifactKind = "ReviewResult",
+                DescriptorKind = null,
+                Scope = "InternalFull",
+                Purpose = "SourceBinding",
+                ContractVersion = "0",
+                CanonicalShapeVersion = "1"
+            }
+        };
         var reviewResult = CreateReviewResult() with { StableHashes = stableHashes };
         var request = CreateRequest(reviewResult, draft);
 
@@ -642,11 +688,57 @@ public class DescriptorReviewReportBuilderTests
             DescriptorIds = ["desc-pkg-1", "desc-pkg-2"],
         };
 
-        var stableHashes = new DescriptorStableHashes(
-            "contract-hash-abc",
-            "definition-hash-def",
-            "runtime-hash-ghi",
-            "binding-hash-jkl");
+        var stableHashes = new DescriptorStableHashes
+        {
+            ContractHash = new CanonicalHash
+            {
+                Value = "contract-hash-abc",
+                Algorithm = "SHA-256",
+                AlgorithmVersion = "sha256-pipe-delimited-v0",
+                ArtifactKind = "Descriptor",
+                DescriptorKind = "Schema",
+                Scope = "InternalFull",
+                Purpose = "Contract",
+                ContractVersion = "0",
+                CanonicalShapeVersion = "1"
+            },
+            DefinitionHash = new CanonicalHash
+            {
+                Value = "definition-hash-def",
+                Algorithm = "SHA-256",
+                AlgorithmVersion = "sha256-pipe-delimited-v0",
+                ArtifactKind = "Descriptor",
+                DescriptorKind = "Schema",
+                Scope = "InternalFull",
+                Purpose = "Definition",
+                ContractVersion = "0",
+                CanonicalShapeVersion = "1"
+            },
+            RuntimeHash = new CanonicalHash
+            {
+                Value = "runtime-hash-ghi",
+                Algorithm = "SHA-256",
+                AlgorithmVersion = "sha256-pipe-delimited-v0",
+                ArtifactKind = "ReviewResult",
+                DescriptorKind = null,
+                Scope = "InternalFull",
+                Purpose = "SourceBinding",
+                ContractVersion = "0",
+                CanonicalShapeVersion = "1"
+            },
+            BindingHash = new CanonicalHash
+            {
+                Value = "binding-hash-jkl",
+                Algorithm = "SHA-256",
+                AlgorithmVersion = "sha256-pipe-delimited-v0",
+                ArtifactKind = "ReviewResult",
+                DescriptorKind = null,
+                Scope = "InternalFull",
+                Purpose = "SourceBinding",
+                ContractVersion = "0",
+                CanonicalShapeVersion = "1"
+            }
+        };
 
         var diag = CreateDiagnostic("DIAG_001", DraftAbstractions.DescriptorDraftDiagnosticSeverity.Info, "Info diagnostic");
 

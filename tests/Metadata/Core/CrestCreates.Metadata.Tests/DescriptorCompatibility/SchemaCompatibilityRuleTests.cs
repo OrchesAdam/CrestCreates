@@ -21,7 +21,7 @@ public class SchemaCompatibilityRuleTests
         return new SchemaDescriptor
         {
             Id = id, Name = "TestSchema", Version = version,
-            State = DescriptorState.Active, ContractHash = "hash", DefinitionHash = "defhash",
+            State = DescriptorState.Active,
             Fields = fields?.Values.ToArray() ?? Array.Empty<SchemaFieldDescriptor>(),
             References = references ?? Array.Empty<VersionedDescriptorRef<SchemaDescriptor>>(),
             ChangeKind = changeKind

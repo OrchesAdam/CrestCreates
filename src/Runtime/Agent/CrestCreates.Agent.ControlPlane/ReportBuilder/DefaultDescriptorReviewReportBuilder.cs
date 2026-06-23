@@ -786,10 +786,10 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["HashCount"] = "2", // ContractHash + DefinitionHash
-                ["ContractHash"] = hashes.ContractHash,
-                ["DefinitionHash"] = hashes.DefinitionHash,
-                ["RuntimeHash"] = hashes.RuntimeHash ?? "",
-                ["BindingHash"] = hashes.BindingHash ?? "",
+                ["ContractHash"] = hashes.ContractHash.Value,
+                ["DefinitionHash"] = hashes.DefinitionHash.Value,
+                ["RuntimeHash"] = hashes.RuntimeHash?.Value ?? "",
+                ["BindingHash"] = hashes.BindingHash?.Value ?? "",
             };
             items.Add(CreateItem("stable_hashes_present", "stable_hashes_available",
                 "report.stable_hashes.present", DescriptorReviewSeverity.Info, parameters));

@@ -38,6 +38,7 @@ public abstract class AgentControlPlaneTestBase
     protected readonly Mock<IDescriptorPackageBuilder> PackageBuilderMock = new();
     protected readonly Mock<IDescriptorReviewReportBuilder> ReportBuilderMock = new();
     protected readonly Mock<IDescriptorReviewReportRenderer> ReportRendererMock = new();
+    protected readonly Mock<IDescriptorStableHashBuilder> HashBuilderMock = new();
     protected readonly InMemoryAgentToolInvocationAuditor InMemoryAuditor = new();
 
     protected const string TestTenantId = "tenant-001";
@@ -52,6 +53,7 @@ public abstract class AgentControlPlaneTestBase
     protected DefaultAgentControlPlaneToolService CreateService(
         InMemoryAgentToolInvocationAuditor? auditor = null)
     {
+        EnsureHashBuilderSetup();
         var options = AgentToolAuthorizationOptions.DevelopmentDefaults;
         var authzService = new DefaultAgentToolAuthorizationService(options);
         var actualAuditor = auditor ?? InMemoryAuditor;
@@ -70,6 +72,7 @@ public abstract class AgentControlPlaneTestBase
             TopologyBuilderMock.Object,
             PackageBuilderMock.Object,
             NullLogger<DefaultAgentControlPlaneToolService>.Instance,
+            HashBuilderMock.Object,
             ReportBuilderMock.Object,
             ReportRendererMock.Object,
             authorizationOptions: options);
@@ -83,6 +86,7 @@ public abstract class AgentControlPlaneTestBase
         AgentToolAuthorizationOptions options,
         InMemoryAgentToolInvocationAuditor? auditor = null)
     {
+        EnsureHashBuilderSetup();
         var authzService = new DefaultAgentToolAuthorizationService(options);
         var actualAuditor = auditor ?? InMemoryAuditor;
 
@@ -100,6 +104,7 @@ public abstract class AgentControlPlaneTestBase
             TopologyBuilderMock.Object,
             PackageBuilderMock.Object,
             NullLogger<DefaultAgentControlPlaneToolService>.Instance,
+            HashBuilderMock.Object,
             ReportBuilderMock.Object,
             ReportRendererMock.Object,
             authorizationOptions: options);
@@ -110,6 +115,7 @@ public abstract class AgentControlPlaneTestBase
     /// </summary>
     protected DefaultAgentControlPlaneToolService CreateServiceWithMocks()
     {
+        EnsureHashBuilderSetup();
         return new DefaultAgentControlPlaneToolService(
             ManifestProviderMock.Object,
             AuthorizationServiceMock.Object,
@@ -124,6 +130,7 @@ public abstract class AgentControlPlaneTestBase
             TopologyBuilderMock.Object,
             PackageBuilderMock.Object,
             NullLogger<DefaultAgentControlPlaneToolService>.Instance,
+            HashBuilderMock.Object,
             ReportBuilderMock.Object,
             ReportRendererMock.Object,
             authorizationOptions: AgentToolAuthorizationOptions.DevelopmentDefaults);
@@ -167,9 +174,7 @@ public abstract class AgentControlPlaneTestBase
             Id = id,
             Name = name,
             Kind = kind,
-            State = state,
-            ContractHash = "ch-001",
-            DefinitionHash = "dh-001"
+            State = state
         };
     }
 
@@ -271,6 +276,41 @@ public abstract class AgentControlPlaneTestBase
                 Evidence = new DescriptorPackageEvidence()
             });
     }
+
+    /// <summary>
+    /// Ensures HashBuilderMock returns valid <see cref="DescriptorStableHashes"/> for any descriptor.
+    /// Prevents <see cref="NullReferenceException"/> when the service accesses
+    /// <c>hashes.ContractHash.Value</c> or <c>hashes.DefinitionHash.Value</c>.
+    /// </summary>
+    private void EnsureHashBuilderSetup()
+    {
+        HashBuilderMock.Setup(x => x.Build(It.IsAny<IDescriptor>()))
+            .Returns(new DescriptorStableHashes
+            {
+                ContractHash = new CanonicalHash
+                {
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "sha256-canonical-json-v1",
+                    ArtifactKind = CanonicalHashArtifactNames.Descriptor,
+                    Scope = CanonicalHashScopeNames.InternalFull,
+                    Purpose = CanonicalHashPurposeNames.Contract,
+                    ContractVersion = "canonical-hash-v1",
+                    CanonicalShapeVersion = "test-contract-hash-v1",
+                    Value = "test-contract-hash"
+                },
+                DefinitionHash = new CanonicalHash
+                {
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "sha256-canonical-json-v1",
+                    ArtifactKind = CanonicalHashArtifactNames.Descriptor,
+                    Scope = CanonicalHashScopeNames.InternalFull,
+                    Purpose = CanonicalHashPurposeNames.Definition,
+                    ContractVersion = "canonical-hash-v1",
+                    CanonicalShapeVersion = "test-definition-hash-v1",
+                    Value = "test-definition-hash"
+                }
+            });
+    }
 }
 
 /// <summary>
@@ -283,8 +323,6 @@ public sealed class TestDescriptor : IDescriptor
     public string Name { get; init; } = "TestDescriptor";
     public DescriptorKind Kind { get; init; } = DescriptorKind.Event;
     public DescriptorState State { get; init; } = DescriptorState.Active;
-    public string ContractHash { get; init; } = "ch-001";
-    public string DefinitionHash { get; init; } = "dh-001";
     public string? SupersededById { get; init; }
 }
 
@@ -298,8 +336,6 @@ public sealed class TestVersionedDescriptor : IVersionedDescriptor
     public string Name { get; init; } = "TestVersionedDescriptor";
     public DescriptorKind Kind { get; init; } = DescriptorKind.Event;
     public DescriptorState State { get; init; } = DescriptorState.Active;
-    public string ContractHash { get; init; } = "ch-001";
-    public string DefinitionHash { get; init; } = "dh-001";
     public string? SupersededById { get; init; }
     public int Version { get; init; } = 1;
 

@@ -188,6 +188,7 @@ public class RuntimeBoundaryTests : AgentControlPlaneTestBase
             TopologyBuilderMock.Object,
             PackageBuilderMock.Object,
             NullLogger<DefaultAgentControlPlaneToolService>.Instance,
+            HashBuilderMock.Object,
             ReportBuilderMock.Object,
             ReportRendererMock.Object
         );

@@ -18,8 +18,6 @@ public sealed record EventDescriptorDraftPayload(
             Name = Descriptor.Name,
             State = Descriptor.State,
             SupersededById = Descriptor.SupersededById,
-            ContractHash = Descriptor.ContractHash,
-            DefinitionHash = Descriptor.DefinitionHash,
             Version = Descriptor.Version,
             PayloadSchema = Descriptor.PayloadSchema,
             Category = Descriptor.Category,

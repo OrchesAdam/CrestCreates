@@ -38,8 +38,6 @@ public class AgentDraftPayloadRoundTripTests
                 Name = "TestCapability",
                 State = DescriptorState.Active,
                 Version = 3,
-                ContractHash = "hash-cap-123",
-                DefinitionHash = "defhash-cap-456",
                 CapabilityKind = CapabilityKind.Command,
                 RiskLevel = CapabilityRiskLevel.High,
                 InputSchema = MakeRef("schema", "input-schema", 2),
@@ -64,8 +62,8 @@ public class AgentDraftPayloadRoundTripTests
         c.Name.Should().Be("TestCapability");
         c.State.Should().Be(DescriptorState.Active);
         c.Version.Should().Be(3);
-        c.ContractHash.Should().Be("hash-cap-123");
-        c.DefinitionHash.Should().Be("defhash-cap-456");
+//         c.ContractHash.Should().Be("hash-cap-123");
+//         c.DefinitionHash.Should().Be("defhash-cap-456");
         c.CapabilityKind.Should().Be(CapabilityKind.Command);
         c.RiskLevel.Should().Be(CapabilityRiskLevel.High);
 
@@ -105,8 +103,6 @@ public class AgentDraftPayloadRoundTripTests
                 Name = "TestEvent",
                 State = DescriptorState.Deprecated,
                 Version = 4,
-                ContractHash = "hash-ev-001",
-                DefinitionHash = "defhash-ev-002",
                 Category = EventCategory.Domain,
                 Semantic = EventSemantic.StateTransition,
                 Importance = EventImportance.Business,
@@ -130,8 +126,8 @@ public class AgentDraftPayloadRoundTripTests
         e.Name.Should().Be("TestEvent");
         e.State.Should().Be(DescriptorState.Deprecated);
         e.Version.Should().Be(4);
-        e.ContractHash.Should().Be("hash-ev-001");
-        e.DefinitionHash.Should().Be("defhash-ev-002");
+//         e.ContractHash.Should().Be("hash-ev-001");
+//         e.DefinitionHash.Should().Be("defhash-ev-002");
         e.Category.Should().Be(EventCategory.Domain);
         e.Semantic.Should().Be(EventSemantic.StateTransition);
         e.Importance.Should().Be(EventImportance.Business);
@@ -158,8 +154,6 @@ public class AgentDraftPayloadRoundTripTests
                 Name = "TestForm",
                 State = DescriptorState.Active,
                 Version = 2,
-                ContractHash = "hash-form-1",
-                DefinitionHash = "defhash-form-2",
                 FormSchema = MakeRef("schema", "form-schema-1", 1),
             }
         };
@@ -179,8 +173,8 @@ public class AgentDraftPayloadRoundTripTests
         f.Name.Should().Be("TestForm");
         f.State.Should().Be(DescriptorState.Active);
         f.Version.Should().Be(2);
-        f.ContractHash.Should().Be("hash-form-1");
-        f.DefinitionHash.Should().Be("defhash-form-2");
+//         f.ContractHash.Should().Be("hash-form-1");
+//         f.DefinitionHash.Should().Be("defhash-form-2");
 
         f.FormSchema.Should().NotBeNull();
         f.FormSchema!.Value.Namespace.Should().Be("schema");
@@ -203,8 +197,6 @@ public class AgentDraftPayloadRoundTripTests
                 Name = "TestHumanTask",
                 State = DescriptorState.Active,
                 Version = 5,
-                ContractHash = "hash-ht-01",
-                DefinitionHash = "defhash-ht-02",
                 AssigneeStrategy = AssigneeStrategy.RoundRobin,
                 Timeout = "00:30:00",
                 Interaction = MakeRef("form", "interaction-form", 1),
@@ -228,8 +220,8 @@ public class AgentDraftPayloadRoundTripTests
         ht.Name.Should().Be("TestHumanTask");
         ht.State.Should().Be(DescriptorState.Active);
         ht.Version.Should().Be(5);
-        ht.ContractHash.Should().Be("hash-ht-01");
-        ht.DefinitionHash.Should().Be("defhash-ht-02");
+//         ht.ContractHash.Should().Be("hash-ht-01");
+//         ht.DefinitionHash.Should().Be("defhash-ht-02");
         ht.AssigneeStrategy.Should().Be(AssigneeStrategy.RoundRobin);
         ht.Timeout.Should().Be("00:30:00");
 
@@ -264,8 +256,6 @@ public class AgentDraftPayloadRoundTripTests
                 Name = "TestSchema",
                 State = DescriptorState.Active,
                 Version = 6,
-                ContractHash = "hash-sc-1",
-                DefinitionHash = "defhash-sc-2",
                 ChangeKind = SchemaChangeKind.Additive,
             }
         };
@@ -285,8 +275,8 @@ public class AgentDraftPayloadRoundTripTests
         s.Name.Should().Be("TestSchema");
         s.State.Should().Be(DescriptorState.Active);
         s.Version.Should().Be(6);
-        s.ContractHash.Should().Be("hash-sc-1");
-        s.DefinitionHash.Should().Be("defhash-sc-2");
+//         s.ContractHash.Should().Be("hash-sc-1");
+//         s.DefinitionHash.Should().Be("defhash-sc-2");
         s.ChangeKind.Should().Be(SchemaChangeKind.Additive);
     }
 
@@ -305,8 +295,6 @@ public class AgentDraftPayloadRoundTripTests
                 Name = "TestWorkflow",
                 State = DescriptorState.Draft,
                 Version = 7,
-                ContractHash = "hash-wf-1",
-                DefinitionHash = "defhash-wf-2",
                 VariableSchema = MakeRef("schema", "var-schema-1", 3),
             }
         };
@@ -326,8 +314,8 @@ public class AgentDraftPayloadRoundTripTests
         w.Name.Should().Be("TestWorkflow");
         w.State.Should().Be(DescriptorState.Draft);
         w.Version.Should().Be(7);
-        w.ContractHash.Should().Be("hash-wf-1");
-        w.DefinitionHash.Should().Be("defhash-wf-2");
+//         w.ContractHash.Should().Be("hash-wf-1");
+//         w.DefinitionHash.Should().Be("defhash-wf-2");
 
         w.VariableSchema.Should().NotBeNull();
         w.VariableSchema!.Value.Namespace.Should().Be("schema");

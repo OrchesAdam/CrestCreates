@@ -1,6 +1,7 @@
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.CanonicalHashing;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -37,7 +38,8 @@ public class CapabilityContextAwareHandlerInvokerTests
             provider,
             registry,
             resolver,
-            provider.GetRequiredService<CapabilityPipelineBuilder>());
+            provider.GetRequiredService<CapabilityPipelineBuilder>(),
+            new DescriptorStableHashBuilder(new DefaultCanonicalHashComputer()));
 
         var result = await pipeline.ExecuteAsync("cert.approve", new Dictionary<string, object?>
         {

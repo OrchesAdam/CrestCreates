@@ -810,7 +810,6 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
                         Kind = d.Kind,
                         Name = d.Name,
                         State = d.State,
-                        ContractHash = d.ContractHash
                     })
                     .ToList().AsReadOnly();
 

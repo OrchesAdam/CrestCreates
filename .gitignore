@@ -429,3 +429,6 @@ CrestCreates.Generated/
 .opencode/
 .omo/
 nul
+
+# Deepwork progress files
+.slim/deepwork/

@@ -3,7 +3,7 @@ using CrestCreates.Schema.Abstractions;
 
 namespace CrestCreates.Metadata;
 
-public sealed class CapabilityDescriptor : IDescriptor, IVersionedDescriptor, IHasContractIdentity
+public sealed class CapabilityDescriptor : IDescriptor, IVersionedDescriptor
 {
     // === IDescriptor ===
     public string Namespace { get; init; } = "capability";
@@ -15,10 +15,6 @@ public sealed class CapabilityDescriptor : IDescriptor, IVersionedDescriptor, IH
 
     // === IVersionedDescriptor ===
     public int Version { get; init; }
-
-    // === IHasContractIdentity ===
-    public string ContractHash { get; init; } = string.Empty;
-    public string DefinitionHash { get; init; } = string.Empty;
 
     // === Catalog Properties ===
     public IReadOnlyList<string> Categories { get; init; } = Array.Empty<string>();

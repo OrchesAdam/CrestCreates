@@ -22,8 +22,6 @@ public sealed record CapabilityDescriptorDraftPayload(
             Name = Descriptor.Name,
             State = Descriptor.State,
             SupersededById = Descriptor.SupersededById,
-            ContractHash = Descriptor.ContractHash,
-            DefinitionHash = Descriptor.DefinitionHash,
             Version = Descriptor.Version,
             CapabilityKind = Descriptor.CapabilityKind,
             InputSchema = Descriptor.InputSchema,

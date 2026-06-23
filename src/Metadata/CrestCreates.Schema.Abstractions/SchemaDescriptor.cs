@@ -9,8 +9,6 @@ public sealed class SchemaDescriptor : IVersionedDescriptor
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
     public DescriptorState State { get; init; } = DescriptorState.Active;
-    public string ContractHash { get; init; } = string.Empty;
-    public string DefinitionHash { get; init; } = string.Empty;
     public string? SupersededById { get; init; }
 
     public int Version { get; init; }

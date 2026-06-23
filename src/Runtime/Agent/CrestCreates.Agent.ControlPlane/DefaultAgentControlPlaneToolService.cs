@@ -42,6 +42,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly IDescriptorRelationshipProvider _relationshipProvider;
     private readonly IDescriptorTopologyBuilder _topologyBuilder;
     private readonly IDescriptorPackageBuilder _packageBuilder;
+    private readonly IDescriptorStableHashBuilder _hashBuilder;
     private readonly ILogger<DefaultAgentControlPlaneToolService> _logger;
     private readonly AgentControlPlaneResourceResolver _resourceResolver;
     private readonly AgentTopologyVisibilityProjector _topologyProjector;
@@ -75,6 +76,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         IDescriptorTopologyBuilder topologyBuilder,
         IDescriptorPackageBuilder packageBuilder,
         ILogger<DefaultAgentControlPlaneToolService> logger,
+        IDescriptorStableHashBuilder hashBuilder,
         IDescriptorReviewReportBuilder reportBuilder,
         IDescriptorReviewReportRenderer reportRenderer,
         AgentToolAuthorizationOptions? authorizationOptions = null)
@@ -91,6 +93,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         _relationshipProvider = relationshipProvider;
         _topologyBuilder = topologyBuilder;
         _packageBuilder = packageBuilder;
+        _hashBuilder = hashBuilder;
         _logger = logger;
         _reportBuilder = reportBuilder;
         _reportRenderer = reportRenderer;
@@ -504,14 +507,15 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 return denyResult;
 
             // Build result from snapshot — no second catalog read
+            var hashes = _hashBuilder.Build(snapshot.Descriptor);
             var info = new DescriptorInfo
             {
                 Ref = snapshot.Ref,
                 Kind = snapshot.Descriptor.Kind,
                 Name = snapshot.Descriptor.Name,
                 State = snapshot.Descriptor.State,
-                ContractHash = snapshot.Descriptor.ContractHash,
-                DefinitionHash = snapshot.Descriptor.DefinitionHash
+                ContractHash = hashes.ContractHash.Value,
+                DefinitionHash = hashes.DefinitionHash.Value
             };
 
             var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
@@ -571,14 +575,15 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var refWithVersion = d is IVersionedDescriptor vd
                     ? new DescriptorRef(d.Namespace, d.Id, vd.Version)
                     : new DescriptorRef(d.Namespace, d.Id);
+                var hashes = _hashBuilder.Build(d);
                 return new DescriptorInfo
                 {
                     Ref = refWithVersion,
                     Kind = d.Kind,
                     Name = d.Name,
                     State = d.State,
-                    ContractHash = d.ContractHash,
-                    DefinitionHash = d.DefinitionHash
+                    ContractHash = hashes.ContractHash.Value,
+                    DefinitionHash = hashes.DefinitionHash.Value
                 };
             }).ToList().AsReadOnly();
 

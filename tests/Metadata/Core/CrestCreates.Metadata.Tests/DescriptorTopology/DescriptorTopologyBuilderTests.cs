@@ -1,6 +1,9 @@
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
+using CrestCreates.Metadata.CanonicalHashing;
+using CrestCreates.Form.Abstractions;
+using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Moq;
 using Xunit;
@@ -9,11 +12,18 @@ namespace CrestCreates.Metadata.Tests.DescriptorTopology;
 
 public class DescriptorTopologyBuilderTests
 {
+    private readonly ICanonicalHashComputer _hashComputer = new DefaultCanonicalHashComputer();
+    private readonly IDescriptorStableHashBuilder _hashBuilder;
+
+    public DescriptorTopologyBuilderTests()
+    {
+        _hashBuilder = new DescriptorStableHashBuilder(_hashComputer);
+    }
     [Fact]
     public void Build_Empty_Input_Produces_Empty_Snapshot()
     {
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
 
         var snapshot = builder.Build(Array.Empty<IDescriptor>());
 
@@ -29,10 +39,10 @@ public class DescriptorTopologyBuilderTests
     {
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
         mockProvider.Setup(p => p.GetRelationships(It.IsAny<IDescriptor>())).Returns(Array.Empty<DescriptorRelationship>());
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
 
-        var schemaDesc = CreateMockDescriptor("schema", "User", "User Schema", DescriptorKind.Schema);
-        var capDesc = CreateMockDescriptor("capability", "CreateUser", "Create User", DescriptorKind.Capability);
+        var schemaDesc = CreateConcreteDescriptor("schema", "User", "User Schema", DescriptorKind.Schema);
+        var capDesc = CreateConcreteDescriptor("capability", "CreateUser", "Create User", DescriptorKind.Capability);
 
         var snapshot = builder.Build(new[] { schemaDesc, capDesc });
 
@@ -46,10 +56,11 @@ public class DescriptorTopologyBuilderTests
     {
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
         mockProvider.Setup(p => p.GetRelationships(It.IsAny<IDescriptor>())).Returns(Array.Empty<DescriptorRelationship>());
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
 
-        var desc = CreateMockDescriptor("schema", "User", "User Schema", DescriptorKind.Schema,
-            state: DescriptorState.Active, contractHash: "abc123", supersededById: null);
+        var desc = CreateConcreteDescriptor("schema", "User", "User Schema", DescriptorKind.Schema,
+            state: DescriptorState.Active, supersededById: null);
+        var expectedHashes = _hashBuilder.Build(desc);
 
         var snapshot = builder.Build(new[] { desc });
 
@@ -58,7 +69,7 @@ public class DescriptorTopologyBuilderTests
         node!.Kind.Should().Be(DescriptorKind.Schema);
         node.Name.Should().Be("User Schema");
         node.State.Should().Be(DescriptorState.Active);
-        node.ContractHash.Should().Be("abc123");
+        node.ContractHash.Should().Be(expectedHashes.ContractHash.Value);
         node.SupersededById.Should().BeNull();
         node.OutgoingEdgeIndices.Should().BeEmpty();
         node.IncomingEdgeIndices.Should().BeEmpty();
@@ -76,8 +87,8 @@ public class DescriptorTopologyBuilderTests
         };
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
-        var schemaDesc = CreateMockDescriptor("schema", "User", "User Schema", DescriptorKind.Schema);
-        var formDesc = CreateMockDescriptor("form", "UserForm", "User Form", DescriptorKind.Form);
+        var schemaDesc = CreateConcreteDescriptor("schema", "User", "User Schema", DescriptorKind.Schema);
+        var formDesc = CreateConcreteDescriptor("form", "UserForm", "User Form", DescriptorKind.Form);
 
         mockProvider
             .Setup(p => p.GetRelationships(formDesc))
@@ -86,7 +97,7 @@ public class DescriptorTopologyBuilderTests
             .Setup(p => p.GetRelationships(schemaDesc))
             .Returns(Array.Empty<DescriptorRelationship>());
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { schemaDesc, formDesc });
 
         snapshot.EdgeCount.Should().Be(1);
@@ -111,13 +122,13 @@ public class DescriptorTopologyBuilderTests
         };
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
-        var schemaDesc = CreateMockDescriptor("schema", "User", "User Schema", DescriptorKind.Schema);
-        var formDesc = CreateMockDescriptor("form", "UserForm", "User Form", DescriptorKind.Form);
+        var schemaDesc = CreateConcreteDescriptor("schema", "User", "User Schema", DescriptorKind.Schema);
+        var formDesc = CreateConcreteDescriptor("form", "UserForm", "User Form", DescriptorKind.Form);
 
         mockProvider.Setup(p => p.GetRelationships(formDesc)).Returns(relationships);
         mockProvider.Setup(p => p.GetRelationships(schemaDesc)).Returns(Array.Empty<DescriptorRelationship>());
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { schemaDesc, formDesc });
 
         var formNode = snapshot.FindNode(formRef)!;
@@ -141,10 +152,10 @@ public class DescriptorTopologyBuilderTests
         };
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
-        var formDesc = CreateMockDescriptor("form", "UserForm", "User Form", DescriptorKind.Form);
+        var formDesc = CreateConcreteDescriptor("form", "UserForm", "User Form", DescriptorKind.Form);
         mockProvider.Setup(p => p.GetRelationships(formDesc)).Returns(relationships);
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { formDesc });
 
         snapshot.EdgeCount.Should().Be(1);
@@ -155,9 +166,9 @@ public class DescriptorTopologyBuilderTests
     public void Build_ConsumerIndex_NullVersion_Returns_All()
     {
         var target = new DescriptorRef("schema", "User", null);
-        var c1 = CreateMockDescriptor("capability", "CreateUser", "CreateUser", DescriptorKind.Capability);
-        var c2 = CreateMockDescriptor("form", "UserForm", "UserForm", DescriptorKind.Form);
-        var targetDesc = CreateMockDescriptor("schema", "User", "User", DescriptorKind.Schema);
+        var c1 = CreateConcreteDescriptor("capability", "CreateUser", "CreateUser", DescriptorKind.Capability);
+        var c2 = CreateConcreteDescriptor("form", "UserForm", "UserForm", DescriptorKind.Form);
+        var targetDesc = CreateConcreteDescriptor("schema", "User", "User", DescriptorKind.Schema);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
         mockProvider.Setup(p => p.GetRelationships(c1)).Returns(new DescriptorRelationship[]
@@ -172,7 +183,7 @@ public class DescriptorTopologyBuilderTests
         });
         mockProvider.Setup(p => p.GetRelationships(targetDesc)).Returns(Array.Empty<DescriptorRelationship>());
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { targetDesc, c1, c2 });
 
         var consumers = snapshot.GetConsumers("schema", "User");
@@ -184,10 +195,10 @@ public class DescriptorTopologyBuilderTests
     public void Build_ConsumerIndex_ExactVersion_Returns_Exact_Plus_Unpinned()
     {
         var targetV2 = new DescriptorRef("schema", "User", 2);
-        var cv1 = CreateMockDescriptor("capability", "ExactV1", "EV1", DescriptorKind.Capability);
-        var cv2 = CreateMockDescriptor("capability", "ExactV2", "EV2", DescriptorKind.Capability);
-        var cUnpinned = CreateMockDescriptor("form", "Unpinned", "UP", DescriptorKind.Form);
-        var targetDesc = CreateMockDescriptor("schema", "User", "User", DescriptorKind.Schema);
+        var cv1 = CreateConcreteDescriptor("capability", "ExactV1", "EV1", DescriptorKind.Capability);
+        var cv2 = CreateConcreteDescriptor("capability", "ExactV2", "EV2", DescriptorKind.Capability);
+        var cUnpinned = CreateConcreteDescriptor("form", "Unpinned", "UP", DescriptorKind.Form);
+        var targetDesc = CreateConcreteDescriptor("schema", "User", "User", DescriptorKind.Schema);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
         mockProvider.Setup(p => p.GetRelationships(cv1)).Returns(new DescriptorRelationship[]
@@ -204,7 +215,7 @@ public class DescriptorTopologyBuilderTests
         });
         mockProvider.Setup(p => p.GetRelationships(targetDesc)).Returns(Array.Empty<DescriptorRelationship>());
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { targetDesc, cv1, cv2, cUnpinned });
 
         var consumersV2 = snapshot.GetConsumers("schema", "User", version: 2);
@@ -215,31 +226,45 @@ public class DescriptorTopologyBuilderTests
     [Fact]
     public void Build_ConsumerIndex_No_Match_Returns_Empty()
     {
-        var desc = CreateMockDescriptor("schema", "User", "User", DescriptorKind.Schema);
+        var desc = CreateConcreteDescriptor("schema", "User", "User", DescriptorKind.Schema);
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
         mockProvider.Setup(p => p.GetRelationships(desc)).Returns(Array.Empty<DescriptorRelationship>());
 
-        var builder = new DescriptorTopologyBuilder(mockProvider.Object);
+        var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { desc });
 
         snapshot.GetConsumers("schema", "NoSuch").Should().BeEmpty();
     }
 
-    // Helper
-    private static IDescriptor CreateMockDescriptor(
+    // Helper: create concrete descriptors instead of mocks for SG-generated hash dispatcher
+    private static IDescriptor CreateConcreteDescriptor(
         string ns, string id, string name, DescriptorKind kind,
         DescriptorState state = DescriptorState.Active,
-        string contractHash = "hash",
         string? supersededById = null)
     {
-        var mock = new Mock<IDescriptor>();
-        mock.Setup(d => d.Namespace).Returns(ns);
-        mock.Setup(d => d.Id).Returns(id);
-        mock.Setup(d => d.Name).Returns(name);
-        mock.Setup(d => d.Kind).Returns(kind);
-        mock.Setup(d => d.State).Returns(state);
-        mock.Setup(d => d.ContractHash).Returns(contractHash);
-        mock.Setup(d => d.SupersededById).Returns(supersededById);
-        return mock.Object;
+        return kind switch
+        {
+            DescriptorKind.Schema => new SchemaDescriptor
+            {
+                Id = id, Name = name, Version = 0,
+                State = state, SupersededById = supersededById,
+                ChangeKind = SchemaChangeKind.Additive,
+                Fields = [], References = [], ValidationRules = []
+            },
+            DescriptorKind.Capability => new CapabilityDescriptor
+            {
+                Id = id, Name = name, Version = 0,
+                State = state, SupersededById = supersededById,
+                CapabilityKind = CapabilityKind.Command
+            },
+            DescriptorKind.Form => new FormDescriptor
+            {
+                Id = id, Name = name, Version = 0,
+                State = state, SupersededById = supersededById,
+                Schema = default,
+                Fields = [], LayoutColumns = null
+            },
+            _ => throw new ArgumentException($"Unsupported descriptor kind: {kind}", nameof(kind))
+        };
     }
 }

@@ -20,7 +20,7 @@ public class FormCompatibilityRuleTests
         return new FormDescriptor
         {
             Id = id, Name = "TestForm", Version = version,
-            State = DescriptorState.Active, ContractHash = "hash", DefinitionHash = "defhash",
+            State = DescriptorState.Active,
             Schema = new VersionedDescriptorRef<SchemaDescriptor> { Id = schemaId, Version = schemaVersion },
             Fields = fields?.Values.ToArray() ?? Array.Empty<FormFieldDescriptor>()
         };

@@ -17,8 +17,6 @@ public sealed record FormDescriptorDraftPayload(
             Name = Descriptor.Name,
             State = Descriptor.State,
             SupersededById = Descriptor.SupersededById,
-            ContractHash = Descriptor.ContractHash,
-            DefinitionHash = Descriptor.DefinitionHash,
             Version = Descriptor.Version,
             Schema = Descriptor.Schema,
             Fields = Descriptor.Fields.Select(CloneField).ToArray(),
