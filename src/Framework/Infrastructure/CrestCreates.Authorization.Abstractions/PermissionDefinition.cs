@@ -2,26 +2,6 @@ using System.Collections.Generic;
 
 namespace CrestCreates.Authorization.Abstractions;
 
-public interface IPermissionDefinitionProvider
-{
-    void Define(IPermissionDefinitionContext context);
-}
-
-public interface IPermissionDefinitionContext
-{
-    PermissionGroupDefinition AddGroup(string name, string? displayName = null);
-    PermissionGroupDefinition? GetGroupOrNull(string name);
-    void RemoveGroup(string name);
-}
-
-public interface IPermissionDefinitionManager
-{
-    PermissionDefinition Get(string name);
-    PermissionDefinition? GetOrNull(string name);
-    IEnumerable<PermissionDefinition> GetPermissions();
-    IEnumerable<PermissionGroupDefinition> GetGroups();
-}
-
 public class PermissionDefinition
 {
     public string Name { get; }
@@ -78,48 +58,6 @@ public class PermissionDefinition
             foreach (var descendant in child.GetAllDescendants())
             {
                 yield return descendant;
-            }
-        }
-    }
-}
-
-public class PermissionGroupDefinition
-{
-    public string Name { get; }
-    public string DisplayName { get; set; }
-    public List<PermissionDefinition> Permissions { get; }
-
-    public PermissionGroupDefinition(string name, string? displayName = null)
-    {
-        Name = name ?? throw new System.ArgumentNullException(nameof(name));
-        DisplayName = displayName ?? name;
-        Permissions = new List<PermissionDefinition>();
-    }
-
-    public PermissionDefinition AddPermission(
-        string name,
-        string? displayName = null,
-        string? description = null,
-        bool isEnabledByDefault = false)
-    {
-        var permission = new PermissionDefinition(name, displayName, description, isEnabledByDefault)
-        {
-            GroupName = this.Name
-        };
-
-        Permissions.Add(permission);
-        return permission;
-    }
-
-    public IEnumerable<PermissionDefinition> GetAllPermissions()
-    {
-        foreach (var permission in Permissions)
-        {
-            yield return permission;
-
-            foreach (var child in permission.GetAllDescendants())
-            {
-                yield return child;
             }
         }
     }

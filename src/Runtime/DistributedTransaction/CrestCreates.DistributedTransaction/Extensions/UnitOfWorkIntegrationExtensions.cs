@@ -17,11 +17,6 @@ namespace CrestCreates.DistributedTransaction.Extensions
         }
     }
 
-    public interface ITransactionParticipantRegistry
-    {
-        void AddParticipant(ITransactionParticipant participant);
-    }
-
     internal class UnitOfWorkTransactionParticipant : ITransactionParticipant
     {
         private readonly IUnitOfWork _unitOfWork;

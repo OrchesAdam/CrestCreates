@@ -35,26 +35,3 @@ public interface ISchedulerService
     Task<bool> ExistsAsync(JobId jobId);
     Task<IEnumerable<JobInfo>> GetAllAsync(JobStatus status = JobStatus.All);
 }
-
-public enum JobStatus { All, Running, Paused, Scheduled, Completed, Failed }
-
-public record JobInfo(
-    JobId Id,
-    Type JobType,
-    Type? ArgType,
-    string? CronExpression,
-    DateTimeOffset? NextFireTime,
-    JobStatus Status,
-    int? ExecutionCount
-);
-
-public class JobMetadata
-{
-    public required string Name { get; init; }
-    public string Group { get; init; } = "Default";
-    public string? CronExpression { get; init; }
-    public TimeSpan? Timeout { get; init; }
-    public JobRetryOptions? Retry { get; init; }
-    public string? Description { get; init; }
-    public bool Enabled { get; init; } = true;
-}

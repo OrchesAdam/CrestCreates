@@ -9,14 +9,6 @@ using Microsoft.Extensions.Options;
 
 namespace CrestCreates.Application.Tenants;
 
-public interface ITenantDeletionManager
-{
-    Task<Tenant> ArchiveAsync(string name, CancellationToken cancellationToken = default);
-    Task<Tenant> RestoreAsync(string name, CancellationToken cancellationToken = default);
-    Task<Tenant> SoftDeleteAsync(string name, CancellationToken cancellationToken = default);
-    Task DeleteAsync(string name, CancellationToken cancellationToken = default);
-}
-
 public class TenantDeletionManager : ITenantDeletionManager
 {
     private readonly ITenantRepository _tenantRepository;

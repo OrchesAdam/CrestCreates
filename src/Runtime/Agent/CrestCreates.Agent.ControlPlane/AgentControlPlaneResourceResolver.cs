@@ -6,45 +6,6 @@ using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 namespace CrestCreates.Agent.ControlPlane;
 
 /// <summary>
-/// Immutable snapshot of a resolved descriptor resource.
-/// </summary>
-internal sealed record DescriptorResourceSnapshot(IDescriptor Descriptor, DescriptorRef Ref);
-
-/// <summary>
-/// Immutable snapshot of a resolved draft resource.
-/// </summary>
-internal sealed record DraftResourceSnapshot(Draft Draft);
-
-/// <summary>
-/// Status of a resource resolution attempt.
-/// </summary>
-internal enum ResourceResolutionStatus
-{
-    /// <summary>Resource was found and snapshot is available.</summary>
-    Resolved,
-    /// <summary>Resource was not found within the invocation tenant.</summary>
-    NotFound,
-    /// <summary>Multiple candidates found for an unpinned reference — caller must specify a version.</summary>
-    Ambiguous
-}
-
-/// <summary>
-/// Result of a resource resolution attempt carrying either a snapshot or a status.
-/// </summary>
-internal sealed record ResourceResolution<T>(ResourceResolutionStatus Status, T? Snapshot)
-    where T : class
-{
-    /// <summary>Creates a successful resolution with the given snapshot.</summary>
-    public static ResourceResolution<T> Found(T snapshot) => new(ResourceResolutionStatus.Resolved, snapshot);
-
-    /// <summary>Creates a not-found resolution.</summary>
-    public static ResourceResolution<T> Missing() => new(ResourceResolutionStatus.NotFound, null);
-
-    /// <summary>Creates an ambiguous resolution (multiple candidates for an unpinned ref).</summary>
-    public static ResourceResolution<T> AmbiguousResult() => new(ResourceResolutionStatus.Ambiguous, null);
-}
-
-/// <summary>
 /// Tenant-safe resource resolver that produces immutable snapshots for authorization and execution.
 /// Resolves each resource once; the snapshot is reused for both kind visibility evaluation
 /// and business execution, preventing TOCTOU inconsistencies.
