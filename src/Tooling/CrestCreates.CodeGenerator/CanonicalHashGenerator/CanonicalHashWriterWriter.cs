@@ -275,7 +275,16 @@ internal sealed class CanonicalHashWriterWriter
         WriteScalarValue(sb, type, propName, access);
     }
 
-    private static void WriteScalarValue(StringBuilder sb, ITypeSymbol type, string propName, string access)
+    private enum ScalarWriteMode { Named, Inline }
+
+    /// <summary>
+    /// Unified scalar value writer covering all supported canonical hash scalar types.
+    /// Used by WriteScalarValue (named property), WriteScalarValueForDictionaryValue (named),
+    /// and WriteScalarValueInline (value-only). No .ToString() fallback — unsupported types
+    /// emit #error CCHASH028.
+    /// </summary>
+    private static void WriteScalarValueCore(StringBuilder sb, ITypeSymbol type, string? propName,
+        string access, string indent, ScalarWriteMode mode)
     {
         var specialType = type.SpecialType;
         var typeName = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
@@ -283,46 +292,82 @@ internal sealed class CanonicalHashWriterWriter
         switch (specialType)
         {
             case SpecialType.System_String:
-                sb.AppendLine($"        w.WriteString(\"{propName}\", {access});");
+                if (mode == ScalarWriteMode.Named)
+                    sb.AppendLine($"{indent}w.WriteString(\"{propName}\", {access});");
+                else
+                    sb.AppendLine($"{indent}w.WriteStringValue({access});");
                 break;
             case SpecialType.System_Int32:
             case SpecialType.System_Int64:
-                sb.AppendLine($"        w.WriteNumber(\"{propName}\", {access});");
+                if (mode == ScalarWriteMode.Named)
+                    sb.AppendLine($"{indent}w.WriteNumber(\"{propName}\", {access});");
+                else
+                    sb.AppendLine($"{indent}w.WriteNumberValue({access});");
                 break;
             case SpecialType.System_Boolean:
-                sb.AppendLine($"        w.WriteBoolean(\"{propName}\", {access});");
+                if (mode == ScalarWriteMode.Named)
+                    sb.AppendLine($"{indent}w.WriteBoolean(\"{propName}\", {access});");
+                else
+                    sb.AppendLine($"{indent}w.WriteBooleanValue({access});");
                 break;
             case SpecialType.System_Double:
-                sb.AppendLine($"        w.WriteNumber(\"{propName}\", {access});");
-                break;
             case SpecialType.System_Single:
-                sb.AppendLine($"        w.WriteNumber(\"{propName}\", {access});");
-                break;
             case SpecialType.System_Decimal:
-                sb.AppendLine($"        w.WriteNumber(\"{propName}\", {access});");
+                if (mode == ScalarWriteMode.Named)
+                    sb.AppendLine($"{indent}w.WriteNumber(\"{propName}\", {access});");
+                else
+                    sb.AppendLine($"{indent}w.WriteNumberValue({access});");
                 break;
             case SpecialType.System_DateTime:
-                sb.AppendLine($"        w.WriteString(\"{propName}\", {access}.ToString(\"O\"));");
+                if (mode == ScalarWriteMode.Named)
+                    sb.AppendLine($"{indent}w.WriteString(\"{propName}\", {access}.ToString(\"O\"));");
+                else
+                    sb.AppendLine($"{indent}w.WriteStringValue({access}.ToString(\"O\"));");
                 break;
             default:
                 // Enum — use compile-time switch expression for determinism
                 if (type.TypeKind == TypeKind.Enum)
                 {
-                    WriteEnumSwitchExpression(sb, type, propName, access, "        ");
+                    WriteEnumSwitchExpression(sb, type, propName, access, indent);
                 }
                 // TimeSpan — deterministic "c" format (constant format, culture-invariant)
                 else if (typeName == "global::System.TimeSpan")
                 {
-                    sb.AppendLine($"        w.WriteString(\"{propName}\", {access}.ToString(\"c\"));");
+                    if (mode == ScalarWriteMode.Named)
+                        sb.AppendLine($"{indent}w.WriteString(\"{propName}\", {access}.ToString(\"c\"));");
+                    else
+                        sb.AppendLine($"{indent}w.WriteStringValue({access}.ToString(\"c\"));");
                 }
                 else
                 {
                     // Unsupported scalar type — should never reach here if CCHASH028 is enforced
                     // during model building. Emit a compile error comment as safety net.
-                    sb.AppendLine($"        #error CCHASH028: Unsupported scalar type '{typeName}' for canonical hash field '{propName}'. Use ElementProfile or ValueProfile.");
+                    sb.AppendLine($"{indent}#error CCHASH028: Unsupported scalar type '{typeName}' for canonical hash field '{propName}'. Use ElementProfile or ValueProfile.");
                 }
                 break;
         }
+    }
+
+    private static void WriteScalarValue(StringBuilder sb, ITypeSymbol type, string propName, string access)
+    {
+        WriteScalarValueCore(sb, type, propName, access, "        ", ScalarWriteMode.Named);
+    }
+
+    private static void WriteScalarValueForDictionaryValue(StringBuilder sb, ITypeSymbol valueType,
+        string jsonPropName, string access)
+    {
+        WriteScalarValueCore(sb, valueType, jsonPropName, access, "                ", ScalarWriteMode.Named);
+    }
+
+    private static void WriteScalarValueInline(StringBuilder sb, ITypeSymbol? elementType, string accessExpr)
+    {
+        if (elementType is null)
+        {
+            sb.AppendLine($"                #error CCHASH028: Cannot generate canonical hash for collection element with unknown type. Use ElementProfile or ValueProfile.");
+            return;
+        }
+
+        WriteScalarValueCore(sb, elementType, null, accessExpr, "                ", ScalarWriteMode.Inline);
     }
 
     private static void WriteDictionaryField(StringBuilder sb, ProfileFieldModel field, string propName, string access, string purpose)
@@ -400,30 +445,6 @@ internal sealed class CanonicalHashWriterWriter
         }
 
         sb.AppendLine("            w.WriteEndArray();");
-    }
-
-    private static void WriteScalarValueForDictionaryValue(StringBuilder sb, ITypeSymbol valueType,
-        string jsonPropName, string access)
-    {
-        switch (valueType.SpecialType)
-        {
-            case SpecialType.System_String:
-                sb.AppendLine($"                w.WriteString(\"{jsonPropName}\", {access});");
-                break;
-            case SpecialType.System_Int32:
-            case SpecialType.System_Int64:
-                sb.AppendLine($"                w.WriteNumber(\"{jsonPropName}\", {access});");
-                break;
-            case SpecialType.System_Boolean:
-                sb.AppendLine($"                w.WriteBoolean(\"{jsonPropName}\", {access});");
-                break;
-            default:
-                if (valueType.TypeKind == TypeKind.Enum)
-                    WriteEnumSwitchExpression(sb, valueType, jsonPropName, access, "                ");
-                else
-                    sb.AppendLine($"                w.WriteString(\"{jsonPropName}\", {access}.ToString());");
-                break;
-        }
     }
 
     private static void WriteCollectionWithProfileField(StringBuilder sb, ProfileFieldModel field,
@@ -598,35 +619,6 @@ internal sealed class CanonicalHashWriterWriter
         }
     }
 
-    private static void WriteScalarValueInline(StringBuilder sb, ITypeSymbol? elementType, string accessExpr)
-    {
-        if (elementType is null)
-        {
-            sb.AppendLine($"                w.WriteStringValue({accessExpr}.ToString());");
-            return;
-        }
-
-        switch (elementType.SpecialType)
-        {
-            case SpecialType.System_String:
-                sb.AppendLine($"                w.WriteStringValue({accessExpr});");
-                break;
-            case SpecialType.System_Int32:
-            case SpecialType.System_Int64:
-                sb.AppendLine($"                w.WriteNumberValue({accessExpr});");
-                break;
-            case SpecialType.System_Boolean:
-                sb.AppendLine($"                w.WriteBooleanValue({accessExpr});");
-                break;
-            default:
-                if (elementType.TypeKind == TypeKind.Enum)
-                    WriteEnumSwitchExpression(sb, elementType, null, accessExpr, "                ");
-                else
-                    sb.AppendLine($"                w.WriteStringValue({accessExpr}.ToString());");
-                break;
-        }
-    }
-
     /// <summary>
     /// Generates a compile-time switch expression for an enum that maps each member
     /// to its canonical name string. This replaces .ToString() which is brittle
@@ -649,11 +641,9 @@ internal sealed class CanonicalHashWriterWriter
 
         if (members.Count == 0)
         {
-            // Degenerate enum — fall back to .ToString()
-            if (propName is not null)
-                sb.AppendLine($"{indent}w.WriteString(\"{propName}\", {accessExpr}.ToString());");
-            else
-                sb.AppendLine($"{indent}w.WriteStringValue({accessExpr}.ToString());");
+            // Degenerate enum with no named members — should never occur in practice.
+            // Emit #error as safety net instead of .ToString() (culture-sensitive, non-deterministic).
+            sb.AppendLine($"{indent}#error CCHASH028: Enum type '{enumType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}' has no named members. Canonical hash cannot be generated.");
             return;
         }
 
