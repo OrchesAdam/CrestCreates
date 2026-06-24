@@ -8,5 +8,6 @@ public enum DescriptorChangeKind
     Removed,
     Activated,
     StateChanged,
-    ContractHashChanged
+    ContractHashChanged,
+    DefinitionHashChanged
 }

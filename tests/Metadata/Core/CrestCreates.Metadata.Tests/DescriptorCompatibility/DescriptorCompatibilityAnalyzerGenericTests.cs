@@ -4,6 +4,7 @@ using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 using CrestCreates.Metadata.DescriptorCompatibility;
+using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 
 namespace CrestCreates.Metadata.Tests.DescriptorCompatibility;
@@ -261,5 +262,59 @@ public class DescriptorCompatibilityAnalyzerGenericTests
 
         result.Findings.Should().Contain(f => f.Level == DescriptorCompatibilityLevel.Breaking);
         result.HasBreakingChanges.Should().BeTrue();
+    }
+
+    [Fact]
+    public void GenericDefinitionHashChanged_ReturnsRisky()
+    {
+        var change = MakeChange(DescriptorChangeKind.DefinitionHashChanged,
+            beforeHash: "h1", afterHash: "h1");
+        var cs = new DescriptorChangeSet { Changes = new[] { change } };
+        var report = MakeImpactReport(cs);
+
+        var result = Analyzer.Analyze(Array.Empty<IDescriptor>(), Array.Empty<IDescriptor>(), cs, report);
+
+        result.Findings.Should().Contain(f =>
+            f.RuleId == "COMPAT_GENERIC_DEFINITION_CHANGED" && f.Level == DescriptorCompatibilityLevel.Risky);
+    }
+
+    [Fact]
+    public void SchemaSpecificDefinitionHashChanged_DoesNotReceiveConflictingGenericFinding()
+    {
+        // Use SchemaCompatibilityRule via the analyzer — schema descriptor + DefinitionHashChanged
+        // Schema rule should fully classify the change; generic rule must not emit a second Risky.
+        var schemaBefore = new SchemaDescriptor
+        {
+            Id = "S1", Name = "TestSchema", Version = 1,
+            State = DescriptorState.Active,
+            Fields = new[] { new SchemaFieldDescriptor { Name = "test", FieldType = "string" } }
+        };
+        var schemaAfter = new SchemaDescriptor
+        {
+            Id = "S1", Name = "TestSchema", Version = 1,
+            State = DescriptorState.Active,
+            Fields = new[] { new SchemaFieldDescriptor { Name = "test", FieldType = "string" } }
+        };
+
+        var change = new DescriptorChange
+        {
+            Ref = new DescriptorRef("schema", "S1", 1),
+            Kind = DescriptorChangeKind.DefinitionHashChanged,
+            BeforeContractHash = "h1",
+            AfterContractHash = "h1",
+            BeforeDefinitionHash = "d1",
+            AfterDefinitionHash = "d2"
+        };
+        var cs = new DescriptorChangeSet { Changes = new[] { change } };
+        var report = MakeImpactReport(cs);
+
+        var result = Analyzer.Analyze(
+            new IDescriptor[] { schemaBefore },
+            new IDescriptor[] { schemaAfter },
+            cs, report);
+
+        // Should not contain a generic definition-changed finding
+        result.Findings.Should().NotContain(f =>
+            f.RuleId == "COMPAT_GENERIC_DEFINITION_CHANGED");
     }
 }

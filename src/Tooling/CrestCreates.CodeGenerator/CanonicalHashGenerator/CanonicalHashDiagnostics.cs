@@ -109,6 +109,110 @@ internal static class CanonicalHashDiagnostics
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    public static readonly DiagnosticDescriptor UnionProfileMissingRequiredProps = new(
+        id: "CCHASH015",
+        title: "Union profile missing TargetType or Discriminator",
+        messageFormat: "CanonicalHashUnionProfile requires TargetType and Discriminator.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor UnionCaseTypeNotAssignable = new(
+        id: "CCHASH016",
+        title: "Union case type not assignable to union target type",
+        messageFormat: "Union case type '{0}' is not assignable to union target type '{1}'.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor UnionCaseMissingValueProfile = new(
+        id: "CCHASH017",
+        title: "Union case missing ValueProfile",
+        messageFormat: "Union case '{0}' is missing ValueProfile.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor DuplicateUnionDiscriminator = new(
+        id: "CCHASH018",
+        title: "Duplicate union discriminator value",
+        messageFormat: "Duplicate discriminator value '{0}' in union profile '{1}'.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor DuplicateUnionCaseType = new(
+        id: "CCHASH019",
+        title: "Duplicate union case type",
+        messageFormat: "Duplicate case type '{0}' in union profile '{1}'.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor UnionCaseTypeMustBeSealed = new(
+        id: "CCHASH020",
+        title: "Union case type must be sealed",
+        messageFormat: "Union case type '{0}' must be sealed.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor UnionCaseMissingKnownSubtype = new(
+        id: "CCHASH021",
+        title: "Known direct sealed subtype missing from union cases",
+        messageFormat: "Sealed subtype '{0}' of '{1}' is not declared as a union case.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor UnionCaseValueProfileTargetMismatch = new(
+        id: "CCHASH022",
+        title: "ValueProfile target type does not match case type",
+        messageFormat: "ValueProfile target type '{0}' does not match case type '{1}'.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor CustomWriterUnsupported = new(
+        id: "CCHASH023",
+        title: "CustomWriter is unsupported",
+        messageFormat: "CustomWriter is unsupported. Use CanonicalHashUnionProfileAttribute or a normal ValueProfile instead.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor FilterOnlyForCollection = new(
+        id: "CCHASH024",
+        title: "Filter can only be used on collection-valued fields",
+        messageFormat: "Filter can only be used on collection-valued fields. Field '{0}' is not a collection.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor InvalidFilterSignature = new(
+        id: "CCHASH025",
+        title: "Filter type lacks static bool Include(TElement) method",
+        messageFormat: "Filter type '{0}' must expose a public or internal static bool Include(TElement value) method.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor FilterElementTypeMismatch = new(
+        id: "CCHASH026",
+        title: "Filter Include parameter type does not match collection element type",
+        messageFormat: "Filter Include parameter type '{0}' does not match collection element type '{1}'.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor FilterNotSupportedOnDictionary = new(
+        id: "CCHASH027",
+        title: "Filter is not supported on dictionary fields",
+        messageFormat: "Filter is not supported on dictionary field '{0}'. Dictionaries always use key-ordered serialization (OrderedKeyValue); filtering key-value pairs has no deterministic semantic meaning.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     public static Diagnostic Create(DiagnosticDescriptor descriptor, Location? location, params object[] args)
     {
         return Diagnostic.Create(descriptor, location, args);

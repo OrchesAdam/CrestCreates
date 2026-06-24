@@ -13,15 +13,15 @@ namespace CrestCreates.Metadata.CanonicalHashing.Profiles;
 /// DefinitionOnly fields (only in DefinitionHash):
 ///   Name, OnError
 ///
-/// Target is included via <see cref="CustomWriter"/> (<see cref="InteractionTargetCanonicalHashWriter"/>)
-/// for discriminated union serialization.
+/// Target is included via <see cref="ValueProfile"/> (<see cref="InteractionTargetCanonicalHashProfile"/>)
+/// for discriminated union serialization (Canonical Hash Profile Semantics v2).
 /// </summary>
 [CanonicalHashProfile(
     ArtifactKind = CanonicalHashArtifactKind.Descriptor,
     DescriptorKind = DescriptorKind.Unknown,
     TargetType = typeof(WorkflowStep),
-    ContractShapeVersion = "workflow-step-contract-hash-v1",
-    DefinitionShapeVersion = "workflow-step-definition-hash-v1")]
+    ContractShapeVersion = "workflow-step-contract-hash-v2",
+    DefinitionShapeVersion = "workflow-step-definition-hash-v2")]
 internal sealed class WorkflowStepCanonicalHashProfile
 {
     // ── Contract fields (common to both ContractHash and DefinitionHash) ──
@@ -33,16 +33,15 @@ internal sealed class WorkflowStepCanonicalHashProfile
     [CanonicalHashField(nameof(WorkflowStep.Transitions), CanonicalHashFieldClassification.Contract, Order = 50,
         CollectionOrderMode = CanonicalHashCollectionOrderMode.OrdinalByValue)]
 
+    // ── Union value fields ──
+
+    [CanonicalHashField(nameof(WorkflowStep.Target), CanonicalHashFieldClassification.Contract, Order = 10,
+        ValueProfile = typeof(InteractionTargetCanonicalHashProfile))]
+
     // ── DefinitionOnly fields (only in DefinitionHash) ──
 
     [CanonicalHashField(nameof(WorkflowStep.Name), CanonicalHashFieldClassification.DefinitionOnly, Order = 100)]
     [CanonicalHashField(nameof(WorkflowStep.OnError), CanonicalHashFieldClassification.DefinitionOnly, Order = 110)]
-
-    // ── Excluded fields ──
-
-    [CanonicalHashField(nameof(WorkflowStep.Target), CanonicalHashFieldClassification.Contract, Order = 10,
-        CustomWriter = typeof(InteractionTargetCanonicalHashWriter),
-        Reason = "Discriminant union — hand-written InteractionTargetCanonicalHashWriter")]
 
     private static void Fields() { }
 }

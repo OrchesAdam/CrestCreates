@@ -12,11 +12,12 @@ namespace CrestCreates.CodeGenerator.CanonicalHashGenerator;
 public sealed class CanonicalHashSourceGenerator : IIncrementalGenerator
 {
     private const string ProfileAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashProfileAttribute";
+    private const string UnionProfileAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashUnionProfileAttribute";
     private const string FieldAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashFieldAttribute";
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        // Find all classes with [CanonicalHashProfile] attribute
+        // Find all classes with [CanonicalHashProfile] or [CanonicalHashUnionProfile] attribute
         var profileClasses = context.SyntaxProvider
             .CreateSyntaxProvider(
                 predicate: static (node, _) => node is ClassDeclarationSyntax { AttributeLists.Count: > 0 },
@@ -42,27 +43,36 @@ public sealed class CanonicalHashSourceGenerator : IIncrementalGenerator
         var profileAttr = symbol.GetAttributes().FirstOrDefault(a =>
             a.AttributeClass?.ToDisplayString() == ProfileAttrFullName);
 
-        if (profileAttr is null) return null;
-
-        // Find method(s) with [CanonicalHashField] attributes — just count them for CCHASH014
-        var fieldMethodCount = 0;
-
-        foreach (var member in symbol.GetMembers())
+        if (profileAttr is not null)
         {
-            if (member is IMethodSymbol method)
+            // Count methods with [CanonicalHashField] for CCHASH014
+            var fieldMethodCount = 0;
+            foreach (var member in symbol.GetMembers())
             {
-                var methodFieldAttrs = method.GetAttributes()
-                    .Where(a => a.AttributeClass?.ToDisplayString() == FieldAttrFullName)
-                    .ToList();
-
-                if (methodFieldAttrs.Count > 0)
+                if (member is IMethodSymbol method)
                 {
-                    fieldMethodCount++;
+                    var methodFieldAttrs = method.GetAttributes()
+                        .Where(a => a.AttributeClass?.ToDisplayString() == FieldAttrFullName)
+                        .ToList();
+
+                    if (methodFieldAttrs.Count > 0)
+                        fieldMethodCount++;
                 }
             }
+
+            return new ProfileClassInfo(symbol, fieldMethodCount, isUnion: false);
         }
 
-        return new ProfileClassInfo(symbol, fieldMethodCount);
+        // Check for [CanonicalHashUnionProfile] attribute
+        var unionProfileAttr = symbol.GetAttributes().FirstOrDefault(a =>
+            a.AttributeClass?.ToDisplayString() == UnionProfileAttrFullName);
+
+        if (unionProfileAttr is not null)
+        {
+            return new ProfileClassInfo(symbol, fieldMethodCount: 0, isUnion: true);
+        }
+
+        return null;
     }
 
     private static void GenerateCanonicalHashCode(
@@ -72,38 +82,41 @@ public sealed class CanonicalHashSourceGenerator : IIncrementalGenerator
     {
         if (profileClassInfos.IsDefaultOrEmpty) return;
 
+        var normalInfos = profileClassInfos.Where(i => !i.IsUnion).ToImmutableArray();
+        var unionInfos = profileClassInfos.Where(i => i.IsUnion).ToImmutableArray();
+
         var modelBuilder = new CanonicalHashModelBuilder(compilation, context);
-        var profiles = modelBuilder.Build(profileClassInfos);
+        var (profiles, unionProfiles) = modelBuilder.Build(normalInfos, unionInfos);
 
         if (profiles is null || profiles.Count == 0) return;
 
         if (context.CancellationToken.IsCancellationRequested) return;
 
-        // 1. Generate payload DTOs
+        // 1. Generate payload DTOs (normal profiles only — union profiles dispatch to case payloads)
         var payloadWriter = new CanonicalHashPayloadWriter();
         context.AddSource("CanonicalHashPayloads.g.cs",
             SourceText.From(payloadWriter.Write(profiles), Encoding.UTF8));
 
         if (context.CancellationToken.IsCancellationRequested) return;
 
-        // 2. Generate projection code
+        // 2. Generate projection code (normal + union profile references)
         var projectionWriter = new CanonicalHashProjectionWriter();
         context.AddSource("CanonicalHashProjections.g.cs",
             SourceText.From(projectionWriter.Write(profiles), Encoding.UTF8));
 
         if (context.CancellationToken.IsCancellationRequested) return;
 
-        // 3. Generate dispatcher
+        // 3. Generate dispatcher (normal profiles only)
         var dispatcherWriter = new CanonicalHashDispatcherWriter();
         context.AddSource("CanonicalHashDispatcher.g.cs",
             SourceText.From(dispatcherWriter.Write(profiles), Encoding.UTF8));
 
         if (context.CancellationToken.IsCancellationRequested) return;
 
-        // 4. Generate canonical JSON writers (Utf8JsonWriter-based, no STJ/JsonTypeInfo/reflection)
+        // 4. Generate canonical JSON writers (normal + union profiles, Utf8JsonWriter-based, no STJ/JsonTypeInfo/reflection)
         var writerWriter = new CanonicalHashWriterWriter();
         context.AddSource("CanonicalHashWriters.g.cs",
-            SourceText.From(writerWriter.Write(profiles), Encoding.UTF8));
+            SourceText.From(writerWriter.Write(profiles, unionProfiles), Encoding.UTF8));
 
         if (context.CancellationToken.IsCancellationRequested) return;
 

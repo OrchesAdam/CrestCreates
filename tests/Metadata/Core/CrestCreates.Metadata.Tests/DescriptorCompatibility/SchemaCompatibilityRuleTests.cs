@@ -51,6 +51,21 @@ public class SchemaCompatibilityRuleTests
         };
     }
 
+    private static DescriptorChange MakeDefinitionChange(string id, int version,
+        string beforeDefHash = "d1", string afterDefHash = "d2",
+        string beforeContractHash = "h1", string afterContractHash = "h1")
+    {
+        return new DescriptorChange
+        {
+            Ref = new DescriptorRef("schema", id, version),
+            Kind = DescriptorChangeKind.DefinitionHashChanged,
+            BeforeContractHash = beforeContractHash,
+            AfterContractHash = afterContractHash,
+            BeforeDefinitionHash = beforeDefHash,
+            AfterDefinitionHash = afterDefHash
+        };
+    }
+
     private static DescriptorImpactAnalysisReport MakeImpactReport(
         DescriptorChangeSet changeSet, DescriptorRef changedRef,
         params DescriptorRef[] affectedRefs)
@@ -196,5 +211,81 @@ public class SchemaCompatibilityRuleTests
 
         result.Findings.Should().Contain(f =>
             f.RuleId == "COMPAT_SCHEMA_DECLARED_BREAKING" && f.Level == DescriptorCompatibilityLevel.Breaking);
+    }
+
+    [Fact]
+    public void OptionalFieldAdded_WithDefinitionHashChanged_ReturnsCompatible()
+    {
+        var before = MakeSchema(fields: new());
+        var after = MakeSchema(fields: new() { ["newField"] = MakeField("newField", isRequired: false) });
+        var change = MakeDefinitionChange("S1", 1);
+        var cs = new DescriptorChangeSet { Changes = new[] { change } };
+        var report = MakeImpactReport(cs, change.Ref);
+
+        var result = Analyzer.Analyze(new IDescriptor[] { before }, new IDescriptor[] { after }, cs, report);
+
+        result.Findings.Should().Contain(f =>
+            f.RuleId == "COMPAT_SCHEMA_OPTIONAL_FIELD_ADDED" && f.Level == DescriptorCompatibilityLevel.Compatible);
+    }
+
+    [Fact]
+    public void OptionalFieldRemoved_WithAffectedConsumers_ReturnsBreaking()
+    {
+        var before = MakeSchema(fields: new() { ["oldField"] = MakeField("oldField") });
+        var after = MakeSchema(fields: new());
+        var consumer = new DescriptorRef("form", "F1", 1);
+        var change = MakeDefinitionChange("S1", 1);
+        var cs = new DescriptorChangeSet { Changes = new[] { change } };
+        var report = MakeImpactReport(cs, change.Ref, consumer);
+
+        var result = Analyzer.Analyze(new IDescriptor[] { before }, new IDescriptor[] { after }, cs, report);
+
+        result.Findings.Should().Contain(f =>
+            f.RuleId == "COMPAT_SCHEMA_FIELD_REMOVED" && f.Level == DescriptorCompatibilityLevel.Breaking);
+    }
+
+    [Fact]
+    public void OptionalFieldRemoved_WithoutAffectedConsumers_ReturnsRisky()
+    {
+        var before = MakeSchema(fields: new() { ["oldField"] = MakeField("oldField") });
+        var after = MakeSchema(fields: new());
+        var change = MakeDefinitionChange("S1", 1);
+        var cs = new DescriptorChangeSet { Changes = new[] { change } };
+        var report = MakeImpactReport(cs, change.Ref);
+
+        var result = Analyzer.Analyze(new IDescriptor[] { before }, new IDescriptor[] { after }, cs, report);
+
+        result.Findings.Should().Contain(f =>
+            f.RuleId == "COMPAT_SCHEMA_FIELD_REMOVED" && f.Level == DescriptorCompatibilityLevel.Risky);
+    }
+
+    [Fact]
+    public void OptionalFieldTypeChanged_WithDefinitionHashChanged_ReturnsBreaking()
+    {
+        var before = MakeSchema(fields: new() { ["f"] = MakeField("f", fieldType: "string") });
+        var after = MakeSchema(fields: new() { ["f"] = MakeField("f", fieldType: "int") });
+        var change = MakeDefinitionChange("S1", 1);
+        var cs = new DescriptorChangeSet { Changes = new[] { change } };
+        var report = MakeImpactReport(cs, change.Ref);
+
+        var result = Analyzer.Analyze(new IDescriptor[] { before }, new IDescriptor[] { after }, cs, report);
+
+        result.Findings.Should().Contain(f =>
+            f.RuleId == "COMPAT_SCHEMA_FIELD_TYPE_CHANGED" && f.Level == DescriptorCompatibilityLevel.Breaking);
+    }
+
+    [Fact]
+    public void ValidationRuleChanged_WithDefinitionHashChanged_ReturnsRisky()
+    {
+        var before = MakeSchema(fields: new() { ["f"] = MakeField("f", fieldType: "string", maxLength: 50) });
+        var after = MakeSchema(fields: new() { ["f"] = MakeField("f", fieldType: "string", maxLength: 30) });
+        var change = MakeDefinitionChange("S1", 1);
+        var cs = new DescriptorChangeSet { Changes = new[] { change } };
+        var report = MakeImpactReport(cs, change.Ref);
+
+        var result = Analyzer.Analyze(new IDescriptor[] { before }, new IDescriptor[] { after }, cs, report);
+
+        result.Findings.Should().Contain(f =>
+            f.RuleId == "COMPAT_SCHEMA_MAX_LENGTH_NARROWED" && f.Level == DescriptorCompatibilityLevel.Risky);
     }
 }

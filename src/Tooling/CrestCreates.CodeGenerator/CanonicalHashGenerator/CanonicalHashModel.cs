@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -18,13 +19,6 @@ internal sealed record ProfileFieldModel
     public ProfileModel? ValueProfile { get; init; }
     public string? Reason { get; init; }
 
-    /// <summary>
-    /// Fully-qualified type name of a custom writer class for fields requiring hand-written
-    /// canonical JSON serialization (e.g., discriminated unions).
-    /// When set, the SG generates a call to this writer instead of inline serialization.
-    /// </summary>
-    public string? CustomWriterTypeName { get; init; }
-
     // Resolved from TargetType's property symbol
     public required ITypeSymbol PropertyType { get; init; }
     public required bool IsNullable { get; init; }
@@ -33,6 +27,70 @@ internal sealed record ProfileFieldModel
 
     // Location for diagnostics
     public required Location? Location { get; init; }
+
+    /// <summary>
+    /// Profile reference for collection element types (new model for union support).
+    /// </summary>
+    public ProfileReferenceModel? ElementProfileReference { get; init; }
+
+    /// <summary>
+    /// Profile reference for nested value types (new model for union support).
+    /// </summary>
+    public ProfileReferenceModel? ValueProfileReference { get; init; }
+
+    /// <summary>
+    /// Collection filter for this field. Only valid on collection-valued fields.
+    /// </summary>
+    public FieldFilterModel? Filter { get; init; }
+}
+
+/// <summary>
+/// Models a reference to either a normal or union profile.
+/// </summary>
+internal sealed record ProfileReferenceModel
+{
+    public ProfileModel? NormalProfile { get; init; }
+    public UnionProfileModel? UnionProfile { get; init; }
+    public bool IsUnion => UnionProfile is not null;
+}
+
+/// <summary>
+/// Models a collection filter on a profile field.
+/// </summary>
+internal sealed record FieldFilterModel
+{
+    public required INamedTypeSymbol FilterType { get; init; }
+    public required ITypeSymbol ElementType { get; init; }
+    public required string FullyQualifiedTypeName { get; init; }
+}
+
+/// <summary>
+/// Models one case in a discriminated union profile.
+/// </summary>
+internal sealed record UnionCaseModel
+{
+    public required INamedTypeSymbol CaseType { get; init; }
+    public required string DiscriminatorValue { get; init; }
+    public required ProfileModel ValueProfile { get; init; }
+    public required Location? Location { get; init; }
+}
+
+/// <summary>
+/// Models a parsed canonical hash union profile class.
+/// </summary>
+internal sealed record UnionProfileModel
+{
+    public required string ProfileClassName { get; init; }
+    public required INamedTypeSymbol ProfileClassSymbol { get; init; }
+    public required INamedTypeSymbol TargetType { get; init; }
+    public required string TargetTypeName { get; init; }
+    public required string Discriminator { get; init; }
+    public required IReadOnlyList<UnionCaseModel> Cases { get; init; }
+    public required Location? Location { get; init; }
+
+    public string Stem => ProfileClassName.EndsWith("CanonicalHashProfile")
+        ? ProfileClassName.Substring(0, ProfileClassName.Length - "CanonicalHashProfile".Length)
+        : ProfileClassName;
 }
 
 /// <summary>
@@ -69,10 +127,19 @@ internal sealed record ProfileModel
 
     /// <summary>
     /// Fields whose classification is "Contract" or "DefinitionOnly" (i.e., not "Excluded").
-    /// Contract fields come first, then DefinitionOnly fields.
+    /// When the same PropertyName appears in both Contract and DefinitionOnly,
+    /// the DefinitionOnly entry takes precedence in DefinitionFields (the Contract
+    /// entry is excluded). This supports patterns where ContractHash uses a
+    /// filtered/reduced sub-profile while DefinitionHash uses the full profile
+    /// for the same logical field.
     /// </summary>
     public IReadOnlyList<ProfileFieldModel> DefinitionFields =>
-        Fields.Where(f => f.Classification != "Excluded").OrderBy(f => f.Order).ToList();
+        Fields
+            .Where(f => f.Classification != "Excluded")
+            .GroupBy(f => f.PropertyName, StringComparer.Ordinal)
+            .Select(g => g.FirstOrDefault(f => f.Classification == "DefinitionOnly") ?? g.First())
+            .OrderBy(f => f.Order)
+            .ToList();
 
     /// <summary>
     /// Whether this profile represents a top-level descriptor type (has explicit DescriptorKind).

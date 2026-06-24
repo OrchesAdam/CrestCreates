@@ -78,6 +78,10 @@ public sealed class GenericCompatibilityRule : IDescriptorCompatibilityRule
                     DescriptorCompatibilityLevel.Risky, DescriptorCompatibilityFindingKind.Contract,
                     "Contract hash changed with no affected consumers. Descriptor-specific rule did not classify.", affectedRefs)],
 
+            DescriptorChangeKind.DefinitionHashChanged => [MakeFinding(change, "COMPAT_GENERIC_DEFINITION_CHANGED",
+                DescriptorCompatibilityLevel.Risky, DescriptorCompatibilityFindingKind.Contract,
+                "Definition hash changed. Descriptor-specific rule did not classify. Treating as Risky.", affectedRefs)],
+
             _ => [MakeFinding(change, "COMPAT_GENERIC_NO_MATCHING_RULE",
                 options.TreatUnknownDescriptorKindAsUnsupported
                     ? DescriptorCompatibilityLevel.Unsupported

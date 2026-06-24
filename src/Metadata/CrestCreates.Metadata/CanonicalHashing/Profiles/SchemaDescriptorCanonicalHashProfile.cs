@@ -10,21 +10,26 @@ namespace CrestCreates.Metadata.CanonicalHashing.Profiles;
 ///
 /// Contract fields (in both ContractHash and DefinitionHash):
 ///   Id, Name, Version, ChangeKind, State, SupersededById,
-///   Fields (ordered by Name), References (ordered by Id+Version)
+///   Fields (required only, ordered by Name), References (ordered by Id+Version)
 ///
 /// DefinitionOnly fields (only in DefinitionHash):
+///   Fields (full, ordered by Name),
 ///   ValidationRules (ordered by Name)
 ///
 /// Excluded fields:
 ///   Namespace, Kind (computed constants),
 ///   ContractHash, DefinitionHash (hash outputs)
+///
+/// v2 change: Schema ContractHash now excludes optional fields — only the
+/// required-binding surface (IsRequired=true) is included. DefinitionHash
+/// still includes all fields via the full SchemaFieldCanonicalHashProfile.
 /// </summary>
 [CanonicalHashProfile(
     ArtifactKind = CanonicalHashArtifactKind.Descriptor,
     DescriptorKind = DescriptorKind.Schema,
     TargetType = typeof(SchemaDescriptor),
-    ContractShapeVersion = "schema-contract-hash-v1",
-    DefinitionShapeVersion = "schema-definition-hash-v1")]
+    ContractShapeVersion = "schema-contract-hash-v2",
+    DefinitionShapeVersion = "schema-definition-hash-v2")]
 internal sealed class SchemaDescriptorCanonicalHashProfile
 {
     // ── Contract fields (common to both ContractHash and DefinitionHash) ──
@@ -36,9 +41,10 @@ internal sealed class SchemaDescriptorCanonicalHashProfile
     [CanonicalHashField(nameof(SchemaDescriptor.State), CanonicalHashFieldClassification.Contract, Order = 4)]
     [CanonicalHashField(nameof(SchemaDescriptor.SupersededById), CanonicalHashFieldClassification.Contract, Order = 5)]
     [CanonicalHashField(nameof(SchemaDescriptor.Fields), CanonicalHashFieldClassification.Contract, Order = 10,
-        ElementProfile = typeof(SchemaFieldCanonicalHashProfile),
+        ElementProfile = typeof(SchemaRequiredFieldCanonicalHashProfile),
         CollectionOrderMode = CanonicalHashCollectionOrderMode.OrdinalByProperty,
-        OrderByProperty = nameof(SchemaFieldDescriptor.Name))]
+        OrderByProperty = nameof(SchemaFieldDescriptor.Name),
+        Filter = typeof(RequiredSchemaFieldCanonicalHashFilter))]
     [CanonicalHashField(nameof(SchemaDescriptor.References), CanonicalHashFieldClassification.Contract, Order = 20,
         ElementProfile = typeof(VersionedSchemaRefCanonicalHashProfile),
         CollectionOrderMode = CanonicalHashCollectionOrderMode.OrdinalByProperty,
@@ -46,6 +52,10 @@ internal sealed class SchemaDescriptorCanonicalHashProfile
 
     // ── DefinitionOnly fields (only in DefinitionHash) ──
 
+    [CanonicalHashField(nameof(SchemaDescriptor.Fields), CanonicalHashFieldClassification.DefinitionOnly, Order = 100,
+        ElementProfile = typeof(SchemaFieldCanonicalHashProfile),
+        CollectionOrderMode = CanonicalHashCollectionOrderMode.OrdinalByProperty,
+        OrderByProperty = nameof(SchemaFieldDescriptor.Name))]
     [CanonicalHashField(nameof(SchemaDescriptor.ValidationRules), CanonicalHashFieldClassification.DefinitionOnly, Order = 110,
         ElementProfile = typeof(SchemaValidationRuleCanonicalHashProfile),
         CollectionOrderMode = CanonicalHashCollectionOrderMode.OrdinalByProperty,

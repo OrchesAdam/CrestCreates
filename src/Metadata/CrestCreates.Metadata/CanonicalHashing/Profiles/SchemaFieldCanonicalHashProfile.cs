@@ -5,25 +5,21 @@ namespace CrestCreates.Metadata.CanonicalHashing.Profiles;
 
 /// <summary>
 /// Canonical hash profile for <see cref="SchemaFieldDescriptor"/>.
-/// All fields participate in both ContractHash and DefinitionHash
-/// of the parent <see cref="SchemaDescriptor"/>, so every field
-/// is classified as <see cref="CanonicalHashFieldClassification.Contract"/>.
+/// Full field descriptor — all fields participate in DefinitionHash.
 ///
-/// <b>Design Decision</b>: Optional field additions (IsRequired=false) are treated
-/// as contract changes. This is a conservative stance — adding an optional field
-/// changes the ContractHash, signaling that consumers should be aware of the new field.
-/// The alternative (optional fields → DefinitionOnly only) was rejected because:
-/// (a) conditional field classification would require per-instance runtime dispatch,
-///     defeating compile-time determinism; (b) even optional fields change the
-///     structural contract that consumers must be prepared to handle.
-/// If finer-grained classification is needed in the future, a sub-classification
-/// mechanism can be added without breaking existing hashes (via ContractShapeVersion bump).
+/// v2: This profile is now used only for the full-field representation
+/// in Schema DefinitionHash. Schema ContractHash uses
+/// <see cref="SchemaRequiredFieldCanonicalHashProfile"/> which captures
+/// only the required-binding surface, filtered by
+/// <see cref="RequiredSchemaFieldCanonicalHashFilter"/>.
+/// Optional fields are excluded from ContractHash but still included
+/// in DefinitionHash via this profile.
 /// </summary>
 [CanonicalHashProfile(
     ArtifactKind = CanonicalHashArtifactKind.Descriptor,
     TargetType = typeof(SchemaFieldDescriptor),
-    ContractShapeVersion = "schema-field-contract-hash-v1",
-    DefinitionShapeVersion = "schema-field-definition-hash-v1")]
+    ContractShapeVersion = "schema-field-contract-hash-v2",
+    DefinitionShapeVersion = "schema-field-definition-hash-v2")]
 internal sealed class SchemaFieldCanonicalHashProfile
 {
     [CanonicalHashField(nameof(SchemaFieldDescriptor.Name), CanonicalHashFieldClassification.Contract, Order = 0)]

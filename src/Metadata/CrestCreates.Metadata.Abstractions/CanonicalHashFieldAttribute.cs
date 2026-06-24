@@ -51,6 +51,12 @@ public sealed class CanonicalHashFieldAttribute : Attribute
     public Type? ValueProfile { get; init; }
 
     /// <summary>
+    /// Collection filter type for collection-valued fields.
+    /// Allows filtering elements from the collection before hashing.
+    /// </summary>
+    public Type? Filter { get; init; }
+
+    /// <summary>
     /// How to handle dictionary/collection ordering for this field.
     /// </summary>
     public CanonicalHashCollectionOrderMode CollectionOrderMode { get; init; } = CanonicalHashCollectionOrderMode.None;
@@ -77,5 +83,6 @@ public sealed class CanonicalHashFieldAttribute : Attribute
     /// Used for discriminated unions and other types the SG cannot handle automatically.
     /// When specified, the SG generates a call to this writer instead of inline serialization.
     /// </summary>
+    [Obsolete("CustomWriter is unsupported by Canonical Hash Profile Semantics v2. Use CanonicalHashUnionProfileAttribute or a normal ValueProfile instead.")]
     public Type? CustomWriter { get; init; }
 }

@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-06-22
+Last Updated: 2026-06-23
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -436,9 +436,17 @@ This thread achieved the following:
 - `AddDescriptorStableHash()` DI registration.
 - 18 tests: same/recreated stability, optional field→definition change, required field addition/removal→contract change, permission change→both hashes, form label→contract stable, workflow step id→definition change, workflow target ref change→**both** hashes change, DI resolution, cross-instance stability, HumanTask/Event stability, optional field contract hash behavior (exclusion policy deferred).
 - `CompanyCertificationChangeScenarios` — `"INVALIDATED"` sentinels replaced; 12 control-plane tests pass.
-- **Schema field inclusion policy**: ContractHash currently includes ALL schema fields (required + optional). This is conservative and does not miss changes, but is stricter than eventual compatibility semantics. An explicit per-descriptor-kind inclusion/exclusion policy (Issue #29 Requirement #4) should be implemented before relying on ContractHash as a compatibility boundary for schemas.
+- **Schema field inclusion policy (v2 resolved)**: ContractHash now includes only required fields (`IsRequired=true`) via `SchemaRequiredFieldCanonicalHashProfile` + `RequiredSchemaFieldCanonicalHashFilter`. Optional field additions change DefinitionHash only (emit `DefinitionHashChanged`), not ContractHash. See Phase 6h.
 - **Workflow step ordering**: Steps are hashed in list order (NOT sorted by Id), because step order is semantically meaningful for workflow execution.
 - **Design spec**: GitHub issue #29.
+
+### Canonical Hash Profile Semantics v2 (Phase 6h, 2026-06-23)
+
+- **Union profiles replace CustomWriter**: `[CanonicalHashUnionProfile]` + `[CanonicalHashUnionCase]` declare discriminated unions. SG generates exhaustive current-compilation switch writers. `[CanonicalHashField.CustomWriter]` is `[Obsolete]` and triggers CCHASH015. `InteractionTargetCanonicalHashProfile` declares Capability, HumanTask, Workflow cases. `WorkflowStep.Target` uses `ValueProfile = typeof(InteractionTargetCanonicalHashProfile)`.
+- **Schema ContractHash v2 is required-binding surface**: Only schema fields with `IsRequired=true` are included via `SchemaRequiredFieldCanonicalHashProfile` + `RequiredSchemaFieldCanonicalHashFilter`. DefinitionHash includes all fields via `SchemaFieldCanonicalHashProfile`.
+- **DefinitionHashChanged**: `DescriptorChangeKind.DefinitionHashChanged` tracks definition-only changes separate from `ContractHashChanged`. Optional field addition changes DefinitionHash and emits `DefinitionHashChanged`; it does not change Schema ContractHash v2. Compatibility rules use this distinction for severity grading.
+- **Filter**: `[CanonicalHashField.Filter]` is a collection-only semantic projection applied before ordering and writing.
+- Profile shape versions bumped to v2 (`schema-contract-hash-v2`, `schema-definition-hash-v2`).
 
 ### Agent Control Plane Tool Surface (Phase 7c, 2026-06-18)
 

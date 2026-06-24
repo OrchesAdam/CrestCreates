@@ -57,27 +57,31 @@ public sealed class DescriptorCompatibilityAnalyzer : IDescriptorCompatibilityAn
             var afterDesc = ResolveDescriptor(change.Ref, afterIndex);
 
             // Run descriptor-specific rules first (all except the last Generic rule)
-            bool classified = false;
+            bool claimed = false;
             for (int i = 0; i < _rules.Count - 1; i++)
             {
                 var rule = _rules[i];
                 if (!rule.CanAnalyze(change, beforeDesc, afterDesc)) continue;
+                claimed = true;
                 var ruleFindings = rule.Analyze(change, beforeDesc, afterDesc, impactReport, options);
                 if (ruleFindings.Count > 0)
                 {
                     findings.AddRange(ruleFindings);
-                    classified = true;
                 }
             }
 
             // Run generic rule as catch-all. When a descriptor-specific rule already
-            // classified a ContractHashChanged change, suppress the generic
+            // claimed a ContractHashChanged change, suppress the generic
             // COMPAT_GENERIC_UNCLASSIFIED_CONTRACT_CHANGE to avoid conflicting Risky findings.
+            // Likewise, suppress COMPAT_GENERIC_DEFINITION_CHANGED when a descriptor-specific
+            // rule already claimed a DefinitionHashChanged change.
             var genericFindings = _rules.Last().Analyze(change, beforeDesc, afterDesc, impactReport, options);
-            if (classified)
+            if (claimed)
             {
                 genericFindings = genericFindings
-                    .Where(f => f.RuleId != "COMPAT_GENERIC_UNCLASSIFIED_CONTRACT_CHANGE")
+                    .Where(f => f.RuleId is not (
+                        "COMPAT_GENERIC_UNCLASSIFIED_CONTRACT_CHANGE"
+                        or "COMPAT_GENERIC_DEFINITION_CHANGED"))
                     .ToArray();
             }
             findings.AddRange(genericFindings);

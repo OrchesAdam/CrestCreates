@@ -67,7 +67,7 @@ internal sealed class CanonicalHashDispatcherWriter
         sb.AppendLine("        string algorithmVersion)");
         sb.AppendLine("    {");
         sb.AppendLine("        throw new InvalidOperationException(");
-        sb.AppendLine("            $\"No canonical hash profile for {descriptor.GetType().Name}\");");
+        sb.AppendLine("            \"No canonical hash profile registered for the given descriptor type\");");
         sb.AppendLine("    }");
         sb.AppendLine();
         sb.AppendLine("    public static CanonicalHashProjectionResult ToDefinitionProjection(");
@@ -77,7 +77,7 @@ internal sealed class CanonicalHashDispatcherWriter
         sb.AppendLine("        string algorithmVersion)");
         sb.AppendLine("    {");
         sb.AppendLine("        throw new InvalidOperationException(");
-        sb.AppendLine("            $\"No canonical hash profile for {descriptor.GetType().Name}\");");
+        sb.AppendLine("            \"No canonical hash profile registered for the given descriptor type\");");
         sb.AppendLine("    }");
     }
 
@@ -117,7 +117,7 @@ internal sealed class CanonicalHashDispatcherWriter
         }
 
         sb.AppendLine("            _ => throw new InvalidOperationException(");
-        sb.AppendLine("                $\"No canonical hash profile for {descriptor.GetType().Name}\")");
+        sb.AppendLine("                \"No canonical hash profile registered for the given descriptor type\")");
         sb.AppendLine("        };");
         sb.AppendLine("    }");
     }
@@ -157,7 +157,7 @@ internal sealed class CanonicalHashDispatcherWriter
         }
 
         sb.AppendLine("            _ => throw new InvalidOperationException(");
-        sb.AppendLine("                $\"No canonical hash profile for {descriptor.GetType().Name}\")");
+        sb.AppendLine("                \"No canonical hash profile registered for the given descriptor type\")");
         sb.AppendLine("        };");
         sb.AppendLine("    }");
     }

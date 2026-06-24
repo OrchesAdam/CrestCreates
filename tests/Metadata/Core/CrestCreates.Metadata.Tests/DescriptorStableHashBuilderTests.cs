@@ -1,9 +1,11 @@
+using System.Text.Json;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.CanonicalHashing;
+using CrestCreates.Metadata.CanonicalHashing.Generated;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
@@ -76,8 +78,7 @@ public sealed class DescriptorStableHashBuilderTests
         // Definition should change (optional field added = descriptor definition changed)
         originalHashes.DefinitionHash.Should().NotBe(modifiedHashes.DefinitionHash,
             "optional field addition should change the definition hash");
-        // NOTE: ContractHash also changes because current implementation includes all fields.
-        // When exclusion policy (Issue #29 Requirement #4) is implemented, assert .Be().
+        // v2: ContractHash no longer changes because optional fields are excluded from the contract binding surface
     }
 
     [Fact]
@@ -343,13 +344,11 @@ public sealed class DescriptorStableHashBuilderTests
     }
 
     /// <summary>
-    /// Documents current behavior: the ContractHash includes ALL schema fields (including
-    /// optional ones). When the inclusion/exclusion policy (Issue #29 Requirement #4) is
-    /// implemented to exclude optional fields from ContractHash, change the assertion
-    /// below to <c>.Be()</c>.
+    /// Verifies v2 behavior: adding an optional field does NOT change ContractHash
+    /// (only the required-binding surface participates in ContractHash).
     /// </summary>
     [Fact]
-    public void Build_OptionalSchemaFieldAddition_ChangesContractHash_UntilExclusionPolicy()
+    public void Build_OptionalSchemaFieldAddition_DoesNotChangeContractHash()
     {
         var original = CreateSchema("s1", "Test", fields: new[]
         {
@@ -364,10 +363,9 @@ public sealed class DescriptorStableHashBuilderTests
         var originalHashes = _builder.Build(original);
         var modifiedHashes = _builder.Build(modified);
 
-        // Current implementation includes ALL fields in contract hash.
-        // Change to .Be() when Issue #29 Requirement #4 exclusion policy is implemented.
-        modifiedHashes.ContractHash.Should().NotBe(originalHashes.ContractHash,
-            "CURRENT: all fields (including optional) are in contract hash — update to .Be() when exclusion policy is implemented");
+        // v2: optional fields are excluded from ContractHash
+        modifiedHashes.ContractHash.Value.Should().Be(originalHashes.ContractHash.Value,
+            "optional field addition should NOT change ContractHash (v2)");
     }
 
     [Fact]
@@ -723,6 +721,177 @@ public sealed class DescriptorStableHashBuilderTests
         h1.ContractHash.Should().NotBe(h2.ContractHash, "category change affects event routing — must change contract hash");
     }
 
+    // ── InteractionTarget union profile behavior tests (Task 4) ──
+
+    [Fact]
+    public void Changing_WorkflowStep_Target_Kind_Should_ChangeContractHash()
+    {
+        // Changing from CapabilityTarget to HumanTaskTarget changes the discriminator kind.
+        var wf1 = new WorkflowDescriptor
+        {
+            Id = "wf1", Name = "test", Version = 1, State = DescriptorState.Active,
+            Steps = new[]
+            {
+                new WorkflowStep
+                {
+                    Id = "s1", Name = "Step",
+                    Target = new CapabilityTarget
+                    {
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("ref-1", 1)
+                    },
+                    Transitions = Array.Empty<string>()
+                }
+            }
+        };
+        var wf2 = new WorkflowDescriptor
+        {
+            Id = "wf1", Name = "test", Version = 1, State = DescriptorState.Active,
+            Steps = new[]
+            {
+                new WorkflowStep
+                {
+                    Id = "s1", Name = "Step",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ref-1", 1)
+                    },
+                    Transitions = Array.Empty<string>()
+                }
+            }
+        };
+
+        var h1 = _builder.Build(wf1);
+        var h2 = _builder.Build(wf2);
+
+        h1.ContractHash.Value.Should().NotBe(h2.ContractHash.Value,
+            "changing target kind (Capability vs HumanTask) must change ContractHash");
+        h1.DefinitionHash.Value.Should().NotBe(h2.DefinitionHash.Value,
+            "changing target kind must change DefinitionHash");
+    }
+
+    [Fact]
+    public void Changing_WorkflowStep_Target_Id_Should_ChangeContractHash()
+    {
+        // Same target kind (CapabilityTarget) with different capability id.
+        var wf1 = new WorkflowDescriptor
+        {
+            Id = "wf1", Name = "test", Version = 1, State = DescriptorState.Active,
+            Steps = new[]
+            {
+                new WorkflowStep
+                {
+                    Id = "s1", Name = "Step",
+                    Target = new CapabilityTarget
+                    {
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap-a", 1)
+                    },
+                    Transitions = Array.Empty<string>()
+                }
+            }
+        };
+        var wf2 = new WorkflowDescriptor
+        {
+            Id = "wf1", Name = "test", Version = 1, State = DescriptorState.Active,
+            Steps = new[]
+            {
+                new WorkflowStep
+                {
+                    Id = "s1", Name = "Step",
+                    Target = new CapabilityTarget
+                    {
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap-b", 1)
+                    },
+                    Transitions = Array.Empty<string>()
+                }
+            }
+        };
+
+        var h1 = _builder.Build(wf1);
+        var h2 = _builder.Build(wf2);
+
+        h1.ContractHash.Value.Should().NotBe(h2.ContractHash.Value,
+            "changing target id within same kind must change ContractHash");
+    }
+
+    [Fact]
+    public void Changing_WorkflowStep_Target_Version_Should_ChangeContractHash()
+    {
+        // Same target kind and id, different version.
+        var wf1 = new WorkflowDescriptor
+        {
+            Id = "wf1", Name = "test", Version = 1, State = DescriptorState.Active,
+            Steps = new[]
+            {
+                new WorkflowStep
+                {
+                    Id = "s1", Name = "Step",
+                    Target = new SubWorkflowTarget
+                    {
+                        SubWorkflow = new VersionedDescriptorRef<WorkflowDescriptor>("sub-wf", 1)
+                    },
+                    Transitions = Array.Empty<string>()
+                }
+            }
+        };
+        var wf2 = new WorkflowDescriptor
+        {
+            Id = "wf1", Name = "test", Version = 1, State = DescriptorState.Active,
+            Steps = new[]
+            {
+                new WorkflowStep
+                {
+                    Id = "s1", Name = "Step",
+                    Target = new SubWorkflowTarget
+                    {
+                        SubWorkflow = new VersionedDescriptorRef<WorkflowDescriptor>("sub-wf", 2)
+                    },
+                    Transitions = Array.Empty<string>()
+                }
+            }
+        };
+
+        var h1 = _builder.Build(wf1);
+        var h2 = _builder.Build(wf2);
+
+        h1.ContractHash.Value.Should().NotBe(h2.ContractHash.Value,
+            "changing target version must change ContractHash");
+    }
+
+    [Fact]
+    public void UnionProfile_Json_Shape_Contains_Kind_Before_Value()
+    {
+        // Verify that the generated union JSON for InteractionTarget has "Kind" before "Value".
+        // We capture the canonical JSON bytes produced by the generated writer for a sub-structure
+        // and verify that "Kind" appears before "Value" in the output.
+        var target = new CapabilityTarget
+        {
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap-x", 1)
+        };
+
+        // Write canonical JSON to a buffer using the generated writer
+        using var stream = new MemoryStream();
+        using var jsonWriter = new Utf8JsonWriter(stream, new JsonWriterOptions
+        {
+            Indented = false,
+            SkipValidation = true
+        });
+
+        // Write just the sub-structure payload (no envelope)
+        CanonicalHashing.Generated.InteractionTargetCanonicalHashWriter.WriteContractPayload(jsonWriter, target);
+        jsonWriter.Flush();
+
+        stream.Position = 0;
+        var json = System.Text.Encoding.UTF8.GetString(stream.ToArray());
+
+        var kindIndex = json.IndexOf("\"Kind\"", StringComparison.Ordinal);
+        var valueIndex = json.IndexOf("\"Value\"", StringComparison.Ordinal);
+
+        kindIndex.Should().BeGreaterThan(-1, "output must contain discriminator 'Kind'");
+        valueIndex.Should().BeGreaterThan(-1, "output must contain payload 'Value'");
+        kindIndex.Should().BeLessThan(valueIndex,
+            "'Kind' must appear before 'Value' in union JSON shape");
+    }
+
     [Fact]
     public void Changing_HumanTaskAssigneeStrategy_Should_ChangeContractHash()
     {
@@ -1069,6 +1238,259 @@ public sealed class DescriptorStableHashBuilderTests
 
         var act = () => CanonicalHashProjectionResult.Create(metadata, null!);
         act.Should().Throw<ArgumentNullException>();
+    }
+
+    // ── Schema Canonical Hash v2 Behavior Tests (Task 5) ──
+
+    [Fact]
+    public void OptionalFieldAddition_DoesNotChange_SchemaContractHash()
+    {
+        var original = CreateSchema("s1", "Test", fields: new[]
+        {
+            new SchemaFieldDescriptor { Name = "Name", FieldType = "string", IsRequired = true }
+        });
+        var modified = CreateSchema("s1", "Test", fields: new[]
+        {
+            new SchemaFieldDescriptor { Name = "Name", FieldType = "string", IsRequired = true },
+            new SchemaFieldDescriptor { Name = "Phone", FieldType = "string", IsRequired = false }
+        });
+
+        var originalHashes = _builder.Build(original);
+        var modifiedHashes = _builder.Build(modified);
+
+        // v2: optional fields are excluded from ContractHash
+        originalHashes.ContractHash.Value.Should().Be(modifiedHashes.ContractHash.Value,
+            "optional field addition should NOT change Schema ContractHash (v2)");
+    }
+
+    [Fact]
+    public void OptionalFieldAddition_Changes_SchemaDefinitionHash()
+    {
+        var original = CreateSchema("s1", "Test", fields: new[]
+        {
+            new SchemaFieldDescriptor { Name = "Name", FieldType = "string", IsRequired = true }
+        });
+        var modified = CreateSchema("s1", "Test", fields: new[]
+        {
+            new SchemaFieldDescriptor { Name = "Name", FieldType = "string", IsRequired = true },
+            new SchemaFieldDescriptor { Name = "Phone", FieldType = "string", IsRequired = false }
+        });
+
+        var originalHashes = _builder.Build(original);
+        var modifiedHashes = _builder.Build(modified);
+
+        // v2: optional fields are still included in DefinitionHash
+        originalHashes.DefinitionHash.Value.Should().NotBe(modifiedHashes.DefinitionHash.Value,
+            "optional field addition should change Schema DefinitionHash (v2)");
+    }
+
+    [Fact]
+    public void RequiredFieldAddition_Changes_SchemaContractHash()
+    {
+        var original = CreateSchema("s1", "Test", fields: new[]
+        {
+            new SchemaFieldDescriptor { Name = "Name", FieldType = "string", IsRequired = true }
+        });
+        var modified = CreateSchema("s1", "Test", fields: new[]
+        {
+            new SchemaFieldDescriptor { Name = "Name", FieldType = "string", IsRequired = true },
+            new SchemaFieldDescriptor { Name = "IdNumber", FieldType = "string", IsRequired = true }
+        });
+
+        var originalHashes = _builder.Build(original);
+        var modifiedHashes = _builder.Build(modified);
+
+        // v2: required fields are still part of the contract binding surface
+        originalHashes.ContractHash.Value.Should().NotBe(modifiedHashes.ContractHash.Value,
+            "required field addition should change Schema ContractHash (v2)");
+    }
+
+    [Fact]
+    public void OptionalFieldTypeChange_DoesNotChangeContractHash_ChangesDefinitionHash()
+    {
+        var original = CreateSchema("s1", "Test", fields: new[]
+        {
+            new SchemaFieldDescriptor { Name = "Name", FieldType = "string", IsRequired = true },
+            new SchemaFieldDescriptor { Name = "Phone", FieldType = "string", IsRequired = false }
+        });
+        var modified = CreateSchema("s1", "Test", fields: new[]
+        {
+            new SchemaFieldDescriptor { Name = "Name", FieldType = "string", IsRequired = true },
+            new SchemaFieldDescriptor { Name = "Phone", FieldType = "integer", IsRequired = false }
+        });
+
+        var originalHashes = _builder.Build(original);
+        var modifiedHashes = _builder.Build(modified);
+
+        originalHashes.ContractHash.Value.Should().Be(modifiedHashes.ContractHash.Value,
+            "optional field type change should NOT change ContractHash (v2)");
+        originalHashes.DefinitionHash.Value.Should().NotBe(modifiedHashes.DefinitionHash.Value,
+            "optional field type change should change DefinitionHash (v2)");
+    }
+
+    [Fact]
+    public void Build_RequiredFieldTypeChange_ChangesBothContractAndDefinitionHash()
+    {
+        var original = CreateSchema("s1", "Test", fields: new[]
+        {
+            new SchemaFieldDescriptor { Name = "Email", FieldType = "string", IsRequired = true }
+        });
+        var modified = CreateSchema("s1", "Test", fields: new[]
+        {
+            new SchemaFieldDescriptor { Name = "Email", FieldType = "integer", IsRequired = true }
+        });
+
+        var originalHashes = _builder.Build(original);
+        var modifiedHashes = _builder.Build(modified);
+
+        originalHashes.ContractHash.Value.Should().NotBe(modifiedHashes.ContractHash.Value,
+            "required field type change should change ContractHash");
+        originalHashes.DefinitionHash.Value.Should().NotBe(modifiedHashes.DefinitionHash.Value,
+            "required field type change should change DefinitionHash");
+    }
+
+    [Fact]
+    public void ValidationRuleChange_ChangesDefinitionHashOnly()
+    {
+        var original = new SchemaDescriptor
+        {
+            Id = "s1", Name = "Test", Version = 1, State = DescriptorState.Active,
+            Fields = new[]
+            {
+                new SchemaFieldDescriptor { Name = "Name", FieldType = "string", IsRequired = true }
+            },
+            ValidationRules = new[] { new SchemaValidationRule { Name = "r1", Expression = "x > 0" } }
+        };
+        var modified = new SchemaDescriptor
+        {
+            Id = "s1", Name = "Test", Version = 1, State = DescriptorState.Active,
+            Fields = new[]
+            {
+                new SchemaFieldDescriptor { Name = "Name", FieldType = "string", IsRequired = true }
+            },
+            ValidationRules = new[] { new SchemaValidationRule { Name = "r1", Expression = "x > 100" } }
+        };
+
+        var originalHashes = _builder.Build(original);
+        var modifiedHashes = _builder.Build(modified);
+
+        originalHashes.ContractHash.Value.Should().Be(modifiedHashes.ContractHash.Value,
+            "validation rule change should NOT change ContractHash");
+        originalHashes.DefinitionHash.Value.Should().NotBe(modifiedHashes.DefinitionHash.Value,
+            "validation rule change should change DefinitionHash");
+    }
+
+    // ── Golden-master: WorkflowDescriptor union profile hash determinism (Finding 4) ──
+
+    [Fact]
+    public void WorkflowDescriptor_UnionProfileTarget_HashValuesAreDeterministic()
+    {
+        // 1. Create a fixed WorkflowDescriptor with known Steps (at least one step with a CapabilityTarget)
+        var wf1 = new WorkflowDescriptor
+        {
+            Id = "wf-determinism", Name = "determinism-test", Version = 1, State = DescriptorState.Active,
+            Steps = new[]
+            {
+                new WorkflowStep
+                {
+                    Id = "step_01", Name = "Step One",
+                    Target = new CapabilityTarget
+                    {
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap-det", 1)
+                    },
+                    Condition = "x > 0",
+                    Transitions = new[] { "approve", "reject" }
+                },
+                new WorkflowStep
+                {
+                    Id = "step_02", Name = "Step Two",
+                    Target = new CapabilityTarget
+                    {
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap-det-2", 1)
+                    },
+                    Transitions = Array.Empty<string>()
+                }
+            }
+        };
+
+        // 2. Compute ContractHash and DefinitionHash via ICanonicalHashComputer
+        var contractHash1 = _hashComputer.ComputeContractHash(wf1, CanonicalHashScope.InternalFull);
+        var definitionHash1 = _hashComputer.ComputeDefinitionHash(wf1, CanonicalHashScope.InternalFull);
+
+        // 3. Assert both hash values are non-null/non-empty
+        contractHash1.Should().NotBeNull();
+        contractHash1.Value.Should().NotBeNullOrEmpty();
+        definitionHash1.Should().NotBeNull();
+        definitionHash1.Value.Should().NotBeNullOrEmpty();
+
+        // 4. Create a second identical descriptor, compute hashes, assert they're identical (determinism)
+        var wf2 = new WorkflowDescriptor
+        {
+            Id = "wf-determinism", Name = "determinism-test", Version = 1, State = DescriptorState.Active,
+            Steps = new[]
+            {
+                new WorkflowStep
+                {
+                    Id = "step_01", Name = "Step One",
+                    Target = new CapabilityTarget
+                    {
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap-det", 1)
+                    },
+                    Condition = "x > 0",
+                    Transitions = new[] { "approve", "reject" }
+                },
+                new WorkflowStep
+                {
+                    Id = "step_02", Name = "Step Two",
+                    Target = new CapabilityTarget
+                    {
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap-det-2", 1)
+                    },
+                    Transitions = Array.Empty<string>()
+                }
+            }
+        };
+
+        var contractHash2 = _hashComputer.ComputeContractHash(wf2, CanonicalHashScope.InternalFull);
+        var definitionHash2 = _hashComputer.ComputeDefinitionHash(wf2, CanonicalHashScope.InternalFull);
+
+        contractHash1.Value.Should().Be(contractHash2.Value,
+            "identical descriptors must produce identical ContractHash (determinism)");
+        definitionHash1.Value.Should().Be(definitionHash2.Value,
+            "identical descriptors must produce identical DefinitionHash (determinism)");
+
+        // 5. Create a descriptor with a different Target (HumanTaskTarget instead of CapabilityTarget), assert hashes differ
+        var wf3 = new WorkflowDescriptor
+        {
+            Id = "wf-determinism", Name = "determinism-test", Version = 1, State = DescriptorState.Active,
+            Steps = new[]
+            {
+                new WorkflowStep
+                {
+                    Id = "step_01", Name = "Step One",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("ht-det", 1)
+                    },
+                    Condition = "x > 0",
+                    Transitions = new[] { "approve", "reject" }
+                },
+                new WorkflowStep
+                {
+                    Id = "step_02", Name = "Step Two",
+                    Target = new CapabilityTarget
+                    {
+                        Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap-det-2", 1)
+                    },
+                    Transitions = Array.Empty<string>()
+                }
+            }
+        };
+
+        var contractHash3 = _hashComputer.ComputeContractHash(wf3, CanonicalHashScope.InternalFull);
+
+        contractHash3.Value.Should().NotBe(contractHash1.Value,
+            "different target type (HumanTask vs Capability) must produce different ContractHash");
     }
 
     // ── Helpers ──

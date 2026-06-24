@@ -33,7 +33,8 @@ public sealed class DescriptorChangeSetBuilder : IDescriptorChangeSetBuilder
                     Ref = refKey,
                     Kind = DescriptorChangeKind.Added,
                     AfterState = d.State,
-                    AfterContractHash = afterHashes.ContractHash.Value
+                    AfterContractHash = afterHashes.ContractHash.Value,
+                    AfterDefinitionHash = afterHashes.DefinitionHash.Value
                 });
                 continue;
             }
@@ -54,6 +55,8 @@ public sealed class DescriptorChangeSetBuilder : IDescriptorChangeSetBuilder
                 kind = DescriptorChangeKind.StateChanged;
             else if (afterHashes.ContractHash != beforeHashes.ContractHash)
                 kind = DescriptorChangeKind.ContractHashChanged;
+            else if (afterHashes.DefinitionHash != beforeHashes.DefinitionHash)
+                kind = DescriptorChangeKind.DefinitionHashChanged;
             else if (d.Name != beforeDesc.Name)
                 kind = DescriptorChangeKind.Updated;
             else
@@ -66,7 +69,9 @@ public sealed class DescriptorChangeSetBuilder : IDescriptorChangeSetBuilder
                 BeforeState = beforeState,
                 AfterState = afterState,
                 BeforeContractHash = beforeHashes.ContractHash.Value,
-                AfterContractHash = afterHashes.ContractHash.Value
+                AfterContractHash = afterHashes.ContractHash.Value,
+                BeforeDefinitionHash = beforeHashes.DefinitionHash.Value,
+                AfterDefinitionHash = afterHashes.DefinitionHash.Value
             });
         }
 
@@ -85,7 +90,8 @@ public sealed class DescriptorChangeSetBuilder : IDescriptorChangeSetBuilder
                     Ref = kv.Key,
                     Kind = DescriptorChangeKind.Removed,
                     BeforeState = kv.Value.State,
-                    BeforeContractHash = beforeHashes.ContractHash.Value
+                    BeforeContractHash = beforeHashes.ContractHash.Value,
+                    BeforeDefinitionHash = beforeHashes.DefinitionHash.Value
                 });
             }
         }
@@ -111,9 +117,10 @@ public sealed class DescriptorChangeSetBuilder : IDescriptorChangeSetBuilder
         DescriptorChangeKind.Deprecated => 2,
         DescriptorChangeKind.StateChanged => 3,
         DescriptorChangeKind.ContractHashChanged => 4,
-        DescriptorChangeKind.Updated => 5,
-        DescriptorChangeKind.Added => 6,
-        DescriptorChangeKind.Activated => 7,
+        DescriptorChangeKind.DefinitionHashChanged => 5,
+        DescriptorChangeKind.Updated => 6,
+        DescriptorChangeKind.Added => 7,
+        DescriptorChangeKind.Activated => 8,
         _ => int.MaxValue
     };
 }

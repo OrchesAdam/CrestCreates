@@ -116,7 +116,7 @@ public sealed class DescriptorStableHashCoverageTests
             new(nameof(EventDescriptor.PayloadSchema), HashFieldCoverage.Contract, "Payload schema defines event contract"),
             new(nameof(EventDescriptor.Category), HashFieldCoverage.Contract, "Event category affects routing and handling"),
             new(nameof(EventDescriptor.Semantic), HashFieldCoverage.Contract, "Event semantic affects processing"),
-            new(nameof(EventDescriptor.Importance), HashFieldCoverage.Contract, "Importance drives infrastructure policy"),
+            new(nameof(EventDescriptor.Importance), HashFieldCoverage.DefinitionOnly, "Importance drives infrastructure policy, not structural contract"),
             new(nameof(EventDescriptor.ChangeKind), HashFieldCoverage.Contract, "Schema evolution kind for payload"),
         },
 

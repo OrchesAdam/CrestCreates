@@ -1,6 +1,6 @@
 # Canonical Hash Runtime — Architecture Design
 
-> **Date:** 2026-06-23 | **Status:** Complete (v1) | **Issue:** #30
+> **Date:** 2026-06-23 | **Status:** Complete (v2) | **Issue:** #30
 
 ---
 
@@ -115,7 +115,11 @@ public interface ICanonicalHashComputer
 | Attribute | Target | Purpose |
 |-----------|--------|---------|
 | `[CanonicalHashProfile]` | Class | Declares ArtifactKind, DescriptorKind, TargetType, ShapeVersions |
-| `[CanonicalHashField]` | Method | Declares PropertyName, Classification, Order, ElementProfile, CollectionOrderMode, CustomWriter |
+| `[CanonicalHashField]` | Method | Declares PropertyName, Classification, Order, ElementProfile, ValueProfile, Filter, CollectionOrderMode |
+| `[CanonicalHashUnionProfile]` | Class | Declares union type with Discriminator; SG generates switch-based writer |
+| `[CanonicalHashUnionCase]` | Class | Declares a union case: case type, discriminator value, ValueProfile |
+
+`[CanonicalHashField.CustomWriter]` is `[Obsolete]` — unsupported in v2. Use union profiles (`[CanonicalHashUnionProfile]`) or `ValueProfile` instead.
 
 ### 4.2 Field Classification
 
@@ -158,7 +162,7 @@ The writer generates static methods that write directly to `Utf8JsonWriter`:
 - **Payload methods** (`WriteContractPayload`): Write only field values (for sub-structures nested inside parent payloads)
 - **Enum handling**: Generates inline switch expressions using canonical string constants — never `enum.ToString()`
 - **Nullable<T> paths**: Generates null-safe access (`x.Capability != null ? x.Capability.Value.Id : (string?)null`)
-- **CustomWriter**: `[CanonicalHashField]` with `CustomWriter = typeof(...)` delegates to hand-written writer class
+- **Union profiles**: `[CanonicalHashUnionProfile]` + `[CanonicalHashUnionCase]` — SG generates exhaustive current-compilation switch writers. CustomWriter is not a supported v2 main-path extension.
 
 ### 5.3 Sub-structure Semantics
 
@@ -186,23 +190,23 @@ Wraps `ICanonicalHashComputer` to implement `IDescriptorStableHashBuilder`. Retu
 
 ---
 
-## 7. Discriminated Union Support
+## 7. Union Profile Support (v2)
 
-InteractionTarget (abstract record with 3 subtypes: CapabilityTarget, HumanTaskTarget, SubWorkflowTarget) uses a hand-written `InteractionTargetCanonicalHashWriter`:
+Union types (discriminated unions) are declared with `[CanonicalHashUnionProfile]` and `[CanonicalHashUnionCase]`. The SG generates exhaustive current-compilation switch writers — no hand-written `CustomWriter` needed.
 
 ```csharp
-w.WriteString("Kind", target switch
+[CanonicalHashUnionProfile(TargetType = typeof(InteractionTarget), Discriminator = "Kind")]
+[CanonicalHashUnionCase(typeof(CapabilityTarget), "Capability", ValueProfile = typeof(CapabilityTargetCanonicalHashProfile))]
+[CanonicalHashUnionCase(typeof(HumanTaskTarget), "HumanTask", ValueProfile = typeof(HumanTaskTargetCanonicalHashProfile))]
+[CanonicalHashUnionCase(typeof(SubWorkflowTarget), "Workflow", ValueProfile = typeof(SubWorkflowTargetCanonicalHashProfile))]
+internal sealed class InteractionTargetCanonicalHashProfile
 {
-    CapabilityTarget => "Capability",
-    HumanTaskTarget => "HumanTask",
-    SubWorkflowTarget => "Workflow",
-    _ => "Unknown"
-});
-w.WriteString("Id", target.Id);
-w.WriteNumber("Version", target.Version);
+}
 ```
 
-Registered via `[CanonicalHashField(..., CustomWriter = typeof(InteractionTargetCanonicalHashWriter))]`.
+The SG generates a writer that emits `"Kind"` before `"Value"` in canonical JSON, with a dedicated sub-profile per case. Consumers reference the union profile via `ValueProfile = typeof(InteractionTargetCanonicalHashProfile)`.
+
+CustomWriter is not a supported v2 main-path extension. The `[CanonicalHashField.CustomWriter]` property is marked `[Obsolete]` and triggers diagnostic CCHASH023.
 
 ---
 
@@ -210,19 +214,51 @@ Registered via `[CanonicalHashField(..., CustomWriter = typeof(InteractionTarget
 
 | Profile | DescriptorKind | Contract Fields | Definition-Only Fields |
 |---------|---------------|-----------------|----------------------|
-| SchemaDescriptorCanonicalHashProfile | Schema | Id, Version, Fields, References, ValidationRules | DisplayName, Description |
-| SchemaFieldCanonicalHashProfile | (sub-structure) | Name, FieldType, IsRequired, DefaultValue | DisplayName, Description |
+| SchemaDescriptorCanonicalHashProfile | Schema | Id, Name, Version, ChangeKind, State, SupersededById, Fields (required only via SchemaRequiredFieldCanonicalHashProfile + RequiredSchemaFieldCanonicalHashFilter), References | Fields (full, via SchemaFieldCanonicalHashProfile), ValidationRules |
+| SchemaRequiredFieldCanonicalHashProfile | (sub-structure) | Name, FieldType, IsRequired, IsNullable, IsCollection, CollectionElementType, MaxLength, MinLength, MaxValue, MinValue, Pattern | — |
+| SchemaFieldCanonicalHashProfile | (sub-structure) | (v2: used for DefinitionHash full field set) | — |
 | FormDescriptorCanonicalHashProfile | Form | Id, Name, Version, Schema, Fields | DisplayName, Description |
 | CapabilityDescriptorCanonicalHashProfile | Capability | Id, Name, Version, Permission, Inputs, Outputs, Produces, Consumes | DisplayName, Description |
 | HumanTaskDescriptorCanonicalHashProfile | HumanTask | Id, Name, Version, AssigneeStrategy, Outcomes | DisplayName, Description |
 | WorkflowDescriptorCanonicalHashProfile | Workflow | Id, Name, Version, Steps | DisplayName, Description |
 | EventDescriptorCanonicalHashProfile | Event | Id, Name, Version, State, PayloadSchema, Category, Semantic, ChangeKind | Importance |
 
-Sub-structure profiles: SchemaFieldCanonicalHashProfile, VersionedSchemaRefCanonicalHashProfile, FormFieldCanonicalHashProfile, WorkflowStepCanonicalHashProfile, CompletionOutcomeCanonicalHashProfile, EventRefCanonicalHashProfile, VersionedDescriptorRefCanonicalHashProfile.
+Sub-structure profiles: SchemaRequiredFieldCanonicalHashProfile, SchemaFieldCanonicalHashProfile, VersionedSchemaRefCanonicalHashProfile, FormFieldCanonicalHashProfile, WorkflowStepCanonicalHashProfile, CompletionOutcomeCanonicalHashProfile, EventRefCanonicalHashProfile, VersionedDescriptorRefCanonicalHashProfile.
+
+Union profiles: InteractionTargetCanonicalHashProfile (with CapabilityTargetCanonicalHashProfile, HumanTaskTargetCanonicalHashProfile, SubWorkflowTargetCanonicalHashProfile case profiles).
 
 ---
 
-## 9. SG Diagnostics
+## 9. Schema ContractHash v2 Semantics
+
+### 9.1 ContractHash vs DefinitionHash
+
+Schema ContractHash v2 represents the **required read/write binding surface only**. Only schema fields with `IsRequired=true` are included in ContractHash through `SchemaRequiredFieldCanonicalHashProfile` + `RequiredSchemaFieldCanonicalHashFilter`.
+
+Schema DefinitionHash represents the **full descriptor definition surface** — all fields (required + optional) plus validation rules, via the full `SchemaFieldCanonicalHashProfile`.
+
+Adding an optional field changes DefinitionHash and emits `DefinitionHashChanged`; it does **not** change Schema ContractHash v2.
+
+### 9.2 DefinitionHashChanged
+
+`DescriptorChangeKind.DefinitionHashChanged` tracks definition-only changes (e.g., optional field additions, description updates, validation rule changes) separate from `ContractHashChanged`. Compatibility rules use this distinction: a `DefinitionHashChanged` change is less severe than a `ContractHashChanged` change.
+
+### 9.3 Filter (Collection Filtering)
+
+`[CanonicalHashField.Filter]` declares a collection-only semantic projection applied **before** ordering and writing. Filters receive individual elements and return `bool` to include/exclude them from the canonical JSON.
+
+```csharp
+internal static class RequiredSchemaFieldCanonicalHashFilter
+{
+    public static bool Include(SchemaFieldDescriptor field) => field.IsRequired;
+}
+```
+
+The SG generates a call to the filter for each collection element. Only elements passing the filter are included in the hash.
+
+---
+
+## 10. SG Diagnostics
 
 | Code | Severity | Condition |
 |------|----------|-----------|
@@ -238,10 +274,23 @@ Sub-structure profiles: SchemaFieldCanonicalHashProfile, VersionedSchemaRefCanon
 | CCHASH012 | Error | OrderedKeyValue on non-dictionary field |
 | CCHASH013 | Error | ElementProfile type mismatch |
 | CCHASH014 | Error | Multiple field-block methods in profile |
+| CCHASH015 | Error | Union profile missing required properties (TargetType or Discriminator) |
+| CCHASH016 | Error | Union case type not assignable to union target type |
+| CCHASH017 | Error | Union case missing ValueProfile |
+| CCHASH018 | Error | Duplicate union discriminator value |
+| CCHASH019 | Error | Duplicate union case type |
+| CCHASH020 | Error | Union case type must be sealed |
+| CCHASH021 | Error | Known sealed subtype of union target type not declared as a case (runs on abstract and non-sealed base types) |
+| CCHASH022 | Error | Union case ValueProfile TargetType does not match case type |
+| CCHASH023 | Error | CustomWriter is unsupported — use CanonicalHashUnionProfile or ValueProfile |
+| CCHASH024 | Error | Filter is only valid for collection fields |
+| CCHASH025 | Error | Filter must expose a static bool Include(T) method |
+| CCHASH026 | Error | Filter element type does not match collection element type |
+| CCHASH027 | Error | Filter is not supported on dictionary fields (dictionaries always use OrderedKeyValue) |
 
 ---
 
-## 10. Breaking Changes
+## 11. Breaking Changes
 
 - All existing hash values invalidated (pipe-delimited → canonical JSON via Utf8JsonWriter)
 - `DescriptorStableHashes.ContractHash`/`DefinitionHash` type: `string` → `CanonicalHash`
@@ -252,7 +301,7 @@ Sub-structure profiles: SchemaFieldCanonicalHashProfile, VersionedSchemaRefCanon
 
 ---
 
-## 11. Deferred to v2
+## 12. Deferred to v3
 
 - DescriptorPackageHashComputer migration to canonical JSON
 - SourceReviewHash / ReportId migration via hand-written projections

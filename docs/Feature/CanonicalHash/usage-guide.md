@@ -1,7 +1,7 @@
 # Canonical Hash Runtime — Usage Guide
 
 > This document is for CrestCreates module developers who need to compute, consume, or extend canonical hashes.
-> *v1 (2026-06-23): SG-based descriptor hash generation, DefaultCanonicalHashComputer, DescriptorStableHashBuilder adapter*
+> *v2 (2026-06-23): union profiles, Schema ContractHash v2 (required-binding surface), DefinitionHashChanged, Filter support*
 
 ---
 
@@ -144,35 +144,56 @@ internal sealed class SchemaDescriptorCanonicalHashProfile
     CollectionOrderMode = CanonicalHashCollectionOrderMode.OrderedKeyValue)]
 ```
 
-### 2.4 Custom Writers for Discriminated Unions
+### 2.4 Union Profiles (v2)
+
+For discriminated unions, use `[CanonicalHashUnionProfile]` + `[CanonicalHashUnionCase]` instead of hand-written CustomWriter classes:
 
 ```csharp
-// In the profile — reference a hand-written writer class
-[CanonicalHashField(nameof(WorkflowStep.Target), Contract, Order = 5,
-    CustomWriter = typeof(InteractionTargetCanonicalHashWriter))]
-
-// The hand-written writer class
-internal static class InteractionTargetCanonicalHashWriter
+// Union profile — SG generates exhaustive switch-based writer
+[CanonicalHashUnionProfile(TargetType = typeof(InteractionTarget), Discriminator = "Kind")]
+[CanonicalHashUnionCase(typeof(CapabilityTarget), "Capability",
+    ValueProfile = typeof(CapabilityTargetCanonicalHashProfile))]
+[CanonicalHashUnionCase(typeof(HumanTaskTarget), "HumanTask",
+    ValueProfile = typeof(HumanTaskTargetCanonicalHashProfile))]
+[CanonicalHashUnionCase(typeof(SubWorkflowTarget), "Workflow",
+    ValueProfile = typeof(SubWorkflowTargetCanonicalHashProfile))]
+internal sealed class InteractionTargetCanonicalHashProfile
 {
-    public static void WriteContractEnvelope(Utf8JsonWriter w, InteractionTarget target)
-    {
-        w.WriteStartObject();
-        w.WriteString("Kind", target switch
-        {
-            CapabilityTarget => "Capability",
-            HumanTaskTarget => "HumanTask",
-            SubWorkflowTarget => "Workflow",
-            _ => "Unknown"
-        });
-        w.WriteString("Id", target.Id);
-        w.WriteNumber("Version", target.Version);
-        w.WriteEndObject();
-    }
-
-    public static void WriteDefinitionEnvelope(Utf8JsonWriter w, InteractionTarget target)
-        => WriteContractEnvelope(w, target); // same shape for both
 }
+
+// Consumer references the union profile via ValueProfile
+[CanonicalHashField(nameof(WorkflowStep.Target), Contract, Order = 10,
+    ValueProfile = typeof(InteractionTargetCanonicalHashProfile))]
 ```
+
+The SG generates per-case sub-profiles (`CapabilityTargetCanonicalHashProfile`, etc.) and an exhaustive switch writer that emits `"Kind"` before `"Value"`. CustomWriter is `[Obsolete]` and triggers CCHASH023.
+
+### 2.5 Collection Filtering
+
+`[CanonicalHashField.Filter]` applies a collection-only semantic projection before ordering and writing:
+
+```csharp
+// Filter: include only required fields in ContractHash
+internal static class RequiredSchemaFieldCanonicalHashFilter
+{
+    public static bool Include(SchemaFieldDescriptor field) => field.IsRequired;
+}
+
+// ContractHash uses filtered profile
+[CanonicalHashField(nameof(SchemaDescriptor.Fields), Contract, Order = 10,
+    ElementProfile = typeof(SchemaRequiredFieldCanonicalHashProfile),
+    CollectionOrderMode = CanonicalHashCollectionOrderMode.OrdinalByProperty,
+    OrderByProperty = nameof(SchemaFieldDescriptor.Name),
+    Filter = typeof(RequiredSchemaFieldCanonicalHashFilter))]
+
+// DefinitionHash uses full profile (no filter)
+[CanonicalHashField(nameof(SchemaDescriptor.Fields), DefinitionOnly,
+    ElementProfile = typeof(SchemaFieldCanonicalHashProfile),
+    CollectionOrderMode = CanonicalHashCollectionOrderMode.OrdinalByProperty,
+    OrderByProperty = nameof(SchemaFieldDescriptor.Name))]
+```
+
+> **Optional field behavior (v2):** Adding an optional field changes DefinitionHash and emits `DefinitionHashChanged`; it does **not** change Schema ContractHash v2.
 
 ---
 
@@ -291,6 +312,19 @@ var digest = hash.Value;
 | CCHASH012 | Error | OrderedKeyValue on non-dictionary |
 | CCHASH013 | Error | ElementProfile type mismatch |
 | CCHASH014 | Error | Multiple field-block methods in profile |
+| CCHASH015 | Error | Union profile missing required properties (TargetType or Discriminator) |
+| CCHASH016 | Error | Union case type not assignable to union target type |
+| CCHASH017 | Error | Union case missing ValueProfile |
+| CCHASH018 | Error | Duplicate union discriminator value |
+| CCHASH019 | Error | Duplicate union case type |
+| CCHASH020 | Error | Union case type must be sealed |
+| CCHASH021 | Error | Known sealed subtype of union target type not declared as a case (runs on abstract and non-sealed base types) |
+| CCHASH022 | Error | Union case ValueProfile TargetType does not match case type |
+| CCHASH023 | Error | CustomWriter is unsupported — use CanonicalHashUnionProfile or ValueProfile |
+| CCHASH024 | Error | Filter is only valid for collection fields |
+| CCHASH025 | Error | Filter must expose a static bool Include(T) method |
+| CCHASH026 | Error | Filter element type does not match collection element type |
+| CCHASH027 | Error | Filter is not supported on dictionary fields (dictionaries always use OrderedKeyValue) |
 
 ---
 
@@ -356,17 +390,42 @@ public void Different_Scope_Produces_Different_Hash()
 }
 ```
 
-### 8.3 Contract vs Definition
+### 8.3 Contract vs Definition (v2: Schema Required-Binding)
 
 ```csharp
 [Fact]
-public void Definition_Change_Does_Not_Affect_ContractHash()
+public void Optional_Field_Addition_Changes_DefinitionHash_Not_ContractHash()
+{
+    var schema1 = CreateTestSchema(includeOptional: false);
+    var schema2 = CreateTestSchema(includeOptional: true);
+
+    var c1 = _hashComputer.ComputeContractHash(schema1, CanonicalHashScope.InternalFull);
+    var c2 = _hashComputer.ComputeContractHash(schema2, CanonicalHashScope.InternalFull);
+    var d1 = _hashComputer.ComputeDefinitionHash(schema1, CanonicalHashScope.InternalFull);
+    var d2 = _hashComputer.ComputeDefinitionHash(schema2, CanonicalHashScope.InternalFull);
+
+    // Optional field addition does NOT change ContractHash (v2)
+    c1.Value.Should().Be(c2.Value, "optional fields are not part of required-binding ContractHash");
+
+    // Optional field addition DOES change DefinitionHash
+    d1.Value.Should().NotBe(d2.Value, "DefinitionHash includes all fields");
+}
+```
+
+### 8.4 DefinitionHashChanged Change Kind
+
+```csharp
+[Fact]
+public void Optional_Field_Addition_Emits_DefinitionHashChanged()
 {
     var schema1 = CreateTestSchema(displayName: "v1");
     var schema2 = CreateTestSchema(displayName: "v2");
-    var c1 = _hashComputer.ComputeContractHash(schema1, CanonicalHashScope.InternalFull);
-    var c2 = _hashComputer.ComputeContractHash(schema2, CanonicalHashScope.InternalFull);
-    c1.Value.Should().Be(c2.Value, "DisplayName is DefinitionOnly");
+    var builder = services.GetRequiredService<IDescriptorChangeSetBuilder>();
+
+    var changeSet = builder.Build(new[] { schema1 }, new[] { schema2 });
+
+    changeSet.Changes.Should().ContainSingle()
+        .Which.Kind.Should().Be(DescriptorChangeKind.DefinitionHashChanged);
 }
 ```
 

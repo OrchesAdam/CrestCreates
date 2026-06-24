@@ -22,7 +22,7 @@ namespace CrestCreates.CodeGenerator.CanonicalHashGenerator;
 /// </summary>
 internal sealed class CanonicalHashWriterWriter
 {
-    public string Write(IReadOnlyList<ProfileModel> profiles)
+    public string Write(IReadOnlyList<ProfileModel> profiles, IReadOnlyList<UnionProfileModel> unionProfiles)
     {
         var sb = new StringBuilder();
 
@@ -31,6 +31,13 @@ internal sealed class CanonicalHashWriterWriter
         foreach (var profile in profiles)
         {
             WriteWriterClass(sb, profile);
+            sb.AppendLine();
+        }
+
+        // Generate union writer classes
+        foreach (var unionProfile in unionProfiles)
+        {
+            WriteUnionWriterClass(sb, unionProfile);
             sb.AppendLine();
         }
 
@@ -71,6 +78,57 @@ internal sealed class CanonicalHashWriterWriter
         WritePayloadMethod(sb, profile, "Definition", profile.DefinitionFields, targetTypeName);
 
         sb.AppendLine("}");
+    }
+
+    /// <summary>
+    /// Generates a writer class for a union profile that dispatches to case profile writers.
+    /// </summary>
+    private static void WriteUnionWriterClass(StringBuilder sb, UnionProfileModel unionProfile)
+    {
+        var className = $"{unionProfile.Stem}CanonicalHashWriter";
+        var targetTypeFqn = unionProfile.TargetType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+        sb.AppendLine($"internal static class {className}");
+        sb.AppendLine("{");
+
+        // WriteContractPayload
+        WriteUnionPayloadMethod(sb, unionProfile, "Contract", targetTypeFqn);
+        sb.AppendLine();
+
+        // WriteDefinitionPayload
+        WriteUnionPayloadMethod(sb, unionProfile, "Definition", targetTypeFqn);
+
+        sb.AppendLine("}");
+    }
+
+    private static void WriteUnionPayloadMethod(StringBuilder sb, UnionProfileModel unionProfile, string purpose,
+        string targetTypeFqn)
+    {
+        sb.AppendLine($"    public static void Write{purpose}Payload(Utf8JsonWriter w, {targetTypeFqn} target)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        switch (target)");
+        sb.AppendLine("        {");
+
+        foreach (var caseModel in unionProfile.Cases)
+        {
+            var caseTypeFqn = caseModel.CaseType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            var caseStem = caseModel.ValueProfile.Stem;
+            var discriminatorProp = unionProfile.Discriminator;
+            var discriminatorValue = caseModel.DiscriminatorValue;
+
+            sb.AppendLine($"            case {caseTypeFqn} value:");
+            sb.AppendLine("                w.WriteStartObject();");
+            sb.AppendLine($"                w.WriteString(\"{discriminatorProp}\", \"{discriminatorValue}\");");
+            sb.AppendLine("                w.WritePropertyName(\"Value\");");
+            sb.AppendLine($"                {caseStem}CanonicalHashWriter.Write{purpose}Payload(w, value);");
+            sb.AppendLine("                w.WriteEndObject();");
+            sb.AppendLine("                break;");
+        }
+
+        sb.AppendLine("            default:");
+        sb.AppendLine($"                throw new InvalidOperationException($\"Unknown {targetTypeFqn} subtype: {{target.GetType().Name}}\");");
+        sb.AppendLine("        }");
+        sb.AppendLine("    }");
     }
 
     private static void WriteEnvelopeMethod(StringBuilder sb, ProfileModel profile, string purpose,
@@ -141,22 +199,18 @@ internal sealed class CanonicalHashWriterWriter
         var propName = field.PropertyName;
         var access = $"{sourceVar}.{propName}";
 
-        // CustomWriter takes precedence — the SG delegates to a hand-written canonical writer
-        if (field.CustomWriterTypeName is not null)
-        {
-            WriteCustomWriterField(sb, field, propName, access, purpose);
-            return;
-        }
+        // CustomWriter is no longer supported (CCHASH023 rejects them from the model)
+        // The branch is removed as unreachable dead code.
 
         // Dictionary → CanonicalStringKeyValuePayload
         if (field.IsDictionary)
         {
-            WriteDictionaryField(sb, field, propName, access);
+            WriteDictionaryField(sb, field, propName, access, purpose);
             return;
         }
 
-        // Collection with element profile
-        if (field.IsCollection && field.ElementProfile is not null)
+        // Collection with element profile or union element reference
+        if (field.IsCollection && (field.ElementProfile is not null || field.ElementProfileReference?.UnionProfile is not null))
         {
             WriteCollectionWithProfileField(sb, field, propName, access, purpose);
             return;
@@ -169,8 +223,8 @@ internal sealed class CanonicalHashWriterWriter
             return;
         }
 
-        // Non-collection complex type with ValueProfile (sub-structure)
-        if (field.ValueProfile is not null)
+        // Non-collection complex type with ValueProfile or union value reference (sub-structure)
+        if (field.ValueProfile is not null || field.ValueProfileReference?.UnionProfile is not null)
         {
             WriteSubStructureField(sb, field, propName, access, purpose);
             return;
@@ -255,49 +309,7 @@ internal sealed class CanonicalHashWriterWriter
         }
     }
 
-    private static void WriteCustomWriterField(StringBuilder sb, ProfileFieldModel field,
-        string propName, string access, string purpose)
-    {
-        // CustomWriter is a static class with WriteContractPayload/WriteDefinitionPayload methods
-        // that write only the payload fields (no envelope metadata).
-        var writerClass = field.CustomWriterTypeName!;
-        var payloadMethod = purpose == "Contract" ? "WriteContractPayload" : "WriteDefinitionPayload";
-
-        if (field.IsNullable)
-        {
-            if (IsNullableValueType(field.PropertyType))
-            {
-                sb.AppendLine($"        if ({access}.HasValue)");
-                sb.AppendLine("        {");
-                sb.AppendLine($"            w.WritePropertyName(\"{propName}\");");
-                sb.AppendLine($"            {writerClass}.{payloadMethod}(w, {access}.Value);");
-                sb.AppendLine("        }");
-                sb.AppendLine("        else");
-                sb.AppendLine("        {");
-                sb.AppendLine($"            w.WriteNull(\"{propName}\");");
-                sb.AppendLine("        }");
-            }
-            else
-            {
-                sb.AppendLine($"        if ({access} is not null)");
-                sb.AppendLine("        {");
-                sb.AppendLine($"            w.WritePropertyName(\"{propName}\");");
-                sb.AppendLine($"            {writerClass}.{payloadMethod}(w, {access});");
-                sb.AppendLine("        }");
-                sb.AppendLine("        else");
-                sb.AppendLine("        {");
-                sb.AppendLine($"            w.WriteNull(\"{propName}\");");
-                sb.AppendLine("        }");
-            }
-        }
-        else
-        {
-            sb.AppendLine($"        w.WritePropertyName(\"{propName}\");");
-            sb.AppendLine($"            {writerClass}.{payloadMethod}(w, {access});");
-        }
-    }
-
-    private static void WriteDictionaryField(StringBuilder sb, ProfileFieldModel field, string propName, string access)
+    private static void WriteDictionaryField(StringBuilder sb, ProfileFieldModel field, string propName, string access, string purpose)
     {
         var valueType = GetDictionaryValueTypeSymbol(field.PropertyType);
         var isNullable = field.IsNullable;
@@ -306,7 +318,7 @@ internal sealed class CanonicalHashWriterWriter
         {
             sb.AppendLine($"        if ({access} is not null)");
             sb.AppendLine("        {");
-            WriteDictionaryContent(sb, field, propName, access, valueType);
+            WriteDictionaryContent(sb, field, propName, access, valueType, purpose);
             sb.AppendLine("        }");
             sb.AppendLine("        else");
             sb.AppendLine("        {");
@@ -315,12 +327,12 @@ internal sealed class CanonicalHashWriterWriter
         }
         else
         {
-            WriteDictionaryContent(sb, field, propName, access, valueType);
+            WriteDictionaryContent(sb, field, propName, access, valueType, purpose);
         }
     }
 
     private static void WriteDictionaryContent(StringBuilder sb, ProfileFieldModel field, string propName,
-        string access, ITypeSymbol? valueType)
+        string access, ITypeSymbol? valueType, string purpose)
     {
         // Dictionary is always written as ordered array of { Key, Value } objects
         sb.AppendLine($"            w.WritePropertyName(\"{propName}\");");
@@ -329,16 +341,22 @@ internal sealed class CanonicalHashWriterWriter
         // Sort by key for determinism (CollectionOrderMode for dictionaries is always OrderedKeyValue)
         var sortedAccess = $"{access}.OrderBy(kv => kv.Key, StringComparer.Ordinal)";
 
-        if (valueType is not null && field.ValueProfile is not null)
+        if (valueType is not null && (field.ValueProfile is not null || field.ValueProfileReference?.UnionProfile is not null))
         {
             // Dictionary with sub-structure values — use payload methods (no envelope metadata)
-            var writerClass = $"{field.ValueProfile.Stem}CanonicalHashWriter";
+            string writerClass;
+            if (field.ValueProfileReference?.UnionProfile is not null)
+                writerClass = $"{field.ValueProfileReference.UnionProfile.Stem}CanonicalHashWriter";
+            else
+                writerClass = $"{field.ValueProfile!.Stem}CanonicalHashWriter";
+            var writerMethod = purpose == "Contract" ? "WriteContractPayload" : "WriteDefinitionPayload";
+
             sb.AppendLine($"            foreach (var kv in {sortedAccess})");
             sb.AppendLine("            {");
             sb.AppendLine("                w.WriteStartObject();");
             sb.AppendLine("                w.WriteString(\"Key\", kv.Key);");
             sb.AppendLine("                w.WritePropertyName(\"Value\");");
-            sb.AppendLine($"                {writerClass}.WriteContractPayload(w, kv.Value);");
+            sb.AppendLine($"                {writerClass}.{writerMethod}(w, kv.Value);");
             sb.AppendLine("                w.WriteEndObject();");
             sb.AppendLine("            }");
         }
@@ -395,14 +413,24 @@ internal sealed class CanonicalHashWriterWriter
     private static void WriteCollectionWithProfileField(StringBuilder sb, ProfileFieldModel field,
         string propName, string access, string purpose)
     {
-        var elementWriter = $"{field.ElementProfile!.Stem}CanonicalHashWriter";
+        // Route to union writer if the element profile reference is a union
+        string elementWriter;
+        if (field.ElementProfileReference?.UnionProfile is not null)
+        {
+            elementWriter = $"{field.ElementProfileReference.UnionProfile.Stem}CanonicalHashWriter";
+        }
+        else
+        {
+            elementWriter = $"{field.ElementProfile!.Stem}CanonicalHashWriter";
+        }
         var orderingClause = GetOrderingClause(field);
+        var filterWhere = GetFilterWhereClause(field);
 
         if (field.IsNullable)
         {
             sb.AppendLine($"        if ({access} is not null)");
             sb.AppendLine("        {");
-            WriteCollectionWithProfileContent(sb, field, propName, access, purpose, elementWriter, orderingClause);
+            WriteCollectionWithProfileContent(sb, field, propName, access, purpose, elementWriter, orderingClause, filterWhere);
             sb.AppendLine("        }");
             sb.AppendLine("        else");
             sb.AppendLine("        {");
@@ -411,17 +439,32 @@ internal sealed class CanonicalHashWriterWriter
         }
         else
         {
-            WriteCollectionWithProfileContent(sb, field, propName, access, purpose, elementWriter, orderingClause);
+            WriteCollectionWithProfileContent(sb, field, propName, access, purpose, elementWriter, orderingClause, filterWhere);
         }
     }
 
     private static void WriteCollectionWithProfileContent(StringBuilder sb, ProfileFieldModel field,
-        string propName, string access, string purpose, string elementWriter, string orderingClause)
+        string propName, string access, string purpose, string elementWriter, string orderingClause, string filterWhere)
     {
         var writerMethod = purpose == "Contract" ? "WriteContractPayload" : "WriteDefinitionPayload";
-        var orderedAccess = orderingClause.Length > 0
-            ? $"{access}.{orderingClause}"
-            : access;
+
+        // Build the collection chain: source -> filter -> order
+        var collectionChain = new StringBuilder(access);
+        bool hasOperations = false;
+
+        if (filterWhere.Length > 0)
+        {
+            collectionChain.Append('.').Append(filterWhere);
+            hasOperations = true;
+        }
+
+        if (orderingClause.Length > 0)
+        {
+            collectionChain.Append('.').Append(orderingClause);
+            hasOperations = true;
+        }
+
+        var orderedAccess = hasOperations ? collectionChain.ToString() : access;
 
         sb.AppendLine($"            w.WritePropertyName(\"{propName}\");");
         sb.AppendLine("            w.WriteStartArray();");
@@ -436,12 +479,13 @@ internal sealed class CanonicalHashWriterWriter
         string propName, string access)
     {
         var orderingClause = GetOrderingClause(field);
+        var filterWhere = GetFilterWhereClause(field);
 
         if (field.IsNullable)
         {
             sb.AppendLine($"        if ({access} is not null)");
             sb.AppendLine("        {");
-            WriteSimpleCollectionContent(sb, field, propName, access, orderingClause);
+            WriteSimpleCollectionContent(sb, field, propName, access, orderingClause, filterWhere);
             sb.AppendLine("        }");
             sb.AppendLine("        else");
             sb.AppendLine("        {");
@@ -450,16 +494,30 @@ internal sealed class CanonicalHashWriterWriter
         }
         else
         {
-            WriteSimpleCollectionContent(sb, field, propName, access, orderingClause);
+            WriteSimpleCollectionContent(sb, field, propName, access, orderingClause, filterWhere);
         }
     }
 
     private static void WriteSimpleCollectionContent(StringBuilder sb, ProfileFieldModel field,
-        string propName, string access, string orderingClause)
+        string propName, string access, string orderingClause, string filterWhere)
     {
-        var orderedAccess = orderingClause.Length > 0
-            ? $"{access}.{orderingClause}"
-            : access;
+        // Build the collection chain: source -> filter -> order
+        var collectionChain = new StringBuilder(access);
+        bool hasOperations = false;
+
+        if (filterWhere.Length > 0)
+        {
+            collectionChain.Append('.').Append(filterWhere);
+            hasOperations = true;
+        }
+
+        if (orderingClause.Length > 0)
+        {
+            collectionChain.Append('.').Append(orderingClause);
+            hasOperations = true;
+        }
+
+        var orderedAccess = hasOperations ? collectionChain.ToString() : access;
 
         sb.AppendLine($"            w.WritePropertyName(\"{propName}\");");
         sb.AppendLine("            w.WriteStartArray();");
@@ -478,7 +536,16 @@ internal sealed class CanonicalHashWriterWriter
     private static void WriteSubStructureField(StringBuilder sb, ProfileFieldModel field,
         string propName, string access, string purpose)
     {
-        var writerClass = $"{field.ValueProfile!.Stem}CanonicalHashWriter";
+        // Route to union writer if the value profile reference is a union
+        string writerClass;
+        if (field.ValueProfileReference?.UnionProfile is not null)
+        {
+            writerClass = $"{field.ValueProfileReference.UnionProfile.Stem}CanonicalHashWriter";
+        }
+        else
+        {
+            writerClass = $"{field.ValueProfile!.Stem}CanonicalHashWriter";
+        }
         var payloadMethod = purpose == "Contract" ? "WriteContractPayload" : "WriteDefinitionPayload";
 
         if (field.IsNullable)
@@ -606,6 +673,19 @@ internal sealed class CanonicalHashWriterWriter
     }
 
     // --- Helpers for ordering clause generation (same logic as ProjectionWriter) ---
+
+    /// <summary>
+    /// Returns a .Where(filter.Include) clause if the field has a filter, or empty string otherwise.
+    /// </summary>
+    private static string GetFilterWhereClause(ProfileFieldModel field)
+    {
+        if (field.Filter is not null)
+        {
+            return $"Where({field.Filter.FullyQualifiedTypeName}.Include)";
+        }
+        return "";
+    }
+
     private static string GetOrderingClause(ProfileFieldModel field)
     {
         return field.CollectionOrderMode switch

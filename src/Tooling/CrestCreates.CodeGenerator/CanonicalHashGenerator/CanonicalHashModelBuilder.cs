@@ -7,20 +7,24 @@ using System.Linq;
 namespace CrestCreates.CodeGenerator.CanonicalHashGenerator;
 
 /// <summary>
-/// Holds extracted info about a single profile class decorated with [CanonicalHashProfile].
-/// Only stores symbol references — attribute data is re-read fresh from the compilation
-/// in the ModelBuilder to avoid stale data from SyntaxProvider transforms.
+/// Holds extracted info about a single profile class decorated with [CanonicalHashProfile]
+/// or [CanonicalHashUnionProfile]. Only stores symbol references — attribute data is
+/// re-read fresh from the compilation in the ModelBuilder to avoid stale data from
+/// SyntaxProvider transforms.
 /// </summary>
 internal sealed class ProfileClassInfo
 {
     public INamedTypeSymbol Symbol { get; }
     /// <summary>Number of methods carrying [CanonicalHashField] attributes.</summary>
     public int FieldMethodCount { get; }
+    /// <summary>Whether this is a union profile (vs. normal profile).</summary>
+    public bool IsUnion { get; }
 
-    public ProfileClassInfo(INamedTypeSymbol symbol, int fieldMethodCount)
+    public ProfileClassInfo(INamedTypeSymbol symbol, int fieldMethodCount, bool isUnion)
     {
         Symbol = symbol;
         FieldMethodCount = fieldMethodCount;
+        IsUnion = isUnion;
     }
 }
 
@@ -37,22 +41,26 @@ internal sealed class CanonicalHashModelBuilder
         "Namespace", "Kind", "ContractHash", "DefinitionHash", "FullId"
     };
 
+    private const string UnionProfileAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashUnionProfileAttribute";
+    private const string UnionCaseAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashUnionCaseAttribute";
+    private const string ProfileAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashProfileAttribute";
+    private const string FieldAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashFieldAttribute";
+
     public CanonicalHashModelBuilder(Compilation compilation, SourceProductionContext context)
     {
         _compilation = compilation;
         _context = context;
     }
 
-    public IReadOnlyList<ProfileModel> Build(ImmutableArray<ProfileClassInfo> profileClassInfos)
+    public (IReadOnlyList<ProfileModel> Profiles, IReadOnlyList<UnionProfileModel> UnionProfiles) Build(
+        ImmutableArray<ProfileClassInfo> normalProfileInfos,
+        ImmutableArray<ProfileClassInfo> unionProfileInfos)
     {
-        if (profileClassInfos.IsDefaultOrEmpty)
-            return Array.Empty<ProfileModel>();
-
-        // Phase 1: Build initial profile models
+        // Phase 1: Build normal profile models
         var profiles = new List<ProfileModel>();
         var profileBySymbol = new Dictionary<INamedTypeSymbol, ProfileModel>(SymbolEqualityComparer.Default);
 
-        foreach (var info in profileClassInfos)
+        foreach (var info in normalProfileInfos)
         {
             var profile = BuildProfileModel(info);
             if (profile is not null)
@@ -62,25 +70,53 @@ internal sealed class CanonicalHashModelBuilder
             }
         }
 
-        if (profiles.Count == 0)
-            return Array.Empty<ProfileModel>();
-
-        // Phase 2: Resolve ElementProfile/ValueProfile references
-        foreach (var profile in profiles)
+        // Phase 1b: Build union profile shells (no case resolution yet)
+        var unionProfiles = new List<UnionProfileModel>();
+        foreach (var info in unionProfileInfos)
         {
-            ResolveFieldProfileReferences(profile, profileBySymbol);
+            var unionProfile = BuildUnionProfileShell(info.Symbol);
+            if (unionProfile is not null)
+                unionProfiles.Add(unionProfile);
         }
 
-        // Phase 3: Validate
+        if (profiles.Count == 0 && unionProfiles.Count == 0)
+            return (Array.Empty<ProfileModel>(), Array.Empty<UnionProfileModel>());
+
+        // Build a lookup for union profiles by their profile class symbol
+        var unionProfileBySymbol = new Dictionary<INamedTypeSymbol, UnionProfileModel>(SymbolEqualityComparer.Default);
+        foreach (var up in unionProfiles)
+        {
+            unionProfileBySymbol[up.ProfileClassSymbol] = up;
+        }
+
+        // Phase 2: Resolve ElementProfile/ValueProfile references and parse filters
+        foreach (var profile in profiles)
+        {
+            ResolveFieldProfileReferences(profile, profileBySymbol, unionProfileBySymbol);
+        }
+
+        // Phase 3: Resolve union cases to normal value profiles
+        for (int i = 0; i < unionProfiles.Count; i++)
+        {
+            unionProfiles[i] = ResolveUnionCases(unionProfiles[i], profileBySymbol, unionProfileBySymbol);
+        }
+
+        // Phase 4: Validate normal profiles
         foreach (var profile in profiles)
         {
             ValidateProfile(profile);
         }
 
+        // Phase 5: Validate union profiles
+        foreach (var unionProfile in unionProfiles)
+        {
+            ValidateUnionProfile(unionProfile);
+        }
+
         // Sort by profile class name for deterministic output
         profiles.Sort((a, b) => string.CompareOrdinal(a.ProfileClassName, b.ProfileClassName));
 
-        return profiles;
+        return (profiles, unionProfiles);
     }
 
     private ProfileModel? BuildProfileModel(ProfileClassInfo info)
@@ -89,7 +125,7 @@ internal sealed class CanonicalHashModelBuilder
 
         // Extract [CanonicalHashProfile] attribute
         var profileAttr = classSymbol.GetAttributes().FirstOrDefault(a =>
-            a.AttributeClass?.ToDisplayString() == "CrestCreates.Metadata.Abstractions.CanonicalHashProfileAttribute");
+            a.AttributeClass?.ToDisplayString() == ProfileAttrFullName);
 
         if (profileAttr is null) return null;
 
@@ -157,17 +193,232 @@ internal sealed class CanonicalHashModelBuilder
         };
     }
 
+    private UnionProfileModel? BuildUnionProfileShell(INamedTypeSymbol classSymbol)
+    {
+        var unionAttr = classSymbol.GetAttributes().FirstOrDefault(a =>
+            a.AttributeClass?.ToDisplayString() == UnionProfileAttrFullName);
+
+        if (unionAttr is null) return null;
+
+        var targetType = GetNamedArgTypeValue(unionAttr, "TargetType");
+        var discriminator = GetNamedArgStringValue(unionAttr, "Discriminator") ?? string.Empty;
+
+        // CCHASH015: TargetType missing or Discriminator empty
+        if (targetType is null || string.IsNullOrEmpty(discriminator))
+        {
+            _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                CanonicalHashDiagnostics.UnionProfileMissingRequiredProps,
+                classSymbol.Locations.FirstOrDefault()));
+            return null;
+        }
+
+        // Collect union case attributes (don't resolve ValueProfile yet)
+        var caseAttrs = classSymbol.GetAttributes()
+            .Where(a => a.AttributeClass?.ToDisplayString() == UnionCaseAttrFullName)
+            .ToList();
+
+        var cases = new List<UnionCaseModel>();
+        foreach (var caseAttr in caseAttrs)
+        {
+            var ctorArgs = caseAttr.ConstructorArguments;
+            if (ctorArgs.Length < 2) continue;
+
+            var caseType = ctorArgs[0].Value as INamedTypeSymbol;
+            var discriminatorValue = ctorArgs[1].Value?.ToString() ?? string.Empty;
+
+            if (caseType is null) continue;
+
+            // Location for diagnostics
+            var location = caseAttr.ApplicationSyntaxReference?.GetSyntax().GetLocation();
+
+            // Store a placeholder case — ValueProfile resolved in ResolveUnionCases
+            cases.Add(new UnionCaseModel
+            {
+                CaseType = caseType,
+                DiscriminatorValue = discriminatorValue,
+                ValueProfile = null!, // will be resolved later
+                Location = location
+            });
+        }
+
+        return new UnionProfileModel
+        {
+            ProfileClassName = classSymbol.Name,
+            ProfileClassSymbol = classSymbol,
+            TargetType = targetType,
+            TargetTypeName = targetType.Name,
+            Discriminator = discriminator,
+            Cases = cases,
+            Location = classSymbol.Locations.FirstOrDefault()
+        };
+    }
+
+    private UnionProfileModel ResolveUnionCases(
+        UnionProfileModel unionProfile,
+        Dictionary<INamedTypeSymbol, ProfileModel> profileBySymbol,
+        Dictionary<INamedTypeSymbol, UnionProfileModel> unionProfileBySymbol)
+    {
+        var classSymbol = unionProfile.ProfileClassSymbol;
+        var caseAttrs = classSymbol.GetAttributes()
+            .Where(a => a.AttributeClass?.ToDisplayString() == UnionCaseAttrFullName)
+            .ToList();
+
+        var resolvedCases = new List<UnionCaseModel>();
+
+        for (int i = 0; i < caseAttrs.Count && i < unionProfile.Cases.Count; i++)
+        {
+            var caseAttr = caseAttrs[i];
+            var caseModel = unionProfile.Cases[i];
+
+            // Resolve ValueProfile — required named argument
+            var valueProfileType = GetNamedArgTypeValue(caseAttr, "ValueProfile");
+
+            // CCHASH017: Missing ValueProfile
+            if (valueProfileType is null)
+            {
+                _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                    CanonicalHashDiagnostics.UnionCaseMissingValueProfile,
+                    caseModel.Location,
+                    caseModel.CaseType.Name));
+                continue;
+            }
+
+            // Resolve the profile model
+            var profileModel = ResolveProfileType(valueProfileType, profileBySymbol, unionProfileBySymbol);
+            if (profileModel is null) continue;
+
+            // CCHASH016: Case type not assignable to union TargetType
+            if (!IsAssignableTo(caseModel.CaseType, unionProfile.TargetType))
+            {
+                _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                    CanonicalHashDiagnostics.UnionCaseTypeNotAssignable,
+                    caseModel.Location,
+                    caseModel.CaseType.Name, unionProfile.TargetTypeName));
+                continue;
+            }
+
+            // CCHASH022: ValueProfile.TargetType != CaseType
+            if (!SymbolEqualityComparer.Default.Equals(profileModel.TargetType, caseModel.CaseType))
+            {
+                _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                    CanonicalHashDiagnostics.UnionCaseValueProfileTargetMismatch,
+                    caseModel.Location,
+                    profileModel.TargetTypeName, caseModel.CaseType.Name));
+                continue;
+            }
+
+            // CCHASH020: Case type must be sealed
+            if (!caseModel.CaseType.IsSealed)
+            {
+                _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                    CanonicalHashDiagnostics.UnionCaseTypeMustBeSealed,
+                    caseModel.Location,
+                    caseModel.CaseType.Name));
+                continue;
+            }
+
+            resolvedCases.Add(caseModel with { ValueProfile = profileModel });
+        }
+
+        return unionProfile with { Cases = resolvedCases.AsReadOnly() };
+    }
+
+    private void ValidateUnionProfile(UnionProfileModel unionProfile)
+    {
+        var classSymbol = unionProfile.ProfileClassSymbol;
+        var cases = unionProfile.Cases;
+
+        // CCHASH018: Duplicate discriminator values
+        var discriminatorSeen = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < cases.Count; i++)
+        {
+            var caseModel = cases[i];
+            if (!string.IsNullOrEmpty(caseModel.DiscriminatorValue))
+            {
+                if (discriminatorSeen.TryGetValue(caseModel.DiscriminatorValue, out var firstIndex))
+                {
+                    _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                        CanonicalHashDiagnostics.DuplicateUnionDiscriminator,
+                        caseModel.Location,
+                        caseModel.DiscriminatorValue, unionProfile.ProfileClassName));
+                }
+                else
+                {
+                    discriminatorSeen[caseModel.DiscriminatorValue] = i;
+                }
+            }
+        }
+
+        // CCHASH019: Duplicate case types (by symbol identity)
+        var caseTypesSeen = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+        foreach (var caseModel in cases)
+        {
+            if (!caseTypesSeen.Add(caseModel.CaseType))
+            {
+                _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                    CanonicalHashDiagnostics.DuplicateUnionCaseType,
+                    caseModel.Location,
+                    caseModel.CaseType.Name, unionProfile.ProfileClassName));
+            }
+        }
+
+        // CCHASH021: Exhaustiveness — check for known direct sealed subtypes not declared
+        if (unionProfile.Location is not null)
+        {
+            var targetType = unionProfile.TargetType;
+            if (!targetType.IsSealed)
+            {
+                // For non-sealed base types (including abstract), scan compilation for sealed subtypes
+                // that directly derive from TargetType and are not declared as cases.
+                var declaredCaseTypes = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+                foreach (var c in cases)
+                    declaredCaseTypes.Add(c.CaseType);
+
+                var allTypes = GetAllTypesInCompilation();
+                foreach (var type in allTypes)
+                {
+                    if (type.IsSealed && type.BaseType is not null &&
+                        SymbolEqualityComparer.Default.Equals(type.BaseType, targetType))
+                    {
+                        if (!declaredCaseTypes.Contains(type))
+                        {
+                            _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                                CanonicalHashDiagnostics.UnionCaseMissingKnownSubtype,
+                                unionProfile.Location,
+                                type.Name, targetType.Name));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private IEnumerable<INamedTypeSymbol> GetAllTypesInCompilation()
+    {
+        // Walk all syntax trees and collect declared types
+        foreach (var tree in _compilation.SyntaxTrees)
+        {
+            var semanticModel = _compilation.GetSemanticModel(tree);
+            var root = tree.GetRoot();
+            foreach (var typeDecl in root.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax>())
+            {
+                var symbol = semanticModel.GetDeclaredSymbol(typeDecl) as INamedTypeSymbol;
+                if (symbol is not null)
+                    yield return symbol;
+            }
+        }
+    }
+
     private static List<AttributeData> ReReadFieldAttributes(INamedTypeSymbol classSymbol)
     {
         var fieldAttrs = new List<AttributeData>();
-        const string fieldAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashFieldAttribute";
 
         foreach (var member in classSymbol.GetMembers())
         {
             if (member is IMethodSymbol method)
             {
                 var methodFieldAttrs = method.GetAttributes()
-                    .Where(a => a.AttributeClass?.ToDisplayString() == fieldAttrFullName)
+                    .Where(a => a.AttributeClass?.ToDisplayString() == FieldAttrFullName)
                     .ToList();
 
                 if (methodFieldAttrs.Count > 0)
@@ -215,6 +466,7 @@ internal sealed class CanonicalHashModelBuilder
             var orderByProperty = GetNamedArgStringValue(attr, "OrderByProperty");
             var reason = GetNamedArgStringValue(attr, "Reason");
             var customWriterType = GetNamedArgTypeValue(attr, "CustomWriter");
+            var filterType = GetNamedArgTypeValue(attr, "Filter");
 
             // Resolve property on target type
             var propertySymbol = targetType.GetMembers(propertyName)
@@ -227,6 +479,16 @@ internal sealed class CanonicalHashModelBuilder
                     CanonicalHashDiagnostics.PropertyNotFound,
                     attr.ApplicationSyntaxReference?.GetSyntax().GetLocation(),
                     propertyName, targetType.Name));
+                attrIndex++;
+                continue;
+            }
+
+            // CCHASH023: CustomWriter is unsupported — reject the field from the model
+            if (customWriterType is not null)
+            {
+                _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                    CanonicalHashDiagnostics.CustomWriterUnsupported,
+                    attr.ApplicationSyntaxReference?.GetSyntax().GetLocation()));
                 attrIndex++;
                 continue;
             }
@@ -278,6 +540,34 @@ internal sealed class CanonicalHashModelBuilder
                     propertyName));
             }
 
+            // Parse and validate Filter
+            FieldFilterModel? filterModel = null;
+            if (filterType is not null)
+            {
+                // CCHASH027: Filter not supported on dictionary fields
+                if (isDictionary)
+                {
+                    _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                        CanonicalHashDiagnostics.FilterNotSupportedOnDictionary,
+                        attr.ApplicationSyntaxReference?.GetSyntax().GetLocation(),
+                        propertyName));
+                }
+                // CCHASH024: Filter only for collection fields
+                else if (!isCollection)
+                {
+                    _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                        CanonicalHashDiagnostics.FilterOnlyForCollection,
+                        attr.ApplicationSyntaxReference?.GetSyntax().GetLocation(),
+                        propertyName));
+                }
+                else
+                {
+                    filterModel = ValidateFilter(filterType, propertyType,
+                        attr.ApplicationSyntaxReference?.GetSyntax().GetLocation(),
+                        propertyName);
+                }
+            }
+
             fields.Add(new ProfileFieldModel
             {
                 PropertyName = propertyName,
@@ -286,7 +576,6 @@ internal sealed class CanonicalHashModelBuilder
                 CollectionOrderMode = collectionOrderMode,
                 OrderByProperty = orderByProperty,
                 Reason = reason,
-                CustomWriterTypeName = customWriterType?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 PropertyType = propertyType,
                 IsNullable = isNullable,
                 IsCollection = isCollection,
@@ -294,6 +583,7 @@ internal sealed class CanonicalHashModelBuilder
                 Location = attr.ApplicationSyntaxReference?.GetSyntax().GetLocation(),
                 ElementProfile = null,
                 ValueProfile = null,
+                Filter = filterModel,
             });
 
             attrIndex++;
@@ -302,9 +592,59 @@ internal sealed class CanonicalHashModelBuilder
         return fields;
     }
 
+    private FieldFilterModel? ValidateFilter(
+        INamedTypeSymbol filterType,
+        ITypeSymbol collectionType,
+        Location? location,
+        string propertyName)
+    {
+        var elementType = GetCollectionElementType(collectionType);
+        if (elementType is null) return null;
+
+        // Look for public or internal static method: bool Include(TElement value)
+        var includeMethod = filterType.GetMembers("Include")
+            .OfType<IMethodSymbol>()
+            .FirstOrDefault(m =>
+                m.IsStatic &&
+                m.ReturnType.SpecialType == SpecialType.System_Boolean &&
+                m.Parameters.Length == 1 &&
+                (m.DeclaredAccessibility == Accessibility.Public ||
+                 m.DeclaredAccessibility == Accessibility.Internal));
+
+        // CCHASH025: Invalid filter signature
+        if (includeMethod is null)
+        {
+            _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                CanonicalHashDiagnostics.InvalidFilterSignature,
+                location,
+                filterType.Name));
+            return null;
+        }
+
+        var paramType = includeMethod.Parameters[0].Type;
+
+        // CCHASH026: Filter element type mismatch
+        if (!SymbolEqualityComparer.Default.Equals(paramType, elementType))
+        {
+            _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                CanonicalHashDiagnostics.FilterElementTypeMismatch,
+                location,
+                paramType.Name, elementType.Name));
+            return null;
+        }
+
+        return new FieldFilterModel
+        {
+            FilterType = filterType,
+            ElementType = elementType,
+            FullyQualifiedTypeName = filterType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+        };
+    }
+
     private void ResolveFieldProfileReferences(
         ProfileModel profile,
-        Dictionary<INamedTypeSymbol, ProfileModel> knownProfiles)
+        Dictionary<INamedTypeSymbol, ProfileModel> knownProfiles,
+        Dictionary<INamedTypeSymbol, UnionProfileModel> unionProfileBySymbol)
     {
         // Get all CanonicalHashField attributes from the profile class's method(s)
         var fieldAttrsWithIndex = new List<(int index, AttributeData attr)>();
@@ -314,8 +654,7 @@ internal sealed class CanonicalHashModelBuilder
             if (member is IMethodSymbol method)
             {
                 var attrs = method.GetAttributes()
-                    .Where(a => a.AttributeClass?.ToDisplayString() ==
-                        "CrestCreates.Metadata.Abstractions.CanonicalHashFieldAttribute")
+                    .Where(a => a.AttributeClass?.ToDisplayString() == FieldAttrFullName)
                     .ToList();
 
                 for (int i = 0; i < attrs.Count; i++)
@@ -344,43 +683,103 @@ internal sealed class CanonicalHashModelBuilder
             // Resolve ElementProfile
             if (elementProfileType is not null)
             {
-                var resolved = ResolveProfileType(elementProfileType, knownProfiles);
-                if (resolved is not null)
+                // Check if the referenced type is a union profile
+                if (unionProfileBySymbol.TryGetValue(elementProfileType, out var unionElementProfile))
                 {
-                    // CCHASH013: ElementProfile target type mismatch
+                    // CCHASH013: Union ElementProfile target type mismatch
                     var collectionElementType = GetCollectionElementType(field.PropertyType);
                     if (collectionElementType is not null &&
-                        !SymbolEqualityComparer.Default.Equals(resolved.TargetType, collectionElementType))
+                        !SymbolEqualityComparer.Default.Equals(unionElementProfile.TargetType, collectionElementType))
                     {
                         _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
                             CanonicalHashDiagnostics.ElementProfileTypeMismatch,
                             field.Location,
-                            resolved.TargetTypeName, collectionElementType.Name));
+                            unionElementProfile.TargetType.Name, collectionElementType.Name));
                     }
-                    updatedFields[fi] = field with { ElementProfile = resolved };
+                    updatedFields[fi] = field with
+                    {
+                        ElementProfileReference = new ProfileReferenceModel
+                        {
+                            UnionProfile = unionElementProfile
+                        }
+                    };
                     changed = true;
+                }
+                else
+                {
+                    var resolved = ResolveProfileType(elementProfileType, knownProfiles, unionProfileBySymbol);
+                    if (resolved is not null)
+                    {
+                        // CCHASH013: ElementProfile target type mismatch
+                        var collectionElementType = GetCollectionElementType(field.PropertyType);
+                        if (collectionElementType is not null &&
+                            !SymbolEqualityComparer.Default.Equals(resolved.TargetType, collectionElementType))
+                        {
+                            _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                                CanonicalHashDiagnostics.ElementProfileTypeMismatch,
+                                field.Location,
+                                resolved.TargetTypeName, collectionElementType.Name));
+                        }
+                        updatedFields[fi] = field with
+                        {
+                            ElementProfile = resolved,
+                            ElementProfileReference = new ProfileReferenceModel
+                            {
+                                NormalProfile = resolved
+                            }
+                        };
+                        changed = true;
+                    }
                 }
             }
 
             // Resolve ValueProfile
             if (valueProfileType is not null)
             {
-                var resolved = ResolveProfileType(valueProfileType, knownProfiles);
-                if (resolved is not null)
+                // Check if the referenced type is a union profile
+                if (unionProfileBySymbol.TryGetValue(valueProfileType, out var unionValueProfile))
                 {
-                    updatedFields[fi] = updatedFields[fi] with { ValueProfile = resolved };
+                    // CCHASH013: Union ValueProfile target type mismatch
+                    if (!SymbolEqualityComparer.Default.Equals(unionValueProfile.TargetType, field.PropertyType))
+                    {
+                        _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
+                            CanonicalHashDiagnostics.ElementProfileTypeMismatch,
+                            field.Location,
+                            unionValueProfile.TargetType.Name, field.PropertyType.Name));
+                    }
+                    updatedFields[fi] = updatedFields[fi] with
+                    {
+                        ValueProfileReference = new ProfileReferenceModel
+                        {
+                            UnionProfile = unionValueProfile
+                        }
+                    };
                     changed = true;
+                }
+                else
+                {
+                    var resolved = ResolveProfileType(valueProfileType, knownProfiles, unionProfileBySymbol);
+                    if (resolved is not null)
+                    {
+                        updatedFields[fi] = updatedFields[fi] with
+                        {
+                            ValueProfile = resolved,
+                            ValueProfileReference = new ProfileReferenceModel
+                            {
+                                NormalProfile = resolved
+                            }
+                        };
+                        changed = true;
+                    }
                 }
             }
 
-            // CCHASH004: Complex fields require ElementProfile, ValueProfile, or CustomWriter
+            // CCHASH004: Complex fields require ElementProfile or ValueProfile
+            // (CustomWriter is no longer a valid escape hatch — CCHASH023 rejects those fields from the model)
+            // Union profiles are acceptable alternatives (checked via ProfileReference)
             var currentField = updatedFields[fi];
-            if (currentField.CustomWriterTypeName is not null)
-            {
-                // Custom writer handles serialization — no profile needed
-                continue;
-            }
             if (currentField.IsCollection && currentField.ElementProfile is null
+                && currentField.ElementProfileReference?.UnionProfile is null
                 && !currentField.IsDictionary && currentField.Classification != "Excluded")
             {
                 var elementType = GetCollectionElementType(currentField.PropertyType);
@@ -393,6 +792,7 @@ internal sealed class CanonicalHashModelBuilder
                 }
             }
             else if (!currentField.IsCollection && currentField.ValueProfile is null
+                && currentField.ValueProfileReference?.UnionProfile is null
                 && currentField.Classification != "Excluded")
             {
                 if (IsComplexType(currentField.PropertyType))
@@ -411,14 +811,15 @@ internal sealed class CanonicalHashModelBuilder
 
     private ProfileModel? ResolveProfileType(
         INamedTypeSymbol profileClassSymbol,
-        Dictionary<INamedTypeSymbol, ProfileModel> knownProfiles)
+        Dictionary<INamedTypeSymbol, ProfileModel> knownProfiles,
+        Dictionary<INamedTypeSymbol, UnionProfileModel> unionProfileBySymbol)
     {
         if (knownProfiles.TryGetValue(profileClassSymbol, out var known))
             return known;
 
         // Check if the referenced type from another assembly has [CanonicalHashProfile]
         var profileAttr = profileClassSymbol.GetAttributes().FirstOrDefault(a =>
-            a.AttributeClass?.ToDisplayString() == "CrestCreates.Metadata.Abstractions.CanonicalHashProfileAttribute");
+            a.AttributeClass?.ToDisplayString() == ProfileAttrFullName);
 
         if (profileAttr is null) return null;
 
@@ -440,8 +841,7 @@ internal sealed class CanonicalHashModelBuilder
             if (member is IMethodSymbol method)
             {
                 fieldAttrs.AddRange(method.GetAttributes().Where(a =>
-                    a.AttributeClass?.ToDisplayString() ==
-                    "CrestCreates.Metadata.Abstractions.CanonicalHashFieldAttribute"));
+                    a.AttributeClass?.ToDisplayString() == FieldAttrFullName));
             }
         }
 
@@ -464,7 +864,7 @@ internal sealed class CanonicalHashModelBuilder
         knownProfiles[profileClassSymbol] = model;
 
         // Recursively resolve
-        ResolveFieldProfileReferences(model, knownProfiles);
+        ResolveFieldProfileReferences(model, knownProfiles, unionProfileBySymbol);
 
         return model;
     }
@@ -504,6 +904,26 @@ internal sealed class CanonicalHashModelBuilder
                     prop.Name));
             }
         }
+    }
+
+    // ── Assignability helper ──
+
+    private static bool IsAssignableTo(ITypeSymbol derived, ITypeSymbol baseType)
+    {
+        // Walk the base type chain
+        var current = derived;
+        while (current is not null)
+        {
+            if (SymbolEqualityComparer.Default.Equals(current, baseType))
+                return true;
+
+            if (current is INamedTypeSymbol namedType)
+                current = namedType.BaseType;
+            else
+                break;
+        }
+
+        return false;
     }
 
     // ── Enum resolution helpers ──

@@ -11,7 +11,10 @@ public sealed class SchemaCompatibilityRule : IDescriptorCompatibilityRule
 
     public bool CanAnalyze(DescriptorChange change, IDescriptor? before, IDescriptor? after)
     {
-        return change.Kind is DescriptorChangeKind.ContractHashChanged or DescriptorChangeKind.Updated
+        return change.Kind is (
+                DescriptorChangeKind.ContractHashChanged
+                or DescriptorChangeKind.DefinitionHashChanged
+                or DescriptorChangeKind.Updated)
             && (after is SchemaDescriptor || before is SchemaDescriptor);
     }
 
@@ -90,6 +93,11 @@ public sealed class SchemaCompatibilityRule : IDescriptorCompatibilityRule
         SchemaFieldDescriptor bf,
         SchemaFieldDescriptor af)
     {
+        // Validation-only changes are Risky for definition-only changes, Breaking for contract changes.
+        var validationLevel = change.Kind == DescriptorChangeKind.DefinitionHashChanged
+            ? DescriptorCompatibilityLevel.Risky
+            : DescriptorCompatibilityLevel.Breaking;
+
         if (bf.FieldType != af.FieldType)
             findings.Add(MakeFieldFinding(change, "COMPAT_SCHEMA_FIELD_TYPE_CHANGED",
                 DescriptorCompatibilityLevel.Breaking,
@@ -128,7 +136,7 @@ public sealed class SchemaCompatibilityRule : IDescriptorCompatibilityRule
 
         if (bf.MaxLength.HasValue && af.MaxLength.HasValue && af.MaxLength < bf.MaxLength)
             findings.Add(MakeFieldFinding(change, "COMPAT_SCHEMA_MAX_LENGTH_NARROWED",
-                DescriptorCompatibilityLevel.Breaking,
+                validationLevel,
                 $"Field '{name}' MaxLength narrowed from {bf.MaxLength} to {af.MaxLength}.",
                 affectedRefs, name, bf.MaxLength.ToString(), af.MaxLength.ToString()));
 
@@ -140,7 +148,7 @@ public sealed class SchemaCompatibilityRule : IDescriptorCompatibilityRule
 
         if (bf.MinLength.HasValue && af.MinLength.HasValue && af.MinLength > bf.MinLength)
             findings.Add(MakeFieldFinding(change, "COMPAT_SCHEMA_MIN_LENGTH_NARROWED",
-                DescriptorCompatibilityLevel.Breaking,
+                validationLevel,
                 $"Field '{name}' MinLength increased from {bf.MinLength} to {af.MinLength}.",
                 affectedRefs, name, bf.MinLength.ToString(), af.MinLength.ToString()));
 
@@ -152,19 +160,19 @@ public sealed class SchemaCompatibilityRule : IDescriptorCompatibilityRule
 
         if (bf.MaxValue.HasValue && af.MaxValue.HasValue && af.MaxValue < bf.MaxValue)
             findings.Add(MakeFieldFinding(change, "COMPAT_SCHEMA_MAX_VALUE_NARROWED",
-                DescriptorCompatibilityLevel.Breaking,
+                validationLevel,
                 $"Field '{name}' MaxValue narrowed from {bf.MaxValue} to {af.MaxValue}.",
                 affectedRefs, name, bf.MaxValue.ToString(), af.MaxValue.ToString()));
 
         if (bf.MinValue.HasValue && af.MinValue.HasValue && af.MinValue > bf.MinValue)
             findings.Add(MakeFieldFinding(change, "COMPAT_SCHEMA_MIN_VALUE_NARROWED",
-                DescriptorCompatibilityLevel.Breaking,
+                validationLevel,
                 $"Field '{name}' MinValue increased from {bf.MinValue} to {af.MinValue}.",
                 affectedRefs, name, bf.MinValue.ToString(), af.MinValue.ToString()));
 
         if (bf.Pattern != af.Pattern && (bf.Pattern != null || af.Pattern != null))
             findings.Add(MakeFieldFinding(change, "COMPAT_SCHEMA_PATTERN_CHANGED",
-                DescriptorCompatibilityLevel.Breaking,
+                validationLevel,
                 $"Field '{name}' Pattern changed.",
                 affectedRefs, name, bf.Pattern, af.Pattern));
     }

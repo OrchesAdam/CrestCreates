@@ -18,8 +18,8 @@ namespace CrestCreates.Metadata.CanonicalHashing.Profiles;
     ArtifactKind = CanonicalHashArtifactKind.Descriptor,
     DescriptorKind = DescriptorKind.Workflow,
     TargetType = typeof(WorkflowDescriptor),
-    ContractShapeVersion = "workflow-contract-hash-v1",
-    DefinitionShapeVersion = "workflow-definition-hash-v1")]
+    ContractShapeVersion = "workflow-contract-hash-v2",
+    DefinitionShapeVersion = "workflow-definition-hash-v2")]
 internal sealed class WorkflowDescriptorCanonicalHashProfile
 {
     // ── Contract fields (common to both ContractHash and DefinitionHash) ──

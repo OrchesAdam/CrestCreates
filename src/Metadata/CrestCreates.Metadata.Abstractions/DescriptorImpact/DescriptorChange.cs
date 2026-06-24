@@ -10,5 +10,7 @@ public sealed record DescriptorChange
     public DescriptorState? AfterState { get; init; }
     public string? BeforeContractHash { get; init; }
     public string? AfterContractHash { get; init; }
+    public string? BeforeDefinitionHash { get; init; }
+    public string? AfterDefinitionHash { get; init; }
     public string? Reason { get; init; }
 }

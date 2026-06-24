@@ -88,8 +88,8 @@ internal sealed class CanonicalHashProjectionWriter
             return GetDictionaryProjection(field, access);
         }
 
-        // Collection with element profile
-        if (field.IsCollection && field.ElementProfile is not null)
+        // Collection with element profile or union element reference
+        if (field.IsCollection && (field.ElementProfile is not null || field.ElementProfileReference?.UnionProfile is not null))
         {
             return GetCollectionWithElementProjection(field, access, purpose);
         }
@@ -100,10 +100,17 @@ internal sealed class CanonicalHashProjectionWriter
             return GetSimpleCollectionProjection(field, access);
         }
 
-        // Non-collection complex type with ValueProfile
-        if (field.ValueProfile is not null)
+        // Non-collection complex type with ValueProfile or union value reference
+        if (field.ValueProfile is not null || field.ValueProfileReference?.UnionProfile is not null)
         {
-            var childProjectionClass = $"{field.ValueProfile.Stem}CanonicalHashProjection";
+            // For union profile references, pass value through directly (no projection)
+            // since union profiles don't have their own payload records.
+            if (field.ValueProfileReference?.UnionProfile is not null)
+            {
+                return access;
+            }
+
+            var childProjectionClass = $"{field.ValueProfile!.Stem}CanonicalHashProjection";
             if (field.IsNullable)
             {
                 // Nullable value types (Nullable<T>) need .HasValue / .Value pattern
@@ -137,23 +144,76 @@ internal sealed class CanonicalHashProjectionWriter
 
     private static string GetCollectionWithElementProjection(ProfileFieldModel field, string access, string purpose)
     {
-        var childProjectionClass = $"{field.ElementProfile!.Stem}CanonicalHashProjection";
-        var orderingClause = GetOrderingClause(field);
-
-        if (field.IsNullable)
+        // For union element references, pass items through directly (no projection)
+        // since union profiles don't have their own payload records.
+        string? selectExpression = null;
+        if (field.ElementProfileReference?.UnionProfile is not null)
         {
-            return $"{access}?.{orderingClause}Select({childProjectionClass}.To{purpose}Payload).ToArray()";
+            // No projection needed for union elements — items pass through as-is
+        }
+        else
+        {
+            var childProjectionClass = $"{field.ElementProfile!.Stem}CanonicalHashProjection";
+            selectExpression = $"Select({childProjectionClass}.To{purpose}Payload)";
         }
 
-        return $"{access}.{orderingClause}Select({childProjectionClass}.To{purpose}Payload).ToArray()";
+        var orderingClause = GetOrderingClause(field);
+        var filterWhere = GetFilterWhereClause(field);
+
+        // Build chain: source -> filter -> order -> select (if any)
+        var chain = new System.Text.StringBuilder();
+        if (field.IsNullable)
+            chain.Append($"{access}?");
+        else
+            chain.Append(access);
+
+        if (filterWhere.Length > 0)
+            chain.Append('.').Append(filterWhere);
+
+        if (orderingClause.Length > 0)
+            chain.Append('.').Append(orderingClause);
+
+        if (selectExpression is not null)
+            chain.Append('.').Append(selectExpression);
+
+        chain.Append(".ToArray()");
+
+        return chain.ToString();
     }
 
     private static string GetSimpleCollectionProjection(ProfileFieldModel field, string access)
     {
         var orderingClause = GetOrderingClause(field);
+        var filterWhere = GetFilterWhereClause(field);
+
+        // Build chain: source -> filter -> order
+        var chain = new System.Text.StringBuilder();
         if (field.IsNullable)
-            return $"{access}?.{orderingClause}ToArray()";
-        return $"{access}.{orderingClause}ToArray()";
+            chain.Append($"{access}?");
+        else
+            chain.Append(access);
+
+        if (filterWhere.Length > 0)
+            chain.Append('.').Append(filterWhere);
+
+        if (orderingClause.Length > 0)
+            chain.Append('.').Append(orderingClause);
+
+        chain.Append(".ToArray()");
+
+        return chain.ToString();
+    }
+
+    /// <summary>
+    /// Returns a .Where(filter.Include) clause if the field has a filter, or empty string otherwise.
+    /// </summary>
+    private static string GetFilterWhereClause(ProfileFieldModel field)
+    {
+        if (field.Filter is not null)
+        {
+            return $"Where({field.Filter.FullyQualifiedTypeName}.Include)";
+        }
+        return "";
     }
 
     private static string GetOrderingClause(ProfileFieldModel field)
@@ -161,10 +221,10 @@ internal sealed class CanonicalHashProjectionWriter
         return field.CollectionOrderMode switch
         {
             "SourceOrder" => "",
-            "OrdinalByValue" => IsElementStringType(field) ? "OrderBy(x => x, StringComparer.Ordinal)." : "OrderBy(x => x).",
+            "OrdinalByValue" => IsElementStringType(field) ? "OrderBy(x => x, StringComparer.Ordinal)" : "OrderBy(x => x)",
             "OrdinalByProperty" when field.OrderByProperty is not null =>
                 BuildMultiPropertyOrdering(field.OrderByProperty, GetElementType(field)),
-            "OrderedKeyValue" => "OrderBy(kv => kv.Key, StringComparer.Ordinal).",  // For dictionaries, handled separately
+            "OrderedKeyValue" => "OrderBy(kv => kv.Key, StringComparer.Ordinal)",  // For dictionaries, handled separately
             _ => "",
         };
     }
@@ -220,7 +280,6 @@ internal sealed class CanonicalHashProjectionWriter
             else
                 sb.Append($".ThenBy(x => {lambda})");
         }
-        sb.Append('.');
         return sb.ToString();
     }
 
