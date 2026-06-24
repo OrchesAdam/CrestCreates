@@ -1,4 +1,5 @@
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorRelationship;
 
 namespace CrestCreates.Agent.ControlPlane.Abstractions;
 

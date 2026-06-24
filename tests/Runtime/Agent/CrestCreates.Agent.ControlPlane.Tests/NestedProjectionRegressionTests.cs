@@ -4,6 +4,8 @@ using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
+using CrestCreates.Metadata.Abstractions.DescriptorPackage;
+using CrestCreates.Metadata.Abstractions.Evidence;
 using FluentAssertions;
 using Moq;
 using Xunit;

@@ -11,9 +11,9 @@ namespace CrestCreates.CodeGenerator.CanonicalHashGenerator;
 [Generator]
 public sealed class CanonicalHashSourceGenerator : IIncrementalGenerator
 {
-    private const string ProfileAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashProfileAttribute";
-    private const string UnionProfileAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashUnionProfileAttribute";
-    private const string FieldAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashFieldAttribute";
+    private const string ProfileAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashing.CanonicalHashProfileAttribute";
+    private const string UnionProfileAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashing.CanonicalHashUnionProfileAttribute";
+    private const string FieldAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashing.CanonicalHashFieldAttribute";
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {

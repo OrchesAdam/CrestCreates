@@ -1,5 +1,6 @@
 using CrestCreates.Event.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorRelationship;
 using CrestCreates.Schema.Abstractions;
 
 namespace CrestCreates.Event;

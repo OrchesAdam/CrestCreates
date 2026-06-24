@@ -1,4 +1,5 @@
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace CrestCreates.Metadata.ContextPack.Abstractions;
 

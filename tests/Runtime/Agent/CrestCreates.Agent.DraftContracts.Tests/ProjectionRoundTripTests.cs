@@ -6,6 +6,7 @@ using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;

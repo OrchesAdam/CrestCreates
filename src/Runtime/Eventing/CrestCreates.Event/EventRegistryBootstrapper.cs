@@ -1,5 +1,6 @@
 using CrestCreates.Event.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.Bootstrap;
 using Microsoft.Extensions.Hosting;
 
 namespace CrestCreates.Event;

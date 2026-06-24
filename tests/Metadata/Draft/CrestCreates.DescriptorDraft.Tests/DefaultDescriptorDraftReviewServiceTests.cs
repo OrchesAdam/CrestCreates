@@ -1,8 +1,11 @@
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
+using CrestCreates.Metadata.Abstractions.DescriptorPackage;
+using CrestCreates.Metadata.Abstractions.DescriptorRelationship;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;

@@ -1,4 +1,5 @@
 using CrestCreates.Metadata;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Schema.Abstractions;
 
 namespace CrestCreates.Agent.DraftContracts.Specs;

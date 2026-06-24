@@ -1,6 +1,8 @@
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
+using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Workflow.Abstractions;
 
 namespace CrestCreates.Workflow;

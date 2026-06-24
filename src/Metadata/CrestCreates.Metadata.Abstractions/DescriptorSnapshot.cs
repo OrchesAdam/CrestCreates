@@ -1,3 +1,5 @@
+using CrestCreates.Metadata.Abstractions.DescriptorPackage;
+
 namespace CrestCreates.Metadata.Abstractions;
 
 public sealed class DescriptorSnapshot

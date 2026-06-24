@@ -2,6 +2,10 @@ using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorBinding;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
+using CrestCreates.Metadata.DescriptorBinding;
+using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Schema.Abstractions;
 
 namespace CrestCreates.HumanTask;

@@ -1,5 +1,8 @@
 using System.Text.Json.Serialization;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions.DescriptorPackage;
+using CrestCreates.Metadata.Abstractions.DescriptorRelationship;
 using CrestCreates.Metadata.ContextPack.Abstractions;
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
 

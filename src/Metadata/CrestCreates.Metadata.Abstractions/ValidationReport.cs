@@ -1,3 +1,5 @@
+using CrestCreates.Metadata.Abstractions.Registry;
+
 namespace CrestCreates.Metadata.Abstractions;
 
 public sealed record ValidationReport(

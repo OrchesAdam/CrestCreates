@@ -41,10 +41,10 @@ internal sealed class CanonicalHashModelBuilder
         "Namespace", "Kind", "ContractHash", "DefinitionHash", "FullId"
     };
 
-    private const string UnionProfileAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashUnionProfileAttribute";
-    private const string UnionCaseAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashUnionCaseAttribute";
-    private const string ProfileAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashProfileAttribute";
-    private const string FieldAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashFieldAttribute";
+    private const string UnionProfileAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashing.CanonicalHashUnionProfileAttribute";
+    private const string UnionCaseAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashing.CanonicalHashUnionCaseAttribute";
+    private const string ProfileAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashing.CanonicalHashProfileAttribute";
+    private const string FieldAttrFullName = "CrestCreates.Metadata.Abstractions.CanonicalHashing.CanonicalHashFieldAttribute";
 
     public CanonicalHashModelBuilder(Compilation compilation, SourceProductionContext context)
     {

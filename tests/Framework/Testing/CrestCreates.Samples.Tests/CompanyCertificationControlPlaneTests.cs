@@ -1,5 +1,6 @@
 using System;
 using CrestCreates.Metadata;
+using CrestCreates.Metadata.Bootstrap;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;

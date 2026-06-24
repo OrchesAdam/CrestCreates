@@ -1,6 +1,7 @@
 using CrestCreates.Agent.DraftContracts;
 using CrestCreates.Agent.DraftContracts.Dto;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using FluentAssertions;
 using Xunit;
 

@@ -6,6 +6,7 @@ using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.ContextPack.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;

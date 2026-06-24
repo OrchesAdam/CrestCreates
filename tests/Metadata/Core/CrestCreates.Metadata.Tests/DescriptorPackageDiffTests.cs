@@ -1,9 +1,11 @@
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
+using DescriptorPackageType = CrestCreates.Metadata.Abstractions.DescriptorPackage.DescriptorPackage;
 
 namespace CrestCreates.Metadata.Tests;
 
@@ -20,7 +22,7 @@ public class DescriptorPackageDiffTests
         _builder = new DefaultDescriptorPackageBuilder(_hashBuilder);
     }
 
-    private DescriptorPackage BuildPackage(string pkgId, IDescriptor[] descriptors, string version = "1.0.0")
+    private DescriptorPackageType BuildPackage(string pkgId, IDescriptor[] descriptors, string version = "1.0.0")
     {
         return _builder.Build(new DescriptorPackageBuildRequest
         {

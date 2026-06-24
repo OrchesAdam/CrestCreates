@@ -1,5 +1,6 @@
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace CrestCreates.Agent.ControlPlane.Abstractions;
 

@@ -1,6 +1,7 @@
 using CrestCreates.Agent.ControlPlane;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;

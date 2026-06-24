@@ -3,6 +3,8 @@ using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorBinding;
+using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Moq;

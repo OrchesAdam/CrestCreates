@@ -3,6 +3,8 @@ using System.Collections.Immutable;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.Registry;
+using CrestCreates.Metadata.Registry;
 
 namespace CrestCreates.Event;
 

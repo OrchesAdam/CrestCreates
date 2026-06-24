@@ -2,6 +2,8 @@ using CrestCreates.EventBus.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.Registry;
+using CrestCreates.Metadata.Registry;
 using FluentAssertions;
 using Moq;
 using Xunit;

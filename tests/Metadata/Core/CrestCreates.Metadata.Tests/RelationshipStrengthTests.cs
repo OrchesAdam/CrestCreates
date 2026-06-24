@@ -16,7 +16,7 @@ public class RelationshipStrengthTests
     [Fact]
     public void RelationshipStrength_Defaults_To_Strong()
     {
-        var rel = new DescriptorRelationship(
+        var rel = new CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship(
             new DescriptorRef("test", "a"),
             new DescriptorRef("test", "b"),
             RelationshipKind.References);

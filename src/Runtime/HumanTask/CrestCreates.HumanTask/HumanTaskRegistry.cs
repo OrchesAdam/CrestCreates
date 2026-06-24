@@ -2,6 +2,8 @@ using System.Collections.Frozen;
 using System.Collections.Immutable;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.Registry;
+using CrestCreates.Metadata.Registry;
 using CrestCreates.HumanTask.Abstractions;
 
 namespace CrestCreates.HumanTask;

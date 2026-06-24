@@ -3,12 +3,14 @@ using CrestCreates.Event.Abstractions;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
+using PackageType = CrestCreates.Metadata.Abstractions.DescriptorPackage.DescriptorPackage;
 
 namespace CrestCreates.Metadata;
 
-[JsonSerializable(typeof(DescriptorPackage))]
+[JsonSerializable(typeof(PackageType))]
 [JsonSerializable(typeof(DescriptorManifest))]
 [JsonSerializable(typeof(DescriptorManifestEntry))]
 [JsonSerializable(typeof(DescriptorSnapshot))]

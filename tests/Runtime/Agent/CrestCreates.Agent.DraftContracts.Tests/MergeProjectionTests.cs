@@ -3,6 +3,7 @@ using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;

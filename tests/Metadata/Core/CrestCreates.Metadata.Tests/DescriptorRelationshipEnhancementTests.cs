@@ -9,7 +9,7 @@ public class DescriptorRelationshipEnhancementTests
     [Fact]
     public void DescriptorRelationship_Has_Role_Property()
     {
-        var rel = new DescriptorRelationship(
+        var rel = new CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship(
             new DescriptorRef("test", "a"),
             new DescriptorRef("test", "b"),
             RelationshipKind.References,
@@ -21,7 +21,7 @@ public class DescriptorRelationshipEnhancementTests
     [Fact]
     public void DescriptorRelationship_Has_SourcePath_Property()
     {
-        var rel = new DescriptorRelationship(
+        var rel = new CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship(
             new DescriptorRef("test", "a"),
             new DescriptorRef("test", "b"),
             RelationshipKind.References,
@@ -33,7 +33,7 @@ public class DescriptorRelationshipEnhancementTests
     [Fact]
     public void DescriptorRelationship_Has_Strength_Property()
     {
-        var rel = new DescriptorRelationship(
+        var rel = new CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship(
             new DescriptorRef("test", "a"),
             new DescriptorRef("test", "b"),
             RelationshipKind.References,
@@ -45,7 +45,7 @@ public class DescriptorRelationshipEnhancementTests
     [Fact]
     public void DescriptorRelationship_Has_IsRuntimeBinding_Property()
     {
-        var rel = new DescriptorRelationship(
+        var rel = new CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship(
             new DescriptorRef("test", "a"),
             new DescriptorRef("test", "b"),
             RelationshipKind.References,
@@ -57,7 +57,7 @@ public class DescriptorRelationshipEnhancementTests
     [Fact]
     public void DescriptorRelationship_IsRuntimeBinding_Defaults_To_False()
     {
-        var rel = new DescriptorRelationship(
+        var rel = new CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship(
             new DescriptorRef("test", "a"),
             new DescriptorRef("test", "b"),
             RelationshipKind.References);
@@ -68,7 +68,7 @@ public class DescriptorRelationshipEnhancementTests
     [Fact]
     public void DescriptorRelationship_Role_Defaults_To_Null()
     {
-        var rel = new DescriptorRelationship(
+        var rel = new CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship(
             new DescriptorRef("test", "a"),
             new DescriptorRef("test", "b"),
             RelationshipKind.References);

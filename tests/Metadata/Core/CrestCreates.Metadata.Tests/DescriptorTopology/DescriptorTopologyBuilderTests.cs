@@ -1,7 +1,8 @@
-using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorRelationship;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 using CrestCreates.Metadata.CanonicalHashing;
+using CrestCreates.Metadata.DescriptorTopology;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
@@ -38,7 +39,7 @@ public class DescriptorTopologyBuilderTests
     public void Build_Creates_Nodes_For_All_Provided_Descriptors()
     {
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
-        mockProvider.Setup(p => p.GetRelationships(It.IsAny<IDescriptor>())).Returns(Array.Empty<DescriptorRelationship>());
+        mockProvider.Setup(p => p.GetRelationships(It.IsAny<IDescriptor>())).Returns(Array.Empty<CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship>());
         var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
 
         var schemaDesc = CreateConcreteDescriptor("schema", "User", "User Schema", DescriptorKind.Schema);
@@ -55,7 +56,7 @@ public class DescriptorTopologyBuilderTests
     public void Build_Node_Has_Correct_Summary_Properties()
     {
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
-        mockProvider.Setup(p => p.GetRelationships(It.IsAny<IDescriptor>())).Returns(Array.Empty<DescriptorRelationship>());
+        mockProvider.Setup(p => p.GetRelationships(It.IsAny<IDescriptor>())).Returns(Array.Empty<CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship>());
         var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
 
         var desc = CreateConcreteDescriptor("schema", "User", "User Schema", DescriptorKind.Schema,
@@ -81,7 +82,7 @@ public class DescriptorTopologyBuilderTests
         var schemaRef = new DescriptorRef("schema", "User", null);
         var formRef = new DescriptorRef("form", "UserForm", null);
 
-        var relationships = new List<DescriptorRelationship>
+        var relationships = new List<CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship>
         {
             new(formRef, schemaRef, RelationshipKind.Uses, "Schema", "Schema", RelationshipStrength.Strong, false)
         };
@@ -95,7 +96,7 @@ public class DescriptorTopologyBuilderTests
             .Returns(relationships);
         mockProvider
             .Setup(p => p.GetRelationships(schemaDesc))
-            .Returns(Array.Empty<DescriptorRelationship>());
+            .Returns(Array.Empty<CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship>());
 
         var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { schemaDesc, formDesc });
@@ -116,7 +117,7 @@ public class DescriptorTopologyBuilderTests
         var schemaRef = new DescriptorRef("schema", "User", null);
         var formRef = new DescriptorRef("form", "UserForm", null);
 
-        var relationships = new List<DescriptorRelationship>
+        var relationships = new List<CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship>
         {
             new(formRef, schemaRef, RelationshipKind.Uses, "Schema", "Schema", RelationshipStrength.Strong, false)
         };
@@ -126,7 +127,7 @@ public class DescriptorTopologyBuilderTests
         var formDesc = CreateConcreteDescriptor("form", "UserForm", "User Form", DescriptorKind.Form);
 
         mockProvider.Setup(p => p.GetRelationships(formDesc)).Returns(relationships);
-        mockProvider.Setup(p => p.GetRelationships(schemaDesc)).Returns(Array.Empty<DescriptorRelationship>());
+        mockProvider.Setup(p => p.GetRelationships(schemaDesc)).Returns(Array.Empty<CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship>());
 
         var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { schemaDesc, formDesc });
@@ -146,7 +147,7 @@ public class DescriptorTopologyBuilderTests
         var formRef = new DescriptorRef("form", "UserForm", null);
         var missingRef = new DescriptorRef("schema", "MissingSchema", null);
 
-        var relationships = new List<DescriptorRelationship>
+        var relationships = new List<CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship>
         {
             new(formRef, missingRef, RelationshipKind.Uses, "Schema", "Schema", RelationshipStrength.Strong, false)
         };
@@ -171,17 +172,17 @@ public class DescriptorTopologyBuilderTests
         var targetDesc = CreateConcreteDescriptor("schema", "User", "User", DescriptorKind.Schema);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
-        mockProvider.Setup(p => p.GetRelationships(c1)).Returns(new DescriptorRelationship[]
+        mockProvider.Setup(p => p.GetRelationships(c1)).Returns(new CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship[]
         {
             new(
                 new DescriptorRef("capability", "CreateUser", null), target, RelationshipKind.Uses, null, null, RelationshipStrength.Strong, false)
         });
-        mockProvider.Setup(p => p.GetRelationships(c2)).Returns(new DescriptorRelationship[]
+        mockProvider.Setup(p => p.GetRelationships(c2)).Returns(new CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship[]
         {
             new(
                 new DescriptorRef("form", "UserForm", null), target, RelationshipKind.Uses, null, null, RelationshipStrength.Strong, false)
         });
-        mockProvider.Setup(p => p.GetRelationships(targetDesc)).Returns(Array.Empty<DescriptorRelationship>());
+        mockProvider.Setup(p => p.GetRelationships(targetDesc)).Returns(Array.Empty<CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship>());
 
         var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { targetDesc, c1, c2 });
@@ -201,19 +202,19 @@ public class DescriptorTopologyBuilderTests
         var targetDesc = CreateConcreteDescriptor("schema", "User", "User", DescriptorKind.Schema);
 
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
-        mockProvider.Setup(p => p.GetRelationships(cv1)).Returns(new DescriptorRelationship[]
+        mockProvider.Setup(p => p.GetRelationships(cv1)).Returns(new CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship[]
         {
             new(new DescriptorRef("capability", "ExactV1", null), new DescriptorRef("schema", "User", 1), RelationshipKind.Uses, null, null, RelationshipStrength.Strong, false)
         });
-        mockProvider.Setup(p => p.GetRelationships(cv2)).Returns(new DescriptorRelationship[]
+        mockProvider.Setup(p => p.GetRelationships(cv2)).Returns(new CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship[]
         {
             new(new DescriptorRef("capability", "ExactV2", null), targetV2, RelationshipKind.Uses, null, null, RelationshipStrength.Strong, false)
         });
-        mockProvider.Setup(p => p.GetRelationships(cUnpinned)).Returns(new DescriptorRelationship[]
+        mockProvider.Setup(p => p.GetRelationships(cUnpinned)).Returns(new CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship[]
         {
             new(new DescriptorRef("form", "Unpinned", null), new DescriptorRef("schema", "User", null), RelationshipKind.Uses, null, null, RelationshipStrength.Strong, false)
         });
-        mockProvider.Setup(p => p.GetRelationships(targetDesc)).Returns(Array.Empty<DescriptorRelationship>());
+        mockProvider.Setup(p => p.GetRelationships(targetDesc)).Returns(Array.Empty<CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship>());
 
         var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { targetDesc, cv1, cv2, cUnpinned });
@@ -228,7 +229,7 @@ public class DescriptorTopologyBuilderTests
     {
         var desc = CreateConcreteDescriptor("schema", "User", "User", DescriptorKind.Schema);
         var mockProvider = new Mock<IDescriptorRelationshipProvider>();
-        mockProvider.Setup(p => p.GetRelationships(desc)).Returns(Array.Empty<DescriptorRelationship>());
+        mockProvider.Setup(p => p.GetRelationships(desc)).Returns(Array.Empty<CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship>());
 
         var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { desc });

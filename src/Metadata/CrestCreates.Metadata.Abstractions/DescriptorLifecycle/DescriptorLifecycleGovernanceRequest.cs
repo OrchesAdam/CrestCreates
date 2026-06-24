@@ -1,6 +1,7 @@
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorImpact;
+using CrestCreates.Metadata.Abstractions.DescriptorBinding;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 
 namespace CrestCreates.Metadata.Abstractions.DescriptorLifecycle;

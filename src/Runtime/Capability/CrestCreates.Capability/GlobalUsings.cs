@@ -1,0 +1,10 @@
+global using CrestCreates.Metadata.Abstractions.Bootstrap;
+global using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+global using CrestCreates.Metadata.Abstractions.DescriptorBinding;
+global using CrestCreates.Metadata.Abstractions.DescriptorCapability;
+global using CrestCreates.Metadata.Abstractions.DescriptorRelationship;
+global using CrestCreates.Metadata.Abstractions.Registry;
+global using CrestCreates.Metadata.DescriptorBinding;
+global using CrestCreates.Metadata.DescriptorCapability;
+global using CrestCreates.Metadata.Registry;
+global using DescriptorRelationship = CrestCreates.Metadata.Abstractions.DescriptorRelationship.DescriptorRelationship;

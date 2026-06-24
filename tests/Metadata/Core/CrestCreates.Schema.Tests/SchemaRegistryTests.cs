@@ -1,5 +1,7 @@
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.Registry;
+using CrestCreates.Metadata.Registry;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;

@@ -1,3 +1,5 @@
+using CrestCreates.Metadata.Abstractions.DescriptorRelationship;
+
 namespace CrestCreates.Metadata.Abstractions;
 
 public sealed class ImpactReport

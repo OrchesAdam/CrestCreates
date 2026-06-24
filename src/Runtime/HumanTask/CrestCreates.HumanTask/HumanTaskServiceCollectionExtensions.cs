@@ -1,6 +1,10 @@
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorBinding;
+using CrestCreates.Metadata.Abstractions.DescriptorRelationship;
+using CrestCreates.Metadata.Abstractions.Registry;
+using CrestCreates.Metadata.Registry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
