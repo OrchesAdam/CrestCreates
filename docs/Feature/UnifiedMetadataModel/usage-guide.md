@@ -1,7 +1,7 @@
 # 统一元数据模型 — 使用指南
 
 > 本文档面向 CrestCreates 模块开发者，介绍如何使用统一元数据模型声明和执行业务能力。
-> *更新于 Phase 6g (2026-06-16): Descriptor Stable Hash Builder — 可注入式哈希构建器主链接口*
+> *更新于 (2026-06-24): Descriptor Stable Hash — Canonical Hash Runtime v2 对齐*
 
 ---
 
@@ -562,13 +562,13 @@ var activeDrafts = await draftStore.QueryAsync(new DraftQuery
 
 ---
 
-## 10. 描述符稳定哈希（Phase 6g）
+## 10. 描述符稳定哈希
 
 ### 10.1 注入并使用 IDescriptorStableHashBuilder
 
 ```csharp
 // DI 注册（通常由宿主自动完成）
-services.AddDescriptorStableHash();
+services.AddCanonicalHashRuntime();
 
 // 注入并使用
 public class MyDescriptorService
@@ -584,10 +584,12 @@ public class MyDescriptorService
     {
         var hashes = _hashBuilder.Build(descriptor);
 
-        Console.WriteLine($"ContractHash:   {hashes.ContractHash}");
-        Console.WriteLine($"DefinitionHash: {hashes.DefinitionHash}");
-        // hashes.RuntimeHash  → null（保留字段）
-        // hashes.BindingHash  → null（保留字段）
+        // ContractHash 和 DefinitionHash 是 CanonicalHash 记录，不是 string
+        Console.WriteLine($"ContractHash:   {hashes.ContractHash.Value}");   // 小写 hex SHA-256
+        Console.WriteLine($"DefinitionHash: {hashes.DefinitionHash.Value}");
+
+        // 直接访问元数据
+        Console.WriteLine($"Shape: {hashes.ContractHash.CanonicalShapeVersion}");
     }
 }
 ```
@@ -596,66 +598,81 @@ public class MyDescriptorService
 
 | 哈希 | 语义 | 变更触发条件 |
 |------|------|------------|
-| `ContractHash` | 外部可观测的契约 | Schema 字段增删（当前包含所有字段，含 optional — 显式 exclusion policy 待实现）、Capability Permissions/SemanticTags 变更、Event PayloadSchema 变更、Form ControlType/IsRequiredOverride 变更、HumanTask Outcomes 变更、Workflow Steps 变更（按列表顺序，非排序） |
-| `DefinitionHash` | 任意定义级变更 | 可选字段新增、显示元数据变更、Form 布局变更、生命周期元数据变更、权限/风险元数据变更 |
+| `ContractHash` | 外部可观测的契约 | Schema 必填字段增删（v2: optional 字段不影响 ContractHash）、Capability Permissions/SemanticTags 变更、Event PayloadSchema/Semantic/ChangeKind 变更、Form ControlType/IsRequiredOverride 变更、HumanTask Outcomes 变更、Workflow Steps + Target 变更 |
+| `DefinitionHash` | 任意定义级变更 | 所有 ContractHash 触发项 + optional 字段新增、显示元数据变更、ValidationRules 变更、Form 布局变更、生命周期元数据变更、权限/风险元数据变更 |
 | `RuntimeHash` | 运行时绑定状态（保留） | 未来 |
 | `BindingHash` | 绑定状态（保留） | 未来 |
 
-### 10.3 变更检测场景
+### 10.3 当前架构
+
+- **Profile 声明定义哈希形状** — `[CanonicalHashProfile]` + `[CanonicalHashField]` 声明每个 descriptor 类型的 Contract/Definition 字段集
+- **Source Generator 生成 canonical writer 代码** — 每个 profile 生成 `Utf8JsonWriter` 方法，写入 deterministic canonical JSON
+- **Runtime 调用生成的 writer delegate** — `DefaultCanonicalHashComputer` 通过 `ArrayBufferWriter<byte>` + `Utf8JsonWriter` + SHA-256 计算哈希字节
+- **无 `JsonSerializer`、`JsonTypeInfo`、运行时反射、pipe-delimited token stream** — 主哈希字节路径完全由编译期生成的代码驱动
+- **Canonical hash bytes 通过 algorithm version + canonical shape version 版本化**
+- **Envelope metadata 参与哈希输入** — ArtifactKind, DescriptorKind, Scope, Purpose, AlgorithmVersion, ContractVersion, CanonicalShapeVersion
+- **Scope 是 domain-separation 元数据，不是 visibility filtering** — 不同 Scope 产生不同哈希
+- **Enum 使用 canonical string helpers，不使用 `ToString()`** — SG 生成编译期 switch 表达式
+- **Union 字段使用 `[CanonicalHashUnionProfile]`** — 不使用 ad hoc CustomWriter（已 `[Obsolete]`）
+- **Schema ContractHash v2 表示 required consumer binding surface** — optional 字段不影响 ContractHash
+- **Dictionaries canonicalize 到有序 key-value 数组** — 总是 `OrderedKeyValue`
+- **Unsupported scalar writer 路径 fail generation** — 不回退到 culture-sensitive `.ToString()`
+
+详细使用方法见 → [Canonical Hash Usage Guide](../CanonicalHash/usage-guide.md) | [Canonical Hash Architecture](../CanonicalHash/arch-design.md)
+
+### 10.4 从旧 API 迁移
+
+Old (deleted):
+```csharp
+// DescriptorHashComputer — 已删除，不可用
+var ch = DescriptorHashComputer.ComputeContractHash(descriptor);
+
+// IDescriptor.ContractHash / IDescriptor.DefinitionHash — 已删除
+var ch = descriptor.ContractHash;
+```
+
+New:
+```csharp
+var hashes = _hashBuilder.Build(descriptor);
+var contractHash = hashes.ContractHash;   // CanonicalHash record
+var digest = contractHash.Value;          // 小写 hex SHA-256 字符串
+```
+
+`DescriptorHashComputer` 和 `IHasContractIdentity` 已从代码库删除。所有哈希计算通过 `ICanonicalHashComputer` / `IDescriptorStableHashBuilder` 进行。
+
+### 10.5 变更检测场景
 
 ```csharp
 var hashBuilder = serviceProvider.GetRequiredService<IDescriptorStableHashBuilder>();
 
-// 创建修改后的描述符
+// 计算原始和修改后描述符的哈希
 var original = GetCapabilityDescriptor();
 var modified = new CapabilityDescriptor
 {
     Id = original.Id, Name = original.Name, Version = original.Version,
     Permissions = new[] { "new.permission" },  // 权限变更
-    // ... 其他属性保持不变
 };
 
-// 计算修改后描述符的哈希
-var hashes = hashBuilder.Build(modified);
+var hashes1 = hashBuilder.Build(original);
+var hashes2 = hashBuilder.Build(modified);
 
-// 将哈希写入描述符（init-only 属性需要重建对象）
-var finalized = new CapabilityDescriptor
-{
-    // ... 所有属性 ...
-    ContractHash = hashes.ContractHash,
-    DefinitionHash = hashes.DefinitionHash,
-};
+// 比较哈希
+if (hashes1.ContractHash != hashes2.ContractHash)
+    Console.WriteLine("Contract changed");
 
-// DescriptorChangeSetBuilder 会通过哈希差异自动检测变更
+// DescriptorChangeSetBuilder 通过哈希差异自动检测变更
+// 产生 DescriptorChangeKind.ContractHashChanged / DefinitionHashChanged
 ```
 
-### 10.4 从旧 API 迁移
+### 10.6 实现保证
 
-> **旧 API (`[Obsolete]`)：**
-> ```csharp
-> var ch = DescriptorHashComputer.ComputeContractHash(descriptor);
-> var dh = DescriptorHashComputer.ComputeDefinitionHash(descriptor);
-> ```
->
-> **新 API：**
-> ```csharp
-> var hashes = hashBuilder.Build(descriptor);
-> var ch = hashes.ContractHash;
-> var dh = hashes.DefinitionHash;
-> ```
-
-静态类 `DescriptorHashComputer` 仍然可用（内部委托给 Builder），但建议迁移到注入式 `IDescriptorStableHashBuilder`。
-
-### 10.5 实现细节
-
-- **AoT 安全**：全量字符串拼接 + SHA-256，零 `JsonSerializer.Serialize` 依赖，零 IL2026 Trim 警告。
-- **分隔符转义**：所有字符串值通过 `Esc()` 转义 `\` 和 `|`，防止字段值中的管道符导致哈希冲突。
-- **Null 区分**：`null` 字段输出 `\0|`（哨兵值），`""` 空字符串输出 `|`，二者哈希不同。
-- **规范排序**：所有字符串集合使用 `StringComparer.Ordinal` 排序，`double` 使用 `InvariantCulture` 格式，`TimeSpan` 使用 ISO 8601 格式。
-- **多态支持**：`InteractionTarget` 子类型（`CapabilityTarget`/`HumanTaskTarget`/`SubWorkflowTarget`）通过显式 switch 提取，ContractHash 和 DefinitionHash 均正确捕获目标引用变更。
-- **字段覆盖 Guard**：`DescriptorStableHashCoverageTests` 覆盖 15 种类型（9 种顶层 descriptor + 6 种嵌套 payload 类型），通过 reflection 断言所有 public 属性均已显式分类。新增字段未更新 coverage 时测试失败 — 防止 "行为变但 hash 不变" 的遗漏。
-- **完整 tie-breaker**：所有排序键覆盖到 append 的全部字段（References: Id+Version, ValidationRules: Name+Expression+ErrorMessage, Outcomes: Condition+CapabilityId+CapabilityVersion），确保重复 key 场景下 hash 对输入顺序不敏感。
-- **Package Hash 同步**：`DescriptorPackageHashComputer` 已收口到相同标准（转义 + null sentinel + ordinal 排序 + invariant 格式），ContentHash/EvidenceHash/EnvelopeHash 全 AoT 安全。
+- **SG 生成的 canonical writer 拥有哈希字节** — 无运行时反射
+- **15 种类型字段覆盖 guard** — `DescriptorStableHashCoverageTests` 确保所有 public 属性已显式分类
+- **Union exhaustiveness** — SG 为所有声明 case 生成 switch，未覆盖子类型触发 CCHASH021
+- **Schema required-binding ContractHash** — v2 shape version = `schema-contract-hash-v2`
+- **DefinitionHashChanged** — 变更集可区分 ContractHashChanged 和 DefinitionHashChanged
+- **AoT 安全** — 全量编译期代码生成，零 `JsonSerializer.Serialize`，零 IL2026 Trim 警告
+- **Culture-invariant** — 数值类型使用 `WriteNumber`，DateTime 使用 `"O"` 格式，TimeSpan 使用 `"c"` 格式
 
 ---
 
@@ -769,6 +786,8 @@ services.AddSingleton<MyRegistry>();
 | Phase 5f 设计规格书 | `docs/superpowers/specs/2026-06-12-phase-5f-humantask-assignee-resolver-design.md` |
 | Phase 5f 实现计划 | `docs/superpowers/plans/2026-06-12-phase-5f-humantask-assignee-resolver.md` |
 | 架构总结 | `docs/Feature/UnifiedMetadataModel/2026-06-09-unified-metadata-model-architecture-summary.md` |
+| Canonical Hash 设计 | `docs/Feature/CanonicalHash/arch-design.md` |
+| Canonical Hash 使用指南 | `docs/Feature/CanonicalHash/usage-guide.md` |
 
 ### 关键接口一览
 
@@ -776,7 +795,6 @@ services.AddSingleton<MyRegistry>();
 |------|------|------|
 | `IDescriptor` | 所有描述符基础接口 | Metadata.Abstractions |
 | `IVersionedDescriptor` | 版本化描述符 | Metadata.Abstractions |
-| `IHasContractIdentity` | 兼容性身份 | Metadata.Abstractions |
 | `IRelationshipAwareDescriptor` | 自描述关系 | Metadata.Abstractions |
 | `RegistryBase<T>` | 通用注册表基类 | Metadata |
 | `RegistrySnapshot<T>` | 不可变快照 | Metadata |
@@ -797,8 +815,10 @@ services.AddSingleton<MyRegistry>();
 | `IBootstrapValidator` | 启动阶段验证器 | Metadata.Abstractions |
 | `IDescriptorLookup` | 跨 Registry 描述符查找 | Metadata.Abstractions |
 | `ICapabilityHandlerRegistry` | Handler 注册表 | Metadata.Abstractions |
-| `IDescriptorStableHashBuilder` | 描述符稳定哈希构建器 (Phase 6g) | Metadata.Abstractions |
-| `DescriptorStableHashes` | 哈希结果记录 (Phase 6g) | Metadata.Abstractions |
+| `IDescriptorStableHashBuilder` | 描述符稳定哈希构建器 — 委托 ICanonicalHashComputer | Metadata.Abstractions |
+| `DescriptorStableHashes` | 哈希结果记录 — ContractHash/DefinitionHash 为 CanonicalHash 类型 | Metadata.Abstractions |
+| `ICanonicalHashComputer` | Canonical hash 计算器 — SG 生成 dispatcher | Metadata.Abstractions |
+| `CanonicalHash` | Canonical hash 记录 — 9 字段 (Value, Algorithm, AlgorithmVersion, ArtifactKind, DescriptorKind, Scope, Purpose, ContractVersion, CanonicalShapeVersion) | Metadata.Abstractions |
 | `ISchemaDescriptorProvider` | 声明 Schema | Schema.Abstractions |
 | `ICapabilityProvider` | 声明 Capability | Capability.Abstractions |
 | `ICapabilityHandler<TIn,TOut>` | 实现业务逻辑 | Capability.Abstractions |

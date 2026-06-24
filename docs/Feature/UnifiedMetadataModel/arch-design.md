@@ -1,6 +1,6 @@
 # 统一元数据模型 — 架构总结文档
 
-> **日期:** 2026-06-16 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a + Phase 4b + Phase 4c + Phase 5 + Phase 5b + Phase 5f + Phase 6g 完成**
+> **日期:** 2026-06-24 | **状态:** 完成 | **Metadata Kernel v1.0 + Phase 3 + Phase 4 + Phase 4a + Phase 4b + Phase 4c + Phase 5 + Phase 5b + Phase 5f + Canonical Hash Runtime v2 完成**
 
 ---
 
@@ -145,27 +145,41 @@ Phase 5b 加固 InMemory Workflow 和 HumanTask 实例存储，增加原子 CAS 
 - 并发重复幂等：`WorkflowContinuationService.ContinueAsync` 捕获 `RuntimeConcurrencyException`，按 HumanTaskId 重新查询 — null → 重复 no-op，否则重新抛出
 - 测试 Barrier：`System.Threading.Barrier(2)` + `SignalAndWait()` 强制真实并发争用
 
-### Phase 6g: Descriptor Stable Hash Builder Public Surface
+### Canonical Hash Runtime v2
 
-Phase 6g 将 descriptor 哈希计算收口为框架主链可注入式 API，替换临时哨兵哈希：
+Canonical Hash Runtime v2 将 descriptor 哈希计算从运行时字符串拼接迁移到 SG 生成的 canonical JSON writer 架构，替代 Phase 6g 的 pipe-delimited token stream：
 
 | 组件 | 说明 |
 |------|------|
-| `IDescriptorStableHashBuilder` | 构建器接口 — `Build(IDescriptor) → DescriptorStableHashes` |
-| `DescriptorStableHashes` | 结果记录 — ContractHash, DefinitionHash, RuntimeHash?, BindingHash? |
-| `DescriptorStableHashBuilder` | 实现 — 全 AoT 安全字符串拼接 (SHA-256)，零 JsonSerializer.Serialize 调用，显式 per-kind 字段提取，字符串分隔符转义，StringComparer.Ordinal 排序，InvariantCulture 数值格式 |
-| `AddDescriptorStableHash()` | DI 注册 — `TryAddSingleton<IDescriptorStableHashBuilder, DescriptorStableHashBuilder>()` |
-| `DescriptorHashComputer` → `[Obsolete]` | 旧静态类标记废弃，内部委托给 DescriptorStableHashBuilder |
-| 样本迁移 | `CompanyCertificationChangeScenarios` 中所有 `"INVALIDATED"` 哨兵哈希替换为实际计算值 |
-| 测试 | 38 个 DescriptorStableHashBuilderTests（含 6 个 per-kind 行为测试 + 3 个 tie-breaker 回归测试）+ 4 个 DescriptorStableHashCoverageTests（15 类型字段覆盖 guard） + 12 个样本测试 |
+| `ICanonicalHashComputer` | Canonical hash 计算器接口 — `ComputeContractHash` / `ComputeDefinitionHash` / `ComputeFromProjection` |
+| `DefaultCanonicalHashComputer` | 实现 — `ArrayBufferWriter<byte>` → `Utf8JsonWriter` → 调用 SG 生成的 writer delegate → `SHA256.HashData` |
+| `CanonicalHash` | 9 字段记录 — Value, Algorithm, AlgorithmVersion, ArtifactKind, DescriptorKind, Scope, Purpose, ContractVersion, CanonicalShapeVersion |
+| `CanonicalHashMetadata` | 7 字段元数据记录 — ArtifactKind, DescriptorKind, Scope, Purpose, AlgorithmVersion, ContractVersion, CanonicalShapeVersion |
+| `CanonicalHashProjectionResult` | sealed record — 携带 Metadata + `Action<Utf8JsonWriter> WriteCanonicalJson` delegate |
+| `IDescriptorStableHashBuilder` | 适配器 — `Build(IDescriptor) → DescriptorStableHashes`，内部委托 `ICanonicalHashComputer` |
+| `DescriptorStableHashes` | 结果记录 — ContractHash/DefinitionHash 为 `CanonicalHash` 类型（非 string） |
+| `CanonicalHashSourceGenerator` | SG — 读取 `[CanonicalHashProfile]` + `[CanonicalHashField]` 属性，生成 projection + canonical writer + dispatcher 代码 |
+| Profile 声明 | `[CanonicalHashProfile]` + `[CanonicalHashField]` — 定义每个 descriptor 类型的 Contract/Definition 字段集 |
+| Union Profile | `[CanonicalHashUnionProfile]` + `[CanonicalHashUnionCase]` — SG 生成 exhaustive switch-based writer |
+| Collection Filter | `[CanonicalHashField.Filter]` — 集合字段语义投影，在排序前过滤 |
+| `AddCanonicalHashRuntime()` | DI 注册 — `ICanonicalHashComputer` + `IDescriptorStableHashBuilder` |
+| SG Diagnostics | CCHASH001-028 — 编译期验证哈希合约完整性 |
 
 **关键不变量:**
-- ContractHash 按 descriptor kind 提取语义相关字段（Schema 字段、Capability Permissions/SemanticTags、Event PayloadSchema、Form ControlType、HumanTask Outcomes、Workflow Steps — 含 Condition），集合规范化排序，重复 key 带完整 tie-breaker
-- DefinitionHash 覆盖任意定义级变更 — 全 AoT 安全字符串拼接，显式 per-kind 字段枚举，`StringComparer.Ordinal` 排序，分隔符转义，`NullSentinel` 区分 null/empty
-- 15 种类型字段覆盖 guard — 防止 descriptor 新增字段后忘记同步更新 hash builder；6 种嵌套类型（SchemaValidationRule、CompletionOutcome、CapabilityTarget、HumanTaskTarget、SubWorkflowTarget、EventRef）均已在 guard 中登记
-- Permission/SemanticTag 数组已规范化排序 — `OrderBy()` + tie-breaker 保证确定性
-- RuntimeHash / BindingHash 保留字段 — 供未来运行时绑定状态分离
-- `DescriptorPackageHashComputer` 同步收口到相同标准 — AoT 安全字符串拼接 + 转义 + null sentinel + ordinal 排序 + invariant 格式
+- Hash 字节由 SG 生成的 canonical writer 代码驱动 — 无 `JsonSerializer`、`JsonTypeInfo`、运行时反射、pipe-delimited token stream
+- Envelope metadata (7 字段) 参与哈希输入 — ArtifactKind, DescriptorKind, Scope, Purpose, AlgorithmVersion, ContractVersion, CanonicalShapeVersion
+- Scope 是 domain-separation 元数据 — 不同 Scope 产生不同哈希；不是 visibility filtering
+- Enum 使用 canonical string helpers (SG 生成编译期 switch 表达式) — 不使用 `ToString()`
+- Union 字段使用 `[CanonicalHashUnionProfile]` — CustomWriter 已 `[Obsolete]` (CCHASH023)
+- Schema ContractHash v2 = required-binding surface — optional 字段变更不影响 ContractHash，shape version = `schema-contract-hash-v2`
+- Schema DefinitionHash = 全量定义面 — 含 ValidationRules
+- `DefinitionHashChanged` 加入 `DescriptorChangeKind` — 变更集可区分 ContractHashChanged / DefinitionHashChanged
+- Dictionaries 总是 `OrderedKeyValue` — key 排序，Filter 不支持 (CCHASH027)
+- Unsupported scalar writer 路径 fail generation (CCHASH028) — 不回退到 culture-sensitive `.ToString()`
+- 15 种类型字段覆盖 guard — 防止 descriptor 新增字段后忘记同步更新 hash profile
+- AoT 安全 — 全量编译期代码生成，零 IL2026 Trim 警告
+- `DescriptorHashComputer` 和 `IHasContractIdentity` 已删除 — 不存在旧 API
+- `IDescriptor.ContractHash` / `IDescriptor.DefinitionHash` 不是 descriptor 内建属性 — 哈希值是计算结果
 
 ### Phase 4: Capability Runtime Consolidation
 
@@ -196,7 +210,7 @@ Phase 3 将 EventRegistry 的模式提炼为通用注册表基类 `RegistryBase<
 | `DescriptorResolver` | 统一描述符解析器 |
 | `IBootstrapTask` | 通用启动任务接口 |
 | `IDynamicRegistry<T>` | 动态注册表 Future Hook |
-| `IHasContractIdentity` | 兼容性身份接口（ContractHash/DefinitionHash） |
+| ~~IHasContractIdentity~~ | 兼容性身份接口 — 已删除（Canonical Hash v2） |
 | `IRelationshipAwareDescriptor` | 自描述关系接口 |
 | `CapabilityRegistry` | 第一个基于 RegistryBase 的非 Event 注册表 |
 
@@ -206,7 +220,7 @@ Phase 3 将 EventRegistry 的模式提炼为通用注册表基类 `RegistryBase<
 
 ```
 framework/src/
-├── CrestCreates.Metadata.Abstractions/     # IDescriptor, IVersionedDescriptor, IHasContractIdentity,
+├── CrestCreates.Metadata.Abstractions/     # IDescriptor, IVersionedDescriptor,
 │                                           # IRelationshipAwareDescriptor, IDescriptorRef, DescriptorRef,
 │                                           # DescriptorKey, ValidationIssue/Report, IRegistryValidator,
 │                                           # IRegistryValidationEngine, IRegistryIndex, IDescriptorProvider,
@@ -215,7 +229,8 @@ framework/src/
 │                                           # CapabilityKind, CapabilityRiskLevel (moved from Capability.Abstractions)
 │                                           # IBootstrapValidator, IDescriptorLookup, ICapabilityHandlerRegistry
 │                                           # IVersionedDescriptorRegistry (updated: +GetByVersion)
-│                                           # IDescriptorStableHashBuilder, DescriptorStableHashes (Phase 6g)
+│                                           # ICanonicalHashComputer, CanonicalHash, CanonicalHashMetadata,
+│                                           # CanonicalHashProjectionResult, IDescriptorStableHashBuilder, DescriptorStableHashes
 ├── CrestCreates.Metadata/                  # RegistryBase<T>, RegistrySnapshot<T>, RegistryValidationEngine<T>,
 │                                           # BootstrapCoordinator, DescriptorResolver, CapabilityDescriptor,
 │                                           # CapabilityRegistry (unified, implements ICapabilityRegistry + RegistryBase),
@@ -228,7 +243,7 @@ framework/src/
 │                                           # DescriptorProviderRegistry, MetadataBootstrapper (Phase 4a)
 │                                           # RuntimeStoreException, RuntimeConcurrencyException (Phase 5b)
 │                                           # RuntimeEntityNotFoundException (Phase 5b)
-│                                           # DescriptorStableHashBuilder (Phase 6g)
+│                                           # DefaultCanonicalHashComputer, DescriptorStableHashBuilder (Canonical Hash v2)
 ├── CrestCreates.Schema.Abstractions/        # SchemaDescriptor, SchemaFieldDescriptor, ISchemaRegistry, ISchemaValidator
 ├── CrestCreates.Schema/                     # SchemaRegistry : RegistryBase<SchemaDescriptor>, SchemaValidator
 ├── CrestCreates.Capability.Abstractions/    # ICapabilityPipeline, CapabilityExecutionContext, CapabilityExecutionResult,
@@ -368,14 +383,14 @@ public interface IVersionedDescriptor : IDescriptor
 }
 
 /// <summary>
-/// 具有兼容性身份的描述符。
-/// 用于版本兼容性判断、拓扑分析、AI推理。
+/// [已删除] 具有兼容性身份的描述符。
+/// 哈希现在通过 ICanonicalHashComputer / IDescriptorStableHashBuilder 计算，不是 descriptor 内建属性。
 /// </summary>
-public interface IHasContractIdentity
-{
-    string ContractHash { get; }        // 结构性兼容性指纹
-    string DefinitionHash { get; }      // 完整内容指纹 (审计)
-}
+// public interface IHasContractIdentity — DELETED in Canonical Hash v2
+// {
+//     string ContractHash { get; }        // 结构性兼容性指纹
+//     string DefinitionHash { get; }      // 完整内容指纹 (审计)
+// }
 
 /// <summary>
 /// 关系感知描述符。描述符自身提供关系信息，供 Topology Engine 消费。
@@ -690,7 +705,7 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 测试项目 | 测试数 | 覆盖范围 |
 |----------|--------|---------|
 | Schema.Tests | 20 | Descriptor 创建, Registry Build + GetById/GetByVersion/GetByName/GetActiveVersion/GetDeprecatedVersions/GetAllByName, Validator(10) |
-| Metadata.Tests | 355 | **Phase 3/4/4a/6g:** RegistryBase(9), Validators(6), Bootstrap(4), Resolver(5), CapabilityRegistry(6), CapabilityDescriptor(4), DescriptorRef(12), RefValidation(3), StableHashBuilder(15), + 原有 291 |
+| Metadata.Tests | 412+ | **Phase 3/4/4a/Canonical Hash v2:** RegistryBase(9), Validators(6), Bootstrap(4), Resolver(5), CapabilityRegistry(6), CapabilityDescriptor(4), DescriptorRef(12), RefValidation(3), StableHashBuilder(15), + 原有 291 |
 | Capability.Tests | 104 | **Phase 4/4a:** Resolver(9), Dispatcher(8), Audit(5), InMemoryStore(5), NullStore(2), E2E(14), Registry(4), Pipeline(6), + 遗留 |
 | Draft.Tests | 13 | DraftRecord(4), InMemoryStore(5), TenantIsolated(4) |
 | Event.Tests | 32 | EventRegistry(16), Validator(4), DynamicRegistry(7), Descriptor(5) |
@@ -716,8 +731,8 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 8 | Descriptor 是纯元数据, Handler 是执行逻辑 | ✅ |
 | 9 | 所有 descriptors 实现 IDescriptor | ✅ |
 | 10 | 所有 6 个类型都是 IVersionedDescriptor | ✅ |
-| 11 | ContractHash + DefinitionHash 分离 | ✅ |
-| 12 | Hash = canonical JSON → SHA256 | ✅ |
+| 11 | ContractHash + DefinitionHash 分离 — CanonicalHash record, 通过 ICanonicalHashComputer 计算 | ✅ |
+| 12 | Hash = SG-generated canonical JSON (Utf8JsonWriter) → SHA256 | ✅ |
 | 13 | VersionedDescriptorRef<T> with VersionSelectionMode | ✅ |
 | 14 | .Version 统一属性（无 SchemaVersion/CapabilityVersion 重复） | ✅ |
 | 15 | WorkflowStep Id 全局唯一 | ✅ |
@@ -751,7 +766,7 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 43 | Entity→Form/Workflow/Capability 是禁止的依赖 | ✅ |
 | 44 | RegistryBase<T> 是所有 Registry 的母体 | ✅ Phase 3 |
 | 45 | IDescriptor.Namespace + Id = Global Identity | ✅ Phase 3 |
-| 46 | IHasContractIdentity 与 IDescriptor 解耦 | ✅ Phase 3 |
+| 46 | IHasContractIdentity 已删除 — 哈希通过 ICanonicalHashComputer 计算 | ✅ Canonical Hash v2 |
 | 47 | RegistrySnapshot 使用 FrozenDictionary 不可变快照 | ✅ Phase 3 |
 | 48 | IRegistryValidator<T> 可插拔验证管道 | ✅ Phase 3 |
 | 49 | IRegistryValidationEngine<T> 协调验证器 | ✅ Phase 3 |
@@ -836,11 +851,11 @@ CapabilityEndpointDescriptor → CapabilityDescriptor (HTTP: HttpMethod, RoutePa
 | 128 | 无 Organization 依赖 — HumanTask 不引用 Organization.Abstractions | ✅ Phase 5f |
 | 129 | 零 Workflow 变更 — HumanTaskStepExecutor 未修改 | ✅ Phase 5f |
 | 130 | 测试: 44 个 HumanTask.Tests（+22 Phase 5f: 10 Resolver + 6 Runtime + 6 Store） | ✅ Phase 5f |
-| 131 | IDescriptorStableHashBuilder — 框架主链可注入式哈希构建器，替代 DescriptorHashComputer 静态类 | ✅ Phase 6g |
-| 132 | DescriptorStableHashes — ContractHash/DefinitionHash/RuntimeHash?/BindingHash? 统一记录 | ✅ Phase 6g |
-| 133 | DescriptorHashComputer 标记 [Obsolete]，内部委托给 DescriptorStableHashBuilder — 零破坏性变更 | ✅ Phase 6g |
-| 134 | AddDescriptorStableHash() DI 注册 — TryAddSingleton，与现有 Metadata DI 模式一致 | ✅ Phase 6g |
-| 135 | ContractHash 按 descriptor kind switch 正则化提取，集合规范化排序 — 全 AoT 安全字符串拼接 | ✅ Phase 6g |
-| 136 | Permission/SemanticTag 数组已规范化排序 — OrderBy() 保证确定性 | ✅ Phase 6g |
-| 137 | CompanyCertificationChangeScenarios 中所有 "INVALIDATED" 哨兵哈希已替换 | ✅ Phase 6g |
-| 138 | 测试: 355 个 Metadata.Tests（+15 StableHashBuilder）+ 12 个 Sample Tests | ✅ Phase 6g |
+| 131 | ICanonicalHashComputer — SG 生成 dispatcher，canonical JSON writer + SHA-256 | ✅ Canonical Hash v2 |
+| 132 | CanonicalHash 9 字段记录 — Value/Algorithm/AlgorithmVersion/ArtifactKind/DescriptorKind/Scope/Purpose/ContractVersion/CanonicalShapeVersion | ✅ Canonical Hash v2 |
+| 133 | IDescriptorStableHashBuilder — 适配器，委托 ICanonicalHashComputer；DescriptorHashComputer / IHasContractIdentity 已删除 | ✅ Canonical Hash v2 |
+| 134 | AddCanonicalHashRuntime() DI 注册 — ICanonicalHashComputer + IDescriptorStableHashBuilder | ✅ Canonical Hash v2 |
+| 135 | Profile 声明定义哈希形状 — [CanonicalHashProfile] + [CanonicalHashField]，SG 生成 canonical writer + projection + dispatcher | ✅ Canonical Hash v2 |
+| 136 | Union Profile — [CanonicalHashUnionProfile] + [CanonicalHashUnionCase]，SG 生成 exhaustive switch writer，CustomWriter [Obsolete] | ✅ Canonical Hash v2 |
+| 137 | Schema ContractHash v2 = required-binding surface；DefinitionHashChanged 加入 DescriptorChangeKind | ✅ Canonical Hash v2 |
+| 138 | 测试: 412+ Metadata.Tests + 20 SG CanonicalHash Tests + 372 Agent Tests，AoT Trim publish 通过 | ✅ Canonical Hash v2 |
