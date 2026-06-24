@@ -74,6 +74,17 @@ public sealed class SchemaCompatibilityRule : IDescriptorCompatibilityRule
                 affectedRefs, "References", null, null));
         }
 
+        // Validation rules changed
+        if (sb != null && !ValidationRulesEqual(sb.ValidationRules, sa.ValidationRules))
+        {
+            var level = change.Kind == DescriptorChangeKind.DefinitionHashChanged
+                ? DescriptorCompatibilityLevel.Risky
+                : DescriptorCompatibilityLevel.Breaking;
+            findings.Add(MakeFieldFinding(change, "COMPAT_SCHEMA_VALIDATION_RULES_CHANGED",
+                level, "Schema validation rules changed.",
+                affectedRefs, "ValidationRules", null, null));
+        }
+
         // Declared breaking change kind
         if (sa.ChangeKind == SchemaChangeKind.Breaking)
         {
@@ -185,6 +196,21 @@ public sealed class SchemaCompatibilityRule : IDescriptorCompatibilityRule
         var aSorted = a.Select(r => (r.Id, r.Version)).OrderBy(x => x).ToArray();
         var bSorted = b.Select(r => (r.Id, r.Version)).OrderBy(x => x).ToArray();
         return aSorted.SequenceEqual(bSorted);
+    }
+
+    private static bool ValidationRulesEqual(
+        IReadOnlyList<SchemaValidationRule> a,
+        IReadOnlyList<SchemaValidationRule> b)
+    {
+        if (a.Count != b.Count) return false;
+        for (int i = 0; i < a.Count; i++)
+        {
+            if (a[i].Name != b[i].Name ||
+                a[i].Expression != b[i].Expression ||
+                a[i].ErrorMessage != b[i].ErrorMessage)
+                return false;
+        }
+        return true;
     }
 
     private static IReadOnlyList<DescriptorRef> GetAffectedRefs(

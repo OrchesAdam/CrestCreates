@@ -279,10 +279,12 @@ public class DescriptorCompatibilityAnalyzerGenericTests
     }
 
     [Fact]
-    public void SchemaSpecificDefinitionHashChanged_DoesNotReceiveConflictingGenericFinding()
+    public void SchemaSpecificDefinitionHashChanged_WithNoSpecificFindings_ReceivesGenericFallback()
     {
-        // Use SchemaCompatibilityRule via the analyzer — schema descriptor + DefinitionHashChanged
-        // Schema rule should fully classify the change; generic rule must not emit a second Risky.
+        // Schema descriptor + DefinitionHashChanged, but SchemaCompatibilityRule produces
+        // no findings (fields/references/ValidationRules unchanged). The generic fallback
+        // COMPAT_GENERIC_DEFINITION_CHANGED must NOT be suppressed — a descriptor-specific
+        // rule that claims a change but finds nothing should not swallow the generic Risky.
         var schemaBefore = new SchemaDescriptor
         {
             Id = "S1", Name = "TestSchema", Version = 1,
@@ -313,8 +315,8 @@ public class DescriptorCompatibilityAnalyzerGenericTests
             new IDescriptor[] { schemaAfter },
             cs, report);
 
-        // Should not contain a generic definition-changed finding
-        result.Findings.Should().NotContain(f =>
+        // Generic fallback must appear — schema rule found nothing to classify
+        result.Findings.Should().Contain(f =>
             f.RuleId == "COMPAT_GENERIC_DEFINITION_CHANGED");
     }
 }

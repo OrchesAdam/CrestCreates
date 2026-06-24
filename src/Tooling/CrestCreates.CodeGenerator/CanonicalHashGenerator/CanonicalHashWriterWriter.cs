@@ -278,6 +278,7 @@ internal sealed class CanonicalHashWriterWriter
     private static void WriteScalarValue(StringBuilder sb, ITypeSymbol type, string propName, string access)
     {
         var specialType = type.SpecialType;
+        var typeName = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
         switch (specialType)
         {
@@ -291,6 +292,15 @@ internal sealed class CanonicalHashWriterWriter
             case SpecialType.System_Boolean:
                 sb.AppendLine($"        w.WriteBoolean(\"{propName}\", {access});");
                 break;
+            case SpecialType.System_Double:
+                sb.AppendLine($"        w.WriteNumber(\"{propName}\", {access});");
+                break;
+            case SpecialType.System_Single:
+                sb.AppendLine($"        w.WriteNumber(\"{propName}\", {access});");
+                break;
+            case SpecialType.System_Decimal:
+                sb.AppendLine($"        w.WriteNumber(\"{propName}\", {access});");
+                break;
             case SpecialType.System_DateTime:
                 sb.AppendLine($"        w.WriteString(\"{propName}\", {access}.ToString(\"O\"));");
                 break;
@@ -300,10 +310,16 @@ internal sealed class CanonicalHashWriterWriter
                 {
                     WriteEnumSwitchExpression(sb, type, propName, access, "        ");
                 }
+                // TimeSpan — deterministic "c" format (constant format, culture-invariant)
+                else if (typeName == "global::System.TimeSpan")
+                {
+                    sb.AppendLine($"        w.WriteString(\"{propName}\", {access}.ToString(\"c\"));");
+                }
                 else
                 {
-                    // Fallback: ToString() for any other type
-                    sb.AppendLine($"        w.WriteString(\"{propName}\", {access}.ToString());");
+                    // Unsupported scalar type — should never reach here if CCHASH028 is enforced
+                    // during model building. Emit a compile error comment as safety net.
+                    sb.AppendLine($"        #error CCHASH028: Unsupported scalar type '{typeName}' for canonical hash field '{propName}'. Use ElementProfile or ValueProfile.");
                 }
                 break;
         }

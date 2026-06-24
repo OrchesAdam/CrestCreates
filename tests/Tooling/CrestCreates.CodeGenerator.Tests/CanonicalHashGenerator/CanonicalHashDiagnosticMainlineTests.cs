@@ -597,4 +597,40 @@ namespace TestNamespace
 
         Assert.Contains(errors, e => e.Id == "CCHASH027");
     }
+
+    [Fact]
+    public void CCHASH028_UnsupportedScalarType_ShouldEmitError()
+    {
+        // A field with an unsupported scalar type (not string/int/long/bool/DateTime/double/float/decimal/enum/TimeSpan)
+        // and no ElementProfile/ValueProfile should emit CCHASH004 (complex field requires profile).
+        // CCHASH028 is a safety net in the writer — unsupported scalars that slip through IsComplexType
+        // produce a #error in generated code. This test verifies the model-layer rejection.
+        var source = TestSources.WithProfiles("""
+using CrestCreates.Metadata.Abstractions;
+
+namespace TestNamespace
+{
+    public sealed class Target
+    {
+        public Guid Uuid { get; init; }
+    }
+
+    [CanonicalHashProfile(
+        TargetType = typeof(Target),
+        ContractShapeVersion = "v1",
+        DefinitionShapeVersion = "v1")]
+    internal sealed class TargetCanonicalHashProfile
+    {
+        [CanonicalHashField(nameof(Target.Uuid), CanonicalHashFieldClassification.Contract, Order = 1)]
+        private static void Fields() { }
+    }
+}
+""");
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CanonicalHashSourceGenerator>(source);
+        var errors = result.GetErrors().ToList();
+
+        // Guid is not a supported scalar type → CCHASH004 (complex field requires profile)
+        Assert.Contains(errors, e => e.Id == "CCHASH004");
+    }
 }

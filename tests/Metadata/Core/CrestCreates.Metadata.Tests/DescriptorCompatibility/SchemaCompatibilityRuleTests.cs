@@ -288,4 +288,101 @@ public class SchemaCompatibilityRuleTests
         result.Findings.Should().Contain(f =>
             f.RuleId == "COMPAT_SCHEMA_MAX_LENGTH_NARROWED" && f.Level == DescriptorCompatibilityLevel.Risky);
     }
+
+    [Fact]
+    public void SchemaValidationRulesChanged_WithDefinitionHashChanged_ReturnsRisky()
+    {
+        // ValidationRules property change (not field-level validation like MaxLength)
+        var before = new SchemaDescriptor
+        {
+            Id = "S1", Name = "TestSchema", Version = 1,
+            State = DescriptorState.Active,
+            Fields = new[] { new SchemaFieldDescriptor { Name = "f", FieldType = "string" } },
+            ValidationRules = new[]
+            {
+                new SchemaValidationRule { Name = "email", Expression = @"^[^@]+@[^@]+$" }
+            }
+        };
+        var after = new SchemaDescriptor
+        {
+            Id = "S1", Name = "TestSchema", Version = 1,
+            State = DescriptorState.Active,
+            Fields = new[] { new SchemaFieldDescriptor { Name = "f", FieldType = "string" } },
+            ValidationRules = new[]
+            {
+                new SchemaValidationRule { Name = "email", Expression = @"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$" }
+            }
+        };
+        var change = MakeDefinitionChange("S1", 1);
+        var cs = new DescriptorChangeSet { Changes = new[] { change } };
+        var report = MakeImpactReport(cs, change.Ref);
+
+        var result = Analyzer.Analyze(new IDescriptor[] { before }, new IDescriptor[] { after }, cs, report);
+
+        result.Findings.Should().Contain(f =>
+            f.RuleId == "COMPAT_SCHEMA_VALIDATION_RULES_CHANGED" && f.Level == DescriptorCompatibilityLevel.Risky);
+    }
+
+    [Fact]
+    public void SchemaValidationRulesAdded_WithDefinitionHashChanged_ReturnsRisky()
+    {
+        var before = new SchemaDescriptor
+        {
+            Id = "S1", Name = "TestSchema", Version = 1,
+            State = DescriptorState.Active,
+            Fields = Array.Empty<SchemaFieldDescriptor>(),
+            ValidationRules = Array.Empty<SchemaValidationRule>()
+        };
+        var after = new SchemaDescriptor
+        {
+            Id = "S1", Name = "TestSchema", Version = 1,
+            State = DescriptorState.Active,
+            Fields = Array.Empty<SchemaFieldDescriptor>(),
+            ValidationRules = new[]
+            {
+                new SchemaValidationRule { Name = "required", Expression = "value != null" }
+            }
+        };
+        var change = MakeDefinitionChange("S1", 1);
+        var cs = new DescriptorChangeSet { Changes = new[] { change } };
+        var report = MakeImpactReport(cs, change.Ref);
+
+        var result = Analyzer.Analyze(new IDescriptor[] { before }, new IDescriptor[] { after }, cs, report);
+
+        result.Findings.Should().Contain(f =>
+            f.RuleId == "COMPAT_SCHEMA_VALIDATION_RULES_CHANGED" && f.Level == DescriptorCompatibilityLevel.Risky);
+    }
+
+    [Fact]
+    public void SchemaValidationRulesChanged_WithContractHashChanged_ReturnsBreaking()
+    {
+        var before = new SchemaDescriptor
+        {
+            Id = "S1", Name = "TestSchema", Version = 1,
+            State = DescriptorState.Active,
+            Fields = Array.Empty<SchemaFieldDescriptor>(),
+            ValidationRules = new[]
+            {
+                new SchemaValidationRule { Name = "email", Expression = @"^[^@]+@[^@]+$" }
+            }
+        };
+        var after = new SchemaDescriptor
+        {
+            Id = "S1", Name = "TestSchema", Version = 1,
+            State = DescriptorState.Active,
+            Fields = Array.Empty<SchemaFieldDescriptor>(),
+            ValidationRules = new[]
+            {
+                new SchemaValidationRule { Name = "email", Expression = @"^[a-z]+@[a-z]+\.[a-z]+$" }
+            }
+        };
+        var change = MakeContractChange("S1", 1);
+        var cs = new DescriptorChangeSet { Changes = new[] { change } };
+        var report = MakeImpactReport(cs, change.Ref);
+
+        var result = Analyzer.Analyze(new IDescriptor[] { before }, new IDescriptor[] { after }, cs, report);
+
+        result.Findings.Should().Contain(f =>
+            f.RuleId == "COMPAT_SCHEMA_VALIDATION_RULES_CHANGED" && f.Level == DescriptorCompatibilityLevel.Breaking);
+    }
 }

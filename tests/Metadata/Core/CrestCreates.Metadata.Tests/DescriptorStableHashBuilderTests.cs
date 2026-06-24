@@ -1493,6 +1493,36 @@ public sealed class DescriptorStableHashBuilderTests
             "different target type (HumanTask vs Capability) must produce different ContractHash");
     }
 
+    // ── Double Culture Stability ──
+
+    [Fact]
+    public void SchemaField_DoubleMaxValue_HashStableAcrossCultures()
+    {
+        // Verify that double? MaxValue/MinValue fields produce deterministic canonical hash
+        // regardless of thread culture (no ToString() culture sensitivity).
+        var schema = CreateSchema("s1", "Test", fields: new[]
+        {
+            new SchemaFieldDescriptor { Name = "Amount", FieldType = "double", MaxValue = 99.99, MinValue = 0.01 }
+        });
+
+        var hashDefault = _hashComputer.ComputeContractHash(schema, CanonicalHashScope.InternalFull);
+
+        // Switch to a culture that uses comma as decimal separator
+        var originalCulture = Thread.CurrentThread.CurrentCulture;
+        try
+        {
+            Thread.CurrentThread.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("de-DE");
+            var hashGerman = _hashComputer.ComputeContractHash(schema, CanonicalHashScope.InternalFull);
+
+            hashGerman.Value.Should().Be(hashDefault.Value,
+                "double values must produce identical hash bytes regardless of CurrentCulture");
+        }
+        finally
+        {
+            Thread.CurrentThread.CurrentCulture = originalCulture;
+        }
+    }
+
     // ── Helpers ──
 
     private static SchemaDescriptor CreateSchema(

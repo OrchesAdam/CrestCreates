@@ -1072,16 +1072,19 @@ internal sealed class CanonicalHashModelBuilder
             underlying = nullableNamed.TypeArguments[0];
         }
 
+        // Supported scalar types — these have deterministic Utf8JsonWriter write methods
         if (underlying.SpecialType == SpecialType.System_String) return false;
         if (underlying.SpecialType == SpecialType.System_Int32) return false;
         if (underlying.SpecialType == SpecialType.System_Boolean) return false;
         if (underlying.SpecialType == SpecialType.System_Int64) return false;
         if (underlying.SpecialType == SpecialType.System_Single) return false;
         if (underlying.SpecialType == SpecialType.System_Double) return false;
+        if (underlying.SpecialType == SpecialType.System_Decimal) return false;
         if (underlying.SpecialType == SpecialType.System_DateTime) return false;
-        if (underlying.ToDisplayString() == "System.TimeSpan") return false;
         if (underlying.TypeKind == TypeKind.Enum) return false;
-        if (underlying.SpecialType == SpecialType.System_Object) return false;
+
+        // TimeSpan is a supported scalar — written as deterministic "c" format string
+        if (underlying.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::System.TimeSpan") return false;
 
         if (underlying is IArrayTypeSymbol) return false;
         if (IsCollectionType(underlying)) return false;

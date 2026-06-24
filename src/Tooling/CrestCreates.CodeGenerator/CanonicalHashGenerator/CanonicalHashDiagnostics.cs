@@ -213,6 +213,14 @@ internal static class CanonicalHashDiagnostics
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    public static readonly DiagnosticDescriptor UnsupportedScalarType = new(
+        id: "CCHASH028",
+        title: "Unsupported scalar type in canonical hash field",
+        messageFormat: "Field '{0}' has unsupported scalar type '{1}' for canonical hash. Supported scalar types: string, int, long, bool, DateTime, double, float, decimal, enum. Use ElementProfile or ValueProfile for complex types.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     public static Diagnostic Create(DiagnosticDescriptor descriptor, Location? location, params object[] args)
     {
         return Diagnostic.Create(descriptor, location, args);

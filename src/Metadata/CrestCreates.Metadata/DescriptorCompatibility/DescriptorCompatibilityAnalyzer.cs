@@ -57,26 +57,28 @@ public sealed class DescriptorCompatibilityAnalyzer : IDescriptorCompatibilityAn
             var afterDesc = ResolveDescriptor(change.Ref, afterIndex);
 
             // Run descriptor-specific rules first (all except the last Generic rule)
-            bool claimed = false;
+            bool anySpecificFindings = false;
             for (int i = 0; i < _rules.Count - 1; i++)
             {
                 var rule = _rules[i];
                 if (!rule.CanAnalyze(change, beforeDesc, afterDesc)) continue;
-                claimed = true;
                 var ruleFindings = rule.Analyze(change, beforeDesc, afterDesc, impactReport, options);
                 if (ruleFindings.Count > 0)
                 {
                     findings.AddRange(ruleFindings);
+                    anySpecificFindings = true;
                 }
             }
 
             // Run generic rule as catch-all. When a descriptor-specific rule already
-            // claimed a ContractHashChanged change, suppress the generic
-            // COMPAT_GENERIC_UNCLASSIFIED_CONTRACT_CHANGE to avoid conflicting Risky findings.
-            // Likewise, suppress COMPAT_GENERIC_DEFINITION_CHANGED when a descriptor-specific
-            // rule already claimed a DefinitionHashChanged change.
+            // produced findings for a ContractHashChanged or DefinitionHashChanged change,
+            // suppress the generic COMPAT_GENERIC_UNCLASSIFIED_CONTRACT_CHANGE and
+            // COMPAT_GENERIC_DEFINITION_CHANGED to avoid conflicting findings.
+            // Only suppress when the specific rule actually found something — a rule that
+            // CanAnalyze=true but produces zero findings (e.g., Schema rule for a
+            // ValidationRules-only change) should NOT suppress the generic fallback.
             var genericFindings = _rules.Last().Analyze(change, beforeDesc, afterDesc, impactReport, options);
-            if (claimed)
+            if (anySpecificFindings)
             {
                 genericFindings = genericFindings
                     .Where(f => f.RuleId is not (
