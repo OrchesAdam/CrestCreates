@@ -1,6 +1,8 @@
 using Xunit;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using FluentAssertions;
 using Moq;
 
@@ -126,7 +128,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
-            ReviewResultId = "review-001"
+            BindingSnapshot = CreateBindingSnapshot()
         };
 
         var result = await service.SubmitActivationRequestAsync(context, request);
@@ -258,4 +260,25 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
             It.Is<AgentToolInvocationAuditRecord>(r => r.ResultStatus == AgentToolResultStatus.Failed),
             It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    private static ActivationBindingSnapshot CreateBindingSnapshot()
+        => new()
+        {
+            TenantId = TestTenantId,
+            DraftId = "draft-001",
+            DraftVersion = 1,
+            ReviewResultId = "review-001",
+            PackagePreviewId = "pkg-001",
+            EvidencePreviewId = "ev-001",
+            Hashes = new BindingHashes
+            {
+                SourceReviewHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                ManifestHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                EvidenceHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                EnvelopeHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                ContractHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                DefinitionHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" }
+            },
+            CreatedAt = DateTimeOffset.UtcNow
+        };
 }

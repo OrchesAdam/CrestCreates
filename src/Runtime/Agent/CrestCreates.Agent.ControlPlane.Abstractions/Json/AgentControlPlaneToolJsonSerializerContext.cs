@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorPackage;
@@ -80,6 +81,22 @@ namespace CrestCreates.Agent.ControlPlane.Abstractions.Json;
 // ── Wave 6 — Activation Handoff ────────────────────────────────────────
 [JsonSerializable(typeof(AgentToolResult<ActivationRequest>))]
 [JsonSerializable(typeof(SubmitActivationRequestRequest))]
+
+// ── Wave 6.5 — Activation Models (Phase 7e) ──────────────────────────
+[JsonSerializable(typeof(ActivationBindingSnapshot))]
+[JsonSerializable(typeof(BindingHashes))]
+[JsonSerializable(typeof(DescriptorActivationActorKind))]
+[JsonSerializable(typeof(DescriptorActivationAuditRecord))]
+[JsonSerializable(typeof(DescriptorActivationDecision))]
+[JsonSerializable(typeof(DescriptorActivationEligibility))]
+[JsonSerializable(typeof(DescriptorActivationPolicy))]
+[JsonSerializable(typeof(DescriptorActivationReviewDecision))]
+[JsonSerializable(typeof(DescriptorActivationReviewOutcome))]
+[JsonSerializable(typeof(DescriptorActivationReviewTaskInput))]
+[JsonSerializable(typeof(ActivationEvidenceRecheckResult))]
+[JsonSerializable(typeof(ActivationEvidenceDrift))]
+[JsonSerializable(typeof(RuntimeActivationGateResult))]
+[JsonSerializable(typeof(ResolvedBindingArtifacts))]
 
 // ── Wave 7 — Manifest Query ────────────────────────────────────────────
 [JsonSerializable(typeof(AgentToolDescriptor))]

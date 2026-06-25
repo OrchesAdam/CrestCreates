@@ -7,5 +7,6 @@ public enum ActivationRequestStatus
     Approved,
     Rejected,
     Cancelled,
-    Expired
+    Expired,
+    Stale
 }

@@ -22,7 +22,7 @@ public class DescriptorReviewReportRendererTests
         output.Should().Contain("- **Tenant**: tenant-1");
         output.Should().Contain("- **Review Result**: rr-xyz");
         output.Should().Contain("- **Generated**:");
-        output.Should().Contain("- **Contract Version**: 7d.v1");
+        output.Should().Contain("- **Contract Version**: 7e.v1");
 
         // All 13 section titles
         output.Should().Contain("## Summary");

@@ -1,6 +1,6 @@
 # Tool DTO, JSON Contract & Review Report — Usage Guide
 
-> **Date:** 2026-06-22 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal)**
+> **Date:** 2026-06-25 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow)**
 
 ## 1. 快速开始 (Quick Start)
 
@@ -162,11 +162,95 @@ public sealed record AgentToolResult<T> where T : class
 
 ### 2.8 Wave 6 — Activation Handoff（3 tools）
 
+> **Phase 7e (#17)** 完整实现了 Wave 6 的激活工作流，包括激活请求生命周期管理、HumanTask 审查编排、证据重校验、以及 `IRuntimeActivationGate` 作为唯一运行时状态变异入口。
+
 | 工具名 | 请求类型 | 结果类型 (AgentToolResult<>) |
 |--------|---------|---------------------------|
 | `SubmitActivationRequest` | `SubmitActivationRequestRequest` | `ActivationRequest` |
 | `GetActivationRequestStatus` | `DescriptorRef` | `ActivationRequest` |
 | `CancelActivationRequest` | `DescriptorRef` | `ActivationRequest` |
+
+**SubmitActivationRequestRequest** 新增字段：
+
+```csharp
+public sealed record SubmitActivationRequestRequest
+{
+    public required string DraftId { get; init; }
+    public required ActivationBindingSnapshot BindingSnapshot { get; init; }
+    public DescriptorLifecycleDecisionKind? GovernanceDecision { get; init; } // NEW in Phase 7e
+}
+```
+
+**ActivationBindingSnapshot** — 激活请求时的绑定引用与哈希快照：
+
+```csharp
+public sealed record ActivationBindingSnapshot
+{
+    public required string ReviewResultId { get; init; }
+    public required string DraftVersion { get; init; }
+    public required string PackagePreviewId { get; init; }    // required (Phase 7e) — 原 string?
+    public required string EvidencePreviewId { get; init; }   // required (Phase 7e) — 原 string?
+    public required BindingHashes Hashes { get; init; }
+}
+```
+
+**BindingHashes** — 6 个 CanonicalHash 字段：
+
+```csharp
+public sealed record BindingHashes
+{
+    public required CanonicalHash SourceReviewHash { get; init; }
+    public required CanonicalHash ManifestHash { get; init; }
+    public required CanonicalHash EvidenceHash { get; init; }
+    public required CanonicalHash EnvelopeHash { get; init; }
+    public required CanonicalHash ContractHash { get; init; }
+    public required CanonicalHash DefinitionHash { get; init; }
+}
+```
+
+**ActivationRequest** — 激活请求主记录：
+
+```csharp
+public sealed record ActivationRequest
+{
+    public required string RequestId { get; init; }
+    public required string DraftId { get; init; }
+    public required string TenantId { get; init; }
+    public required ActivationRequestStatus Status { get; init; }
+    public required ActivationBindingSnapshot BindingSnapshot { get; init; }
+    public required DescriptorActivationPolicy Policy { get; init; }
+    public required DateTimeOffset CreatedAt { get; init; }
+    public DescriptorLifecycleDecisionKind? GovernanceDecision { get; init; }
+}
+```
+
+**ActivationRequestStatus** — 6 值状态枚举：
+- `Submitted` — 已提交
+- `UnderReview` — 审查中（HumanTask 创建后自动转换）
+- `Approved` — 已批准（触发 RuntimeActivationGate）
+- `Rejected` — 已拒绝（人工决策）
+- `Cancelled` — 请求者取消
+- `Expired` — 超时过期
+
+**激活工作流**：
+
+```
+1. SubmitActivationRequest → Status: Submitted
+   ├─ ToolService 从 ReviewResult 提取 GovernanceDecision
+   ├─ RequestService 捕获 Policy 快照 + BindingSnapshot
+   └─ ReviewOrchestrator 创建 HumanTask → Status: UnderReview
+
+2. [HumanTask 审查完成] → HumanTaskCompletedEvent
+   ├─ DescriptorActivationReviewHumanTaskEventHandler 接收事件
+   ├─ DescriptorActivationReviewDecisionParser.TryParse 解析决策
+   └─ 路由到 RequestService:
+       ├─ Approved → EvidenceRechecker.RecheckAsync → RuntimeActivationGate.ActivateAsync
+       └─ Rejected → 更新状态 + 审计
+
+3. GetActivationRequestStatus → 查询当前状态和记录
+
+4. CancelActivationRequest → RequestService 取消 + 审计
+```
 
 ### 2.9 Wave 7 — Manifest（2 tools）
 
@@ -564,7 +648,7 @@ if (request.DescriptorKind != request.Payload.Discriminator)
 
 ```csharp
 string version = AgentControlPlaneContractVersion.Current;
-// => "7d.v1"
+// => "7e.v1"
 ```
 
 ### 7.2 从 Manifest 查询版本
@@ -579,9 +663,9 @@ foreach (var tool in allTools)
     Console.WriteLine($"{tool.Name}: contract={tool.ContractVersion}");
 }
 // 输出示例:
-//   BuildMetadataContextPack: contract=7d.v1
-//   CreateDescriptorDraft: contract=7d.v1
-//   ListAgentTools: contract=7d.v1
+//   BuildMetadataContextPack: contract=7e.v1
+//   CreateDescriptorDraft: contract=7e.v1
+//   ListAgentTools: contract=7e.v1
 //   ...
 ```
 
@@ -590,10 +674,10 @@ foreach (var tool in allTools)
 ```csharp
 // 适配器在连接时检查契约版本兼容性
 var toolDescriptor = manifestProvider.GetToolByName("CreateDescriptorDraft");
-if (toolDescriptor?.ContractVersion != "7d.v1")
+if (toolDescriptor?.ContractVersion != "7e.v1")
 {
     // 版本不匹配 — 适配器可能需要升级或降级策略
-    throw new AdapterException($"Expected contract 7d.v1, got {toolDescriptor?.ContractVersion}");
+    throw new AdapterException($"Expected contract 7e.v1, got {toolDescriptor?.ContractVersion}");
 }
 ```
 
@@ -1256,7 +1340,7 @@ services.AddSingleton<IDescriptorReviewMessageTemplateCatalog, LocalizedTemplate
 ```
 
 **约束**：
-- 模板版本必须在 `TemplateVersion` 中追踪（当前 `"7d.v1"`）
+- 模板版本必须在 `TemplateVersion` 中追踪（当前 `"7e.v1"`）
 - 未知模板 ID 返回 fallback 消息，不抛异常
 - 相同 templateId + 参数 → 相同输出
 
@@ -1271,7 +1355,294 @@ services.AddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptor
 
 ---
 
-## 14. 未来：LLM 集成 (Future: LLM Integration)
+## 14. Safe Activation Workflow 使用 (Safe Activation Workflow Usage) (Phase 7e)
+
+> **Phase 7e (#17)** 实现了从已审查的描述符草稿到运行时激活的完整安全路径。激活请求生命周期通过 `IDescriptorActivationRequestService` 管理，HumanTask 审查通过 `IActivationReviewOrchestrator` 编排，证据完整性通过 `IActivationEvidenceRechecker` 验证，运行时状态变异通过唯一的 `IRuntimeActivationGate` 入口执行。
+
+### 14.1 提交激活请求
+
+```csharp
+using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
+
+// 从审查结果构建绑定快照
+var bindingSnapshot = new ActivationBindingSnapshot
+{
+    ReviewResultId = reviewResult.ReviewResultId,
+    DraftVersion = draft.CurrentVersion,
+    PackagePreviewId = packagePreview.PreviewId,     // required — 编译期强制
+    EvidencePreviewId = evidencePreview.PreviewId,   // required — 编译期强制
+    Hashes = new BindingHashes
+    {
+        SourceReviewHash = reviewResult.StableHash,
+        ManifestHash = packagePreview.ManifestHash,
+        EvidenceHash = evidencePreview.EvidenceHash,
+        EnvelopeHash = packagePreview.EnvelopeHash,
+        ContractHash = draft.ContractHash,
+        DefinitionHash = draft.DefinitionHash
+    }
+};
+
+// 治理决策从审查结果流向激活请求
+var request = new SubmitActivationRequestRequest
+{
+    DraftId = draft.DraftId,
+    BindingSnapshot = bindingSnapshot,
+    GovernanceDecision = reviewResult.GovernanceDecision?.MaxDecision
+};
+
+// 通过工具服务提交
+var result = await toolService.SubmitActivationRequestAsync(context, request, ct);
+if (result.Status == AgentToolResultStatus.Success && result.Value is not null)
+{
+    var activationRequest = result.Value;
+    Console.WriteLine($"Activation request {activationRequest.RequestId} submitted");
+    Console.WriteLine($"Status: {activationRequest.Status}"); // Submitted → UnderReview
+    Console.WriteLine($"Policy: {activationRequest.Policy.PolicySummary}");
+}
+```
+
+### 14.2 治理决策传递
+
+治理决策从审查结果流向激活请求的路径：
+
+```
+ReviewDescriptorDraft
+  → DescriptorDraftReviewResult
+    → GovernanceDecision?.MaxDecision
+      → SubmitActivationRequestRequest.GovernanceDecision
+        → ActivationRequest.GovernanceDecision (快照固化)
+```
+
+ToolService 在 `SubmitActivationRequestAsync` 内部提取决策：
+
+```csharp
+// ToolService 内部逻辑（伪代码）
+var reviewResult = await ResolveReviewResultAsync(draftId);
+var request = new SubmitActivationRequestRequest
+{
+    DraftId = draftId,
+    BindingSnapshot = BuildBindingSnapshot(reviewResult, draft),
+    GovernanceDecision = reviewResult.GovernanceDecision?.MaxDecision
+};
+return await _requestService.SubmitAsync(request);
+```
+
+### 14.3 HumanTask 审查流程
+
+激活请求提交后自动创建 HumanTask：
+
+```csharp
+// SubmitAsync 内部的审查编排
+// → _reviewOrchestrator.CreateReviewTaskAsync(request)
+
+// HumanTask 负载：
+var taskInput = new DescriptorActivationReviewTaskInput
+{
+    ActivationRequestId = request.RequestId,
+    DraftId = request.DraftId,
+    DescriptorKind = draft.DescriptorKind,
+    ReviewSummary = "Draft passed validation. 3 warnings, 0 errors.",
+    EvidenceSummary = "Package: 5 descriptors. Evidence: integrity verified.",
+    BoundHashes = request.BindingSnapshot.Hashes,
+    PackageManifestSummary = "Capability: ProcessOrder, Workflow: OrderFulfillment, Schema: OrderSchema",
+    ImpactContext = "Affects 2 dependent workflows. No breaking changes.",
+    PackageManifestJson = packageManifestJson
+};
+
+// HumanTask 完成后触发 EventBus 回调：
+// HumanTaskCompletedEvent → DescriptorActivationReviewHumanTaskEventHandler
+// → 解析 DescriptorActivationReviewDecision → 路由到 RequestService
+```
+
+### 14.4 审批/拒绝操作
+
+审批时进行证据绑定验证和 ActivationRequestId 匹配：
+
+```csharp
+// 审批决策结构
+var reviewDecision = new DescriptorActivationReviewDecision
+{
+    ActivationRequestId = activationRequestId,
+    ActorId = reviewerUserId,
+    ActorKind = DescriptorActivationActorKind.Human,
+    Decision = DescriptorActivationReviewOutcome.Approved,
+    BoundEvidenceHash = request.BindingSnapshot.Hashes.EvidenceHash,  // 绑定到证据快照
+    BoundEnvelopeHash = request.BindingSnapshot.Hashes.EnvelopeHash    // 绑定到信封快照
+};
+
+// ApproveAsync 内部验证序列：
+// 1. reviewDecision.ActivationRequestId == request.RequestId
+//    → 不匹配: ACTIVATION_REVIEW_REQUEST_MISMATCH
+// 2. reviewDecision.Decision == DescriptorActivationReviewOutcome.Approved
+//    → 不匹配: ACTIVATION_REVIEW_DECISION_MISMATCH
+// 3. reviewDecision.BoundEvidenceHash == request.BindingSnapshot.Hashes.EvidenceHash
+//    → 不匹配: ACTIVATION_REVIEW_EVIDENCE_MISMATCH（证据漂移）
+// 4. reviewDecision.BoundEnvelopeHash == request.BindingSnapshot.Hashes.EnvelopeHash
+//    → 不匹配: ACTIVATION_REVIEW_ENVELOPE_MISMATCH（信封漂移）
+// 5. → _evidenceRechecker.RecheckAsync(request)
+//    → 所有 6 字段 CanonicHash 比较通过
+// 6. → _runtimeActivationGate.ActivateAsync(request)
+//    → 唯一运行时状态变异入口
+
+// 拒绝决策
+var rejectDecision = new DescriptorActivationReviewDecision
+{
+    ActivationRequestId = activationRequestId,
+    ActorId = reviewerUserId,
+    ActorKind = DescriptorActivationActorKind.Human,
+    Decision = DescriptorActivationReviewOutcome.Rejected,
+    BoundEvidenceHash = request.BindingSnapshot.Hashes.EvidenceHash,
+    BoundEnvelopeHash = request.BindingSnapshot.Hashes.EnvelopeHash
+};
+
+// RejectAsync 内部验证：
+// 1. reviewDecision.ActivationRequestId == request.RequestId
+//    → 不匹配: ACTIVATION_REVIEW_REQUEST_MISMATCH
+// 2. request.Status 允许拒绝（非 Approved/Rejected/Cancelled/Expired）
+//    → 不允许: ACTIVATION_INVALID_STATUS_FOR_REJECTION
+```
+
+### 14.5 证据重校验
+
+证据重校验在审批前执行，比较全部 6 个 BindingHashes 字段：
+
+```csharp
+// IActivationEvidenceRechecker.RecheckAsync(request)
+
+// 重校验逻辑（伪代码）：
+// 1. 通过 IActivationBindingArtifactResolver 解析当前制品哈希
+// 2. 比较 BindingHashes 的全部 6 个字段，使用 CanonicalHash 记录相等性：
+//    - SourceReviewHash: 审查结果哈希是否一致
+//    - ManifestHash: 包清单哈希是否一致
+//    - EvidenceHash: 证据哈希是否一致
+//    - EnvelopeHash: 信封哈希是否一致
+//    - ContractHash: 契约哈希是否一致
+//    - DefinitionHash: 定义哈希是否一致
+// 3. 返回重校验结果
+
+// 使用示例：
+var evidenceResult = await _evidenceRechecker.RecheckAsync(activationRequest);
+if (!evidenceResult.AllMatch)
+{
+    // 处理漂移字段
+    foreach (var driftedField in evidenceResult.DriftedFields)
+    {
+        Console.WriteLine($"Hash drift detected in {driftedField}: " +
+            $"request has {evidenceResult.RequestHashes[driftedField]}, " +
+            $"current is {evidenceResult.CurrentHashes[driftedField]}");
+    }
+}
+```
+
+### 14.6 AoT 安全决策解析
+
+审查决策通过 `DescriptorActivationReviewDecisionParser` 以 AoT 安全方式解析：
+
+```csharp
+using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
+
+// 从 HumanTask 完成事件的 JSON 负载解析
+string decisionJson = eventData.DecisionPayload;
+if (DescriptorActivationReviewDecisionParser.TryParse(decisionJson, out var decision))
+{
+    switch (decision.Decision)
+    {
+        case DescriptorActivationReviewOutcome.Approved:
+            await _requestService.ApproveActivationRequestAsync(decision);
+            break;
+        case DescriptorActivationReviewOutcome.Rejected:
+            await _requestService.RejectActivationRequestAsync(decision);
+            break;
+        case DescriptorActivationReviewOutcome.Deferred:
+            // 无状态变更，保留 UnderReview
+            break;
+    }
+}
+else
+{
+    // 解析失败 — 记录审计
+    await _auditor.RecordAsync(new DescriptorActivationAuditRecord
+    {
+        ActivationRequestId = eventData.ActivationRequestId,
+        Action = DescriptorActivationAuditAction.Block,
+        Reason = "Failed to parse review decision from HumanTask"
+    });
+}
+```
+
+### 14.7 自我审批检查
+
+自我审批使用激活请求创建时捕获的策略快照：
+
+```csharp
+// request.Policy 在 SubmitAsync 时捕获 — 不是实时查询
+if (request.Policy.AllowSelfApproval)
+{
+    // 允许相同 ActorId 的审批
+}
+else if (request.Policy.ForbidSelfApproval)
+{
+    // 拒绝自我审批 → Block audit action
+    var reason = $"Self-approval forbidden by policy: {request.Policy.PolicySummary}";
+}
+else
+{
+    // 回退策略：使用 snapshot.Owner.DescriptorKind 查询
+    var fallbackPolicy = await _policyProvider.GetPolicyAsync(
+        request.TenantId,
+        request.BindingSnapshot.Owner?.DescriptorKind ?? DescriptorKind.Unknown);
+}
+```
+
+### 14.8 激活诊断码参考
+
+所有 Phase 7e 激活诊断码使用 SCREAMING_SNAKE_CASE：
+
+| 诊断码 | 触发条件 | Audit Action |
+|--------|----------|--------------|
+| `ACTIVATION_BINDING_SNAPSHOT_REQUIRED` | SubmitAsync — BindingSnapshot 为 null | Block |
+| `ACTIVATION_BINDING_HASHES_REQUIRED` | SubmitAsync — Hashes 为 null | Block |
+| `ACTIVATION_INCOMPLETE_BINDING` | SubmitAsync — PackagePreviewId 为 IsNullOrWhiteSpace | Block |
+| `ACTIVATION_INCOMPLETE_EVIDENCE_BINDING` | SubmitAsync — EvidencePreviewId 为 IsNullOrWhiteSpace | Block |
+| `ACTIVATION_REVIEW_REQUEST_MISMATCH` | ApproveAsync/RejectAsync — ActivationRequestId 不匹配 | Block |
+| `ACTIVATION_REVIEW_DECISION_MISMATCH` | ApproveAsync — 决策种类不是 Approved | Block |
+| `ACTIVATION_REVIEW_EVIDENCE_MISMATCH` | ApproveAsync — BoundEvidenceHash 漂移 | GateDenied |
+| `ACTIVATION_REVIEW_ENVELOPE_MISMATCH` | ApproveAsync — BoundEnvelopeHash 漂移 | GateDenied |
+| `ACTIVATION_INVALID_STATUS_FOR_REJECTION` | RejectAsync — 请求状态不允许拒绝 | Block |
+
+### 14.9 DI 注册
+
+```csharp
+// Phase 7e 激活组件注册
+services.AddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
+services.AddSingleton<IDescriptorActivationPolicyProvider, DefaultDescriptorActivationPolicyProvider>();
+services.AddSingleton<IDescriptorActivationAuditor, DefaultDescriptorActivationAuditor>();
+services.AddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
+services.AddSingleton<IRuntimeActivationGate, DefaultRuntimeActivationGate>();
+services.AddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
+services.AddSingleton<IActivationBindingArtifactResolver, DefaultActivationBindingArtifactResolver>();
+
+// EventBus 处理程序
+services.AddTransient<DescriptorActivationReviewHumanTaskEventHandler>();
+```
+
+### 14.10 关键使用约束
+
+| 约束 | 说明 |
+|------|------|
+| **BindingSnapshot 为 required** | `PackagePreviewId` 和 `EvidencePreviewId` 为 `required string`，编译期强制非空 |
+| **自我审批用快照策略** | `request.Policy` 在创建时捕获，不使用实时查询 |
+| **证据重校验比较 6 字段 CanonicalHash** | 使用完整的 `CanonicalHash` 记录相等性，不只用 `.Value` 摘要 |
+| **IRuntimeActivationGate 是唯一变异入口** | 任何代码路径都不应在 Gate 之外修改运行时注册表 |
+| **审批绑定到证据快照** | `BoundEvidenceHash` / `BoundEnvelopeHash` 必须与激活请求快照的 `Hashes.EvidenceHash` / `Hashes.EnvelopeHash` 匹配 |
+| **ActivationRequestId 绑定** | 审批和拒绝路径均检查 `reviewDecision.ActivationRequestId == request.RequestId` |
+| **审计动作语义** | 验证失败用 `Block` 或 `GateDenied`，不用 `Reject`（后者表示人工拒绝） |
+| **ToolService 不维护双轨逻辑** | ToolService 委托给 `_requestService`，无独立的激活代码路径 |
+
+---
+
+## 15. 未来：LLM 集成 (Future: LLM Integration)
 
 Phase 7b（LLM Bootstrap Plane）将在此 DTO 边界之上构建。LLM 集成将使用相同的 Tool DTO 与 Control Plane 交互：
 

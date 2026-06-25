@@ -1,6 +1,7 @@
 using Xunit;
 using Moq;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -190,7 +191,9 @@ public class RuntimeBoundaryTests : AgentControlPlaneTestBase
             NullLogger<DefaultAgentControlPlaneToolService>.Instance,
             HashBuilderMock.Object,
             ReportBuilderMock.Object,
-            ReportRendererMock.Object
+            ReportRendererMock.Object,
+            ActivationRequestServiceMock.Object,
+            ActivationReviewOrchestratorMock.Object
         );
 
         var context = new AgentToolInvocationContext

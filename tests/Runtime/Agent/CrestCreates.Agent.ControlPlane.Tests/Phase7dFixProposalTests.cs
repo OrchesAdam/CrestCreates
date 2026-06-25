@@ -43,7 +43,7 @@ public class Phase7dFixProposalTests : AgentControlPlaneTestBase
         var proposal = CreateMinimalFixProposal();
 
         proposal.ContractVersion.Should().Be(AgentControlPlaneContractVersion.Current);
-        proposal.ContractVersion.Should().Be("7d.v1");
+        proposal.ContractVersion.Should().Be("7e.v1");
     }
 
     [Fact]

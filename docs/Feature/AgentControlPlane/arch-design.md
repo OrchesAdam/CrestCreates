@@ -1,12 +1,14 @@
 # Tool DTO, JSON Contract & Review Report — Architecture Design
 
-> **Date:** 2026-06-22 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal)**
+> **Date:** 2026-06-25 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow)**
 
 ## 1. 概述 (Overview)
 
 Phase 7c 在 Agent Control Plane 与外部协议适配器（MCP、HTTP、SignalR）之间引入了一个纯 DTO 序列化边界。所有工具请求/结果类型都通过**密封 record DTO** 暴露，不再暴露领域内部的 `IDescriptor`、`IServiceProvider`、`JsonElement` 或运行时处理程序类型。
 
 Phase 7d 在 Phase 7c DTO 边界之上增加了审查报告（Review Report）与修复提案（Fix Proposal）契约层。审查报告将审查结果转换为结构化、确定性、人工/Agent 可读的报告；修复提案契约升级使提案能表达结构化值变更、种类标签和安全等级。审查报告无治理决定权、无激活决定权、无运行时注册表变异能力。
+
+Phase 7e 实现了安全激活工作流（Safe Activation Workflow）——从已审查的描述符草稿到运行时激活的完整路径。核心能力包括：激活请求生命周期管理（提交/审批/拒绝/取消/状态查询）、基于 HumanTask 的人工审核编排、证据重校验（通过 6 字段 CanonicalHash 比较检测激活请求创建后的漂移）、治理决策传递、以及 `IRuntimeActivationGate` 作为唯一运行时状态变异入口的架构不变量。合约版本迭代至 `7e.v1`，新增 431 个 ControlPlane 测试覆盖全部激活路径。
 
 核心交付物：
 - **34 个 Tool DTO** — 统一的密封 record 类型，代替所有领域类型（新增 2 个：BuildDescriptorReviewReport、RenderDescriptorReviewReport）
@@ -15,11 +17,15 @@ Phase 7d 在 Phase 7c DTO 边界之上增加了审查报告（Review Report）�
 - **Source-Generated Patch DTOs (New in #42)** — `AgentDraftPayloadPatchDto` 和 `Agent{Kind}DraftChangedField` 枚举用于 Update 操作的字段级合并
 - **Source-Generated Projection (New in #42)** — `AgentDraftPayloadProjection` 提供 `Create`、`FromDomain`、`Merge` 方法，替代手写 payload 投影
 - **Projection Helpers** — 领域 ←→ DTO 的双向投影，位于 ControlPlane 项目
-- **Contract Version** — `AgentControlPlaneContractVersion.Current = "7d.v1"`
+- **Contract Version** — `AgentControlPlaneContractVersion.Current = "7e.v1"`
 - **Review Report DTO & Builder (Phase 7d)** — `DescriptorReviewReportDto`（13 个固定 Section）、`IDescriptorReviewReportBuilder` + `DefaultDescriptorReviewReportBuilder`
 - **Review Report Renderer (Phase 7d)** — `IDescriptorReviewReportRenderer` + `DefaultDescriptorReviewReportRenderer`，Markdown/PlainText 确定性投影
 - **Message Template Catalog (Phase 7d)** — `IDescriptorReviewMessageTemplateCatalog` + `DefaultDescriptorReviewMessageTemplateCatalog`，31 个确定性模板
 - **Fix Proposal Contract Upgrade (Phase 7d)** — `FixProposalKind`（9 值）、`FixProposalActionKind`（10 值）、`FixProposalApplicability`（4 值）、`FixProposalActionSafetyLevel`（4 值）、`JsonElement?` 值类型
+- **Activation Abstractions (Phase 7e)** — 15 个激活契约类型：`ActivationRequest`、`ActivationBindingSnapshot`、`BindingHashes`（6 字段 CanonicalHash）、`ActivationRequestStatus`、`DescriptorActivationReviewDecision`、`DescriptorActivationReviewTaskInput`、`DescriptorActivationPolicy`、`DescriptorActivationEligibility` 等
+- **Activation Services (Phase 7e)** — 7 个核心接口 + 8 个实现：`IDescriptorActivationRequestService`（生命周期）、`IActivationEvidenceRechecker`（证据重校验）、`IRuntimeActivationGate`（唯一运行时状态变异入口）、`IActivationReviewOrchestrator`（HumanTask 编排）、`IActivationBindingArtifactResolver`（绑定引用哈希解析）、`IDescriptorActivationPolicyProvider`（策略）、`IDescriptorActivationAuditor`（审计）
+- **HumanTask + EventBus Integration (Phase 7e)** — `DescriptorActivationReviewHumanTaskEventHandler` 处理 HumanTask 完成回调，触发审查决策处理
+- **Governance Integration (Phase 7e)** — 治理决策从审查结果流向 `SubmitActivationRequestRequest.GovernanceDecision`，绑定到激活请求快照
 
 ### 1.1 目标
 
@@ -72,7 +78,7 @@ Protocol Adapters (MCP / HTTP / SignalR)
 | `CrestCreates.Agent.DraftContracts` | Spec 文件（`[AgentDraftContractSpec]`、`[AgentDraftField]` 等）、引用 `CrestCreates.CodeGenerator` → 生成 payload DTO、patch DTO、changed-field 枚举、投影类、manifest |
 | `CrestCreates.Agent.ControlPlane.Abstractions` | Tool DTO（请求/结果类型）、JSON 序列化上下文、契约版本、工具描述符、工具名称常量；payload DTO 类型通过 global using 别名映射到 DraftContracts 生成类型 |
 | `CrestCreates.Agent.ControlPlane` | Wrapper 投影（`AgentDescriptorDraftDtoProjection`）、`AgentDraftPayloadProjection` 的调用者、工具服务实现、权限/审计/可见性基础设施 |
-| `CrestCreates.Agent.ControlPlane.Tests` | 366 个 ControlPlane 测试（含 DraftContracts + Generator）+ 7 个 Boundary 测试 = **373 个测试** |
+| `CrestCreates.Agent.ControlPlane.Tests` | 423 个 ControlPlane 测试（含 DraftContracts + Generator + Activation）+ 8 个 Boundary 测试 = **431 个测试** |
 
 ---
 
@@ -101,7 +107,7 @@ Protocol Adapters (MCP / HTTP / SignalR)
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐    │
 │  │  Contract Version                                         │    │
-│  │  AgentControlPlaneContractVersion.Current = "7d.v1"       │    │
+│  │  AgentControlPlaneContractVersion.Current = "7e.v1"       │    │
 │  └──────────────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────────┘
                            ↓ (deserialize)
@@ -192,7 +198,7 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `UpdateDescriptorDraftRequest` | Abstractions | 更新草稿请求（含 `AgentDraftPayloadPatchDto?`） | **Implemented (#42)** |
 | `AgentControlPlaneToolJsonSerializerContext` | Abstractions/Json | Source-generated JSON 序列化上下文，注册所有 Root DTO + 稳定值对象 | **Implemented** |
 | `AgentControlPlaneToolJsonSerializerOptions` | Abstractions/Json | `CreateDefault()` 工厂方法 | **Implemented** |
-| `AgentControlPlaneContractVersion` | Abstractions/Json | `Current = "7d.v1"` | **Implemented** |
+| `AgentControlPlaneContractVersion` | Abstractions/Json | `Current = "7e.v1"` | **Implemented** |
 | `AgentToolDescriptor.ContractVersion` | Abstractions | 工具描述符上的契约版本字段 | **Implemented** |
 | `AgentToolName` | Abstractions | 34 个工具名称常量 | **Implemented** |
 | `AgentToolCategory` | Abstractions | 8 个工具分类枚举 | **Implemented** |
@@ -222,6 +228,35 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `FixProposalActionKind` | Abstractions | 10 值枚举：SetValue=1 至 ManualActionRequired=10 | **Implemented (Phase 7d)** |
 | `FixProposalApplicability` | Abstractions | 4 值枚举：CurrentMutableDraft=1 至 NotApplicable=4 | **Implemented (Phase 7d)** |
 | `FixProposalActionSafetyLevel` | Abstractions | 4 值枚举：Safe=1 至 Unsafe=4 | **Implemented (Phase 7d)** |
+| `ActivationRequest` | Abstractions/Activation | 激活请求记录，含 RequestId、DraftId、TenantId、Status、BindingSnapshot、Policy、CreatedAt、GovernanceDecision | **Implemented (Phase 7e)** |
+| `ActivationBindingSnapshot` | Abstractions/Activation | 激活请求时的绑定引用与哈希快照，`required` 字段：ReviewResultId、DraftVersion、PackagePreviewId、EvidencePreviewId、Hashes | **Implemented (Phase 7e)** |
+| `BindingHashes` | Abstractions/Activation | 6 个 CanonicalHash 字段：SourceReviewHash、ManifestHash、EvidenceHash、EnvelopeHash、ContractHash、DefinitionHash | **Implemented (Phase 7e)** |
+| `ActivationRequestStatus` | Abstractions/Activation | 6 值枚举：Submitted、UnderReview、Approved、Rejected、Cancelled、Expired | **Implemented (Phase 7e)** |
+| `DescriptorActivationReviewDecision` | Abstractions/Activation | 审查决策 DTO，含 ActivationRequestId、ActorId、ActorKind、Decision、BoundEvidenceHash、BoundEnvelopeHash | **Implemented (Phase 7e)** |
+| `DescriptorActivationReviewTaskInput` | Abstractions/Activation | HumanTask 负载，含 ActivationRequestId、DraftId、DescriptorKind、ReviewSummary、EvidenceSummary、BindingHashes?、PackageManifestSummary、ImpactContext 等 | **Implemented (Phase 7e)** |
+| `DescriptorActivationPolicy` | Abstractions/Activation | 策略快照：AllowSelfApproval、ForbidSelfApproval、[Obsolete]RequireEvidenceBinding、MaxConcurrentActivations、PolicySummary | **Implemented (Phase 7e)** |
+| `DescriptorActivationEligibility` | Abstractions/Activation | 派生资格：AutoActivatable、RequiresHumanReview、Blocked | **Implemented (Phase 7e)** |
+| `DescriptorActivationAuditRecord` | Abstractions/Activation | 激活事件审计跟踪 | **Implemented (Phase 7e)** |
+| `DescriptorActivationAuditAction` | Abstractions/Activation | 审计动作枚举：Submit、Approve、Reject、Cancel、Block、GateDenied、Expire | **Implemented (Phase 7e)** |
+| `DescriptorActivationActorKind` | Abstractions/Activation | 请求者种类：Agent、Human、System | **Implemented (Phase 7e)** |
+| `DescriptorActivationReviewOutcome` | Abstractions/Activation | 审查结果：Approved、Rejected、Deferred | **Implemented (Phase 7e)** |
+| `SubmitActivationRequestRequest` | Abstractions | 提交激活请求 DTO，新增 GovernanceDecision 字段（DescriptorLifecycleDecisionKind?） | **Implemented (Phase 7e)** |
+| `DescriptorActivationReviewDecisionParser` | Abstractions/Activation | AoT 安全 TryParse，从 JSON 解析审查决策 | **Implemented (Phase 7e)** |
+| `IDescriptorActivationRequestService` | ControlPlane/Activation | 激活请求生命周期接口：Create、Approve、Reject、Cancel、GetStatus | **Implemented (Phase 7e)** |
+| `DefaultDescriptorActivationRequestService` | ControlPlane/Activation | 默认实现，含策略快照、证据绑定验证、fail-closed 空值守卫 | **Implemented (Phase 7e)** |
+| `IActivationEvidenceRechecker` | ControlPlane/Activation | 证据重校验接口：验证 BindingHashes 6 字段 CanonicalHash 比较 | **Implemented (Phase 7e)** |
+| `DefaultActivationEvidenceRechecker` | ControlPlane/Activation | 默认实现，全字段 CanonicalHash 记录相等性比较 | **Implemented (Phase 7e)** |
+| `IRuntimeActivationGate` | ControlPlane/Activation | 运行时激活门接口：唯一运行时状态变异入口（架构不变量） | **Implemented (Phase 7e)** |
+| `DefaultRuntimeActivationGate` | ControlPlane/Activation | 默认实现，激活时变异运行时描述符注册表 | **Implemented (Phase 7e)** |
+| `IActivationReviewOrchestrator` | ControlPlane/Activation | HumanTask 审查编排接口：CreateTask、HandleCompletion | **Implemented (Phase 7e)** |
+| `DefaultActivationReviewOrchestrator` | ControlPlane/Activation | 默认实现，通过 IHumanTaskRuntime 创建任务 + DescriptorActivationReviewHumanTaskEventHandler 回调 | **Implemented (Phase 7e)** |
+| `IActivationBindingArtifactResolver` | ControlPlane/Activation | 绑定引用哈希解析接口：从绑定引用解析当前制品哈希 | **Implemented (Phase 7e)** |
+| `DefaultActivationBindingArtifactResolver` | ControlPlane/Activation | 默认实现，用于证据重校验时获取当前哈希 | **Implemented (Phase 7e)** |
+| `IDescriptorActivationPolicyProvider` | ControlPlane/Activation | 激活策略提供者接口：按租户/描述符种类提供策略 | **Implemented (Phase 7e)** |
+| `DefaultDescriptorActivationPolicyProvider` | ControlPlane/Activation | 默认策略提供者实现 | **Implemented (Phase 7e)** |
+| `IDescriptorActivationAuditor` | ControlPlane/Activation | 激活审计接口：记录激活审计事件 | **Implemented (Phase 7e)** |
+| `DefaultDescriptorActivationAuditor` | ControlPlane/Activation | 默认审计实现 | **Implemented (Phase 7e)** |
+| `DescriptorActivationReviewHumanTaskEventHandler` | ControlPlane/Activation | EventBus 事件处理程序：处理 HumanTaskCompletedEvent，将决策路由到 RequestService | **Implemented (Phase 7e)** |
 
 ### 4.1 工具覆盖 (34 Tools)
 
@@ -233,7 +268,7 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | Wave 3.5 | ReviewReport | 2 | BuildDescriptorReviewReport, RenderDescriptorReviewReport |
 | Wave 4 | Fix Proposal | 4 | SuggestDescriptorDraftFixes, GetFixProposal, ListFixProposals, ApplyFixProposalToDraft |
 | Wave 5 | Package Preview | 4 | PreviewDescriptorPackage, BuildPackageEvidencePreview, BuildActivationReadinessPreview, GetPackagePreview |
-| Wave 6 | Activation Handoff | 3 | SubmitActivationRequest, GetActivationRequestStatus, CancelActivationRequest |
+| Wave 6 | Activation Handoff | 3 | SubmitActivationRequest, GetActivationRequestStatus, CancelActivationRequest（Phase 7e 完整实现激活工作流：HumanTask 审查编排、证据重校验、IRuntimeActivationGate 唯一运行时状态变异入口） |
 | Wave 7 | Manifest | 2 | ListAgentTools, GetAgentToolDescriptor |
 
 ---
@@ -464,7 +499,7 @@ public static (bool IsValid, AgentDraftContractError? Error) TryValidatePayload(
 ```csharp
 public static class AgentControlPlaneContractVersion
 {
-    public const string Current = "7d.v1";
+    public const string Current = "7e.v1";
 }
 ```
 
@@ -521,12 +556,36 @@ public sealed record AgentToolDescriptor
 | 7c-sub | #41: Tool DTO, JSON Context, Projection 基础 | Implemented |
 | 7c-sub | #42: AgentDraftContract Generator, Patch DTO, ChangedField enums, Projection 生成 | Implemented |
 | **7d** | Tool DTO, JSON Contract & Review Report — Review Report DTO, Builder, Renderer, Fix Proposal Contract Upgrade (#16) | **Implemented** |
-| 7b | LLM Bootstrap（Prompt 模板、LLM Provider、Draft Builder） | Future |
-| 7e | Activation Workflow（已审查的草稿 → 运行时激活） | Future |
+| 7e | Activation Workflow（已审查的草稿 → 运行时激活） | **Implemented (#17)** |
 | 7f | Continuous Improvement Loop（运行时反馈 → prompt 优化） | Future |
 | 7a | Descriptor Draft Runtime（存储、验证、物化、审查） | Implemented |
 
-### 10.1 Phase 7b — LLM Bootstrap Plane
+### 10.1 Phase 7e — Safe Activation Workflow (#17)
+
+Phase 7e 实现了从已审查的描述符草稿到运行时激活的完整工作流。核心链路：`IDescriptorActivationRequestService`（生命周期管理）→ `IActivationEvidenceRechecker`（证据重校验）→ `IRuntimeActivationGate`（唯一运行时状态变异入口）。
+
+**关键架构决策**：
+
+1. **IRuntimeActivationGate 是唯一运行时状态变异入口** — 除 Gate 外，没有其他代码路径可以修改运行时描述符注册表
+2. **证据重校验比较全部 6 个 BindingHashes 字段** — 使用完整的 CanonicalHash 记录相等性（不仅仅是 .Value 摘要）
+3. **治理决策从审查结果流向激活请求** — ToolService 提取 `reviewRef.Review.GovernanceDecision?.MaxDecision`，通过 `SubmitActivationRequestRequest.GovernanceDecision` 传递给 RequestService
+4. **绑定完整性由编译期 + 运行时共同强制执行** — `required string` 在 `PackagePreviewId`/`EvidencePreviewId` 上 + `IsNullOrWhiteSpace` 运行时守卫 + `ACTIVATION_INCOMPLETE_BINDING` 次级 fail-closed
+5. **审批绑定到证据快照** — `ApproveActivationRequestAsync` 验证 `reviewDecision.BoundEvidenceHash`/`BoundEnvelopeHash` 与 `request.BindingSnapshot.Hashes.EvidenceHash`/`EnvelopeHash`
+6. **审批/拒绝验证 ActivationRequestId** — 两条路径均检查 `reviewDecision.ActivationRequestId == request.RequestId`
+7. **自我审批使用快照策略** — `request.Policy` 在创建时捕获，不使用实时查找；回退使用 `snapshot.Owner.DescriptorKind`
+8. **Fail-closed 空值守卫** — `BindingSnapshot` 和 `BindingSnapshot.Hashes` 在所有入口点执行空值检查，附带结构化诊断
+9. **审计动作语义** — 验证失败使用 `GateDenied`/`Block`，而非 `Reject`（后者表示人工拒绝）
+10. **HumanTask 集成** — 审查通过 `IHumanTaskRuntime.CreateAsync` 创建任务 + `DescriptorActivationReviewHumanTaskEventHandler` 处理完成回调
+11. **EventBus 集成** — `HumanTaskCompletedEvent` 触发审查决策处理
+12. **ToolService 委托给 RequestService** — 不在 ToolService 中维护双轨激活逻辑
+
+**新增 15 个 Abstractions 类型 + 8 个 ControlPlane 类型 + 9 个激活诊断码（SCREAMING_SNAKE_CASE）**。
+
+**激活诊断码**：`ACTIVATION_BINDING_SNAPSHOT_REQUIRED`、`ACTIVATION_BINDING_HASHES_REQUIRED`、`ACTIVATION_INCOMPLETE_BINDING`、`ACTIVATION_INCOMPLETE_EVIDENCE_BINDING`、`ACTIVATION_REVIEW_DECISION_MISMATCH`、`ACTIVATION_REVIEW_REQUEST_MISMATCH`、`ACTIVATION_REVIEW_EVIDENCE_MISMATCH`、`ACTIVATION_REVIEW_ENVELOPE_MISMATCH`、`ACTIVATION_INVALID_STATUS_FOR_REJECTION`。
+
+**测试覆盖**：431 个 ControlPlane 测试 + 8 个 Boundary 测试，包括完整的激活请求生命周期、证据重校验、HumanTask 回调、策略快照和审计追踪覆盖。
+
+### 10.2 Phase 7b — LLM Bootstrap Plane
 
 Phase 7b 将引入 LLM 驱动的描述符草稿生成。核心组件已设计但尚未实现：
 
@@ -941,3 +1000,232 @@ services.AddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptor
 | Phase 7d 不进行运行时注册表变异 | Fix Proposal 仅修改草稿，不变异活跃注册表 |
 | IsExecutable 聚合规则 | `FixProposal.IsExecutable = Applicability==CurrentMutableDraft && Actions.All(IsExecutable)` |
 | RequiresManualAction 一致性 | `FixProposal.RequiresManualAction == (Applicability == ManualActionRequired)` |
+
+---
+
+## 12. Safe Activation Workflow (Phase 7e)
+
+> **Phase 7e (#17)** 实现了从已审查的描述符草稿到运行时激活的完整安全路径。核心链路：`IDescriptorActivationRequestService` → `IActivationEvidenceRechecker` → `IRuntimeActivationGate`，配合 HumanTask 审查编排和 EventBus 事件驱动回调。
+
+### 12.1 架构概览
+
+```
+Protocol Adapters (MCP / HTTP / SignalR)
+          ↓
+┌─────────────────────────────────────────────────────────────┐
+│  Tool Service (DefaultAgentControlPlaneToolService)          │
+│  Wave 6: Submit / GetStatus / Cancel Activation Request      │
+│                                                              │
+│  SubmitActivationRequestAsync:                               │
+│    1. Resolve draft → reviewResult                           │
+│    2. Extract GovernanceDecision from reviewResult           │
+│    3. Build ActivationBindingSnapshot (hashes + preview ids) │
+│    4. → _requestService.SubmitAsync(request)                 │
+└─────────────────────────────────────────────────────────────┘
+          ↓
+┌─────────────────────────────────────────────────────────────┐
+│  IDescriptorActivationRequestService                         │
+│  (DefaultDescriptorActivationRequestService)                 │
+│                                                              │
+│  SubmitAsync(request):                                       │
+│    - Fail-closed null guards on BindingSnapshot              │
+│    - Policy snapshot capture (AllowSelfApproval etc.)        │
+│    - Build ActivationRequest record                          │
+│    - Store + audit (Submit action)                           │
+│    - → _reviewOrchestrator.CreateReviewTaskAsync(request)    │
+│                                                              │
+│  ApproveAsync(decision):                                     │
+│    - Verify decision.ActivationRequestId == request.Id       │
+│    - Verify decision.BoundEvidenceHash == snapshot.EvidenceHash │
+│    - Verify decision.BoundEnvelopeHash == snapshot.EnvelopeHash │
+│    - → _evidenceRechecker.RecheckAsync(request)              │
+│    - → _runtimeActivationGate.ActivateAsync(request)         │
+│    - Update status → Approved + audit                        │
+│                                                              │
+│  RejectAsync(decision):                                      │
+│    - Verify decision.ActivationRequestId == request.Id       │
+│    - Update status → Rejected + audit                        │
+└─────────────────────────────────────────────────────────────┘
+          ↓
+┌─────────────────────────────────────────────────────────────┐
+│  IActivationEvidenceRechecker                                │
+│  (DefaultActivationEvidenceRechecker)                        │
+│                                                              │
+│  RecheckAsync(request):                                      │
+│    - Resolve current artifact hashes via                     │
+│      _artifactResolver                                        │
+│    - Compare ALL 6 BindingHashes fields using CanonicalHash  │
+│      equality (not just .Value digest)                       │
+│    - Return result: { AllMatch, DriftedFields, Diagnosis }   │
+└─────────────────────────────────────────────────────────────┘
+          ↓
+┌─────────────────────────────────────────────────────────────┐
+│  IRuntimeActivationGate  ← THE ONLY runtime mutation point    │
+│  (DefaultRuntimeActivationGate)                              │
+│                                                              │
+│  ActivateAsync(request):                                     │
+│    - Validate request is in Approved status                  │
+│    - Write descriptor to runtime registry                    │
+│    - Mark draft as activated                                 │
+│  Architectural invariant: ONLY this component mutates runtime │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 12.2 HumanTask + EventBus 集成
+
+激活审查请求创建 HumanTask 并通过 EventBus 处理完成回调：
+
+```
+SubmitAsync
+  → _reviewOrchestrator.CreateReviewTaskAsync(request)
+    → IHumanTaskRuntime.CreateAsync(taskInput)
+    → HumanTask enters review queue
+
+[Reviewer completes HumanTask]
+  → HumanTaskCompletedEvent published on EventBus
+  → DescriptorActivationReviewHumanTaskEventHandler handles event
+    → Parses review decision via DescriptorActivationReviewDecisionParser (AoT-safe)
+    → Routes decision to IDescriptorActivationRequestService:
+        - Approval → ApproveActivationRequestAsync(reviewDecision)
+        - Rejection → RejectActivationRequestAsync(reviewDecision)
+        - Deferred  → no status change
+```
+
+**HumanTask 负载**：`DescriptorActivationReviewTaskInput` 包含完整的审查上下文：
+- `ActivationRequestId` — 激活请求 ID
+- `DraftId` — 草稿 ID
+- `DescriptorKind` — 描述符种类
+- `ReviewSummary` — 审查摘要
+- `EvidenceSummary` — 证据摘要
+- `BoundHashes` — 可选的绑定哈希
+- `PackageManifestSummary` — 包清单摘要
+- `ImpactContext` — 影响上下文
+- `PackageManifestJson` — 包清单 JSON
+
+### 12.3 Fail-Closed 守卫
+
+所有激活入口点强制执行 fail-closed 空值检查：
+
+| 守卫点 | 诊断码 | 说明 |
+|--------|--------|------|
+| SubmitAsync — BindingSnapshot 为 null | `ACTIVATION_BINDING_SNAPSHOT_REQUIRED` | 提交请求缺少绑定快照 |
+| SubmitAsync — Hashes 为 null | `ACTIVATION_BINDING_HASHES_REQUIRED` | 绑定快照缺少哈希值 |
+| SubmitAsync — PackagePreviewId 为空 | `ACTIVATION_INCOMPLETE_BINDING` | 包预览 ID 缺失（次级 fail-closed） |
+| SubmitAsync — EvidencePreviewId 为空 | `ACTIVATION_INCOMPLETE_EVIDENCE_BINDING` | 证据预览 ID 缺失 |
+| ApproveAsync — request.Id 不匹配 | `ACTIVATION_REVIEW_REQUEST_MISMATCH` | 审查决策引用了错误的激活请求 |
+| ApproveAsync — 决策种类不匹配 | `ACTIVATION_REVIEW_DECISION_MISMATCH` | 审查决策种类不是 Approval |
+| ApproveAsync — EvidenceHash 不匹配 | `ACTIVATION_REVIEW_EVIDENCE_MISMATCH` | 审批时证据哈希漂移 |
+| ApproveAsync — EnvelopeHash 不匹配 | `ACTIVATION_REVIEW_ENVELOPE_MISMATCH` | 审批时信封哈希漂移 |
+| RejectAsync — 状态不允许拒绝 | `ACTIVATION_INVALID_STATUS_FOR_REJECTION` | 请求状态不允许拒绝操作 |
+
+### 12.4 关键架构决策
+
+**1. IRuntimeActivationGate 是唯一运行时状态变异入口**
+
+架构不变量：除 `IRuntimeActivationGate` 外，没有其他代码路径可以修改运行时描述符注册表。这确保了所有激活都经过统一的审计、验证和治理管道。
+
+**2. 证据重校验使用完整 CanonicalHash 记录相等性**
+
+`IActivationEvidenceRechecker` 比较 `BindingHashes` 的全部 6 个字段（SourceReviewHash、ManifestHash、EvidenceHash、EnvelopeHash、ContractHash、DefinitionHash），使用 `CanonicalHash` 记录相等性而非仅比较 `.Value` 摘要。这防止了哈希摘要碰撞导致的误判。
+
+**3. 治理决策从审查结果流向激活请求**
+
+`SubmitActivationRequestAsync` 从审查结果中提取 `reviewRef.Review.GovernanceDecision?.MaxDecision`，并通过 `SubmitActivationRequestRequest.GovernanceDecision` 字段传递给 `RequestService`。这确保了治理决策在激活请求创建时被快照固化。
+
+**4. 绑定完整性由编译期 + 运行时共同强制执行**
+
+- 编译期：`ActivationBindingSnapshot.PackagePreviewId` 和 `EvidencePreviewId` 为 `required string`
+- 运行时：`IsNullOrWhiteSpace` 检查 + `ACTIVATION_INCOMPLETE_BINDING` 次级 fail-closed 诊断
+
+**5. 审批绑定到证据快照**
+
+`ApproveActivationRequestAsync` 验证审查决策中的 `BoundEvidenceHash` 和 `BoundEnvelopeHash` 必须与激活请求快照中的 `Hashes.EvidenceHash` 和 `Hashes.EnvelopeHash` 匹配。这防止了在审查期间证据被篡改。
+
+**6. 审批/拒绝均验证 ActivationRequestId**
+
+两条路径均检查 `reviewDecision.ActivationRequestId == request.RequestId`，防止决策被错误路由到不相关的激活请求。
+
+**7. 自我审批使用快照策略**
+
+`request.Policy` 在激活请求创建时捕获自 `DescriptorActivationPolicy`，后续的自我审批检查使用此快照而非实时查询。回退使用 `snapshot.Owner.DescriptorKind`。
+
+**8. 审计动作语义区分**
+
+| 审计动作 | 含义 | 
+|----------|------|
+| `Submit` | 提交激活请求 |
+| `Approve` | 人工审批通过 |
+| `Reject` | 人工拒绝 |
+| `Cancel` | 请求者取消 |
+| `Block` | 被框架守卫阻止（非人工决策） |
+| `GateDenied` | 被 RuntimeActivationGate 拒绝 |
+| `Expire` | 激活请求过期 |
+
+**9. ToolService 委托给 RequestService**
+
+ToolService 不维护独立的激活逻辑。所有激活操作通过 `_requestService` 执行，避免双轨实现。
+
+**10. ContractVersion 升级**
+
+合约版本从 `"7d.v1"` 升级至 `"7e.v1"`：`AgentControlPlaneContractVersion.Current = "7e.v1"`。
+
+### 12.5 激活请求生命周期
+
+```
+Submitted ──→ UnderReview ──→ Approved ──→ [Runtime Activation via Gate]
+   │              │                │
+   │              ├──→ Rejected    │
+   │              │                │
+   ├──→ Cancelled ├──→ Expired    │
+   │                                │
+   └──→ Expired                     │
+```
+
+状态转换规则：
+- **Submitted** → UnderReview（HumanTask 创建后自动转换）
+- **UnderReview** → Approved（审查者批准）
+- **UnderReview** → Rejected（审查者拒绝）
+- **Submitted / UnderReview** → Cancelled（请求者取消）
+- **Submitted** → Expired（超时未进入审查）
+- **UnderReview** → Expired（HumanTask 超时）
+
+### 12.6 新增类型总览
+
+#### Abstractions/Activation/ — 15 个契约类型
+
+| 类型 | 说明 |
+|------|------|
+| `ActivationRequest` | 主激活请求记录：RequestId、DraftId、TenantId、Status、BindingSnapshot、Policy、CreatedAt、GovernanceDecision |
+| `ActivationBindingSnapshot` | 绑定引用与哈希快照，`required` 字段：ReviewResultId、DraftVersion、PackagePreviewId、EvidencePreviewId、Hashes |
+| `BindingHashes` | 6 个 CanonicalHash：SourceReviewHash、ManifestHash、EvidenceHash、EnvelopeHash、ContractHash、DefinitionHash |
+| `ActivationRequestStatus` | 6 值枚举：Submitted、UnderReview、Approved、Rejected、Cancelled、Expired |
+| `DescriptorActivationReviewDecision` | 审查决策：ActivationRequestId、ActorId、ActorKind、Decision、BoundEvidenceHash、BoundEnvelopeHash |
+| `DescriptorActivationReviewTaskInput` | HumanTask 负载：含完整审查上下文 |
+| `DescriptorActivationPolicy` | 策略快照：AllowSelfApproval、ForbidSelfApproval、[Obsolete]RequireEvidenceBinding、MaxConcurrentActivations、PolicySummary |
+| `DescriptorActivationEligibility` | 派生资格：AutoActivatable、RequiresHumanReview、Blocked |
+| `DescriptorActivationActorKind` | 请求者种类：Agent、Human、System |
+| `DescriptorActivationAuditRecord` | 激活事件审计跟踪 |
+| `DescriptorActivationAuditAction` | 7 值审计动作枚举 |
+| `DescriptorActivationReviewOutcome` | 审查结果：Approved、Rejected、Deferred |
+| `DescriptorActivationDecision` | 审批/拒绝决策：ActivationRequestId + ActorId + Decision + BoundEvidenceHash/EnvelopeHash |
+| `SubmitActivationRequestRequest` | 提交请求 DTO，新增 GovernanceDecision 字段 |
+| `DescriptorActivationReviewDecisionParser` | AoT 安全 TryParse，从 JSON 解析审查决策 |
+
+#### ControlPlane/Activation/ — 7 个接口 + 8 个实现
+
+| 接口 | 实现 | 说明 |
+|------|------|------|
+| `IDescriptorActivationRequestService` | `DefaultDescriptorActivationRequestService` | 激活请求生命周期管理 |
+| `IActivationEvidenceRechecker` | `DefaultActivationEvidenceRechecker` | 证据重校验（6 字段 CanonicalHash 比较） |
+| `IRuntimeActivationGate` | `DefaultRuntimeActivationGate` | 唯一运行时状态变异入口（架构不变量） |
+| `IActivationReviewOrchestrator` | `DefaultActivationReviewOrchestrator` | HumanTask 审查编排 |
+| `IActivationBindingArtifactResolver` | `DefaultActivationBindingArtifactResolver` | 绑定引用哈希解析 |
+| `IDescriptorActivationPolicyProvider` | `DefaultDescriptorActivationPolicyProvider` | 激活策略提供者 |
+| `IDescriptorActivationAuditor` | `DefaultDescriptorActivationAuditor` | 激活审计 |
+| — | `DescriptorActivationReviewHumanTaskEventHandler` | EventBus 事件处理程序 |
+
+### 12.7 测试覆盖
+
+- **ControlPlane 测试**：423 个（含 DraftContracts + Generator + Activation），覆盖完整的激活请求生命周期、证据重校验、HumanTask 回调、策略快照、审计追踪
+- **Boundary 测试**：8 个，验证激活组件依赖边界
+- **总测试数**：431 个
