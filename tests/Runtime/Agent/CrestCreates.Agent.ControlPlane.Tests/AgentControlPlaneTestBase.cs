@@ -1,11 +1,14 @@
+using System.Collections.Concurrent;
 using CrestCreates.Agent.ControlPlane;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
+using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using CrestCreates.Metadata.Abstractions.DescriptorRelationship;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
@@ -43,6 +46,11 @@ public abstract class AgentControlPlaneTestBase
     protected readonly Mock<IDescriptorReviewReportBuilder> ReportBuilderMock = new();
     protected readonly Mock<IDescriptorReviewReportRenderer> ReportRendererMock = new();
     protected readonly Mock<IDescriptorStableHashBuilder> HashBuilderMock = new();
+    protected readonly Mock<IDescriptorActivationRequestService> ActivationRequestServiceMock = new();
+    protected readonly Mock<IRuntimeActivationGate> RuntimeActivationGateMock = new();
+    protected readonly Mock<IActivationEvidenceRechecker> EvidenceRecheckerMock = new();
+    protected readonly Mock<IHumanTaskRuntime> HumanTaskRuntimeMock = new();
+    protected readonly Mock<IActivationReviewOrchestrator> ActivationReviewOrchestratorMock = new();
     protected readonly InMemoryAgentToolInvocationAuditor InMemoryAuditor = new();
 
     protected const string TestTenantId = "tenant-001";
@@ -58,6 +66,7 @@ public abstract class AgentControlPlaneTestBase
         InMemoryAgentToolInvocationAuditor? auditor = null)
     {
         EnsureHashBuilderSetup();
+        EnsureActivationRequestServiceSetup();
         var options = AgentToolAuthorizationOptions.DevelopmentDefaults;
         var authzService = new DefaultAgentToolAuthorizationService(options);
         var actualAuditor = auditor ?? InMemoryAuditor;
@@ -79,6 +88,8 @@ public abstract class AgentControlPlaneTestBase
             HashBuilderMock.Object,
             ReportBuilderMock.Object,
             ReportRendererMock.Object,
+            ActivationRequestServiceMock.Object,
+            ActivationReviewOrchestratorMock.Object,
             authorizationOptions: options);
     }
 
@@ -91,6 +102,7 @@ public abstract class AgentControlPlaneTestBase
         InMemoryAgentToolInvocationAuditor? auditor = null)
     {
         EnsureHashBuilderSetup();
+        EnsureActivationRequestServiceSetup();
         var authzService = new DefaultAgentToolAuthorizationService(options);
         var actualAuditor = auditor ?? InMemoryAuditor;
 
@@ -111,6 +123,8 @@ public abstract class AgentControlPlaneTestBase
             HashBuilderMock.Object,
             ReportBuilderMock.Object,
             ReportRendererMock.Object,
+            ActivationRequestServiceMock.Object,
+            ActivationReviewOrchestratorMock.Object,
             authorizationOptions: options);
     }
 
@@ -120,6 +134,7 @@ public abstract class AgentControlPlaneTestBase
     protected DefaultAgentControlPlaneToolService CreateServiceWithMocks()
     {
         EnsureHashBuilderSetup();
+        EnsureActivationRequestServiceSetup();
         return new DefaultAgentControlPlaneToolService(
             ManifestProviderMock.Object,
             AuthorizationServiceMock.Object,
@@ -137,6 +152,8 @@ public abstract class AgentControlPlaneTestBase
             HashBuilderMock.Object,
             ReportBuilderMock.Object,
             ReportRendererMock.Object,
+            ActivationRequestServiceMock.Object,
+            ActivationReviewOrchestratorMock.Object,
             authorizationOptions: AgentToolAuthorizationOptions.DevelopmentDefaults);
     }
 
@@ -282,6 +299,76 @@ public abstract class AgentControlPlaneTestBase
     }
 
     /// <summary>
+    /// Creates a service with all binding artifacts (review result, package preview,
+    /// evidence preview) pre-populated in the ToolService's internal stores.
+    /// Use this when submitting activation requests that require complete evidence binding.
+    /// </summary>
+    protected async Task<(DefaultAgentControlPlaneToolService Service, string ReviewResultId, string PackagePreviewId, string EvidencePreviewId)> CreateServiceWithFullBindingArtifacts(
+        string draftId = "draft-001")
+    {
+        var draft = CreateTestDraft(draftId: draftId);
+
+        DraftStoreMock
+            .Setup(s => s.GetAsync(TestTenantId, draftId, It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(draft));
+
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns([]);
+
+        // Review setup
+        var reviewResult = new DraftAbstractions.DescriptorDraftReviewResult
+        {
+            DraftId = draftId,
+            TenantId = TestTenantId,
+            ValidationResult = DraftAbstractions.DescriptorDraftValidationResult.Success(),
+            Diagnostics = Array.Empty<DraftAbstractions.DescriptorDraftDiagnostic>(),
+            IsActivationEligible = true,
+            ProposedInventory = new List<IDescriptor>().AsReadOnly(),
+            GovernanceDecision = new DescriptorLifecycleGovernanceReport
+            {
+                Decisions = [],
+                MaxDecision = DescriptorLifecycleDecisionKind.Allowed,
+                PackageFindings = []
+            }
+        };
+        DraftReviewServiceMock
+            .Setup(r => r.ReviewAsync(draft, It.IsAny<IReadOnlyList<IDescriptor>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult(reviewResult));
+
+        // Materializer + package builder for package/evidence tool calls
+        DraftMaterializerMock
+            .Setup(m => m.Materialize(draft, It.IsAny<IReadOnlyList<IDescriptor>>()))
+            .Returns(DraftAbstractions.DescriptorDraftMaterializationResult.Success(new List<IDescriptor>().AsReadOnly()));
+
+        SetupPackageBuilder();
+
+        // Create service AFTER mock setups (EnsureActivationRequestServiceSetup runs inside)
+        var service = CreateService();
+
+        // Execute review tool
+        var reviewContext = CreateContext("ReviewDescriptorDraft");
+        await service.ReviewDescriptorDraftAsync(reviewContext, draftId);
+        var reviewResultId = InMemoryAuditor.GetAllRecords().First(r =>
+            r.Context.ToolName == "ReviewDescriptorDraft" &&
+            r.TouchedReviewResultIds != null).TouchedReviewResultIds!.First();
+
+        // Execute package preview tool
+        var previewContext = CreateContext("PreviewDescriptorPackage");
+        await service.PreviewDescriptorPackageAsync(previewContext, draftId);
+        var packagePreviewId = InMemoryAuditor.GetAllRecords().First(r =>
+            r.Context.ToolName == "PreviewDescriptorPackage" &&
+            r.TouchedPackagePreviewIds != null).TouchedPackagePreviewIds!.First();
+
+        // Execute evidence preview tool
+        var evidenceContext = CreateContext("BuildPackageEvidencePreview");
+        await service.BuildPackageEvidencePreviewAsync(evidenceContext, draftId);
+        var evidencePreviewId = InMemoryAuditor.GetAllRecords().First(r =>
+            r.Context.ToolName == "BuildPackageEvidencePreview" &&
+            r.TouchedPackagePreviewIds != null).TouchedPackagePreviewIds!.First();
+
+        return (service, reviewResultId, packagePreviewId, evidencePreviewId);
+    }
+
+    /// <summary>
     /// Ensures HashBuilderMock returns valid <see cref="DescriptorStableHashes"/> for any descriptor.
     /// Prevents <see cref="NullReferenceException"/> when the service accesses
     /// <c>hashes.ContractHash.Value</c> or <c>hashes.DefinitionHash.Value</c>.
@@ -313,6 +400,94 @@ public abstract class AgentControlPlaneTestBase
                     CanonicalShapeVersion = "test-definition-hash-v1",
                     Value = "test-definition-hash"
                 }
+            });
+    }
+
+    /// <summary>
+    /// In-memory store shared across ActivationRequestServiceMock callbacks to
+    /// maintain state between Create, Get, and Cancel calls within a test.
+    /// Cleared before each test setup via <see cref="EnsureActivationRequestServiceSetup"/>.
+    /// </summary>
+    private readonly ConcurrentDictionary<(string TenantId, string RequestId), ActivationRequest> _mockActivationRequests = new();
+
+    /// <summary>
+    /// Sets up ActivationRequestServiceMock to return a default Submitted ActivationRequest
+    /// when CreateActivationRequestAsync is called, and to route Get/Cancel through an
+    /// in-memory store. Tests that need specific behavior (e.g., Blocked, RequiresHumanReview)
+    /// should override this setup before calling <c>CreateService()</c>.
+    /// </summary>
+    private void EnsureActivationRequestServiceSetup()
+    {
+        _mockActivationRequests.Clear();
+
+        ActivationRequestServiceMock
+            .Setup(x => x.CreateActivationRequestAsync(
+                It.IsAny<AgentToolInvocationContext>(),
+                It.IsAny<SubmitActivationRequestRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentToolInvocationContext ctx, SubmitActivationRequestRequest req, CancellationToken _) =>
+            {
+                var activationRequest = new ActivationRequest
+                {
+                    RequestId = Guid.NewGuid().ToString("N"),
+                    TenantId = ctx.TenantId,
+                    DraftId = req.DraftId,
+                    Status = ActivationRequestStatus.Submitted,
+                    SubmittedAt = DateTimeOffset.UtcNow,
+                    SubmittedBy = ctx.ActorId,
+                    CreatedByActorId = ctx.ActorId,
+                    CreatedByActorKind = DescriptorActivationActorKindExtensions.FromAgentToolActorKind(ctx.ActorKind)
+                        ?? DescriptorActivationActorKind.System,
+                    GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
+                    Eligibility = DescriptorActivationEligibility.AutoActivatable,
+                    Policy = new DescriptorActivationPolicy
+                    {
+                        RequireHumanReviewForAll = false,
+                        ForbidSelfApproval = true,
+                        AutoActivateAllowedWhenPolicyPermits = true
+                    },
+                    BindingSnapshot = req.BindingSnapshot,
+                    Diagnostics = []
+                };
+                _mockActivationRequests[(ctx.TenantId, activationRequest.RequestId)] = activationRequest;
+                return AgentToolResult<ActivationRequest>.Success(activationRequest);
+            });
+
+        ActivationRequestServiceMock
+            .Setup(x => x.GetActivationRequestStatusAsync(
+                It.IsAny<AgentToolInvocationContext>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentToolInvocationContext ctx, string requestId, CancellationToken _) =>
+            {
+                if (_mockActivationRequests.TryGetValue((ctx.TenantId, requestId), out var request))
+                    return AgentToolResult<ActivationRequest>.Success(request);
+                return AgentToolResult<ActivationRequest>.NotFound($"Activation request '{requestId}' not found.");
+            });
+
+        ActivationRequestServiceMock
+            .Setup(x => x.CancelActivationRequestAsync(
+                It.IsAny<AgentToolInvocationContext>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentToolInvocationContext ctx, string requestId, string reason, CancellationToken _) =>
+            {
+                if (!_mockActivationRequests.TryGetValue((ctx.TenantId, requestId), out var request))
+                    return AgentToolResult<ActivationRequest>.NotFound($"Activation request '{requestId}' not found.");
+                if (request.Status is ActivationRequestStatus.Approved or ActivationRequestStatus.Rejected)
+                {
+                    return AgentToolResult<ActivationRequest>.InvalidRequest(
+                        [new AgentToolDiagnostic
+                        {
+                            Code = "ACTIVATION_REQUEST_TERMINAL",
+                            Severity = AgentToolDiagnosticSeverity.Error,
+                            Message = $"Activation request '{requestId}' is in terminal state '{request.Status}' and cannot be cancelled."
+                        }]);
+                }
+                var cancelled = request with { Status = ActivationRequestStatus.Cancelled };
+                _mockActivationRequests[(ctx.TenantId, requestId)] = cancelled;
+                return AgentToolResult<ActivationRequest>.Success(cancelled);
             });
     }
 }

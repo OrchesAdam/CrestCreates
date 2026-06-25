@@ -6,5 +6,6 @@ public enum AgentToolInvocationSource
     McpAdapter,
     HttpAdapter,
     CliAdapter,
-    Internal
+    Internal,
+    HumanTaskCallback
 }

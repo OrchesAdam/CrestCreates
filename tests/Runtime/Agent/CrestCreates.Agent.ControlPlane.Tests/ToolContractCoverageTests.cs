@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using FluentAssertions;
 using Xunit;
@@ -500,6 +501,18 @@ public class ToolContractCoverageTests
             typeof(AgentToolAuthorizationMode),
             typeof(DescriptorReviewReportBuildRequest), // internal builder input, not adapter request
             typeof(DescriptorReviewReportFormat),        // enum parameter for render tool
+
+            // Phase 7e — Activation supporting types (used internally by activation infrastructure)
+            typeof(DescriptorActivationAuditRecord),
+            typeof(DescriptorActivationDecision),
+            typeof(DescriptorActivationPolicy),
+            typeof(DescriptorActivationReviewDecision),
+            typeof(DescriptorActivationReviewOutcome),
+            typeof(DescriptorActivationReviewTaskInput),
+            typeof(ActivationEvidenceRecheckResult),
+            typeof(ActivationEvidenceDrift),
+            typeof(RuntimeActivationGateResult),
+            typeof(ResolvedBindingArtifacts),
         };
 
         var orphanTypes = serializableTypes

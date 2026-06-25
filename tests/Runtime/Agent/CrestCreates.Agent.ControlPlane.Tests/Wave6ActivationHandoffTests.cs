@@ -1,7 +1,10 @@
 using Xunit;
 using Moq;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using FluentAssertions;
 
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
@@ -15,11 +18,49 @@ namespace CrestCreates.Agent.ControlPlane.Tests;
 /// Key invariants:
 /// - Agent CANNOT approve or execute activation
 /// - Submit creates a record, does not execute activation
-/// - Terminal states (Approved/Rejected) cannot be cancelled
+/// - Terminal states (Approved/Rejected/Cancelled) cannot be cancelled
 /// - Referenced evidence artifacts must exist, belong to tenant, and match the draft
 /// </summary>
 public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
 {
+    private static CanonicalHash CreateCanonicalHash(string value)
+        => new()
+        {
+            Algorithm = "SHA-256",
+            AlgorithmVersion = "sha256-canonical-json-v1",
+            ArtifactKind = CanonicalHashArtifactNames.Descriptor,
+            Scope = CanonicalHashScopeNames.InternalFull,
+            Purpose = CanonicalHashPurposeNames.Contract,
+            ContractVersion = "canonical-hash-v1",
+            CanonicalShapeVersion = "v1",
+            Value = value
+        };
+
+    private static ActivationBindingSnapshot CreateBindingSnapshot(
+        string draftId = "draft-001",
+        string? reviewResultId = null,
+        string packagePreviewId = "pkg-001",
+        string evidencePreviewId = "ev-001")
+        => new()
+        {
+            TenantId = TestTenantId,
+            DraftId = draftId,
+            DraftVersion = 1,
+            ReviewResultId = reviewResultId ?? "review-001",
+            PackagePreviewId = packagePreviewId,
+            EvidencePreviewId = evidencePreviewId,
+            Hashes = new BindingHashes
+            {
+                SourceReviewHash = CreateCanonicalHash("src-review-hash"),
+                ManifestHash = CreateCanonicalHash("manifest-hash"),
+                EvidenceHash = CreateCanonicalHash("evidence-hash"),
+                EnvelopeHash = CreateCanonicalHash("envelope-hash"),
+                ContractHash = CreateCanonicalHash("contract-hash"),
+                DefinitionHash = CreateCanonicalHash("definition-hash")
+            },
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
     /// <summary>
     /// Creates a service and populates the internal review result store by running
     /// ReviewDescriptorDraftAsync. Returns the review result ID.
@@ -90,16 +131,66 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
         return (service, previewId);
     }
 
+    /// <summary>
+    /// Creates a service and populates both the review result and package preview stores
+    /// for the same draft. Returns the service and both artifact IDs.
+    /// </summary>
+    private async Task<(DefaultAgentControlPlaneToolService Service, string ReviewResultId, string PackagePreviewId)> CreateServiceWithReviewAndPackagePreview(
+        string draftId = "draft-001")
+    {
+        var service = CreateService();
+        var draft = CreateTestDraft(draftId: draftId);
+
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, draftId, It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(draft));
+
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns([]);
+
+        var reviewResult = new DraftAbstractions.DescriptorDraftReviewResult
+        {
+            DraftId = draftId,
+            TenantId = TestTenantId,
+            ValidationResult = DraftAbstractions.DescriptorDraftValidationResult.Success(),
+            Diagnostics = Array.Empty<DraftAbstractions.DescriptorDraftDiagnostic>(),
+            IsActivationEligible = true,
+            ProposedInventory = new List<IDescriptor>().AsReadOnly()
+        };
+        DraftReviewServiceMock.Setup(r => r.ReviewAsync(draft, It.IsAny<IReadOnlyList<IDescriptor>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult(reviewResult));
+
+        var reviewContext = CreateContext("ReviewDescriptorDraft");
+        await service.ReviewDescriptorDraftAsync(reviewContext, draftId);
+
+        var reviewResultId = InMemoryAuditor.GetAllRecords().First(r =>
+            r.Context.ToolName == "ReviewDescriptorDraft" &&
+            r.TouchedReviewResultIds != null).TouchedReviewResultIds!.First();
+
+        DraftMaterializerMock.Setup(m => m.Materialize(draft, It.IsAny<IReadOnlyList<IDescriptor>>()))
+            .Returns(DraftAbstractions.DescriptorDraftMaterializationResult.Success(new List<IDescriptor>().AsReadOnly()));
+
+        SetupPackageBuilder();
+
+        var previewContext = CreateContext("PreviewDescriptorPackage");
+        await service.PreviewDescriptorPackageAsync(previewContext, draftId);
+
+        var packagePreviewId = InMemoryAuditor.GetAllRecords().First(r =>
+            r.Context.ToolName == "PreviewDescriptorPackage" &&
+            r.TouchedPackagePreviewIds != null).TouchedPackagePreviewIds!.First();
+
+        return (service, reviewResultId, packagePreviewId);
+    }
+
     [Fact]
     public async Task SubmitActivationRequest_Creates_Request_Record()
     {
-        var (service, reviewResultId) = await CreateServiceWithReviewResult();
+        var (service, reviewResultId, packagePreviewId, evidencePreviewId) = await CreateServiceWithFullBindingArtifacts();
         var context = CreateContext("SubmitActivationRequest");
 
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
-            ReviewResultId = reviewResultId
+            BindingSnapshot = CreateBindingSnapshot(reviewResultId: reviewResultId,
+                packagePreviewId: packagePreviewId, evidencePreviewId: evidencePreviewId)
         };
 
         var result = await service.SubmitActivationRequestAsync(context, request);
@@ -116,41 +207,20 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
     [Fact]
     public async Task SubmitActivationRequest_Does_Not_Approve_Or_Execute_Activation()
     {
-        var (service, reviewResultId) = await CreateServiceWithReviewResult();
+        var (service, reviewResultId, packagePreviewId, evidencePreviewId) = await CreateServiceWithFullBindingArtifacts();
         var context = CreateContext("SubmitActivationRequest");
 
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
-            ReviewResultId = reviewResultId
+            BindingSnapshot = CreateBindingSnapshot(reviewResultId: reviewResultId,
+                packagePreviewId: packagePreviewId, evidencePreviewId: evidencePreviewId)
         };
 
         var result = await service.SubmitActivationRequestAsync(context, request);
 
         result.Value!.Status.Should().Be(ActivationRequestStatus.Submitted);
         result.Value.Status.Should().NotBe(ActivationRequestStatus.Approved);
-    }
-
-    [Fact]
-    public async Task SubmitActivationRequest_Requires_At_Least_One_Reference()
-    {
-        var service = CreateService();
-        var context = CreateContext("SubmitActivationRequest");
-        var draft = CreateTestDraft();
-
-        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
-            .Returns(Task.FromResult<Draft?>(draft));
-
-        var request = new SubmitActivationRequestRequest
-        {
-            DraftId = "draft-001"
-            // No ReviewResultId, PackagePreviewId, or EvidencePreviewId
-        };
-
-        var result = await service.SubmitActivationRequestAsync(context, request);
-
-        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
-        result.Diagnostics.Should().Contain(d => d.Code == "ACTIVATION_MISSING_REFERENCES");
     }
 
     [Fact]
@@ -165,7 +235,7 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "nonexistent",
-            ReviewResultId = "review-001"
+            BindingSnapshot = CreateBindingSnapshot("nonexistent")
         };
 
         var result = await service.SubmitActivationRequestAsync(context, request);
@@ -186,7 +256,7 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
-            ReviewResultId = "nonexistent-review"
+            BindingSnapshot = CreateBindingSnapshot()
         };
 
         var result = await service.SubmitActivationRequestAsync(context, request);
@@ -211,7 +281,7 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-002",
-            ReviewResultId = reviewResultId
+            BindingSnapshot = CreateBindingSnapshot("draft-002") with { ReviewResultId = reviewResultId }
         };
 
         var result = await service.SubmitActivationRequestAsync(context, request);
@@ -223,7 +293,7 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
     [Fact]
     public async Task SubmitActivationRequest_Rejects_NonExistent_PackagePreview()
     {
-        var service = CreateService();
+        var (service, reviewResultId) = await CreateServiceWithReviewResult();
         var context = CreateContext("SubmitActivationRequest");
         var draft = CreateTestDraft();
 
@@ -233,7 +303,7 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
-            PackagePreviewId = "nonexistent-preview"
+            BindingSnapshot = CreateBindingSnapshot(reviewResultId: reviewResultId) with { PackagePreviewId = "nonexistent-preview" }
         };
 
         var result = await service.SubmitActivationRequestAsync(context, request);
@@ -245,8 +315,8 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
     [Fact]
     public async Task SubmitActivationRequest_Rejects_PackagePreview_Draft_Mismatch()
     {
-        // Create package preview for draft-001
-        var (service, packagePreviewId) = await CreateServiceWithPackagePreview();
+        // Create review result + package preview both for draft-001
+        var (service, reviewResultId, packagePreviewId) = await CreateServiceWithReviewAndPackagePreview();
         var context = CreateContext("SubmitActivationRequest");
 
         // Set up draft-002 (a different draft)
@@ -258,7 +328,7 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-002",
-            PackagePreviewId = packagePreviewId
+            BindingSnapshot = CreateBindingSnapshot("draft-002", reviewResultId: reviewResultId) with { PackagePreviewId = packagePreviewId }
         };
 
         var result = await service.SubmitActivationRequestAsync(context, request);
@@ -270,7 +340,7 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
     [Fact]
     public async Task SubmitActivationRequest_Rejects_NonExistent_EvidencePreview()
     {
-        var service = CreateService();
+        var (service, reviewResultId) = await CreateServiceWithReviewResult();
         var context = CreateContext("SubmitActivationRequest");
         var draft = CreateTestDraft();
 
@@ -280,7 +350,7 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
-            EvidencePreviewId = "nonexistent-evidence"
+            BindingSnapshot = CreateBindingSnapshot(reviewResultId: reviewResultId) with { EvidencePreviewId = "nonexistent-evidence" }
         };
 
         var result = await service.SubmitActivationRequestAsync(context, request);
@@ -292,13 +362,14 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
     [Fact]
     public async Task SubmitActivationRequest_Audit_Records_TouchedIds()
     {
-        var (service, packagePreviewId) = await CreateServiceWithPackagePreview();
+        var (service, reviewResultId, packagePreviewId, evidencePreviewId) = await CreateServiceWithFullBindingArtifacts();
         var context = CreateContext("SubmitActivationRequest");
 
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
-            PackagePreviewId = packagePreviewId
+            BindingSnapshot = CreateBindingSnapshot(reviewResultId: reviewResultId,
+                packagePreviewId: packagePreviewId, evidencePreviewId: evidencePreviewId)
         };
 
         await service.SubmitActivationRequestAsync(context, request);
@@ -312,13 +383,14 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
     [Fact]
     public async Task GetActivationRequestStatus_Returns_Request()
     {
-        var (service, reviewResultId) = await CreateServiceWithReviewResult();
+        var (service, reviewResultId, packagePreviewId, evidencePreviewId) = await CreateServiceWithFullBindingArtifacts();
         var submitContext = CreateContext("SubmitActivationRequest");
 
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
-            ReviewResultId = reviewResultId
+            BindingSnapshot = CreateBindingSnapshot(reviewResultId: reviewResultId,
+                packagePreviewId: packagePreviewId, evidencePreviewId: evidencePreviewId)
         };
 
         var submitResult = await service.SubmitActivationRequestAsync(submitContext, request);
@@ -347,13 +419,14 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
     [Fact]
     public async Task CancelActivationRequest_Cancels_Submitted_Request()
     {
-        var (service, reviewResultId) = await CreateServiceWithReviewResult();
+        var (service, reviewResultId, packagePreviewId, evidencePreviewId) = await CreateServiceWithFullBindingArtifacts();
         var submitContext = CreateContext("SubmitActivationRequest");
 
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
-            ReviewResultId = reviewResultId
+            BindingSnapshot = CreateBindingSnapshot(reviewResultId: reviewResultId,
+                packagePreviewId: packagePreviewId, evidencePreviewId: evidencePreviewId)
         };
 
         var submitResult = await service.SubmitActivationRequestAsync(submitContext, request);
@@ -386,13 +459,14 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
         // (that's the governance boundary). Instead, we verify that cancelling
         // a Submitted request works, and document that Approved/Rejected are
         // the terminal states that would block cancellation.
-        var (service, reviewResultId) = await CreateServiceWithReviewResult();
+        var (service, reviewResultId, packagePreviewId, evidencePreviewId) = await CreateServiceWithFullBindingArtifacts();
         var submitContext = CreateContext("SubmitActivationRequest");
 
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
-            ReviewResultId = reviewResultId
+            BindingSnapshot = CreateBindingSnapshot(reviewResultId: reviewResultId,
+                packagePreviewId: packagePreviewId, evidencePreviewId: evidencePreviewId)
         };
 
         var submitResult = await service.SubmitActivationRequestAsync(submitContext, request);
@@ -407,15 +481,12 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
         // Note: Approved and Rejected are terminal states that would return InvalidRequest
         // with ACTIVATION_REQUEST_TERMINAL. These states can only be set by human governance
         // (outside the tool surface), so we cannot test them through the API directly.
-        // The implementation code at CancelActivationRequestAsync checks:
-        //   if (request.Status is ActivationRequestStatus.Approved or ActivationRequestStatus.Rejected)
-        //       → return InvalidRequest with ACTIVATION_REQUEST_TERMINAL
     }
 
     [Fact]
     public async Task Activation_Requests_Are_Tenant_Isolated()
     {
-        var (serviceA, reviewResultIdA) = await CreateServiceWithReviewResult();
+        var (serviceA, _) = await CreateServiceWithReviewResult();
 
         var contextA = CreateContext("SubmitActivationRequest", tenantId: "tenant-A");
         var contextB = CreateContext("GetActivationRequestStatus", tenantId: "tenant-B");
@@ -425,10 +496,6 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
         DraftStoreMock.Setup(s => s.GetAsync("tenant-A", "draft-001", It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult<Draft?>(draftA));
 
-        // Note: reviewResultIdA was stored under tenant-001, not tenant-A.
-        // For tenant isolation test, we just need to verify that tenant-B can't see tenant-A's request.
-        // Since we can't easily populate review results for tenant-A, let's just verify
-        // that a nonexistent request returns NotFound for tenant-B.
         var statusResult = await serviceA.GetActivationRequestStatusAsync(contextB, "any-request-id");
 
         statusResult.Status.Should().Be(AgentToolResultStatus.NotFound);
@@ -437,25 +504,47 @@ public class Wave6ActivationHandoffTests : AgentControlPlaneTestBase
     [Fact]
     public async Task Agent_Cannot_Become_Governance_Authority()
     {
-        // This test documents the invariant: there is no tool that allows
-        // an agent to approve an activation request. SubmitActivationRequest
-        // only creates a Submitted record. The approval path requires
-        // human governance (outside the Control Plane tool surface).
-        var (service, reviewResultId) = await CreateServiceWithReviewResult();
+        var (service, reviewResultId, packagePreviewId, evidencePreviewId) = await CreateServiceWithFullBindingArtifacts();
         var context = CreateContext("SubmitActivationRequest", actorKind: AgentToolActorKind.Agent);
 
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
-            ReviewResultId = reviewResultId
+            BindingSnapshot = CreateBindingSnapshot(reviewResultId: reviewResultId,
+                packagePreviewId: packagePreviewId, evidencePreviewId: evidencePreviewId)
         };
 
         var result = await service.SubmitActivationRequestAsync(context, request);
 
         // Status is Submitted, never Approved
         result.Value!.Status.Should().Be(ActivationRequestStatus.Submitted);
+    }
 
-        // The IAgentControlPlaneToolService interface has no ApproveActivationRequest method
-        // This is by design — agents cannot approve
+    [Fact]
+    public async Task SubmitActivationRequest_Wires_GovernanceDecision_From_ReviewResult()
+    {
+        // The ToolService should extract GovernanceDecision from the review result's
+        // GovernanceDecision.MaxDecision and pass it through to the RequestService.
+        var (service, reviewResultId, packagePreviewId, evidencePreviewId) = await CreateServiceWithFullBindingArtifacts();
+        var context = CreateContext("SubmitActivationRequest");
+
+        var request = new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001",
+            BindingSnapshot = CreateBindingSnapshot(reviewResultId: reviewResultId,
+                packagePreviewId: packagePreviewId, evidencePreviewId: evidencePreviewId)
+        };
+
+        await service.SubmitActivationRequestAsync(context, request);
+
+        // Verify the mock received a request with GovernanceDecision = Allowed
+        // (the test base sets up the review result with GovernanceDecision.MaxDecision = Allowed)
+        ActivationRequestServiceMock.Verify(
+            x => x.CreateActivationRequestAsync(
+                It.IsAny<AgentToolInvocationContext>(),
+                It.Is<SubmitActivationRequestRequest>(r =>
+                    r.GovernanceDecision == DescriptorLifecycleDecisionKind.Allowed),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 }

@@ -94,6 +94,23 @@ public class DependencyBoundaryTests
         Assert.True(platformRoot.Exists, "Platform root should exist when Platform projects are part of the layout.");
     }
 
+    [Fact]
+    public void ControlPlaneAbstractions_MayReferenceHumanTaskAbstractions_ButNotFrameworkOrWeb()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+            "ControlPlane.Abstractions may reference HumanTask.Abstractions (Runtime→Runtime) but must not reference Framework or Web layer types.",
+            new[]
+            {
+                "src/Framework",
+                "src/Platform",
+                "src/Runtime/Workflow/CrestCreates.Workflow/",
+                "src/Runtime/HumanTask/CrestCreates.HumanTask/",
+                "src/Runtime/Agent/CrestCreates.Agent.Runtime/",
+                "src/Runtime/Capability/CrestCreates.Capability/",
+            });
+    }
+
     private static void AssertNoDirectProjectReferences(
         string projectRootRelativePath,
         string reason,

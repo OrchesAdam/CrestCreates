@@ -622,6 +622,23 @@ This thread achieved the following:
       - **Design spec**: `docs/superpowers/specs/2026-06-22-phase-7d-review-report-fix-proposal-design.md`
       - **Implementation plan**: `docs/superpowers/plans/2026-06-22-phase-7d-review-report-fix-proposal.md`
 
+    - **Safe Activation Workflow — Phase 7e** (2026-06-24):
+      - **Core activation models** (11 new types in `Activation/` sub-namespace): `DescriptorActivationActorKind`, `BindingHashes`, `ActivationBindingSnapshot`, `DescriptorActivationPolicy`, `DescriptorActivationEligibility`, `DescriptorActivationDecision`, `DescriptorActivationReviewDecision`, `DescriptorActivationReviewOutcome`, `DescriptorActivationAuditRecord`, `DescriptorActivationReviewTaskInput`
+      - **Service interfaces** (5): `IDescriptorActivationRequestService`, `IDescriptorActivationPolicyProvider`, `IDescriptorActivationAuditor`, `IActivationEvidenceRechecker`, `IRuntimeActivationGate`
+      - **Orchestrator**: `IActivationReviewOrchestrator` + `DefaultActivationReviewOrchestrator` — creates HumanTask for review-required requests, processes review decisions
+      - **Event handler**: `DescriptorActivationReviewHumanTaskEventHandler` — subscribes to HumanTaskCompletedEvent, routes to RequestService
+      - **Single-track principle**: ToolService delegates ALL activation logic to IDescriptorActivationRequestService
+      - **Policy-driven eligibility**: AutoActivatable / RequiresHumanReview / NotActivatable
+      - **Evidence binding**: ActivationBindingSnapshot captures review+package+evidence hashes at request time; IActivationEvidenceRechecker verifies no drift before gate execution
+      - **Runtime gate**: IRuntimeActivationGate is the ONLY component that mutates runtime state
+      - **Safety-first default**: EvaluateGovernance defaults to ReviewRequired (not Allowed)
+      - **Audit trail**: IDescriptorActivationAuditor records all decisions with ordering
+      - **AoT safety**: TryParseReviewDecision moved to DescriptorActivationReviewDecisionParser with JsonSerializerContext
+      - **Tenant isolation**: DescriptorActivationReviewDecision carries TenantId/CorrelationId; HumanTask callback resolves from instance
+      - **Contract version**: bumped to "7e.v1"
+      - **424 ControlPlane tests + 1 Boundary test pass**
+      - **Design spec**: Phase 7e issue #17
+
   - **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface.
 
 ---

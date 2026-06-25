@@ -1,12 +1,15 @@
 using System.Reflection;
 using System.Text.Json;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
+using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using CrestCreates.Metadata.ContextPack.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
@@ -681,12 +684,12 @@ public class ToolDtoSemanticPreservationTests
         roundTripped.Schema.Should().BeNull();
     }
 
-    // ── Test 10: ContractVersion_Is_7c_v1 ──
+    // ── Test 10: ContractVersion_Is_7e_v1 ──
 
     [Fact]
-    public void ContractVersion_Is_7d_v1()
+    public void ContractVersion_Is_7e_v1()
     {
-        AgentControlPlaneContractVersion.Current.Should().Be("7d.v1");
+        AgentControlPlaneContractVersion.Current.Should().Be("7e.v1");
     }
 
     // ── Helper: DescriptorRef round-trip (value type) ──
@@ -846,15 +849,54 @@ public class ToolDtoSemanticPreservationTests
         Status = ActivationRequestStatus.Submitted,
         SubmittedAt = new DateTimeOffset(2026, 6, 21, 15, 0, 0, TimeSpan.Zero),
         SubmittedBy = "agent-001",
-        CorrelationId = "corr-ar-001"
+        CreatedByActorId = "agent-001",
+        CreatedByActorKind = DescriptorActivationActorKind.Agent,
+        GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
+        Eligibility = DescriptorActivationEligibility.AutoActivatable,
+        BindingSnapshot = new ActivationBindingSnapshot
+        {
+            TenantId = "tenant-001",
+            DraftId = "draft-001",
+            DraftVersion = 1,
+            ReviewResultId = "rr-001",
+            PackagePreviewId = "pp-001",
+            EvidencePreviewId = "ep-001",
+            Hashes = new BindingHashes
+            {
+                SourceReviewHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = "Descriptor", Scope = "InternalFull", Purpose = "Contract", ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                ManifestHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = "Descriptor", Scope = "InternalFull", Purpose = "Contract", ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                EvidenceHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = "Descriptor", Scope = "InternalFull", Purpose = "Contract", ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                EnvelopeHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = "Descriptor", Scope = "InternalFull", Purpose = "Contract", ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                ContractHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = "Descriptor", Scope = "InternalFull", Purpose = "Contract", ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                DefinitionHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = "Descriptor", Scope = "InternalFull", Purpose = "Contract", ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" }
+            },
+            CorrelationId = "corr-ar-001",
+            CreatedAt = new DateTimeOffset(2026, 6, 21, 15, 0, 0, TimeSpan.Zero)
+        }
     };
 
     private static SubmitActivationRequestRequest BuildSampleSubmitActivationRequest() => new()
     {
         DraftId = "draft-001",
-        ReviewResultId = "rr-001",
-        PackagePreviewId = "pp-001",
-        EvidencePreviewId = "ep-001",
+        BindingSnapshot = new ActivationBindingSnapshot
+        {
+            TenantId = "tenant-001",
+            DraftId = "draft-001",
+            DraftVersion = 1,
+            ReviewResultId = "rr-001",
+            PackagePreviewId = "pp-001",
+            EvidencePreviewId = "ep-001",
+            Hashes = new BindingHashes
+            {
+                SourceReviewHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = "Descriptor", Scope = "InternalFull", Purpose = "Contract", ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                ManifestHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = "Descriptor", Scope = "InternalFull", Purpose = "Contract", ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                EvidenceHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = "Descriptor", Scope = "InternalFull", Purpose = "Contract", ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                EnvelopeHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = "Descriptor", Scope = "InternalFull", Purpose = "Contract", ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                ContractHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = "Descriptor", Scope = "InternalFull", Purpose = "Contract", ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
+                DefinitionHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = "Descriptor", Scope = "InternalFull", Purpose = "Contract", ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" }
+            },
+            CreatedAt = new DateTimeOffset(2026, 6, 21, 15, 0, 0, TimeSpan.Zero)
+        },
         Rationale = "Ready for activation"
     };
 

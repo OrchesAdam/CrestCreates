@@ -1,13 +1,18 @@
 ﻿using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
+using CrestCreates.Agent.ControlPlane.Activation;
 using CrestCreates.Agent.ControlPlane.Projections;
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Agent.DraftContracts.Dto;
 using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using CrestCreates.Metadata.Abstractions.DescriptorRelationship;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
@@ -54,6 +59,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly Func<AgentToolAuthorizationOptions> _optionsFactory;
     private readonly IDescriptorReviewReportBuilder _reportBuilder;
     private readonly IDescriptorReviewReportRenderer _reportRenderer;
+    private readonly IDescriptorActivationRequestService _activationRequestService;
+    private readonly IActivationReviewOrchestrator _activationReviewOrchestrator;
+    private readonly InMemoryActivationBindingArtifactResolver _artifactResolver = new();
 
     // Local stores for review results, fix proposals, package previews, activation requests
     // Keyed by (TenantId, ArtifactId) for tenant isolation.
@@ -62,7 +70,6 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly ConcurrentDictionary<(string TenantId, string Id), FixProposalResourceSnapshot> _fixProposals = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), PackagePreviewResourceSnapshot> _packagePreviews = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), EvidencePreviewResourceSnapshot> _evidencePreviews = new();
-    private readonly ConcurrentDictionary<(string TenantId, string Id), ActivationResourceSnapshot> _activationRequests = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), ReportResourceSnapshot> _reports = new();
 
     public DefaultAgentControlPlaneToolService(
@@ -82,6 +89,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         IDescriptorStableHashBuilder hashBuilder,
         IDescriptorReviewReportBuilder reportBuilder,
         IDescriptorReviewReportRenderer reportRenderer,
+        IDescriptorActivationRequestService activationRequestService,
+        IActivationReviewOrchestrator activationReviewOrchestrator,
         AgentToolAuthorizationOptions? authorizationOptions = null)
     {
         _manifestProvider = manifestProvider;
@@ -100,6 +109,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         _logger = logger;
         _reportBuilder = reportBuilder;
         _reportRenderer = reportRenderer;
+        _activationRequestService = activationRequestService;
+        _activationReviewOrchestrator = activationReviewOrchestrator;
         _resourceResolver = new AgentControlPlaneResourceResolver(draftStore, descriptorCatalog);
         _topologyProjector = new AgentTopologyVisibilityProjector();
         _artifactProjector = new AgentDraftArtifactVisibilityProjector(_topologyProjector, topologyBuilder);
@@ -1190,6 +1201,11 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var reviewId = Guid.NewGuid().ToString("N");
             _reviewResults[(context.TenantId, reviewId)] = new ReviewResourceSnapshot(projectedReview, snapshot.Draft, DateTimeOffset.UtcNow);
 
+            // Store review hashes for evidence recheck
+            var sourceReviewHash = ComputeSourceReviewHash(reviewResult);
+            var manifestHash = ComputeReviewManifestHash(reviewResult);
+            _artifactResolver.StoreReviewHashes(context.TenantId, reviewId, sourceReviewHash, manifestHash);
+
             var reviewed = snapshot.Draft with { Status = DraftAbstractions.DescriptorDraftStatus.Reviewed };
             await _draftStore.SaveAsync(reviewed, ct);
 
@@ -1871,6 +1887,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             _packagePreviews[(context.TenantId, previewId)] = new PackagePreviewResourceSnapshot(
                 new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft);
 
+            // Store package hash for evidence recheck
+            var evidenceHash = CreateCanonicalHash(preview.EvidenceHash, CanonicalHashPurposeNames.AuditEvidence);
+            _artifactResolver.StorePackageHash(context.TenantId, previewId, evidenceHash);
+
             var audit2 = BuildAudit(context, AgentToolResultStatus.Success, []);
             audit2 = audit2 with
             {
@@ -2010,6 +2030,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var evidencePreviewId = Guid.NewGuid().ToString("N");
             _evidencePreviews[(context.TenantId, evidencePreviewId)] = new EvidencePreviewResourceSnapshot(
                 new EvidencePreviewEntry(draft.DraftId, context.TenantId, result), snapshot.Draft);
+
+            // Store evidence hash for evidence recheck
+            var envelopeHash = CreateCanonicalHash(preview.EnvelopeHash, CanonicalHashPurposeNames.AuditEvidence);
+            _artifactResolver.StoreEvidenceHash(context.TenantId, evidencePreviewId, envelopeHash);
 
             var audit = BuildAudit(context, AgentToolResultStatus.Success, result.Diagnostics);
             audit = audit with
@@ -2158,89 +2182,113 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (denyResult is not null)
                 return denyResult;
 
-            // Requires at least one reference
-            if (request.ReviewResultId is null &&
-                request.PackagePreviewId is null &&
-                request.EvidencePreviewId is null)
+            // Phase 7e: BindingSnapshot replaces individual reference fields.
+            // Fail-closed: BindingSnapshot must be present (JSON/input-bound calls may bypass C# required constraints).
+            if (request.BindingSnapshot is null)
             {
-                var diag = new AgentToolDiagnostic
-                {
-                    Code = "ACTIVATION_MISSING_REFERENCES",
-                    Severity = AgentToolDiagnosticSeverity.Error,
-                    Message = "Activation request requires at least one reference (review result, package preview, or evidence preview)."
-                };
-                var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [diag]);
-                await _auditor.RecordAsync(audit, ct);
-                return AgentToolResult<ActivationRequest>.InvalidRequest([diag], audit);
+                return await RecordAndReturn(context,
+                    AgentToolResult<ActivationRequest>.InvalidRequest([
+                        new AgentToolDiagnostic
+                        {
+                            Code = "ACTIVATION_BINDING_SNAPSHOT_REQUIRED",
+                            Severity = AgentToolDiagnosticSeverity.Error,
+                            Message = "BindingSnapshot is required for activation request submission."
+                        }
+                    ]));
             }
 
-            // Validate that referenced artifacts exist, belong to this tenant, and match the draft
+            // Fail-closed: BindingSnapshot.Hashes must be present (JSON/input-bound calls may bypass C# required constraints).
+            if (request.BindingSnapshot.Hashes is null)
+            {
+                return await RecordAndReturn(context,
+                    AgentToolResult<ActivationRequest>.InvalidRequest([
+                        new AgentToolDiagnostic
+                        {
+                            Code = "ACTIVATION_BINDING_HASHES_REQUIRED",
+                            Severity = AgentToolDiagnosticSeverity.Error,
+                            Message = "BindingSnapshot.Hashes is required for activation request submission."
+                        }
+                    ]));
+            }
+
+            // Validate that the binding snapshot references exist and match the draft.
             var refDiagnostics = new List<AgentToolDiagnostic>();
 
-            if (request.ReviewResultId is not null)
+            if (!_reviewResults.TryGetValue((context.TenantId, request.BindingSnapshot.ReviewResultId), out var reviewRef))
             {
-                if (!_reviewResults.TryGetValue((context.TenantId, request.ReviewResultId), out var reviewRef))
+                refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    refDiagnostics.Add(new AgentToolDiagnostic
-                    {
-                        Code = "ACTIVATION_REVIEW_RESULT_NOT_FOUND",
-                        Severity = AgentToolDiagnosticSeverity.Error,
-                        Message = $"Referenced review result '{request.ReviewResultId}' not found for this tenant."
-                    });
-                }
-                else if (reviewRef.Review.DraftId != request.DraftId)
+                    Code = "ACTIVATION_REVIEW_RESULT_NOT_FOUND",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = $"Referenced review result '{request.BindingSnapshot.ReviewResultId}' not found for this tenant."
+                });
+            }
+            else if (reviewRef.Review.DraftId != request.DraftId)
+            {
+                refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    refDiagnostics.Add(new AgentToolDiagnostic
-                    {
-                        Code = "ACTIVATION_REVIEW_RESULT_DRAFT_MISMATCH",
-                        Severity = AgentToolDiagnosticSeverity.Error,
-                        Message = $"Referenced review result '{request.ReviewResultId}' belongs to draft '{reviewRef.Review.DraftId}', not '{request.DraftId}'."
-                    });
-                }
+                    Code = "ACTIVATION_REVIEW_RESULT_DRAFT_MISMATCH",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = $"Referenced review result '{request.BindingSnapshot.ReviewResultId}' belongs to draft '{reviewRef.Review.DraftId}', not '{request.DraftId}'."
+                });
             }
 
-            if (request.PackagePreviewId is not null)
+            // Fail-closed: binding references must be non-empty
+            if (string.IsNullOrWhiteSpace(request.BindingSnapshot.PackagePreviewId))
             {
-                if (!_packagePreviews.TryGetValue((context.TenantId, request.PackagePreviewId), out var packageRef))
+                refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    refDiagnostics.Add(new AgentToolDiagnostic
-                    {
-                        Code = "ACTIVATION_PACKAGE_PREVIEW_NOT_FOUND",
-                        Severity = AgentToolDiagnosticSeverity.Error,
-                        Message = $"Referenced package preview '{request.PackagePreviewId}' not found for this tenant."
-                    });
-                }
-                else if (packageRef.Preview.DraftId != request.DraftId)
+                    Code = "ACTIVATION_PACKAGE_PREVIEW_NOT_FOUND",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = "PackagePreviewId is required for activation request submission."
+                });
+            }
+            else if (!_packagePreviews.TryGetValue((context.TenantId, request.BindingSnapshot.PackagePreviewId), out var packageRef))
+            {
+                refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    refDiagnostics.Add(new AgentToolDiagnostic
-                    {
-                        Code = "ACTIVATION_PACKAGE_PREVIEW_DRAFT_MISMATCH",
-                        Severity = AgentToolDiagnosticSeverity.Error,
-                        Message = $"Referenced package preview '{request.PackagePreviewId}' belongs to draft '{packageRef.Preview.DraftId}', not '{request.DraftId}'."
-                    });
-                }
+                    Code = "ACTIVATION_PACKAGE_PREVIEW_NOT_FOUND",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = $"Referenced package preview '{request.BindingSnapshot.PackagePreviewId}' not found for this tenant."
+                });
+            }
+            else if (packageRef.Preview.DraftId != request.DraftId)
+            {
+                refDiagnostics.Add(new AgentToolDiagnostic
+                {
+                    Code = "ACTIVATION_PACKAGE_PREVIEW_DRAFT_MISMATCH",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = $"Referenced package preview '{request.BindingSnapshot.PackagePreviewId}' belongs to draft '{packageRef.Preview.DraftId}', not '{request.DraftId}'."
+                });
             }
 
-            if (request.EvidencePreviewId is not null)
+            // Fail-closed: binding references must be non-empty
+            if (string.IsNullOrWhiteSpace(request.BindingSnapshot.EvidencePreviewId))
             {
-                if (!_evidencePreviews.TryGetValue((context.TenantId, request.EvidencePreviewId), out var evidenceRef))
+                refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    refDiagnostics.Add(new AgentToolDiagnostic
-                    {
-                        Code = "ACTIVATION_EVIDENCE_PREVIEW_NOT_FOUND",
-                        Severity = AgentToolDiagnosticSeverity.Error,
-                        Message = $"Referenced evidence preview '{request.EvidencePreviewId}' not found for this tenant."
-                    });
-                }
-                else if (evidenceRef.Evidence.DraftId != request.DraftId)
+                    Code = "ACTIVATION_EVIDENCE_PREVIEW_NOT_FOUND",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = "EvidencePreviewId is required for activation request submission."
+                });
+            }
+            else if (!_evidencePreviews.TryGetValue((context.TenantId, request.BindingSnapshot.EvidencePreviewId), out var evidenceRef))
+            {
+                refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    refDiagnostics.Add(new AgentToolDiagnostic
-                    {
-                        Code = "ACTIVATION_EVIDENCE_PREVIEW_DRAFT_MISMATCH",
-                        Severity = AgentToolDiagnosticSeverity.Error,
-                        Message = $"Referenced evidence preview '{request.EvidencePreviewId}' belongs to draft '{evidenceRef.Evidence.DraftId}', not '{request.DraftId}'."
-                    });
-                }
+                    Code = "ACTIVATION_EVIDENCE_PREVIEW_NOT_FOUND",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = $"Referenced evidence preview '{request.BindingSnapshot.EvidencePreviewId}' not found for this tenant."
+                });
+            }
+            else if (evidenceRef.Evidence.DraftId != request.DraftId)
+            {
+                refDiagnostics.Add(new AgentToolDiagnostic
+                {
+                    Code = "ACTIVATION_EVIDENCE_PREVIEW_DRAFT_MISMATCH",
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = $"Referenced evidence preview '{request.BindingSnapshot.EvidencePreviewId}' belongs to draft '{evidenceRef.Evidence.DraftId}', not '{request.DraftId}'."
+                });
             }
 
             if (refDiagnostics.Count > 0)
@@ -2250,96 +2298,82 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 return AgentToolResult<ActivationRequest>.InvalidRequest(refDiagnostics, refAudit);
             }
 
-            var activationRequest = new ActivationRequest
-            {
-                RequestId = Guid.NewGuid().ToString("N"),
-                TenantId = context.TenantId,
-                DraftId = request.DraftId,
-                Status = Abstractions.ActivationRequestStatus.Submitted,
-                SubmittedAt = DateTimeOffset.UtcNow,
-                SubmittedBy = context.ActorId,
-                ReviewResultId = request.ReviewResultId,
-                PackagePreviewId = request.PackagePreviewId,
-                EvidencePreviewId = request.EvidencePreviewId,
-                CorrelationId = request.CorrelationId ?? context.CorrelationId,
-                Diagnostics = []
-            };
+            // Extract governance decision from review result — the review pipeline already
+            // evaluated governance via IDescriptorLifecycleGovernanceService.
+            var governanceDecision = reviewRef?.Review?.GovernanceDecision?.MaxDecision;
 
-            _activationRequests[(context.TenantId, activationRequest.RequestId)] =
-                new ActivationResourceSnapshot(activationRequest, draftSnapshot.Draft);
+            // Delegate to RequestService — single authority for activation request lifecycle.
+            // Pass pre-evaluated governance decision so auto-activation is reachable.
+            var governedRequest = request with { GovernanceDecision = governanceDecision };
+            var result = await _activationRequestService.CreateActivationRequestAsync(context, governedRequest, ct);
 
-            var successAudit = BuildAudit(context, AgentToolResultStatus.Success, []);
-            successAudit = successAudit with
+            // If human review required, create review task
+            if (result.Status == AgentToolResultStatus.Success
+                && result.Value?.Status == ActivationRequestStatus.UnderReview)
             {
-                TouchedDraftIds = [request.DraftId],
-                TouchedActivationRequestIds = [activationRequest.RequestId]
+                var policy = result.Value.Policy ?? new DescriptorActivationPolicy
+                {
+                    RequireHumanReviewForAll = false,
+                    ForbidSelfApproval = true,
+                    AutoActivateAllowedWhenPolicyPermits = true
+                };
+
+                var reviewTaskResult = await _activationReviewOrchestrator.CreateActivationReviewTaskAsync(
+                    context, result.Value, policy, ct);
+
+                if (reviewTaskResult.Status != AgentToolResultStatus.Success)
+                {
+                    _logger.LogWarning(
+                        "Failed to create activation review task for request {RequestId}: {Error}",
+                        result.Value.RequestId,
+                        reviewTaskResult.Diagnostics.FirstOrDefault()?.Message ?? "unknown error");
+                }
+            }
+
+            // Record audit for the tool surface
+            var audit = BuildAudit(context, result.Status, result.Diagnostics);
+            audit = audit with
+            {
+                TouchedDraftIds = result.Value is not null ? [request.DraftId] : null,
+                TouchedActivationRequestIds = result.Value is not null ? [result.Value.RequestId] : null
             };
-            await _auditor.RecordAsync(successAudit, ct);
-            return AgentToolResult<ActivationRequest>.Success(activationRequest, successAudit);
+            await _auditor.RecordAsync(audit, ct);
+
+            return result;
         }, ct);
     }
 
     public async Task<AgentToolResult<ActivationRequest>> GetActivationRequestStatusAsync(
         AgentToolInvocationContext context, string requestId, CancellationToken ct = default)
     {
-        // Complete — Indirect: owner-kind visibility resolution
+        // Phase 7e: delegate to RequestService — single authority for activation lifecycle
         return await ExecuteAsync(context, AgentToolName.GetActivationRequestStatus, AgentToolPermissionName.ActivationRequestRead, async (scope, ct) =>
         {
-            if (!_activationRequests.TryGetValue((context.TenantId, requestId), out var snapshot))
-            {
-                return await RecordAndReturn(context,
-                    AgentToolResult<ActivationRequest>.NotFound($"Activation request '{requestId}' not found."));
-            }
+            var result = await _activationRequestService.GetActivationRequestStatusAsync(context, requestId, ct);
 
-            var denyResult = DenyIfInvisible<ActivationRequest>(context, scope, snapshot.Owner.DescriptorKind);
-            if (denyResult is not null)
-                return denyResult;
-
-            var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
+            // Audit the tool-level invocation
+            var audit = BuildAudit(context, result.Status, result.Diagnostics);
             audit = audit with { TouchedActivationRequestIds = [requestId] };
             await _auditor.RecordAsync(audit, ct);
-            return AgentToolResult<ActivationRequest>.Success(snapshot.Request, audit);
+
+            return result;
         }, ct);
     }
 
     public async Task<AgentToolResult<ActivationRequest>> CancelActivationRequestAsync(
         AgentToolInvocationContext context, string requestId, CancellationToken ct = default)
     {
-        // Complete — Indirect: owner-kind visibility resolution
+        // Phase 7e: delegate to RequestService — single authority for activation lifecycle
         return await ExecuteAsync(context, AgentToolName.CancelActivationRequest, AgentToolPermissionName.ActivationRequestCancel, async (scope, ct) =>
         {
-            if (!_activationRequests.TryGetValue((context.TenantId, requestId), out var snapshot))
-            {
-                return await RecordAndReturn(context,
-                    AgentToolResult<ActivationRequest>.NotFound($"Activation request '{requestId}' not found."));
-            }
+            var result = await _activationRequestService.CancelActivationRequestAsync(context, requestId, "Cancelled via agent tool", ct);
 
-            var denyResult = DenyIfInvisible<ActivationRequest>(context, scope, snapshot.Owner.DescriptorKind);
-            if (denyResult is not null)
-                return denyResult;
+            // Audit the tool-level invocation
+            var audit = BuildAudit(context, result.Status, result.Diagnostics);
+            audit = audit with { TouchedActivationRequestIds = [requestId] };
+            await _auditor.RecordAsync(audit, ct);
 
-            if (snapshot.Request.Status is Abstractions.ActivationRequestStatus.Approved
-                or Abstractions.ActivationRequestStatus.Rejected)
-            {
-                var diag = new AgentToolDiagnostic
-                {
-                    Code = "ACTIVATION_REQUEST_TERMINAL",
-                    Severity = AgentToolDiagnosticSeverity.Error,
-                    Message = $"Activation request '{requestId}' is in terminal state '{snapshot.Request.Status}' and cannot be cancelled."
-                };
-                var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [diag]);
-                await _auditor.RecordAsync(audit, ct);
-                return AgentToolResult<ActivationRequest>.InvalidRequest([diag], audit);
-            }
-
-            var cancelled = snapshot.Request with { Status = Abstractions.ActivationRequestStatus.Cancelled };
-            _activationRequests[(context.TenantId, requestId)] =
-                new ActivationResourceSnapshot(cancelled, snapshot.Owner);
-
-            var successAudit = BuildAudit(context, AgentToolResultStatus.Success, []);
-            successAudit = successAudit with { TouchedActivationRequestIds = [requestId] };
-            await _auditor.RecordAsync(successAudit, ct);
-            return AgentToolResult<ActivationRequest>.Success(cancelled, successAudit);
+            return result;
         }, ct);
     }
 
@@ -2482,5 +2516,97 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         }
 
         return actions.AsReadOnly();
+    }
+
+    // ── Evidence recheck hash helpers ──
+
+    private static CanonicalHash CreateCanonicalHash(string digest, string purpose)
+        => new()
+        {
+            Algorithm = "SHA-256",
+            AlgorithmVersion = "sha256-canonical-json-v1",
+            ArtifactKind = CanonicalHashArtifactNames.Descriptor,
+            Scope = CanonicalHashScopeNames.InternalFull,
+            Purpose = purpose,
+            ContractVersion = "canonical-hash-v1",
+            CanonicalShapeVersion = "test-v1",
+            Value = digest
+        };
+
+    private static CanonicalHash ComputeSourceReviewHash(DraftAbstractions.DescriptorDraftReviewResult reviewResult)
+    {
+        var sb = new StringBuilder();
+        sb.Append(reviewResult.TenantId);
+        sb.Append('|');
+        sb.Append(reviewResult.DraftId);
+        sb.Append('|');
+        sb.Append(reviewResult.IsActivationEligible);
+        sb.Append('|');
+        sb.Append(reviewResult.ValidationResult.IsValid);
+
+        foreach (var d in reviewResult.ValidationResult.Diagnostics.OrderBy(d => d.Code))
+        {
+            sb.Append('|');
+            sb.Append(d.Code);
+            sb.Append(':');
+            sb.Append((int)d.Severity);
+        }
+
+        foreach (var d in (reviewResult.Diagnostics ?? Array.Empty<DraftAbstractions.DescriptorDraftDiagnostic>())
+            .OrderBy(d => d.Code))
+        {
+            sb.Append('|');
+            sb.Append(d.Code);
+            sb.Append(':');
+            sb.Append((int)d.Severity);
+        }
+
+        if (reviewResult.GovernanceDecision != null)
+        {
+            sb.Append('|');
+            sb.Append(reviewResult.GovernanceDecision.MaxDecision);
+            sb.Append('|');
+            sb.Append(reviewResult.GovernanceDecision.Decisions.Count);
+        }
+
+        if (reviewResult.MaterializationResult != null)
+        {
+            sb.Append('|');
+            sb.Append(reviewResult.MaterializationResult.IsMaterialized);
+            sb.Append('|');
+            sb.Append(reviewResult.MaterializationResult.ProposedInventory.Count);
+        }
+
+        if (reviewResult.ImpactAnalysisResult != null)
+        {
+            sb.Append('|');
+            sb.Append(reviewResult.ImpactAnalysisResult.AffectedDescriptors.Count);
+            sb.Append('|');
+            sb.Append(reviewResult.ImpactAnalysisResult.MaxSeverity);
+        }
+
+        var digest = ComputeSha256(sb.ToString());
+        return CreateCanonicalHash(digest, CanonicalHashPurposeNames.SourceBinding);
+    }
+
+    private static CanonicalHash ComputeReviewManifestHash(DraftAbstractions.DescriptorDraftReviewResult reviewResult)
+    {
+        var sb = new StringBuilder();
+        sb.Append(reviewResult.DraftId);
+        sb.Append('|');
+        sb.Append(reviewResult.ValidationResult.IsValid);
+        sb.Append('|');
+        sb.Append(reviewResult.IsActivationEligible);
+        sb.Append('|');
+        sb.Append(reviewResult.Diagnostics.Count);
+
+        var digest = ComputeSha256(sb.ToString());
+        return CreateCanonicalHash(digest, CanonicalHashPurposeNames.Integrity);
+    }
+
+    private static string ComputeSha256(string input)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
+        return Convert.ToHexStringLower(bytes);
     }
 }
