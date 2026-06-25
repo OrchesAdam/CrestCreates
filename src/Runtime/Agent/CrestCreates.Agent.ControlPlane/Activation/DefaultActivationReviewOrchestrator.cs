@@ -118,15 +118,9 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
                 "Processing approval for activation request {RequestId} by actor {ActorId}",
                 reviewDecision.ActivationRequestId, reviewDecision.ActorId);
 
-            var result = await _activationRequestService.ApproveActivationRequestAsync(
+            // ApproveActivationRequestAsync now internally executes evidence recheck + gate
+            await _activationRequestService.ApproveActivationRequestAsync(
                 context, reviewDecision.ActivationRequestId, reviewDecision, ct);
-
-            if (result.Status == AgentToolResultStatus.Success)
-            {
-                // After approval, execute the activation gate
-                await _activationRequestService.ExecuteActivationGateAsync(
-                    context, reviewDecision.ActivationRequestId, ct);
-            }
         }
         else if (reviewDecision.Decision == DescriptorActivationReviewOutcome.Rejected)
         {

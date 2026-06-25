@@ -5,6 +5,8 @@ public enum ActivationRequestStatus
     Submitted,
     UnderReview,
     Approved,
+    Activated,
+    ActivationFailed,
     Rejected,
     Cancelled,
     Expired,

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using CrestCreates.Agent.ControlPlane;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
+using CrestCreates.Agent.ControlPlane.Activation;
 using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -51,6 +52,7 @@ public abstract class AgentControlPlaneTestBase
     protected readonly Mock<IActivationEvidenceRechecker> EvidenceRecheckerMock = new();
     protected readonly Mock<IHumanTaskRuntime> HumanTaskRuntimeMock = new();
     protected readonly Mock<IActivationReviewOrchestrator> ActivationReviewOrchestratorMock = new();
+    protected readonly InMemoryActivationBindingArtifactResolver InMemoryArtifactResolver = new();
     protected readonly InMemoryAgentToolInvocationAuditor InMemoryAuditor = new();
 
     protected const string TestTenantId = "tenant-001";
@@ -90,6 +92,7 @@ public abstract class AgentControlPlaneTestBase
             ReportRendererMock.Object,
             ActivationRequestServiceMock.Object,
             ActivationReviewOrchestratorMock.Object,
+            InMemoryArtifactResolver,
             authorizationOptions: options);
     }
 
@@ -125,6 +128,7 @@ public abstract class AgentControlPlaneTestBase
             ReportRendererMock.Object,
             ActivationRequestServiceMock.Object,
             ActivationReviewOrchestratorMock.Object,
+            InMemoryArtifactResolver,
             authorizationOptions: options);
     }
 
@@ -154,6 +158,7 @@ public abstract class AgentControlPlaneTestBase
             ReportRendererMock.Object,
             ActivationRequestServiceMock.Object,
             ActivationReviewOrchestratorMock.Object,
+            InMemoryArtifactResolver,
             authorizationOptions: AgentToolAuthorizationOptions.DevelopmentDefaults);
     }
 

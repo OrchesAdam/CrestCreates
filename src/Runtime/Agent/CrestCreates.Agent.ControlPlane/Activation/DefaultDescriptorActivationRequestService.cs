@@ -329,8 +329,8 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         await RecordAudit(context, requestId, DescriptorActivationAuditAction.Approve,
             "Approved", [], ct, updatedRequest);
 
-        // Note: Evidence recheck + gate execution happens in ExecuteActivationGateAsync (Phase B)
-        return AgentToolResult<ActivationRequest>.Success(updatedRequest);
+        // Evidence recheck + gate execution (matches interface contract: "rechecks evidence hashes, then calls Runtime Activation Gate")
+        return await ExecuteActivationGateAsync(context, requestId, ct);
     }
 
     public async Task<AgentToolResult<ActivationRequest>> RejectActivationRequestAsync(
@@ -417,7 +417,8 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         var request = snapshot.Request;
 
         // Terminal states don't need recheck
-        if (request.Status == ActivationRequestStatus.Approved
+        if (request.Status == ActivationRequestStatus.Activated
+            || request.Status == ActivationRequestStatus.ActivationFailed
             || request.Status == ActivationRequestStatus.Rejected
             || request.Status == ActivationRequestStatus.Cancelled
             || request.Status == ActivationRequestStatus.Expired
@@ -517,20 +518,26 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
 
         if (gateResult.Status != AgentToolResultStatus.Success)
         {
+            var failedRequest = request with { Status = ActivationRequestStatus.ActivationFailed };
+            _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(failedRequest, snapshot.Owner);
+
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.GateDenied,
-                "GateRejected", gateResult.Diagnostics, ct, request);
+                "GateRejected", gateResult.Diagnostics, ct, failedRequest);
             return AgentToolResult<ActivationRequest>.Failed(gateResult.Diagnostics);
         }
 
-        // Record activation audit
+        // Transition to Activated — gate executed successfully
+        var activatedRequest = request with { Status = ActivationRequestStatus.Activated };
+        _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(activatedRequest, snapshot.Owner);
+
         await RecordAudit(context, requestId, DescriptorActivationAuditAction.Activate,
-            "GateExecuted", [], ct, request);
+            "GateExecuted", [], ct, activatedRequest);
 
         _logger.LogInformation(
             "Activation gate executed successfully for request {RequestId}, draft {DraftId}",
             requestId, request.DraftId);
 
-        return AgentToolResult<ActivationRequest>.Success(request);
+        return AgentToolResult<ActivationRequest>.Success(activatedRequest);
     }
 
     public async Task<AgentToolResult<ActivationRequest>> CancelActivationRequestAsync(

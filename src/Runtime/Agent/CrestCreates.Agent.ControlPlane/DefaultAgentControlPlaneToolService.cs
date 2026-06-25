@@ -61,7 +61,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly IDescriptorReviewReportRenderer _reportRenderer;
     private readonly IDescriptorActivationRequestService _activationRequestService;
     private readonly IActivationReviewOrchestrator _activationReviewOrchestrator;
-    private readonly InMemoryActivationBindingArtifactResolver _artifactResolver = new();
+    private readonly IActivationBindingArtifactResolver _artifactResolver;
 
     // Local stores for review results, fix proposals, package previews, activation requests
     // Keyed by (TenantId, ArtifactId) for tenant isolation.
@@ -91,6 +91,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         IDescriptorReviewReportRenderer reportRenderer,
         IDescriptorActivationRequestService activationRequestService,
         IActivationReviewOrchestrator activationReviewOrchestrator,
+        IActivationBindingArtifactResolver artifactResolver,
         AgentToolAuthorizationOptions? authorizationOptions = null)
     {
         _manifestProvider = manifestProvider;
@@ -111,6 +112,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         _reportRenderer = reportRenderer;
         _activationRequestService = activationRequestService;
         _activationReviewOrchestrator = activationReviewOrchestrator;
+        _artifactResolver = artifactResolver;
         _resourceResolver = new AgentControlPlaneResourceResolver(draftStore, descriptorCatalog);
         _topologyProjector = new AgentTopologyVisibilityProjector();
         _artifactProjector = new AgentDraftArtifactVisibilityProjector(_topologyProjector, topologyBuilder);
@@ -1888,7 +1890,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft);
 
             // Store package hash for evidence recheck
-            var evidenceHash = CreateCanonicalHash(preview.EvidenceHash, CanonicalHashPurposeNames.AuditEvidence);
+            var evidenceHash = CreatePackageCanonicalHash(preview.EvidenceHash, CanonicalHashPurposeNames.AuditEvidence);
             _artifactResolver.StorePackageHash(context.TenantId, previewId, evidenceHash);
 
             var audit2 = BuildAudit(context, AgentToolResultStatus.Success, []);
@@ -2032,7 +2034,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 new EvidencePreviewEntry(draft.DraftId, context.TenantId, result), snapshot.Draft);
 
             // Store evidence hash for evidence recheck
-            var envelopeHash = CreateCanonicalHash(preview.EnvelopeHash, CanonicalHashPurposeNames.AuditEvidence);
+            var envelopeHash = CreatePackageCanonicalHash(preview.EnvelopeHash, CanonicalHashPurposeNames.AuditEvidence);
             _artifactResolver.StoreEvidenceHash(context.TenantId, evidencePreviewId, envelopeHash);
 
             var audit = BuildAudit(context, AgentToolResultStatus.Success, result.Diagnostics);
@@ -2520,19 +2522,34 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
     // ── Evidence recheck hash helpers ──
 
-    private static CanonicalHash CreateCanonicalHash(string digest, string purpose)
+    private static CanonicalHash CreateReviewCanonicalHash(string digest, string purpose)
         => new()
         {
             Algorithm = "SHA-256",
-            AlgorithmVersion = "sha256-canonical-json-v1",
-            ArtifactKind = CanonicalHashArtifactNames.Descriptor,
+            AlgorithmVersion = "sha256-adhoc-v1",
+            ArtifactKind = CanonicalHashArtifactNames.ReviewResult,
             Scope = CanonicalHashScopeNames.InternalFull,
             Purpose = purpose,
-            ContractVersion = "canonical-hash-v1",
-            CanonicalShapeVersion = "test-v1",
+            ContractVersion = AgentControlPlaneContractVersion.Current,
+            CanonicalShapeVersion = "sha256-adhoc-v1",
             Value = digest
         };
 
+    private static CanonicalHash CreatePackageCanonicalHash(string digest, string purpose)
+        => new()
+        {
+            Algorithm = "SHA-256",
+            AlgorithmVersion = "sha256-adhoc-v1",
+            ArtifactKind = CanonicalHashArtifactNames.Package,
+            Scope = CanonicalHashScopeNames.InternalFull,
+            Purpose = purpose,
+            ContractVersion = AgentControlPlaneContractVersion.Current,
+            CanonicalShapeVersion = "sha256-adhoc-v1",
+            Value = digest
+        };
+
+    // TODO: Migrate to canonical source-binding writer when #30 provides SourceBinding CanonicalHashProfile.
+    // Current ad hoc pipe-delimited hash is interim; hash input format will change when canonical writer is available.
     private static CanonicalHash ComputeSourceReviewHash(DraftAbstractions.DescriptorDraftReviewResult reviewResult)
     {
         var sb = new StringBuilder();
@@ -2586,7 +2603,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         }
 
         var digest = ComputeSha256(sb.ToString());
-        return CreateCanonicalHash(digest, CanonicalHashPurposeNames.SourceBinding);
+        return CreateReviewCanonicalHash(digest, CanonicalHashPurposeNames.SourceBinding);
     }
 
     private static CanonicalHash ComputeReviewManifestHash(DraftAbstractions.DescriptorDraftReviewResult reviewResult)
@@ -2601,7 +2618,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         sb.Append(reviewResult.Diagnostics.Count);
 
         var digest = ComputeSha256(sb.ToString());
-        return CreateCanonicalHash(digest, CanonicalHashPurposeNames.Integrity);
+        return CreateReviewCanonicalHash(digest, CanonicalHashPurposeNames.Integrity);
     }
 
     private static string ComputeSha256(string input)

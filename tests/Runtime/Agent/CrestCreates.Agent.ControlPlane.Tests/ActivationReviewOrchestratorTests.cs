@@ -204,19 +204,19 @@ public class ActivationReviewOrchestratorTests : AgentControlPlaneTestBase
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // Test 3: ProcessReviewDecisionAsync — Approved → calls Approve + ExecuteGate
+    // Test 3: ProcessReviewDecisionAsync — Approved → calls Approve (gate now internal)
     // ════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task ProcessReviewDecisionAsync_Approved_CallsApproveAndExecuteGate()
+    public async Task ProcessReviewDecisionAsync_Approved_CallsApproveOnly()
     {
         // Arrange
         var activationServiceMock = new Mock<IDescriptorActivationRequestService>();
         var orchestrator = CreateOrchestrator(activationServiceMock);
         var reviewDecision = CreateReviewDecision(outcome: DescriptorActivationReviewOutcome.Approved);
-        var approvedRequest = CreateActivationRequest(
+        var activatedRequest = CreateActivationRequest(
             requestId: "req-001",
-            status: ActivationRequestStatus.Approved);
+            status: ActivationRequestStatus.Activated);
 
         activationServiceMock
             .Setup(x => x.ApproveActivationRequestAsync(
@@ -224,14 +224,7 @@ public class ActivationReviewOrchestratorTests : AgentControlPlaneTestBase
                 "req-001",
                 reviewDecision,
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentToolResult<ActivationRequest>.Success(approvedRequest));
-
-        activationServiceMock
-            .Setup(x => x.ExecuteActivationGateAsync(
-                It.IsAny<AgentToolInvocationContext>(),
-                "req-001",
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AgentToolResult<ActivationRequest>.Success(approvedRequest));
+            .ReturnsAsync(AgentToolResult<ActivationRequest>.Success(activatedRequest));
 
         // Act
         await orchestrator.ProcessReviewDecisionAsync(reviewDecision);
@@ -245,12 +238,13 @@ public class ActivationReviewOrchestratorTests : AgentControlPlaneTestBase
                 It.IsAny<CancellationToken>()),
             Times.Once);
 
+        // ExecuteActivationGateAsync should NOT be called — gate is now internal to ApproveActivationRequestAsync
         activationServiceMock.Verify(
             x => x.ExecuteActivationGateAsync(
                 It.IsAny<AgentToolInvocationContext>(),
-                "req-001",
+                It.IsAny<string>(),
                 It.IsAny<CancellationToken>()),
-            Times.Once);
+            Times.Never);
     }
 
     // ════════════════════════════════════════════════════════════════════════

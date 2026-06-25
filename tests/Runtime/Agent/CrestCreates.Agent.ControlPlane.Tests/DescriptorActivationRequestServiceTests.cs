@@ -220,7 +220,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         result.Status.Should().Be(AgentToolResultStatus.Success);
         result.Value.Should().NotBeNull();
         result.Value!.Eligibility.Should().Be(DescriptorActivationEligibility.AutoActivatable);
-        result.Value.Status.Should().Be(ActivationRequestStatus.Approved);
+        result.Value.Status.Should().Be(ActivationRequestStatus.Activated);
         result.Value.BindingSnapshot.Should().NotBeNull();
 
         var records = auditor.GetAllRecords();
@@ -363,7 +363,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         // Assert — succeeds because BindingSnapshot is provided (required by type system)
         result.Status.Should().Be(AgentToolResultStatus.Success);
         result.Value.Should().NotBeNull();
-        result.Value!.Status.Should().Be(ActivationRequestStatus.Approved);
+        result.Value!.Status.Should().Be(ActivationRequestStatus.Activated);
 
         var records = auditor.GetAllRecords();
         records.Should().NotBeEmpty();
@@ -406,7 +406,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
     }
 
     [Fact]
-    public async Task ApproveActivationRequestAsync_ValidApproval_TransitionsToApproved()
+    public async Task ApproveActivationRequestAsync_ValidApproval_TransitionsToActivated()
     {
         // Arrange
         var (service, auditor, requestId) = await CreateUnderReviewRequestAsync(
@@ -421,10 +421,11 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         // Assert
         result.Status.Should().Be(AgentToolResultStatus.Success);
         result.Value.Should().NotBeNull();
-        result.Value!.Status.Should().Be(ActivationRequestStatus.Approved);
+        result.Value!.Status.Should().Be(ActivationRequestStatus.Activated);
 
         var records = auditor.GetAllRecords();
         records.Should().Contain(r => r.Action == DescriptorActivationAuditAction.Approve);
+        records.Should().Contain(r => r.Action == DescriptorActivationAuditAction.Activate);
     }
 
     [Fact]
@@ -1104,11 +1105,11 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
     // ════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task ExecuteActivationGateAsync_ApprovedRequest_ReturnsSuccess()
+    public async Task ExecuteActivationGateAsync_SubmittedRequest_ReturnsSuccess()
     {
-        // Arrange — create auto-activated (Approved) request
-        var (service, _, policyMock, draftStoreMock, _, _) = CreateTestService();
-        var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: true, requireHumanReviewForAll: false);
+        // Arrange — create Submitted request (auto-activation disabled to keep status at Submitted)
+        var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
+        var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: false, requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
         service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
@@ -1120,13 +1121,15 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         };
         var createResult = await service.CreateActivationRequestAsync(context, request);
         var requestId = createResult.Value!.RequestId;
+        createResult.Value!.Status.Should().Be(ActivationRequestStatus.Submitted);
 
-        // Act
+        // Act — gate accepts both Approved and Submitted
         var result = await service.ExecuteActivationGateAsync(context, requestId);
 
         // Assert
         result.Status.Should().Be(AgentToolResultStatus.Success);
         result.Value.Should().NotBeNull();
+        result.Value!.Status.Should().Be(ActivationRequestStatus.Activated);
     }
 
     [Fact]
@@ -1230,7 +1233,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
     [Fact]
     public async Task RecheckEvidenceAsync_TerminalState_ReturnsUnchanged()
     {
-        // Arrange — create auto-activated (Approved = terminal) request
+        // Arrange — create auto-activated (Activated = terminal) request
         var (service, _, policyMock, draftStoreMock, _, evidenceRecheckerMock) = CreateTestService();
         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: true, requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
@@ -1244,7 +1247,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         };
         var createResult = await service.CreateActivationRequestAsync(context, request);
         var requestId = createResult.Value!.RequestId;
-        createResult.Value!.Status.Should().Be(ActivationRequestStatus.Approved);
+        createResult.Value!.Status.Should().Be(ActivationRequestStatus.Activated);
 
         // Reconfigure evidence rechecker to return stale — but it should not be called for terminal state
         evidenceRecheckerMock
@@ -1264,7 +1267,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         // Assert — terminal state should not call evidence rechecker, returns unchanged
         result.Status.Should().Be(AgentToolResultStatus.Success);
         result.Value.Should().NotBeNull();
-        result.Value!.Status.Should().Be(ActivationRequestStatus.Approved);
+        result.Value!.Status.Should().Be(ActivationRequestStatus.Activated);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -1360,6 +1363,10 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var records = auditor.GetAllRecords();
         records.Should().Contain(r => r.Action == DescriptorActivationAuditAction.GateDenied
                                    && r.Outcome == "GateRejected");
+
+        // Verify status transitioned to ActivationFailed
+        var statusResult = await service.GetActivationRequestStatusAsync(context, requestId);
+        statusResult.Value!.Status.Should().Be(ActivationRequestStatus.ActivationFailed);
     }
 
     [Fact]
@@ -1450,7 +1457,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         // Assert
         result.Status.Should().Be(AgentToolResultStatus.Success);
         result.Value.Should().NotBeNull();
-        result.Value!.Status.Should().Be(ActivationRequestStatus.Approved);
+        result.Value!.Status.Should().Be(ActivationRequestStatus.Activated);
         result.Value.Eligibility.Should().Be(DescriptorActivationEligibility.AutoActivatable);
 
         var records = auditor.GetAllRecords();
@@ -1465,9 +1472,9 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
     // ════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task ExecuteActivationGateAsync_InMemoryGateRejects_ReturnsFailure()
+    public async Task ApproveActivationRequestAsync_InMemoryGateRejects_ReturnsFailure()
     {
-        // Arrange — use the real InMemoryRuntimeActivationGate
+        // Arrange — use the real InMemoryRuntimeActivationGate with CanReject=true
         var auditor = new InMemoryDescriptorActivationAuditor();
         var policyMock = new Mock<IDescriptorActivationPolicyProvider>();
         var draftStoreMock = new Mock<DraftAbstractions.IDescriptorDraftStore>();
@@ -1496,7 +1503,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
             evidenceRecheckerMock.Object,
             NullLogger<DefaultDescriptorActivationRequestService>.Instance);
 
-        // Setup: policy that creates Submitted (not auto-activated)
+        // Setup: policy that creates Submitted (not auto-activated), allows self-approval
         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: false, requireHumanReviewForAll: false, forbidSelfApproval: false);
         var draft = CreateTestDraft();
         draftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -1519,19 +1526,18 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         createResult.Value!.Status.Should().Be(ActivationRequestStatus.Submitted);
         var requestId = createResult.Value.RequestId;
 
-        // Approve the request (self-approval allowed)
+        // Approve — ApproveActivationRequestAsync now internally executes gate, which rejects (CanReject=true)
         var approveContext = CreateActivationContext(actorId: TestActorId);
         var reviewDecision = CreateTestReviewDecision(requestId, actorId: TestActorId, actorKind: DescriptorActivationActorKind.Agent);
         var approveResult = await service.ApproveActivationRequestAsync(approveContext, requestId, reviewDecision);
-        approveResult.Status.Should().Be(AgentToolResultStatus.Success);
-        approveResult.Value!.Status.Should().Be(ActivationRequestStatus.Approved);
 
-        // Act — execute gate with CanReject=true
-        var gateResult = await service.ExecuteActivationGateAsync(createContext, requestId);
+        // Assert — gate rejection flows through approve path
+        approveResult.Status.Should().Be(AgentToolResultStatus.Failed);
+        approveResult.Diagnostics.Should().Contain(d => d.Code == "RUNTIME_ACTIVATION_GATE_REJECTED");
 
-        // Assert
-        gateResult.Status.Should().Be(AgentToolResultStatus.Failed);
-        gateResult.Diagnostics.Should().Contain(d => d.Code == "RUNTIME_ACTIVATION_GATE_REJECTED");
+        // Verify status is ActivationFailed
+        var statusResult = await service.GetActivationRequestStatusAsync(createContext, requestId);
+        statusResult.Value!.Status.Should().Be(ActivationRequestStatus.ActivationFailed);
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -1603,8 +1609,8 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var result = await service.CreateActivationRequestAsync(context, request);
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
-        result.Value!.Status.Should().Be(ActivationRequestStatus.Approved,
-            "auto-activation should transition to Approved when governance is Allowed and policy permits");
+        result.Value!.Status.Should().Be(ActivationRequestStatus.Activated,
+            "auto-activation should transition to Activated when governance is Allowed, policy permits, and gate succeeds");
         result.Value.Eligibility.Should().Be(DescriptorActivationEligibility.AutoActivatable);
     }
 

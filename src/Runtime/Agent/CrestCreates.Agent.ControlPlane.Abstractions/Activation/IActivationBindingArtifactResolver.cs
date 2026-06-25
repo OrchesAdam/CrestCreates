@@ -17,6 +17,24 @@ public interface IActivationBindingArtifactResolver
         string tenantId,
         ActivationBindingSnapshot bindingSnapshot,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Stores source review hash and manifest hash for a review result.
+    /// Called by the ToolService when a review result is created.
+    /// </summary>
+    void StoreReviewHashes(string tenantId, string reviewResultId, CanonicalHash sourceReviewHash, CanonicalHash manifestHash);
+
+    /// <summary>
+    /// Stores the evidence hash for a package preview.
+    /// Called by the ToolService when a package preview is created.
+    /// </summary>
+    void StorePackageHash(string tenantId, string packagePreviewId, CanonicalHash evidenceHash);
+
+    /// <summary>
+    /// Stores the envelope hash for an evidence preview.
+    /// Called by the ToolService when an evidence preview is created.
+    /// </summary>
+    void StoreEvidenceHash(string tenantId, string evidencePreviewId, CanonicalHash envelopeHash);
 }
 
 /// <summary>
