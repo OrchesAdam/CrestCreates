@@ -76,6 +76,10 @@ Add one file per type under `CrestCreates.Core.Abstractions/Identity/`:
 - `HumanTaskId`
 - `DescriptorId`
 - `VersionKey`
+- `MessageTemplateId`
+
+All semantic value objects use namespace
+`CrestCreates.Core.Abstractions.Identity`.
 
 Each type is a `readonly record struct` with:
 
@@ -256,6 +260,28 @@ Generator internals should avoid direct diagnostic id literals:
 - Put Roslyn diagnostic ids in centralized constants.
 - Use those constants when creating `DiagnosticDescriptor`.
 - Tests should reference the centralized ids where possible.
+
+Roslyn `DiagnosticDescriptor` construction must use `DiagnosticCode` constant
+classes through `XxxValue`, not the typed `DiagnosticCode` property, because
+Roslyn APIs require string ids at this compile-time boundary:
+
+```csharp
+public static class CanonicalHashDiagnosticCodes
+{
+    public const string MissingCanonicalHashValue = "CCHASH001";
+
+    public static DiagnosticCode MissingCanonicalHash { get; } =
+        new(MissingCanonicalHashValue);
+}
+
+new DiagnosticDescriptor(
+    CanonicalHashDiagnosticCodes.MissingCanonicalHashValue,
+    title,
+    messageFormat,
+    category,
+    DiagnosticSeverity.Warning,
+    isEnabledByDefault: true);
+```
 
 Generators may emit typed semantic properties only when the target compilation
 can resolve the corresponding value object type, such as
