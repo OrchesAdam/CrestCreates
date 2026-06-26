@@ -70,7 +70,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly ConcurrentDictionary<(string TenantId, string Id), FixProposalResourceSnapshot> _fixProposals = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), PackagePreviewResourceSnapshot> _packagePreviews = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), EvidencePreviewResourceSnapshot> _evidencePreviews = new();
-    private readonly ConcurrentDictionary<(string TenantId, string DraftId), string> _latestPackageByDraft = new();
+    private readonly ConcurrentDictionary<(string TenantId, string DraftId, string ScopeFingerprint), string> _latestPackageByDraft = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), ReportResourceSnapshot> _reports = new();
 
     public DefaultAgentControlPlaneToolService(
@@ -94,7 +94,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         IDescriptorActivationRequestService activationRequestService,
         IActivationReviewOrchestrator activationReviewOrchestrator,
         IActivationBindingArtifactResolver artifactResolver,
-        AgentToolAuthorizationOptions? authorizationOptions = null)
+        AgentToolAuthorizationOptions? authorizationOptions = null,
+        Func<AgentToolAuthorizationOptions>? optionsFactory = null)
     {
         _manifestProvider = manifestProvider;
         _authorizationService = authorizationService;
@@ -120,7 +121,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         _topologyProjector = new AgentTopologyVisibilityProjector();
         _artifactProjector = new AgentDraftArtifactVisibilityProjector(_topologyProjector, topologyBuilder);
         var capturedOptions = authorizationOptions ?? AgentToolAuthorizationOptions.ProductionDefaults;
-        _optionsFactory = () => capturedOptions;
+        _optionsFactory = optionsFactory ?? (() => capturedOptions);
     }
 
     // ── Helpers ──
@@ -1893,8 +1894,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg,
                 scope.ScopeFingerprint, snapshot.Draft.ProposedVersion);
 
-            // Track latest package preview for this draft (for evidence preview reuse)
-            _latestPackageByDraft[(context.TenantId, draftId)] = previewId;
+            // Track latest package preview for this draft+scope (for evidence preview reuse)
+            _latestPackageByDraft[(context.TenantId, draftId, scope.ScopeFingerprint)] = previewId;
 
             // Store package hash for evidence recheck
             if (pkg.Hashes is not null)
@@ -1944,10 +1945,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             // draft version, reuse its DescriptorPackage to avoid redundant build and
             // ensure hash consistency. Mismatched scope or version forces Path B.
             PackagePreviewResourceSnapshot? existingPkgSnapshot = null;
-            if (_latestPackageByDraft.TryGetValue((context.TenantId, draftId), out var existingPreviewId)
+            if (_latestPackageByDraft.TryGetValue((context.TenantId, draftId, scope.ScopeFingerprint), out var existingPreviewId)
                 && _packagePreviews.TryGetValue((context.TenantId, existingPreviewId), out var pkgSnapshot)
                 && pkgSnapshot.Package is not null
-                && StringComparer.Ordinal.Equals(pkgSnapshot.ScopeFingerprint, scope.ScopeFingerprint)
                 && StringComparer.Ordinal.Equals(pkgSnapshot.DraftVersion, draft.ProposedVersion))
             {
                 existingPkgSnapshot = pkgSnapshot;
@@ -2092,7 +2092,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             _packagePreviews[(context.TenantId, packagePreviewId)] = new PackagePreviewResourceSnapshot(
                 new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg,
                 scope.ScopeFingerprint, draft.ProposedVersion);
-            _latestPackageByDraft[(context.TenantId, draftId)] = packagePreviewId;
+            _latestPackageByDraft[(context.TenantId, draftId, scope.ScopeFingerprint)] = packagePreviewId;
 
             // Store package hashes for evidence recheck
             if (pkg.Hashes is not null)

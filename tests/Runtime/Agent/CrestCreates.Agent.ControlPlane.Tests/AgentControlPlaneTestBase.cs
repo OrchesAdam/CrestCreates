@@ -139,6 +139,44 @@ public abstract class AgentControlPlaneTestBase
     }
 
     /// <summary>
+    /// Creates a DefaultAgentControlPlaneToolService with a mutable options factory.
+    /// Enables testing scenarios where scope changes between calls (e.g., A/B/A reuse).
+    /// </summary>
+    protected DefaultAgentControlPlaneToolService CreateServiceWithOptionsFactory(
+        Func<AgentToolAuthorizationOptions> optionsFactory,
+        InMemoryAgentToolInvocationAuditor? auditor = null)
+    {
+        EnsureHashBuilderSetup();
+        EnsureActivationRequestServiceSetup();
+        var initialOptions = optionsFactory();
+        var authzService = new DefaultAgentToolAuthorizationService(initialOptions);
+        var actualAuditor = auditor ?? InMemoryAuditor;
+
+        return new DefaultAgentControlPlaneToolService(
+            new StaticAgentToolManifestProvider(),
+            authzService,
+            actualAuditor,
+            DraftStoreMock.Object,
+            DraftValidatorMock.Object,
+            DraftReviewServiceMock.Object,
+            DraftMaterializerMock.Object,
+            ContextPackBuilderMock.Object,
+            DescriptorCatalogMock.Object,
+            RelationshipProviderMock.Object,
+            TopologyBuilderMock.Object,
+            PackageBuilderMock.Object,
+            NullLogger<DefaultAgentControlPlaneToolService>.Instance,
+            HashBuilderMock.Object,
+            ReviewHashServiceMock.Object,
+            ReportBuilderMock.Object,
+            ReportRendererMock.Object,
+            ActivationRequestServiceMock.Object,
+            ActivationReviewOrchestratorMock.Object,
+            InMemoryArtifactResolver,
+            optionsFactory: optionsFactory);
+    }
+
+    /// <summary>
     /// Creates a service with fully mocked dependencies for fine-grained control.
     /// </summary>
     protected DefaultAgentControlPlaneToolService CreateServiceWithMocks()

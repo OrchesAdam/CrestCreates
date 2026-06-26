@@ -516,4 +516,61 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
 
         fp1.Should().NotBe(fp2);
     }
+
+    [Fact]
+    public async Task BuildPackageEvidencePreview_AbaScopeReuse_ReuseScopeA_AfterScopeB()
+    {
+        // A/B/A scenario: scope A builds preview, scope B builds preview,
+        // scope A requests evidence — should reuse scope A's preview (not rebuild).
+        var scopeA = AgentToolAuthorizationOptions.DevelopmentDefaults;
+        var scopeB = new AgentToolAuthorizationOptions
+        {
+            Mode = AgentToolAuthorizationMode.ExplicitPolicy,
+            AllowedDescriptorKinds = new HashSet<string> { "Event", "Capability", "Workflow" },
+            DeniedDescriptorKinds = new HashSet<string> { "Schema" }
+        };
+
+        var fpA = AgentDescriptorVisibilityScope.ComputeFingerprint(scopeA);
+        var fpB = AgentDescriptorVisibilityScope.ComputeFingerprint(scopeB);
+        fpA.Should().NotBe(fpB, "scopes must differ for A/B/A test");
+
+        // Use a mutable factory so the same service instance can alternate scopes
+        var currentOptions = scopeA;
+        var service = CreateServiceWithOptionsFactory(() => currentOptions);
+
+        var draft = CreateTestDraft();
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(draft));
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns(new List<IDescriptor>());
+        DraftMaterializerMock.Setup(m => m.Materialize(draft, It.IsAny<IReadOnlyList<IDescriptor>>()))
+            .Returns(DraftAbstractions.DescriptorDraftMaterializationResult.Success(new List<IDescriptor>().AsReadOnly()));
+        SetupPackageBuilderWithHashes();
+
+        // Step A1: scope A creates package preview
+        currentOptions = scopeA;
+        var previewA = await service.PreviewDescriptorPackageAsync(CreateContext("PreviewDescriptorPackage"), "draft-001");
+        previewA.Status.Should().Be(AgentToolResultStatus.Success);
+        var buildCountAfterA1 = PackageBuilderMock.Invocations.Count;
+
+        // Step B: scope B creates package preview (different key in _latestPackageByDraft)
+        currentOptions = scopeB;
+        var previewB = await service.PreviewDescriptorPackageAsync(CreateContext("PreviewDescriptorPackage"), "draft-001");
+        previewB.Status.Should().Be(AgentToolResultStatus.Success);
+        var buildCountAfterB = PackageBuilderMock.Invocations.Count;
+
+        // Scope B should have triggered a second build (different scope = different key)
+        buildCountAfterB.Should().BeGreaterThan(buildCountAfterA1);
+
+        // Step A2: scope A requests evidence preview — should reuse scope A's package (Path A)
+        currentOptions = scopeA;
+        var evidenceA = await service.BuildPackageEvidencePreviewAsync(CreateContext("BuildPackageEvidencePreview"), "draft-001");
+        evidenceA.Status.Should().Be(AgentToolResultStatus.Success);
+
+        // No additional build should have occurred — scope A's package was reused
+        PackageBuilderMock.Invocations.Count.Should().Be(buildCountAfterB,
+            "scope A should reuse its cached package preview, not rebuild");
+
+        // Evidence diagnostics should be empty (Path A — no new review)
+        evidenceA.Value!.Diagnostics.Should().BeEmpty();
+    }
 }
