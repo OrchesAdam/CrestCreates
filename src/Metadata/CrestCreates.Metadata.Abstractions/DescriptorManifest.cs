@@ -13,11 +13,11 @@ public sealed class DescriptorManifest
     public IReadOnlyList<DescriptorManifestEntry> DescriptorEntries { get; init; }
         = Array.Empty<DescriptorManifestEntry>();
     [Obsolete("Use DescriptorPackage.Hashes instead.")]
-    public string ContentHash { get; set; } = string.Empty;
+    public string ContentHash { get; init; } = string.Empty;
     [Obsolete("Use DescriptorPackage.Hashes instead.")]
-    public string? EvidenceHash { get; set; }
+    public string? EvidenceHash { get; init; }
     [Obsolete("Use DescriptorPackage.Hashes instead.")]
-    public string? EnvelopeHash { get; set; }
+    public string? EnvelopeHash { get; init; }
 }
 
 public sealed class DescriptorManifestEntry

@@ -17,7 +17,7 @@ public sealed class ActivationBindingHashValidator
     [
         (nameof(BindingHashes.SourceReviewHash), CanonicalHashArtifactNames.ReviewResult, CanonicalHashPurposeNames.SourceBinding),
         (nameof(BindingHashes.ReviewManifestHash), CanonicalHashArtifactNames.ReviewResult, CanonicalHashPurposeNames.Integrity),
-        (nameof(BindingHashes.PackageManifestHash), CanonicalHashArtifactNames.PackageManifest, CanonicalHashPurposeNames.AuditEvidence),
+        (nameof(BindingHashes.PackageManifestHash), CanonicalHashArtifactNames.PackageManifest, CanonicalHashPurposeNames.Integrity),
         (nameof(BindingHashes.PackageEvidenceHash), CanonicalHashArtifactNames.PackageEvidence, CanonicalHashPurposeNames.AuditEvidence),
         (nameof(BindingHashes.PackageEvidenceEnvelopeHash), CanonicalHashArtifactNames.PackageEvidenceEnvelope, CanonicalHashPurposeNames.AuditEvidence),
         (nameof(BindingHashes.ContractHash), CanonicalHashArtifactNames.Descriptor, CanonicalHashPurposeNames.Contract),

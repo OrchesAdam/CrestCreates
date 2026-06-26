@@ -86,7 +86,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
             {
                 Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
                 ArtifactKind = CanonicalHashArtifactNames.PackageManifest, Scope = CanonicalHashScopeNames.InternalFull,
-                Purpose = CanonicalHashPurposeNames.AuditEvidence, ContractVersion = "canonical-hash-v1",
+                Purpose = CanonicalHashPurposeNames.Integrity, ContractVersion = "canonical-hash-v1",
                 CanonicalShapeVersion = "test-v1", Value = "pkg-manifest-hash"
             },
             PackageEvidenceHash = new CanonicalHash

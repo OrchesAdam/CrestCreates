@@ -254,7 +254,7 @@ public class ActivationBindingHashValidatorTests
         public static readonly (string ArtifactKind, string Purpose) ReviewManifestHash =
             (CanonicalHashArtifactNames.ReviewResult, CanonicalHashPurposeNames.Integrity);
         public static readonly (string ArtifactKind, string Purpose) PackageManifestHash =
-            (CanonicalHashArtifactNames.PackageManifest, CanonicalHashPurposeNames.AuditEvidence);
+            (CanonicalHashArtifactNames.PackageManifest, CanonicalHashPurposeNames.Integrity);
         public static readonly (string ArtifactKind, string Purpose) PackageEvidenceHash =
             (CanonicalHashArtifactNames.PackageEvidence, CanonicalHashPurposeNames.AuditEvidence);
         public static readonly (string ArtifactKind, string Purpose) PackageEvidenceEnvelopeHash =
