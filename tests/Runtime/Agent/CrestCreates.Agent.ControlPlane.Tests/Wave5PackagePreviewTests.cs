@@ -3,6 +3,9 @@ using Moq;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
+using CrestCreates.Metadata.Abstractions.DescriptorImpact;
+using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using FluentAssertions;
 
@@ -572,5 +575,89 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
 
         // Evidence diagnostics should be empty (Path A — no new review)
         evidenceA.Value!.Diagnostics.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task BuildPackageEvidencePreview_VisibleUniverseChange_ReuseRejected()
+    {
+        // When the visible descriptor set changes between package preview and
+        // evidence preview (e.g., a new descriptor was registered in the catalog),
+        // the VisibleDescriptorSetHash won't match, so Path A is rejected and
+        // Path B rebuilds from the new visible universe.
+        var options = AgentToolAuthorizationOptions.DevelopmentDefaults;
+        var service = CreateService(options);
+
+        var draft = CreateTestDraft();
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(draft));
+
+        var descriptor1 = new TestDescriptor { Id = "desc-001", Kind = DescriptorKind.Event };
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns(new List<IDescriptor> { descriptor1 });
+        DraftMaterializerMock.Setup(m => m.Materialize(draft, It.IsAny<IReadOnlyList<IDescriptor>>()))
+            .Returns(DraftAbstractions.DescriptorDraftMaterializationResult.Success(new List<IDescriptor> { descriptor1 }.AsReadOnly()));
+        SetupPackageBuilderWithHashes();
+
+        // Setup review service for evidence preview
+        DraftReviewServiceMock
+            .Setup(r => r.ReviewAsync(draft, It.IsAny<IReadOnlyList<IDescriptor>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DraftAbstractions.DescriptorDraftReviewResult
+            {
+                DraftId = draft.DraftId,
+                TenantId = draft.TenantId,
+                ValidationResult = DraftAbstractions.DescriptorDraftValidationResult.Success(),
+                ProposedInventory = new List<IDescriptor> { descriptor1 },
+                ImpactAnalysisResult = new DescriptorImpactAnalysisReport
+                {
+                    ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
+                    AffectedDescriptors = Array.Empty<AffectedDescriptor>(),
+                    Paths = Array.Empty<DescriptorImpactPath>(),
+                    MaxSeverity = DescriptorImpactSeverity.Low,
+                    Diagnostics = Array.Empty<DescriptorImpactDiagnostic>()
+                },
+                CompatibilityResult = new DescriptorCompatibilityReport
+                {
+                    ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
+                    ImpactReport = new DescriptorImpactAnalysisReport
+                    {
+                        ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
+                        AffectedDescriptors = Array.Empty<AffectedDescriptor>(),
+                        Paths = Array.Empty<DescriptorImpactPath>(),
+                        MaxSeverity = DescriptorImpactSeverity.Low,
+                        Diagnostics = Array.Empty<DescriptorImpactDiagnostic>()
+                    },
+                    Findings = Array.Empty<DescriptorCompatibilityFinding>(),
+                    MaxLevel = DescriptorCompatibilityLevel.Compatible,
+                    Diagnostics = Array.Empty<DescriptorCompatibilityDiagnostic>()
+                },
+                GovernanceDecision = new DescriptorLifecycleGovernanceReport
+                {
+                    Decisions = Array.Empty<DescriptorLifecycleDecision>(),
+                    MaxDecision = DescriptorLifecycleDecisionKind.Allowed,
+                    PackageFindings = Array.Empty<DescriptorLifecycleFinding>()
+                },
+                Diagnostics = Array.Empty<DraftAbstractions.DescriptorDraftDiagnostic>(),
+                IsActivationEligible = true
+            });
+
+        // Step 1: Create package preview with descriptor1 only
+        var preview1 = await service.PreviewDescriptorPackageAsync(CreateContext("PreviewDescriptorPackage"), "draft-001");
+        preview1.Status.Should().Be(AgentToolResultStatus.Success);
+        var buildCountAfterPreview = PackageBuilderMock.Invocations.Count;
+
+        // Step 2: Catalog changes — a new descriptor is registered
+        var descriptor2 = new TestDescriptor { Id = "desc-002", Kind = DescriptorKind.Capability };
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns(new List<IDescriptor> { descriptor1, descriptor2 });
+        DraftMaterializerMock.Setup(m => m.Materialize(draft, It.IsAny<IReadOnlyList<IDescriptor>>()))
+            .Returns(DraftAbstractions.DescriptorDraftMaterializationResult.Success(
+                new List<IDescriptor> { descriptor1, descriptor2 }.AsReadOnly()));
+
+        // Step 3: Evidence preview should NOT reuse — visible set changed
+        var evidence = await service.BuildPackageEvidencePreviewAsync(
+            CreateContext("BuildPackageEvidencePreview"), "draft-001");
+        evidence.Status.Should().Be(AgentToolResultStatus.Success);
+
+        // A new build should have occurred (Path B) because visible universe changed
+        PackageBuilderMock.Invocations.Count.Should().BeGreaterThan(buildCountAfterPreview,
+            "visible universe change should force Path B rebuild");
     }
 }

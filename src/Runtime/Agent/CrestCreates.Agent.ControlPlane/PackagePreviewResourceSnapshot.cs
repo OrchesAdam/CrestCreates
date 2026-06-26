@@ -9,4 +9,5 @@ internal sealed record PackagePreviewResourceSnapshot(
     Draft Owner,
     DescriptorPackage? Package = null,
     string? ScopeFingerprint = null,
-    string? DraftVersion = null);
+    string? DraftVersion = null,
+    string? VisibleDescriptorSetHash = null);

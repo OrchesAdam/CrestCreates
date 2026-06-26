@@ -1890,9 +1890,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             preview = projectedPreview;
 
             var previewId = Guid.NewGuid().ToString("N");
+            var visibleSetHash = ComputeVisibleDescriptorSetHash(visibleProposed);
             _packagePreviews[(context.TenantId, previewId)] = new PackagePreviewResourceSnapshot(
                 new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg,
-                scope.ScopeFingerprint, snapshot.Draft.ProposedVersion);
+                scope.ScopeFingerprint, snapshot.Draft.ProposedVersion, visibleSetHash);
 
             // Track latest package preview for this draft+scope (for evidence preview reuse)
             _latestPackageByDraft[(context.TenantId, draftId, scope.ScopeFingerprint)] = previewId;
@@ -1941,14 +1942,17 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var universe = universeResult.Universe!;
 
             // Try find existing package preview for this tenant+draft with matching scope.
-            // When a package preview already exists under the same visibility scope and
-            // draft version, reuse its DescriptorPackage to avoid redundant build and
-            // ensure hash consistency. Mismatched scope or version forces Path B.
+            // When a package preview already exists under the same visibility scope,
+            // draft version, and visible descriptor set, reuse its DescriptorPackage to
+            // avoid redundant build and ensure hash consistency.
+            // Mismatched scope, version, or visible universe forces Path B.
             PackagePreviewResourceSnapshot? existingPkgSnapshot = null;
+            var currentVisibleSetHash = ComputeVisibleDescriptorSetHash(universe.VisibleDescriptors);
             if (_latestPackageByDraft.TryGetValue((context.TenantId, draftId, scope.ScopeFingerprint), out var existingPreviewId)
                 && _packagePreviews.TryGetValue((context.TenantId, existingPreviewId), out var pkgSnapshot)
                 && pkgSnapshot.Package is not null
-                && StringComparer.Ordinal.Equals(pkgSnapshot.DraftVersion, draft.ProposedVersion))
+                && StringComparer.Ordinal.Equals(pkgSnapshot.DraftVersion, draft.ProposedVersion)
+                && StringComparer.Ordinal.Equals(pkgSnapshot.VisibleDescriptorSetHash, currentVisibleSetHash))
             {
                 existingPkgSnapshot = pkgSnapshot;
             }
@@ -2089,9 +2093,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             // Create package preview entry alongside evidence preview.
             // Both share the same DescriptorPackage and hash set for consistency.
             var packagePreviewId = Guid.NewGuid().ToString("N");
+            var pathBVisibleSetHash = ComputeVisibleDescriptorSetHash(filteredInventory);
             _packagePreviews[(context.TenantId, packagePreviewId)] = new PackagePreviewResourceSnapshot(
                 new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg,
-                scope.ScopeFingerprint, draft.ProposedVersion);
+                scope.ScopeFingerprint, draft.ProposedVersion, pathBVisibleSetHash);
             _latestPackageByDraft[(context.TenantId, draftId, scope.ScopeFingerprint)] = packagePreviewId;
 
             // Store package hashes for evidence recheck
@@ -2604,5 +2609,23 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         }
 
         return actions.AsReadOnly();
+    }
+
+    /// <summary>
+    /// Computes a deterministic hash from the sorted set of visible descriptor IDs.
+    /// Used to verify that the visible universe has not changed between preview
+    /// creation and evidence preview reuse — preventing stale package reuse when
+    /// the catalog changes under the same policy.
+    /// </summary>
+    private static string ComputeVisibleDescriptorSetHash(IReadOnlyList<IDescriptor> visibleDescriptors)
+    {
+        if (visibleDescriptors.Count == 0)
+            return "empty";
+
+        var ids = visibleDescriptors
+            .Select(d => d.Id)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        return string.Join("|", ids);
     }
 }
