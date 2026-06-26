@@ -171,10 +171,10 @@ namespace Sample.Domain.Entities
         Assert.True(result.ContainsFile("ProductCrudPermissions.g.cs"));
         var source = result.GetSourceByFileName("ProductCrudPermissions.g.cs")!.SourceText;
 
-        Assert.Contains("public const string CreateValue", source);
+        Assert.Contains("private const string CreateValue", source);
         Assert.Contains("public static global::CrestCreates.Core.Abstractions.Identity.PermissionName Create { get; }", source);
 
-        Assert.Contains("public const string GetValue", source);
+        Assert.Contains("private const string GetValue", source);
         Assert.Contains("public static global::CrestCreates.Core.Abstractions.Identity.PermissionName Get { get; }", source);
     }
 
@@ -204,7 +204,7 @@ namespace Sample.Domain.Entities
             "Generated files: " + string.Join(", ", result.GeneratedSources.Select(s => s.FileName)));
         var source = result.GetSourceByFileName("ProductCrudPermissions.g.cs")!.SourceText;
 
-        Assert.Contains("public const string CreateValue", source);
+        Assert.Contains("private const string CreateValue", source);
         Assert.DoesNotContain("global::CrestCreates.Core.Abstractions.Identity.PermissionName", source);
     }
 
@@ -320,11 +320,11 @@ namespace Sample.Domain.Entities
 
         var source = result.GetSourceByFileName("ProductAppService.g.cs")!.SourceText;
 
-        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.CreateValue", source);
-        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.GetValue", source);
-        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.SearchValue", source);
-        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.UpdateValue", source);
-        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.DeleteValue", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Create", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Get", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Search", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Update", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Delete", source);
         Assert.DoesNotContain("Product.View", source);
     }
 

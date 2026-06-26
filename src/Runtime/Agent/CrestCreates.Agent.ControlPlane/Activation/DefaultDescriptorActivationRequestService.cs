@@ -61,7 +61,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.BindingSnapshotRequiredValue,
+                Code = DescriptorActivationDiagnosticCodes.BindingSnapshotRequired,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = "BindingSnapshot is required for activation request submission."
             };
@@ -74,7 +74,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.BindingHashesRequiredValue,
+                Code = DescriptorActivationDiagnosticCodes.BindingHashesRequired,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = "BindingSnapshot.Hashes is required for activation request submission."
             };
@@ -89,7 +89,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diags = hashErrors.Select(i => new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.BindingHashValidationFailedValue,
+                Code = DescriptorActivationDiagnosticCodes.BindingHashValidationFailed,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Binding hash validation failed at slot '{i.Slot}': {i.Description}"
             }).ToList();
@@ -126,7 +126,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.BlockedByGovernanceValue,
+                Code = DescriptorActivationDiagnosticCodes.BlockedByGovernance,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Activation is blocked by governance decision: {governanceDecision}."
             };
@@ -149,7 +149,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.IncompleteBindingValue,
+                Code = DescriptorActivationDiagnosticCodes.IncompleteBinding,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = "Activation request requires complete binding (PackagePreviewId and EvidencePreviewId must be non-empty)."
             };
@@ -255,7 +255,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.BindingHashesRequiredValue,
+                Code = DescriptorActivationDiagnosticCodes.BindingHashesRequired,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = "BindingSnapshot.Hashes is required for approval."
             };
@@ -268,7 +268,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.ReviewRequestMismatchValue,
+                Code = DescriptorActivationDiagnosticCodes.ReviewRequestMismatch,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Review decision targets request '{reviewDecision.ActivationRequestId}', but current request is '{request.RequestId}'."
             };
@@ -282,7 +282,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.ReviewDecisionMismatchValue,
+                Code = DescriptorActivationDiagnosticCodes.ReviewDecisionMismatch,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"ApproveActivationRequestAsync called with decision '{reviewDecision.Decision}', expected 'Approved'."
             };
@@ -295,7 +295,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.ReviewEvidenceMismatchValue,
+                Code = DescriptorActivationDiagnosticCodes.ReviewEvidenceMismatch,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Review decision evidence hash '{reviewDecision.BoundEvidenceHash}' does not match request binding hash '{request.BindingSnapshot.Hashes.PackageEvidenceHash}'."
             };
@@ -308,7 +308,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.ReviewEnvelopeMismatchValue,
+                Code = DescriptorActivationDiagnosticCodes.ReviewEnvelopeMismatch,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Review decision envelope hash '{reviewDecision.BoundEnvelopeHash}' does not match request binding hash '{request.BindingSnapshot.Hashes.PackageEvidenceEnvelopeHash}'."
             };
@@ -323,7 +323,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.InvalidStatusForApprovalValue,
+                Code = DescriptorActivationDiagnosticCodes.InvalidStatusForApproval,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Cannot approve request in status '{request.Status}'. Expected 'UnderReview' or 'Submitted'."
             };
@@ -338,7 +338,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.SelfApprovalForbiddenValue,
+                Code = DescriptorActivationDiagnosticCodes.SelfApprovalForbidden,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Actor '{reviewDecision.ActorId}' cannot approve their own activation request when ForbidSelfApproval is enabled."
             };
@@ -375,7 +375,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.BindingHashesRequiredValue,
+                Code = DescriptorActivationDiagnosticCodes.BindingHashesRequired,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = "BindingSnapshot.Hashes is required for rejection."
             };
@@ -388,7 +388,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.ReviewRequestMismatchValue,
+                Code = DescriptorActivationDiagnosticCodes.ReviewRequestMismatch,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Review decision targets request '{reviewDecision.ActivationRequestId}', but current request is '{request.RequestId}'."
             };
@@ -402,7 +402,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.ReviewDecisionMismatchValue,
+                Code = DescriptorActivationDiagnosticCodes.ReviewDecisionMismatch,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"RejectActivationRequestAsync called with decision '{reviewDecision.Decision}', expected 'Rejected'."
             };
@@ -414,7 +414,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.InvalidStatusForRejectionValue,
+                Code = DescriptorActivationDiagnosticCodes.InvalidStatusForRejection,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Cannot reject request in status '{request.Status}'. Expected 'UnderReview' or 'Submitted'."
             };
@@ -460,7 +460,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var staleDiagnostics = recheckResult.Drifts.Select(d => new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.EvidenceStaleValue,
+                Code = DescriptorActivationDiagnosticCodes.EvidenceStale,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Evidence drift detected: {d.FieldName} changed from '{d.BoundHashValue}' to '{d.CurrentHashValue}'."
             }).ToList();
@@ -494,7 +494,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.GateInvalidStateValue,
+                Code = DescriptorActivationDiagnosticCodes.GateInvalidState,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Cannot execute activation gate for request in status '{request.Status}'. Expected 'Approved' or 'Submitted'."
             };
@@ -507,7 +507,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.GateBlockedValue,
+                Code = DescriptorActivationDiagnosticCodes.GateBlocked,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = "Cannot execute activation gate for NotActivatable request."
             };
@@ -524,7 +524,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var staleDiagnostics = recheckResult.Drifts.Select(d => new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.EvidenceStaleValue,
+                Code = DescriptorActivationDiagnosticCodes.EvidenceStale,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Evidence drift detected: {d.FieldName} changed from '{d.BoundHashValue}' to '{d.CurrentHashValue}'."
             }).ToList();
@@ -581,7 +581,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             var diag = new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.CannotCancelValue,
+                Code = DescriptorActivationDiagnosticCodes.CannotCancel,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Cannot cancel request in status '{request.Status}'. Only 'Submitted' or 'UnderReview' can be cancelled."
             };
@@ -653,7 +653,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             diagnostics.Add(new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.GovernanceBlockedValue,
+                Code = DescriptorActivationDiagnosticCodes.GovernanceBlocked,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Activation blocked by governance decision: {governanceDecision}."
             });
@@ -662,7 +662,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         {
             diagnostics.Add(new AgentToolDiagnostic
             {
-                Code = DescriptorActivationDiagnosticCodes.RequiresHumanReviewValue,
+                Code = DescriptorActivationDiagnosticCodes.RequiresHumanReview,
                 Severity = AgentToolDiagnosticSeverity.Warning,
                 Message = policy.RequireHumanReviewForAll
                     ? "Activation requires human review (policy: RequireHumanReviewForAll)."

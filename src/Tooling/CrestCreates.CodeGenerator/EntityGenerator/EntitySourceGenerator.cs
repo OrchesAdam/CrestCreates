@@ -1341,7 +1341,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 var permissionValue = permission.Contains(".")
                     ? permission
                     : $"{permissionPrefix}.{permission}";
-                sourceCode.AppendLine($"        public const string {actionName}Value = \"{EscapeStringLiteral(permissionValue)}\";");
+                sourceCode.AppendLine($"        private const string {actionName}Value = \"{EscapeStringLiteral(permissionValue)}\";");
                 if (hasPermissionName) sourceCode.AppendLine($"        public static global::CrestCreates.Core.Abstractions.Identity.PermissionName {actionName} {{ get; }} = new({actionName}Value);");
             }
 

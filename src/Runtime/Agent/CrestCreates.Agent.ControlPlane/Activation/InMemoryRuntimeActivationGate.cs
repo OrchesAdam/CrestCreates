@@ -44,7 +44,7 @@ public sealed class InMemoryRuntimeActivationGate : IRuntimeActivationGate
 
                 var diags = hashErrors.Select(i => new AgentToolDiagnostic
                 {
-                    Code = DescriptorActivationDiagnosticCodes.BindingHashValidationFailedValue,
+                    Code = DescriptorActivationDiagnosticCodes.BindingHashValidationFailed,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Binding hash validation failed at slot '{i.Slot}': {i.Description}"
                 }).ToList();
@@ -64,7 +64,7 @@ public sealed class InMemoryRuntimeActivationGate : IRuntimeActivationGate
                 AgentToolResult<RuntimeActivationGateResult>.Failed(
                     [new AgentToolDiagnostic
                     {
-                        Code = AgentToolDiagnosticCodes.RuntimeActivationGateRejectedValue,
+                        Code = AgentToolDiagnosticCodes.RuntimeActivationGateRejected,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = "In-memory gate rejection (CanReject=true)."
                     }]));

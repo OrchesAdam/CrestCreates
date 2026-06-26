@@ -354,7 +354,7 @@ public class ActivationBindingHashValidatorIntegrationTests
         result.Status.Should().Be(AgentToolResultStatus.Failed);
         result.Diagnostics.Should().NotBeEmpty();
         result.Diagnostics.Should().Contain(d =>
-            d.Code == DescriptorActivationDiagnosticCodes.BindingHashValidationFailedValue &&
+            d.Code == DescriptorActivationDiagnosticCodes.BindingHashValidationFailed &&
             d.Severity == AgentToolDiagnosticSeverity.Error);
     }
 

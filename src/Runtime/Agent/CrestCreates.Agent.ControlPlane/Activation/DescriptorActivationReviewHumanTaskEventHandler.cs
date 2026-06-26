@@ -31,7 +31,7 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
     public async Task HandleAsync(HumanTaskCompletedEvent @event, CancellationToken cancellationToken = default)
     {
         // Only process activation review HumanTasks
-        if (@event.HumanTaskId != DescriptorActivationHumanTaskIds.ActivationReviewValue)
+        if (@event.HumanTaskId != DescriptorActivationHumanTaskIds.ActivationReview)
         {
             return;
         }

@@ -5,7 +5,7 @@ namespace CrestCreates.Domain.Exceptions;
 public class CrestPermissionException : CrestException
 {
     public CrestPermissionException(string permissionName)
-        : base(CrestErrorCodes.AuthForbiddenValue, 403, $"Permission '{permissionName}' was not granted.", permissionName)
+        : base(CrestErrorCodes.AuthForbidden, 403, $"Permission '{permissionName}' was not granted.", permissionName)
     {
         PermissionName = permissionName;
     }

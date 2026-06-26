@@ -41,11 +41,11 @@ public class CrestBusinessExceptionTests
     [Fact]
     public void CrestErrorCodes_Match_Wire_Values()
     {
-        CrestErrorCodes.InternalErrorValue.Should().Be("Crest.InternalError");
-        CrestErrorCodes.AuthUnauthorizedValue.Should().Be("Crest.Auth.Unauthorized");
-        CrestErrorCodes.AuthForbiddenValue.Should().Be("Crest.Auth.Forbidden");
-        CrestErrorCodes.ValidationFailedValue.Should().Be("Crest.Validation.Failed");
-        CrestErrorCodes.ConcurrencyConflictValue.Should().Be("Crest.Concurrency.Conflict");
-        CrestErrorCodes.ConcurrencyPreconditionRequiredValue.Should().Be("Crest.Concurrency.PreconditionRequired");
+        CrestErrorCodes.InternalError.Value.Should().Be("Crest.InternalError");
+        CrestErrorCodes.AuthUnauthorized.Value.Should().Be("Crest.Auth.Unauthorized");
+        CrestErrorCodes.AuthForbidden.Value.Should().Be("Crest.Auth.Forbidden");
+        CrestErrorCodes.ValidationFailed.Value.Should().Be("Crest.Validation.Failed");
+        CrestErrorCodes.ConcurrencyConflict.Value.Should().Be("Crest.Concurrency.Conflict");
+        CrestErrorCodes.ConcurrencyPreconditionRequired.Value.Should().Be("Crest.Concurrency.PreconditionRequired");
     }
 }

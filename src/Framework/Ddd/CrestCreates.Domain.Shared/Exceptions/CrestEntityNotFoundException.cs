@@ -4,7 +4,7 @@ public class CrestEntityNotFoundException : CrestException
 {
     public CrestEntityNotFoundException(string entityType, object? entityId = null)
         : base(
-            CrestErrorCodes.EntityNotFoundValue,
+            CrestErrorCodes.EntityNotFound,
             404,
             "Entity not found.",
             entityId is null ? entityType : $"{entityType} (Id={entityId})")
