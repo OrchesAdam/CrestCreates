@@ -86,6 +86,8 @@ Hard rules:
 - Agent Control Plane production code must not manually instantiate production
   `CanonicalHash` values for computed review, package, evidence, envelope,
   contract, or definition hashes.
+- Agent Control Plane may accept, clone, compare, validate, serialize, and pass
+  through `CanonicalHash` values produced elsewhere.
 - Metadata canonical hash runtime must not reference DescriptorDraft review
   models.
 
@@ -210,13 +212,16 @@ Required binding hash slot metadata:
 | `SourceReviewHash` | `ReviewResult` | `SourceBinding` | `InternalFull` |
 | `ReviewManifestHash` | `ReviewResult` | `Integrity` | `InternalFull` |
 | `PackageManifestHash` | `PackageManifest` | `Integrity` | `InternalFull` |
-| `EvidenceHash` | `PackageEvidence` | `AuditEvidence` | `InternalFull` |
-| `EnvelopeHash` | `PackageEvidenceEnvelope` | `AuditEvidence` | `InternalFull` |
+| `PackageEvidenceHash` | `PackageEvidence` | `AuditEvidence` | `InternalFull` |
+| `PackageEvidenceEnvelopeHash` | `PackageEvidenceEnvelope` | `AuditEvidence` | `InternalFull` |
 | `ContractHash` | `Descriptor` | `Contract` | `InternalFull` |
 | `DefinitionHash` | `Descriptor` | `Definition` | `InternalFull` |
 
-`EnvelopeHash` purpose is fixed to `AuditEvidence`. It is not left open to
-choose between `Integrity` and `AuditEvidence` during implementation.
+`PackageEvidenceEnvelopeHash` purpose is fixed to `AuditEvidence`. The envelope
+is treated as part of the package audit evidence artifact family because it
+binds package identity, package evidence, and envelope metadata into the
+auditable activation handoff record. It is not left open to choose between
+`Integrity` and `AuditEvidence` during implementation.
 
 ## 7. BindingHashes Breaking Model
 
@@ -229,8 +234,8 @@ public sealed record BindingHashes
     public required CanonicalHash SourceReviewHash { get; init; }
     public required CanonicalHash ReviewManifestHash { get; init; }
     public required CanonicalHash PackageManifestHash { get; init; }
-    public required CanonicalHash EvidenceHash { get; init; }
-    public required CanonicalHash EnvelopeHash { get; init; }
+    public required CanonicalHash PackageEvidenceHash { get; init; }
+    public required CanonicalHash PackageEvidenceEnvelopeHash { get; init; }
     public required CanonicalHash ContractHash { get; init; }
     public required CanonicalHash DefinitionHash { get; init; }
 }
@@ -241,8 +246,8 @@ Semantics:
 - `SourceReviewHash`: source-binding view of `DescriptorDraftReviewResult`.
 - `ReviewManifestHash`: integrity view of `DescriptorDraftReviewResult`.
 - `PackageManifestHash`: canonical package manifest hash.
-- `EvidenceHash`: canonical package evidence hash.
-- `EnvelopeHash`: canonical evidence envelope hash.
+- `PackageEvidenceHash`: canonical package evidence hash.
+- `PackageEvidenceEnvelopeHash`: canonical evidence envelope hash.
 - `ContractHash` and `DefinitionHash`: descriptor canonical hashes produced by
   `IDescriptorStableHashBuilder`.
 
@@ -312,8 +317,8 @@ The hash set is the package hash source of truth:
 public sealed record DescriptorPackageHashSet
 {
     public required CanonicalHash PackageManifestHash { get; init; }
-    public required CanonicalHash EvidenceHash { get; init; }
-    public required CanonicalHash EnvelopeHash { get; init; }
+    public required CanonicalHash PackageEvidenceHash { get; init; }
+    public required CanonicalHash PackageEvidenceEnvelopeHash { get; init; }
 }
 ```
 
@@ -334,8 +339,8 @@ hash computation.
 public sealed record DescriptorPackagePreview
 {
     public required CanonicalHash PackageManifestHash { get; init; }
-    public required CanonicalHash EvidenceHash { get; init; }
-    public required CanonicalHash EnvelopeHash { get; init; }
+    public required CanonicalHash PackageEvidenceHash { get; init; }
+    public required CanonicalHash PackageEvidenceEnvelopeHash { get; init; }
     public required IReadOnlyList<string> DescriptorIds { get; init; }
 }
 ```
@@ -370,6 +375,10 @@ The implementation must:
 `IDescriptorPackageCanonicalHashComputer` after building the manifest,
 evidence, and evidence envelope.
 
+`DescriptorPackageHashComputer` must be removed, renamed, or downgraded to
+tests/migration-only code. No production package builder may call
+`DescriptorPackageHashComputer` after this migration.
+
 ## 11. Activation Runtime Flow
 
 ### 11.1 ReviewDescriptorDraftAsync
@@ -388,7 +397,7 @@ Agent Control Plane does not compute review hashes.
 ```text
 IDescriptorPackageBuilder.Build(...)
   -> DescriptorPackage.Hashes
-  -> IActivationBindingArtifactResolver.StorePackageHashSet(...)
+  -> IActivationBindingArtifactResolver.StorePackagePreviewHashSet(...)
 ```
 
 Package, evidence, and envelope hashes are stored as one
@@ -408,7 +417,7 @@ If a reusable preview is available:
 resolve package preview
   -> reuse DescriptorPackageHashSet
   -> build/project evidence preview from the same package artifact
-  -> StoreEvidenceHashSet(...)
+  -> StoreEvidencePreviewHashSet(...)
 ```
 
 If no reusable preview is available:
@@ -417,7 +426,7 @@ If no reusable preview is available:
 build package once
   -> create package preview snapshot
   -> create evidence preview snapshot
-  -> store the same DescriptorPackageHashSet for both references
+  -> store the same DescriptorPackageHashSet for both preview references
 ```
 
 Snapshot records should preserve enough identity to make reuse safe:
@@ -567,12 +576,12 @@ void StoreReviewHashes(
     CanonicalHash sourceReviewHash,
     CanonicalHash reviewManifestHash);
 
-void StorePackageHashSet(
+void StorePackagePreviewHashSet(
     string tenantId,
     string packagePreviewId,
     DescriptorPackageHashSet hashSet);
 
-void StoreEvidenceHashSet(
+void StoreEvidencePreviewHashSet(
     string tenantId,
     string evidencePreviewId,
     DescriptorPackageHashSet hashSet);
@@ -583,13 +592,13 @@ Resolved artifacts should expose the same slot names used by `BindingHashes`:
 - `CurrentSourceReviewHash`
 - `CurrentReviewManifestHash`
 - `CurrentPackageManifestHash`
-- `CurrentEvidenceHash`
-- `CurrentEnvelopeHash`
+- `CurrentPackageEvidenceHash`
+- `CurrentPackageEvidenceEnvelopeHash`
 - `CurrentContractHash`
 - `CurrentDefinitionHash`
 
-Do not store `PackageManifestHash`, `EvidenceHash`, and `EnvelopeHash` through
-unrelated resolver methods.
+Do not store `PackageManifestHash`, `PackageEvidenceHash`, and
+`PackageEvidenceEnvelopeHash` through unrelated resolver methods.
 
 ## 16. DTO and Display Projection Policy
 
@@ -659,8 +668,9 @@ Required behavior tests:
   InternalFull`.
 - ReviewResult manifest hash uses `ReviewResult + Integrity + InternalFull`.
 - Package manifest hash uses `PackageManifest + Integrity + InternalFull`.
-- Evidence hash uses `PackageEvidence + AuditEvidence + InternalFull`.
-- Envelope hash uses `PackageEvidenceEnvelope + AuditEvidence + InternalFull`.
+- Package evidence hash uses `PackageEvidence + AuditEvidence + InternalFull`.
+- Package evidence envelope hash uses `PackageEvidenceEnvelope +
+  AuditEvidence + InternalFull`.
 - Same semantic input produces stable `CanonicalHash`.
 - Relevant input changes change the hash.
 - Collection ordering is deterministic.
@@ -697,6 +707,9 @@ Rules:
 
 - Writer output must match golden JSON bytes exactly.
 - Hash values must be computed from the exact golden bytes.
+- Golden tests must assert `CanonicalHash` metadata as well as JSON bytes:
+  `Algorithm`, `AlgorithmVersion`, `ArtifactKind`, `Purpose`, `Scope`,
+  `ContractVersion`, and `CanonicalShapeVersion`.
 - Golden cases must cover collection order, DateTimeOffset, numeric values,
   null, and empty string.
 - Golden file updates require explicit review because they are canonical shape
@@ -728,8 +741,8 @@ Heuristic bans:
 
 - same method contains `StringBuilder`, `Append('|')`, and hash/SHA keywords,
 - package source-of-truth model assigns or stores `ContentHash`,
-- production activation binding assigns `EvidenceHash` or `EnvelopeHash` from
-  `pkg.Manifest.*Hash` string fields,
+- production activation binding assigns package evidence or envelope hashes
+  from `pkg.Manifest.*Hash` string fields,
 - production resolver stores package manifest/evidence/envelope hashes through
   separate methods instead of `DescriptorPackageHashSet`.
 
@@ -752,7 +765,8 @@ Expected migration impact:
   `PackageManifestHash`.
 - Package preview models switch from string hashes to `CanonicalHash`.
 - Package manifest source-of-truth no longer contains `ContentHash`,
-  `EvidenceHash`, or `EnvelopeHash` string digest fields.
+  package evidence hash, or package evidence envelope hash string digest
+  fields.
 - Package diff and serializer tests must move to canonical hash fields.
 - Agent DTO mappers may add display string projections if needed.
 - Existing tests that construct placeholder `CanonicalHash` may continue doing
@@ -790,10 +804,16 @@ or sample projects.
 - Package/evidence/envelope hashes are produced as `DescriptorPackageHashSet`
   by `IDescriptorPackageCanonicalHashComputer`.
 - `BindingHashes` has explicit `ReviewManifestHash` and `PackageManifestHash`
-  slots.
+  slots, and package evidence slots are named `PackageEvidenceHash` and
+  `PackageEvidenceEnvelopeHash`.
 - `ContentHash` is not a domain/source-of-truth package hash.
+- `DescriptorPackageHashComputer` is not used by production package builder
+  after migration.
 - `ActivationBindingHashValidator` runs at submit, recheck, and pre-gate
   boundaries.
+- Binding hash slot validation rejects a correct `Value` with wrong
+  `ArtifactKind`, `Purpose`, or `Scope`.
 - Full `CanonicalHash` equality remains the stale evidence comparison.
 - Canonical JSON golden output tests exist for every new writer.
+- Golden tests assert both canonical JSON bytes and `CanonicalHash` metadata.
 - Boundary guard tests prevent the ad hoc hash path from returning.
