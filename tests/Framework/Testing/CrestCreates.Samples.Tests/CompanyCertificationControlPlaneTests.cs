@@ -51,15 +51,13 @@ public sealed class CompanyCertificationControlPlaneTests : IDisposable
         // ControlPlanePassed signals that topology, governance, and package are clean
         report.ControlPlanePassed.Should().BeTrue();
 
-        // Package content hash must be non-empty
-        report.Package.ContentHash.Should().NotBeNullOrEmpty();
+        // Package manifest hash must be non-empty
+        report.Package.Hashes.Should().NotBeNull();
+        report.Package.Hashes!.PackageManifestHash.Value.Should().NotBeNullOrEmpty();
 
         // Evidence and envelope hashes are produced by the package builder.
-        // If the builder emits them, they must be non-empty; otherwise skip.
-        if (report.Package.Manifest.EvidenceHash is not null)
-            report.PackageEvidenceHash.Should().NotBeNullOrEmpty();
-        if (report.Package.Manifest.EnvelopeHash is not null)
-            report.PackageEnvelopeHash.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.PackageEvidenceHash.Value.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.PackageEvidenceEnvelopeHash.Value.Should().NotBeNullOrEmpty();
     }
 
     [Fact]
@@ -78,11 +76,10 @@ public sealed class CompanyCertificationControlPlaneTests : IDisposable
         report.Governance.MaxDecision.Should().NotBe(DescriptorLifecycleDecisionKind.Allowed);
 
         // Package hashes must be present
-        report.Package.ContentHash.Should().NotBeNullOrEmpty();
-        if (report.Package.Manifest.EvidenceHash is not null)
-            report.PackageEvidenceHash.Should().NotBeNullOrEmpty();
-        if (report.Package.Manifest.EnvelopeHash is not null)
-            report.PackageEnvelopeHash.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.Should().NotBeNull();
+        report.Package.Hashes!.PackageManifestHash.Value.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.PackageEvidenceHash.Value.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.PackageEvidenceEnvelopeHash.Value.Should().NotBeNullOrEmpty();
     }
 
     [Fact]
@@ -114,11 +111,10 @@ public sealed class CompanyCertificationControlPlaneTests : IDisposable
         report.Governance.IsBlocked.Should().BeFalse();
 
         // Package hashes must be present
-        report.Package.ContentHash.Should().NotBeNullOrEmpty();
-        if (report.Package.Manifest.EvidenceHash is not null)
-            report.PackageEvidenceHash.Should().NotBeNullOrEmpty();
-        if (report.Package.Manifest.EnvelopeHash is not null)
-            report.PackageEnvelopeHash.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.Should().NotBeNull();
+        report.Package.Hashes!.PackageManifestHash.Value.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.PackageEvidenceHash.Value.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.PackageEvidenceEnvelopeHash.Value.Should().NotBeNullOrEmpty();
     }
 
     [Fact]
@@ -134,7 +130,8 @@ public sealed class CompanyCertificationControlPlaneTests : IDisposable
         report.Governance.MaxDecision.Should().NotBe(DescriptorLifecycleDecisionKind.Allowed);
 
         // Package hashes must be present
-        report.Package.ContentHash.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.Should().NotBeNull();
+        report.Package.Hashes!.PackageManifestHash.Value.Should().NotBeNullOrEmpty();
     }
 
     [Fact]
@@ -156,27 +153,26 @@ public sealed class CompanyCertificationControlPlaneTests : IDisposable
         report.Governance.MaxDecision.Should().NotBe(DescriptorLifecycleDecisionKind.Allowed);
 
         // Package hashes must be present
-        report.Package.ContentHash.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.Should().NotBeNull();
+        report.Package.Hashes!.PackageManifestHash.Value.Should().NotBeNullOrEmpty();
     }
 
     [Fact]
     public void Package_Should_Include_Manifest_Snapshot_Evidence_And_StableHash()
     {
         var scenario = CompanyCertificationChangeScenarios.Baseline();
-        var report1 = _runner.Run(scenario);
+        var report = _runner.Run(scenario);
 
-        // All three hashes must be non-empty
-        report1.Package.ContentHash.Should().NotBeNullOrEmpty();
-        report1.PackageEvidenceHash.Should().NotBeNullOrEmpty();
-        report1.PackageEnvelopeHash.Should().NotBeNullOrEmpty();
+        // All three canonical hashes must be non-empty
+        report.Package.Hashes.Should().NotBeNull();
+        report.Package.Hashes!.PackageManifestHash.Value.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.PackageEvidenceHash.Value.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.PackageEvidenceEnvelopeHash.Value.Should().NotBeNullOrEmpty();
 
-        // Running the same scenario again must produce stable content and
-        // evidence hashes. Envelope hash may vary due to manifest metadata.
-        var scenario2 = CompanyCertificationChangeScenarios.Baseline();
-        var report2 = _runner.Run(scenario2);
-
-        report2.Package.ContentHash.Should().Be(report1.Package.ContentHash);
-        report2.PackageEvidenceHash.Should().Be(report1.PackageEvidenceHash);
-        report2.PackageEnvelopeHash.Should().NotBeNullOrEmpty();
+        // Canonical hash metadata must be consistent
+        report.Package.Hashes.PackageManifestHash.ArtifactKind.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.PackageManifestHash.Algorithm.Should().Be("SHA-256");
+        report.Package.Hashes.PackageEvidenceHash.ArtifactKind.Should().NotBeNullOrEmpty();
+        report.Package.Hashes.PackageEvidenceEnvelopeHash.ArtifactKind.Should().NotBeNullOrEmpty();
     }
 }

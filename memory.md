@@ -411,7 +411,7 @@ This thread achieved the following:
 - Upgraded `DescriptorPackage`, `DescriptorManifest`, `DescriptorManifestEntry`, `DescriptorSnapshot`, `SnapshotEntry` in-place.
 - Removed per-kind manifest entry lists (`Schemas`, `Capabilities`, …) — replaced by flat `DescriptorEntries`.
 - `IDescriptorPackageBuilder` + `DefaultDescriptorPackageBuilder` — stateless singleton, explicit inventory input, consumes optional 6b/6c/6d/6e reports.
-- `DescriptorPackageHashComputer` — explicit field encoding with escaped string fields (`Esc`), null sentinels (`\\0`), ordinal ordering (`StringComparer.Ordinal`), invariant formatting (`CultureInfo.InvariantCulture`), SHA-256. `ContentHash`/`EvidenceHash`/`EnvelopeHash` fully AoT-safe and deterministic; zero runtime JSON.
+- `DescriptorPackageHashComputer` — explicit field encoding with escaped string fields (`Esc`), null sentinels (`\\0`), ordinal ordering (`StringComparer.Ordinal`), invariant formatting (`CultureInfo.InvariantCulture`), SHA-256. `ContentHash`/`EvidenceHash`/`EnvelopeHash` marked `[Obsolete]` — replaced by canonical hash infrastructure in Phase 7e.1.
 - `DescriptorPackageEvidence` + `EvidenceFinding` — aggregated evidence summary from topology/impact/compatibility/lifecycle reports.
 - `DescriptorPackageRelationshipEntry` — flattened relationship facts with `SourcePath` preservation from topology edges.
 - `DescriptorPackageDiagnostic` + 12 self-consistency diagnostic codes.
@@ -632,6 +632,7 @@ This thread achieved the following:
 - **Single-track principle**: ToolService delegates ALL activation logic to IDescriptorActivationRequestService
 - **Policy-driven eligibility**: AutoActivatable / RequiresHumanReview / NotActivatable
 - **Evidence binding**: ActivationBindingSnapshot captures review+package+evidence hashes at request time; IActivationEvidenceRechecker verifies no drift before gate execution
+- **BindingHashes**: 5 top-level slots (SourceReviewHash, ReviewManifestHash, PackageHashes, ContractHash, DefinitionHash) with nested `DescriptorPackageHashSet` for atomic package hash storage
 - **Runtime gate**: IRuntimeActivationGate is the ONLY component that mutates runtime state
 - **Safety-first default**: EvaluateGovernance defaults to ReviewRequired (not Allowed)
 - **Audit trail**: IDescriptorActivationAuditor records all decisions with ordering
@@ -641,6 +642,30 @@ This thread achieved the following:
 - **424 ControlPlane tests + 1 Boundary test pass**
 - **Design spec**: Phase 7e issue #17
 - **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface.
+
+### Canonical Evidence Hashing Migration (Phase 7e.1, 2026-06-26)
+
+- **Package canonical hash infrastructure**: `IDescriptorPackageCanonicalHashComputer` + `DefaultDescriptorPackageCanonicalHashComputer` — produces `DescriptorPackageHashSet` (PackageManifestHash, PackageEvidenceHash, PackageEvidenceEnvelopeHash) using canonical JSON writers + SHA-256
+- **3 new artifact kinds**: `CanonicalHashArtifactKind.PackageManifest=5`, `PackageEvidence=6`, `PackageEvidenceEnvelope=7`
+- **3 canonical JSON writers**: `ManifestCanonicalHashWriter`, `EvidenceCanonicalHashWriter`, `EnvelopeCanonicalHashWriter` — deterministic ordering, ordinal sorting, invariant formatting
+- **DescriptorPackageEvidenceEnvelope**: sealed record with PackageId, PackageVersion, CreatedAt, CreatedBy, Source, PackageManifestHash, PackageEvidenceHash + Metadata
+- **DescriptorPackageCanonicalShapeVersions**: 3 shape versions (PackageManifestV1, PackageEvidenceV1, PackageEvidenceEnvelopeV1)
+- **CanonicalHashContractVersions.DescriptorHash**: public constant `"canonical-hash-v1"` in Metadata.Abstractions
+- **DescriptorDraft review hash service**: `IDescriptorDraftReviewHashService` + `DefaultDescriptorDraftReviewHashService` — computes SourceReviewHash and ReviewManifestHash via canonical projections
+- **2 review projections**: `ReviewResultSourceBindingProjection`, `ReviewResultIntegrityProjection` — canonical JSON writers for review result binding and integrity
+- **DescriptorDraftReviewCanonicalShapeVersions**: 2 shape versions (SourceBindingV1, IntegrityV1)
+- **Package model migration**: `DescriptorPackage` gains `Hashes` (DescriptorPackageHashSet) + `EvidenceEnvelope` (DescriptorPackageEvidenceEnvelope); `DescriptorManifest.ContentHash/EvidenceHash/EnvelopeHash` marked `[Obsolete]`
+- **Builder migration**: `DefaultDescriptorPackageBuilder` injects `IDescriptorPackageCanonicalHashComputer`, replaces 3 legacy hash calls
+- **ToolService cleanup**: Removed ~100 lines of ad-hoc hash helpers from `DefaultAgentControlPlaneToolService`, injected `IDescriptorDraftReviewHashService`
+- **ReportBuilder migration**: `DefaultDescriptorReviewReportBuilder` injects `IDescriptorDraftReviewHashService`, removed `ComputeSourceReviewHash`
+- **Activation binding validator**: `ActivationBindingHashValidator` — checks completeness (all 5 slots populated) + AlgorithmVersion/ContractVersion consistency across all hashes
+- **Validator integration at 3 gates**: RequestService (submit), EvidenceRechecker (recheck — malformed = drift), RuntimeActivationGate (before execution)
+- **BindingHashes redesign**: 6 flat slots → 5 top-level slots with nested `DescriptorPackageHashSet` for atomic package hash storage
+- **DescriptorActivationDiagnosticCodes.BindingHashValidationFailed**: new diagnostic code
+- **Golden tests**: 8 sensitivity tests for package manifest/evidence, 8 for review source-binding/integrity, canonical sorting tests, 7-field metadata assertions
+- **Guard tests**: `AgentActivationCanonicalHashGuardTests` — boundary guard for canonical hash production
+- **39 files changed** (434 insertions, 339 deletions), 14 new files
+- **Test results**: 453 ControlPlane, 439 Metadata, 57 DescriptorDraft, 11 DependencyBoundaries — all passing
 
 ### Semantic String Governance (2026-06-25)
 

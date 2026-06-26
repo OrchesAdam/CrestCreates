@@ -3,6 +3,7 @@ using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using FluentAssertions;
 
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
@@ -185,12 +186,13 @@ public class ToolNameBoundaryTests : AgentControlPlaneTestBase
             EvidencePreviewId = "ev-001",
             Hashes = new BindingHashes
             {
-                SourceReviewHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
-                ManifestHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
-                EvidenceHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
-                EnvelopeHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
-                ContractHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" },
-                DefinitionHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "hash" }
+                SourceReviewHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1", ArtifactKind = CanonicalHashArtifactNames.ReviewResult, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.SourceBinding, ContractVersion = "canonical-hash-v1", CanonicalShapeVersion = "test-v1", Value = "hash" },
+                ReviewManifestHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1", ArtifactKind = CanonicalHashArtifactNames.ReviewResult, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Integrity, ContractVersion = "canonical-hash-v1", CanonicalShapeVersion = "test-v1", Value = "hash" },
+                PackageManifestHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1", ArtifactKind = CanonicalHashArtifactNames.PackageManifest, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.AuditEvidence, ContractVersion = "canonical-hash-v1", CanonicalShapeVersion = "test-v1", Value = "hash" },
+                PackageEvidenceHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1", ArtifactKind = CanonicalHashArtifactNames.PackageEvidence, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.AuditEvidence, ContractVersion = "canonical-hash-v1", CanonicalShapeVersion = "test-v1", Value = "hash" },
+                PackageEvidenceEnvelopeHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1", ArtifactKind = CanonicalHashArtifactNames.PackageEvidenceEnvelope, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.AuditEvidence, ContractVersion = "canonical-hash-v1", CanonicalShapeVersion = "test-v1", Value = "hash" },
+                ContractHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "canonical-hash-v1", CanonicalShapeVersion = "test-v1", Value = "hash" },
+                DefinitionHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Definition, ContractVersion = "canonical-hash-v1", CanonicalShapeVersion = "test-v1", Value = "hash" }
             },
             CreatedAt = DateTimeOffset.UtcNow
         };

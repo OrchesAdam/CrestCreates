@@ -4,6 +4,7 @@ using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using CrestCreates.DescriptorDraft.Abstractions;
+using CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
@@ -17,12 +18,15 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 {
     private readonly IDescriptorReviewMessageTemplateCatalog _templateCatalog;
     private readonly TimeProvider _clock;
+    private readonly IDescriptorDraftReviewHashService _reviewHashService;
 
     public DefaultDescriptorReviewReportBuilder(
         IDescriptorReviewMessageTemplateCatalog templateCatalog,
+        IDescriptorDraftReviewHashService reviewHashService,
         TimeProvider? clock = null)
     {
         _templateCatalog = templateCatalog ?? throw new ArgumentNullException(nameof(templateCatalog));
+        _reviewHashService = reviewHashService ?? throw new ArgumentNullException(nameof(reviewHashService));
         _clock = clock ?? TimeProvider.System;
     }
 
@@ -42,8 +46,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         var templateVersion = _templateCatalog.TemplateVersion;
         var draftVersion = draft.ProposedVersion ?? draft.BaseVersion ?? "0";
 
-        var sourceReviewHash = ComputeSourceReviewHash(reviewResult);
-        var reviewResultId = sourceReviewHash;
+        var sourceReviewHash = _reviewHashService.ComputeSourceReviewHash(reviewResult);
+        var reviewResultId = sourceReviewHash.Value;
         var reportIdRaw = $"{reviewResult.TenantId}|{reviewResult.DraftId}|{draftVersion}|{reviewResultId}|{contractVersion}|{templateVersion}";
         var reportId = ComputeSha256(reportIdRaw);
 
@@ -79,7 +83,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             TenantId = reviewResult.TenantId,
             ReviewResultId = reviewResultId,
             DraftVersion = draftVersion,
-            SourceReviewHash = sourceReviewHash,
+            SourceReviewHash = sourceReviewHash.Value,
             TemplateVersion = templateVersion,
             GeneratedAt = generatedAt,
             ContractVersion = contractVersion,
@@ -756,10 +760,9 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             {
                 ["DescriptorCount"] = preview.DescriptorIds.Count.ToString(),
                 ["HashCount"] = "3", // ManifestHash, EvidenceHash, EnvelopeHash
-                ["ManifestHash"] = preview.ManifestHash,
-                ["SnapshotHash"] = preview.SnapshotHash ?? "",
-                ["EvidenceHash"] = preview.EvidenceHash,
-                ["EnvelopeHash"] = preview.EnvelopeHash,
+                ["ManifestHash"] = preview.PackageManifestHash?.Value ?? "",
+                ["EvidenceHash"] = preview.PackageEvidenceHash?.Value ?? "",
+                ["EnvelopeHash"] = preview.PackageEvidenceEnvelopeHash?.Value ?? "",
             };
             items.Add(CreateItem("package_preview_present", "package_preview_available",
                 DescriptorReviewReportMessageTemplateIds.PackagePreviewPresentValue, DescriptorReviewSeverity.Info, parameters));
@@ -903,61 +906,6 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────
-
-    private static string ComputeSourceReviewHash(DescriptorDraftReviewResult reviewResult)
-    {
-        var sb = new StringBuilder();
-        sb.Append(reviewResult.TenantId);
-        sb.Append('|');
-        sb.Append(reviewResult.DraftId);
-        sb.Append('|');
-        sb.Append(reviewResult.IsActivationEligible);
-        sb.Append('|');
-        sb.Append(reviewResult.ValidationResult.IsValid);
-
-        foreach (var d in reviewResult.ValidationResult.Diagnostics.OrderBy(d => d.Code))
-        {
-            sb.Append('|');
-            sb.Append(d.Code);
-            sb.Append(':');
-            sb.Append((int)d.Severity);
-        }
-
-        foreach (var d in (reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>())
-            .OrderBy(d => d.Code))
-        {
-            sb.Append('|');
-            sb.Append(d.Code);
-            sb.Append(':');
-            sb.Append((int)d.Severity);
-        }
-
-        if (reviewResult.GovernanceDecision != null)
-        {
-            sb.Append('|');
-            sb.Append(reviewResult.GovernanceDecision.MaxDecision);
-            sb.Append('|');
-            sb.Append(reviewResult.GovernanceDecision.Decisions.Count);
-        }
-
-        if (reviewResult.MaterializationResult != null)
-        {
-            sb.Append('|');
-            sb.Append(reviewResult.MaterializationResult.IsMaterialized);
-            sb.Append('|');
-            sb.Append(reviewResult.MaterializationResult.ProposedInventory.Count);
-        }
-
-        if (reviewResult.ImpactAnalysisResult != null)
-        {
-            sb.Append('|');
-            sb.Append(reviewResult.ImpactAnalysisResult.AffectedDescriptors.Count);
-            sb.Append('|');
-            sb.Append(reviewResult.ImpactAnalysisResult.MaxSeverity);
-        }
-
-        return ComputeSha256(sb.ToString());
-    }
 
     private static string ComputeSha256(string input)
     {

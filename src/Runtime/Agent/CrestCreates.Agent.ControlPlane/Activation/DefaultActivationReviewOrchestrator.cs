@@ -71,7 +71,7 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
                 : null,
             BoundHashes = activationRequest.BindingSnapshot.Hashes,
             PackageManifestSummary = activationRequest.BindingSnapshot.Hashes is not null
-                ? $"ManifestHash={activationRequest.BindingSnapshot.Hashes.ManifestHash}, EvidenceHash={activationRequest.BindingSnapshot.Hashes.EvidenceHash}"
+                ? $"PackageManifestHash={activationRequest.BindingSnapshot.Hashes.PackageManifestHash}, PackageEvidenceHash={activationRequest.BindingSnapshot.Hashes.PackageEvidenceHash}"
                 : null,
             ImpactContext = activationRequest.GovernanceDecision.ToString()
         };

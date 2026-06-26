@@ -26,6 +26,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
     private readonly DraftAbstractions.IDescriptorDraftStore _draftStore;
     private readonly IRuntimeActivationGate _activationGate;
     private readonly IActivationEvidenceRechecker _evidenceRechecker;
+    private readonly ActivationBindingHashValidator _bindingHashValidator;
     private readonly ILogger<DefaultDescriptorActivationRequestService> _logger;
 
     private readonly ConcurrentDictionary<(string TenantId, string RequestId), ActivationResourceSnapshot> _requests = new();
@@ -38,6 +39,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         DraftAbstractions.IDescriptorDraftStore draftStore,
         IRuntimeActivationGate activationGate,
         IActivationEvidenceRechecker evidenceRechecker,
+        ActivationBindingHashValidator bindingHashValidator,
         ILogger<DefaultDescriptorActivationRequestService> logger)
     {
         _governanceService = governanceService;
@@ -47,6 +49,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         _draftStore = draftStore;
         _activationGate = activationGate;
         _evidenceRechecker = evidenceRechecker;
+        _bindingHashValidator = bindingHashValidator;
         _logger = logger;
     }
 
@@ -77,6 +80,28 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             };
             await RecordAudit(context, null, DescriptorActivationAuditAction.Block, "MissingBindingHashes", [diag], ct);
             return AgentToolResult<ActivationRequest>.InvalidRequest([diag]);
+        }
+
+        // Validate binding hashes for completeness and metadata consistency
+        var hashIssues = _bindingHashValidator.Validate(request.BindingSnapshot.Hashes);
+        var hashErrors = hashIssues.Where(i => i.Severity == BindingHashValidationSeverity.Error).ToList();
+        if (hashErrors.Count > 0)
+        {
+            var diags = hashErrors.Select(i => new AgentToolDiagnostic
+            {
+                Code = DescriptorActivationDiagnosticCodes.BindingHashValidationFailedValue,
+                Severity = AgentToolDiagnosticSeverity.Error,
+                Message = $"Binding hash validation failed at slot '{i.Slot}': {i.Description}"
+            }).ToList();
+            await RecordAudit(context, null, DescriptorActivationAuditAction.Block, "BindingHashValidationFailed", diags, ct);
+            return AgentToolResult<ActivationRequest>.InvalidRequest(diags);
+        }
+
+        // Log warnings without blocking
+        var hashWarnings = hashIssues.Where(i => i.Severity == BindingHashValidationSeverity.Warning).ToList();
+        foreach (var w in hashWarnings)
+        {
+            _logger.LogWarning("Binding hash warning at slot '{Slot}': {Description}", w.Slot, w.Description);
         }
 
         // Resolve draft
@@ -266,26 +291,26 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
 
         // Verify the review decision is bound to the same evidence as the request.
         // Inconsistency means the reviewer approved a different package/evidence than what the request was bound to.
-        if (reviewDecision.BoundEvidenceHash != request.BindingSnapshot.Hashes.EvidenceHash)
+        if (reviewDecision.BoundEvidenceHash != request.BindingSnapshot.Hashes.PackageEvidenceHash)
         {
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.ReviewEvidenceMismatchValue,
                 Severity = AgentToolDiagnosticSeverity.Error,
-                Message = $"Review decision evidence hash '{reviewDecision.BoundEvidenceHash}' does not match request binding hash '{request.BindingSnapshot.Hashes.EvidenceHash}'."
+                Message = $"Review decision evidence hash '{reviewDecision.BoundEvidenceHash}' does not match request binding hash '{request.BindingSnapshot.Hashes.PackageEvidenceHash}'."
             };
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.Block,
                 "ReviewEvidenceMismatch", [diag], ct, request);
             return AgentToolResult<ActivationRequest>.InvalidRequest([diag]);
         }
 
-        if (reviewDecision.BoundEnvelopeHash != request.BindingSnapshot.Hashes.EnvelopeHash)
+        if (reviewDecision.BoundEnvelopeHash != request.BindingSnapshot.Hashes.PackageEvidenceEnvelopeHash)
         {
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.ReviewEnvelopeMismatchValue,
                 Severity = AgentToolDiagnosticSeverity.Error,
-                Message = $"Review decision envelope hash '{reviewDecision.BoundEnvelopeHash}' does not match request binding hash '{request.BindingSnapshot.Hashes.EnvelopeHash}'."
+                Message = $"Review decision envelope hash '{reviewDecision.BoundEnvelopeHash}' does not match request binding hash '{request.BindingSnapshot.Hashes.PackageEvidenceEnvelopeHash}'."
             };
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.Block,
                 "ReviewEnvelopeMismatch", [diag], ct, request);
@@ -669,8 +694,8 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             TargetDescriptorRef = request?.DraftId,
             Outcome = outcome,
             CorrelationId = context.CorrelationId,
-            EvidenceHash = request?.BindingSnapshot?.Hashes?.EvidenceHash,
-            EnvelopeHash = request?.BindingSnapshot?.Hashes?.EnvelopeHash,
+            EvidenceHash = request?.BindingSnapshot?.Hashes?.PackageEvidenceHash,
+            EnvelopeHash = request?.BindingSnapshot?.Hashes?.PackageEvidenceEnvelopeHash,
             Timestamp = DateTimeOffset.UtcNow
         };
 

@@ -1,6 +1,7 @@
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
@@ -498,9 +499,9 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         SetupReviewServiceReturnsFull(draft,
             packagePreview: new DraftPackagePreview
             {
-                ManifestHash = "mh-1",
-                EvidenceHash = "eh-1",
-                EnvelopeHash = "env-1",
+                PackageManifestHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "mh-1" },
+                PackageEvidenceHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "eh-1" },
+                PackageEvidenceEnvelopeHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "env-1" },
                 DescriptorIds = new[] { "desc-002" } // known Capability descriptor
             });
 
@@ -534,9 +535,9 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         SetupReviewServiceReturnsFull(draft,
             packagePreview: new DraftPackagePreview
             {
-                ManifestHash = "mh-1",
-                EvidenceHash = "eh-1",
-                EnvelopeHash = "env-1",
+                PackageManifestHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "mh-1" },
+                PackageEvidenceHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "eh-1" },
+                PackageEvidenceEnvelopeHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "v1", ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "v1", CanonicalShapeVersion = "v1", Value = "env-1" },
                 DescriptorIds = new[] { "desc-001" }
             });
 

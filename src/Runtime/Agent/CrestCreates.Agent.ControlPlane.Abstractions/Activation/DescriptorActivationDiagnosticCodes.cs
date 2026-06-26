@@ -78,4 +78,7 @@ public static class DescriptorActivationDiagnosticCodes
 
     public const string HandoffDeniedValue = "ACTIVATION_HANDOFF_DENIED";
     public static DiagnosticCode HandoffDenied { get; } = new(HandoffDeniedValue);
+
+    public const string BindingHashValidationFailedValue = "ACTIVATION_BINDING_HASH_VALIDATION_FAILED";
+    public static DiagnosticCode BindingHashValidationFailed { get; } = new(BindingHashValidationFailedValue);
 }

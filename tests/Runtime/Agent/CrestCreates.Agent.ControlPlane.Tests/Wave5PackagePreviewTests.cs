@@ -37,8 +37,8 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
         result.Value.Should().NotBeNull();
-        result.Value!.ManifestHash.Should().NotBeNullOrEmpty();
-        result.Value.EvidenceHash.Should().NotBeNullOrEmpty();
+        result.Value!.PackageManifestHash?.Value.Should().NotBeNullOrEmpty();
+        result.Value.PackageEvidenceHash?.Value.Should().NotBeNullOrEmpty();
     }
 
     [Fact]
@@ -272,7 +272,7 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
         var getResult = await service.GetPackagePreviewAsync(getContext, previewId);
 
         getResult.Status.Should().Be(AgentToolResultStatus.Success);
-        getResult.Value!.ManifestHash.Should().NotBeNullOrEmpty();
+        getResult.Value!.PackageManifestHash?.Value.Should().NotBeNullOrEmpty();
     }
 
     [Fact]

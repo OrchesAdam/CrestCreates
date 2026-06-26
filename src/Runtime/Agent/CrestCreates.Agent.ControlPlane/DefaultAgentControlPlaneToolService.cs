@@ -1,6 +1,4 @@
 ﻿using System.Collections.Concurrent;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
@@ -8,6 +6,7 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using CrestCreates.Agent.ControlPlane.Activation;
 using CrestCreates.Agent.ControlPlane.Projections;
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
+using DraftCanonicalHashing = CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
 using CrestCreates.Agent.DraftContracts.Dto;
 using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.Metadata.Abstractions;
@@ -51,6 +50,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly IDescriptorTopologyBuilder _topologyBuilder;
     private readonly IDescriptorPackageBuilder _packageBuilder;
     private readonly IDescriptorStableHashBuilder _hashBuilder;
+    private readonly DraftCanonicalHashing.IDescriptorDraftReviewHashService _reviewHashService;
     private readonly ILogger<DefaultAgentControlPlaneToolService> _logger;
     private readonly AgentControlPlaneResourceResolver _resourceResolver;
     private readonly AgentTopologyVisibilityProjector _topologyProjector;
@@ -87,6 +87,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         IDescriptorPackageBuilder packageBuilder,
         ILogger<DefaultAgentControlPlaneToolService> logger,
         IDescriptorStableHashBuilder hashBuilder,
+        DraftCanonicalHashing.IDescriptorDraftReviewHashService reviewHashService,
         IDescriptorReviewReportBuilder reportBuilder,
         IDescriptorReviewReportRenderer reportRenderer,
         IDescriptorActivationRequestService activationRequestService,
@@ -107,6 +108,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         _topologyBuilder = topologyBuilder;
         _packageBuilder = packageBuilder;
         _hashBuilder = hashBuilder;
+        _reviewHashService = reviewHashService;
         _logger = logger;
         _reportBuilder = reportBuilder;
         _reportRenderer = reportRenderer;
@@ -1204,9 +1206,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             _reviewResults[(context.TenantId, reviewId)] = new ReviewResourceSnapshot(projectedReview, snapshot.Draft, DateTimeOffset.UtcNow);
 
             // Store review hashes for evidence recheck
-            var sourceReviewHash = ComputeSourceReviewHash(reviewResult);
-            var manifestHash = ComputeReviewManifestHash(reviewResult);
-            _artifactResolver.StoreReviewHashes(context.TenantId, reviewId, sourceReviewHash, manifestHash);
+            var sourceReviewHash = _reviewHashService.ComputeSourceReviewHash(reviewResult);
+            var reviewManifestHash = _reviewHashService.ComputeReviewManifestHash(reviewResult);
+            _artifactResolver.StoreReviewHashes(context.TenantId, reviewId, sourceReviewHash, reviewManifestHash);
 
             var reviewed = snapshot.Draft with { Status = DraftAbstractions.DescriptorDraftStatus.Reviewed };
             await _draftStore.SaveAsync(reviewed, ct);
@@ -1868,10 +1870,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var pkg = _packageBuilder.Build(pkgRequest);
             var preview = new DraftPackagePreview
             {
-                ManifestHash = pkg.Manifest.ContentHash,
-                SnapshotHash = null,
-                EvidenceHash = pkg.Manifest.EvidenceHash ?? "",
-                EnvelopeHash = pkg.Manifest.EnvelopeHash ?? "",
+                PackageManifestHash = pkg.Hashes?.PackageManifestHash,
+                PackageEvidenceHash = pkg.Hashes?.PackageEvidenceHash,
+                PackageEvidenceEnvelopeHash = pkg.Hashes?.PackageEvidenceEnvelopeHash,
                 DescriptorIds = pkg.Manifest.DescriptorEntries.Select(e => e.Ref.Id).ToList().AsReadOnly()
             };
 
@@ -1890,8 +1891,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft);
 
             // Store package hash for evidence recheck
-            var evidenceHash = CreatePackageCanonicalHash(preview.EvidenceHash, CanonicalHashPurposeNames.AuditEvidence);
-            _artifactResolver.StorePackageHash(context.TenantId, previewId, evidenceHash);
+            if (pkg.Hashes is not null)
+                _artifactResolver.StorePackageHashSet(context.TenantId, previewId, pkg.Hashes);
 
             var audit2 = BuildAudit(context, AgentToolResultStatus.Success, []);
             audit2 = audit2 with
@@ -1999,10 +2000,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var pkg = _packageBuilder.Build(pkgRequest);
             var preview = new DraftPackagePreview
             {
-                ManifestHash = pkg.Manifest.ContentHash,
-                SnapshotHash = null,
-                EvidenceHash = pkg.Manifest.EvidenceHash ?? "",
-                EnvelopeHash = pkg.Manifest.EnvelopeHash ?? "",
+                PackageManifestHash = pkg.Hashes?.PackageManifestHash,
+                PackageEvidenceHash = pkg.Hashes?.PackageEvidenceHash,
+                PackageEvidenceEnvelopeHash = pkg.Hashes?.PackageEvidenceEnvelopeHash,
                 DescriptorIds = pkg.Manifest.DescriptorEntries.Select(e => e.Ref.Id).ToList().AsReadOnly()
             };
 
@@ -2033,9 +2033,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             _evidencePreviews[(context.TenantId, evidencePreviewId)] = new EvidencePreviewResourceSnapshot(
                 new EvidencePreviewEntry(draft.DraftId, context.TenantId, result), snapshot.Draft);
 
-            // Store evidence hash for evidence recheck
-            var envelopeHash = CreatePackageCanonicalHash(preview.EnvelopeHash, CanonicalHashPurposeNames.AuditEvidence);
-            _artifactResolver.StoreEvidenceHash(context.TenantId, evidencePreviewId, envelopeHash);
+            // Store package hash for evidence recheck
+            if (pkg.Hashes is not null)
+                _artifactResolver.StorePackageHashSet(context.TenantId, evidencePreviewId, pkg.Hashes);
 
             var audit = BuildAudit(context, AgentToolResultStatus.Success, result.Diagnostics);
             audit = audit with
@@ -2518,112 +2518,5 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         }
 
         return actions.AsReadOnly();
-    }
-
-    // ── Evidence recheck hash helpers ──
-
-    private static CanonicalHash CreateReviewCanonicalHash(string digest, string purpose)
-        => new()
-        {
-            Algorithm = "SHA-256",
-            AlgorithmVersion = "sha256-adhoc-v1",
-            ArtifactKind = CanonicalHashArtifactNames.ReviewResult,
-            Scope = CanonicalHashScopeNames.InternalFull,
-            Purpose = purpose,
-            ContractVersion = AgentControlPlaneContractVersion.Current,
-            CanonicalShapeVersion = "sha256-adhoc-v1",
-            Value = digest
-        };
-
-    private static CanonicalHash CreatePackageCanonicalHash(string digest, string purpose)
-        => new()
-        {
-            Algorithm = "SHA-256",
-            AlgorithmVersion = "sha256-adhoc-v1",
-            ArtifactKind = CanonicalHashArtifactNames.Package,
-            Scope = CanonicalHashScopeNames.InternalFull,
-            Purpose = purpose,
-            ContractVersion = AgentControlPlaneContractVersion.Current,
-            CanonicalShapeVersion = "sha256-adhoc-v1",
-            Value = digest
-        };
-
-    // TODO: Migrate to canonical source-binding writer when #30 provides SourceBinding CanonicalHashProfile.
-    // Current ad hoc pipe-delimited hash is interim; hash input format will change when canonical writer is available.
-    private static CanonicalHash ComputeSourceReviewHash(DraftAbstractions.DescriptorDraftReviewResult reviewResult)
-    {
-        var sb = new StringBuilder();
-        sb.Append(reviewResult.TenantId);
-        sb.Append('|');
-        sb.Append(reviewResult.DraftId);
-        sb.Append('|');
-        sb.Append(reviewResult.IsActivationEligible);
-        sb.Append('|');
-        sb.Append(reviewResult.ValidationResult.IsValid);
-
-        foreach (var d in reviewResult.ValidationResult.Diagnostics.OrderBy(d => d.Code))
-        {
-            sb.Append('|');
-            sb.Append(d.Code);
-            sb.Append(':');
-            sb.Append((int)d.Severity);
-        }
-
-        foreach (var d in (reviewResult.Diagnostics ?? Array.Empty<DraftAbstractions.DescriptorDraftDiagnostic>())
-            .OrderBy(d => d.Code))
-        {
-            sb.Append('|');
-            sb.Append(d.Code);
-            sb.Append(':');
-            sb.Append((int)d.Severity);
-        }
-
-        if (reviewResult.GovernanceDecision != null)
-        {
-            sb.Append('|');
-            sb.Append(reviewResult.GovernanceDecision.MaxDecision);
-            sb.Append('|');
-            sb.Append(reviewResult.GovernanceDecision.Decisions.Count);
-        }
-
-        if (reviewResult.MaterializationResult != null)
-        {
-            sb.Append('|');
-            sb.Append(reviewResult.MaterializationResult.IsMaterialized);
-            sb.Append('|');
-            sb.Append(reviewResult.MaterializationResult.ProposedInventory.Count);
-        }
-
-        if (reviewResult.ImpactAnalysisResult != null)
-        {
-            sb.Append('|');
-            sb.Append(reviewResult.ImpactAnalysisResult.AffectedDescriptors.Count);
-            sb.Append('|');
-            sb.Append(reviewResult.ImpactAnalysisResult.MaxSeverity);
-        }
-
-        var digest = ComputeSha256(sb.ToString());
-        return CreateReviewCanonicalHash(digest, CanonicalHashPurposeNames.SourceBinding);
-    }
-
-    private static CanonicalHash ComputeReviewManifestHash(DraftAbstractions.DescriptorDraftReviewResult reviewResult)
-    {
-        var sb = new StringBuilder();
-        sb.Append(reviewResult.DraftId);
-        sb.Append('|');
-        sb.Append(reviewResult.ValidationResult.IsValid);
-        sb.Append('|');
-        sb.Append(reviewResult.IsActivationEligible);
-        sb.Append('|');
-        sb.Append(reviewResult.Diagnostics.Count);
-
-        var digest = ComputeSha256(sb.ToString());
-        return CreateReviewCanonicalHash(digest, CanonicalHashPurposeNames.Integrity);
-    }
-
-    private static string ComputeSha256(string input)
-    {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
-        return Convert.ToHexStringLower(bytes);
     }
 }

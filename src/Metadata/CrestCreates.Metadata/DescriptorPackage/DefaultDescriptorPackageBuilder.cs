@@ -11,10 +11,14 @@ namespace CrestCreates.Metadata.DescriptorPackage;
 public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
 {
     private readonly IDescriptorStableHashBuilder _hashBuilder;
+    private readonly IDescriptorPackageCanonicalHashComputer? _packageHashComputer;
 
-    public DefaultDescriptorPackageBuilder(IDescriptorStableHashBuilder hashBuilder)
+    public DefaultDescriptorPackageBuilder(
+        IDescriptorStableHashBuilder hashBuilder,
+        IDescriptorPackageCanonicalHashComputer? packageHashComputer = null)
     {
         _hashBuilder = hashBuilder;
+        _packageHashComputer = packageHashComputer;
     }
 
     public Package Build(DescriptorPackageBuildRequest request)
@@ -30,14 +34,7 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
         // Build relationship entries from topology
         var relationships = BuildRelationshipEntries(request.TopologySnapshot);
 
-        // Compute evidence hash
-        var evidenceHash = DescriptorPackageHashComputer.ComputeEvidenceHash(evidence);
-
-        // Compute content hash
-        var contentHash = DescriptorPackageHashComputer.ComputeContentHash(
-            request.Options.FormatVersion, entries, relationships);
-
-        // Build manifest
+        // Build manifest structure first (without hashes) — needed as input to canonical hash
         var manifest = new DescriptorManifest
         {
             FormatVersion = request.Options.FormatVersion,
@@ -48,15 +45,42 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
             CreatedBy = request.CreatedBy,
             Source = request.Source,
             DescriptorCount = entries.Count,
-            DescriptorEntries = entries,
-            ContentHash = contentHash,
-            EvidenceHash = evidenceHash,
-            EnvelopeHash = DescriptorPackageHashComputer.ComputeEnvelopeHash(
-                contentHash, evidenceHash, request.PackageId, request.PackageVersion,
-                createdAt, request.CreatedBy, request.Source)
+            DescriptorEntries = entries
         };
 
-        // Build snapshot
+        // Compute atomic hash set through the canonical hash computer
+        var envelopeMetadata = new DescriptorPackageEvidenceEnvelopeMetadata
+        {
+            PackageId = request.PackageId,
+            PackageVersion = request.PackageVersion,
+            CreatedAt = createdAt,
+            CreatedBy = request.CreatedBy,
+            Source = request.Source
+        };
+
+        if (_packageHashComputer == null)
+            throw new InvalidOperationException(
+                "IDescriptorPackageCanonicalHashComputer is required. " +
+                "Call AddDescriptorPackaging() during DI registration.");
+
+        var hashSet = _packageHashComputer.ComputeHashSet(manifest, evidence, envelopeMetadata);
+
+        // Note: DescriptorManifest.ContentHash/EvidenceHash/EnvelopeHash are [Obsolete].
+        // They are NOT populated — consumers must use DescriptorPackage.Hashes instead.
+
+        // Build evidence envelope
+        var evidenceEnvelope = new DescriptorPackageEvidenceEnvelope
+        {
+            PackageId = request.PackageId,
+            PackageVersion = request.PackageVersion,
+            CreatedAt = createdAt,
+            CreatedBy = request.CreatedBy,
+            Source = request.Source,
+            PackageManifestHash = hashSet.PackageManifestHash,
+            PackageEvidenceHash = hashSet.PackageEvidenceHash
+        };
+
+        // Build snapshot (uses package manifest hash for deterministic SnapshotId)
         var snapshotEntries = entries.Select(e => new SnapshotEntry
         {
             Ref = e.Ref,
@@ -70,7 +94,7 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
 
         var snapshot = new DescriptorSnapshot
         {
-            SnapshotId = $"snapshot_{contentHash[..16]}",
+            SnapshotId = $"snapshot_{hashSet.PackageManifestHash.Value[..16]}",
             PackageId = request.PackageId,
             PackageVersion = request.PackageVersion,
             CreatedAt = createdAt,
@@ -79,14 +103,16 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
         };
 
         // Run self-consistency diagnostics
-        var diagnostics = RunDiagnostics(request, entries, evidence, contentHash);
+        var diagnostics = RunDiagnostics(request, entries, evidence, hashSet.PackageManifestHash.Value);
 
         return new Package
         {
             Manifest = manifest,
             Snapshot = snapshot,
             Evidence = evidence,
-            Diagnostics = diagnostics
+            Diagnostics = diagnostics,
+            Hashes = hashSet,
+            EvidenceEnvelope = evidenceEnvelope
         };
     }
 

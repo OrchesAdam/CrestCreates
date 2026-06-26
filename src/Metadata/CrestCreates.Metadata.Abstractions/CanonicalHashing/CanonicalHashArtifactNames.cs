@@ -11,4 +11,7 @@ public static class CanonicalHashArtifactNames
     public const string ReviewResult = "ReviewResult";
     public const string Package = "Package";
     public const string Report = "Report";
+    public const string PackageManifest = "PackageManifest";
+    public const string PackageEvidence = "PackageEvidence";
+    public const string PackageEvidenceEnvelope = "PackageEvidenceEnvelope";
 }

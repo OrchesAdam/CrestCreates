@@ -1,6 +1,9 @@
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using CrestCreates.Metadata.CanonicalHashing;
+using CrestCreates.Metadata.DescriptorPackage;
+using CrestCreates.Metadata.DescriptorPackage.CanonicalHashing;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -11,12 +14,14 @@ public class DescriptorPackageSerializerTests
 {
     private readonly ICanonicalHashComputer _hashComputer = new DefaultCanonicalHashComputer();
     private readonly IDescriptorStableHashBuilder _hashBuilder;
+    private readonly IDescriptorPackageCanonicalHashComputer _packageHashComputer;
     private readonly IDescriptorPackageBuilder _builder;
 
     public DescriptorPackageSerializerTests()
     {
         _hashBuilder = new DescriptorStableHashBuilder(_hashComputer);
-        _builder = new DefaultDescriptorPackageBuilder(_hashBuilder);
+        _packageHashComputer = new DefaultDescriptorPackageCanonicalHashComputer(_hashComputer);
+        _builder = new DefaultDescriptorPackageBuilder(_hashBuilder, _packageHashComputer);
     }
 
     private readonly IDescriptorPackageSerializer _serializer = new DescriptorPackageSerializer();

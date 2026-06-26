@@ -1,4 +1,5 @@
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 
 namespace CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 
@@ -19,22 +20,16 @@ public interface IActivationBindingArtifactResolver
         CancellationToken ct = default);
 
     /// <summary>
-    /// Stores source review hash and manifest hash for a review result.
+    /// Stores source review hash and review manifest hash for a review result.
     /// Called by the ToolService when a review result is created.
     /// </summary>
-    void StoreReviewHashes(string tenantId, string reviewResultId, CanonicalHash sourceReviewHash, CanonicalHash manifestHash);
+    void StoreReviewHashes(string tenantId, string reviewResultId, CanonicalHash sourceReviewHash, CanonicalHash reviewManifestHash);
 
     /// <summary>
-    /// Stores the evidence hash for a package preview.
-    /// Called by the ToolService when a package preview is created.
+    /// Stores the package hash set (manifest, evidence, envelope) for a review result.
+    /// Called by the ToolService when package and evidence previews are created.
     /// </summary>
-    void StorePackageHash(string tenantId, string packagePreviewId, CanonicalHash evidenceHash);
-
-    /// <summary>
-    /// Stores the envelope hash for an evidence preview.
-    /// Called by the ToolService when an evidence preview is created.
-    /// </summary>
-    void StoreEvidenceHash(string tenantId, string evidencePreviewId, CanonicalHash envelopeHash);
+    void StorePackageHashSet(string tenantId, string reviewResultId, DescriptorPackageHashSet packageHashes);
 }
 
 /// <summary>
@@ -44,9 +39,8 @@ public interface IActivationBindingArtifactResolver
 public sealed record ResolvedBindingArtifacts
 {
     public CanonicalHash? CurrentSourceReviewHash { get; init; }
-    public CanonicalHash? CurrentManifestHash { get; init; }
-    public CanonicalHash? CurrentEvidenceHash { get; init; }
-    public CanonicalHash? CurrentEnvelopeHash { get; init; }
+    public CanonicalHash? CurrentReviewManifestHash { get; init; }
+    public DescriptorPackageHashSet? CurrentPackageHashes { get; init; }
     public CanonicalHash? CurrentContractHash { get; init; }
     public CanonicalHash? CurrentDefinitionHash { get; init; }
 }

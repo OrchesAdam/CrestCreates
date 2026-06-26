@@ -14,7 +14,7 @@ namespace CrestCreates.Metadata.DescriptorPackage;
 /// now use the canonical JSON hash runtime (<see cref="ICanonicalHashComputer"/>).
 /// Package hash migration to canonical JSON is planned for v2.
 /// </summary>
-[Obsolete("Pipe-delimited hash format — migrate to ICanonicalHashComputer in v2.")]
+[Obsolete("Use IDescriptorPackageCanonicalHashComputer instead.")]
 public static class DescriptorPackageHashComputer
 {
     private const string NullSentinel = "\\0";

@@ -28,6 +28,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
         services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
         services.TryAddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
+        services.TryAddSingleton<ActivationBindingHashValidator>();
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
         return services;
@@ -35,8 +36,6 @@ public static class AgentControlPlaneServiceCollectionExtensions
 
     /// <summary>
     /// Registers Agent Control Plane services with the specified authorization options.
-    /// The options are used by both the coarse authorization service and the
-    /// descriptor kind visibility scope, ensuring a single policy truth source.
     /// </summary>
     public static IServiceCollection AddAgentControlPlane(
         this IServiceCollection services,
@@ -52,6 +51,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
         services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
         services.TryAddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
+        services.TryAddSingleton<ActivationBindingHashValidator>();
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
         return services;
@@ -82,6 +82,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
         services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
         services.TryAddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
+        services.TryAddSingleton<ActivationBindingHashValidator>();
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
         return services;

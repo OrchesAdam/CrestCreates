@@ -2,6 +2,7 @@ using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using CrestCreates.Metadata.CanonicalHashing;
+using CrestCreates.Metadata.DescriptorPackage.CanonicalHashing;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -13,13 +14,15 @@ public class DescriptorPackageDiffTests
 {
     private readonly ICanonicalHashComputer _hashComputer = new DefaultCanonicalHashComputer();
     private readonly IDescriptorStableHashBuilder _hashBuilder;
+    private readonly IDescriptorPackageCanonicalHashComputer _packageHashComputer;
     private readonly IDescriptorPackageBuilder _builder;
     private readonly IDescriptorPackageDiffer _differ = new DescriptorPackageDiffer();
 
     public DescriptorPackageDiffTests()
     {
         _hashBuilder = new DescriptorStableHashBuilder(_hashComputer);
-        _builder = new DefaultDescriptorPackageBuilder(_hashBuilder);
+        _packageHashComputer = new DefaultDescriptorPackageCanonicalHashComputer(_hashComputer);
+        _builder = new DefaultDescriptorPackageBuilder(_hashBuilder, _packageHashComputer);
     }
 
     private DescriptorPackageType BuildPackage(string pkgId, IDescriptor[] descriptors, string version = "1.0.0")

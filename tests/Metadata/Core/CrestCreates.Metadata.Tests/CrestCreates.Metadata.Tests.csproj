@@ -18,6 +18,11 @@
     <PackageReference Include="Moq" />
   </ItemGroup>
   <ItemGroup>
+    <None Update="DescriptorPackage\CanonicalHashing\GoldenFiles\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
     <ProjectReference Include="../../../../src/Metadata/CrestCreates.Schema.Abstractions/CrestCreates.Schema.Abstractions.csproj" />

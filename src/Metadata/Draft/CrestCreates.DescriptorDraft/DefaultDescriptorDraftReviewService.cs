@@ -193,10 +193,9 @@ public sealed class DefaultDescriptorDraftReviewService : IDescriptorDraftReview
             var pkg = _packageBuilder.Build(pkgRequest);
             packagePreview = new DescriptorPackagePreview
             {
-                ManifestHash = pkg.Manifest.ContentHash,
-                SnapshotHash = null,
-                EvidenceHash = pkg.Manifest.EvidenceHash ?? "",
-                EnvelopeHash = pkg.Manifest.EnvelopeHash ?? "",
+                PackageManifestHash = pkg.Hashes?.PackageManifestHash,
+                PackageEvidenceHash = pkg.Hashes?.PackageEvidenceHash,
+                PackageEvidenceEnvelopeHash = pkg.Hashes?.PackageEvidenceEnvelopeHash,
                 DescriptorIds = pkg.Manifest.DescriptorEntries
                     .Select(e => e.Ref.Id)
                     .ToList().AsReadOnly()

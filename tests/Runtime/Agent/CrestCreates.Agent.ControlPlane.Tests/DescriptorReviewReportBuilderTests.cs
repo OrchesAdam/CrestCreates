@@ -7,25 +7,53 @@ using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 using FluentAssertions;
+using Moq;
 using Xunit;
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
+using DraftCanonicalHashing = CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
 
 namespace CrestCreates.Agent.ControlPlane.Tests;
 
 public class DescriptorReviewReportBuilderTests
 {
     private readonly DefaultDescriptorReviewMessageTemplateCatalog _templateCatalog = new();
+    private readonly Mock<DraftCanonicalHashing.IDescriptorDraftReviewHashService> _reviewHashServiceMock = new();
     private readonly DefaultDescriptorReviewReportBuilder _builder;
 
     public DescriptorReviewReportBuilderTests()
     {
-        _builder = new DefaultDescriptorReviewReportBuilder(_templateCatalog);
+        _reviewHashServiceMock
+            .Setup(x => x.ComputeSourceReviewHash(It.IsAny<DraftAbstractions.DescriptorDraftReviewResult>()))
+            .Returns(new CanonicalHash
+            {
+                Algorithm = "SHA-256",
+                AlgorithmVersion = "v1",
+                ArtifactKind = CanonicalHashArtifactNames.Descriptor,
+                Scope = CanonicalHashScopeNames.InternalFull,
+                Purpose = CanonicalHashPurposeNames.SourceBinding,
+                ContractVersion = "v1",
+                CanonicalShapeVersion = "v1",
+                Value = "test-source-review-hash"
+            });
+        _builder = new DefaultDescriptorReviewReportBuilder(_templateCatalog, _reviewHashServiceMock.Object);
     }
 
     // ─────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────
+
+    private static CanonicalHash CreateCanonicalHash(string value) => new()
+    {
+        Algorithm = "SHA-256",
+        AlgorithmVersion = "v1",
+        ArtifactKind = CanonicalHashArtifactNames.Descriptor,
+        Scope = CanonicalHashScopeNames.InternalFull,
+        Purpose = CanonicalHashPurposeNames.Contract,
+        ContractVersion = "v1",
+        CanonicalShapeVersion = "v1",
+        Value = value
+    };
 
     private static Draft CreateDraft(
         string draftId = "draft-001",
@@ -363,10 +391,9 @@ public class DescriptorReviewReportBuilderTests
         var draft = CreateDraft();
         var packagePreview = new DraftAbstractions.DescriptorPackagePreview
         {
-            ManifestHash = "mh-001",
-            SnapshotHash = "sh-001",
-            EvidenceHash = "eh-001",
-            EnvelopeHash = "env-001",
+            PackageManifestHash = CreateCanonicalHash("mh-001"),
+            PackageEvidenceHash = CreateCanonicalHash("eh-001"),
+            PackageEvidenceEnvelopeHash = CreateCanonicalHash("env-001"),
             DescriptorIds = new[] { "desc-1", "desc-2", "desc-3" },
         };
         var reviewResult = CreateReviewResult() with { PackagePreview = packagePreview };
@@ -379,7 +406,6 @@ public class DescriptorReviewReportBuilderTests
         section.Items.Should().HaveCount(1);
         var item = section.Items[0];
         item.Parameters["ManifestHash"].Should().Be("mh-001");
-        item.Parameters["SnapshotHash"].Should().Be("sh-001");
         item.Parameters["DescriptorCount"].Should().Be("3");
     }
 
@@ -682,10 +708,9 @@ public class DescriptorReviewReportBuilderTests
 
         var packagePreview = new DraftAbstractions.DescriptorPackagePreview
         {
-            ManifestHash = "mh-001",
-            SnapshotHash = "sh-001",
-            EvidenceHash = "eh-001",
-            EnvelopeHash = "env-001",
+            PackageManifestHash = CreateCanonicalHash("mh-001"),
+            PackageEvidenceHash = CreateCanonicalHash("eh-001"),
+            PackageEvidenceEnvelopeHash = CreateCanonicalHash("env-001"),
             DescriptorIds = ["desc-pkg-1", "desc-pkg-2"],
         };
 

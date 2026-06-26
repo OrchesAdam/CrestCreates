@@ -4,6 +4,7 @@ using CrestCreates.Agent.ControlPlane.Activation;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
+using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -34,8 +35,9 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
             DraftAbstractions.IDescriptorDraftStore draftStore,
             IRuntimeActivationGate activationGate,
             IActivationEvidenceRechecker evidenceRechecker,
+            ActivationBindingHashValidator bindingHashValidator,
             ILogger<DefaultDescriptorActivationRequestService> logger)
-            : base(governanceService, policyProvider, auditor, hashBuilder, draftStore, activationGate, evidenceRechecker, logger)
+            : base(governanceService, policyProvider, auditor, hashBuilder, draftStore, activationGate, evidenceRechecker, bindingHashValidator, logger)
         {
         }
 
@@ -66,12 +68,55 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
     private static BindingHashes CreateTestBindingHashes()
         => new()
         {
-            SourceReviewHash = CreateTestCanonicalHash("src-review-hash"),
-            ManifestHash = CreateTestCanonicalHash("manifest-hash"),
-            EvidenceHash = CreateTestCanonicalHash("evidence-hash"),
-            EnvelopeHash = CreateTestCanonicalHash("envelope-hash"),
-            ContractHash = CreateTestCanonicalHash("contract-hash"),
-            DefinitionHash = CreateTestCanonicalHash("definition-hash")
+            SourceReviewHash = new CanonicalHash
+            {
+                Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+                ArtifactKind = CanonicalHashArtifactNames.ReviewResult, Scope = CanonicalHashScopeNames.InternalFull,
+                Purpose = CanonicalHashPurposeNames.SourceBinding, ContractVersion = "canonical-hash-v1",
+                CanonicalShapeVersion = "test-v1", Value = "src-review-hash"
+            },
+            ReviewManifestHash = new CanonicalHash
+            {
+                Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+                ArtifactKind = CanonicalHashArtifactNames.ReviewResult, Scope = CanonicalHashScopeNames.InternalFull,
+                Purpose = CanonicalHashPurposeNames.Integrity, ContractVersion = "canonical-hash-v1",
+                CanonicalShapeVersion = "test-v1", Value = "manifest-hash"
+            },
+            PackageManifestHash = new CanonicalHash
+            {
+                Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+                ArtifactKind = CanonicalHashArtifactNames.PackageManifest, Scope = CanonicalHashScopeNames.InternalFull,
+                Purpose = CanonicalHashPurposeNames.AuditEvidence, ContractVersion = "canonical-hash-v1",
+                CanonicalShapeVersion = "test-v1", Value = "pkg-manifest-hash"
+            },
+            PackageEvidenceHash = new CanonicalHash
+            {
+                Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+                ArtifactKind = CanonicalHashArtifactNames.PackageEvidence, Scope = CanonicalHashScopeNames.InternalFull,
+                Purpose = CanonicalHashPurposeNames.AuditEvidence, ContractVersion = "canonical-hash-v1",
+                CanonicalShapeVersion = "test-v1", Value = "evidence-hash"
+            },
+            PackageEvidenceEnvelopeHash = new CanonicalHash
+            {
+                Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+                ArtifactKind = CanonicalHashArtifactNames.PackageEvidenceEnvelope, Scope = CanonicalHashScopeNames.InternalFull,
+                Purpose = CanonicalHashPurposeNames.AuditEvidence, ContractVersion = "canonical-hash-v1",
+                CanonicalShapeVersion = "test-v1", Value = "envelope-hash"
+            },
+            ContractHash = new CanonicalHash
+            {
+                Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+                ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull,
+                Purpose = CanonicalHashPurposeNames.Contract, ContractVersion = "canonical-hash-v1",
+                CanonicalShapeVersion = "test-v1", Value = "contract-hash"
+            },
+            DefinitionHash = new CanonicalHash
+            {
+                Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+                ArtifactKind = CanonicalHashArtifactNames.Descriptor, Scope = CanonicalHashScopeNames.InternalFull,
+                Purpose = CanonicalHashPurposeNames.Definition, ContractVersion = "canonical-hash-v1",
+                CanonicalShapeVersion = "test-v1", Value = "definition-hash"
+            }
         };
 
     private static ActivationBindingSnapshot CreateTestBindingSnapshot(string draftId = "draft-001")
@@ -103,8 +148,8 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
             ActorId = actorId,
             Reason = outcome == DescriptorActivationReviewOutcome.Approved ? "Approved" : "Rejected",
             DecidedAt = DateTimeOffset.UtcNow,
-            BoundEvidenceHash = CreateTestCanonicalHash("evidence-hash"),
-            BoundEnvelopeHash = CreateTestCanonicalHash("envelope-hash")
+            BoundEvidenceHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1", ArtifactKind = CanonicalHashArtifactNames.PackageEvidence, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.AuditEvidence, ContractVersion = "canonical-hash-v1", CanonicalShapeVersion = "test-v1", Value = "evidence-hash" },
+            BoundEnvelopeHash = new CanonicalHash { Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1", ArtifactKind = CanonicalHashArtifactNames.PackageEvidenceEnvelope, Scope = CanonicalHashScopeNames.InternalFull, Purpose = CanonicalHashPurposeNames.AuditEvidence, ContractVersion = "canonical-hash-v1", CanonicalShapeVersion = "test-v1", Value = "envelope-hash" }
         };
 
     private static DescriptorActivationPolicy CreatePolicy(
@@ -171,6 +216,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
             draftStoreMock.Object,
             activationGateMock.Object,
             evidenceRecheckerMock.Object,
+            new ActivationBindingHashValidator(),
             NullLogger<DefaultDescriptorActivationRequestService>.Instance);
 
         return (service, auditor, policyMock, draftStoreMock, activationGateMock, evidenceRecheckerMock);
@@ -1492,7 +1538,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
                 Drifts = Array.Empty<ActivationEvidenceDrift>()
             });
 
-        var gate = new InMemoryRuntimeActivationGate(NullLogger<InMemoryRuntimeActivationGate>.Instance);
+        var gate = new InMemoryRuntimeActivationGate(NullLogger<InMemoryRuntimeActivationGate>.Instance, new ActivationBindingHashValidator());
         gate.CanReject = true;
 
         var service = new TestableDescriptorActivationRequestService(
@@ -1503,6 +1549,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
             draftStoreMock.Object,
             gate,
             evidenceRecheckerMock.Object,
+            new ActivationBindingHashValidator(),
             NullLogger<DefaultDescriptorActivationRequestService>.Instance);
 
         // Setup: policy that creates Submitted (not auto-activated), allows self-approval

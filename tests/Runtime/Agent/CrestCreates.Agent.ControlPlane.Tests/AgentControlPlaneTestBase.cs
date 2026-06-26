@@ -23,6 +23,7 @@ using Xunit;
 
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
+using DraftCanonicalHashing = CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
 
 // semantic-string-guard: allow
 
@@ -49,6 +50,7 @@ public abstract class AgentControlPlaneTestBase
     protected readonly Mock<IDescriptorReviewReportBuilder> ReportBuilderMock = new();
     protected readonly Mock<IDescriptorReviewReportRenderer> ReportRendererMock = new();
     protected readonly Mock<IDescriptorStableHashBuilder> HashBuilderMock = new();
+    protected readonly Mock<DraftCanonicalHashing.IDescriptorDraftReviewHashService> ReviewHashServiceMock = new();
     protected readonly Mock<IDescriptorActivationRequestService> ActivationRequestServiceMock = new();
     protected readonly Mock<IRuntimeActivationGate> RuntimeActivationGateMock = new();
     protected readonly Mock<IActivationEvidenceRechecker> EvidenceRecheckerMock = new();
@@ -90,6 +92,7 @@ public abstract class AgentControlPlaneTestBase
             PackageBuilderMock.Object,
             NullLogger<DefaultAgentControlPlaneToolService>.Instance,
             HashBuilderMock.Object,
+            ReviewHashServiceMock.Object,
             ReportBuilderMock.Object,
             ReportRendererMock.Object,
             ActivationRequestServiceMock.Object,
@@ -126,6 +129,7 @@ public abstract class AgentControlPlaneTestBase
             PackageBuilderMock.Object,
             NullLogger<DefaultAgentControlPlaneToolService>.Instance,
             HashBuilderMock.Object,
+            ReviewHashServiceMock.Object,
             ReportBuilderMock.Object,
             ReportRendererMock.Object,
             ActivationRequestServiceMock.Object,
@@ -156,6 +160,7 @@ public abstract class AgentControlPlaneTestBase
             PackageBuilderMock.Object,
             NullLogger<DefaultAgentControlPlaneToolService>.Instance,
             HashBuilderMock.Object,
+            ReviewHashServiceMock.Object,
             ReportBuilderMock.Object,
             ReportRendererMock.Object,
             ActivationRequestServiceMock.Object,

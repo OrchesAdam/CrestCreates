@@ -46,22 +46,23 @@ public sealed record CompanyCertificationControlPlaneReport
     public DescriptorLifecycleDecisionKind GovernanceDecision => Governance.MaxDecision;
 
     /// <summary>
-    /// SHA-256 hash of the descriptor payload content.
+    /// SHA-256 canonical hash of the package manifest.
     /// </summary>
-    public string PackageContentHash => Package.ContentHash;
+    public string PackageManifestHash =>
+        Package.Hashes?.PackageManifestHash.Value ?? string.Empty;
 
     /// <summary>
-    /// SHA-256 hash of the evidence payload (topology + impact + compatibility
+    /// SHA-256 canonical hash of the evidence payload (topology + impact + compatibility
     /// + governance). May be empty when the package builder does not produce
     /// a separate evidence hash.
     /// </summary>
     public string PackageEvidenceHash =>
-        Package.Manifest.EvidenceHash ?? string.Empty;
+        Package.Hashes?.PackageEvidenceHash.Value ?? string.Empty;
 
     /// <summary>
-    /// SHA-256 hash of the full package envelope (content + evidence + manifest).
+    /// SHA-256 canonical hash of the full package envelope (manifest + evidence).
     /// May be empty when the package builder does not produce an envelope hash.
     /// </summary>
     public string PackageEnvelopeHash =>
-        Package.Manifest.EnvelopeHash ?? string.Empty;
+        Package.Hashes?.PackageEvidenceEnvelopeHash.Value ?? string.Empty;
 }

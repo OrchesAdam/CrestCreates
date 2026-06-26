@@ -192,6 +192,7 @@ public class RuntimeBoundaryTests : AgentControlPlaneTestBase
             PackageBuilderMock.Object,
             NullLogger<DefaultAgentControlPlaneToolService>.Instance,
             HashBuilderMock.Object,
+            ReviewHashServiceMock.Object,
             ReportBuilderMock.Object,
             ReportRendererMock.Object,
             ActivationRequestServiceMock.Object,

@@ -12,10 +12,14 @@ namespace CrestCreates.Agent.ControlPlane.Activation;
 public sealed class InMemoryRuntimeActivationGate : IRuntimeActivationGate
 {
     private readonly ILogger<InMemoryRuntimeActivationGate> _logger;
+    private readonly ActivationBindingHashValidator _bindingHashValidator;
 
-    public InMemoryRuntimeActivationGate(ILogger<InMemoryRuntimeActivationGate> logger)
+    public InMemoryRuntimeActivationGate(
+        ILogger<InMemoryRuntimeActivationGate> logger,
+        ActivationBindingHashValidator bindingHashValidator)
     {
         _logger = logger;
+        _bindingHashValidator = bindingHashValidator;
     }
 
     /// <summary>
@@ -27,6 +31,29 @@ public sealed class InMemoryRuntimeActivationGate : IRuntimeActivationGate
     public Task<AgentToolResult<RuntimeActivationGateResult>> ActivateAsync(
         AgentToolInvocationContext context, ActivationRequest request, CancellationToken ct = default)
     {
+        // Validate binding hashes before gate execution — malformed hashes block activation
+        if (request.BindingSnapshot?.Hashes is not null)
+        {
+            var hashIssues = _bindingHashValidator.Validate(request.BindingSnapshot.Hashes);
+            var hashErrors = hashIssues.Where(i => i.Severity == BindingHashValidationSeverity.Error).ToList();
+            if (hashErrors.Count > 0)
+            {
+                _logger.LogWarning(
+                    "Runtime activation gate: BLOCKED for draft {DraftId}, request {RequestId} — binding hash validation failed",
+                    request.DraftId, request.RequestId);
+
+                var diags = hashErrors.Select(i => new AgentToolDiagnostic
+                {
+                    Code = DescriptorActivationDiagnosticCodes.BindingHashValidationFailedValue,
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = $"Binding hash validation failed at slot '{i.Slot}': {i.Description}"
+                }).ToList();
+
+                return Task.FromResult(
+                    AgentToolResult<RuntimeActivationGateResult>.Failed(diags));
+            }
+        }
+
         if (CanReject)
         {
             _logger.LogInformation(

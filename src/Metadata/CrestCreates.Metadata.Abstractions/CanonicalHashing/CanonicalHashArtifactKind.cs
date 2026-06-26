@@ -23,5 +23,20 @@ public enum CanonicalHashArtifactKind
     /// <summary>
     /// A review report. SG v1: reserved.
     /// </summary>
-    Report = 4
+    Report = 4,
+
+    /// <summary>
+    /// A package manifest.
+    /// </summary>
+    PackageManifest = 5,
+
+    /// <summary>
+    /// Package evidence.
+    /// </summary>
+    PackageEvidence = 6,
+
+    /// <summary>
+    /// Package evidence envelope.
+    /// </summary>
+    PackageEvidenceEnvelope = 7
 }

@@ -17,17 +17,20 @@ public sealed class DefaultActivationEvidenceRechecker : IActivationEvidenceRech
     private readonly IDescriptorStableHashBuilder _hashBuilder;
     private readonly DraftAbstractions.IDescriptorDraftStore _draftStore;
     private readonly IActivationBindingArtifactResolver _artifactResolver;
+    private readonly ActivationBindingHashValidator _bindingHashValidator;
     private readonly ILogger<DefaultActivationEvidenceRechecker> _logger;
 
     public DefaultActivationEvidenceRechecker(
         IDescriptorStableHashBuilder hashBuilder,
         DraftAbstractions.IDescriptorDraftStore draftStore,
         IActivationBindingArtifactResolver artifactResolver,
+        ActivationBindingHashValidator bindingHashValidator,
         ILogger<DefaultActivationEvidenceRechecker> logger)
     {
         _hashBuilder = hashBuilder;
         _draftStore = draftStore;
         _artifactResolver = artifactResolver;
+        _bindingHashValidator = bindingHashValidator;
         _logger = logger;
     }
 
@@ -35,6 +38,31 @@ public sealed class DefaultActivationEvidenceRechecker : IActivationEvidenceRech
         string tenantId, ActivationBindingSnapshot bindingSnapshot, CancellationToken ct = default)
     {
         var drifts = new List<ActivationEvidenceDrift>();
+
+        // Validate binding hashes — if malformed, treat as evidence of drift
+        var hashIssues = _bindingHashValidator.Validate(bindingSnapshot.Hashes);
+        var hashErrors = hashIssues.Where(i => i.Severity == BindingHashValidationSeverity.Error).ToList();
+        if (hashErrors.Count > 0)
+        {
+            foreach (var issue in hashErrors)
+            {
+                _logger.LogWarning("Evidence drift: binding hash validation failed for '{Slot}': {Description}", issue.Slot, issue.Description);
+                drifts.Add(new ActivationEvidenceDrift
+                {
+                    FieldName = $"BindingHash.{issue.Slot}",
+                    BoundHashValue = "<bound>",
+                    CurrentHashValue = $"<validation-error: {issue.Description}>"
+                });
+            }
+            return new ActivationEvidenceRecheckResult { IsStale = true, Drifts = drifts };
+        }
+
+        // Log warnings without adding drift
+        var hashWarnings = hashIssues.Where(i => i.Severity == BindingHashValidationSeverity.Warning).ToList();
+        foreach (var w in hashWarnings)
+        {
+            _logger.LogWarning("Binding hash warning at slot '{Slot}': {Description}", w.Slot, w.Description);
+        }
 
         // 1. Check draft existence and version drift
         var draft = await _draftStore.GetAsync(tenantId, bindingSnapshot.DraftId, ct);
@@ -96,12 +124,32 @@ public sealed class DefaultActivationEvidenceRechecker : IActivationEvidenceRech
 
         CompareHash(drifts, "SourceReviewHash",
             bindingSnapshot.Hashes.SourceReviewHash, resolvedArtifacts.CurrentSourceReviewHash);
-        CompareHash(drifts, "ManifestHash",
-            bindingSnapshot.Hashes.ManifestHash, resolvedArtifacts.CurrentManifestHash);
-        CompareHash(drifts, "EvidenceHash",
-            bindingSnapshot.Hashes.EvidenceHash, resolvedArtifacts.CurrentEvidenceHash);
-        CompareHash(drifts, "EnvelopeHash",
-            bindingSnapshot.Hashes.EnvelopeHash, resolvedArtifacts.CurrentEnvelopeHash);
+        CompareHash(drifts, "ReviewManifestHash",
+            bindingSnapshot.Hashes.ReviewManifestHash, resolvedArtifacts.CurrentReviewManifestHash);
+
+        // Compare package hash set as atomic unit
+        if (resolvedArtifacts.CurrentPackageHashes is not null)
+        {
+            CompareHash(drifts, "PackageManifestHash",
+                bindingSnapshot.Hashes.PackageManifestHash,
+                resolvedArtifacts.CurrentPackageHashes.PackageManifestHash);
+            CompareHash(drifts, "PackageEvidenceHash",
+                bindingSnapshot.Hashes.PackageEvidenceHash,
+                resolvedArtifacts.CurrentPackageHashes.PackageEvidenceHash);
+            CompareHash(drifts, "PackageEvidenceEnvelopeHash",
+                bindingSnapshot.Hashes.PackageEvidenceEnvelopeHash,
+                resolvedArtifacts.CurrentPackageHashes.PackageEvidenceEnvelopeHash);
+        }
+        else
+        {
+            _logger.LogWarning("Evidence drift: PackageHashes artifact no longer exists");
+            drifts.Add(new ActivationEvidenceDrift
+            {
+                FieldName = "PackageHashes",
+                BoundHashValue = bindingSnapshot.Hashes.PackageHashes.ToString(),
+                CurrentHashValue = "<not-found>"
+            });
+        }
 
         return new ActivationEvidenceRecheckResult
         {

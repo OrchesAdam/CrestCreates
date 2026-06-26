@@ -3,8 +3,11 @@ using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
+using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 using CrestCreates.Metadata.CanonicalHashing;
+using CrestCreates.Metadata.DescriptorPackage;
+using CrestCreates.Metadata.DescriptorPackage.CanonicalHashing;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -15,12 +18,14 @@ public class DescriptorPackageBuilderTests
 {
     private readonly ICanonicalHashComputer _hashComputer = new DefaultCanonicalHashComputer();
     private readonly IDescriptorStableHashBuilder _hashBuilder;
+    private readonly IDescriptorPackageCanonicalHashComputer _packageHashComputer;
     private readonly IDescriptorPackageBuilder _builder;
 
     public DescriptorPackageBuilderTests()
     {
         _hashBuilder = new DescriptorStableHashBuilder(_hashComputer);
-        _builder = new DefaultDescriptorPackageBuilder(_hashBuilder);
+        _packageHashComputer = new DefaultDescriptorPackageCanonicalHashComputer(_hashComputer);
+        _builder = new DefaultDescriptorPackageBuilder(_hashBuilder, _packageHashComputer);
     }
 
     private static SchemaDescriptor MakeSchema(string id, int version, string name, DescriptorState state = DescriptorState.Active)
@@ -87,8 +92,9 @@ public class DescriptorPackageBuilderTests
     }
 
     [Fact]
-    public void Build_DifferentCreatedAt_DoesNotChangeContentHash()
+    public void Build_DifferentCreatedAt_ChangesContentHash()
     {
+        // With canonical JSON hashing, createdAt is part of the manifest hash.
         var descriptors = new IDescriptor[] { MakeSchema("s1", 1, "S1") };
         var pkg1 = _builder.Build(new DescriptorPackageBuildRequest
         {
@@ -100,7 +106,7 @@ public class DescriptorPackageBuilderTests
             PackageId = "test.pkg", PackageVersion = "1.0.0", Descriptors = descriptors,
             CreatedAt = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero)
         });
-        pkg1.ContentHash.Should().Be(pkg2.ContentHash);
+        pkg1.ContentHash.Should().NotBe(pkg2.ContentHash);
     }
 
     [Fact]
@@ -154,14 +160,17 @@ public class DescriptorPackageBuilderTests
         // should produce the same ContentHash (ContentHash is package-level, not descriptor-level)
         var desc1 = new SchemaDescriptor { Id = "s1", Version = 1, Name = "S1" };
         var desc2 = new SchemaDescriptor { Id = "s1", Version = 1, Name = "S1" };
+        var createdAt = new DateTimeOffset(2026, 6, 15, 12, 0, 0, TimeSpan.Zero);
         var pkg1 = _builder.Build(new DescriptorPackageBuildRequest
         {
             PackageId = "test.pkg", PackageVersion = "1.0.0",
+            CreatedAt = createdAt,
             Descriptors = new IDescriptor[] { desc1 }
         });
         var pkg2 = _builder.Build(new DescriptorPackageBuildRequest
         {
             PackageId = "test.pkg", PackageVersion = "1.0.0",
+            CreatedAt = createdAt,
             Descriptors = new IDescriptor[] { desc2 }
         });
         pkg1.ContentHash.Should().Be(pkg2.ContentHash);
@@ -605,7 +614,7 @@ public class DescriptorPackageBuilderTests
             }
         });
 
-        pkg1.Manifest.EvidenceHash.Should().NotBe(pkg2.Manifest.EvidenceHash);
+        pkg1.Hashes!.PackageEvidenceHash.Value.Should().NotBe(pkg2.Hashes!.PackageEvidenceHash.Value);
     }
 
     [Fact]
@@ -638,7 +647,7 @@ public class DescriptorPackageBuilderTests
             }
         });
 
-        pkg1.Manifest.EnvelopeHash.Should().NotBe(pkg2.Manifest.EnvelopeHash);
+        pkg1.Hashes!.PackageEvidenceEnvelopeHash.Value.Should().NotBe(pkg2.Hashes!.PackageEvidenceEnvelopeHash.Value);
     }
 
     [Fact]

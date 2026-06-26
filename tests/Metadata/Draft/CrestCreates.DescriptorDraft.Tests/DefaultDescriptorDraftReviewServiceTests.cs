@@ -315,6 +315,6 @@ public class DefaultDescriptorDraftReviewServiceTests
         var result = service.ReviewAsync(draft, EmptyInventory).Result;
 
         result.PackagePreview.Should().NotBeNull();
-        result.PackagePreview!.SnapshotHash.Should().BeNull();
+        result.PackagePreview!.PackageManifestHash.Should().BeNull();
     }
 }

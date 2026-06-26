@@ -9,6 +9,7 @@ using CrestCreates.Metadata.DescriptorCompatibility;
 using CrestCreates.Metadata.DescriptorImpact;
 using CrestCreates.Metadata.DescriptorLifecycle;
 using CrestCreates.Metadata.DescriptorPackage;
+using CrestCreates.Metadata.DescriptorPackage.CanonicalHashing;
 using CrestCreates.Metadata.DescriptorRelationship;
 using CrestCreates.Metadata.DescriptorTopology;
 using CrestCreates.Metadata.Registry;
@@ -84,6 +85,8 @@ public static class MetadataServiceCollectionExtensions
             DescriptorPackageDiffer>();
         services.TryAddSingleton<IDescriptorPackageSerializer,
             DescriptorPackageSerializer>();
+        services.TryAddSingleton<IDescriptorPackageCanonicalHashComputer,
+            DefaultDescriptorPackageCanonicalHashComputer>();
         return services;
     }
 }

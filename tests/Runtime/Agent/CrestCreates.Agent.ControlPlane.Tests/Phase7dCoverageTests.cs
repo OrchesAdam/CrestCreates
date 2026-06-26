@@ -186,7 +186,7 @@ public class Phase7dCoverageTests : AgentControlPlaneTestBase
     [Fact]
     public void Builder_VisibilityAppliedFalse_ThrowsFailFast()
     {
-        var builder = new DefaultDescriptorReviewReportBuilder(_templateCatalog);
+        var builder = new DefaultDescriptorReviewReportBuilder(_templateCatalog, ReviewHashServiceMock.Object);
 
         var draft = CreateTestDraft();
         var reviewResult = new CrestCreates.DescriptorDraft.Abstractions.DescriptorDraftReviewResult
