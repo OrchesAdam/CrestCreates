@@ -12,38 +12,69 @@ namespace CrestCreates.Metadata.DescriptorPackage.CanonicalHashing;
 /// </summary>
 public static class DescriptorPackageEvidenceCanonicalHashWriter
 {
+    private static class Fields
+    {
+        public const string TopologyNodeCount = "topologyNodeCount";
+        public const string TopologyEdgeCount = "topologyEdgeCount";
+        public const string HasTopologyErrors = "hasTopologyErrors";
+        public const string TopologyDiagnosticCounts = "topologyDiagnosticCounts";
+        public const string MaxImpactSeverity = "maxImpactSeverity";
+        public const string AffectedDescriptorCount = "affectedDescriptorCount";
+        public const string ImpactPathCount = "impactPathCount";
+        public const string ImpactDiagnosticCounts = "impactDiagnosticCounts";
+        public const string MaxCompatibilityLevel = "maxCompatibilityLevel";
+        public const string BreakingFindingCount = "breakingFindingCount";
+        public const string SecuritySensitiveFindingCount = "securitySensitiveFindingCount";
+        public const string UnsupportedFindingCount = "unsupportedFindingCount";
+        public const string MaxLifecycleDecision = "maxLifecycleDecision";
+        public const string RequiresReview = "requiresReview";
+        public const string IsBlocked = "isBlocked";
+        public const string PackageFindingCount = "packageFindingCount";
+        public const string NormalizedFindings = "normalizedFindings";
+        public const string Severity = "severity";
+        public const string Code = "code";
+        public const string Source = "source";
+        public const string Message = "message";
+        public const string Subject = "subject";
+        public const string RelatedRefs = "relatedRefs";
+        public const string Namespace = "namespace";
+        public const string Id = "id";
+        public const string Version = "version";
+        public const string Count = "count";
+    }
+
     public static void WritePayload(Utf8JsonWriter writer, DescriptorPackageEvidence evidence)
     {
         writer.WriteStartObject();
 
         // Topology
-        writer.WriteNumber("topologyNodeCount", evidence.TopologyNodeCount);
-        writer.WriteNumber("topologyEdgeCount", evidence.TopologyEdgeCount);
-        writer.WriteBoolean("hasTopologyErrors", evidence.HasTopologyErrors);
-        writer.WritePropertyName("topologyDiagnosticCounts");
+        writer.WriteNumber(Fields.TopologyNodeCount, evidence.TopologyNodeCount);
+        writer.WriteNumber(Fields.TopologyEdgeCount, evidence.TopologyEdgeCount);
+        writer.WriteBoolean(Fields.HasTopologyErrors, evidence.HasTopologyErrors);
+        writer.WritePropertyName(Fields.TopologyDiagnosticCounts);
         WriteFindingCounts(writer, evidence.TopologyDiagnosticCounts);
 
         // Impact
-        writer.WriteString("maxImpactSeverity", evidence.MaxImpactSeverity.ToString());
-        writer.WriteNumber("affectedDescriptorCount", evidence.AffectedDescriptorCount);
-        writer.WriteNumber("impactPathCount", evidence.ImpactPathCount);
-        writer.WritePropertyName("impactDiagnosticCounts");
+        writer.WriteString(Fields.MaxImpactSeverity, evidence.MaxImpactSeverity.ToString());
+        writer.WriteNumber(Fields.AffectedDescriptorCount, evidence.AffectedDescriptorCount);
+        writer.WriteNumber(Fields.ImpactPathCount, evidence.ImpactPathCount);
+        writer.WritePropertyName(Fields.ImpactDiagnosticCounts);
         WriteFindingCounts(writer, evidence.ImpactDiagnosticCounts);
 
         // Compatibility
-        writer.WriteString("maxCompatibilityLevel", evidence.MaxCompatibilityLevel.ToString());
-        writer.WriteNumber("breakingFindingCount", evidence.BreakingFindingCount);
-        writer.WriteNumber("securitySensitiveFindingCount", evidence.SecuritySensitiveFindingCount);
-        writer.WriteNumber("unsupportedFindingCount", evidence.UnsupportedFindingCount);
+        writer.WriteString(Fields.MaxCompatibilityLevel, evidence.MaxCompatibilityLevel.ToString());
+        writer.WriteNumber(Fields.BreakingFindingCount, evidence.BreakingFindingCount);
+        writer.WriteNumber(Fields.SecuritySensitiveFindingCount, evidence.SecuritySensitiveFindingCount);
+        writer.WriteNumber(Fields.UnsupportedFindingCount, evidence.UnsupportedFindingCount);
 
         // Lifecycle
-        writer.WriteString("maxLifecycleDecision", evidence.MaxLifecycleDecision.ToString());
-        writer.WriteBoolean("requiresReview", evidence.RequiresReview);
-        writer.WriteBoolean("isBlocked", evidence.IsBlocked);
-        writer.WriteNumber("packageFindingCount", evidence.PackageFindingCount);
+        writer.WriteString(Fields.MaxLifecycleDecision, evidence.MaxLifecycleDecision.ToString());
+        writer.WriteBoolean(Fields.RequiresReview, evidence.RequiresReview);
+        writer.WriteBoolean(Fields.IsBlocked, evidence.IsBlocked);
+        writer.WriteNumber(Fields.PackageFindingCount, evidence.PackageFindingCount);
 
         // Normalized findings
-        writer.WritePropertyName("normalizedFindings");
+        writer.WritePropertyName(Fields.NormalizedFindings);
         writer.WriteStartArray();
         foreach (var f in evidence.NormalizedFindings
             .OrderBy(f => f.Severity, StringComparer.Ordinal)
@@ -52,24 +83,24 @@ public static class DescriptorPackageEvidenceCanonicalHashWriter
             .ThenBy(f => f.Message, StringComparer.Ordinal))
         {
             writer.WriteStartObject();
-            writer.WriteString("severity", f.Severity);
-            writer.WriteString("code", f.Code);
-            writer.WriteString("source", f.Source);
-            writer.WriteString("message", f.Message);
+            writer.WriteString(Fields.Severity, f.Severity);
+            writer.WriteString(Fields.Code, f.Code);
+            writer.WriteString(Fields.Source, f.Source);
+            writer.WriteString(Fields.Message, f.Message);
 
             // Subject
             if (f.Subject is null)
             {
-                writer.WriteNull("subject");
+                writer.WriteNull(Fields.Subject);
             }
             else
             {
-                writer.WritePropertyName("subject");
+                writer.WritePropertyName(Fields.Subject);
                 WriteDescriptorRef(writer, f.Subject.Value);
             }
 
             // RelatedRefs
-            writer.WritePropertyName("relatedRefs");
+            writer.WritePropertyName(Fields.RelatedRefs);
             writer.WriteStartArray();
             foreach (var r in f.RelatedRefs
                 .OrderBy(r => r.Namespace, StringComparer.Ordinal)
@@ -77,12 +108,12 @@ public static class DescriptorPackageEvidenceCanonicalHashWriter
                 .ThenBy(r => r.Version))
             {
                 writer.WriteStartObject();
-                writer.WriteString("namespace", r.Namespace);
-                writer.WriteString("id", r.Id);
+                writer.WriteString(Fields.Namespace, r.Namespace);
+                writer.WriteString(Fields.Id, r.Id);
                 if (r.Version is null)
-                    writer.WriteNull("version");
+                    writer.WriteNull(Fields.Version);
                 else
-                    writer.WriteNumber("version", r.Version.Value);
+                    writer.WriteNumber(Fields.Version, r.Version.Value);
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
@@ -101,9 +132,9 @@ public static class DescriptorPackageEvidenceCanonicalHashWriter
             .ThenBy(c => c.Code, StringComparer.Ordinal))
         {
             writer.WriteStartObject();
-            writer.WriteString("severity", c.Severity);
-            writer.WriteString("code", c.Code);
-            writer.WriteNumber("count", c.Count);
+            writer.WriteString(Fields.Severity, c.Severity);
+            writer.WriteString(Fields.Code, c.Code);
+            writer.WriteNumber(Fields.Count, c.Count);
             writer.WriteEndObject();
         }
         writer.WriteEndArray();
@@ -112,12 +143,12 @@ public static class DescriptorPackageEvidenceCanonicalHashWriter
     private static void WriteDescriptorRef(Utf8JsonWriter writer, DescriptorRef r)
     {
         writer.WriteStartObject();
-        writer.WriteString("namespace", r.Namespace);
-        writer.WriteString("id", r.Id);
+        writer.WriteString(Fields.Namespace, r.Namespace);
+        writer.WriteString(Fields.Id, r.Id);
         if (r.Version is null)
-            writer.WriteNull("version");
+            writer.WriteNull(Fields.Version);
         else
-            writer.WriteNumber("version", r.Version.Value);
+            writer.WriteNumber(Fields.Version, r.Version.Value);
         writer.WriteEndObject();
     }
 }
