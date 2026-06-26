@@ -13,23 +13,23 @@ public static class DescriptorPackageManifestCanonicalHashWriter
 {
     private static class Fields
     {
-        public const string FormatVersion = "formatVersion";
-        public const string PackageId = "packageId";
-        public const string PackageVersion = "packageVersion";
-        public const string Name = "name";
-        public const string CreatedAt = "createdAt";
-        public const string CreatedBy = "createdBy";
-        public const string Source = "source";
-        public const string DescriptorCount = "descriptorCount";
-        public const string DescriptorEntries = "descriptorEntries";
-        public const string Namespace = "namespace";
-        public const string Id = "id";
-        public const string Version = "version";
-        public const string Kind = "kind";
-        public const string State = "state";
-        public const string ContractHash = "contractHash";
-        public const string DefinitionHash = "definitionHash";
-        public const string SupersededById = "supersededById";
+        public const string FormatVersion = nameof(DescriptorManifest.FormatVersion);
+        public const string PackageId = nameof(DescriptorManifest.PackageId);
+        public const string PackageVersion = nameof(DescriptorManifest.PackageVersion);
+        public const string Name = nameof(DescriptorManifest.Name);
+        public const string CreatedAt = nameof(DescriptorManifest.CreatedAt);
+        public const string CreatedBy = nameof(DescriptorManifest.CreatedBy);
+        public const string Source = nameof(DescriptorManifest.Source);
+        public const string DescriptorCount = nameof(DescriptorManifest.DescriptorCount);
+        public const string DescriptorEntries = nameof(DescriptorManifest.DescriptorEntries);
+        public const string Namespace = nameof(DescriptorRef.Namespace);
+        public const string Id = nameof(DescriptorRef.Id);
+        public const string Version = nameof(DescriptorRef.Version);
+        public const string Kind = nameof(DescriptorManifestEntry.Kind);
+        public const string State = nameof(DescriptorManifestEntry.State);
+        public const string ContractHash = nameof(DescriptorManifestEntry.ContractHash);
+        public const string DefinitionHash = nameof(DescriptorManifestEntry.DefinitionHash);
+        public const string SupersededById = nameof(DescriptorManifestEntry.SupersededById);
     }
 
     public static void WritePayload(Utf8JsonWriter writer, DescriptorManifest manifest)

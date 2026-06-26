@@ -1,0 +1,1 @@
+{"TenantId":"tenant-1","DraftId":"draft-1","IsActivationEligible":true,"IsValid":true,"Diagnostics":[{"Code":"ERR-01","Severity":"Error"},{"Code":"WARN-01","Severity":"Warning"}],"GovernanceDecision":null,"ImpactSeverity":null}

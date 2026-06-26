@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 
 namespace CrestCreates.Metadata.DescriptorPackage.CanonicalHashing;
@@ -14,22 +15,22 @@ public static class DescriptorPackageEvidenceEnvelopeCanonicalHashWriter
 {
     private static class Fields
     {
-        public const string PackageId = "packageId";
-        public const string PackageVersion = "packageVersion";
-        public const string CreatedAt = "createdAt";
-        public const string CreatedBy = "createdBy";
-        public const string Source = "source";
-        public const string PackageManifestHash = "packageManifestHash";
-        public const string PackageEvidenceHash = "packageEvidenceHash";
-        public const string Algorithm = "algorithm";
-        public const string AlgorithmVersion = "algorithmVersion";
-        public const string ArtifactKind = "artifactKind";
-        public const string DescriptorKind = "descriptorKind";
-        public const string Scope = "scope";
-        public const string Purpose = "purpose";
-        public const string ContractVersion = "contractVersion";
-        public const string CanonicalShapeVersion = "canonicalShapeVersion";
-        public const string Value = "value";
+        public const string PackageId = nameof(DescriptorPackageEvidenceEnvelope.PackageId);
+        public const string PackageVersion = nameof(DescriptorPackageEvidenceEnvelope.PackageVersion);
+        public const string CreatedAt = nameof(DescriptorPackageEvidenceEnvelope.CreatedAt);
+        public const string CreatedBy = nameof(DescriptorPackageEvidenceEnvelope.CreatedBy);
+        public const string Source = nameof(DescriptorPackageEvidenceEnvelope.Source);
+        public const string PackageManifestHash = nameof(DescriptorPackageEvidenceEnvelope.PackageManifestHash);
+        public const string PackageEvidenceHash = nameof(DescriptorPackageEvidenceEnvelope.PackageEvidenceHash);
+        public const string Algorithm = nameof(CanonicalHash.Algorithm);
+        public const string AlgorithmVersion = nameof(CanonicalHash.AlgorithmVersion);
+        public const string ArtifactKind = nameof(CanonicalHash.ArtifactKind);
+        public const string DescriptorKind = nameof(CanonicalHash.DescriptorKind);
+        public const string Scope = nameof(CanonicalHash.Scope);
+        public const string Purpose = nameof(CanonicalHash.Purpose);
+        public const string ContractVersion = nameof(CanonicalHash.ContractVersion);
+        public const string CanonicalShapeVersion = nameof(CanonicalHash.CanonicalShapeVersion);
+        public const string Value = nameof(CanonicalHash.Value);
     }
 
     public static void WritePayload(Utf8JsonWriter writer, DescriptorPackageEvidenceEnvelope envelope)
@@ -47,7 +48,7 @@ public static class DescriptorPackageEvidenceEnvelopeCanonicalHashWriter
         writer.WriteEndObject();
     }
 
-    private static void WriteCanonicalHash(Utf8JsonWriter writer, Abstractions.CanonicalHashing.CanonicalHash hash)
+    private static void WriteCanonicalHash(Utf8JsonWriter writer, CanonicalHash hash)
     {
         writer.WriteStartObject();
         writer.WriteString(Fields.Algorithm, hash.Algorithm);

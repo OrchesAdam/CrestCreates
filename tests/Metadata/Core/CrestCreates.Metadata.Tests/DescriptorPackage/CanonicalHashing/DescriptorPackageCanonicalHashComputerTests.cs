@@ -29,16 +29,16 @@ public sealed class DescriptorPackageCanonicalHashComputerTests
         hashes.PackageManifestHash.Scope.Should().Be(CanonicalHashScopeNames.InternalFull);
         hashes.PackageManifestHash.Algorithm.Should().Be("SHA-256");
         hashes.PackageManifestHash.AlgorithmVersion.Should().Be("sha256-canonical-json-v1");
-        hashes.PackageManifestHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageManifestV1);
+        hashes.PackageManifestHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageManifestV2);
         hashes.PackageManifestHash.ContractVersion.Should().Be(CanonicalHashContractVersions.DescriptorHash);
 
         hashes.PackageEvidenceHash.ArtifactKind.Should().Be(CanonicalHashArtifactNames.PackageEvidence);
         hashes.PackageEvidenceHash.Purpose.Should().Be(CanonicalHashPurposeNames.AuditEvidence);
-        hashes.PackageEvidenceHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageEvidenceV1);
+        hashes.PackageEvidenceHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageEvidenceV2);
 
         hashes.PackageEvidenceEnvelopeHash.ArtifactKind.Should().Be(CanonicalHashArtifactNames.PackageEvidenceEnvelope);
         hashes.PackageEvidenceEnvelopeHash.Purpose.Should().Be(CanonicalHashPurposeNames.AuditEvidence);
-        hashes.PackageEvidenceEnvelopeHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageEvidenceEnvelopeV1);
+        hashes.PackageEvidenceEnvelopeHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageEvidenceEnvelopeV2);
     }
 
     [Fact]

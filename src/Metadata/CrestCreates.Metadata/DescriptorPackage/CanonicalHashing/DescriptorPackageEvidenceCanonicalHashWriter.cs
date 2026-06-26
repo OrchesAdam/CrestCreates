@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorPackage;
+using CrestCreates.Metadata.Abstractions.Evidence;
 
 namespace CrestCreates.Metadata.DescriptorPackage.CanonicalHashing;
 
@@ -14,33 +15,33 @@ public static class DescriptorPackageEvidenceCanonicalHashWriter
 {
     private static class Fields
     {
-        public const string TopologyNodeCount = "topologyNodeCount";
-        public const string TopologyEdgeCount = "topologyEdgeCount";
-        public const string HasTopologyErrors = "hasTopologyErrors";
-        public const string TopologyDiagnosticCounts = "topologyDiagnosticCounts";
-        public const string MaxImpactSeverity = "maxImpactSeverity";
-        public const string AffectedDescriptorCount = "affectedDescriptorCount";
-        public const string ImpactPathCount = "impactPathCount";
-        public const string ImpactDiagnosticCounts = "impactDiagnosticCounts";
-        public const string MaxCompatibilityLevel = "maxCompatibilityLevel";
-        public const string BreakingFindingCount = "breakingFindingCount";
-        public const string SecuritySensitiveFindingCount = "securitySensitiveFindingCount";
-        public const string UnsupportedFindingCount = "unsupportedFindingCount";
-        public const string MaxLifecycleDecision = "maxLifecycleDecision";
-        public const string RequiresReview = "requiresReview";
-        public const string IsBlocked = "isBlocked";
-        public const string PackageFindingCount = "packageFindingCount";
-        public const string NormalizedFindings = "normalizedFindings";
-        public const string Severity = "severity";
-        public const string Code = "code";
-        public const string Source = "source";
-        public const string Message = "message";
-        public const string Subject = "subject";
-        public const string RelatedRefs = "relatedRefs";
-        public const string Namespace = "namespace";
-        public const string Id = "id";
-        public const string Version = "version";
-        public const string Count = "count";
+        public const string TopologyNodeCount = nameof(DescriptorPackageEvidence.TopologyNodeCount);
+        public const string TopologyEdgeCount = nameof(DescriptorPackageEvidence.TopologyEdgeCount);
+        public const string HasTopologyErrors = nameof(DescriptorPackageEvidence.HasTopologyErrors);
+        public const string TopologyDiagnosticCounts = nameof(DescriptorPackageEvidence.TopologyDiagnosticCounts);
+        public const string MaxImpactSeverity = nameof(DescriptorPackageEvidence.MaxImpactSeverity);
+        public const string AffectedDescriptorCount = nameof(DescriptorPackageEvidence.AffectedDescriptorCount);
+        public const string ImpactPathCount = nameof(DescriptorPackageEvidence.ImpactPathCount);
+        public const string ImpactDiagnosticCounts = nameof(DescriptorPackageEvidence.ImpactDiagnosticCounts);
+        public const string MaxCompatibilityLevel = nameof(DescriptorPackageEvidence.MaxCompatibilityLevel);
+        public const string BreakingFindingCount = nameof(DescriptorPackageEvidence.BreakingFindingCount);
+        public const string SecuritySensitiveFindingCount = nameof(DescriptorPackageEvidence.SecuritySensitiveFindingCount);
+        public const string UnsupportedFindingCount = nameof(DescriptorPackageEvidence.UnsupportedFindingCount);
+        public const string MaxLifecycleDecision = nameof(DescriptorPackageEvidence.MaxLifecycleDecision);
+        public const string RequiresReview = nameof(DescriptorPackageEvidence.RequiresReview);
+        public const string IsBlocked = nameof(DescriptorPackageEvidence.IsBlocked);
+        public const string PackageFindingCount = nameof(DescriptorPackageEvidence.PackageFindingCount);
+        public const string NormalizedFindings = nameof(DescriptorPackageEvidence.NormalizedFindings);
+        public const string Severity = nameof(EvidenceFindingCount.Severity);
+        public const string Code = nameof(EvidenceFindingCount.Code);
+        public const string Source = nameof(EvidenceFinding.Source);
+        public const string Message = nameof(EvidenceFinding.Message);
+        public const string Subject = nameof(EvidenceFinding.Subject);
+        public const string RelatedRefs = nameof(EvidenceFinding.RelatedRefs);
+        public const string Namespace = nameof(DescriptorRef.Namespace);
+        public const string Id = nameof(DescriptorRef.Id);
+        public const string Version = nameof(DescriptorRef.Version);
+        public const string Count = nameof(EvidenceFindingCount.Count);
     }
 
     public static void WritePayload(Utf8JsonWriter writer, DescriptorPackageEvidence evidence)

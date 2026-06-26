@@ -10,15 +10,15 @@ public static class ReviewResultSourceBindingCanonicalHashWriter
 {
     private static class Fields
     {
-        public const string TenantId = "tenantId";
-        public const string DraftId = "draftId";
-        public const string IsActivationEligible = "isActivationEligible";
-        public const string IsValid = "isValid";
-        public const string Diagnostics = "diagnostics";
-        public const string Code = "code";
-        public const string Severity = "severity";
-        public const string GovernanceDecision = "governanceDecision";
-        public const string ImpactSeverity = "impactSeverity";
+        public const string TenantId = nameof(ReviewResultSourceBindingProjection.TenantId);
+        public const string DraftId = nameof(ReviewResultSourceBindingProjection.DraftId);
+        public const string IsActivationEligible = nameof(ReviewResultSourceBindingProjection.IsActivationEligible);
+        public const string IsValid = nameof(ReviewResultSourceBindingProjection.IsValid);
+        public const string Diagnostics = nameof(ReviewResultSourceBindingProjection.Diagnostics);
+        public const string Code = nameof(ReviewDiagnosticProjection.Code);
+        public const string Severity = nameof(ReviewDiagnosticProjection.Severity);
+        public const string GovernanceDecision = nameof(ReviewResultSourceBindingProjection.GovernanceDecision);
+        public const string ImpactSeverity = nameof(ReviewResultSourceBindingProjection.ImpactSeverity);
     }
 
     public static void WritePayload(Utf8JsonWriter writer, ReviewResultSourceBindingProjection projection)

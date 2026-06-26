@@ -10,11 +10,11 @@ public static class ReviewResultIntegrityCanonicalHashWriter
 {
     private static class Fields
     {
-        public const string TenantId = "tenantId";
-        public const string DraftId = "draftId";
-        public const string IsActivationEligible = "isActivationEligible";
-        public const string IsValid = "isValid";
-        public const string DiagnosticCount = "diagnosticCount";
+        public const string TenantId = nameof(ReviewResultIntegrityProjection.TenantId);
+        public const string DraftId = nameof(ReviewResultIntegrityProjection.DraftId);
+        public const string IsActivationEligible = nameof(ReviewResultIntegrityProjection.IsActivationEligible);
+        public const string IsValid = nameof(ReviewResultIntegrityProjection.IsValid);
+        public const string DiagnosticCount = nameof(ReviewResultIntegrityProjection.DiagnosticCount);
     }
 
     public static void WritePayload(Utf8JsonWriter writer, ReviewResultIntegrityProjection projection)

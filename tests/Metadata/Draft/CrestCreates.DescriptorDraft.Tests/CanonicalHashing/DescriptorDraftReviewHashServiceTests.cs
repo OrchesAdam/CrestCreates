@@ -23,7 +23,7 @@ public sealed class DescriptorDraftReviewHashServiceTests
         hash.Scope.Should().Be(CanonicalHashScopeNames.InternalFull);
         hash.Algorithm.Should().Be("SHA-256");
         hash.AlgorithmVersion.Should().Be("sha256-canonical-json-v1");
-        hash.CanonicalShapeVersion.Should().Be(DescriptorDraftReviewCanonicalShapeVersions.SourceBindingV1);
+        hash.CanonicalShapeVersion.Should().Be(DescriptorDraftReviewCanonicalShapeVersions.SourceBindingV2);
         hash.ContractVersion.Should().NotBeNullOrWhiteSpace();
         hash.Value.Should().NotBeEmpty();
     }
@@ -38,7 +38,7 @@ public sealed class DescriptorDraftReviewHashServiceTests
         hash.ArtifactKind.Should().Be(CanonicalHashArtifactNames.ReviewResult);
         hash.Purpose.Should().Be(CanonicalHashPurposeNames.Integrity);
         hash.Scope.Should().Be(CanonicalHashScopeNames.InternalFull);
-        hash.CanonicalShapeVersion.Should().Be(DescriptorDraftReviewCanonicalShapeVersions.IntegrityV1);
+        hash.CanonicalShapeVersion.Should().Be(DescriptorDraftReviewCanonicalShapeVersions.IntegrityV2);
         hash.Value.Should().NotBeEmpty();
     }
 

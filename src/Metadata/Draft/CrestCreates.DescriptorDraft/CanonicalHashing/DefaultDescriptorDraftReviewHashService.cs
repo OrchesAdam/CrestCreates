@@ -20,7 +20,7 @@ public sealed class DefaultDescriptorDraftReviewHashService : IDescriptorDraftRe
         var projection = CreateSourceBindingProjection(reviewResult);
         return _hashComputer.ComputeFromProjection(
             CanonicalHashProjectionResult.Create(
-                CreateMetadata(CanonicalHashPurposeNames.SourceBinding, DescriptorDraftReviewCanonicalShapeVersions.SourceBindingV1),
+                CreateMetadata(CanonicalHashPurposeNames.SourceBinding, DescriptorDraftReviewCanonicalShapeVersions.SourceBindingV2),
                 writer => ReviewResultSourceBindingCanonicalHashWriter.WritePayload(writer, projection)));
     }
 
@@ -29,7 +29,7 @@ public sealed class DefaultDescriptorDraftReviewHashService : IDescriptorDraftRe
         var projection = CreateIntegrityProjection(reviewResult);
         return _hashComputer.ComputeFromProjection(
             CanonicalHashProjectionResult.Create(
-                CreateMetadata(CanonicalHashPurposeNames.Integrity, DescriptorDraftReviewCanonicalShapeVersions.IntegrityV1),
+                CreateMetadata(CanonicalHashPurposeNames.Integrity, DescriptorDraftReviewCanonicalShapeVersions.IntegrityV2),
                 writer => ReviewResultIntegrityCanonicalHashWriter.WritePayload(writer, projection)));
     }
 

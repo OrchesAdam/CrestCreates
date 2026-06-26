@@ -1,1 +1,0 @@
-{"tenantId":"tenant-1","draftId":"draft-1","isActivationEligible":true,"isValid":true,"diagnostics":[{"code":"ERR-01","severity":"Error"},{"code":"WARN-01","severity":"Warning"}],"governanceDecision":null,"impactSeverity":null}

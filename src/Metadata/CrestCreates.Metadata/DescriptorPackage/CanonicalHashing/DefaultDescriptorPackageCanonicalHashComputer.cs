@@ -23,12 +23,12 @@ public sealed class DefaultDescriptorPackageCanonicalHashComputer : IDescriptorP
     {
         var packageManifestHash = _hashComputer.ComputeFromProjection(
             CanonicalHashProjectionResult.Create(
-                CreateMetadata(CanonicalHashArtifactNames.PackageManifest, CanonicalHashPurposeNames.Integrity, DescriptorPackageCanonicalShapeVersions.PackageManifestV1),
+                CreateMetadata(CanonicalHashArtifactNames.PackageManifest, CanonicalHashPurposeNames.Integrity, DescriptorPackageCanonicalShapeVersions.PackageManifestV2),
                 writer => DescriptorPackageManifestCanonicalHashWriter.WritePayload(writer, manifest)));
 
         var packageEvidenceHash = _hashComputer.ComputeFromProjection(
             CanonicalHashProjectionResult.Create(
-                CreateMetadata(CanonicalHashArtifactNames.PackageEvidence, CanonicalHashPurposeNames.AuditEvidence, DescriptorPackageCanonicalShapeVersions.PackageEvidenceV1),
+                CreateMetadata(CanonicalHashArtifactNames.PackageEvidence, CanonicalHashPurposeNames.AuditEvidence, DescriptorPackageCanonicalShapeVersions.PackageEvidenceV2),
                 writer => DescriptorPackageEvidenceCanonicalHashWriter.WritePayload(writer, evidence)));
 
         // Build envelope projection with computed hashes for envelope hash
@@ -45,7 +45,7 @@ public sealed class DefaultDescriptorPackageCanonicalHashComputer : IDescriptorP
 
         var packageEvidenceEnvelopeHash = _hashComputer.ComputeFromProjection(
             CanonicalHashProjectionResult.Create(
-                CreateMetadata(CanonicalHashArtifactNames.PackageEvidenceEnvelope, CanonicalHashPurposeNames.AuditEvidence, DescriptorPackageCanonicalShapeVersions.PackageEvidenceEnvelopeV1),
+                CreateMetadata(CanonicalHashArtifactNames.PackageEvidenceEnvelope, CanonicalHashPurposeNames.AuditEvidence, DescriptorPackageCanonicalShapeVersions.PackageEvidenceEnvelopeV2),
                 writer => DescriptorPackageEvidenceEnvelopeCanonicalHashWriter.WritePayload(writer, envelopeProjection)));
 
         return new DescriptorPackageHashSet

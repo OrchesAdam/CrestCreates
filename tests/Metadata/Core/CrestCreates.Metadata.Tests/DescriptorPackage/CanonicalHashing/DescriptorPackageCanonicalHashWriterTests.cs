@@ -25,9 +25,9 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
 
         json1.Should().Be(json2);
         json1.Should().NotBeEmpty();
-        json1.Should().Contain("formatVersion");
-        json1.Should().Contain("packageId");
-        json1.Should().Contain("descriptorEntries");
+        json1.Should().Contain("FormatVersion");
+        json1.Should().Contain("PackageId");
+        json1.Should().Contain("DescriptorEntries");
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
         };
 
         var json = WriteCanonicalJson(w => DescriptorPackageManifestCanonicalHashWriter.WritePayload(w, manifest));
-        json.Should().Contain("\"version\":null");
+        json.Should().Contain("\"Version\":null");
     }
 
     [Fact]
@@ -83,9 +83,9 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
 
         json1.Should().Be(json2);
         json1.Should().NotBeEmpty();
-        json1.Should().Contain("topologyNodeCount");
-        json1.Should().Contain("maxImpactSeverity");
-        json1.Should().Contain("normalizedFindings");
+        json1.Should().Contain("TopologyNodeCount");
+        json1.Should().Contain("MaxImpactSeverity");
+        json1.Should().Contain("NormalizedFindings");
     }
 
     [Fact]
@@ -144,9 +144,9 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
 
         json1.Should().Be(json2);
         json1.Should().NotBeEmpty();
-        json1.Should().Contain("packageId");
-        json1.Should().Contain("packageManifestHash");
-        json1.Should().Contain("packageEvidenceHash");
+        json1.Should().Contain("PackageId");
+        json1.Should().Contain("PackageManifestHash");
+        json1.Should().Contain("PackageEvidenceHash");
     }
 
     [Fact]
@@ -156,9 +156,9 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
         var envelope = CreateEnvelope(hash, hash);
         var json = WriteCanonicalJson(w => DescriptorPackageEvidenceEnvelopeCanonicalHashWriter.WritePayload(w, envelope));
 
-        json.Should().Contain("\"algorithm\":\"SHA-256\"");
-        json.Should().Contain("\"value\":\"deadbeef\"");
-        json.Should().Contain("\"artifactKind\":\"Descriptor\"");
+        json.Should().Contain("\"Algorithm\":\"SHA-256\"");
+        json.Should().Contain("\"Value\":\"deadbeef\"");
+        json.Should().Contain("\"ArtifactKind\":\"Descriptor\"");
         json.Should().NotBe("\"deadbeef\"", "hash should be written as full object, not just the value string");
     }
 
@@ -182,7 +182,7 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
     {
         var manifest = CreateManifest();
         var json = WriteCanonicalJson(w => DescriptorPackageManifestCanonicalHashWriter.WritePayload(w, manifest));
-        var golden = ReadGoldenFile("descriptor-package-manifest-v1.json");
+        var golden = ReadGoldenFile("descriptor-package-manifest-v2.json");
         json.Should().Be(golden);
 
         // Verify hash metadata produced by the computer using this writer
@@ -195,7 +195,7 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
         hashes.PackageManifestHash.Algorithm.Should().Be("SHA-256");
         hashes.PackageManifestHash.AlgorithmVersion.Should().Be("sha256-canonical-json-v1");
         hashes.PackageManifestHash.ContractVersion.Should().Be(CanonicalHashContractVersions.DescriptorHash);
-        hashes.PackageManifestHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageManifestV1);
+        hashes.PackageManifestHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageManifestV2);
     }
 
     [Fact]
@@ -203,7 +203,7 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
     {
         var evidence = CreateEvidence();
         var json = WriteCanonicalJson(w => DescriptorPackageEvidenceCanonicalHashWriter.WritePayload(w, evidence));
-        var golden = ReadGoldenFile("descriptor-package-evidence-v1.json");
+        var golden = ReadGoldenFile("descriptor-package-evidence-v2.json");
         json.Should().Be(golden);
 
         // Verify hash metadata produced by the computer using this writer
@@ -216,7 +216,7 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
         hashes.PackageEvidenceHash.Algorithm.Should().Be("SHA-256");
         hashes.PackageEvidenceHash.AlgorithmVersion.Should().Be("sha256-canonical-json-v1");
         hashes.PackageEvidenceHash.ContractVersion.Should().Be(CanonicalHashContractVersions.DescriptorHash);
-        hashes.PackageEvidenceHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageEvidenceV1);
+        hashes.PackageEvidenceHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageEvidenceV2);
     }
 
     [Fact]
@@ -224,7 +224,7 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
     {
         var envelope = CreateEnvelope(CreateHash("abc123"), CreateHash("def456"));
         var json = WriteCanonicalJson(w => DescriptorPackageEvidenceEnvelopeCanonicalHashWriter.WritePayload(w, envelope));
-        var golden = ReadGoldenFile("descriptor-package-evidence-envelope-v1.json");
+        var golden = ReadGoldenFile("descriptor-package-evidence-envelope-v2.json");
         json.Should().Be(golden);
 
         // Verify hash metadata produced by the computer for the envelope
@@ -237,7 +237,7 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
         hashes.PackageEvidenceEnvelopeHash.Algorithm.Should().Be("SHA-256");
         hashes.PackageEvidenceEnvelopeHash.AlgorithmVersion.Should().Be("sha256-canonical-json-v1");
         hashes.PackageEvidenceEnvelopeHash.ContractVersion.Should().Be(CanonicalHashContractVersions.DescriptorHash);
-        hashes.PackageEvidenceEnvelopeHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageEvidenceEnvelopeV1);
+        hashes.PackageEvidenceEnvelopeHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageEvidenceEnvelopeV2);
     }
 
     // ── Hash value tests (manifest + evidence) ──────────────────────
@@ -255,17 +255,17 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
         hashes.PackageManifestHash.Algorithm.Should().Be("SHA-256");
         hashes.PackageManifestHash.AlgorithmVersion.Should().Be("sha256-canonical-json-v1");
         hashes.PackageManifestHash.ContractVersion.Should().Be(CanonicalHashContractVersions.DescriptorHash);
-        hashes.PackageManifestHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageManifestV1);
+        hashes.PackageManifestHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageManifestV2);
 
         hashes.PackageEvidenceHash.Value.Should().HaveLength(64);
         hashes.PackageEvidenceHash.ArtifactKind.Should().Be(CanonicalHashArtifactNames.PackageEvidence);
         hashes.PackageEvidenceHash.Purpose.Should().Be(CanonicalHashPurposeNames.AuditEvidence);
-        hashes.PackageEvidenceHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageEvidenceV1);
+        hashes.PackageEvidenceHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageEvidenceV2);
 
         hashes.PackageEvidenceEnvelopeHash.Value.Should().HaveLength(64);
         hashes.PackageEvidenceEnvelopeHash.ArtifactKind.Should().Be(CanonicalHashArtifactNames.PackageEvidenceEnvelope);
         hashes.PackageEvidenceEnvelopeHash.Purpose.Should().Be(CanonicalHashPurposeNames.AuditEvidence);
-        hashes.PackageEvidenceEnvelopeHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageEvidenceEnvelopeV1);
+        hashes.PackageEvidenceEnvelopeHash.CanonicalShapeVersion.Should().Be(DescriptorPackageCanonicalShapeVersions.PackageEvidenceEnvelopeV2);
     }
 
     [Fact]

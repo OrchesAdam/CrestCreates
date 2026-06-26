@@ -18,7 +18,7 @@ public sealed class ReviewResultCanonicalHashWriterTests
     {
         var projection = CreateSourceBindingProjection();
         var json = WriteCanonicalJson(w => ReviewResultSourceBindingCanonicalHashWriter.WritePayload(w, projection));
-        var golden = File.ReadAllText("CanonicalHashing/GoldenFiles/review-result-source-binding-v1.json");
+        var golden = File.ReadAllText("CanonicalHashing/GoldenFiles/review-result-source-binding-v2.json");
         json.Should().Be(golden);
 
         // Verify hash metadata for source binding
@@ -32,7 +32,7 @@ public sealed class ReviewResultCanonicalHashWriterTests
         hash.Algorithm.Should().Be("SHA-256");
         hash.AlgorithmVersion.Should().Be("sha256-canonical-json-v1");
         hash.ContractVersion.Should().Be(CanonicalHashContractVersions.DescriptorHash);
-        hash.CanonicalShapeVersion.Should().Be(DescriptorDraftReviewCanonicalShapeVersions.SourceBindingV1);
+        hash.CanonicalShapeVersion.Should().Be(DescriptorDraftReviewCanonicalShapeVersions.SourceBindingV2);
     }
 
     [Fact]
@@ -40,7 +40,7 @@ public sealed class ReviewResultCanonicalHashWriterTests
     {
         var projection = CreateIntegrityProjection();
         var json = WriteCanonicalJson(w => ReviewResultIntegrityCanonicalHashWriter.WritePayload(w, projection));
-        var golden = File.ReadAllText("CanonicalHashing/GoldenFiles/review-result-integrity-v1.json");
+        var golden = File.ReadAllText("CanonicalHashing/GoldenFiles/review-result-integrity-v2.json");
         json.Should().Be(golden);
 
         // Verify hash metadata for integrity
@@ -54,7 +54,7 @@ public sealed class ReviewResultCanonicalHashWriterTests
         hash.Algorithm.Should().Be("SHA-256");
         hash.AlgorithmVersion.Should().Be("sha256-canonical-json-v1");
         hash.ContractVersion.Should().Be(CanonicalHashContractVersions.DescriptorHash);
-        hash.CanonicalShapeVersion.Should().Be(DescriptorDraftReviewCanonicalShapeVersions.IntegrityV1);
+        hash.CanonicalShapeVersion.Should().Be(DescriptorDraftReviewCanonicalShapeVersions.IntegrityV2);
     }
 
     // ── Sensitivity tests ────────────────────────────────────────────
@@ -78,7 +78,7 @@ public sealed class ReviewResultCanonicalHashWriterTests
         };
 
         var json = WriteCanonicalJson(w => ReviewResultSourceBindingCanonicalHashWriter.WritePayload(w, swapped));
-        var golden = File.ReadAllText("CanonicalHashing/GoldenFiles/review-result-source-binding-v1.json");
+        var golden = File.ReadAllText("CanonicalHashing/GoldenFiles/review-result-source-binding-v2.json");
         json.Should().Be(golden, "canonical sorting should produce the same JSON regardless of diagnostic input order");
     }
 
