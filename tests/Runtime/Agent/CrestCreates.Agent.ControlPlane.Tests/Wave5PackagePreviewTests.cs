@@ -472,4 +472,48 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
                 Hashes = hashes
             });
     }
+
+    [Fact]
+    public void ComputeFingerprint_DifferentOptions_ReturnsDifferentFingerprints()
+    {
+        var devOptions = AgentToolAuthorizationOptions.DevelopmentDefaults;
+        var prodOptions = AgentToolAuthorizationOptions.ProductionDefaults;
+
+        var devFp = AgentDescriptorVisibilityScope.ComputeFingerprint(devOptions);
+        var prodFp = AgentDescriptorVisibilityScope.ComputeFingerprint(prodOptions);
+
+        devFp.Should().NotBe(prodFp);
+    }
+
+    [Fact]
+    public void ComputeFingerprint_SameOptions_ReturnsSameFingerprint()
+    {
+        var options1 = AgentToolAuthorizationOptions.DevelopmentDefaults;
+        var options2 = AgentToolAuthorizationOptions.DevelopmentDefaults;
+
+        var fp1 = AgentDescriptorVisibilityScope.ComputeFingerprint(options1);
+        var fp2 = AgentDescriptorVisibilityScope.ComputeFingerprint(options2);
+
+        fp1.Should().Be(fp2);
+    }
+
+    [Fact]
+    public void ComputeFingerprint_DifferentDeniedKinds_ReturnsDifferentFingerprints()
+    {
+        var options1 = new AgentToolAuthorizationOptions
+        {
+            Mode = AgentToolAuthorizationMode.ExplicitPolicy,
+            DeniedDescriptorKinds = new HashSet<string> { "Schema" }
+        };
+        var options2 = new AgentToolAuthorizationOptions
+        {
+            Mode = AgentToolAuthorizationMode.ExplicitPolicy,
+            DeniedDescriptorKinds = new HashSet<string> { "Capability" }
+        };
+
+        var fp1 = AgentDescriptorVisibilityScope.ComputeFingerprint(options1);
+        var fp2 = AgentDescriptorVisibilityScope.ComputeFingerprint(options2);
+
+        fp1.Should().NotBe(fp2);
+    }
 }

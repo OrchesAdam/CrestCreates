@@ -192,7 +192,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         //    The scope captures the tenant and effective kind policy snapshot.
         var options = _optionsFactory();
         var evaluator = new AgentDescriptorKindPolicyEvaluator(options);
-        var scope = new AgentDescriptorVisibilityScope(context.TenantId, evaluator);
+        var scope = new AgentDescriptorVisibilityScope(context.TenantId, evaluator,
+            AgentDescriptorVisibilityScope.ComputeFingerprint(options));
 
         // 4. Execute action with visibility scope and cancellation token.
         //    The action is responsible for resolving resources, applying kind visibility
@@ -1889,7 +1890,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
             var previewId = Guid.NewGuid().ToString("N");
             _packagePreviews[(context.TenantId, previewId)] = new PackagePreviewResourceSnapshot(
-                new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg);
+                new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg,
+                scope.ScopeFingerprint, snapshot.Draft.ProposedVersion);
 
             // Track latest package preview for this draft (for evidence preview reuse)
             _latestPackageByDraft[(context.TenantId, draftId)] = previewId;
@@ -1937,13 +1939,16 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 return await RecordAggregateFailure<PackageEvidencePreview>(context, "AUTHORIZATION_CONTEXT_UNAVAILABLE", ct);
             var universe = universeResult.Universe!;
 
-            // Try find existing package preview for this tenant+draft.
-            // When a package preview already exists, reuse its DescriptorPackage
-            // to avoid redundant build and ensure hash consistency.
+            // Try find existing package preview for this tenant+draft with matching scope.
+            // When a package preview already exists under the same visibility scope and
+            // draft version, reuse its DescriptorPackage to avoid redundant build and
+            // ensure hash consistency. Mismatched scope or version forces Path B.
             PackagePreviewResourceSnapshot? existingPkgSnapshot = null;
             if (_latestPackageByDraft.TryGetValue((context.TenantId, draftId), out var existingPreviewId)
                 && _packagePreviews.TryGetValue((context.TenantId, existingPreviewId), out var pkgSnapshot)
-                && pkgSnapshot.Package is not null)
+                && pkgSnapshot.Package is not null
+                && StringComparer.Ordinal.Equals(pkgSnapshot.ScopeFingerprint, scope.ScopeFingerprint)
+                && StringComparer.Ordinal.Equals(pkgSnapshot.DraftVersion, draft.ProposedVersion))
             {
                 existingPkgSnapshot = pkgSnapshot;
             }
@@ -2085,7 +2090,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             // Both share the same DescriptorPackage and hash set for consistency.
             var packagePreviewId = Guid.NewGuid().ToString("N");
             _packagePreviews[(context.TenantId, packagePreviewId)] = new PackagePreviewResourceSnapshot(
-                new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg);
+                new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg,
+                scope.ScopeFingerprint, draft.ProposedVersion);
             _latestPackageByDraft[(context.TenantId, draftId)] = packagePreviewId;
 
             // Store package hashes for evidence recheck

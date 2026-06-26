@@ -7,4 +7,6 @@ namespace CrestCreates.Agent.ControlPlane;
 internal sealed record PackagePreviewResourceSnapshot(
     PackagePreviewEntry Preview,
     Draft Owner,
-    DescriptorPackage? Package = null);
+    DescriptorPackage? Package = null,
+    string? ScopeFingerprint = null,
+    string? DraftVersion = null);

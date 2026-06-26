@@ -1,3 +1,4 @@
+using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 
 namespace CrestCreates.Agent.ControlPlane;
@@ -14,14 +15,22 @@ internal sealed class AgentDescriptorVisibilityScope
     public string TenantId { get; }
 
     /// <summary>
+    /// Deterministic fingerprint of the scope's visibility policy.
+    /// Used to verify that a cached package preview was built under the same scope.
+    /// Format: "Mode:AllowedKinds:DeniedKinds" where kinds are sorted and comma-separated.
+    /// </summary>
+    public string ScopeFingerprint { get; }
+
+    /// <summary>
     /// Whether any descriptor kind restrictions are active for this invocation.
     /// </summary>
     public bool IsRestricted => _evaluator.HasRestrictions;
 
-    public AgentDescriptorVisibilityScope(string tenantId, AgentDescriptorKindPolicyEvaluator evaluator)
+    public AgentDescriptorVisibilityScope(string tenantId, AgentDescriptorKindPolicyEvaluator evaluator, string scopeFingerprint)
     {
         TenantId = tenantId;
         _evaluator = evaluator;
+        ScopeFingerprint = scopeFingerprint;
     }
 
     /// <summary>
@@ -40,4 +49,15 @@ internal sealed class AgentDescriptorVisibilityScope
     /// </summary>
     public IReadOnlyList<T> Filter<T>(IEnumerable<T> source, Func<T, DescriptorKind> selector) =>
         source.Where(item => IsVisible(selector(item))).ToList().AsReadOnly();
+
+    /// <summary>
+    /// Computes a deterministic fingerprint from authorization options.
+    /// Used to verify scope identity when reusing cached package previews.
+    /// </summary>
+    public static string ComputeFingerprint(AgentToolAuthorizationOptions options)
+    {
+        var allowed = string.Join(",", options.AllowedDescriptorKinds.Order(StringComparer.Ordinal));
+        var denied = string.Join(",", options.DeniedDescriptorKinds.Order(StringComparer.Ordinal));
+        return $"{options.Mode}:{allowed}:{denied}";
+    }
 }
