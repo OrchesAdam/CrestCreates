@@ -605,55 +605,57 @@ This thread achieved the following:
       - **Design spec**: `docs/superpowers/specs/2026-06-21-phase-7c-agent-draft-payload-contract-source-generator-design.md`
       - **Implementation plan**: `docs/superpowers/plans/2026-06-21-phase-7c-agent-draft-payload-contract-source-generator.md`
 
-    - **Review Report & Fix Proposal Contract — Phase 7d** (2026-06-22):
-      - **Review Report DTOs** (5 new types): `DescriptorReviewReportDto` (13 typed sections + top-level Recommendations + source binding fields: ReviewResultId, DraftVersion, SourceReviewHash, TemplateVersion), `DescriptorReviewReportSectionDto` (Kind, SectionId, Title, Order, IsEmpty, OverallSeverity, Items), `DescriptorReviewReportItemDto` (ItemId with disambiguation suffix, ReasonCode, MessageTemplateId, Message, Severity, Parameters, RelatedDiagnosticIds, RelatedDescriptorIds), `DescriptorReviewRecommendationDto` (RecommendationId, ReasonCode, Message, Kind, IsActionable, RelatedItemIds), `DescriptorReviewReportBuildRequest` (ReviewResult, Draft, VisibilityApplied — fail-fast InvalidOperationException when false)
-      - **New enums**: `DescriptorReviewReportSectionKind` (13 values, 1-based), `DescriptorReviewSeverity` (Info=1/Warning=2/Error=3/Blocker=4), `DescriptorReviewRecommendationKind` (6 values including RequestActivationHandoff), `DescriptorReviewReportFormat` (Markdown=1/PlainText=2)
-      - **FixProposal contract upgrade** (breaking): `FixProposal` gains Kind, Title, Explanation, ReasonCode, Applicability, IsExecutable (aggregation: Applicability==CurrentMutableDraft && Actions.All(a=>a.IsExecutable)), RequiresManualAction, BlocksActivationUntilResolved (explanation-not-gate), ContractVersion; `FixProposalAction` gains TargetPath (was Path), Kind (was ActionKind), JsonElement? CurrentValue/ProposedValue (was string, via JsonSerializer.SerializeToElement+.Clone for AOT safety), IsExecutable, SafetyLevel
-      - **New enums**: `FixProposalKind` (9 values: CreateMissingDescriptor=1 to SetRequiredField=9; default mapping → MarkRequiresReview), `FixProposalApplicability` (4 values incl. CurrentMutableDraft), `FixProposalActionSafetyLevel` (4 values), `FixProposalActionKind` expanded to 10 (SetValue=1 to ManualActionRequired=10)
-      - **Report Builder**: `IDescriptorReviewReportBuilder`/`DefaultDescriptorReviewReportBuilder` (1,046 lines) — 13 Build*Section methods, SHA256 ReportId via IDescriptorStableHashBuilder, deterministic .OrderBy() on all iteration, fail-fast on VisibilityApplied=false, TimeProvider injection, DeriveRecommendations
-      - **Report Renderer**: `IDescriptorReviewReportRenderer`/`DefaultDescriptorReviewReportRenderer` — Markdown + PlainText, reads DTO Message directly, ContractVersion validation (UnsupportedReportContractVersion on mismatch), no external services/LLM
-      - **Message Template Catalog**: `IDescriptorReviewMessageTemplateCatalog`/`DefaultDescriptorReviewMessageTemplateCatalog` — 31 templates, regex-based parameter substitution, TemplateVersion="7d.v1"
-      - **Service integration**: `BuildDescriptorReviewReportAsync` + `RenderDescriptorReviewReportAsync` (2 new tools), single-action constraint on ApplyFixProposal (UnsupportedMultiActionFixProposal diagnostic), Applicability check (FIX_PROPOSAL_NOT_APPLICABLE), MapDiagnosticToFixProposalKind (RATIONALE_EMPTY/INTENT_EMPTY→SetRequiredField, default→MarkRequiresReview)
-      - **Contract version**: bumped to "7d.v1"
-      - **Tool count**: 30 → 34 (BuildDescriptorReviewReport + RenderDescriptorReviewReport + 2 convenience)
-      - **Code review**: 3 rounds, 4 Critical + 7 Important + 4 Minor fixed; 2 issues rejected with technical reasoning (I#6 YAGNI, M#13 no NRE path)
-      - **Test suites**: 8+ test files, 67+ new tests total — Builder (20+), Renderer (7+), Catalog (8), FixProposal (18+), Service Integration (8), Coverage (5+), Semantic Preservation, Wave4 updates
-      - **366 ControlPlane tests + 7 Boundary tests pass** (373 total)
-      - **Design spec**: `docs/superpowers/specs/2026-06-22-phase-7d-review-report-fix-proposal-design.md`
-      - **Implementation plan**: `docs/superpowers/plans/2026-06-22-phase-7d-review-report-fix-proposal.md`
+### Review Report & Fix Proposal Contract (Phase 7d, 2026-06-22)
 
-    - **Safe Activation Workflow — Phase 7e** (2026-06-24):
-      - **Core activation models** (11 new types in `Activation/` sub-namespace): `DescriptorActivationActorKind`, `BindingHashes`, `ActivationBindingSnapshot`, `DescriptorActivationPolicy`, `DescriptorActivationEligibility`, `DescriptorActivationDecision`, `DescriptorActivationReviewDecision`, `DescriptorActivationReviewOutcome`, `DescriptorActivationAuditRecord`, `DescriptorActivationReviewTaskInput`
-      - **Service interfaces** (5): `IDescriptorActivationRequestService`, `IDescriptorActivationPolicyProvider`, `IDescriptorActivationAuditor`, `IActivationEvidenceRechecker`, `IRuntimeActivationGate`
-      - **Orchestrator**: `IActivationReviewOrchestrator` + `DefaultActivationReviewOrchestrator` — creates HumanTask for review-required requests, processes review decisions
-      - **Event handler**: `DescriptorActivationReviewHumanTaskEventHandler` — subscribes to HumanTaskCompletedEvent, routes to RequestService
-      - **Single-track principle**: ToolService delegates ALL activation logic to IDescriptorActivationRequestService
-      - **Policy-driven eligibility**: AutoActivatable / RequiresHumanReview / NotActivatable
-      - **Evidence binding**: ActivationBindingSnapshot captures review+package+evidence hashes at request time; IActivationEvidenceRechecker verifies no drift before gate execution
-      - **Runtime gate**: IRuntimeActivationGate is the ONLY component that mutates runtime state
-      - **Safety-first default**: EvaluateGovernance defaults to ReviewRequired (not Allowed)
-      - **Audit trail**: IDescriptorActivationAuditor records all decisions with ordering
-      - **AoT safety**: TryParseReviewDecision moved to DescriptorActivationReviewDecisionParser with JsonSerializerContext
-      - **Tenant isolation**: DescriptorActivationReviewDecision carries TenantId/CorrelationId; HumanTask callback resolves from instance
-      - **Contract version**: bumped to "7e.v1"
-      - **424 ControlPlane tests + 1 Boundary test pass**
-      - **Design spec**: Phase 7e issue #17
+- **Review Report DTOs** (5 new types): `DescriptorReviewReportDto` (13 typed sections + top-level Recommendations + source binding fields: ReviewResultId, DraftVersion, SourceReviewHash, TemplateVersion), `DescriptorReviewReportSectionDto` (Kind, SectionId, Title, Order, IsEmpty, OverallSeverity, Items), `DescriptorReviewReportItemDto` (ItemId with disambiguation suffix, ReasonCode, MessageTemplateId, Message, Severity, Parameters, RelatedDiagnosticIds, RelatedDescriptorIds), `DescriptorReviewRecommendationDto` (RecommendationId, ReasonCode, Message, Kind, IsActionable, RelatedItemIds), `DescriptorReviewReportBuildRequest` (ReviewResult, Draft, VisibilityApplied — fail-fast InvalidOperationException when false)
+- **New enums**: `DescriptorReviewReportSectionKind` (13 values, 1-based), `DescriptorReviewSeverity` (Info=1/Warning=2/Error=3/Blocker=4), `DescriptorReviewRecommendationKind` (6 values including RequestActivationHandoff), `DescriptorReviewReportFormat` (Markdown=1/PlainText=2)
+- **FixProposal contract upgrade** (breaking): `FixProposal` gains Kind, Title, Explanation, ReasonCode, Applicability, IsExecutable (aggregation: Applicability==CurrentMutableDraft && Actions.All(a=>a.IsExecutable)), RequiresManualAction, BlocksActivationUntilResolved (explanation-not-gate), ContractVersion; `FixProposalAction` gains TargetPath (was Path), Kind (was ActionKind), JsonElement? CurrentValue/ProposedValue (was string, via JsonSerializer.SerializeToElement+.Clone for AOT safety), IsExecutable, SafetyLevel
+- **New enums**: `FixProposalKind` (9 values: CreateMissingDescriptor=1 to SetRequiredField=9; default mapping → MarkRequiresReview), `FixProposalApplicability` (4 values incl. CurrentMutableDraft), `FixProposalActionSafetyLevel` (4 values), `FixProposalActionKind` expanded to 10 (SetValue=1 to ManualActionRequired=10)
+- **Report Builder**: `IDescriptorReviewReportBuilder`/`DefaultDescriptorReviewReportBuilder` (1,046 lines) — 13 Build*Section methods, SHA256 ReportId via IDescriptorStableHashBuilder, deterministic .OrderBy() on all iteration, fail-fast on VisibilityApplied=false, TimeProvider injection, DeriveRecommendations
+- **Report Renderer**: `IDescriptorReviewReportRenderer`/`DefaultDescriptorReviewReportRenderer` — Markdown + PlainText, reads DTO Message directly, ContractVersion validation (UnsupportedReportContractVersion on mismatch), no external services/LLM
+- **Message Template Catalog**: `IDescriptorReviewMessageTemplateCatalog`/`DefaultDescriptorReviewMessageTemplateCatalog` — 31 templates, regex-based parameter substitution, TemplateVersion="7d.v1"
+- **Service integration**: `BuildDescriptorReviewReportAsync` + `RenderDescriptorReviewReportAsync` (2 new tools), single-action constraint on ApplyFixProposal (UnsupportedMultiActionFixProposal diagnostic), Applicability check (FIX_PROPOSAL_NOT_APPLICABLE), MapDiagnosticToFixProposalKind (RATIONALE_EMPTY/INTENT_EMPTY→SetRequiredField, default→MarkRequiresReview)
+- **Contract version**: bumped to "7d.v1"
+- **Tool count**: 30 → 34 (BuildDescriptorReviewReport + RenderDescriptorReviewReport + 2 convenience)
+- **Code review**: 3 rounds, 4 Critical + 7 Important + 4 Minor fixed; 2 issues rejected with technical reasoning (I#6 YAGNI, M#13 no NRE path)
+- **Test suites**: 8+ test files, 67+ new tests total — Builder (20+), Renderer (7+), Catalog (8), FixProposal (18+), Service Integration (8), Coverage (5+), Semantic Preservation, Wave4 updates
+- **366 ControlPlane tests + 7 Boundary tests pass** (373 total)
+- **Design spec**: `docs/superpowers/specs/2026-06-22-phase-7d-review-report-fix-proposal-design.md`
+- **Implementation plan**: `docs/superpowers/plans/2026-06-22-phase-7d-review-report-fix-proposal.md`
 
-  - **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface.
+### Safe Activation Workflow (Phase 7e, 2026-06-24)
 
-    - **Semantic String Governance** (2026-06-25):
-      - **Core value objects** (11 types in `CrestCreates.Core.Abstractions.Identity`): `ErrorCode`, `PermissionName`, `PolicyName`, `FeatureName`, `SettingName`, `DiagnosticCode`, `EventName`, `CapabilityId`, `WorkflowId`, `HumanTaskId`, `MessageTemplateId` — each with `XxxValue` const string + typed property, inline validation, safe implicit conversion to string, private constructor + static factory for constrained types
-      - **SeverityLevel** value object: private constructor, static factory properties (Info/Warning/Error), get-only Value, implicit conversion to string
-      - **CrestErrorCodes** centralized: `General`, `Validation`, `Authorization`, `NotFound`, `Concurrency`, `PreconditionRequired` — replaces 6 inline `"CrestError.X"` literals across exception classes
-      - **Typed exception overloads**: `CrestException(ErrorCode)`, `CrestBusinessException(ErrorCode)`, `CrestPermissionException(PermissionName)`, `CrestValidationException(ErrorCode)` — existing string overloads preserved for backward compat
-      - **Framework constant classes**: `FeatureManagementErrorCodes` (7 entries), `SchemaValidationErrorCodes` (8 entries), `MetadataContextPackDiagnosticCodes` (3 entries), `DescriptorPackageDiagnosticCodes` (12 entries with typed DiagnosticCode properties)
-      - **Agent constant classes**: `DescriptorActivationDiagnosticCodes` (35 entries), `DescriptorActivationHumanTaskIds` (2 entries), `DescriptorActivationMessageTemplateIds` (8 entries), `AgentToolPermissionNames` (20 entries + RuntimePrefix), `AgentToolDiagnosticCodes` (51 entries), `DescriptorReviewReportMessageTemplateIds` (31 entries), `DescriptorDraftDiagnosticCodes` (12 entries)
-      - **Tooling constant classes** (netstandard2.0 — const string only, no typed properties): `CanonicalHashDiagnosticCodes` (28 entries), `ObjectMappingDiagnosticCodes` (12 entries), `CodeGeneratorDiagnosticCodes` (4 entries)
-      - **Generated permission shape**: `XxxPermissions.Create` → `XxxPermissions.CreateValue` (const string) + `XxxPermissions.Create` (typed PermissionName property); `GetAllPermissions()` yields `XxxValue` strings
-      - **Architecture guard**: `SemanticStringGuardTests` in DependencyBoundaries — 6 forbidden patterns (ACTIVATION_*, CCHASH*, OM*, FIELD_REQUIRED, descriptor-activation-review, agent.*), definition file exemptions, `// semantic-string-guard: allow` opt-out for test fixtures
-      - **Test coverage**: 25 value object tests, 4 exception tests, 431 Agent tests, 9 boundary tests, 158 CodeGenerator tests (0 failures)
-      - **Design spec**: `docs/superpowers/specs/2026-06-25-semantic-string-governance-design.md`
-      - **Implementation plan**: `docs/superpowers/plans/2026-06-25-semantic-string-governance.md`
+- **Core activation models** (11 new types in `Activation/` sub-namespace): `DescriptorActivationActorKind`, `BindingHashes`, `ActivationBindingSnapshot`, `DescriptorActivationPolicy`, `DescriptorActivationEligibility`, `DescriptorActivationDecision`, `DescriptorActivationReviewDecision`, `DescriptorActivationReviewOutcome`, `DescriptorActivationAuditRecord`, `DescriptorActivationReviewTaskInput`
+- **Service interfaces** (5): `IDescriptorActivationRequestService`, `IDescriptorActivationPolicyProvider`, `IDescriptorActivationAuditor`, `IActivationEvidenceRechecker`, `IRuntimeActivationGate`
+- **Orchestrator**: `IActivationReviewOrchestrator` + `DefaultActivationReviewOrchestrator` — creates HumanTask for review-required requests, processes review decisions
+- **Event handler**: `DescriptorActivationReviewHumanTaskEventHandler` — subscribes to HumanTaskCompletedEvent, routes to RequestService
+- **Single-track principle**: ToolService delegates ALL activation logic to IDescriptorActivationRequestService
+- **Policy-driven eligibility**: AutoActivatable / RequiresHumanReview / NotActivatable
+- **Evidence binding**: ActivationBindingSnapshot captures review+package+evidence hashes at request time; IActivationEvidenceRechecker verifies no drift before gate execution
+- **Runtime gate**: IRuntimeActivationGate is the ONLY component that mutates runtime state
+- **Safety-first default**: EvaluateGovernance defaults to ReviewRequired (not Allowed)
+- **Audit trail**: IDescriptorActivationAuditor records all decisions with ordering
+- **AoT safety**: TryParseReviewDecision moved to DescriptorActivationReviewDecisionParser with JsonSerializerContext
+- **Tenant isolation**: DescriptorActivationReviewDecision carries TenantId/CorrelationId; HumanTask callback resolves from instance
+- **Contract version**: bumped to "7e.v1"
+- **424 ControlPlane tests + 1 Boundary test pass**
+- **Design spec**: Phase 7e issue #17
+- **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface.
+
+### Semantic String Governance (2026-06-25)
+
+- **Core value objects** (11 types in `CrestCreates.Core.Abstractions.Identity`): `ErrorCode`, `PermissionName`, `PolicyName`, `FeatureName`, `SettingName`, `DiagnosticCode`, `EventName`, `CapabilityId`, `WorkflowId`, `HumanTaskId`, `MessageTemplateId` — each with `XxxValue` const string + typed property, inline validation, safe implicit conversion to string, private constructor + static factory for constrained types
+- **SeverityLevel** value object: private constructor, static factory properties (Info/Warning/Error), get-only Value, implicit conversion to string
+- **CrestErrorCodes** centralized: `General`, `Validation`, `Authorization`, `NotFound`, `Concurrency`, `PreconditionRequired` — replaces 6 inline `"CrestError.X"` literals across exception classes
+- **Typed exception overloads**: `CrestException(ErrorCode)`, `CrestBusinessException(ErrorCode)`, `CrestPermissionException(PermissionName)`, `CrestValidationException(ErrorCode)` — existing string overloads preserved for backward compat
+- **Framework constant classes**: `FeatureManagementErrorCodes` (7 entries), `SchemaValidationErrorCodes` (8 entries), `MetadataContextPackDiagnosticCodes` (3 entries), `DescriptorPackageDiagnosticCodes` (12 entries with typed DiagnosticCode properties)
+- **Agent constant classes**: `DescriptorActivationDiagnosticCodes` (35 entries), `DescriptorActivationHumanTaskIds` (2 entries), `DescriptorActivationMessageTemplateIds` (8 entries), `AgentToolPermissionNames` (20 entries + RuntimePrefix), `AgentToolDiagnosticCodes` (51 entries), `DescriptorReviewReportMessageTemplateIds` (31 entries), `DescriptorDraftDiagnosticCodes` (12 entries)
+- **Tooling constant classes** (netstandard2.0 — const string only, no typed properties): `CanonicalHashDiagnosticCodes` (28 entries), `ObjectMappingDiagnosticCodes` (12 entries), `CodeGeneratorDiagnosticCodes` (4 entries)
+- **Generated permission shape**: `XxxPermissions.Create` → `XxxPermissions.CreateValue` (const string) + `XxxPermissions.Create` (typed PermissionName property); `GetAllPermissions()` yields `XxxValue` strings
+- **Architecture guard**: `SemanticStringGuardTests` in DependencyBoundaries — 6 forbidden patterns (ACTIVATION_*, CCHASH*, OM*, FIELD_REQUIRED, descriptor-activation-review, agent.*), definition file exemptions, `// semantic-string-guard: allow` opt-out for test fixtures
+- **Test coverage**: 25 value object tests, 4 exception tests, 431 Agent tests, 9 boundary tests, 158 CodeGenerator tests (0 failures)
+- **Design spec**: `docs/superpowers/specs/2026-06-25-semantic-string-governance-design.md`
+- **Implementation plan**: `docs/superpowers/plans/2026-06-25-semantic-string-governance.md`
 
 ---
 
