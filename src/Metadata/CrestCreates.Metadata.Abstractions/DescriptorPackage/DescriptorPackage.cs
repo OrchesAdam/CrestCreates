@@ -26,8 +26,7 @@ public sealed class DescriptorPackage
     public string PackageVersion => Manifest.PackageVersion;
 
     /// <summary>
-    /// Canonical hash of the package manifest. Uses <see cref="Hashes"/> when available,
-    /// falls back to <see cref="DescriptorManifest.ContentHash"/> (obsolete) otherwise.
+    /// Canonical hash of the package manifest. Uses <see cref="Hashes"/> when available.
     /// </summary>
-    public string ContentHash => Hashes?.PackageManifestHash.Value ?? Manifest.ContentHash;
+    public string ContentHash => Hashes?.PackageManifestHash.Value ?? string.Empty;
 }

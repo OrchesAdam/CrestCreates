@@ -300,9 +300,6 @@ public abstract class AgentControlPlaneTestBase
                 {
                     PackageId = "pkg-001",
                     PackageVersion = "1",
-                    ContentHash = "hash-001",
-                    EvidenceHash = "ev-hash-001",
-                    EnvelopeHash = "env-hash-001",
                     DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
                 },
                 Snapshot = new DescriptorSnapshot(),

@@ -1892,7 +1892,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
             // Store package hash for evidence recheck
             if (pkg.Hashes is not null)
-                _artifactResolver.StorePackageHashSet(context.TenantId, previewId, pkg.Hashes);
+                _artifactResolver.StorePackageHashes(context.TenantId, previewId, pkg.Hashes);
 
             var audit2 = BuildAudit(context, AgentToolResultStatus.Success, []);
             audit2 = audit2 with
@@ -2033,9 +2033,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             _evidencePreviews[(context.TenantId, evidencePreviewId)] = new EvidencePreviewResourceSnapshot(
                 new EvidencePreviewEntry(draft.DraftId, context.TenantId, result), snapshot.Draft);
 
-            // Store package hash for evidence recheck
+            // Store evidence hash for evidence recheck
             if (pkg.Hashes is not null)
-                _artifactResolver.StorePackageHashSet(context.TenantId, evidencePreviewId, pkg.Hashes);
+                _artifactResolver.StoreEvidenceHashes(context.TenantId, evidencePreviewId, pkg.Hashes);
 
             var audit = BuildAudit(context, AgentToolResultStatus.Success, result.Diagnostics);
             audit = audit with

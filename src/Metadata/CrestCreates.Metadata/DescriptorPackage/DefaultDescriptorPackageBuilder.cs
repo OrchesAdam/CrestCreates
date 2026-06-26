@@ -65,9 +65,6 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
 
         var hashSet = _packageHashComputer.ComputeHashSet(manifest, evidence, envelopeMetadata);
 
-        // Note: DescriptorManifest.ContentHash/EvidenceHash/EnvelopeHash are [Obsolete].
-        // They are NOT populated — consumers must use DescriptorPackage.Hashes instead.
-
         // Build evidence envelope
         var evidenceEnvelope = new DescriptorPackageEvidenceEnvelope
         {

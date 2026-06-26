@@ -14,7 +14,8 @@ public sealed class InMemoryActivationBindingArtifactResolver : IActivationBindi
 {
     private readonly ConcurrentDictionary<(string TenantId, string ReviewResultId), CanonicalHash> _sourceReviewHashes = new();
     private readonly ConcurrentDictionary<(string TenantId, string ReviewResultId), CanonicalHash> _reviewManifestHashes = new();
-    private readonly ConcurrentDictionary<(string TenantId, string PreviewId), DescriptorPackageHashSet> _packageHashSets = new();
+    private readonly ConcurrentDictionary<(string TenantId, string PackagePreviewId), DescriptorPackageHashSet> _packageHashSets = new();
+    private readonly ConcurrentDictionary<(string TenantId, string EvidencePreviewId), DescriptorPackageHashSet> _evidenceHashSets = new();
 
     public void StoreReviewHashes(string tenantId, string reviewResultId, CanonicalHash sourceReviewHash, CanonicalHash reviewManifestHash)
     {
@@ -22,9 +23,14 @@ public sealed class InMemoryActivationBindingArtifactResolver : IActivationBindi
         _reviewManifestHashes[(tenantId, reviewResultId)] = reviewManifestHash;
     }
 
-    public void StorePackageHashSet(string tenantId, string previewId, DescriptorPackageHashSet packageHashes)
+    public void StorePackageHashes(string tenantId, string packagePreviewId, DescriptorPackageHashSet packageHashes)
     {
-        _packageHashSets[(tenantId, previewId)] = packageHashes;
+        _packageHashSets[(tenantId, packagePreviewId)] = packageHashes;
+    }
+
+    public void StoreEvidenceHashes(string tenantId, string evidencePreviewId, DescriptorPackageHashSet evidenceHashes)
+    {
+        _evidenceHashSets[(tenantId, evidencePreviewId)] = evidenceHashes;
     }
 
     public Task<ResolvedBindingArtifacts> ResolveAsync(
@@ -33,21 +39,27 @@ public sealed class InMemoryActivationBindingArtifactResolver : IActivationBindi
         CanonicalHash? sourceReviewHash = null;
         CanonicalHash? reviewManifestHash = null;
         DescriptorPackageHashSet? packageHashes = null;
+        DescriptorPackageHashSet? evidenceHashes = null;
 
         // Review hashes are keyed by ReviewResultId
         var reviewKey = (tenantId, bindingSnapshot.ReviewResultId);
         _sourceReviewHashes.TryGetValue(reviewKey, out sourceReviewHash);
         _reviewManifestHashes.TryGetValue(reviewKey, out reviewManifestHash);
 
-        // Package hashes are keyed by PackagePreviewId (set by ToolService at preview time)
+        // Package hashes are keyed by PackagePreviewId
         var packageKey = (tenantId, bindingSnapshot.PackagePreviewId);
         _packageHashSets.TryGetValue(packageKey, out packageHashes);
+
+        // Evidence hashes are keyed by EvidencePreviewId
+        var evidenceKey = (tenantId, bindingSnapshot.EvidencePreviewId);
+        _evidenceHashSets.TryGetValue(evidenceKey, out evidenceHashes);
 
         return Task.FromResult(new ResolvedBindingArtifacts
         {
             CurrentSourceReviewHash = sourceReviewHash,
             CurrentReviewManifestHash = reviewManifestHash,
             CurrentPackageHashes = packageHashes,
+            CurrentEvidenceHashes = evidenceHashes,
             CurrentContractHash = null, // Computed separately by rechecker via IDescriptorStableHashBuilder
             CurrentDefinitionHash = null  // Computed separately by rechecker via IDescriptorStableHashBuilder
         });

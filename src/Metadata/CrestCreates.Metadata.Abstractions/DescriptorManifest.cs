@@ -12,12 +12,6 @@ public sealed class DescriptorManifest
     public int DescriptorCount { get; init; }
     public IReadOnlyList<DescriptorManifestEntry> DescriptorEntries { get; init; }
         = Array.Empty<DescriptorManifestEntry>();
-    [Obsolete("Use DescriptorPackage.Hashes instead.")]
-    public string ContentHash { get; init; } = string.Empty;
-    [Obsolete("Use DescriptorPackage.Hashes instead.")]
-    public string? EvidenceHash { get; init; }
-    [Obsolete("Use DescriptorPackage.Hashes instead.")]
-    public string? EnvelopeHash { get; init; }
 }
 
 public sealed class DescriptorManifestEntry

@@ -245,6 +245,90 @@ public class ActivationBindingHashValidatorTests
         result.Should().AllSatisfy(i => i.Severity.Should().Be(BindingHashValidationSeverity.Error));
     }
 
+    [Fact]
+    public void Validate_WrongScope_ReturnsError()
+    {
+        // SourceReviewHash expects Scope=InternalFull, but we put TenantVisible
+        var hashes = CreateValidBindingHashes() with
+        {
+            SourceReviewHash = CreateSlotHash(SlotMetadata.SourceReviewHash) with
+            {
+                Scope = "TenantVisible" // Wrong!
+            }
+        };
+
+        var result = _validator.Validate(hashes);
+
+        result.Should().Contain(i =>
+            i.Slot == "SourceReviewHash" &&
+            i.Description.Contains("Scope") &&
+            i.Severity == BindingHashValidationSeverity.Error);
+    }
+
+    [Fact]
+    public void Validate_EmptyAlgorithm_ReturnsError()
+    {
+        var hashes = CreateValidBindingHashes() with
+        {
+            ContractHash = CreateSlotHash(SlotMetadata.ContractHash) with { Algorithm = "" }
+        };
+
+        var result = _validator.Validate(hashes);
+
+        result.Should().Contain(i =>
+            i.Slot == "ContractHash" &&
+            i.Description.Contains("Algorithm") &&
+            i.Severity == BindingHashValidationSeverity.Error);
+    }
+
+    [Fact]
+    public void Validate_EmptyAlgorithmVersion_ReturnsError()
+    {
+        var hashes = CreateValidBindingHashes() with
+        {
+            ContractHash = CreateSlotHash(SlotMetadata.ContractHash) with { AlgorithmVersion = "" }
+        };
+
+        var result = _validator.Validate(hashes);
+
+        result.Should().Contain(i =>
+            i.Slot == "ContractHash" &&
+            i.Description.Contains("AlgorithmVersion") &&
+            i.Severity == BindingHashValidationSeverity.Error);
+    }
+
+    [Fact]
+    public void Validate_EmptyContractVersion_ReturnsError()
+    {
+        var hashes = CreateValidBindingHashes() with
+        {
+            ContractHash = CreateSlotHash(SlotMetadata.ContractHash) with { ContractVersion = "" }
+        };
+
+        var result = _validator.Validate(hashes);
+
+        result.Should().Contain(i =>
+            i.Slot == "ContractHash" &&
+            i.Description.Contains("ContractVersion") &&
+            i.Severity == BindingHashValidationSeverity.Error);
+    }
+
+    [Fact]
+    public void Validate_EmptyCanonicalShapeVersion_ReturnsError()
+    {
+        var hashes = CreateValidBindingHashes() with
+        {
+            ContractHash = CreateSlotHash(SlotMetadata.ContractHash) with { CanonicalShapeVersion = "" }
+        };
+
+        var result = _validator.Validate(hashes);
+
+        result.Should().Contain(i =>
+            i.Slot == "ContractHash" &&
+            i.Description.Contains("CanonicalShapeVersion") &&
+            i.Severity == BindingHashValidationSeverity.Error);
+    }
+
     // ── Helpers ──
 
     private static class SlotMetadata

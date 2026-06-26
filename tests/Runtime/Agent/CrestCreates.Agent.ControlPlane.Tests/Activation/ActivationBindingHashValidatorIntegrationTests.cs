@@ -254,7 +254,8 @@ public class ActivationBindingHashValidatorIntegrationTests
             {
                 CurrentSourceReviewHash = boundHashes.SourceReviewHash,
                 CurrentReviewManifestHash = boundHashes.ReviewManifestHash,
-                CurrentPackageHashes = boundHashes.PackageHashes
+                CurrentPackageHashes = boundHashes.PackageHashes,
+                CurrentEvidenceHashes = boundHashes.PackageHashes
             });
 
         var rechecker = new DefaultActivationEvidenceRechecker(

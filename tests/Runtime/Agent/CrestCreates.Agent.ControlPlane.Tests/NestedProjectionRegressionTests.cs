@@ -820,9 +820,6 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
                 {
                     PackageId = req.PackageId,
                     PackageVersion = req.PackageVersion,
-                    ContentHash = "ch-" + req.PackageId,
-                    EvidenceHash = "eh-" + req.PackageId,
-                    EnvelopeHash = "envh-" + req.PackageId,
                     DescriptorEntries = entries
                 };
 

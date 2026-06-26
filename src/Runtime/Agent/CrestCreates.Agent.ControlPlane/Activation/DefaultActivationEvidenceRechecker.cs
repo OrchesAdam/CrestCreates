@@ -127,18 +127,12 @@ public sealed class DefaultActivationEvidenceRechecker : IActivationEvidenceRech
         CompareHash(drifts, "ReviewManifestHash",
             bindingSnapshot.Hashes.ReviewManifestHash, resolvedArtifacts.CurrentReviewManifestHash);
 
-        // Compare package hash set as atomic unit
+        // Compare package manifest hash from package preview
         if (resolvedArtifacts.CurrentPackageHashes is not null)
         {
             CompareHash(drifts, "PackageManifestHash",
                 bindingSnapshot.Hashes.PackageManifestHash,
                 resolvedArtifacts.CurrentPackageHashes.PackageManifestHash);
-            CompareHash(drifts, "PackageEvidenceHash",
-                bindingSnapshot.Hashes.PackageEvidenceHash,
-                resolvedArtifacts.CurrentPackageHashes.PackageEvidenceHash);
-            CompareHash(drifts, "PackageEvidenceEnvelopeHash",
-                bindingSnapshot.Hashes.PackageEvidenceEnvelopeHash,
-                resolvedArtifacts.CurrentPackageHashes.PackageEvidenceEnvelopeHash);
         }
         else
         {
@@ -147,6 +141,27 @@ public sealed class DefaultActivationEvidenceRechecker : IActivationEvidenceRech
             {
                 FieldName = "PackageHashes",
                 BoundHashValue = bindingSnapshot.Hashes.PackageHashes.ToString(),
+                CurrentHashValue = "<not-found>"
+            });
+        }
+
+        // Compare evidence hashes from evidence preview
+        if (resolvedArtifacts.CurrentEvidenceHashes is not null)
+        {
+            CompareHash(drifts, "PackageEvidenceHash",
+                bindingSnapshot.Hashes.PackageEvidenceHash,
+                resolvedArtifacts.CurrentEvidenceHashes.PackageEvidenceHash);
+            CompareHash(drifts, "PackageEvidenceEnvelopeHash",
+                bindingSnapshot.Hashes.PackageEvidenceEnvelopeHash,
+                resolvedArtifacts.CurrentEvidenceHashes.PackageEvidenceEnvelopeHash);
+        }
+        else
+        {
+            _logger.LogWarning("Evidence drift: EvidenceHashes artifact no longer exists");
+            drifts.Add(new ActivationEvidenceDrift
+            {
+                FieldName = "EvidenceHashes",
+                BoundHashValue = "<evidence>",
                 CurrentHashValue = "<not-found>"
             });
         }

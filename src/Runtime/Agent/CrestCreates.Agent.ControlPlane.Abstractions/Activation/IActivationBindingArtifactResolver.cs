@@ -26,10 +26,16 @@ public interface IActivationBindingArtifactResolver
     void StoreReviewHashes(string tenantId, string reviewResultId, CanonicalHash sourceReviewHash, CanonicalHash reviewManifestHash);
 
     /// <summary>
-    /// Stores the package hash set (manifest, evidence, envelope) for a review result.
-    /// Called by the ToolService when package and evidence previews are created.
+    /// Stores the package hash set (manifest, evidence, envelope) for a package preview.
+    /// Called by the ToolService when a package preview is created.
     /// </summary>
-    void StorePackageHashSet(string tenantId, string reviewResultId, DescriptorPackageHashSet packageHashes);
+    void StorePackageHashes(string tenantId, string packagePreviewId, DescriptorPackageHashSet packageHashes);
+
+    /// <summary>
+    /// Stores the evidence hash set (manifest, evidence, envelope) for an evidence preview.
+    /// Called by the ToolService when an evidence preview is created.
+    /// </summary>
+    void StoreEvidenceHashes(string tenantId, string evidencePreviewId, DescriptorPackageHashSet evidenceHashes);
 }
 
 /// <summary>
@@ -40,7 +46,16 @@ public sealed record ResolvedBindingArtifacts
 {
     public CanonicalHash? CurrentSourceReviewHash { get; init; }
     public CanonicalHash? CurrentReviewManifestHash { get; init; }
+    /// <summary>
+    /// Package hashes resolved from the package preview (keyed by PackagePreviewId).
+    /// Used to verify PackageManifestHash in the binding snapshot.
+    /// </summary>
     public DescriptorPackageHashSet? CurrentPackageHashes { get; init; }
+    /// <summary>
+    /// Evidence hashes resolved from the evidence preview (keyed by EvidencePreviewId).
+    /// Used to verify PackageEvidenceHash and PackageEvidenceEnvelopeHash in the binding snapshot.
+    /// </summary>
+    public DescriptorPackageHashSet? CurrentEvidenceHashes { get; init; }
     public CanonicalHash? CurrentContractHash { get; init; }
     public CanonicalHash? CurrentDefinitionHash { get; init; }
 }

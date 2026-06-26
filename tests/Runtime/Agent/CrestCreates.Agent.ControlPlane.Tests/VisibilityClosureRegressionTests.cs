@@ -575,9 +575,6 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
                     {
                         PackageId = "pkg-001",
                         PackageVersion = "1",
-                        ContentHash = "ch-001",
-                        EvidenceHash = "eh-001",
-                        EnvelopeHash = "envh-001",
                         DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
                     },
                     Snapshot = new DescriptorSnapshot(),
@@ -697,9 +694,6 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
                     {
                         PackageId = "pkg-001",
                         PackageVersion = "1",
-                        ContentHash = "ch-001",
-                        EvidenceHash = "eh-001",
-                        EnvelopeHash = "envh-001",
                         DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
                     },
                     Snapshot = new DescriptorSnapshot(),
@@ -799,9 +793,6 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
                     {
                         PackageId = "pkg-001",
                         PackageVersion = "1",
-                        ContentHash = "ch-001",
-                        EvidenceHash = "eh-001",
-                        EnvelopeHash = "envh-001",
                         DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
                     },
                     Snapshot = new DescriptorSnapshot(),
@@ -1110,15 +1101,12 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
         PackageBuilderMock.Setup(b => b.Build(It.IsAny<DescriptorPackageBuildRequest>()))
             .Returns(new DescriptorPackage
             {
-                Manifest = new DescriptorManifest
-                {
-                    PackageId = "pkg-001",
-                    PackageVersion = "1",
-                    ContentHash = "hash-001",
-                    EvidenceHash = "ev-hash-001",
-                    EnvelopeHash = "env-hash-001",
-                    DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
-                },
+                    Manifest = new DescriptorManifest
+                    {
+                        PackageId = "pkg-001",
+                        PackageVersion = "1",
+                        DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
+                    },
                 Snapshot = new DescriptorSnapshot(),
                 Evidence = new DescriptorPackageEvidence()
             });
