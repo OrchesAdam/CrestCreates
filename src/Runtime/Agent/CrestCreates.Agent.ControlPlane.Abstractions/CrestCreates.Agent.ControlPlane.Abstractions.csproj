@@ -15,5 +15,6 @@
     <ProjectReference Include="../../../Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj" />
     <ProjectReference Include="../../../Runtime/Agent/CrestCreates.Agent.DraftContracts/CrestCreates.Agent.DraftContracts.csproj" />
     <ProjectReference Include="../../../Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
+    <ProjectReference Include="../../../Core/CrestCreates.Core.Abstractions/CrestCreates.Core.Abstractions.csproj" />
   </ItemGroup>
 </Project>

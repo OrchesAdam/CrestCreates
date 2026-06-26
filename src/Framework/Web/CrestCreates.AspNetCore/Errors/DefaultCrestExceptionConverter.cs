@@ -30,15 +30,15 @@ public class DefaultCrestExceptionConverter : ICrestExceptionConverter
     {
         var response = exception switch
         {
-            CrestPermissionException permissionException => Create(context, "Crest.Auth.Forbidden", 403, "没有权限执行当前操作。", permissionException.PermissionName),
+            CrestPermissionException permissionException => Create(context, CrestErrorCodes.AuthForbiddenValue, 403, "没有权限执行当前操作。", permissionException.PermissionName),
             CrestException crestException => FromCrestException(context, crestException),
             UnauthorizedAccessException => MapUnauthorized(context),
-            KeyNotFoundException keyNotFoundException => Create(context, "Crest.Entity.NotFound", 404, "资源不存在。", keyNotFoundException.Message),
-            System.ComponentModel.DataAnnotations.ValidationException validationException => Create(context, "Crest.Validation.Failed", 400, "数据验证失败。", validationException.Message),
-            FluentValidation.ValidationException fluentValidationException => Create(context, "Crest.Validation.Failed", 400, "数据验证失败。", string.Join("; ", fluentValidationException.Errors.Select(e => e.ErrorMessage))),
-            ArgumentException => Create(context, "Crest.Request.InvalidArgument", 400, "请求参数错误。"),
-            InvalidOperationException => Create(context, "Crest.Operation.Invalid", 400, "当前操作无效。"),
-            _ => Create(context, "Crest.InternalError", 500, "服务器内部错误。")
+            KeyNotFoundException keyNotFoundException => Create(context, CrestErrorCodes.EntityNotFoundValue, 404, "资源不存在。", keyNotFoundException.Message),
+            System.ComponentModel.DataAnnotations.ValidationException validationException => Create(context, CrestErrorCodes.ValidationFailedValue, 400, "数据验证失败。", validationException.Message),
+            FluentValidation.ValidationException fluentValidationException => Create(context, CrestErrorCodes.ValidationFailedValue, 400, "数据验证失败。", string.Join("; ", fluentValidationException.Errors.Select(e => e.ErrorMessage))),
+            ArgumentException => Create(context, CrestErrorCodes.InvalidArgumentValue, 400, "请求参数错误。"),
+            InvalidOperationException => Create(context, CrestErrorCodes.OperationInvalidValue, 400, "当前操作无效。"),
+            _ => Create(context, CrestErrorCodes.InternalErrorValue, 500, "服务器内部错误。")
         };
 
         var logLevel = response.StatusCode >= 500 ? LogLevel.Error : LogLevel.Warning;
@@ -49,8 +49,8 @@ public class DefaultCrestExceptionConverter : ICrestExceptionConverter
     {
         var isAuthenticated = context.User?.Identity?.IsAuthenticated == true;
         return isAuthenticated
-            ? Create(context, "Crest.Auth.Forbidden", 403, "没有权限执行当前操作。")
-            : Create(context, "Crest.Auth.Unauthorized", 401, "当前请求未认证。");
+            ? Create(context, CrestErrorCodes.AuthForbiddenValue, 403, "没有权限执行当前操作。")
+            : Create(context, CrestErrorCodes.AuthUnauthorizedValue, 401, "当前请求未认证。");
     }
 
     private CrestErrorResponse FromCrestException(HttpContext context, CrestException exception)

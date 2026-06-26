@@ -17,7 +17,7 @@ public sealed class SchemaValidator : ISchemaValidator
                     requiredFields.Select(f => new SchemaValidationError
                     {
                         FieldName = f.Name,
-                        ErrorCode = "FIELD_REQUIRED",
+                        ErrorCode = SchemaValidationErrorCodes.FieldRequiredValue,
                         Message = $"Field '{f.Name}' is required but payload is null."
                     }).ToList());
             }
@@ -45,7 +45,7 @@ public sealed class SchemaValidator : ISchemaValidator
                 errors.Add(new SchemaValidationError
                 {
                     FieldName = field.Name,
-                    ErrorCode = "FIELD_REQUIRED",
+                    ErrorCode = SchemaValidationErrorCodes.FieldRequiredValue,
                     Message = $"Field '{field.Name}' is required."
                 });
             return;
@@ -57,7 +57,7 @@ public sealed class SchemaValidator : ISchemaValidator
                 errors.Add(new SchemaValidationError
                 {
                     FieldName = field.Name,
-                    ErrorCode = "NULL_NOT_ALLOWED",
+                    ErrorCode = SchemaValidationErrorCodes.NullNotAllowedValue,
                     Message = $"Field '{field.Name}' does not allow null."
                 });
             return;
@@ -85,7 +85,7 @@ public sealed class SchemaValidator : ISchemaValidator
             errors.Add(new SchemaValidationError
             {
                 FieldName = field.Name,
-                ErrorCode = "TYPE_MISMATCH",
+                ErrorCode = SchemaValidationErrorCodes.TypeMismatchValue,
                 Message = $"Field '{field.Name}' expected {type}, got {kind}."
             });
     }
@@ -99,7 +99,7 @@ public sealed class SchemaValidator : ISchemaValidator
             errors.Add(new SchemaValidationError
             {
                 FieldName = field.Name,
-                ErrorCode = "MAX_LENGTH_EXCEEDED",
+                ErrorCode = SchemaValidationErrorCodes.MaxLengthExceededValue,
                 Message = $"Field '{field.Name}' exceeds max length {field.MaxLength}."
             });
 
@@ -107,7 +107,7 @@ public sealed class SchemaValidator : ISchemaValidator
             errors.Add(new SchemaValidationError
             {
                 FieldName = field.Name,
-                ErrorCode = "MIN_LENGTH_NOT_MET",
+                ErrorCode = SchemaValidationErrorCodes.MinLengthNotMetValue,
                 Message = $"Field '{field.Name}' shorter than min length {field.MinLength}."
             });
 
@@ -115,7 +115,7 @@ public sealed class SchemaValidator : ISchemaValidator
             errors.Add(new SchemaValidationError
             {
                 FieldName = field.Name,
-                ErrorCode = "PATTERN_MISMATCH",
+                ErrorCode = SchemaValidationErrorCodes.PatternMismatchValue,
                 Message = $"Field '{field.Name}' does not match pattern '{field.Pattern}'."
             });
     }
@@ -129,7 +129,7 @@ public sealed class SchemaValidator : ISchemaValidator
             errors.Add(new SchemaValidationError
             {
                 FieldName = field.Name,
-                ErrorCode = "MAX_VALUE_EXCEEDED",
+                ErrorCode = SchemaValidationErrorCodes.MaxValueExceededValue,
                 Message = $"Field '{field.Name}' exceeds max value {field.MaxValue}."
             });
 
@@ -137,7 +137,7 @@ public sealed class SchemaValidator : ISchemaValidator
             errors.Add(new SchemaValidationError
             {
                 FieldName = field.Name,
-                ErrorCode = "MIN_VALUE_NOT_MET",
+                ErrorCode = SchemaValidationErrorCodes.MinValueNotMetValue,
                 Message = $"Field '{field.Name}' below min value {field.MinValue}."
             });
     }

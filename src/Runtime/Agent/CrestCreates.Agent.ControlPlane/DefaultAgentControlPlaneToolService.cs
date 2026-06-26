@@ -136,7 +136,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         {
             var mismatchDiag = new AgentToolDiagnostic
             {
-                Code = "TOOL_NAME_MISMATCH",
+                Code = AgentToolDiagnosticCodes.ToolNameMismatchValue,
                 Severity = AgentToolDiagnosticSeverity.Blocker,
                 Message = $"Invocation context tool '{context.ToolName}' does not match expected tool '{expectedToolName}'."
             };
@@ -152,7 +152,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         {
             var notFoundDiag = new AgentToolDiagnostic
             {
-                Code = "TOOL_NOT_FOUND",
+                Code = AgentToolDiagnosticCodes.ToolNotFoundValue,
                 Severity = AgentToolDiagnosticSeverity.Warning,
                 Message = $"Tool '{expectedToolName}' is not a known Agent Control Plane tool."
             };
@@ -219,7 +219,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             _logger.LogError(ex, "Tool '{ToolName}' invocation failed", expectedToolName);
             var errorDiag = new AgentToolDiagnostic
             {
-                Code = "TOOL_INVOCATION_FAILED",
+                Code = AgentToolDiagnosticCodes.ToolInvocationFailedValue,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Tool '{expectedToolName}' invocation failed: {ex.Message}"
             };
@@ -350,7 +350,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     [
         new AgentToolDiagnostic
         {
-            Code = "RESULTS_SECURITY_TRIMMED",
+            Code = AgentToolDiagnosticCodes.ResultsSecurityTrimmedValue,
             Severity = AgentToolDiagnosticSeverity.Info,
             Message = "Results reflect the invocation's descriptor visibility scope."
         }
@@ -412,7 +412,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 {
                     var ambigDiag = new AgentToolDiagnostic
                     {
-                        Code = "DESCRIPTOR_REF_AMBIGUOUS",
+                        Code = AgentToolDiagnosticCodes.DescriptorRefAmbiguousValue,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = $"Focus descriptor ref '{focusRef.FullId}' is ambiguous."
                     };
@@ -437,7 +437,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 {
                     var denyDiag = new AgentToolDiagnostic
                     {
-                        Code = "DESC_KIND_DENIED",
+                        Code = AgentToolDiagnosticCodes.DescKindDeniedValue,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = $"IncludeKinds value '{explicitKind}' is not visible to this invocation."
                     };
@@ -466,7 +466,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<MetadataContextPack>> BuildMetadataContextPackAsync(
         AgentToolInvocationContext context, MetadataContextPackRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.BuildMetadataContextPack, AgentToolPermissionName.ContextRead, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.BuildMetadataContextPack, AgentToolPermissionNames.ContextRead, async (scope, ct) =>
         {
             return await BuildContextPackAsync(context, request, scope, ct);
         }, ct);
@@ -475,7 +475,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<MetadataContextPack>> BuildRuntimeScenarioContextPackAsync(
         AgentToolInvocationContext context, MetadataContextPackRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.BuildRuntimeScenarioContextPack, AgentToolPermissionName.ContextRead, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.BuildRuntimeScenarioContextPack, AgentToolPermissionNames.ContextRead, async (scope, ct) =>
         {
             return await BuildContextPackAsync(context, request, scope, ct);
         }, ct);
@@ -485,7 +485,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, DescriptorRef descriptorRef, CancellationToken ct = default)
     {
         // Complete — snapshot reuse via _resourceResolver
-        return await ExecuteAsync(context, AgentToolName.GetDescriptorByRef, AgentToolPermissionName.DescriptorRead, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.GetDescriptorByRef, AgentToolPermissionNames.DescriptorRead, async (scope, ct) =>
         {
             // Resolve against visible descriptors only — prevents ambiguous ref
             // from leaking existence of denied descriptor versions.
@@ -499,7 +499,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 // specify a version without revealing which versions exist.
                 var ambiguousDiag = new AgentToolDiagnostic
                 {
-                    Code = "DESCRIPTOR_REF_AMBIGUOUS",
+                    Code = AgentToolDiagnosticCodes.DescriptorRefAmbiguousValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Descriptor ref '{descriptorRef.FullId}' is ambiguous. Specify a version to disambiguate."
                 };
@@ -544,7 +544,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DescriptorSearchResult>> SearchDescriptorsAsync(
         AgentToolInvocationContext context, DescriptorSearchRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.SearchDescriptors, AgentToolPermissionName.DescriptorSearch, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.SearchDescriptors, AgentToolPermissionNames.DescriptorSearch, async (scope, ct) =>
         {
             // If the caller explicitly specifies a denied kind, return Denied
             // rather than an empty Success. Spec §6.2: "If a caller explicitly
@@ -618,7 +618,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 diags.Add(new AgentToolDiagnostic
                 {
-                    Code = "SEARCH_TRUNCATED",
+                    Code = AgentToolDiagnosticCodes.SearchTruncatedValue,
                     Severity = AgentToolDiagnosticSeverity.Info,
                     Message = "Search results were truncated to the maximum allowed count."
                 });
@@ -633,7 +633,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DescriptorRelationshipsResult>> ListDescriptorRelationshipsAsync(
         AgentToolInvocationContext context, DescriptorRef descriptorRef, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.ListDescriptorRelationships, AgentToolPermissionName.DescriptorRead, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.ListDescriptorRelationships, AgentToolPermissionNames.DescriptorRead, async (scope, ct) =>
         {
             // Build visible universe — resolved subject must be visible
             var universeResult = AgentVisibleDescriptorUniverse.TryCreate(
@@ -655,7 +655,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 var ambiguousDiag = new AgentToolDiagnostic
                 {
-                    Code = "DESCRIPTOR_REF_AMBIGUOUS",
+                    Code = AgentToolDiagnosticCodes.DescriptorRefAmbiguousValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Descriptor ref '{descriptorRef.FullId}' is ambiguous. Specify a version to disambiguate."
                 };
@@ -712,7 +712,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<TopologySummaryResult>> GetTopologySummaryAsync(
         AgentToolInvocationContext context, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.GetTopologySummary, AgentToolPermissionName.ContextRead, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.GetTopologySummary, AgentToolPermissionNames.ContextRead, async (scope, ct) =>
         {
             var universeResult = AgentVisibleDescriptorUniverse.TryCreate(
                 _descriptorCatalog.GetAll(), scope);
@@ -752,7 +752,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<AgentDescriptorDraftDto>> CreateDescriptorDraftAsync(
         AgentToolInvocationContext context, CreateDescriptorDraftRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.CreateDescriptorDraft, AgentToolPermissionName.DraftCreate, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.CreateDescriptorDraft, AgentToolPermissionNames.DraftCreate, async (scope, ct) =>
         {
             // Kind visibility check on the request's declared kind
             var denyResult = DenyIfInvisible<AgentDescriptorDraftDto>(context, scope, request.DescriptorKind);
@@ -821,8 +821,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (dto is null)
             {
                 return AgentToolResult<AgentDescriptorDraftDto>.Failed(
-                    [new AgentToolDiagnostic { Code = "DRAFT_PROJECTION_FAILED", Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
-                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = "DRAFT_PROJECTION_FAILED", Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
+                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailedValue, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
+                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailedValue, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
             }
             return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, audit);
         }, ct);
@@ -832,7 +832,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, UpdateDescriptorDraftRequest request, CancellationToken ct = default)
     {
         // Complete — SingleDraft: snapshot reuse via _resourceResolver
-        return await ExecuteAsync(context, AgentToolName.UpdateDescriptorDraft, AgentToolPermissionName.DraftUpdate, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.UpdateDescriptorDraft, AgentToolPermissionNames.DraftUpdate, async (scope, ct) =>
         {
             var resolution = await _resourceResolver.ResolveDraftAsync(context.TenantId, request.DraftId, ct);
 
@@ -896,8 +896,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (dto is null)
             {
                 return AgentToolResult<AgentDescriptorDraftDto>.Failed(
-                    [new AgentToolDiagnostic { Code = "DRAFT_PROJECTION_FAILED", Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
-                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = "DRAFT_PROJECTION_FAILED", Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
+                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailedValue, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
+                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailedValue, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
             }
             return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, audit);
         }, ct);
@@ -907,7 +907,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Complete — SingleDraft: snapshot reuse via _resourceResolver
-        return await ExecuteAsync(context, AgentToolName.GetDescriptorDraft, AgentToolPermissionName.DraftRead, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.GetDescriptorDraft, AgentToolPermissionNames.DraftRead, async (scope, ct) =>
         {
             var resolution = await _resourceResolver.ResolveDraftAsync(context.TenantId, draftId, ct);
 
@@ -932,8 +932,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (dto is null)
             {
                 return AgentToolResult<AgentDescriptorDraftDto>.Failed(
-                    [new AgentToolDiagnostic { Code = "DRAFT_PROJECTION_FAILED", Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
-                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = "DRAFT_PROJECTION_FAILED", Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
+                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailedValue, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
+                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailedValue, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
             }
             return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, audit);
         }, ct);
@@ -942,7 +942,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DescriptorDraftListResult>> ListDescriptorDraftsAsync(
         AgentToolInvocationContext context, DraftAbstractions.DraftQuery? query, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.ListDescriptorDrafts, AgentToolPermissionName.DraftList, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.ListDescriptorDrafts, AgentToolPermissionNames.DraftList, async (scope, ct) =>
         {
             // Per spec §6.2: explicitly filtering by a denied DescriptorKind
             // must return Denied, not an empty Success. Invalid (undefined)
@@ -958,7 +958,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 {
                     var denyDiag = new AgentToolDiagnostic
                     {
-                        Code = "DESC_KIND_DENIED",
+                        Code = AgentToolDiagnosticCodes.DescKindDeniedValue,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = $"Descriptor kind '{kind}' is denied for this invocation."
                     };
@@ -997,7 +997,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Complete — SingleDraft: snapshot reuse via _resourceResolver
-        return await ExecuteAsync(context, AgentToolName.CancelDescriptorDraft, AgentToolPermissionName.DraftCancel, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.CancelDescriptorDraft, AgentToolPermissionNames.DraftCancel, async (scope, ct) =>
         {
             var resolution = await _resourceResolver.ResolveDraftAsync(context.TenantId, draftId, ct);
 
@@ -1025,8 +1025,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (dto is null)
             {
                 return AgentToolResult<AgentDescriptorDraftDto>.Failed(
-                    [new AgentToolDiagnostic { Code = "DRAFT_PROJECTION_FAILED", Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
-                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = "DRAFT_PROJECTION_FAILED", Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
+                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailedValue, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
+                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailedValue, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
             }
             return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, audit);
         }, ct);
@@ -1036,7 +1036,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Complete — Nested: snapshot reuse via _resourceResolver
-        return await ExecuteAsync(context, AgentToolName.CompareDescriptorDraft, AgentToolPermissionName.DraftRead, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.CompareDescriptorDraft, AgentToolPermissionNames.DraftRead, async (scope, ct) =>
         {
             var resolution = await _resourceResolver.ResolveDraftAsync(context.TenantId, draftId, ct);
             if (resolution.Status == ResourceResolutionStatus.NotFound)
@@ -1110,8 +1110,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (compareDraftDto is null)
             {
                 return AgentToolResult<DraftComparisonResult>.Failed(
-                    [new AgentToolDiagnostic { Code = "DRAFT_PROJECTION_FAILED", Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft for comparison." }],
-                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = "DRAFT_PROJECTION_FAILED", Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft for comparison." }]));
+                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailedValue, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft for comparison." }],
+                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailedValue, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft for comparison." }]));
             }
             var result = new DraftComparisonResult
             {
@@ -1133,7 +1133,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Complete — SingleDraft: snapshot reuse via _resourceResolver
-        return await ExecuteAsync(context, AgentToolName.ValidateDescriptorDraft, AgentToolPermissionName.ReviewValidate, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.ValidateDescriptorDraft, AgentToolPermissionNames.ReviewValidate, async (scope, ct) =>
         {
             var resolution = await _resourceResolver.ResolveDraftAsync(context.TenantId, draftId, ct);
 
@@ -1163,7 +1163,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<AgentReviewResultDto>> ReviewDescriptorDraftAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.ReviewDescriptorDraft, AgentToolPermissionName.ReviewRun, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.ReviewDescriptorDraft, AgentToolPermissionNames.ReviewRun, async (scope, ct) =>
         {
             var resolution = await _resourceResolver.ResolveDraftAsync(context.TenantId, draftId, ct);
             if (resolution.Status == ResourceResolutionStatus.NotFound)
@@ -1226,7 +1226,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<AgentReviewResultDto>> GetDraftReviewResultAsync(
         AgentToolInvocationContext context, string reviewResultId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.GetDraftReviewResult, AgentToolPermissionName.ReviewRead, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.GetDraftReviewResult, AgentToolPermissionNames.ReviewRead, async (scope, ct) =>
         {
             if (!_reviewResults.TryGetValue((context.TenantId, reviewResultId), out var snapshot))
             {
@@ -1251,7 +1251,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<ReviewResultListResult>> ListDraftReviewResultsAsync(
         AgentToolInvocationContext context, string? draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.ListDraftReviewResults, AgentToolPermissionName.ReviewRead, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.ListDraftReviewResults, AgentToolPermissionNames.ReviewRead, async (scope, ct) =>
         {
             // When an explicit draftId is provided, it is an explicit target.
             // Spec §6.2: "If the target resolves to a denied kind, return Denied."
@@ -1302,7 +1302,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<DiagnosticExplanation>> ExplainDiagnosticsAsync(
         AgentToolInvocationContext context, ExplainDiagnosticsRequest request, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.ExplainDiagnostics, AgentToolPermissionName.DiagnosticExplain, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.ExplainDiagnostics, AgentToolPermissionNames.DiagnosticExplain, async (scope, ct) =>
         {
             // If a draft is referenced, verify tenant and owner visibility
             if (request.DraftId is not null)
@@ -1343,7 +1343,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         return await ExecuteAsync(context, AgentToolName.BuildDescriptorReviewReport,
-            AgentToolPermissionName.ReviewReportBuild, async (scope, ct) =>
+            AgentToolPermissionNames.ReviewReportBuild, async (scope, ct) =>
         {
             var draftResolution = await _resourceResolver.ResolveDraftAsync(context.TenantId, draftId, ct);
             if (draftResolution.Status == ResourceResolutionStatus.NotFound)
@@ -1363,7 +1363,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 var noReviewDiag = new AgentToolDiagnostic
                 {
-                    Code = "NO_REVIEW_RESULT",
+                    Code = AgentToolDiagnosticCodes.NoReviewResultValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"No review result found for draft '{draftId}'. Run ReviewDescriptorDraft first."
                 };
@@ -1393,14 +1393,14 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         DescriptorReviewReportFormat format, CancellationToken ct = default)
     {
         return await ExecuteAsync(context, AgentToolName.RenderDescriptorReviewReport,
-            AgentToolPermissionName.ReviewReportRender, async (scope, ct) =>
+            AgentToolPermissionNames.ReviewReportRender, async (scope, ct) =>
         {
             // Validate contract version
             if (report.ContractVersion != AgentControlPlaneContractVersion.Current)
             {
                 var diag = new AgentToolDiagnostic
                 {
-                    Code = "UNSUPPORTED_REPORT_CONTRACT_VERSION",
+                    Code = AgentToolDiagnosticCodes.UnsupportedReportContractVersionValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Report contract version '{report.ContractVersion}' is not supported. Current: '{AgentControlPlaneContractVersion.Current}'."
                 };
@@ -1420,7 +1420,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 var diag = new AgentToolDiagnostic
                 {
-                    Code = "UNSUPPORTED_REPORT_FORMAT",
+                    Code = AgentToolDiagnosticCodes.UnsupportedReportFormatValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Report format '{format}' is not supported."
                 };
@@ -1440,7 +1440,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<FixProposalListResult>> SuggestDescriptorDraftFixesAsync(
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.SuggestDescriptorDraftFixes, AgentToolPermissionName.FixSuggest, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.SuggestDescriptorDraftFixes, AgentToolPermissionNames.FixSuggest, async (scope, ct) =>
         {
             var resolution = await _resourceResolver.ResolveDraftAsync(context.TenantId, draftId, ct);
             if (resolution.Status == ResourceResolutionStatus.NotFound)
@@ -1509,7 +1509,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<FixProposal>> GetFixProposalAsync(
         AgentToolInvocationContext context, string proposalId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.GetFixProposal, AgentToolPermissionName.FixSuggest, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.GetFixProposal, AgentToolPermissionNames.FixSuggest, async (scope, ct) =>
         {
             if (!_fixProposals.TryGetValue((context.TenantId, proposalId), out var snapshot))
             {
@@ -1533,7 +1533,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     public async Task<AgentToolResult<FixProposalListResult>> ListFixProposalsAsync(
         AgentToolInvocationContext context, string? draftId, CancellationToken ct = default)
     {
-        return await ExecuteAsync(context, AgentToolName.ListFixProposals, AgentToolPermissionName.FixSuggest, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.ListFixProposals, AgentToolPermissionNames.FixSuggest, async (scope, ct) =>
         {
             // When an explicit draftId is provided, it is an explicit target.
             // Spec §6.2: "If the target resolves to a denied kind, return Denied."
@@ -1585,7 +1585,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, ApplyFixProposalRequest request, CancellationToken ct = default)
     {
         // Complete — Indirect: owner-kind visibility + snapshot reuse
-        return await ExecuteAsync(context, AgentToolName.ApplyFixProposalToDraft, AgentToolPermissionName.FixApplyToDraft, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.ApplyFixProposalToDraft, AgentToolPermissionNames.FixApplyToDraft, async (scope, ct) =>
         {
             if (!_fixProposals.TryGetValue((context.TenantId, request.ProposalId), out var proposalSnapshot))
             {
@@ -1611,7 +1611,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 var mismatchDiag = new AgentToolDiagnostic
                 {
-                    Code = "PROPOSAL_DRAFT_MISMATCH",
+                    Code = AgentToolDiagnosticCodes.ProposalDraftMismatchValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Fix proposal '{request.ProposalId}' is for draft '{proposal.DraftId}', not '{request.DraftId}'."
                 };
@@ -1625,7 +1625,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 var multiActionDiag = new AgentToolDiagnostic
                 {
-                    Code = "UNSUPPORTED_MULTI_ACTION_FIX_PROPOSAL",
+                    Code = AgentToolDiagnosticCodes.UnsupportedMultiActionFixProposalValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Fix proposal '{request.ProposalId}' contains {proposal.Actions.Count} actions. Only single-action fix proposals are supported."
                 };
@@ -1639,7 +1639,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 var noActionDiag = new AgentToolDiagnostic
                 {
-                    Code = "FIX_PROPOSAL_HAS_NO_ACTIONS",
+                    Code = AgentToolDiagnosticCodes.FixProposalHasNoActionsValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Fix proposal '{request.ProposalId}' has no actions to apply."
                 };
@@ -1653,7 +1653,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 var applicabilityDiag = new AgentToolDiagnostic
                 {
-                    Code = "FIX_PROPOSAL_NOT_APPLICABLE",
+                    Code = AgentToolDiagnosticCodes.FixProposalNotApplicableValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Fix proposal applicability is '{proposal.Applicability}', but only '{FixProposalApplicability.CurrentMutableDraft}' proposals can be applied."
                 };
@@ -1674,7 +1674,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 {
                     var nonExecDiag = new AgentToolDiagnostic
                     {
-                        Code = "NON_EXECUTABLE_FIX_ACTION",
+                        Code = AgentToolDiagnosticCodes.NonExecutableFixActionValue,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = $"Fix action for target '{action.TargetPath}' is not executable."
                     };
@@ -1687,7 +1687,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 {
                     var unsupportedKindDiag = new AgentToolDiagnostic
                     {
-                        Code = "UNSUPPORTED_FIX_ACTION_KIND",
+                        Code = AgentToolDiagnosticCodes.UnsupportedFixActionKindValue,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = $"Fix action kind '{action.Kind}' is not supported for draft field mutation. Only SetValue is currently supported."
                     };
@@ -1699,7 +1699,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 {
                     var unsafeDiag = new AgentToolDiagnostic
                     {
-                        Code = "UNSAFE_FIX_ACTION_REJECTED",
+                        Code = AgentToolDiagnosticCodes.UnsafeFixActionRejectedValue,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = $"Fix action for target '{action.TargetPath}' has Unsafe safety level and is rejected."
                     };
@@ -1718,7 +1718,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 {
                     var boundaryDiag = new AgentToolDiagnostic
                     {
-                        Code = "FIX_ACTION_TARGET_BOUNDARY_VIOLATION",
+                        Code = AgentToolDiagnosticCodes.FixActionTargetBoundaryViolationValue,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = $"Fix action targets descriptor '{action.TargetDescriptorId}', but draft fix proposals can only mutate the draft's own fields (descriptor '{draft.DescriptorId}')."
                     };
@@ -1734,7 +1734,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 {
                     var boundaryDiag = new AgentToolDiagnostic
                     {
-                        Code = "FIX_ACTION_TARGET_BOUNDARY_VIOLATION",
+                        Code = AgentToolDiagnosticCodes.FixActionTargetBoundaryViolationValue,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = $"Fix action targets boundary-violating path '{action.TargetPath}'. Draft fix proposals cannot mutate the active descriptor registry."
                     };
@@ -1747,7 +1747,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 {
                     var targetDiag = new AgentToolDiagnostic
                     {
-                        Code = "FIX_ACTION_TARGET_NOT_ALLOWED",
+                        Code = AgentToolDiagnosticCodes.FixActionTargetNotAllowedValue,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = $"Fix action target '{action.TargetPath}' is not an allowed draft field."
                     };
@@ -1782,7 +1782,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 successDiags.Add(new AgentToolDiagnostic
                 {
-                    Code = "FIX_ACTIONS_APPLIED",
+                    Code = AgentToolDiagnosticCodes.FixActionsAppliedValue,
                     Severity = AgentToolDiagnosticSeverity.Info,
                     Message = $"Applied {appliedPaths.Count} action(s) to draft fields: {string.Join(", ", appliedPaths)}."
                 });
@@ -1799,8 +1799,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (dto is null)
             {
                 return AgentToolResult<AgentDescriptorDraftDto>.Failed(
-                    [new AgentToolDiagnostic { Code = "DRAFT_PROJECTION_FAILED", Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
-                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = "DRAFT_PROJECTION_FAILED", Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
+                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailedValue, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
+                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailedValue, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
             }
             return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, successDiags, successAudit);
         }, ct);
@@ -1812,7 +1812,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Complete — Nested: snapshot reuse via _resourceResolver
-        return await ExecuteAsync(context, AgentToolName.PreviewDescriptorPackage, AgentToolPermissionName.PackagePreview, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.PreviewDescriptorPackage, AgentToolPermissionNames.PackagePreview, async (scope, ct) =>
         {
             var resolution = await _resourceResolver.ResolveDraftAsync(context.TenantId, draftId, ct);
             if (resolution.Status == ResourceResolutionStatus.NotFound)
@@ -1908,7 +1908,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Complete — Nested: snapshot reuse via _resourceResolver
-        return await ExecuteAsync(context, AgentToolName.BuildPackageEvidencePreview, AgentToolPermissionName.PackagePreview, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.BuildPackageEvidencePreview, AgentToolPermissionNames.PackagePreview, async (scope, ct) =>
         {
             var resolution = await _resourceResolver.ResolveDraftAsync(context.TenantId, draftId, ct);
             if (resolution.Status == ResourceResolutionStatus.NotFound)
@@ -1940,7 +1940,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 var validationDiag = new AgentToolDiagnostic
                 {
-                    Code = "REVIEW_VALIDATION_FAILED",
+                    Code = AgentToolDiagnosticCodes.ReviewValidationFailedValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = "Review validation failed; evidence preview cannot be computed."
                 };
@@ -2052,7 +2052,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
     {
         // Complete — Nested: snapshot reuse via _resourceResolver
-        return await ExecuteAsync(context, AgentToolName.BuildActivationReadinessPreview, AgentToolPermissionName.PackagePreview, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.BuildActivationReadinessPreview, AgentToolPermissionNames.PackagePreview, async (scope, ct) =>
         {
             var resolution = await _resourceResolver.ResolveDraftAsync(context.TenantId, draftId, ct);
             if (resolution.Status == ResourceResolutionStatus.NotFound)
@@ -2087,7 +2087,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 blockers.Add(new ActivationReadinessBlocker
                 {
-                    Code = "VALIDATION_FAILED",
+                    Code = AgentToolDiagnosticCodes.ValidationFailedValue,
                     Message = "Draft validation failed.",
                     Severity = ActivationReadinessBlockerSeverity.Blocker,
                     Remedy = "Fix validation errors before requesting activation."
@@ -2106,7 +2106,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 blockers.Add(new ActivationReadinessBlocker
                 {
-                    Code = "REVIEW_HAS_ERRORS",
+                    Code = AgentToolDiagnosticCodes.ReviewHasErrorsValue,
                     Message = "Review produced error or blocker diagnostics.",
                     Severity = ActivationReadinessBlockerSeverity.Blocker,
                     Remedy = "Resolve error/blocker diagnostics before requesting activation."
@@ -2117,7 +2117,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 blockers.Add(new ActivationReadinessBlocker
                 {
-                    Code = "NOT_ACTIVATION_ELIGIBLE",
+                    Code = AgentToolDiagnosticCodes.NotActivationEligibleValue,
                     Message = "Governance decision does not allow activation.",
                     Severity = ActivationReadinessBlockerSeverity.Error,
                     Remedy = "Review governance findings and adjust draft."
@@ -2144,7 +2144,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string previewId, CancellationToken ct = default)
     {
         // Complete — Indirect: owner-kind visibility resolution
-        return await ExecuteAsync(context, AgentToolName.GetPackagePreview, AgentToolPermissionName.PackagePreview, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.GetPackagePreview, AgentToolPermissionNames.PackagePreview, async (scope, ct) =>
         {
             if (!_packagePreviews.TryGetValue((context.TenantId, previewId), out var snapshot))
             {
@@ -2169,7 +2169,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, SubmitActivationRequestRequest request, CancellationToken ct = default)
     {
         // Complete — Indirect: snapshot reuse via _resourceResolver
-        return await ExecuteAsync(context, AgentToolName.SubmitActivationRequest, AgentToolPermissionName.ActivationRequestSubmit, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.SubmitActivationRequest, AgentToolPermissionNames.ActivationRequestSubmit, async (scope, ct) =>
         {
             var resolution = await _resourceResolver.ResolveDraftAsync(context.TenantId, request.DraftId, ct);
             if (resolution.Status == ResourceResolutionStatus.NotFound)
@@ -2192,7 +2192,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     AgentToolResult<ActivationRequest>.InvalidRequest([
                         new AgentToolDiagnostic
                         {
-                            Code = "ACTIVATION_BINDING_SNAPSHOT_REQUIRED",
+                            Code = DescriptorActivationDiagnosticCodes.BindingSnapshotRequiredValue,
                             Severity = AgentToolDiagnosticSeverity.Error,
                             Message = "BindingSnapshot is required for activation request submission."
                         }
@@ -2206,7 +2206,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     AgentToolResult<ActivationRequest>.InvalidRequest([
                         new AgentToolDiagnostic
                         {
-                            Code = "ACTIVATION_BINDING_HASHES_REQUIRED",
+                            Code = DescriptorActivationDiagnosticCodes.BindingHashesRequiredValue,
                             Severity = AgentToolDiagnosticSeverity.Error,
                             Message = "BindingSnapshot.Hashes is required for activation request submission."
                         }
@@ -2220,7 +2220,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    Code = "ACTIVATION_REVIEW_RESULT_NOT_FOUND",
+                    Code = DescriptorActivationDiagnosticCodes.ReviewResultNotFoundValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Referenced review result '{request.BindingSnapshot.ReviewResultId}' not found for this tenant."
                 });
@@ -2229,7 +2229,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    Code = "ACTIVATION_REVIEW_RESULT_DRAFT_MISMATCH",
+                    Code = DescriptorActivationDiagnosticCodes.ReviewResultDraftMismatchValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Referenced review result '{request.BindingSnapshot.ReviewResultId}' belongs to draft '{reviewRef.Review.DraftId}', not '{request.DraftId}'."
                 });
@@ -2240,7 +2240,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    Code = "ACTIVATION_PACKAGE_PREVIEW_NOT_FOUND",
+                    Code = DescriptorActivationDiagnosticCodes.PackagePreviewNotFoundValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = "PackagePreviewId is required for activation request submission."
                 });
@@ -2249,7 +2249,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    Code = "ACTIVATION_PACKAGE_PREVIEW_NOT_FOUND",
+                    Code = DescriptorActivationDiagnosticCodes.PackagePreviewNotFoundValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Referenced package preview '{request.BindingSnapshot.PackagePreviewId}' not found for this tenant."
                 });
@@ -2258,7 +2258,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    Code = "ACTIVATION_PACKAGE_PREVIEW_DRAFT_MISMATCH",
+                    Code = DescriptorActivationDiagnosticCodes.PackagePreviewDraftMismatchValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Referenced package preview '{request.BindingSnapshot.PackagePreviewId}' belongs to draft '{packageRef.Preview.DraftId}', not '{request.DraftId}'."
                 });
@@ -2269,7 +2269,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    Code = "ACTIVATION_EVIDENCE_PREVIEW_NOT_FOUND",
+                    Code = DescriptorActivationDiagnosticCodes.EvidencePreviewNotFoundValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = "EvidencePreviewId is required for activation request submission."
                 });
@@ -2278,7 +2278,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    Code = "ACTIVATION_EVIDENCE_PREVIEW_NOT_FOUND",
+                    Code = DescriptorActivationDiagnosticCodes.EvidencePreviewNotFoundValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Referenced evidence preview '{request.BindingSnapshot.EvidencePreviewId}' not found for this tenant."
                 });
@@ -2287,7 +2287,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
-                    Code = "ACTIVATION_EVIDENCE_PREVIEW_DRAFT_MISMATCH",
+                    Code = DescriptorActivationDiagnosticCodes.EvidencePreviewDraftMismatchValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Referenced evidence preview '{request.BindingSnapshot.EvidencePreviewId}' belongs to draft '{evidenceRef.Evidence.DraftId}', not '{request.DraftId}'."
                 });
@@ -2349,7 +2349,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string requestId, CancellationToken ct = default)
     {
         // Phase 7e: delegate to RequestService — single authority for activation lifecycle
-        return await ExecuteAsync(context, AgentToolName.GetActivationRequestStatus, AgentToolPermissionName.ActivationRequestRead, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.GetActivationRequestStatus, AgentToolPermissionNames.ActivationRequestRead, async (scope, ct) =>
         {
             var result = await _activationRequestService.GetActivationRequestStatusAsync(context, requestId, ct);
 
@@ -2366,7 +2366,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         AgentToolInvocationContext context, string requestId, CancellationToken ct = default)
     {
         // Phase 7e: delegate to RequestService — single authority for activation lifecycle
-        return await ExecuteAsync(context, AgentToolName.CancelActivationRequest, AgentToolPermissionName.ActivationRequestCancel, async (scope, ct) =>
+        return await ExecuteAsync(context, AgentToolName.CancelActivationRequest, AgentToolPermissionNames.ActivationRequestCancel, async (scope, ct) =>
         {
             var result = await _activationRequestService.CancelActivationRequestAsync(context, requestId, "Cancelled via agent tool", ct);
 
@@ -2477,11 +2477,11 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     };
 
     private static bool IsIdentityFieldDiagnostic(string code) =>
-        code is "DRAFT_ID_EMPTY" or "DESCRIPTOR_ID_EMPTY" or "AUTHOR_ID_EMPTY";
+        code is DescriptorDraftDiagnosticCodes.DraftIdEmptyValue or DescriptorDraftDiagnosticCodes.DescriptorIdEmptyValue or DescriptorDraftDiagnosticCodes.AuthorIdEmptyValue;
 
     private static FixProposalKind MapDiagnosticToFixProposalKind(string diagnosticCode) => diagnosticCode switch
     {
-        "RATIONALE_EMPTY" or "INTENT_EMPTY" => FixProposalKind.SetRequiredField,
+        DescriptorDraftDiagnosticCodes.RationaleEmptyValue or DescriptorDraftDiagnosticCodes.IntentEmptyValue => FixProposalKind.SetRequiredField,
         _ => FixProposalKind.MarkRequiresReview
     };
 
@@ -2490,7 +2490,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     {
         var actions = new List<FixProposalAction>();
 
-        if (diagnostic.Code == "RATIONALE_EMPTY")
+        if (diagnostic.Code == DescriptorDraftDiagnosticCodes.RationaleEmptyValue)
         {
             actions.Add(new FixProposalAction
             {
@@ -2503,7 +2503,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 Description = "Provide a rationale for the draft."
             });
         }
-        else if (diagnostic.Code == "INTENT_EMPTY")
+        else if (diagnostic.Code == DescriptorDraftDiagnosticCodes.IntentEmptyValue)
         {
             actions.Add(new FixProposalAction
             {

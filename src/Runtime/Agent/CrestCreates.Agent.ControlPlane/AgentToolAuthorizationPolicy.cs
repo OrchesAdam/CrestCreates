@@ -41,13 +41,13 @@ public sealed record AgentToolAuthorizationPolicy
     {
         DeniedPermissionNames = new HashSet<string>(StringComparer.Ordinal)
         {
-            AgentToolPermissionName.DraftCreate,
-            AgentToolPermissionName.DraftUpdate,
-            AgentToolPermissionName.DraftCancel,
-            AgentToolPermissionName.ReviewRun,
-            AgentToolPermissionName.FixApplyToDraft,
-            AgentToolPermissionName.ActivationRequestSubmit,
-            AgentToolPermissionName.ActivationRequestCancel
+            AgentToolPermissionNames.DraftCreate,
+            AgentToolPermissionNames.DraftUpdate,
+            AgentToolPermissionNames.DraftCancel,
+            AgentToolPermissionNames.ReviewRun,
+            AgentToolPermissionNames.FixApplyToDraft,
+            AgentToolPermissionNames.ActivationRequestSubmit,
+            AgentToolPermissionNames.ActivationRequestCancel
         }
     };
 
@@ -59,12 +59,12 @@ public sealed record AgentToolAuthorizationPolicy
     {
         DeniedPermissionNames = new HashSet<string>(StringComparer.Ordinal)
         {
-            AgentToolPermissionName.DraftCreate,
-            AgentToolPermissionName.DraftUpdate,
-            AgentToolPermissionName.DraftCancel,
-            AgentToolPermissionName.FixApplyToDraft,
-            AgentToolPermissionName.ActivationRequestSubmit,
-            AgentToolPermissionName.ActivationRequestCancel
+            AgentToolPermissionNames.DraftCreate,
+            AgentToolPermissionNames.DraftUpdate,
+            AgentToolPermissionNames.DraftCancel,
+            AgentToolPermissionNames.FixApplyToDraft,
+            AgentToolPermissionNames.ActivationRequestSubmit,
+            AgentToolPermissionNames.ActivationRequestCancel
         }
     };
 }

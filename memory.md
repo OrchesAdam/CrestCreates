@@ -641,6 +641,20 @@ This thread achieved the following:
 
   - **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface.
 
+    - **Semantic String Governance** (2026-06-25):
+      - **Core value objects** (11 types in `CrestCreates.Core.Abstractions.Identity`): `ErrorCode`, `PermissionName`, `PolicyName`, `FeatureName`, `SettingName`, `DiagnosticCode`, `EventName`, `CapabilityId`, `WorkflowId`, `HumanTaskId`, `MessageTemplateId` — each with `XxxValue` const string + typed property, inline validation, safe implicit conversion to string, private constructor + static factory for constrained types
+      - **SeverityLevel** value object: private constructor, static factory methods (Info/Warning/Error/Critical), implicit conversion to int
+      - **CrestErrorCodes** centralized: `General`, `Validation`, `Authorization`, `NotFound`, `Concurrency`, `PreconditionRequired` — replaces 6 inline `"CrestError.X"` literals across exception classes
+      - **Typed exception overloads**: `CrestException(ErrorCode)`, `CrestBusinessException(ErrorCode)`, `CrestPermissionException(PermissionName)`, `CrestValidationException(ErrorCode)` — existing string overloads preserved for backward compat
+      - **Framework constant classes**: `FeatureManagementErrorCodes` (7 entries), `SchemaValidationErrorCodes` (8 entries), `MetadataContextPackDiagnosticCodes` (3 entries), `DescriptorPackageDiagnosticCodes` (12 entries with typed DiagnosticCode properties)
+      - **Agent constant classes**: `DescriptorActivationDiagnosticCodes` (35 entries), `DescriptorActivationHumanTaskIds` (2 entries), `DescriptorActivationMessageTemplateIds` (8 entries), `AgentToolPermissionNames` (20 entries + RuntimePrefix), `AgentToolDiagnosticCodes` (51 entries), `DescriptorReviewReportMessageTemplateIds` (31 entries), `DescriptorDraftDiagnosticCodes` (12 entries)
+      - **Tooling constant classes** (netstandard2.0 — const string only, no typed properties): `CanonicalHashDiagnosticCodes` (28 entries), `ObjectMappingDiagnosticCodes` (12 entries), `CodeGeneratorDiagnosticCodes` (4 entries)
+      - **Generated permission shape**: `XxxPermissions.Create` → `XxxPermissions.CreateValue` (const string) + `XxxPermissions.Create` (typed PermissionName property); `GetAllPermissions()` yields `XxxValue` strings
+      - **Architecture guard**: `SemanticStringGuardTests` in DependencyBoundaries — 10 forbidden patterns (ACTIVATION_*, CCHASH*, OM*, CCCG*, FIELD_REQUIRED, descriptor-activation-review, agent.*, CrestError.*, Feature.*, Setting.*), definition file exemptions, `// semantic-string-guard: allow` opt-out for test fixtures
+      - **Test coverage**: 25 value object tests, 4 exception tests, 431 Agent tests, 9 boundary tests, 136 CodeGenerator tests (20 pre-existing failures unrelated to this change)
+      - **Design spec**: `docs/superpowers/specs/2026-06-25-semantic-string-governance-design.md`
+      - **Implementation plan**: `docs/superpowers/plans/2026-06-25-semantic-string-governance.md`
+
 ---
 
 ## Recommended Next Thread Entry Prompt

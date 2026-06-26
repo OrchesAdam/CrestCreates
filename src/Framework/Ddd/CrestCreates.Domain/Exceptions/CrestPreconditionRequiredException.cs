@@ -6,7 +6,7 @@ public class CrestPreconditionRequiredException : CrestException
 {
     public CrestPreconditionRequiredException(string entityType, object? entityId)
         : base(
-            "Crest.Concurrency.PreconditionRequired",
+            CrestErrorCodes.ConcurrencyPreconditionRequiredValue,
             428,
             "Precondition required.",
             $"DELETE on {entityType} (Id={entityId}) requires If-Match header with current ConcurrencyStamp.")

@@ -523,7 +523,7 @@ public class DescriptorPackageBuilderTests
             Descriptors = new IDescriptor[] { MakeSchema("s1", 1, "S1") }
         });
         pkg.Diagnostics.Should().Contain(d =>
-            d.Code == DescriptorPackageDiagnosticCode.TopologyNotProvided);
+            d.Code == DescriptorPackageDiagnosticCodes.TopologyNotProvided);
     }
 
     [Fact]
@@ -538,7 +538,7 @@ public class DescriptorPackageBuilderTests
             Descriptors = new IDescriptor[] { desc1, desc2 }
         });
         pkg.Diagnostics.Should().Contain(d =>
-            d.Code == DescriptorPackageDiagnosticCode.DuplicateDescriptorRef);
+            d.Code == DescriptorPackageDiagnosticCodes.DuplicateDescriptorRef);
     }
 
     [Fact]

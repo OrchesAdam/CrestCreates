@@ -292,8 +292,8 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
             {
                 diagnostics.Add(new DescriptorPackageDiagnostic
                 {
-                    Code = DescriptorPackageDiagnosticCode.DuplicateDescriptorRef,
-                    Severity = DescriptorPackageDiagnosticCode.SeverityError,
+                    Code = DescriptorPackageDiagnosticCodes.DuplicateDescriptorRef,
+                    Severity = DescriptorPackageDiagnosticCodes.SeverityError,
                     Message = $"Duplicate descriptor ref: {entry.Ref.Namespace}.{entry.Ref.Id} v{entry.Ref.Version}",
                     Subject = entry.Ref
                 });
@@ -310,8 +310,8 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
                 {
                     diagnostics.Add(new DescriptorPackageDiagnostic
                     {
-                        Code = DescriptorPackageDiagnosticCode.TopologyEdgeOutsidePackage,
-                        Severity = DescriptorPackageDiagnosticCode.SeverityWarning,
+                        Code = DescriptorPackageDiagnosticCodes.TopologyEdgeOutsidePackage,
+                        Severity = DescriptorPackageDiagnosticCodes.SeverityWarning,
                         Message = $"Topology edge 'From' ref outside package: {edge.From.FullId}",
                         Subject = edge.From
                     });
@@ -320,8 +320,8 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
                 {
                     diagnostics.Add(new DescriptorPackageDiagnostic
                     {
-                        Code = DescriptorPackageDiagnosticCode.TopologyEdgeOutsidePackage,
-                        Severity = DescriptorPackageDiagnosticCode.SeverityWarning,
+                        Code = DescriptorPackageDiagnosticCodes.TopologyEdgeOutsidePackage,
+                        Severity = DescriptorPackageDiagnosticCodes.SeverityWarning,
                         Message = $"Topology edge 'To' ref outside package: {edge.To.FullId}",
                         Subject = edge.To
                     });
@@ -332,8 +332,8 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
         {
             diagnostics.Add(new DescriptorPackageDiagnostic
             {
-                Code = DescriptorPackageDiagnosticCode.TopologyNotProvided,
-                Severity = DescriptorPackageDiagnosticCode.SeverityInfo,
+                Code = DescriptorPackageDiagnosticCodes.TopologyNotProvided,
+                Severity = DescriptorPackageDiagnosticCodes.SeverityInfo,
                 Message = "No topology snapshot provided; package has no relationship facts."
             });
         }
@@ -346,8 +346,8 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
                 {
                     diagnostics.Add(new DescriptorPackageDiagnostic
                     {
-                        Code = DescriptorPackageDiagnosticCode.ImpactChangeOutsidePackage,
-                        Severity = DescriptorPackageDiagnosticCode.SeverityWarning,
+                        Code = DescriptorPackageDiagnosticCodes.ImpactChangeOutsidePackage,
+                        Severity = DescriptorPackageDiagnosticCodes.SeverityWarning,
                         Message = $"Impact change ref outside package: {change.Ref.FullId}",
                         Subject = change.Ref
                     });
@@ -363,8 +363,8 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
                 {
                     diagnostics.Add(new DescriptorPackageDiagnostic
                     {
-                        Code = DescriptorPackageDiagnosticCode.CompatibilitySubjectOutsidePackage,
-                        Severity = DescriptorPackageDiagnosticCode.SeverityWarning,
+                        Code = DescriptorPackageDiagnosticCodes.CompatibilitySubjectOutsidePackage,
+                        Severity = DescriptorPackageDiagnosticCodes.SeverityWarning,
                         Message = $"Compatibility finding subject outside package: {finding.Subject.FullId}",
                         Subject = finding.Subject
                     });
@@ -380,8 +380,8 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
                 {
                     diagnostics.Add(new DescriptorPackageDiagnostic
                     {
-                        Code = DescriptorPackageDiagnosticCode.LifecycleTransitionOutsideInventory,
-                        Severity = DescriptorPackageDiagnosticCode.SeverityWarning,
+                        Code = DescriptorPackageDiagnosticCodes.LifecycleTransitionOutsideInventory,
+                        Severity = DescriptorPackageDiagnosticCodes.SeverityWarning,
                         Message = $"Lifecycle transition subject outside package: {decision.Transition.Subject.FullId}",
                         Subject = decision.Transition.Subject
                     });
@@ -395,8 +395,8 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
             {
                 diagnostics.Add(new DescriptorPackageDiagnostic
                 {
-                    Code = DescriptorPackageDiagnosticCode.EvidenceSubjectOutsideInventory,
-                    Severity = DescriptorPackageDiagnosticCode.SeverityWarning,
+                    Code = DescriptorPackageDiagnosticCodes.EvidenceSubjectOutsideInventory,
+                    Severity = DescriptorPackageDiagnosticCodes.SeverityWarning,
                     Message = $"Evidence finding subject outside package: {finding.Subject.Value.FullId}",
                     Subject = finding.Subject
                 });

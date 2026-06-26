@@ -80,7 +80,7 @@ public class DescriptorPackageSerializerTests
         var deserialized = _serializer.Deserialize(json);
 
         deserialized!.Diagnostics.Should().Contain(d =>
-            d.Code == DescriptorPackageDiagnosticCode.DuplicateDescriptorRef);
+            d.Code == DescriptorPackageDiagnosticCodes.DuplicateDescriptorRef);
     }
 
     [Fact]

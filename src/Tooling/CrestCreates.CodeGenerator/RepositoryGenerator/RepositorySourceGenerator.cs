@@ -246,7 +246,7 @@ namespace CrestCreates.CodeGenerator.RepositoryGenerator
             catch (Exception ex)
             {
                 context.ReportDiagnostic(Diagnostic.Create(
-                    new DiagnosticDescriptor("CCCG003", "Repository generation error",
+                    new DiagnosticDescriptor(CodeGeneratorDiagnosticCodes.GenerationErrorValue, "Repository generation error",
                         $"Error generating repository code: {ex.Message}",
                         "CodeGeneration", DiagnosticSeverity.Warning, true),
                     Location.None));

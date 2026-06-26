@@ -3,6 +3,8 @@ using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
 
+// semantic-string-guard: allow
+
 namespace CrestCreates.Schema.Tests;
 
 public class SchemaValidatorTests

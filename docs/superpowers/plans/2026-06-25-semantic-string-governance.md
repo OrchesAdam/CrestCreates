@@ -1055,7 +1055,7 @@ Complete every id through `CCHASH028`, preserving skipped historical ids by not 
 
 Modify `CanonicalHashDiagnostics.cs` so each `new DiagnosticDescriptor(id: ...)` uses `CanonicalHashDiagnosticCodes.XxxValue`.
 
-Repeat for Object Mapping diagnostics with `ObjectMappingDiagnosticCodes` and every `CCMAP###` id in `ObjectMappingDiagnostics.cs`.
+Repeat for Object Mapping diagnostics with `ObjectMappingDiagnosticCodes` and every `OM###` id in `ObjectMappingDiagnostics.cs`.
 
 - [ ] **Step 4: Update generated permission source shape**
 
@@ -1130,7 +1130,7 @@ public class SemanticStringGuardTests
     [
         new("\"ACTIVATION_[A-Z0-9_]+\"", RegexOptions.Compiled),
         new("\"CCHASH[0-9]{3}\"", RegexOptions.Compiled),
-        new("\"CCMAP[0-9]{3}\"", RegexOptions.Compiled),
+        new("\"OM[0-9]{2,3}\"", RegexOptions.Compiled),
         new("\"FIELD_REQUIRED\"", RegexOptions.Compiled),
         new("\"descriptor-activation-review\"", RegexOptions.Compiled),
         new("\"agent\\.[a-z0-9_.-]+\"", RegexOptions.Compiled)

@@ -10,13 +10,13 @@ public class CrestPermissionException : CrestException
     }
 
     public CrestPermissionException(string permissionName, string message)
-        : base("Crest.Auth.Forbidden", 403, message, permissionName)
+        : base(CrestErrorCodes.AuthForbiddenValue, 403, message, permissionName)
     {
         PermissionName = permissionName;
     }
 
     public CrestPermissionException(string permissionName, string message, Exception innerException)
-        : base("Crest.Auth.Forbidden", 403, message, permissionName, innerException)
+        : base(CrestErrorCodes.AuthForbiddenValue, 403, message, permissionName, innerException)
     {
         PermissionName = permissionName;
     }

@@ -12,6 +12,8 @@ using Xunit;
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
 
+// semantic-string-guard: allow
+
 namespace CrestCreates.Agent.ControlPlane.Tests;
 
 public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase

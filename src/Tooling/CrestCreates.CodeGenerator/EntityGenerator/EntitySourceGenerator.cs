@@ -24,7 +24,9 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 .Where(static x => x is not null)
                 .Collect();
 
-            context.RegisterSourceOutput(entityClasses, ExecuteGeneration);
+            var compilationAndClasses = context.CompilationProvider.Combine(entityClasses);
+
+            context.RegisterSourceOutput(compilationAndClasses, ExecuteGeneration);
         }
 
         private static bool IsEntityCandidate(SyntaxNode node)
@@ -51,9 +53,12 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 attr.AttributeClass?.Name == "EntityAttribute" || attr.AttributeClass?.Name == "Entity");
         }
 
-        private void ExecuteGeneration(SourceProductionContext context, ImmutableArray<INamedTypeSymbol?> entityClasses)
+        private void ExecuteGeneration(SourceProductionContext context, (Compilation Compilation, ImmutableArray<INamedTypeSymbol?> EntityClasses) input)
         {
+            var (compilation, entityClasses) = input;
             if (entityClasses.IsDefaultOrEmpty) return;
+
+            var hasPermissionName = compilation.GetTypeByMetadataName("CrestCreates.Core.Abstractions.Identity.PermissionName") != null;
 
             var processedEntities = new HashSet<string>();
 
@@ -86,13 +91,13 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
 
                     if (GetAttributeProperty(entityClass, "GeneratePermissions", true))
                     {
-                        GenerateEntityPermissions(context, entityClass);
+                        GenerateEntityPermissions(context, entityClass, hasPermissionName);
                     }
                 }
                 catch (Exception ex)
                 {
                     context.ReportDiagnostic(Diagnostic.Create(
-                        new DiagnosticDescriptor("CCCG001", "Code generation error",
+                        new DiagnosticDescriptor(CodeGeneratorDiagnosticCodes.EntityGenerationErrorValue, "Code generation error",
                             $"Error generating code for {entityFullName}: {ex.Message}",
                             "CodeGeneration", DiagnosticSeverity.Warning, true),
                         Location.None));
@@ -1294,7 +1299,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             context.AddSource(entityName + "Validator.g.cs", SourceText.From(sourceCode, Encoding.UTF8));
         }
 
-        private void GenerateEntityPermissions(SourceProductionContext context, INamedTypeSymbol entityClass)
+        private void GenerateEntityPermissions(SourceProductionContext context, INamedTypeSymbol entityClass, bool hasPermissionName)
         {
             var entityName = entityClass.Name;
             var namespaceName = entityClass.ContainingNamespace.ToDisplayString();
@@ -1336,7 +1341,8 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 var permissionValue = permission.Contains(".")
                     ? permission
                     : $"{permissionPrefix}.{permission}";
-                sourceCode.AppendLine($"        public const string {actionName} = \"{EscapeStringLiteral(permissionValue)}\";");
+                sourceCode.AppendLine($"        public const string {actionName}Value = \"{EscapeStringLiteral(permissionValue)}\";");
+                if (hasPermissionName) sourceCode.AppendLine($"        public static global::CrestCreates.Core.Abstractions.Identity.PermissionName {actionName} {{ get; }} = new({actionName}Value);");
             }
 
             sourceCode.AppendLine();
@@ -1352,7 +1358,7 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             foreach (var permission in permissions)
             {
                 var actionName = ToPermissionConstantName(permission);
-                sourceCode.AppendLine($"            yield return {actionName};");
+                sourceCode.AppendLine($"            yield return {actionName}Value;");
             }
 
             sourceCode.AppendLine("        }");

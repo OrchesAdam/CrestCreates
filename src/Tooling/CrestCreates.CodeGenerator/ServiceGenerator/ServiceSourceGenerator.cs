@@ -124,7 +124,7 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
             catch (Exception ex)
             {
                 context.ReportDiagnostic(Diagnostic.Create(
-                    new DiagnosticDescriptor("CCCG002", "Service generation error",
+                    new DiagnosticDescriptor(CodeGeneratorDiagnosticCodes.ServiceGenerationErrorValue, "Service generation error",
                         $"Error generating service code: {ex.Message}",
                         "CodeGeneration", DiagnosticSeverity.Warning, true),
                     Location.None));

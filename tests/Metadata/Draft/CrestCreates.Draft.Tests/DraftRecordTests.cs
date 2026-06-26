@@ -4,6 +4,8 @@ using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
 
+// semantic-string-guard: allow
+
 namespace CrestCreates.Draft.Tests;
 
 public class DraftRecordTests

@@ -17,7 +17,7 @@ public sealed class CanonicalHashSourceGeneratorTests
         private const string AttributeDeclarations = @"
 using System;
 
-namespace CrestCreates.Metadata.Abstractions
+namespace CrestCreates.Metadata.Abstractions.CanonicalHashing
 {
     public enum CanonicalHashArtifactKind { Descriptor = 0, ReviewResult = 1, Package = 2, Report = 3 }
     public enum DescriptorKind { Unknown = 0, Schema = 1, Capability = 2 }
@@ -29,16 +29,16 @@ namespace CrestCreates.Metadata.Abstractions
     {
         public CanonicalHashArtifactKind ArtifactKind { get; init; } = CanonicalHashArtifactKind.Descriptor;
         public DescriptorKind DescriptorKind { get; init; } = DescriptorKind.Unknown;
-        public required Type TargetType { get; init; }
-        public required string ContractShapeVersion { get; init; }
-        public required string DefinitionShapeVersion { get; init; }
+        public Type? TargetType { get; init; }
+        public string? ContractShapeVersion { get; init; }
+        public string? DefinitionShapeVersion { get; init; }
     }
 
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
     public sealed class CanonicalHashUnionProfileAttribute : Attribute
     {
-        public required Type TargetType { get; init; }
-        public required string Discriminator { get; init; }
+        public Type? TargetType { get; init; }
+        public string? Discriminator { get; init; }
     }
 
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
@@ -51,7 +51,7 @@ namespace CrestCreates.Metadata.Abstractions
         }
         public Type CaseType { get; }
         public string DiscriminatorValue { get; }
-        public required Type ValueProfile { get; init; }
+        public Type? ValueProfile { get; init; }
     }
 
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = true, Inherited = false)]
@@ -97,7 +97,7 @@ namespace CrestCreates.Metadata.Abstractions
     /// and their corresponding normal profiles. Used by union writer generation tests.
     /// </summary>
     private const string UnionProfileSource = """
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using System.Collections.Generic;
 
 namespace TestNamespace
@@ -149,7 +149,7 @@ namespace TestNamespace
     /// Source for a profile with a filtered collection of sub-structure items.
     /// </summary>
     private const string FilteredCollectionSource = """
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using System.Collections.Generic;
 
 namespace TestNamespace

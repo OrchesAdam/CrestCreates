@@ -46,7 +46,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
                 Name = "GetDescriptorByRef",
                 Description = "Test",
                 Category = AgentToolCategory.Context,
-                Permissions = [new AgentToolPermissionRequirement { PermissionName = AgentToolPermissionName.DescriptorRead }],
+                Permissions = [new AgentToolPermissionRequirement { PermissionName = AgentToolPermissionNames.DescriptorRead }],
                 AllowedActors = [AgentToolActorKind.Agent],
                 IsReadOnly = true,
                 MutatesRuntimeRegistry = false
@@ -80,7 +80,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
                 Name = "GetDescriptorByRef",
                 Description = "Test",
                 Category = AgentToolCategory.Context,
-                Permissions = [new AgentToolPermissionRequirement { PermissionName = AgentToolPermissionName.DescriptorRead }],
+                Permissions = [new AgentToolPermissionRequirement { PermissionName = AgentToolPermissionNames.DescriptorRead }],
                 AllowedActors = [AgentToolActorKind.Agent],
                 IsReadOnly = true,
                 MutatesRuntimeRegistry = false
@@ -238,7 +238,7 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
                 Name = "GetDescriptorByRef",
                 Description = "Test",
                 Category = AgentToolCategory.Context,
-                Permissions = [new AgentToolPermissionRequirement { PermissionName = AgentToolPermissionName.DescriptorRead }],
+                Permissions = [new AgentToolPermissionRequirement { PermissionName = AgentToolPermissionNames.DescriptorRead }],
                 AllowedActors = [AgentToolActorKind.Agent],
                 IsReadOnly = true,
                 MutatesRuntimeRegistry = false

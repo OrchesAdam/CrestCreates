@@ -8,6 +8,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="CrestCreates.Metadata.ContextPack" />
     <InternalsVisibleTo Include="CrestCreates.Metadata.ContextPack.Tests" />
+    <ProjectReference Include="..\..\Core\CrestCreates.Core.Abstractions\CrestCreates.Core.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Metadata.Abstractions\CrestCreates.Metadata.Abstractions.csproj" />
   </ItemGroup>
 </Project>

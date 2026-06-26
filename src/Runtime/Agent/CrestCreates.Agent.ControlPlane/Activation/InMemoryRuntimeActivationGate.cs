@@ -37,7 +37,7 @@ public sealed class InMemoryRuntimeActivationGate : IRuntimeActivationGate
                 AgentToolResult<RuntimeActivationGateResult>.Failed(
                     [new AgentToolDiagnostic
                     {
-                        Code = "RUNTIME_ACTIVATION_GATE_REJECTED",
+                        Code = AgentToolDiagnosticCodes.RuntimeActivationGateRejectedValue,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = "In-memory gate rejection (CanReject=true)."
                     }]));

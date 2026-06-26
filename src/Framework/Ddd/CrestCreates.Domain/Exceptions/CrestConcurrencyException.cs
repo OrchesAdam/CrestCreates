@@ -6,7 +6,7 @@ public class CrestConcurrencyException : CrestException
 {
     public CrestConcurrencyException(string entityType, object? entityId)
         : base(
-            "Crest.Concurrency.Conflict",
+            CrestErrorCodes.ConcurrencyConflictValue,
             409,
             "Concurrency conflict.",
             $"{entityType} (Id={entityId}) has been modified by another user.")

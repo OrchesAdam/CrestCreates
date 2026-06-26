@@ -87,7 +87,7 @@ public class DescriptorKindDenyTests : AgentControlPlaneTestBase
             AllowReadOnlyToolsByDefault = true,
             AllowMutationToolsByDefault = false,
             AllowActivationHandoffToolsByDefault = false,
-            AllowedPermissions = new HashSet<string>(StringComparer.Ordinal) { AgentToolPermissionName.DraftCreate },
+            AllowedPermissions = new HashSet<string>(StringComparer.Ordinal) { AgentToolPermissionNames.DraftCreate },
             DeniedDescriptorKinds = new HashSet<string>(StringComparer.Ordinal) { "Event" }
         };
 

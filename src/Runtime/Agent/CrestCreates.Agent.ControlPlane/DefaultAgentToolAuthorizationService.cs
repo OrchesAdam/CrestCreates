@@ -1,4 +1,5 @@
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 
 namespace CrestCreates.Agent.ControlPlane;
 
@@ -51,12 +52,12 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
         CancellationToken ct = default)
     {
         // 1. Runtime execution is always denied
-        if (permission.PermissionName.StartsWith("agent.runtime.", StringComparison.Ordinal))
+        if (permission.PermissionName.StartsWith(AgentToolPermissionNames.RuntimePrefixValue, StringComparison.Ordinal))
         {
             return Task.FromResult(AgentToolAuthorizationResult.Denied(
                 new AgentToolDiagnostic
                 {
-                    Code = "RUNTIME_EXECUTION_DENIED",
+                    Code = AgentToolDiagnosticCodes.RuntimeExecutionDeniedValue,
                     Severity = AgentToolDiagnosticSeverity.Blocker,
                     Message = "Runtime execution tools are not available through the Control Plane tool surface."
                 }));
@@ -69,7 +70,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
             return Task.FromResult(AgentToolAuthorizationResult.Denied(
                 new AgentToolDiagnostic
                 {
-                    Code = "PERMISSION_DENIED",
+                    Code = AgentToolDiagnosticCodes.PermissionDeniedValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Permission '{permission.PermissionName}' is denied by policy."
                 }));
@@ -81,7 +82,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
             return Task.FromResult(AgentToolAuthorizationResult.Denied(
                 new AgentToolDiagnostic
                 {
-                    Code = "TOOL_DENIED",
+                    Code = AgentToolDiagnosticCodes.ToolDeniedValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Tool '{expectedToolName}' is denied by policy."
                 }));
@@ -92,7 +93,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
             return Task.FromResult(AgentToolAuthorizationResult.Denied(
                 new AgentToolDiagnostic
                 {
-                    Code = "ACTOR_KIND_DENIED",
+                    Code = AgentToolDiagnosticCodes.ActorKindDeniedValue,
                     Severity = AgentToolDiagnosticSeverity.Error,
                     Message = $"Actor kind '{context.ActorKind}' is denied by policy."
                 }));
@@ -119,7 +120,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                 return Task.FromResult(AgentToolAuthorizationResult.Denied(
                     new AgentToolDiagnostic
                     {
-                        Code = "UNKNOWN_AUTHORIZATION_MODE",
+                        Code = AgentToolDiagnosticCodes.UnknownAuthorizationModeValue,
                         Severity = AgentToolDiagnosticSeverity.Blocker,
                         Message = $"Authorization mode '{_options.Mode}' is not recognized."
                     }));
@@ -143,7 +144,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
         return Task.FromResult(AgentToolAuthorizationResult.Denied(
             new AgentToolDiagnostic
             {
-                Code = "NOT_EXPLICITLY_ALLOWED",
+                Code = AgentToolDiagnosticCodes.NotExplicitlyAllowedValue,
                 Severity = AgentToolDiagnosticSeverity.Error,
                 Message = $"Permission '{permission.PermissionName}' for tool '{expectedToolName}' is not explicitly allowed in DenyAll mode."
             }));
@@ -176,7 +177,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                 return Task.FromResult(AgentToolAuthorizationResult.Denied(
                     new AgentToolDiagnostic
                     {
-                        Code = "ACTIVATION_HANDOFF_DENIED",
+                        Code = DescriptorActivationDiagnosticCodes.HandoffDeniedValue,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = $"Activation handoff tool '{expectedToolName}' is not allowed by default. Enable AllowActivationHandoffToolsByDefault or add to AllowedPermissions/AllowedToolNames."
                     }));
@@ -193,7 +194,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                 return Task.FromResult(AgentToolAuthorizationResult.Denied(
                     new AgentToolDiagnostic
                     {
-                        Code = "MUTATION_DENIED",
+                        Code = AgentToolDiagnosticCodes.MutationDeniedValue,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = $"Mutating tool '{expectedToolName}' is not allowed by default. Enable AllowMutationToolsByDefault or add to AllowedPermissions/AllowedToolNames."
                     }));
@@ -210,7 +211,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                 return Task.FromResult(AgentToolAuthorizationResult.Denied(
                     new AgentToolDiagnostic
                     {
-                        Code = "READ_ONLY_DENIED",
+                        Code = AgentToolDiagnosticCodes.ReadOnlyDeniedValue,
                         Severity = AgentToolDiagnosticSeverity.Error,
                         Message = $"Read-only tool '{expectedToolName}' is not allowed by default. Enable AllowReadOnlyToolsByDefault or add to AllowedPermissions/AllowedToolNames."
                     }));
@@ -223,7 +224,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
         return Task.FromResult(AgentToolAuthorizationResult.Denied(
             new AgentToolDiagnostic
             {
-                Code = "AUTHORIZATION_UNRESOLVED",
+                Code = AgentToolDiagnosticCodes.AuthorizationUnresolvedValue,
                 Severity = AgentToolDiagnosticSeverity.Blocker,
                 Message = $"Authorization could not be resolved for tool '{expectedToolName}'."
             }));

@@ -10,5 +10,6 @@
     <InternalsVisibleTo Include="CrestCreates.Metadata.Tests" />
     <InternalsVisibleTo Include="CrestCreates.Metadata.ContextPack.Tests" />
     <InternalsVisibleTo Include="CrestCreates.Agent.ControlPlane.Tests" />
+    <ProjectReference Include="..\..\Core\CrestCreates.Core.Abstractions\CrestCreates.Core.Abstractions.csproj" />
   </ItemGroup>
 </Project>

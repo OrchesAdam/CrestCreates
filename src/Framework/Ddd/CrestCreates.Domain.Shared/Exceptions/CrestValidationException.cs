@@ -9,7 +9,7 @@ public class CrestValidationException : CrestException
         string message = "Validation failed.",
         IReadOnlyList<string>? errors = null,
         Exception? innerException = null)
-        : base("Crest.Validation.Failed", 400, message, errors is { Count: > 0 } ? string.Join("; ", errors) : null, innerException)
+        : base(CrestErrorCodes.ValidationFailedValue, 400, message, errors is { Count: > 0 } ? string.Join("; ", errors) : null, innerException)
     {
         Errors = errors ?? Array.Empty<string>();
     }

@@ -4,6 +4,8 @@ using Xunit;
 using CrestCreates.CodeGenerator.ObjectMappingGenerator;
 using CrestCreates.CodeGenerator.Tests.TestHelpers;
 
+// semantic-string-guard: allow
+
 namespace CrestCreates.CodeGenerator.Tests.ObjectMappingGenerator
 {
     public class ObjectMappingSourceGeneratorTests

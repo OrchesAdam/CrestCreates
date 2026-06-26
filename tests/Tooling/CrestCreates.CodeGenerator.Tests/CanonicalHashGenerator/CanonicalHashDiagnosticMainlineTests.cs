@@ -4,6 +4,8 @@ using CrestCreates.CodeGenerator.Tests.TestHelpers;
 using Microsoft.CodeAnalysis;
 using Xunit;
 
+// semantic-string-guard: allow
+
 namespace CrestCreates.CodeGenerator.Tests.CanonicalHashGenerator;
 
 public sealed class CanonicalHashDiagnosticMainlineTests
@@ -19,7 +21,7 @@ public sealed class CanonicalHashDiagnosticMainlineTests
         private const string AttributeDeclarations = @"
 using System;
 
-namespace CrestCreates.Metadata.Abstractions
+namespace CrestCreates.Metadata.Abstractions.CanonicalHashing
 {
     public enum CanonicalHashArtifactKind { Descriptor = 0, ReviewResult = 1, Package = 2, Report = 3 }
     public enum DescriptorKind { Unknown = 0, Schema = 1, Capability = 2 }
@@ -31,16 +33,16 @@ namespace CrestCreates.Metadata.Abstractions
     {
         public CanonicalHashArtifactKind ArtifactKind { get; init; } = CanonicalHashArtifactKind.Descriptor;
         public DescriptorKind DescriptorKind { get; init; } = DescriptorKind.Unknown;
-        public required Type TargetType { get; init; }
-        public required string ContractShapeVersion { get; init; }
-        public required string DefinitionShapeVersion { get; init; }
+        public Type? TargetType { get; init; }
+        public string? ContractShapeVersion { get; init; }
+        public string? DefinitionShapeVersion { get; init; }
     }
 
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
     public sealed class CanonicalHashUnionProfileAttribute : Attribute
     {
-        public required Type TargetType { get; init; }
-        public required string Discriminator { get; init; }
+        public Type? TargetType { get; init; }
+        public string? Discriminator { get; init; }
     }
 
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
@@ -53,7 +55,7 @@ namespace CrestCreates.Metadata.Abstractions
         }
         public Type CaseType { get; }
         public string DiscriminatorValue { get; }
-        public required Type ValueProfile { get; init; }
+        public Type? ValueProfile { get; init; }
     }
 
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = true, Inherited = false)]
@@ -101,7 +103,7 @@ namespace CrestCreates.Metadata.Abstractions
     public void CCHASH015_UnionProfileMissingTargetType_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace TestNamespace
 {
@@ -122,7 +124,7 @@ namespace TestNamespace
     public void CCHASH015_UnionProfileMissingDiscriminator_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace TestNamespace
 {
@@ -143,7 +145,7 @@ namespace TestNamespace
     public void CCHASH016_UnionCaseTypeNotAssignable_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace TestNamespace
 {
@@ -176,7 +178,7 @@ namespace TestNamespace
     public void CCHASH017_UnionCaseMissingValueProfile_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace TestNamespace
 {
@@ -199,7 +201,7 @@ namespace TestNamespace
     public void CCHASH018_DuplicateUnionDiscriminator_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace TestNamespace
 {
@@ -244,7 +246,7 @@ namespace TestNamespace
     public void CCHASH019_DuplicateUnionCaseType_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace TestNamespace
 {
@@ -278,7 +280,7 @@ namespace TestNamespace
     public void CCHASH020_UnionCaseTypeMustBeSealed_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace TestNamespace
 {
@@ -311,7 +313,7 @@ namespace TestNamespace
     public void CCHASH021_UnionCaseMissingKnownSubtype_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace TestNamespace
 {
@@ -345,7 +347,7 @@ namespace TestNamespace
     public void CCHASH022_UnionCaseValueProfileTargetMismatch_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace TestNamespace
 {
@@ -379,7 +381,7 @@ namespace TestNamespace
     public void CCHASH023_CustomWriterUsage_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace TestNamespace
 {
@@ -417,7 +419,7 @@ namespace TestNamespace
     public void CCHASH024_FilterOnlyForCollection_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using System.Collections.Generic;
 
 namespace TestNamespace
@@ -451,7 +453,7 @@ namespace TestNamespace
     public void CCHASH025_InvalidFilterSignature_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using System.Collections.Generic;
 
 namespace TestNamespace
@@ -490,7 +492,7 @@ namespace TestNamespace
     public void CCHASH026_FilterElementTypeMismatch_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using System.Collections.Generic;
 
 namespace TestNamespace
@@ -530,7 +532,7 @@ namespace TestNamespace
     {
         // Abstract base type — CCHASH021 must still detect missing sealed subtypes
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace TestNamespace
 {
@@ -564,7 +566,7 @@ namespace TestNamespace
     public void CCHASH027_FilterOnDictionaryField_ShouldEmitError()
     {
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using System.Collections.Generic;
 
 namespace TestNamespace
@@ -606,7 +608,7 @@ namespace TestNamespace
         // CCHASH028 is a safety net in the writer — unsupported scalars that slip through IsComplexType
         // produce a #error in generated code. This test verifies the model-layer rejection.
         var source = TestSources.WithProfiles("""
-using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace TestNamespace
 {

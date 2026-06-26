@@ -165,6 +165,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
 
             var hasMultiTenant = compilation.GetTypeByMetadataName("CrestCreates.DataFilter.Entities.IMultiTenant") != null;
             var hasDynamicApi = HasDynamicApiSupport(compilation);
+            var hasPermissionName = compilation.GetTypeByMetadataName("CrestCreates.Core.Abstractions.Identity.PermissionName") != null;
 
             var processedEntities = new HashSet<string>();
 
@@ -195,7 +196,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     GenerateCrudServiceInterface(context, entityName, namespaceName, idType);
 
                     // Generate permissions
-                    GenerateCrudPermissions(context, entityName, namespaceName);
+                    GenerateCrudPermissions(context, entityName, namespaceName, hasPermissionName);
 
                     // Generate object mapping declarations
                     GenerateObjectMappingDeclarations(context, entityClass, entityName, namespaceName);
@@ -212,7 +213,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 catch (Exception ex)
                 {
                     context.ReportDiagnostic(Diagnostic.Create(
-                        new DiagnosticDescriptor("CCCG003", "CRUD Service generation error",
+                        new DiagnosticDescriptor(CodeGeneratorDiagnosticCodes.GenerationErrorValue, "CRUD Service generation error",
                             $"Error generating CRUD service code for {entityFullName}: {ex.Message}",
                             "CodeGeneration", DiagnosticSeverity.Warning, true),
                         Location.None));
@@ -424,7 +425,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             context.AddSource($"I{entityName}AppService.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
-        private void GenerateCrudPermissions(SourceProductionContext context, string entityName, string namespaceName)
+        private void GenerateCrudPermissions(SourceProductionContext context, string entityName, string namespaceName, bool hasPermissionName)
         {
             var builder = new StringBuilder();
             builder.AppendLine("#nullable enable");
@@ -434,11 +435,16 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("{");
             builder.AppendLine($"    public static partial class {entityName}CrudPermissions");
             builder.AppendLine("    {");
-            builder.AppendLine($"        public const string Create = \"{entityName}.Create\";");
-            builder.AppendLine($"        public const string Get = \"{entityName}.Get\";");
-            builder.AppendLine($"        public const string Search = \"{entityName}.Search\";");
-            builder.AppendLine($"        public const string Update = \"{entityName}.Update\";");
-            builder.AppendLine($"        public const string Delete = \"{entityName}.Delete\";");
+            builder.AppendLine($"        public const string CreateValue = \"{entityName}.Create\";");
+            if (hasPermissionName) builder.AppendLine($"        public static global::CrestCreates.Core.Abstractions.Identity.PermissionName Create {{ get; }} = new(CreateValue);");
+            builder.AppendLine($"        public const string GetValue = \"{entityName}.Get\";");
+            if (hasPermissionName) builder.AppendLine($"        public static global::CrestCreates.Core.Abstractions.Identity.PermissionName Get {{ get; }} = new(GetValue);");
+            builder.AppendLine($"        public const string SearchValue = \"{entityName}.Search\";");
+            if (hasPermissionName) builder.AppendLine($"        public static global::CrestCreates.Core.Abstractions.Identity.PermissionName Search {{ get; }} = new(SearchValue);");
+            builder.AppendLine($"        public const string UpdateValue = \"{entityName}.Update\";");
+            if (hasPermissionName) builder.AppendLine($"        public static global::CrestCreates.Core.Abstractions.Identity.PermissionName Update {{ get; }} = new(UpdateValue);");
+            builder.AppendLine($"        public const string DeleteValue = \"{entityName}.Delete\";");
+            if (hasPermissionName) builder.AppendLine($"        public static global::CrestCreates.Core.Abstractions.Identity.PermissionName Delete {{ get; }} = new(DeleteValue);");
             builder.AppendLine("    }");
             builder.AppendLine("}");
 
@@ -676,7 +682,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("            if (input == null)");
             builder.AppendLine("                throw new ArgumentNullException(nameof(input));");
             builder.AppendLine();
-            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.Create, cancellationToken);");
+            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.CreateValue, cancellationToken);");
             builder.AppendLine("            await ValidateCreateAsync(input, cancellationToken);");
             builder.AppendLine();
             builder.AppendLine($"            var entity = {entityName}ObjectMappings.ToTarget(input);");
@@ -696,7 +702,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("        /// </summary>");
             builder.AppendLine($"        public virtual async Task<{entityName}Dto?> GetByIdAsync({idType} id, CancellationToken cancellationToken = default)");
             builder.AppendLine("        {");
-            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.Get, cancellationToken);");
+            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.GetValue, cancellationToken);");
             builder.AppendLine();
             builder.AppendLine("            var query = Repository.GetQueryable();");
             builder.AppendLine("            query = await ApplyDataPermissionFilterAsync(query);");
@@ -718,7 +724,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("            if (input == null)");
             builder.AppendLine("                throw new ArgumentNullException(nameof(input));");
             builder.AppendLine();
-            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.Search, cancellationToken);");
+            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.SearchValue, cancellationToken);");
             builder.AppendLine();
             builder.AppendLine("            EnsureAllowedFilterFields(input.Filters);");
             builder.AppendLine("            EnsureAllowedSortFields(input.Sorts);");
@@ -760,7 +766,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("            if (input == null)");
             builder.AppendLine("                throw new ArgumentNullException(nameof(input));");
             builder.AppendLine();
-            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.Update, cancellationToken);");
+            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.UpdateValue, cancellationToken);");
             builder.AppendLine("            await ValidateUpdateAsync(id, input, cancellationToken);");
             builder.AppendLine();
             builder.AppendLine("            var entity = await Repository.GetAsync(id, cancellationToken);");
@@ -787,7 +793,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("        [UnitOfWorkMo]");
             builder.AppendLine($"        public virtual async Task DeleteAsync({idType} id, string? expectedStamp = null, CancellationToken cancellationToken = default)");
             builder.AppendLine("        {");
-            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.Delete, cancellationToken);");
+            builder.AppendLine($"            await CheckPermissionAsync({entityName}CrudPermissions.DeleteValue, cancellationToken);");
             builder.AppendLine();
 
             if (hasConcurrencyStamp)

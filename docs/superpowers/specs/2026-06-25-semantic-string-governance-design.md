@@ -77,6 +77,7 @@ Add one file per type under `CrestCreates.Core.Abstractions/Identity/`:
 - `DescriptorId`
 - `VersionKey`
 - `MessageTemplateId`
+- `SeverityLevel` (constrained: private constructor, static factory properties for Error/Warning/Info, implicit conversion to string)
 
 All semantic value objects use namespace
 `CrestCreates.Core.Abstractions.Identity`.
@@ -317,7 +318,7 @@ The guard should catch patterns such as:
 
 - `"ACTIVATION_[A-Z0-9_]+"`
 - `"CCHASH[0-9]{3}"`
-- `"CCMAP[0-9]{3}"`
+- `"OM[0-9]{2,3}"` (replaces former CCMAP prefix)
 - `"FIELD_REQUIRED"`
 - `"descriptor-activation-review"`
 - `"agent\.[a-z0-9_.-]+"`

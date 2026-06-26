@@ -4,6 +4,8 @@ using CrestCreates.CodeGenerator.Tests.TestHelpers;
 using Microsoft.CodeAnalysis;
 using Xunit;
 
+// semantic-string-guard: allow
+
 namespace CrestCreates.CodeGenerator.Tests.ObjectMappingGenerator
 {
     public class ObjectMappingDiagnosticMainlineTests

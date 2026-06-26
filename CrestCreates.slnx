@@ -170,6 +170,9 @@
   <Folder Name="/tests/Boundary/">
     <Project Path="tests/Boundary/CrestCreates.DependencyBoundaries.Tests/CrestCreates.DependencyBoundaries.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/Core/">
+    <Project Path="tests/Core/CrestCreates.Core.Abstractions.Tests/CrestCreates.Core.Abstractions.Tests.csproj" />
+  </Folder>
   <Folder Name="/tests/Framework/Ddd/">
     <Project Path="tests/Framework/Ddd/CrestCreates.Domain.Tests/CrestCreates.Domain.Tests.csproj" />
     <Project Path="tests/Framework/Ddd/CrestCreates.Application.Tests/CrestCreates.Application.Tests.csproj" />

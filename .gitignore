@@ -432,3 +432,6 @@ nul
 
 # Deepwork progress files
 .slim/deepwork/
+
+# Magic Context
+.cortexkit/

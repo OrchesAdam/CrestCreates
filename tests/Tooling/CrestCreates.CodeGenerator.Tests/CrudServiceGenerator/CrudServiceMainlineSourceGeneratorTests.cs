@@ -275,11 +275,11 @@ namespace Sample.Domain.Entities
 
         var source = result.GetSourceByFileName("ProductAppService.g.cs")!.SourceText;
 
-        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Create", source);
-        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Get", source);
-        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Search", source);
-        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Update", source);
-        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.Delete", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.CreateValue", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.GetValue", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.SearchValue", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.UpdateValue", source);
+        Assert.Contains("CheckPermissionAsync(ProductCrudPermissions.DeleteValue", source);
         Assert.DoesNotContain("Product.View", source);
     }
 
@@ -565,6 +565,7 @@ namespace TestNamespace.Mappings
         "CrestCreates.Domain",
         "CrestCreates.Authorization.Abstractions",
         "CrestCreates.Application.Contracts",
+        "CrestCreates.Core.Abstractions",
         "Rougamo"
     };
 

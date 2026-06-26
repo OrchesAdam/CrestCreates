@@ -47,6 +47,7 @@ dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r win
 - 测试项目在 `Directory.Build.targets` 中强制关闭 Trim/AoT（Moq/DynamicProxy 不兼容）
 - Source Generator 可通过 `-p:CrestCreatesCodeGeneration=false` 全局禁用（见 `Directory.Build.Aot.props`）
 - Source Generator 输出到 `obj/{config}/{tfm}/source-generators/`（见 `Directory.Build.targets` 的 `CompilerGeneratedFilesOutputPath`）
+- **CodeGenerator 测试陷阱**：测试中的 `AttributeDeclarations` 命名空间必须与生成器期望的完全匹配。CanonicalHash 属性在 `CrestCreates.Metadata.Abstractions.CanonicalHashing`（不是 `CrestCreates.Metadata.Abstractions`）。测试属性声明不能使用 `required` 关键字，否则 C# 编译器 CS9035 会抢先于生成器诊断触发。
 
 ---
 

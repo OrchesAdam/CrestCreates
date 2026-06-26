@@ -85,7 +85,7 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
             catch (Exception ex)
             {
                 context.ReportDiagnostic(Diagnostic.Create(
-                    new DiagnosticDescriptor("CCCG003", "Controller generation error",
+                    new DiagnosticDescriptor(CodeGeneratorDiagnosticCodes.GenerationErrorValue, "Controller generation error",
                         $"Error generating controller code: {ex.Message}",
                         "CodeGeneration", DiagnosticSeverity.Warning, true),
                     Location.None));
@@ -413,7 +413,7 @@ namespace CrestCreates.CodeGenerator.ControllerGenerator
                 {
                     // 生成警告：资源名称为空
                     context.ReportDiagnostic(Diagnostic.Create(
-                        new DiagnosticDescriptor("CCCG004", "Authorization configuration warning",
+                        new DiagnosticDescriptor(CodeGeneratorDiagnosticCodes.AuthorizationConfigWarningValue, "Authorization configuration warning",
                             $"GenerateAuthorization is true but ResourceName is empty for service {serviceClass.Name}. Resource name will be inferred from method names.",
                             "CodeGeneration", DiagnosticSeverity.Warning, true),
                         serviceClass.Locations[0]));

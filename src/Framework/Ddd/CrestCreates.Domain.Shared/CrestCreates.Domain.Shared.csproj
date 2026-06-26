@@ -12,4 +12,8 @@
     <EmbeddedResource Include="Localization\Resources\zh-CN.json" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../../../Core/CrestCreates.Core.Abstractions/CrestCreates.Core.Abstractions.csproj" />
+  </ItemGroup>
+
 </Project>

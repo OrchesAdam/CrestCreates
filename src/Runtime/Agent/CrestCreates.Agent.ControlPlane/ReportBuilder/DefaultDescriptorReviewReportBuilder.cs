@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using CrestCreates.DescriptorDraft.Abstractions;
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
@@ -126,7 +127,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["ErrorCount"] = errorCount.ToString(),
                 ["BlockerCount"] = blockerCount.ToString(),
             };
-            items.Add(CreateItem("summary_validation", "validation_passed", "report.summary.valid",
+            items.Add(CreateItem("summary_validation", "validation_passed", DescriptorReviewReportMessageTemplateIds.SummaryValidValue,
                 MapMaxSeverity(allDiagnostics), parameters));
         }
         else
@@ -137,7 +138,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["ErrorCount"] = errorCount.ToString(),
                 ["BlockerCount"] = blockerCount.ToString(),
             };
-            items.Add(CreateItem("summary_validation", "validation_failed", "report.summary.invalid",
+            items.Add(CreateItem("summary_validation", "validation_failed", DescriptorReviewReportMessageTemplateIds.SummaryInvalidValue,
                 MapMaxSeverity(allDiagnostics), parameters));
         }
 
@@ -150,14 +151,14 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             ["ErrorCount"] = errorCount.ToString(),
             ["BlockerCount"] = blockerCount.ToString(),
         };
-        items.Add(CreateItem("summary_diag_counts", "diagnostic_counts", "report.diagnostics.count",
+        items.Add(CreateItem("summary_diag_counts", "diagnostic_counts", DescriptorReviewReportMessageTemplateIds.DiagnosticsCountValue,
             MapMaxSeverity(allDiagnostics), countParams));
 
         // Activation eligibility item
         if (reviewResult.IsActivationEligible)
         {
             items.Add(CreateItem("summary_activation", "activation_eligible",
-                "report.activation.eligible", DescriptorReviewSeverity.Info,
+                DescriptorActivationMessageTemplateIds.ActivationEligibleValue, DescriptorReviewSeverity.Info,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
         else
@@ -172,7 +173,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["BlockingReasons"] = blockingReasons,
             };
             items.Add(CreateItem("summary_activation", "activation_blocked",
-                "report.activation.blocked", DescriptorReviewSeverity.Blocker, blockParams));
+                DescriptorActivationMessageTemplateIds.ActivationBlockedValue, DescriptorReviewSeverity.Blocker, blockParams));
         }
 
         // Governance summary item
@@ -186,10 +187,10 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             };
             var templateId = decision.MaxDecision switch
             {
-                DescriptorLifecycleDecisionKind.Allowed => "report.governance.approved",
-                DescriptorLifecycleDecisionKind.Blocked => "report.governance.rejected",
-                DescriptorLifecycleDecisionKind.ReviewRequired => "report.governance.review_required",
-                _ => "report.governance.review_required",
+                DescriptorLifecycleDecisionKind.Allowed => DescriptorReviewReportMessageTemplateIds.GovernanceApprovedValue,
+                DescriptorLifecycleDecisionKind.Blocked => DescriptorReviewReportMessageTemplateIds.GovernanceRejectedValue,
+                DescriptorLifecycleDecisionKind.ReviewRequired => DescriptorReviewReportMessageTemplateIds.GovernanceReviewRequiredValue,
+                _ => DescriptorReviewReportMessageTemplateIds.GovernanceReviewRequiredValue,
             };
             var severity = decision.MaxDecision switch
             {
@@ -225,7 +226,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         {
             ItemId = "draft_identity_info",
             ReasonCode = "draft_identity",
-            MessageTemplateId = "report.draft_identity.info",
+            MessageTemplateId = DescriptorReviewReportMessageTemplateIds.DraftIdentityInfoValue,
             Message = message,
             Severity = DescriptorReviewSeverity.Info,
             Parameters = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -262,7 +263,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                     ["ProposedCount"] = materialization.ProposedInventory.Count.ToString(),
                 };
                 items.Add(CreateItem("proposed_materialized", "materialized",
-                    "report.proposed_changes.materialized", DescriptorReviewSeverity.Info, parameters));
+                    DescriptorReviewReportMessageTemplateIds.ProposedChangesMaterializedValue, DescriptorReviewSeverity.Info, parameters));
 
                 // Add items for each proposed descriptor
                 for (int i = 0; i < materialization.ProposedInventory.Count; i++)
@@ -276,7 +277,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                         ["Namespace"] = desc.Namespace,
                     };
                     items.Add(CreateItem($"proposed_desc_{i}", "proposed_descriptor",
-                        "report.proposed_changes.materialized", DescriptorReviewSeverity.Info, descParams));
+                        DescriptorReviewReportMessageTemplateIds.ProposedChangesMaterializedValue, DescriptorReviewSeverity.Info, descParams));
                 }
             }
             else
@@ -287,7 +288,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                     ["Reason"] = reason,
                 };
                 items.Add(CreateItem("proposed_failed", "materialization_failed",
-                    "report.proposed_changes.failed",
+                    DescriptorReviewReportMessageTemplateIds.ProposedChangesFailedValue,
                     MapMaxSeverity(materialization.Diagnostics), parameters));
             }
         }
@@ -317,7 +318,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                     ["MaxSeverity"] = impact.MaxSeverity.ToString(),
                 };
                 items.Add(CreateItem("impact_affected", "impact_has_affected",
-                    "report.impact.affected", MapImpactSeverity(impact.MaxSeverity), parameters));
+                    DescriptorReviewReportMessageTemplateIds.ImpactAffectedValue, MapImpactSeverity(impact.MaxSeverity), parameters));
 
                 // Add items for each affected descriptor
                 foreach (var affected in impact.AffectedDescriptors.OrderBy(a => a.Name))
@@ -330,13 +331,13 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                         ["Reason"] = affected.Reason ?? "",
                     };
                     items.Add(CreateItem($"impact_affected_{affected.Name}", "affected_descriptor",
-                        "report.impact.affected", MapImpactSeverity(affected.Severity), affParams));
+                        DescriptorReviewReportMessageTemplateIds.ImpactAffectedValue, MapImpactSeverity(affected.Severity), affParams));
                 }
             }
             else
             {
                 items.Add(CreateItem("impact_none", "impact_none",
-                    "report.impact.none", DescriptorReviewSeverity.Info,
+                    DescriptorReviewReportMessageTemplateIds.ImpactNoneValue, DescriptorReviewSeverity.Info,
                     new Dictionary<string, string>(StringComparer.Ordinal)));
             }
         }
@@ -380,7 +381,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["EdgeKindSummary"] = edgeKindSummary,
             };
             items.Add(CreateItem("topology_summary", "dependency_summary",
-                "report.dependency.summary", DescriptorReviewSeverity.Info, parameters));
+                DescriptorReviewReportMessageTemplateIds.DependencySummaryValue, DescriptorReviewSeverity.Info, parameters));
         }
 
         var overallSeverity = items.Count > 0
@@ -417,8 +418,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 };
 
                 var templateId = incompatibleCount > 0
-                    ? "report.compatibility.incompatible"
-                    : "report.compatibility.compatible";
+                    ? DescriptorReviewReportMessageTemplateIds.CompatibilityIncompatibleValue
+                    : DescriptorReviewReportMessageTemplateIds.CompatibilityCompatibleValue;
 
                 var severity = incompatibleCount > 0
                     ? DescriptorReviewSeverity.Warning
@@ -438,7 +439,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                         ["DescriptorId"] = finding.Subject.Id,
                     };
                     items.Add(CreateItem($"compat_finding_{finding.Level}_{items.Count}",
-                        "incompatible_finding", "report.compatibility.incompatible",
+                        "incompatible_finding", DescriptorReviewReportMessageTemplateIds.CompatibilityIncompatibleValue,
                         MapCompatibilityLevel(finding.Level), findParams));
                 }
             }
@@ -471,12 +472,12 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             var (templateId, severity) = gov.MaxDecision switch
             {
                 DescriptorLifecycleDecisionKind.Allowed =>
-                    ("report.governance.approved", DescriptorReviewSeverity.Info),
+                    (DescriptorReviewReportMessageTemplateIds.GovernanceApprovedValue, DescriptorReviewSeverity.Info),
                 DescriptorLifecycleDecisionKind.Blocked =>
-                    ("report.governance.rejected", DescriptorReviewSeverity.Blocker),
+                    (DescriptorReviewReportMessageTemplateIds.GovernanceRejectedValue, DescriptorReviewSeverity.Blocker),
                 DescriptorLifecycleDecisionKind.ReviewRequired =>
-                    ("report.governance.review_required", DescriptorReviewSeverity.Warning),
-                _ => ("report.governance.review_required", DescriptorReviewSeverity.Warning),
+                    (DescriptorReviewReportMessageTemplateIds.GovernanceReviewRequiredValue, DescriptorReviewSeverity.Warning),
+                _ => (DescriptorReviewReportMessageTemplateIds.GovernanceReviewRequiredValue, DescriptorReviewSeverity.Warning),
             };
 
             items.Add(CreateItem("governance_decision", "governance", templateId, severity, parameters));
@@ -527,7 +528,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["Path"] = diag.Path ?? "",
             };
             items.Add(CreateItem($"human_review_{diag.Code}_{items.Count}", diag.Code,
-                "report.human_review.required", MapDiagnosticSeverity(diag.Severity), parameters));
+                DescriptorReviewReportMessageTemplateIds.HumanReviewRequiredValue, MapDiagnosticSeverity(diag.Severity), parameters));
         }
 
         // Also check governance for human review requirement
@@ -542,7 +543,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["Path"] = "",
             };
             items.Add(CreateItem("human_review_governance", "GOV_REVIEW_REQUIRED",
-                "report.human_review.required", DescriptorReviewSeverity.Warning, govParams));
+                DescriptorReviewReportMessageTemplateIds.HumanReviewRequiredValue, DescriptorReviewSeverity.Warning, govParams));
         }
 
         var overallSeverity = items.Count > 0
@@ -562,7 +563,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         if (reviewResult.IsActivationEligible)
         {
             items.Add(CreateItem("activation_eligible", "activation_eligible",
-                "report.activation.eligible", DescriptorReviewSeverity.Info,
+                DescriptorActivationMessageTemplateIds.ActivationEligibleValue, DescriptorReviewSeverity.Info,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
         else
@@ -579,7 +580,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["BlockingReasons"] = blockingReasons,
             };
             items.Add(CreateItem("activation_blocked", "activation_blocked",
-                "report.activation.blocked", DescriptorReviewSeverity.Blocker, parameters));
+                DescriptorActivationMessageTemplateIds.ActivationBlockedValue, DescriptorReviewSeverity.Blocker, parameters));
 
             // Add individual blocker details (explanation only, NOT gate)
             foreach (var blocker in blockerDiags.OrderBy(d => d.Code).ThenBy(d => d.Severity))
@@ -589,7 +590,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                     ["BlockingReasons"] = $"{blocker.Code}: {blocker.Message}",
                 };
                 items.Add(CreateItem($"activation_blocker_{blocker.Code}_{items.Count}", blocker.Code,
-                    "report.activation.blocked",
+                    DescriptorActivationMessageTemplateIds.ActivationBlockedValue,
                     MapDiagnosticSeverity(blocker.Severity), blockParams));
             }
 
@@ -601,7 +602,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                     ["BlockingReasons"] = "Governance decision is blocked",
                 };
                 items.Add(CreateItem("activation_blocker_governance", "GOV_BLOCKED",
-                    "report.activation.blocked", DescriptorReviewSeverity.Blocker, govParams));
+                    DescriptorActivationMessageTemplateIds.ActivationBlockedValue, DescriptorReviewSeverity.Blocker, govParams));
             }
         }
 
@@ -682,19 +683,19 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             reviewResult.GovernanceDecision?.IsAllowed == true)
         {
             items.Add(CreateItem("rec_activation_handoff", "activation_handoff",
-                "report.recommendation.activation_handoff", DescriptorReviewSeverity.Info,
+                DescriptorReviewReportMessageTemplateIds.RecommendationActivationHandoffValue, DescriptorReviewSeverity.Info,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
         else if (reviewResult.GovernanceDecision?.RequiresReview == true)
         {
             items.Add(CreateItem("rec_human_review", "human_review_required",
-                "report.recommendation.human_review", DescriptorReviewSeverity.Warning,
+                DescriptorReviewReportMessageTemplateIds.RecommendationHumanReviewValue, DescriptorReviewSeverity.Warning,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
         else if (!requiredHumanReviewSection.IsEmpty)
         {
             items.Add(CreateItem("rec_human_review_items", "human_review_required",
-                "report.recommendation.human_review", DescriptorReviewSeverity.Warning,
+                DescriptorReviewReportMessageTemplateIds.RecommendationHumanReviewValue, DescriptorReviewSeverity.Warning,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
 
@@ -707,7 +708,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         if (hasBlockers)
         {
             items.Add(CreateItem("rec_revise_draft", "draft_needs_revision",
-                "report.recommendation.revise_draft", DescriptorReviewSeverity.Blocker,
+                DescriptorReviewReportMessageTemplateIds.RecommendationReviseDraftValue, DescriptorReviewSeverity.Blocker,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
 
@@ -719,7 +720,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         if (hasWarnings && !hasBlockers)
         {
             items.Add(CreateItem("rec_apply_fix", "fix_proposal_available",
-                "report.recommendation.apply_fix", DescriptorReviewSeverity.Warning,
+                DescriptorReviewReportMessageTemplateIds.RecommendationApplyFixValue, DescriptorReviewSeverity.Warning,
                 new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["FixProposalId"] = "", // Populated by FixProposal system when available
@@ -730,7 +731,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         if (items.Count == 0)
         {
             items.Add(CreateItem("rec_no_action", "no_action_required",
-                "report.recommendation.no_action", DescriptorReviewSeverity.Info,
+                DescriptorReviewReportMessageTemplateIds.RecommendationNoActionValue, DescriptorReviewSeverity.Info,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
 
@@ -761,12 +762,12 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["EnvelopeHash"] = preview.EnvelopeHash,
             };
             items.Add(CreateItem("package_preview_present", "package_preview_available",
-                "report.package_preview.present", DescriptorReviewSeverity.Info, parameters));
+                DescriptorReviewReportMessageTemplateIds.PackagePreviewPresentValue, DescriptorReviewSeverity.Info, parameters));
         }
         else
         {
             items.Add(CreateItem("package_preview_none", "package_preview_missing",
-                "report.package_preview.none", DescriptorReviewSeverity.Info,
+                DescriptorReviewReportMessageTemplateIds.PackagePreviewNoneValue, DescriptorReviewSeverity.Info,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
 
@@ -792,12 +793,12 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["BindingHash"] = hashes.BindingHash?.Value ?? "",
             };
             items.Add(CreateItem("stable_hashes_present", "stable_hashes_available",
-                "report.stable_hashes.present", DescriptorReviewSeverity.Info, parameters));
+                DescriptorReviewReportMessageTemplateIds.StableHashesPresentValue, DescriptorReviewSeverity.Info, parameters));
         }
         else
         {
             items.Add(CreateItem("stable_hashes_none", "stable_hashes_missing",
-                "report.stable_hashes.none", DescriptorReviewSeverity.Info,
+                DescriptorReviewReportMessageTemplateIds.StableHashesNoneValue, DescriptorReviewSeverity.Info,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
 

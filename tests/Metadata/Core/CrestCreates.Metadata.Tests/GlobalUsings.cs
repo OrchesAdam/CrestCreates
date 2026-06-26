@@ -18,7 +18,7 @@ global using CrestCreates.Metadata.Registry;
 global using DescriptorPackage = CrestCreates.Metadata.Abstractions.DescriptorPackage.DescriptorPackage;
 global using DescriptorPackageEvidence = CrestCreates.Metadata.Abstractions.DescriptorPackage.DescriptorPackageEvidence;
 global using DescriptorPackageRelationshipEntry = CrestCreates.Metadata.Abstractions.DescriptorPackage.DescriptorPackageRelationshipEntry;
-global using DescriptorPackageDiagnosticCode = CrestCreates.Metadata.Abstractions.DescriptorPackage.DescriptorPackageDiagnosticCode;
+global using DescriptorPackageDiagnosticCodes = CrestCreates.Metadata.Abstractions.DescriptorPackage.DescriptorPackageDiagnosticCodes;
 global using EvidenceFinding = CrestCreates.Metadata.Abstractions.Evidence.EvidenceFinding;
 global using EvidenceFindingCount = CrestCreates.Metadata.Abstractions.Evidence.EvidenceFindingCount;
 
