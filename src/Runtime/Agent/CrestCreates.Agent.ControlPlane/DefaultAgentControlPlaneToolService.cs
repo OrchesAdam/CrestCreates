@@ -2612,7 +2612,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     }
 
     /// <summary>
-    /// Computes a deterministic hash from the sorted set of visible descriptor IDs.
+    /// Computes a deterministic fingerprint from the sorted set of visible descriptors.
+    /// Includes FullId (Namespace.Id), Kind, and Version (when available) to detect
+    /// catalog replacements where the same Id has different namespace/kind/version.
     /// Used to verify that the visible universe has not changed between preview
     /// creation and evidence preview reuse — preventing stale package reuse when
     /// the catalog changes under the same policy.
@@ -2622,10 +2624,14 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         if (visibleDescriptors.Count == 0)
             return "empty";
 
-        var ids = visibleDescriptors
-            .Select(d => d.Id)
+        var entries = visibleDescriptors
+            .Select(d =>
+            {
+                var version = d is IVersionedDescriptor vd ? vd.Version.ToString() : "";
+                return $"{d.FullId}:{(int)d.Kind}:{version}";
+            })
             .Order(StringComparer.Ordinal)
             .ToArray();
-        return string.Join("|", ids);
+        return string.Join("|", entries);
     }
 }

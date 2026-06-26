@@ -660,4 +660,85 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
         PackageBuilderMock.Invocations.Count.Should().BeGreaterThan(buildCountAfterPreview,
             "visible universe change should force Path B rebuild");
     }
+
+    [Fact]
+    public async Task BuildPackageEvidencePreview_SameIdDifferentNamespace_ReuseRejected()
+    {
+        // When a descriptor is replaced with same Id but different Namespace/Kind,
+        // the VisibleDescriptorSetHash should differ, forcing Path B rebuild.
+        var options = AgentToolAuthorizationOptions.DevelopmentDefaults;
+        var service = CreateService(options);
+
+        var draft = CreateTestDraft();
+        DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<Draft?>(draft));
+
+        var descV1 = new TestDescriptor { Namespace = "ns-a", Id = "desc-001", Kind = DescriptorKind.Event };
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns(new List<IDescriptor> { descV1 });
+        DraftMaterializerMock.Setup(m => m.Materialize(draft, It.IsAny<IReadOnlyList<IDescriptor>>()))
+            .Returns(DraftAbstractions.DescriptorDraftMaterializationResult.Success(new List<IDescriptor> { descV1 }.AsReadOnly()));
+        SetupPackageBuilderWithHashes();
+
+        DraftReviewServiceMock
+            .Setup(r => r.ReviewAsync(draft, It.IsAny<IReadOnlyList<IDescriptor>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DraftAbstractions.DescriptorDraftReviewResult
+            {
+                DraftId = draft.DraftId,
+                TenantId = draft.TenantId,
+                ValidationResult = DraftAbstractions.DescriptorDraftValidationResult.Success(),
+                ProposedInventory = new List<IDescriptor> { descV1 },
+                ImpactAnalysisResult = new DescriptorImpactAnalysisReport
+                {
+                    ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
+                    AffectedDescriptors = Array.Empty<AffectedDescriptor>(),
+                    Paths = Array.Empty<DescriptorImpactPath>(),
+                    MaxSeverity = DescriptorImpactSeverity.Low,
+                    Diagnostics = Array.Empty<DescriptorImpactDiagnostic>()
+                },
+                CompatibilityResult = new DescriptorCompatibilityReport
+                {
+                    ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
+                    ImpactReport = new DescriptorImpactAnalysisReport
+                    {
+                        ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
+                        AffectedDescriptors = Array.Empty<AffectedDescriptor>(),
+                        Paths = Array.Empty<DescriptorImpactPath>(),
+                        MaxSeverity = DescriptorImpactSeverity.Low,
+                        Diagnostics = Array.Empty<DescriptorImpactDiagnostic>()
+                    },
+                    Findings = Array.Empty<DescriptorCompatibilityFinding>(),
+                    MaxLevel = DescriptorCompatibilityLevel.Compatible,
+                    Diagnostics = Array.Empty<DescriptorCompatibilityDiagnostic>()
+                },
+                GovernanceDecision = new DescriptorLifecycleGovernanceReport
+                {
+                    Decisions = Array.Empty<DescriptorLifecycleDecision>(),
+                    MaxDecision = DescriptorLifecycleDecisionKind.Allowed,
+                    PackageFindings = Array.Empty<DescriptorLifecycleFinding>()
+                },
+                Diagnostics = Array.Empty<DraftAbstractions.DescriptorDraftDiagnostic>(),
+                IsActivationEligible = true
+            });
+
+        // Step 1: Create package preview with ns-a/desc-001/Event
+        var preview1 = await service.PreviewDescriptorPackageAsync(CreateContext("PreviewDescriptorPackage"), "draft-001");
+        preview1.Status.Should().Be(AgentToolResultStatus.Success);
+        var buildCountAfterPreview = PackageBuilderMock.Invocations.Count;
+
+        // Step 2: Catalog replaces descriptor with same Id but different Namespace/Kind
+        var descV2 = new TestDescriptor { Namespace = "ns-b", Id = "desc-001", Kind = DescriptorKind.Capability };
+        DescriptorCatalogMock.Setup(c => c.GetAll()).Returns(new List<IDescriptor> { descV2 });
+        DraftMaterializerMock.Setup(m => m.Materialize(draft, It.IsAny<IReadOnlyList<IDescriptor>>()))
+            .Returns(DraftAbstractions.DescriptorDraftMaterializationResult.Success(
+                new List<IDescriptor> { descV2 }.AsReadOnly()));
+
+        // Step 3: Evidence preview should NOT reuse — visible universe changed (same Id, different namespace/kind)
+        var evidence = await service.BuildPackageEvidencePreviewAsync(
+            CreateContext("BuildPackageEvidencePreview"), "draft-001");
+        evidence.Status.Should().Be(AgentToolResultStatus.Success);
+
+        // A new build should have occurred (Path B) because visible universe changed
+        PackageBuilderMock.Invocations.Count.Should().BeGreaterThan(buildCountAfterPreview,
+            "same Id with different namespace/kind should force Path B rebuild");
+    }
 }
