@@ -164,6 +164,51 @@ namespace Sample.Domain.Entities
     }
 
     [Fact]
+    public void GeneratedCrud_WhenPermissionNameResolvable_ShouldEmitTypedProperties()
+    {
+        var result = RunProductGenerator();
+
+        Assert.True(result.ContainsFile("ProductCrudPermissions.g.cs"));
+        var source = result.GetSourceByFileName("ProductCrudPermissions.g.cs")!.SourceText;
+
+        Assert.Contains("public const string CreateValue", source);
+        Assert.Contains("public static global::CrestCreates.Core.Abstractions.Identity.PermissionName Create { get; }", source);
+
+        Assert.Contains("public const string GetValue", source);
+        Assert.Contains("public static global::CrestCreates.Core.Abstractions.Identity.PermissionName Get { get; }", source);
+    }
+
+    [Fact]
+    public void GeneratedCrud_WhenPermissionNameNotResolvable_ShouldEmitOnlyConstValues()
+    {
+        var referencesWithoutCoreAbstractions = new[]
+        {
+            "CrestCreates.Domain",
+            "CrestCreates.Authorization.Abstractions",
+            "CrestCreates.Application.Contracts",
+            "Rougamo"
+        };
+
+        // Note: When CrestCreates.Core.Abstractions is excluded, the full compilation fails
+        // because CrestCreates.Domain.Shared transitively needs ErrorCode from it.
+        // However, the generator still runs and produces output based on the input
+        // compilation (where PermissionName IS unresolvable). We verify the generated
+        // content directly without requiring full compilation success.
+        var result = SourceGeneratorTestHelper.RunGenerators(
+            EntitySource,
+            new IIncrementalGenerator[] { new CrudServiceSourceGenerator() },
+            new[] { EntitySupport, MappingSupport },
+            referencesWithoutCoreAbstractions);
+
+        Assert.True(result.ContainsFile("ProductCrudPermissions.g.cs"),
+            "Generated files: " + string.Join(", ", result.GeneratedSources.Select(s => s.FileName)));
+        var source = result.GetSourceByFileName("ProductCrudPermissions.g.cs")!.SourceText;
+
+        Assert.Contains("public const string CreateValue", source);
+        Assert.DoesNotContain("global::CrestCreates.Core.Abstractions.Identity.PermissionName", source);
+    }
+
+    [Fact]
     public void GeneratedCrud_ShouldGeneratePermissions()
     {
         var result = RunProductGenerator();

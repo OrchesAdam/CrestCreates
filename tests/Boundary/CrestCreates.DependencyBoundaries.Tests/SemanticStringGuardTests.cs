@@ -79,7 +79,6 @@ public class SemanticStringGuardTests
                name.EndsWith("DiagnosticCodes.cs", StringComparison.Ordinal) ||
                name.EndsWith("EventNames.cs", StringComparison.Ordinal) ||
                name.EndsWith("PermissionNames.cs", StringComparison.Ordinal) ||
-               name.EndsWith("PermissionName.cs", StringComparison.Ordinal) ||
                name.EndsWith("PolicyNames.cs", StringComparison.Ordinal) ||
                name.EndsWith("CapabilityIds.cs", StringComparison.Ordinal) ||
                name.EndsWith("WorkflowIds.cs", StringComparison.Ordinal) ||

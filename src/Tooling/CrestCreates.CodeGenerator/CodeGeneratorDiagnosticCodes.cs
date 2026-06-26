@@ -1,3 +1,6 @@
+// Analyzer package intentionally avoids referencing Core.Abstractions (netstandard2.0 target).
+// Diagnostic ids are const-only here because Roslyn DiagnosticDescriptor requires string ids.
+// Typed DiagnosticCode properties are not available in this project.
 namespace CrestCreates.CodeGenerator;
 
 public static class CodeGeneratorDiagnosticCodes
