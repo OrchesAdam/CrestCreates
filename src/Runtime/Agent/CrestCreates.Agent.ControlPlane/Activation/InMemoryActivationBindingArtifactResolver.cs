@@ -64,4 +64,36 @@ public sealed class InMemoryActivationBindingArtifactResolver : IActivationBindi
             CurrentDefinitionHash = null  // Computed separately by rechecker via IDescriptorStableHashBuilder
         });
     }
+
+    // ── Test-accessible read-only views ──
+
+    /// <summary>
+    /// Total number of stored package hash sets.
+    /// </summary>
+    public int PackageHashSetCount => _packageHashSets.Count;
+
+    /// <summary>
+    /// Total number of stored evidence hash sets.
+    /// </summary>
+    public int EvidenceHashSetCount => _evidenceHashSets.Count;
+
+    /// <summary>
+    /// Retrieves a stored package hash set by tenant and package preview id.
+    /// Returns null when no entry is found.
+    /// </summary>
+    public DescriptorPackageHashSet? GetPackageHashSet(string tenantId, string packagePreviewId)
+    {
+        _packageHashSets.TryGetValue((tenantId, packagePreviewId), out var hs);
+        return hs;
+    }
+
+    /// <summary>
+    /// Retrieves a stored evidence hash set by tenant and evidence preview id.
+    /// Returns null when no entry is found.
+    /// </summary>
+    public DescriptorPackageHashSet? GetEvidenceHashSet(string tenantId, string evidencePreviewId)
+    {
+        _evidenceHashSets.TryGetValue((tenantId, evidencePreviewId), out var hs);
+        return hs;
+    }
 }

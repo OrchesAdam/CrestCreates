@@ -293,9 +293,6 @@ public class DefaultDescriptorDraftReviewServiceTests
                 {
                     PackageId = draft.DraftId,
                     PackageVersion = "1",
-                    ContentHash = "manifest-hash",
-                    EvidenceHash = "evidence-hash",
-                    EnvelopeHash = "envelope-hash",
                     DescriptorEntries = new[]
                     {
                         new DescriptorManifestEntry

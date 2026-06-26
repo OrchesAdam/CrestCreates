@@ -70,6 +70,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly ConcurrentDictionary<(string TenantId, string Id), FixProposalResourceSnapshot> _fixProposals = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), PackagePreviewResourceSnapshot> _packagePreviews = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), EvidencePreviewResourceSnapshot> _evidencePreviews = new();
+    private readonly ConcurrentDictionary<(string TenantId, string DraftId), string> _latestPackageByDraft = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), ReportResourceSnapshot> _reports = new();
 
     public DefaultAgentControlPlaneToolService(
@@ -1888,7 +1889,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
             var previewId = Guid.NewGuid().ToString("N");
             _packagePreviews[(context.TenantId, previewId)] = new PackagePreviewResourceSnapshot(
-                new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft);
+                new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg);
+
+            // Track latest package preview for this draft (for evidence preview reuse)
+            _latestPackageByDraft[(context.TenantId, draftId)] = previewId;
 
             // Store package hash for evidence recheck
             if (pkg.Hashes is not null)
@@ -1933,10 +1937,74 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 return await RecordAggregateFailure<PackageEvidencePreview>(context, "AUTHORIZATION_CONTEXT_UNAVAILABLE", ct);
             var universe = universeResult.Universe!;
 
+            // Try find existing package preview for this tenant+draft.
+            // When a package preview already exists, reuse its DescriptorPackage
+            // to avoid redundant build and ensure hash consistency.
+            PackagePreviewResourceSnapshot? existingPkgSnapshot = null;
+            if (_latestPackageByDraft.TryGetValue((context.TenantId, draftId), out var existingPreviewId)
+                && _packagePreviews.TryGetValue((context.TenantId, existingPreviewId), out var pkgSnapshot)
+                && pkgSnapshot.Package is not null)
+            {
+                existingPkgSnapshot = pkgSnapshot;
+            }
+
+            if (existingPkgSnapshot is not null)
+            {
+                // ── Path A: Reuse existing package preview ──
+                var reusedPkg = existingPkgSnapshot.Package!;
+
+                var reusedPreview = new DraftPackagePreview
+                {
+                    PackageManifestHash = reusedPkg.Hashes?.PackageManifestHash,
+                    PackageEvidenceHash = reusedPkg.Hashes?.PackageEvidenceHash,
+                    PackageEvidenceEnvelopeHash = reusedPkg.Hashes?.PackageEvidenceEnvelopeHash,
+                    DescriptorIds = reusedPkg.Manifest.DescriptorEntries.Select(e => e.Ref.Id).ToList().AsReadOnly()
+                };
+
+                // Project nested package data through visibility.
+                var reusedProjectedPreview = _artifactProjector.ProjectPackage(reusedPreview, universe);
+                if (reusedProjectedPreview is null)
+                {
+                    return await RecordAggregateFailure<PackageEvidencePreview>(
+                        context, "PACKAGE_PROJECTION_FAILURE", ct);
+                }
+                reusedPreview = reusedProjectedPreview;
+
+                var reusedResult = new PackageEvidencePreview
+                {
+                    DraftId = draftId,
+                    TenantId = context.TenantId,
+                    PackagePreview = reusedPreview,
+                    Evidence = reusedPkg.Evidence,
+                    Diagnostics = Array.Empty<AgentToolDiagnostic>().AsReadOnly()
+                };
+
+                // Project evidence through visibility (filters Subject/RelatedRefs)
+                reusedResult = _artifactProjector.ProjectEvidence(reusedResult, universe);
+
+                // Store evidence preview with owner
+                var reusedEvidencePreviewId = Guid.NewGuid().ToString("N");
+                _evidencePreviews[(context.TenantId, reusedEvidencePreviewId)] = new EvidencePreviewResourceSnapshot(
+                    new EvidencePreviewEntry(draft.DraftId, context.TenantId, reusedResult), snapshot.Draft);
+
+                // Store evidence hashes using the SAME DescriptorPackageHashSet as the package preview
+                if (reusedPkg.Hashes is not null)
+                    _artifactResolver.StoreEvidenceHashes(context.TenantId, reusedEvidencePreviewId, reusedPkg.Hashes);
+
+                var reusedAudit = BuildAudit(context, AgentToolResultStatus.Success, reusedResult.Diagnostics);
+                reusedAudit = reusedAudit with
+                {
+                    TouchedDraftIds = [draftId],
+                    TouchedPackagePreviewIds = [reusedEvidencePreviewId]
+                };
+                await _auditor.RecordAsync(reusedAudit, ct);
+                return AgentToolResult<PackageEvidencePreview>.Success(reusedResult, reusedAudit);
+            }
+
+            // ── Path B: Build package + evidence from scratch ──
             var reviewResult = await _draftReviewService.ReviewAsync(draft, universe.VisibleDescriptors, ct);
 
             // If review validation failed, evidence cannot be meaningfully computed.
-            // Return Failed instead of producing a misleading zero-value evidence preview.
             if (!reviewResult.ValidationResult.IsValid)
             {
                 var validationDiag = new AgentToolDiagnostic
@@ -1962,8 +2030,6 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             }
 
             // If materialization failed, the proposed inventory is not available.
-            // Return Failed instead of falling back to currentInventory, which would
-            // produce a misleading evidence preview that doesn't reflect the draft.
             if (projectedReview.MaterializationResult is not null
                 && !projectedReview.MaterializationResult.IsMaterialized)
             {
@@ -2007,7 +2073,6 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             };
 
             // Project nested package data through visibility.
-            // Returns null on projection failure (denied descriptor in package).
             var projectedPreview = _artifactProjector.ProjectPackage(preview, universe);
             if (projectedPreview is null)
             {
@@ -2015,6 +2080,17 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     context, "PACKAGE_PROJECTION_FAILURE", ct);
             }
             preview = projectedPreview;
+
+            // Create package preview entry alongside evidence preview.
+            // Both share the same DescriptorPackage and hash set for consistency.
+            var packagePreviewId = Guid.NewGuid().ToString("N");
+            _packagePreviews[(context.TenantId, packagePreviewId)] = new PackagePreviewResourceSnapshot(
+                new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg);
+            _latestPackageByDraft[(context.TenantId, draftId)] = packagePreviewId;
+
+            // Store package hashes for evidence recheck
+            if (pkg.Hashes is not null)
+                _artifactResolver.StorePackageHashes(context.TenantId, packagePreviewId, pkg.Hashes);
 
             var result = new PackageEvidencePreview
             {
@@ -2033,7 +2109,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             _evidencePreviews[(context.TenantId, evidencePreviewId)] = new EvidencePreviewResourceSnapshot(
                 new EvidencePreviewEntry(draft.DraftId, context.TenantId, result), snapshot.Draft);
 
-            // Store evidence hash for evidence recheck
+            // Store evidence hashes using the SAME DescriptorPackageHashSet as the package preview
             if (pkg.Hashes is not null)
                 _artifactResolver.StoreEvidenceHashes(context.TenantId, evidencePreviewId, pkg.Hashes);
 
@@ -2041,7 +2117,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             audit = audit with
             {
                 TouchedDraftIds = [draftId],
-                TouchedPackagePreviewIds = [evidencePreviewId]
+                TouchedPackagePreviewIds = [packagePreviewId, evidencePreviewId]
             };
             await _auditor.RecordAsync(audit, ct);
             return AgentToolResult<PackageEvidencePreview>.Success(result, audit);
