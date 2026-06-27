@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-06-26
+Last Updated: 2026-06-27
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -639,33 +639,62 @@ This thread achieved the following:
 - **AoT safety**: TryParseReviewDecision moved to DescriptorActivationReviewDecisionParser with JsonSerializerContext
 - **Tenant isolation**: DescriptorActivationReviewDecision carries TenantId/CorrelationId; HumanTask callback resolves from instance
 - **Contract version**: bumped to "7e.v1"
-- **424 ControlPlane tests + 1 Boundary test pass**
+- **471 ControlPlane tests + 11 Boundary tests pass**
 - **Design spec**: Phase 7e issue #17
 - **Caveat**: No HTTP/MCP adapter. No persistent store for package previews or activation requests (in-memory ConcurrentDictionary). Integration with human governance approval path is outside this tool surface.
 
-### Canonical Evidence Hashing Migration (Phase 7e.1, 2026-06-26)
+### Canonical Evidence Hashing Migration (Phase 7e.1, 2026-06-27)
 
 - **Package canonical hash infrastructure**: `IDescriptorPackageCanonicalHashComputer` + `DefaultDescriptorPackageCanonicalHashComputer` — produces `DescriptorPackageHashSet` (PackageManifestHash, PackageEvidenceHash, PackageEvidenceEnvelopeHash) using canonical JSON writers + SHA-256
 - **3 new artifact kinds**: `CanonicalHashArtifactKind.PackageManifest=5`, `PackageEvidence=6`, `PackageEvidenceEnvelope=7`
-- **3 canonical JSON writers**: `ManifestCanonicalHashWriter`, `EvidenceCanonicalHashWriter`, `EnvelopeCanonicalHashWriter` — deterministic ordering, ordinal sorting, invariant formatting
+- **5 canonical JSON writers**: `ManifestCanonicalHashWriter`, `EvidenceCanonicalHashWriter`, `EnvelopeCanonicalHashWriter`, `ReviewResultSourceBindingProjection`, `ReviewResultIntegrityProjection` — deterministic ordering, ordinal sorting, invariant formatting; **all use PascalCase field names via `nameof()`** (e.g., `nameof(DescriptorManifest.FormatVersion)`) matching SG-generated writer convention
 - **DescriptorPackageEvidenceEnvelope**: sealed record with PackageId, PackageVersion, CreatedAt, CreatedBy, Source, PackageManifestHash, PackageEvidenceHash + Metadata
 - **DescriptorPackageCanonicalShapeVersions**: 3 shape versions (PackageManifestV1, PackageEvidenceV1, PackageEvidenceEnvelopeV1)
+- **DescriptorDraftReviewCanonicalShapeVersions**: 2 shape versions (SourceBindingV1, IntegrityV1)
 - **CanonicalHashContractVersions.DescriptorHash**: public constant `"canonical-hash-v1"` in Metadata.Abstractions
 - **DescriptorDraft review hash service**: `IDescriptorDraftReviewHashService` + `DefaultDescriptorDraftReviewHashService` — computes SourceReviewHash and ReviewManifestHash via canonical projections
-- **2 review projections**: `ReviewResultSourceBindingProjection`, `ReviewResultIntegrityProjection` — canonical JSON writers for review result binding and integrity
-- **DescriptorDraftReviewCanonicalShapeVersions**: 2 shape versions (SourceBindingV1, IntegrityV1)
-- **Package model migration**: `DescriptorPackage` gains `Hashes` (DescriptorPackageHashSet) + `EvidenceEnvelope` (DescriptorPackageEvidenceEnvelope); `DescriptorManifest.ContentHash/EvidenceHash/EnvelopeHash` marked `[Obsolete]`
+- **Package model migration**: `DescriptorPackage` gains `Hashes` (DescriptorPackageHashSet) + `EvidenceEnvelope` (DescriptorPackageEvidenceEnvelope); `DescriptorManifest.ContentHash/EvidenceHash/EnvelopeHash` **completely removed** (not just Obsolete); `DescriptorPackage.ContentHash` falls back to `Hashes?.PackageManifestHash.Value ?? string.Empty`
 - **Builder migration**: `DefaultDescriptorPackageBuilder` injects `IDescriptorPackageCanonicalHashComputer`, replaces 3 legacy hash calls
 - **ToolService cleanup**: Removed ~100 lines of ad-hoc hash helpers from `DefaultAgentControlPlaneToolService`, injected `IDescriptorDraftReviewHashService`
 - **ReportBuilder migration**: `DefaultDescriptorReviewReportBuilder` injects `IDescriptorDraftReviewHashService`, removed `ComputeSourceReviewHash`
-- **Activation binding validator**: `ActivationBindingHashValidator` — checks completeness (all 5 slots populated) + AlgorithmVersion/ContractVersion consistency across all hashes
+- **BindingHashes redesign**: **7 flat `CanonicalHash` slots** — `SourceReviewHash`, `ReviewManifestHash`, `PackageManifestHash`, `PackageEvidenceHash`, `PackageEvidenceEnvelopeHash`, `ContractHash`, `DefinitionHash` — plus `PackageHashes` convenience accessor that constructs `DescriptorPackageHashSet` from the 3 package slots
+- **Activation binding validator**: `ActivationBindingHashValidator` validates: (a) per-slot `ArtifactKind` and `Purpose` semantic expectations via 7-slot metadata table, (b) per-slot `Scope` matching (all slots = `InternalFull`), (c) non-empty `Algorithm`/`AlgorithmVersion`/`ContractVersion`/`CanonicalShapeVersion` on every slot, (d) `AlgorithmVersion`/`ContractVersion` consistency across all hashes
 - **Validator integration at 3 gates**: RequestService (submit), EvidenceRechecker (recheck — malformed = drift), RuntimeActivationGate (before execution)
-- **BindingHashes redesign**: 6 flat slots → 5 top-level slots with nested `DescriptorPackageHashSet` for atomic package hash storage
+- **Resolver split**: `IActivationBindingArtifactResolver` split into `StorePackageHashes(tenantId, previewId, DescriptorPackageHashSet)` and `StoreEvidenceHashes(tenantId, evidencePreviewId, DescriptorPackageHashSet)`; `ResolvedBindingArtifacts` carries both `CurrentPackageHashes` and `CurrentEvidenceHashes`; Rechecker compares package vs evidence hashes independently
+- **Package preview reuse**: `BuildPackageEvidencePreviewAsync` reuses existing package preview (Path A) when same `(TenantId, DraftId, ScopeFingerprint)` key exists, `DraftVersion` matches, and `VisibleDescriptorSetHash` matches; otherwise creates fresh package + evidence previews with identical `DescriptorPackageHashSet` (Path B); ScopeFingerprint = deterministic from `AgentDescriptorVisibilityScope` (Mode + AllowedKinds + DeniedKinds)
+- **VisibleDescriptorSetHash**: length-prefixed encoding (`{len}:{value}`) for FullId, Kind, Version — collision-resistant, InvariantCulture formatting; computed from `universe.VisibleDescriptors` (catalog identity, not proposed inventory)
 - **DescriptorActivationDiagnosticCodes.BindingHashValidationFailed**: new diagnostic code
-- **Golden tests**: 8 sensitivity tests for package manifest/evidence, 8 for review source-binding/integrity, canonical sorting tests, 7-field metadata assertions
+- **Golden tests**: 8 sensitivity tests for package manifest/evidence, 8 for review source-binding/integrity, canonical sorting tests, 7-field metadata assertions, VisibleUniverseChange regression test, SameIdSameKindDifferentNamespace + SameFullIdSameKindDifferentVersion isolation tests
 - **Guard tests**: `AgentActivationCanonicalHashGuardTests` — boundary guard for canonical hash production
 - **39 files changed** (434 insertions, 339 deletions), 14 new files
-- **Test results**: 453 ControlPlane, 439 Metadata, 57 DescriptorDraft, 11 DependencyBoundaries — all passing
+- **Test results**: 471 ControlPlane, 439 Metadata, 57 DescriptorDraft, 11 DependencyBoundaries — all passing
+
+### Code Review Findings — Phase 7e.1 (2026-06-27)
+
+5 code review rounds with 16 total findings. All resolved except Finding 2 (multi-scope key, pushback x3):
+
+| Finding | Severity | Description | Resolution |
+|---------|----------|-------------|------------|
+| R1-F1 | Critical | Package hash resolver keyed by previewId but resolves by reviewResultId | Fixed: resolver uses PackagePreviewId for package hashes |
+| R1-F2 | Critical | ActivationBindingHashValidator doesn't validate per-slot ArtifactKind/Purpose | Fixed: 7-slot metadata table with ArtifactKind + Purpose + Scope validation |
+| R1-F3 | High | BindingHashes 5-slot nested vs 7-slot flat contract | Fixed: 7 flat slots + PackageHashes convenience accessor (hybrid design) |
+| R1-F4 | High | Backward-compat writes to Obsolete DescriptorManifest string fields | Fixed: removed string writes, deleted ContentHash/EvidenceHash/EnvelopeHash fields |
+| R1-F5 | High | Canonical writers hash payload only, not metadata envelope | Pushback: deliberate design across entire canonical hash infrastructure, not Phase 7e.1-specific |
+| R2-F1 | Critical | PackageManifestHash producer/validator Purpose mismatch (Integrity vs AuditEvidence) | Fixed: validator aligned to Integrity |
+| R2-F3 | Medium | DescriptorManifest still has public settable string hash fields | Fixed: changed to `{ get; init; }`, then fully removed |
+| R3-F1 | High | Validator doesn't check Scope, Algorithm, AlgorithmVersion, ContractVersion, CanonicalShapeVersion | Fixed: added Scope + mandatory metadata field validation |
+| R3-F2 | High | Resolver doesn't distinguish package vs evidence preview hashes | Fixed: split StorePackageHashes/StoreEvidenceHashes, separate dictionaries |
+| R3-F3 | Medium | DescriptorManifest string hash fields still present | Fixed: fully removed |
+| R4-F1 | High | BuildPackageEvidencePreviewAsync doesn't reuse existing package preview | Fixed: Path A (reuse) + Path B (fresh build) with ScopeFingerprint + DraftVersion identity |
+| R5-F1 | High | ScopeFingerprint = policy identity, not visible universe identity | Fixed: added VisibleDescriptorSetHash (catalog identity) |
+| R5-F2 | Medium | DraftVersion not in _latestPackageByDraft key | Pushback: draft version monotonic, A/B/A impossible |
+| R5-F3 | Medium | A/B/A test uses empty catalog | Fixed: added VisibleUniverseChange regression test |
+| R6-F1 | High | VisibleDescriptorSetHash only used Id, not FullId/Kind/Version | Fixed: length-prefixed encoding with FullId + Kind + Version |
+| R6-F2 | High | _latestPackageByDraft still single-value mapping | Pushback x3: A/B/A scenarios don't occur in practice |
+| R6-F3 | Medium | Tests don't isolate namespace vs version changes | Fixed: added SameIdSameKindDifferentNamespace + SameFullIdSameKindDifferentVersion tests |
+| R7-F1 | High | Store uses visibleProposed, compare uses universe.VisibleDescriptors | Fixed: both now use universe.VisibleDescriptors |
+| R7-F2 | High | ComputeVisibleDescriptorSetHash uses ambiguous delimiters | Fixed: length-prefixed encoding |
+| R7-F3 | Medium | Test doesn't isolate namespace or version | Fixed: separate test cases |
 
 ### Semantic String Governance (2026-06-25)
 

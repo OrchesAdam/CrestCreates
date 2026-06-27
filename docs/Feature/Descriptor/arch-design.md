@@ -1,6 +1,6 @@
 # Descriptor Architecture Summary
 
-> **Date:** 2026-06-15 | **Status:** Complete | **Phase 6a: Relationship Coverage + Phase 6b: Topology Read Model + Phase 6c: Impact Analysis Engine + Phase 6d: Compatibility Analyzer + Phase 6e: Lifecycle Governance + Phase 6f: Package / Manifest / Snapshot**
+> **Date:** 2026-06-27 | **Status:** Complete | **Phase 6a: Relationship Coverage + Phase 6b: Topology Read Model + Phase 6c: Impact Analysis Engine + Phase 6d: Compatibility Analyzer + Phase 6e: Lifecycle Governance + Phase 6f: Package / Manifest / Snapshot + Phase 7e.1: Canonical Evidence Hashing**
 
 ---
 
@@ -713,7 +713,7 @@ All types in `CrestCreates.Metadata.Abstractions` (evolved in-place) + new files
 | Type | Status | Description |
 |------|--------|-------------|
 | `DescriptorPackage` | UPGRADED | Envelope: Manifest + Snapshot + Evidence + Diagnostics; convenience passthroughs for PackageId/Version/ContentHash |
-| `DescriptorManifest` | UPGRADED | Deterministic manifest: FormatVersion, identity metadata, flat `DescriptorEntries`, ContentHash/EvidenceHash/EnvelopeHash |
+| `DescriptorManifest` | UPGRADED | Deterministic manifest: FormatVersion, identity metadata, flat `DescriptorEntries` (ContentHash/EvidenceHash/EnvelopeHash string fields REMOVED in Phase 7e.1) |
 | `DescriptorManifestEntry` | UPGRADED | Identity: `DescriptorRef` (Namespace, Id, Version) + Kind/Name/State/ContractHash/DefinitionHash/SupersededById |
 | `DescriptorSnapshot` | UPGRADED | Deterministic SnapshotId (first 16 chars of ContentHash, no Guid) + Descriptors + Relationships |
 | `SnapshotEntry` | UPGRADED | Identity: `DescriptorRef` + contract/definition hashes + state |
@@ -747,22 +747,34 @@ public sealed record DescriptorPackageBuildRequest
 
 Builder is stateless singleton. Explicit inventory input — does NOT read from `IGlobalDescriptorRegistry`.
 
-### 12.4 Hash Rules (AoT-Safe)
+### 12.4 Hash Rules (Phase 7e.1 — Canonical Hash Pipeline)
 
-`DescriptorPackageHashComputer` uses deterministic string concatenation + SHA-256 — no `JsonSerializer.Serialize`, no anonymous objects, no runtime reflection.
+Phase 7e.1 replaced the ad-hoc `DescriptorPackageHashComputer` (string concatenation + SHA-256) with the canonical hash infrastructure:
 
-| Hash | Contents |
-|------|----------|
-| `ContractHash` | From legacy `DescriptorHashComputer` (informational only) |
-| `DefinitionHash` | From legacy `DescriptorHashComputer` (informational only) |
-| `EvidenceHash` | Deterministic string concat of all evidence fields including diagnostic counts and normalized findings with RelatedRefs |
-| `ContentHash` | `SHA256(FormatVersion + sorted refs + sorted relationships)` — snapshot identity only, no evidence dependence |
-| `EnvelopeHash` | `SHA256(ContentHash + EvidenceHash + PackageId + PackageVersion + CreatedAt/CreatedBy/Source)` |
+| Hash | Producer | Canonical Writer | Shape Version |
+|------|----------|-----------------|---------------|
+| PackageManifestHash | `IDescriptorPackageCanonicalHashComputer` | `DescriptorPackageManifestCanonicalHashWriter` | `PackageManifestV1` |
+| PackageEvidenceHash | `IDescriptorPackageCanonicalHashComputer` | `DescriptorPackageEvidenceCanonicalHashWriter` | `PackageEvidenceV1` |
+| PackageEvidenceEnvelopeHash | `IDescriptorPackageCanonicalHashComputer` | `DescriptorPackageEvidenceEnvelopeCanonicalHashWriter` | `PackageEvidenceEnvelopeV1` |
+
+Review hashes (owned by `IDescriptorDraftReviewHashService`):
+
+| Hash | Producer | Canonical Writer | Shape Version |
+|------|----------|-----------------|---------------|
+| SourceReviewHash | `IDescriptorDraftReviewHashService` | `ReviewResultSourceBindingCanonicalHashWriter` | `SourceBindingV1` |
+| ReviewManifestHash | `IDescriptorDraftReviewHashService` | `ReviewResultIntegrityCanonicalHashWriter` | `IntegrityV1` |
+
+All writers use PascalCase field names via `nameof()` (e.g., `nameof(DescriptorManifest.FormatVersion)`), matching SG-generated writer convention.
+
+`DescriptorPackage` carries `Hashes` (DescriptorPackageHashSet) + `EvidenceEnvelope` (DescriptorPackageEvidenceEnvelope with typed CanonicalHash properties).
+
+`DescriptorManifest.ContentHash`/`EvidenceHash`/`EnvelopeHash` string fields have been **removed**. `DescriptorPackage.ContentHash` convenience property falls back to `Hashes?.PackageManifestHash.Value ?? string.Empty`.
 
 Key invariants:
-- `CreatedAt` does NOT affect `ContentHash`.
-- Different evidence → same `ContentHash`, different `EvidenceHash`, different `EnvelopeHash`.
+- `CreatedAt` does NOT affect `PackageManifestHash` (included in envelope only).
+- Different evidence → same `PackageManifestHash`, different `PackageEvidenceHash`, different `PackageEvidenceEnvelopeHash`.
 - `SnapshotId` derives from `ContentHash[..16]` only.
+- Canonical hash metadata (ArtifactKind, Purpose, Scope, AlgorithmVersion, ContractVersion, CanonicalShapeVersion) is NOT included in the hash digest — domain separation is at the CanonicalHash record comparison layer.
 
 ### 12.5 Evidence Summary
 
@@ -826,3 +838,16 @@ framework/test/CrestCreates.Metadata.Tests/           ← 5 new test files (41 t
 - 6f IS: evidence freezing, manifest/snapshot construction, deterministic identity, shallow diff.
 - `ContentHash` = AoT-safe. `ContractHash`/`DefinitionHash` = informational, not used in package identity.
 - `DescriptorSnapshotBuilder.TakeSnapshot()` is `[Obsolete]`. New main path: `IDescriptorPackageBuilder.Build(explicit inventory)`.
+
+### 12.12 Phase 7e.1 — Canonical Evidence Hashing Integration
+
+Phase 7e.1 migrated the package hash pipeline from ad-hoc string concatenation to canonical JSON + SHA-256:
+
+- `IDescriptorPackageCanonicalHashComputer` + `DefaultDescriptorPackageCanonicalHashComputer` — produces `DescriptorPackageHashSet` (3 typed CanonicalHash: PackageManifestHash, PackageEvidenceHash, PackageEvidenceEnvelopeHash)
+- `IDescriptorDraftReviewHashService` + `DefaultDescriptorDraftReviewHashService` — produces SourceReviewHash and ReviewManifestHash via canonical projections
+- `DescriptorPackageEvidenceEnvelope` — sealed record with PackageManifestHash, PackageEvidenceHash as typed CanonicalHash properties
+- 3 new `CanonicalHashArtifactKind` values: PackageManifest=5, PackageEvidence=6, PackageEvidenceEnvelope=7
+- `DescriptorPackageHashComputer` (old) marked `[Obsolete]`
+- `DescriptorManifest.ContentHash`/`EvidenceHash`/`EnvelopeHash` string fields removed
+- Golden tests: 8 sensitivity tests for package manifest/evidence, 8 for review source-binding/integrity
+- Guard tests: `AgentActivationCanonicalHashGuardTests` — boundary guard for canonical hash production

@@ -1,6 +1,6 @@
 # Tool DTO, JSON Contract & Review Report — Architecture Design
 
-> **Date:** 2026-06-25 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow)**
+> **Date:** 2026-06-27 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow) + Phase 7e.1: Canonical Evidence Hashing**
 
 ## 1. 概述 (Overview)
 
@@ -8,7 +8,7 @@ Phase 7c 在 Agent Control Plane 与外部协议适配器（MCP、HTTP、SignalR
 
 Phase 7d 在 Phase 7c DTO 边界之上增加了审查报告（Review Report）与修复提案（Fix Proposal）契约层。审查报告将审查结果转换为结构化、确定性、人工/Agent 可读的报告；修复提案契约升级使提案能表达结构化值变更、种类标签和安全等级。审查报告无治理决定权、无激活决定权、无运行时注册表变异能力。
 
-Phase 7e 实现了安全激活工作流（Safe Activation Workflow）——从已审查的描述符草稿到运行时激活的完整路径。核心能力包括：激活请求生命周期管理（提交/审批/拒绝/取消/状态查询）、基于 HumanTask 的人工审核编排、证据重校验（通过 6 字段 CanonicalHash 比较检测激活请求创建后的漂移）、治理决策传递、以及 `IRuntimeActivationGate` 作为唯一运行时状态变异入口的架构不变量。合约版本迭代至 `7e.v1`，新增 431 个 ControlPlane 测试覆盖全部激活路径。
+Phase 7e 实现了安全激活工作流（Safe Activation Workflow）——从已审查的描述符草稿到运行时激活的完整路径。核心能力包括：激活请求生命周期管理（提交/审批/拒绝/取消/状态查询）、基于 HumanTask 的人工审核编排、证据重校验（通过 7 字段 CanonicalHash 比较检测激活请求创建后的漂移）、治理决策传递、以及 `IRuntimeActivationGate` 作为唯一运行时状态变异入口的架构不变量。合约版本迭代至 `7e.v1`，Phase 7e.1 将哈希生产与验证迁移到 canonical hash 基础设施，替换了 ad-hoc SHA256 管道拼接。
 
 核心交付物：
 - **34 个 Tool DTO** — 统一的密封 record 类型，代替所有领域类型（新增 2 个：BuildDescriptorReviewReport、RenderDescriptorReviewReport）
@@ -22,7 +22,7 @@ Phase 7e 实现了安全激活工作流（Safe Activation Workflow）——从�
 - **Review Report Renderer (Phase 7d)** — `IDescriptorReviewReportRenderer` + `DefaultDescriptorReviewReportRenderer`，Markdown/PlainText 确定性投影
 - **Message Template Catalog (Phase 7d)** — `IDescriptorReviewMessageTemplateCatalog` + `DefaultDescriptorReviewMessageTemplateCatalog`，31 个确定性模板
 - **Fix Proposal Contract Upgrade (Phase 7d)** — `FixProposalKind`（9 值）、`FixProposalActionKind`（10 值）、`FixProposalApplicability`（4 值）、`FixProposalActionSafetyLevel`（4 值）、`JsonElement?` 值类型
-- **Activation Abstractions (Phase 7e)** — 15 个激活契约类型：`ActivationRequest`、`ActivationBindingSnapshot`、`BindingHashes`（6 字段 CanonicalHash）、`ActivationRequestStatus`、`DescriptorActivationReviewDecision`、`DescriptorActivationReviewTaskInput`、`DescriptorActivationPolicy`、`DescriptorActivationEligibility` 等
+- **Activation Abstractions (Phase 7e)** — 15 个激活契约类型：`ActivationRequest`、`ActivationBindingSnapshot`、`BindingHashes`（7 字段 CanonicalHash：SourceReviewHash、ReviewManifestHash、PackageManifestHash、PackageEvidenceHash、PackageEvidenceEnvelopeHash、ContractHash、DefinitionHash）、`ActivationRequestStatus`、`DescriptorActivationReviewDecision`、`DescriptorActivationReviewTaskInput`、`DescriptorActivationPolicy`、`DescriptorActivationEligibility` 等
 - **Activation Services (Phase 7e)** — 7 个核心接口 + 8 个实现：`IDescriptorActivationRequestService`（生命周期）、`IActivationEvidenceRechecker`（证据重校验）、`IRuntimeActivationGate`（唯一运行时状态变异入口）、`IActivationReviewOrchestrator`（HumanTask 编排）、`IActivationBindingArtifactResolver`（绑定引用哈希解析）、`IDescriptorActivationPolicyProvider`（策略）、`IDescriptorActivationAuditor`（审计）
 - **HumanTask + EventBus Integration (Phase 7e)** — `DescriptorActivationReviewHumanTaskEventHandler` 处理 HumanTask 完成回调，触发审查决策处理
 - **Governance Integration (Phase 7e)** — 治理决策从审查结果流向 `SubmitActivationRequestRequest.GovernanceDecision`，绑定到激活请求快照
@@ -230,7 +230,7 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `FixProposalActionSafetyLevel` | Abstractions | 4 值枚举：Safe=1 至 Unsafe=4 | **Implemented (Phase 7d)** |
 | `ActivationRequest` | Abstractions/Activation | 激活请求记录，含 RequestId、DraftId、TenantId、Status、BindingSnapshot、Policy、CreatedAt、GovernanceDecision | **Implemented (Phase 7e)** |
 | `ActivationBindingSnapshot` | Abstractions/Activation | 激活请求时的绑定引用与哈希快照，`required` 字段：ReviewResultId、DraftVersion、PackagePreviewId、EvidencePreviewId、Hashes | **Implemented (Phase 7e)** |
-| `BindingHashes` | Abstractions/Activation | 6 个 CanonicalHash 字段：SourceReviewHash、ManifestHash、EvidenceHash、EnvelopeHash、ContractHash、DefinitionHash | **Implemented (Phase 7e)** |
+| `BindingHashes` | Abstractions/Activation | 7 个 CanonicalHash 字段：SourceReviewHash、ReviewManifestHash、PackageManifestHash、PackageEvidenceHash、PackageEvidenceEnvelopeHash、ContractHash、DefinitionHash；PackageHashes 便捷访问器返回 DescriptorPackageHashSet | **Implemented (Phase 7e → 7e.1 升级)** |
 | `ActivationRequestStatus` | Abstractions/Activation | 6 值枚举：Submitted、UnderReview、Approved、Rejected、Cancelled、Expired | **Implemented (Phase 7e)** |
 | `DescriptorActivationReviewDecision` | Abstractions/Activation | 审查决策 DTO，含 ActivationRequestId、ActorId、ActorKind、Decision、BoundEvidenceHash、BoundEnvelopeHash | **Implemented (Phase 7e)** |
 | `DescriptorActivationReviewTaskInput` | Abstractions/Activation | HumanTask 负载，含 ActivationRequestId、DraftId、DescriptorKind、ReviewSummary、EvidenceSummary、BindingHashes?、PackageManifestSummary、ImpactContext 等 | **Implemented (Phase 7e)** |
@@ -244,8 +244,8 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `DescriptorActivationReviewDecisionParser` | Abstractions/Activation | AoT 安全 TryParse，从 JSON 解析审查决策 | **Implemented (Phase 7e)** |
 | `IDescriptorActivationRequestService` | ControlPlane/Activation | 激活请求生命周期接口：Create、Approve、Reject、Cancel、GetStatus | **Implemented (Phase 7e)** |
 | `DefaultDescriptorActivationRequestService` | ControlPlane/Activation | 默认实现，含策略快照、证据绑定验证、fail-closed 空值守卫 | **Implemented (Phase 7e)** |
-| `IActivationEvidenceRechecker` | ControlPlane/Activation | 证据重校验接口：验证 BindingHashes 6 字段 CanonicalHash 比较 | **Implemented (Phase 7e)** |
-| `DefaultActivationEvidenceRechecker` | ControlPlane/Activation | 默认实现，全字段 CanonicalHash 记录相等性比较 | **Implemented (Phase 7e)** |
+| `IActivationEvidenceRechecker` | ControlPlane/Activation | 证据重校验接口：验证 BindingHashes 7 字段 CanonicalHash 比较 | **Implemented (Phase 7e → 7e.1 升级)** |
+| `DefaultActivationEvidenceRechecker` | ControlPlane/Activation | 默认实现，全字段 CanonicalHash 记录相等性比较 | **Implemented (Phase 7e → 7e.1 升级)** |
 | `IRuntimeActivationGate` | ControlPlane/Activation | 运行时激活门接口：唯一运行时状态变异入口（架构不变量） | **Implemented (Phase 7e)** |
 | `DefaultRuntimeActivationGate` | ControlPlane/Activation | 默认实现，激活时变异运行时描述符注册表 | **Implemented (Phase 7e)** |
 | `IActivationReviewOrchestrator` | ControlPlane/Activation | HumanTask 审查编排接口：CreateTask、HandleCompletion | **Implemented (Phase 7e)** |
@@ -1054,7 +1054,7 @@ Protocol Adapters (MCP / HTTP / SignalR)
 │  RecheckAsync(request):                                      │
 │    - Resolve current artifact hashes via                     │
 │      _artifactResolver                                        │
-│    - Compare ALL 6 BindingHashes fields using CanonicalHash  │
+│    - Compare ALL 7 BindingHashes fields using CanonicalHash  │
 │      equality (not just .Value digest)                       │
 │    - Return result: { AllMatch, DriftedFields, Diagnosis }   │
 └─────────────────────────────────────────────────────────────┘
@@ -1126,7 +1126,7 @@ SubmitAsync
 
 **2. 证据重校验使用完整 CanonicalHash 记录相等性**
 
-`IActivationEvidenceRechecker` 比较 `BindingHashes` 的全部 6 个字段（SourceReviewHash、ManifestHash、EvidenceHash、EnvelopeHash、ContractHash、DefinitionHash），使用 `CanonicalHash` 记录相等性而非仅比较 `.Value` 摘要。这防止了哈希摘要碰撞导致的误判。
+`IActivationEvidenceRechecker` 比较 `BindingHashes` 的全部 7 个字段（SourceReviewHash、ReviewManifestHash、PackageManifestHash、PackageEvidenceHash、PackageEvidenceEnvelopeHash、ContractHash、DefinitionHash），使用 `CanonicalHash` 记录相等性而非仅比较 `.Value` 摘要。这防止了哈希摘要碰撞导致的误判。
 
 **3. 治理决策从审查结果流向激活请求**
 
@@ -1197,7 +1197,7 @@ Submitted ──→ UnderReview ──→ Approved ──→ [Runtime Activation
 |------|------|
 | `ActivationRequest` | 主激活请求记录：RequestId、DraftId、TenantId、Status、BindingSnapshot、Policy、CreatedAt、GovernanceDecision |
 | `ActivationBindingSnapshot` | 绑定引用与哈希快照，`required` 字段：ReviewResultId、DraftVersion、PackagePreviewId、EvidencePreviewId、Hashes |
-| `BindingHashes` | 6 个 CanonicalHash：SourceReviewHash、ManifestHash、EvidenceHash、EnvelopeHash、ContractHash、DefinitionHash |
+| `BindingHashes` | 7 个 CanonicalHash：SourceReviewHash、ReviewManifestHash、PackageManifestHash、PackageEvidenceHash、PackageEvidenceEnvelopeHash、ContractHash、DefinitionHash；PackageHashes 便捷访问器 |
 | `ActivationRequestStatus` | 6 值枚举：Submitted、UnderReview、Approved、Rejected、Cancelled、Expired |
 | `DescriptorActivationReviewDecision` | 审查决策：ActivationRequestId、ActorId、ActorKind、Decision、BoundEvidenceHash、BoundEnvelopeHash |
 | `DescriptorActivationReviewTaskInput` | HumanTask 负载：含完整审查上下文 |
@@ -1216,16 +1216,86 @@ Submitted ──→ UnderReview ──→ Approved ──→ [Runtime Activation
 | 接口 | 实现 | 说明 |
 |------|------|------|
 | `IDescriptorActivationRequestService` | `DefaultDescriptorActivationRequestService` | 激活请求生命周期管理 |
-| `IActivationEvidenceRechecker` | `DefaultActivationEvidenceRechecker` | 证据重校验（6 字段 CanonicalHash 比较） |
+| `IActivationEvidenceRechecker` | `DefaultActivationEvidenceRechecker` | 证据重校验（7 字段 CanonicalHash 比较，分别校验 package hashes 和 evidence hashes） |
 | `IRuntimeActivationGate` | `DefaultRuntimeActivationGate` | 唯一运行时状态变异入口（架构不变量） |
 | `IActivationReviewOrchestrator` | `DefaultActivationReviewOrchestrator` | HumanTask 审查编排 |
-| `IActivationBindingArtifactResolver` | `DefaultActivationBindingArtifactResolver` | 绑定引用哈希解析 |
+| `IActivationBindingArtifactResolver` | `DefaultActivationBindingArtifactResolver` | 绑定引用哈希解析（StorePackageHashes + StoreEvidenceHashes 分离存储） |
 | `IDescriptorActivationPolicyProvider` | `DefaultDescriptorActivationPolicyProvider` | 激活策略提供者 |
 | `IDescriptorActivationAuditor` | `DefaultDescriptorActivationAuditor` | 激活审计 |
 | — | `DescriptorActivationReviewHumanTaskEventHandler` | EventBus 事件处理程序 |
 
 ### 12.7 测试覆盖
 
-- **ControlPlane 测试**：423 个（含 DraftContracts + Generator + Activation），覆盖完整的激活请求生命周期、证据重校验、HumanTask 回调、策略快照、审计追踪
-- **Boundary 测试**：8 个，验证激活组件依赖边界
-- **总测试数**：431 个
+- **ControlPlane 测试**：471 个（含 DraftContracts + Generator + Activation + CanonicalHash + PackagePreview），覆盖完整的激活请求生命周期、证据重校验、HumanTask 回调、策略快照、审计追踪
+- **Boundary 测试**：11 个，验证激活组件依赖边界
+- **总测试数**：482 个
+
+### 12.8 Phase 7e.1 — Canonical Evidence Hashing 消费边界
+
+Phase 7e.1 将激活工作流中的哈希生产与验证迁移到 canonical hash 基础设施，替换了 ad-hoc SHA256 管道拼接。
+
+#### 12.8.1 BindingHashes 7-Slot 模型
+
+`BindingHashes` 从 6-slot 升级为 7 个 flat CanonicalHash slot，加上 `PackageHashes` 便捷访问器：
+
+| Slot | ArtifactKind | Purpose | 来源 |
+|------|-------------|---------|------|
+| SourceReviewHash | ReviewResult | SourceBinding | IDescriptorDraftReviewHashService |
+| ReviewManifestHash | ReviewResult | Integrity | IDescriptorDraftReviewHashService |
+| PackageManifestHash | PackageManifest | Integrity | IDescriptorPackageCanonicalHashComputer |
+| PackageEvidenceHash | PackageEvidence | AuditEvidence | IDescriptorPackageCanonicalHashComputer |
+| PackageEvidenceEnvelopeHash | PackageEvidenceEnvelope | AuditEvidence | IDescriptorPackageCanonicalHashComputer |
+| ContractHash | Descriptor | Contract | IDescriptorStableHashBuilder |
+| DefinitionHash | Descriptor | Definition | IDescriptorStableHashBuilder |
+
+`PackageHashes` 便捷访问器从 3 个 package slot 构建 `DescriptorPackageHashSet`，保证原子性。
+
+#### 12.8.2 ActivationBindingHashValidator
+
+`ActivationBindingHashValidator` 在 3 个激活入口点执行验证（Submit、Recheck、Gate）：
+
+- **Per-slot ArtifactKind + Purpose 验证**：每个 slot 有期望的 ArtifactKind 和 Purpose 元数据
+- **Scope 验证**：所有 slot 必须为 `InternalFull`
+- **Mandatory metadata 验证**：Algorithm、AlgorithmVersion、ContractVersion、CanonicalShapeVersion 非空
+- **一致性验证**：AlgorithmVersion/ContractVersion 跨所有 hash 一致
+
+#### 12.8.3 IActivationBindingArtifactResolver 拆分
+
+`IActivationBindingArtifactResolver` 分离存储 package 和 evidence 哈希：
+
+- `StorePackageHashes(tenantId, previewId, DescriptorPackageHashSet)` — 存储包预览哈希
+- `StoreEvidenceHashes(tenantId, evidencePreviewId, DescriptorPackageHashSet)` — 存储证据预览哈希
+- `ResolvedBindingArtifacts` 携带 `CurrentPackageHashes` 和 `CurrentEvidenceHashes`
+
+重校验器独立比较 package hashes（PackageManifestHash）和 evidence hashes（EvidenceHash、EvidenceEnvelopeHash），防止 stale preview 交叉接受。
+
+#### 12.8.4 Package Preview Reuse Identity
+
+`BuildPackageEvidencePreviewAsync` 实现双路径重用：
+
+- **Path A（重用）**：当 `_latestPackageByDraft` 中存在 `(TenantId, DraftId, ScopeFingerprint)` 匹配项，且 `DraftVersion` 和 `VisibleDescriptorSetHash` 匹配时，直接重用已有 package preview
+- **Path B（新建）**：当无匹配预览时，单次 `_packageBuilder.Build(...)` 同时创建 package preview 和 evidence preview snapshot，存储相同的 `DescriptorPackageHashSet`
+
+**ScopeFingerprint**：从 `AgentDescriptorVisibilityScope`（Mode + AllowedKinds + DeniedKinds）计算确定性指纹。确保不同可见性范围的预览不会交叉重用。
+
+**VisibleDescriptorSetHash**：从 `universe.VisibleDescriptors`（catalog identity，非 proposed inventory）计算 length-prefixed encoding hash（`{len}:{FullId}:{(int)Kind}:{version}`）。确保 catalog 变化时预览不重用。Draft 变化由 `DraftVersion` 覆盖。
+
+**_latestPackageByDraft**：键为 `(TenantId, DraftId, ScopeFingerprint)`，允许多个 scope 并行缓存各自的预览。
+
+#### 12.8.5 Canonical Hash Writers 规范
+
+所有 5 个 hand-written canonical hash writer 使用 **PascalCase field names via `nameof()`**：
+
+- `DescriptorPackageManifestCanonicalHashWriter` — PackageManifest
+- `DescriptorPackageEvidenceCanonicalHashWriter` — PackageEvidence
+- `DescriptorPackageEvidenceEnvelopeCanonicalHashWriter` — PackageEvidenceEnvelope
+- `ReviewResultSourceBindingCanonicalHashWriter` — ReviewResult/SourceBinding
+- `ReviewResultIntegrityCanonicalHashWriter` — ReviewResult/Integrity
+
+与 SG-generated writer 约定一致。元数据（ArtifactKind、Purpose、Scope 等）仅附加到 `CanonicalHash` record，不参与 digest 计算。
+
+#### 12.8.6 已移除的遗留字段
+
+- `DescriptorManifest.ContentHash`/`EvidenceHash`/`EnvelopeHash` string 字段已完全删除
+- `DescriptorPackageHashComputer`（ad-hoc string concatenation）标记 `[Obsolete]`
+- `DescriptorPackage.ContentHash` 便捷属性回退到 `Hashes?.PackageManifestHash.Value ?? string.Empty`

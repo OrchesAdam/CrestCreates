@@ -6,7 +6,7 @@
 
 ## 1. Design Goals
 
-Replace 4 independent ad hoc hash systems with one deterministic, versioned, AoT-friendly hash runtime driven by a Source Generator for descriptor types.
+Replace 5 independent ad hoc hash systems with one deterministic, versioned, AoT-friendly hash runtime driven by a Source Generator for descriptor types.
 
 The target question:
 
@@ -19,7 +19,7 @@ Given artifact X, what is its deterministic, domain-separated identity hash that
 1. **SG owns shape generation, Runtime owns execution** — The source generator generates canonical DTOs, projections, and Utf8JsonWriter methods. The runtime applies SHA-256.
 2. **No reflection, no runtime Type** — Utf8JsonWriter is a ref struct with zero reflection. No JsonSerializer, no JsonTypeInfo, no DefaultJsonTypeInfoResolver.
 3. **Profile declaration is compile-time only** — Profile classes carry attributes; they are never instantiated, never registered in DI.
-4. **Domain separation via metadata** — CanonicalHashMetadata (7 fields) participates in hash input. Same payload + different scope/purpose/shape = different hash.
+4. **Domain separation via metadata** — CanonicalHashMetadata (7 fields) attaches to CanonicalHash records for domain separation at comparison time. Metadata is NOT included in the canonical JSON bytes — same payload + different metadata produces the same digest. Domain separation is enforced at the CanonicalHash record equality layer.
 5. **Canonical string helpers for all enums** — Never use enum.ToString(). Always use *Names.ToCanonicalString() methods.
 
 ---
@@ -177,12 +177,14 @@ Sub-structures (e.g., SchemaFieldDescriptor inside SchemaDescriptor) generate pa
 ```
 1. Obtain CanonicalHashProjectionResult (via dispatcher or hand-written projection)
 2. Create ArrayBufferWriter<byte>
-3. Create Utf8JsonWriter (PascalCase, IncludeNulls)
-4. Call projection.WriteCanonicalJson(writer)
+3. Create Utf8JsonWriter (PascalCase property names, IncludeNulls)
+4. Call projection.WriteCanonicalJson(writer) — writes PAYLOAD FIELDS ONLY, no metadata
 5. SHA256.HashData(buffer.WrittenSpan)
 6. Convert to lowercase hex string
-7. Construct CanonicalHash from digest + metadata
+7. Construct CanonicalHash from digest + metadata (metadata attached to record, not digest)
 ```
+
+> **Important**: `projection.WriteCanonicalJson(writer)` writes payload fields exclusively. Metadata (ArtifactKind, DescriptorKind, Scope, Purpose, AlgorithmVersion, ContractVersion, CanonicalShapeVersion) is used only for `CanonicalHash` record construction (step 7), NOT included in the hash digest. Two artifacts with identical payloads but different ArtifactKind/Purpose produce the SAME digest — domain separation is at the record/comparison layer, not in the hash bytes.
 
 ### 6.2 DescriptorStableHashBuilder (Adapter)
 
@@ -301,10 +303,72 @@ The SG generates a call to the filter for each collection element. Only elements
 
 ---
 
-## 12. Deferred to v3
+## 12. Phase 7e.1 — Canonical Evidence Hashing (Completed)
 
-- DescriptorPackageHashComputer migration to canonical JSON
-- SourceReviewHash / ReportId migration via hand-written projections
+Phase 7e.1 extended the canonical hash infrastructure beyond SG-generated descriptor hashes to hand-written writers for package and review evidence:
+
+### 12.1 Hand-Written Canonical Hash Writers
+
+5 hand-written writers in `CrestCreates.Metadata` produce canonical JSON for package/review evidence:
+
+| Writer | ArtifactKind | Purpose | Shape Version | Source Type |
+|--------|-------------|---------|---------------|-------------|
+| `DescriptorPackageManifestCanonicalHashWriter` | PackageManifest | Integrity/AuditEvidence | PackageManifestV1 | DescriptorManifest |
+| `DescriptorPackageEvidenceCanonicalHashWriter` | PackageEvidence | AuditEvidence | PackageEvidenceV1 | DescriptorPackageEvidence |
+| `DescriptorPackageEvidenceEnvelopeCanonicalHashWriter` | PackageEvidenceEnvelope | AuditEvidence | PackageEvidenceEnvelopeV1 | DescriptorPackageEvidenceEnvelope |
+| `ReviewResultSourceBindingCanonicalHashWriter` | ReviewResult | SourceBinding | SourceBindingV1 | DescriptorDraftReviewResult |
+| `ReviewResultIntegrityCanonicalHashWriter` | ReviewResult | Integrity | IntegrityV1 | DescriptorDraftReviewResult |
+
+All writers use **PascalCase field names via `nameof()`** (e.g., `nameof(DescriptorManifest.FormatVersion)`), matching SG-generated writer convention. No inline camelCase string literals.
+
+### 12.2 Canonical Hash Services
+
+| Service | Interface | Responsibility |
+|---------|-----------|---------------|
+| Package hash computer | `IDescriptorPackageCanonicalHashComputer` | Produces `DescriptorPackageHashSet` (PackageManifestHash, PackageEvidenceHash, PackageEvidenceEnvelopeHash) |
+| Review hash service | `IDescriptorDraftReviewHashService` | Produces SourceReviewHash and ReviewManifestHash via canonical projections |
+
+### 12.3 DescriptorPackageHashSet
+
+```csharp
+public sealed record DescriptorPackageHashSet
+{
+    public required CanonicalHash PackageManifestHash { get; init; }
+    public required CanonicalHash PackageEvidenceHash { get; init; }
+    public required CanonicalHash PackageEvidenceEnvelopeHash { get; init; }
+}
+```
+
+Atomic hash unit for descriptor packages. Stored and retrieved as a whole — package hashes cannot be partially updated.
+
+### 12.4 BindingHashes (7 Flat Slots)
+
+```csharp
+public sealed record BindingHashes
+{
+    public required CanonicalHash SourceReviewHash { get; init; }          // ArtifactKind=ReviewResult, Purpose=SourceBinding
+    public required CanonicalHash ReviewManifestHash { get; init; }        // ArtifactKind=ReviewResult, Purpose=Integrity
+    public required CanonicalHash PackageManifestHash { get; init; }       // ArtifactKind=PackageManifest, Purpose=Integrity
+    public required CanonicalHash PackageEvidenceHash { get; init; }       // ArtifactKind=PackageEvidence, Purpose=AuditEvidence
+    public required CanonicalHash PackageEvidenceEnvelopeHash { get; init; } // ArtifactKind=PackageEvidenceEnvelope, Purpose=AuditEvidence
+    public required CanonicalHash ContractHash { get; init; }              // ArtifactKind=Descriptor, Purpose=Contract
+    public required CanonicalHash DefinitionHash { get; init; }            // ArtifactKind=Descriptor, Purpose=Definition
+    public DescriptorPackageHashSet PackageHashes { get; }                 // Convenience accessor from 3 package slots
+}
+```
+
+Per-slot validation enforced by `ActivationBindingHashValidator`: ArtifactKind, Purpose, Scope (InternalFull), plus non-empty Algorithm/AlgorithmVersion/ContractVersion/CanonicalShapeVersion.
+
+### 12.5 Key Invariants
+
+- Hand-written writers follow the same pipeline as SG-generated writers: `WriteCanonicalJson` writes payload fields only, metadata attaches to CanonicalHash record
+- `DescriptorPackageHashComputer` (old, ad-hoc string concatenation) is `[Obsolete]`
+- `DescriptorManifest.ContentHash`/`EvidenceHash`/`EnvelopeHash` string fields removed
+- Golden tests verify canonical JSON output + digest stability
+- `AgentActivationCanonicalHashGuardTests` enforce boundary guard
+
+### 12.6 Still Deferred
+
 - PublicCrossTenant scope projection
 - CCHASH diagnostic trigger tests (requires SG test infrastructure)
 - Visibility projector integration tests
