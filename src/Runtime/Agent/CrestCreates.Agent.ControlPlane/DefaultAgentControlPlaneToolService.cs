@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.Json;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
@@ -1890,7 +1891,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             preview = projectedPreview;
 
             var previewId = Guid.NewGuid().ToString("N");
-            var visibleSetHash = ComputeVisibleDescriptorSetHash(visibleProposed);
+            // Use the visible catalog (not proposed inventory) for the fingerprint.
+            // The reuse check compares catalog snapshots to detect catalog changes;
+            // draft changes are detected by DraftVersion comparison.
+            var visibleSetHash = ComputeVisibleDescriptorSetHash(universe.VisibleDescriptors);
             _packagePreviews[(context.TenantId, previewId)] = new PackagePreviewResourceSnapshot(
                 new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg,
                 scope.ScopeFingerprint, snapshot.Draft.ProposedVersion, visibleSetHash);
@@ -2093,7 +2097,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             // Create package preview entry alongside evidence preview.
             // Both share the same DescriptorPackage and hash set for consistency.
             var packagePreviewId = Guid.NewGuid().ToString("N");
-            var pathBVisibleSetHash = ComputeVisibleDescriptorSetHash(filteredInventory);
+            // Use the visible catalog (not filtered proposed inventory) for the fingerprint.
+            // Consistent with PreviewDescriptorPackageAsync: catalog identity, not proposed identity.
+            var pathBVisibleSetHash = ComputeVisibleDescriptorSetHash(universe.VisibleDescriptors);
             _packagePreviews[(context.TenantId, packagePreviewId)] = new PackagePreviewResourceSnapshot(
                 new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg,
                 scope.ScopeFingerprint, draft.ProposedVersion, pathBVisibleSetHash);
@@ -2618,6 +2624,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     /// Used to verify that the visible universe has not changed between preview
     /// creation and evidence preview reuse — preventing stale package reuse when
     /// the catalog changes under the same policy.
+    /// Uses length-prefixed encoding to avoid delimiter collision.
     /// </summary>
     private static string ComputeVisibleDescriptorSetHash(IReadOnlyList<IDescriptor> visibleDescriptors)
     {
@@ -2627,8 +2634,14 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         var entries = visibleDescriptors
             .Select(d =>
             {
-                var version = d is IVersionedDescriptor vd ? vd.Version.ToString() : "";
-                return $"{d.FullId}:{(int)d.Kind}:{version}";
+                var fullId = d.FullId;
+                var kind = ((int)d.Kind).ToString(CultureInfo.InvariantCulture);
+                var version = d is IVersionedDescriptor vd
+                    ? vd.Version.ToString(CultureInfo.InvariantCulture)
+                    : "";
+                // Length-prefixed encoding: {len1}:{val1}{len2}:{val2}{len3}:{val3}
+                // Unambiguous — no delimiter collision possible.
+                return $"{fullId.Length}:{fullId}{kind.Length}:{kind}{version.Length}:{version}";
             })
             .Order(StringComparer.Ordinal)
             .ToArray();
