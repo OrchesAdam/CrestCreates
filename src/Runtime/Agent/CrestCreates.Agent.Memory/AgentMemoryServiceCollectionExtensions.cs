@@ -15,6 +15,19 @@ namespace CrestCreates.Agent.Memory;
 /// <summary>
 /// DI registration extension for the Agent Memory runtime.
 /// </summary>
+/// <remarks>
+/// <para>Prerequisite: <c>ICanonicalHashComputer</c> must be registered before calling this method.</para>
+/// <para>Typical usage:</para>
+/// <code>
+/// services.AddDescriptorStableHash();
+/// services.AddAgentMemoryRuntime();
+/// </code>
+/// <para>
+/// If <c>ICanonicalHashComputer</c> is not registered, resolving hash-dependent services
+/// (<c>DefaultAgentMemoryContentSanitizer</c>, <c>DefaultAgentMemoryRetriever</c>)
+/// will throw <see cref="InvalidOperationException"/> at runtime.
+/// </para>
+/// </remarks>
 public static class AgentMemoryServiceCollectionExtensions
 {
     public static IServiceCollection AddAgentMemoryRuntime(this IServiceCollection services)

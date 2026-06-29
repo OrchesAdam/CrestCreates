@@ -12,6 +12,7 @@ using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.ContextPack.Abstractions;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 
@@ -1387,5 +1388,56 @@ public sealed class MainChainTests
         var act = async () => await promotionService.PromoteAsync(tenantId, "c-1", request);
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage($"*{AgentMemoryDiagnosticCodes.InvalidOperationTenantMismatch}*");
+    }
+
+    [Fact]
+    public void AddAgentMemoryRuntime_RequiresCanonicalHashComputer_WhenResolvingHashDependentServices()
+    {
+        // Register AgentMemoryRuntime WITHOUT ICanonicalHashComputer
+        var services = new ServiceCollection();
+        services.AddAgentMemoryRuntime();
+
+        var sp = services.BuildServiceProvider();
+
+        // Resolving hash-dependent services should throw because ICanonicalHashComputer is not registered
+        var actSanitizer = () => sp.GetRequiredService<IAgentMemoryContentSanitizer>();
+        actSanitizer.Should().Throw<InvalidOperationException>();
+
+        var actRetriever = () => sp.GetRequiredService<IAgentMemoryRetriever>();
+        actRetriever.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void AddAgentMemoryRuntime_ResolvesAllServices_WhenCanonicalHashComputerIsRegistered()
+    {
+        var services = new ServiceCollection();
+        services.AddAgentMemoryRuntime();
+
+        // Register a minimal ICanonicalHashComputer for resolution
+        var hashComputer = new Mock<ICanonicalHashComputer>();
+        hashComputer
+            .Setup(h => h.ComputeFromProjection(It.IsAny<CanonicalHashProjectionResult>()))
+            .Returns((CanonicalHashProjectionResult p) => new CanonicalHash
+            {
+                Value = "test-hash",
+                Algorithm = "SHA-256",
+                AlgorithmVersion = p.Metadata.AlgorithmVersion,
+                ArtifactKind = p.Metadata.ArtifactKind,
+                Scope = p.Metadata.Scope,
+                Purpose = p.Metadata.Purpose,
+                ContractVersion = p.Metadata.ContractVersion,
+                CanonicalShapeVersion = p.Metadata.CanonicalShapeVersion
+            });
+        services.AddSingleton(hashComputer.Object);
+
+        var sp = services.BuildServiceProvider();
+
+        // All services should resolve successfully
+        sp.GetRequiredService<IAgentMemoryContentSanitizer>().Should().NotBeNull();
+        sp.GetRequiredService<IAgentMemoryRetriever>().Should().NotBeNull();
+        sp.GetRequiredService<IAgentContextCompressor>().Should().NotBeNull();
+        sp.GetRequiredService<IAgentMemoryExtractor>().Should().NotBeNull();
+        sp.GetRequiredService<IAgentMemoryPromotionService>().Should().NotBeNull();
+        sp.GetRequiredService<IAgentAuthoringContextBuilder>().Should().NotBeNull();
     }
 }
