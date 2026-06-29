@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Agent.Memory.Stores;
 
@@ -15,24 +16,57 @@ public sealed class InMemoryAgentTaskHistoryStore : IAgentTaskHistoryStore
 
     public ValueTask SaveTaskAsync(AgentTaskRecord task, CancellationToken cancellationToken = default)
     {
-        var sanitizedSummary = task.Summary is not null
-            ? _sanitizer.Sanitize(task.TenantId, task.Summary, Array.Empty<AgentContextSourceRef>()).SanitizedContent
-            : null;
+        var diagnostics = new List<AgentMemoryDiagnostic>();
 
-        var sanitizedEvents = task.Events.Select(e =>
+        string? sanitizedSummary = null;
+        if (task.Summary is not null)
+        {
+            var summaryResult = _sanitizer.Sanitize(task.TenantId, task.Summary, Array.Empty<AgentContextSourceRef>());
+            if (summaryResult.Rejected)
+            {
+                diagnostics.Add(new AgentMemoryDiagnostic
+                {
+                    Code = AgentMemoryDiagnosticCodes.ContentRejected,
+                    Message = $"Task '{task.TaskId}' summary was rejected after sanitization and will be set to null.",
+                    Severity = SeverityLevel.Warning
+                });
+                sanitizedSummary = null;
+            }
+            else
+            {
+                sanitizedSummary = summaryResult.SanitizedContent;
+                diagnostics.AddRange(summaryResult.Diagnostics);
+            }
+        }
+
+        var sanitizedEvents = new List<AgentTaskEvent>();
+        foreach (var e in task.Events)
         {
             var sanitized = _sanitizer.Sanitize(task.TenantId, e.Content, e.SourceRefs);
-            return e with
+            if (sanitized.Rejected)
+            {
+                diagnostics.Add(new AgentMemoryDiagnostic
+                {
+                    Code = AgentMemoryDiagnosticCodes.ContentRejected,
+                    Message = $"Event '{e.EventId}' was rejected after sanitization and will not be stored.",
+                    Severity = SeverityLevel.Warning,
+                    SourceRefs = e.SourceRefs
+                });
+                continue;
+            }
+            sanitizedEvents.Add(e with
             {
                 Content = sanitized.SanitizedContent,
-                SourceRefs = e.SourceRefs.ToArray()
-            };
-        }).ToArray();
+                SourceRefs = e.SourceRefs.ToArray(),
+                Diagnostics = sanitized.Diagnostics.ToArray()
+            });
+        }
 
         _tasks[(task.TenantId, task.TaskId)] = task with
         {
             Summary = sanitizedSummary,
-            Events = sanitizedEvents
+            Events = sanitizedEvents.ToArray(),
+            Diagnostics = diagnostics.ToArray()
         };
         return ValueTask.CompletedTask;
     }
@@ -45,8 +79,13 @@ public sealed class InMemoryAgentTaskHistoryStore : IAgentTaskHistoryStore
         var snapshot = task with
         {
             Events = task.Events
-                .Select(e => e with { SourceRefs = e.SourceRefs.ToArray() })
-                .ToArray()
+                .Select(e => e with
+                {
+                    SourceRefs = e.SourceRefs.ToArray(),
+                    Diagnostics = e.Diagnostics.ToArray()
+                })
+                .ToArray(),
+            Diagnostics = task.Diagnostics.ToArray()
         };
         return new ValueTask<AgentTaskRecord?>(snapshot);
     }
@@ -60,10 +99,17 @@ public sealed class InMemoryAgentTaskHistoryStore : IAgentTaskHistoryStore
         }
 
         var sanitized = _sanitizer.Sanitize(tenantId, taskEvent.Content, taskEvent.SourceRefs);
+        if (sanitized.Rejected)
+        {
+            // Skip the event — content was entirely rejected after sanitization
+            return ValueTask.CompletedTask;
+        }
+
         var sanitizedEvent = taskEvent with
         {
             Content = sanitized.SanitizedContent,
-            SourceRefs = taskEvent.SourceRefs.ToArray()
+            SourceRefs = taskEvent.SourceRefs.ToArray(),
+            Diagnostics = sanitized.Diagnostics.ToArray()
         };
 
         _tasks[key] = existing with
@@ -77,11 +123,17 @@ public sealed class InMemoryAgentTaskHistoryStore : IAgentTaskHistoryStore
     {
         var tasks = _tasks.Values
             .Where(t => t.TenantId == tenantId)
+            .OrderBy(t => t.TaskId, StringComparer.Ordinal)
             .Select(t => t with
             {
                 Events = t.Events
-                    .Select(e => e with { SourceRefs = e.SourceRefs.ToArray() })
-                    .ToArray()
+                    .Select(e => e with
+                    {
+                        SourceRefs = e.SourceRefs.ToArray(),
+                        Diagnostics = e.Diagnostics.ToArray()
+                    })
+                    .ToArray(),
+                Diagnostics = t.Diagnostics.ToArray()
             })
             .ToArray();
         return new ValueTask<IReadOnlyList<AgentTaskRecord>>(tasks);

@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace CrestCreates.Agent.Memory.Abstractions.Json;
 
@@ -23,6 +24,7 @@ namespace CrestCreates.Agent.Memory.Abstractions.Json;
 [JsonSerializable(typeof(AgentSourceExpansionResult))]
 [JsonSerializable(typeof(SanitizedAgentContent))]
 [JsonSerializable(typeof(AgentMemoryOperationRequest))]
-[JsonSerializable(typeof(AgentActorContext))]
+[JsonSerializable(typeof(AgentMemoryInvocationContext))]
 [JsonSerializable(typeof(AgentMemoryDiagnostic))]
+[JsonSerializable(typeof(CanonicalHash))]
 public sealed partial class AgentMemoryJsonSerializerContext : JsonSerializerContext;

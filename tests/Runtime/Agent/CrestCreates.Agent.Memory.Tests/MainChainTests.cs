@@ -1,26 +1,67 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Authoring;
+using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Compression;
 using CrestCreates.Agent.Memory.Extraction;
 using CrestCreates.Agent.Memory.Promotion;
 using CrestCreates.Agent.Memory.Recall;
 using CrestCreates.Agent.Memory.Sanitization;
 using CrestCreates.Agent.Memory.Stores;
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.ContextPack.Abstractions;
 using FluentAssertions;
-using CrestCreates.Core.Abstractions.Identity;
+using Moq;
 using Xunit;
 
 namespace CrestCreates.Agent.Memory.Tests;
 
 public sealed class MainChainTests
 {
+    private static CanonicalHash TestCanonicalHash(string value) => new()
+    {
+        Value = value,
+        Algorithm = "SHA-256",
+        AlgorithmVersion = "sha256-canonical-json-v1",
+        ArtifactKind = CanonicalHashArtifactNames.AgentMemoryContent,
+        Scope = CanonicalHashScopeNames.InternalFull,
+        Purpose = CanonicalHashPurposeNames.SourceIdentity,
+        ContractVersion = "memory-hash-v1",
+        CanonicalShapeVersion = "memory-content-hash-v1"
+    };
+
+    private static AgentMemoryCanonicalHashProjector CreateTestHashProjector()
+    {
+        var hashComputer = new Mock<ICanonicalHashComputer>();
+        hashComputer
+            .Setup(h => h.ComputeFromProjection(It.IsAny<CanonicalHashProjectionResult>()))
+            .Returns((CanonicalHashProjectionResult p) => new CanonicalHash
+            {
+                Value = $"hash-{Guid.NewGuid():N}"[..16],
+                Algorithm = "SHA-256",
+                AlgorithmVersion = p.Metadata.AlgorithmVersion,
+                ArtifactKind = p.Metadata.ArtifactKind,
+                Scope = p.Metadata.Scope,
+                Purpose = p.Metadata.Purpose,
+                ContractVersion = p.Metadata.ContractVersion,
+                CanonicalShapeVersion = p.Metadata.CanonicalShapeVersion
+            });
+        return new AgentMemoryCanonicalHashProjector(hashComputer.Object);
+    }
+
+    private static AgentMemoryInvocationContext CreateTestInvocationContext(string tenantId) => new()
+    {
+        TenantId = tenantId,
+        ActorId = "agent-1",
+        ActorKind = "Agent"
+    };
+
     [Fact]
     public async Task FullMainChain_ConversationToAuthoringContext()
     {
         // Arrange
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var conversationStore = new InMemoryAgentConversationStore(sanitizer);
         var taskStore = new InMemoryAgentTaskHistoryStore(sanitizer);
         var contextStore = new InMemoryAgentCompressedContextStore();
@@ -28,9 +69,9 @@ public sealed class MainChainTests
         var compressor = new DefaultAgentContextCompressor(sanitizer);
         var extractor = new DefaultAgentMemoryExtractor();
         var promotionService = new DefaultAgentMemoryPromotionService(memoryStore);
-        var retriever = new DefaultAgentMemoryRetriever(memoryStore);
+        var retriever = new DefaultAgentMemoryRetriever(memoryStore, CreateTestHashProjector());
         var expander = new DefaultAgentContextSourceExpander(conversationStore, taskStore, contextStore, memoryStore);
-        var builder = new DefaultAgentAuthoringContextBuilder(retriever);
+        var builder = new DefaultAgentAuthoringContextBuilder();
 
         const string tenantId = "tenant-1";
         const string conversationId = "conv-1";
@@ -79,7 +120,7 @@ public sealed class MainChainTests
         var operationRequest = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            Actor = new AgentActorContext { ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "User preference detected",
             Timestamp = DateTimeOffset.UtcNow,
             Explanation = "Promoting based on conversation analysis"
@@ -94,14 +135,14 @@ public sealed class MainChainTests
         pack.Memories.Should().ContainSingle(m => m.MemoryId == promotedMemory.MemoryId);
         pack.IsAuthoritative.Should().BeFalse();
 
-        // Step 6: Build authoring context
+        // Step 6: Build authoring context (pass memoryPack directly)
         var authoringRequest = new AgentAuthoringRequest
         {
             TenantId = tenantId,
             IntentText = "What timestamp format should I use?"
         };
         var metadataContextPack = CreateMinimalMetadataContextPack(tenantId);
-        var authoringContext = await builder.BuildAsync(authoringRequest, metadataContextPack);
+        var authoringContext = await builder.BuildAsync(authoringRequest, metadataContextPack, pack);
         authoringContext.MemoryPack.Memories.Should().ContainSingle();
         authoringContext.MetadataContextPack.Request.TenantId.Should().Be(tenantId);
     }
@@ -120,7 +161,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.Preference,
             Content = "Already promoted",
-            CanonicalContentHash = "hash",
+            CanonicalContentHash = TestCanonicalHash("hash"),
             Status = AgentMemoryStatus.Active
         };
         await memoryStore.SaveCandidateAsync(alreadyPromoted);
@@ -128,7 +169,7 @@ public sealed class MainChainTests
         var request = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            Actor = new AgentActorContext { ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Test",
             Timestamp = DateTimeOffset.UtcNow,
             Explanation = "Testing"
@@ -153,14 +194,14 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.Preference,
             Content = "Old preference",
-            CanonicalContentHash = "hash1"
+            CanonicalContentHash = TestCanonicalHash("hash1")
         };
         await memoryStore.SaveCandidateAsync(candidate);
 
         var promoteRequest = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            Actor = new AgentActorContext { ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Initial",
             Timestamp = DateTimeOffset.UtcNow,
             Explanation = "Initial promotion"
@@ -174,14 +215,14 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.Preference,
             Content = "New preference",
-            CanonicalContentHash = "hash2"
+            CanonicalContentHash = TestCanonicalHash("hash2")
         };
         await memoryStore.SaveCandidateAsync(replacement);
 
         var supersedeRequest = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            Actor = new AgentActorContext { ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Updated preference",
             Timestamp = DateTimeOffset.UtcNow,
             Explanation = "Updating preference"
@@ -198,7 +239,7 @@ public sealed class MainChainTests
     [Fact]
     public async Task SourceExpander_ResolvesConversationSource()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var conversationStore = new InMemoryAgentConversationStore(sanitizer);
         var taskStore = new InMemoryAgentTaskHistoryStore(sanitizer);
         var contextStore = new InMemoryAgentCompressedContextStore();
@@ -240,7 +281,7 @@ public sealed class MainChainTests
     [Fact]
     public async Task SourceExpander_ReturnsNotFoundForMissingSource()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var conversationStore = new InMemoryAgentConversationStore(sanitizer);
         var taskStore = new InMemoryAgentTaskHistoryStore(sanitizer);
         var contextStore = new InMemoryAgentCompressedContextStore();
@@ -300,7 +341,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.Preference,
             Content = "Test",
-            CanonicalContentHash = "hash",
+            CanonicalContentHash = TestCanonicalHash("hash"),
             Status = AgentMemoryStatus.Rejected
         };
         await memoryStore.SaveCandidateAsync(candidate);
@@ -308,7 +349,7 @@ public sealed class MainChainTests
         var request = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            Actor = new AgentActorContext { ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Test",
             Timestamp = DateTimeOffset.UtcNow,
             Explanation = "Testing"
@@ -333,14 +374,14 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.Preference,
             Content = "Archived",
-            CanonicalContentHash = "hash1"
+            CanonicalContentHash = TestCanonicalHash("hash1")
         };
         await memoryStore.SaveCandidateAsync(candidate);
 
         var promoteRequest = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            Actor = new AgentActorContext { ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Initial",
             Timestamp = DateTimeOffset.UtcNow,
             Explanation = "Initial promotion"
@@ -350,7 +391,7 @@ public sealed class MainChainTests
         var archiveRequest = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            Actor = new AgentActorContext { ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Archive",
             Timestamp = DateTimeOffset.UtcNow,
             Explanation = "Archiving memory"
@@ -364,14 +405,14 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.Preference,
             Content = "Replacement",
-            CanonicalContentHash = "hash2"
+            CanonicalContentHash = TestCanonicalHash("hash2")
         };
         await memoryStore.SaveCandidateAsync(replacement);
 
         var supersedeRequest = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            Actor = new AgentActorContext { ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Supersede attempt",
             Timestamp = DateTimeOffset.UtcNow,
             Explanation = "Attempting supersede"
@@ -396,7 +437,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.Preference,
             Content = "Should not be archivable",
-            CanonicalContentHash = "hash",
+            CanonicalContentHash = TestCanonicalHash("hash"),
             PromotedAt = DateTimeOffset.UtcNow,
             Status = AgentMemoryStatus.Candidate
         };
@@ -405,7 +446,7 @@ public sealed class MainChainTests
         var request = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            Actor = new AgentActorContext { ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Test",
             Timestamp = DateTimeOffset.UtcNow,
             Explanation = "Testing"
@@ -419,7 +460,7 @@ public sealed class MainChainTests
     public async Task Recall_IsAlwaysNonAuthoritative_WithAndWithoutTruncation()
     {
         var memoryStore = new InMemoryAgentMemoryStore();
-        var retriever = new DefaultAgentMemoryRetriever(memoryStore);
+        var retriever = new DefaultAgentMemoryRetriever(memoryStore, CreateTestHashProjector());
 
         const string tenantId = "tenant-1";
 
@@ -430,7 +471,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.ProjectFact,
             Content = new string('a', 50),
-            CanonicalContentHash = "hash1",
+            CanonicalContentHash = TestCanonicalHash("hash1"),
             PromotedAt = DateTimeOffset.UtcNow
         };
         var mem2 = new AgentMemoryItem
@@ -439,7 +480,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.ProjectFact,
             Content = new string('b', 50),
-            CanonicalContentHash = "hash2",
+            CanonicalContentHash = TestCanonicalHash("hash2"),
             PromotedAt = DateTimeOffset.UtcNow
         };
         await memoryStore.SaveMemoryAsync(mem1);
@@ -467,7 +508,7 @@ public sealed class MainChainTests
     [Fact]
     public async Task AppendEvent_ThrowsWhenTaskNotFound()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var taskStore = new InMemoryAgentTaskHistoryStore(sanitizer);
         var taskEvent = new AgentTaskEvent
         {
@@ -495,7 +536,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.Preference,
             Content = "Test",
-            CanonicalContentHash = "hash",
+            CanonicalContentHash = TestCanonicalHash("hash"),
             Tags = tags
         };
         await memoryStore.SaveCandidateAsync(candidate);
@@ -508,12 +549,12 @@ public sealed class MainChainTests
         retrieved!.Tags.Should().ContainSingle();
     }
 
-    // --- Fix #1a: Sanitizer tests ---
+    // --- Sanitizer tests ---
 
     [Fact]
     public void Sanitizer_RedactsBearerTokens()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var result = sanitizer.Sanitize("tenant-1", "Authorization: Bearer abc123token", Array.Empty<AgentContextSourceRef>());
 
         result.Rejected.Should().BeFalse();
@@ -525,7 +566,7 @@ public sealed class MainChainTests
     [Fact]
     public void Sanitizer_RedactsCredentialAssignments()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var result = sanitizer.Sanitize("tenant-1", "password=secret123", Array.Empty<AgentContextSourceRef>());
 
         result.Rejected.Should().BeTrue(); // Entirely credential content is rejected
@@ -536,7 +577,7 @@ public sealed class MainChainTests
     [Fact]
     public void Sanitizer_RedactsConnectionStringPasswords()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var result = sanitizer.Sanitize("tenant-1", "Server=host;Password=mypass;Database=db", Array.Empty<AgentContextSourceRef>());
 
         result.Rejected.Should().BeFalse(); // Not entirely redacted — other parts remain
@@ -548,7 +589,7 @@ public sealed class MainChainTests
     [Fact]
     public void Sanitizer_RejectsEntirelyRedactedContent()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         // Content that is entirely a password assignment
         var result = sanitizer.Sanitize("tenant-1", "api_key=sk-abc123xyz", Array.Empty<AgentContextSourceRef>());
 
@@ -557,12 +598,12 @@ public sealed class MainChainTests
         result.Diagnostics.Should().Contain(d => d.Code == AgentMemoryDiagnosticCodes.ContentRejected);
     }
 
-    // --- Fix #1b: Compressor sanitizes ---
+    // --- Compressor sanitizes ---
 
     [Fact]
     public async Task Compressor_SanitizesBeforeCompressing()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var compressor = new DefaultAgentContextCompressor(sanitizer);
 
         var conversation = new AgentConversationRecord
@@ -592,7 +633,7 @@ public sealed class MainChainTests
     [Fact]
     public async Task Compressor_SkipsRejectedBlocks()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var compressor = new DefaultAgentContextCompressor(sanitizer);
 
         var conversation = new AgentConversationRecord
@@ -627,13 +668,13 @@ public sealed class MainChainTests
         compressed.Diagnostics.Should().Contain(d => d.Code == AgentMemoryDiagnosticCodes.ContentRejected);
     }
 
-    // --- Fix #2: Recall tests ---
+    // --- Recall tests ---
 
     [Fact]
     public async Task Recall_IsAlwaysNonAuthoritative()
     {
         var memoryStore = new InMemoryAgentMemoryStore();
-        var retriever = new DefaultAgentMemoryRetriever(memoryStore);
+        var retriever = new DefaultAgentMemoryRetriever(memoryStore, CreateTestHashProjector());
 
         const string tenantId = "tenant-1";
         var memory = new AgentMemoryItem
@@ -642,7 +683,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.ProjectFact,
             Content = "Some memory",
-            CanonicalContentHash = "hash",
+            CanonicalContentHash = TestCanonicalHash("hash"),
             PromotedAt = DateTimeOffset.UtcNow
         };
         await memoryStore.SaveMemoryAsync(memory);
@@ -656,7 +697,7 @@ public sealed class MainChainTests
     public async Task Recall_EmitsDiagnosticWhenBudgetTruncates()
     {
         var memoryStore = new InMemoryAgentMemoryStore();
-        var retriever = new DefaultAgentMemoryRetriever(memoryStore);
+        var retriever = new DefaultAgentMemoryRetriever(memoryStore, CreateTestHashProjector());
 
         const string tenantId = "tenant-1";
 
@@ -666,7 +707,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.ProjectFact,
             Content = new string('a', 50),
-            CanonicalContentHash = "hash1",
+            CanonicalContentHash = TestCanonicalHash("hash1"),
             PromotedAt = DateTimeOffset.UtcNow
         });
         await memoryStore.SaveMemoryAsync(new AgentMemoryItem
@@ -675,7 +716,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.ProjectFact,
             Content = new string('b', 50),
-            CanonicalContentHash = "hash2",
+            CanonicalContentHash = TestCanonicalHash("hash2"),
             PromotedAt = DateTimeOffset.UtcNow
         });
 
@@ -689,7 +730,7 @@ public sealed class MainChainTests
         pack.Diagnostics.Should().Contain(d => d.Severity == SeverityLevel.Warning);
     }
 
-    // --- Fix #3: Store does not apply recall-level filters ---
+    // --- Store does not apply recall-level filters ---
 
     [Fact]
     public async Task Store_DoesNotApplyRecallFilters()
@@ -703,19 +744,19 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.ProjectFact,
             Content = "Low confidence memory",
-            CanonicalContentHash = "hash",
+            CanonicalContentHash = TestCanonicalHash("hash"),
             PromotedAt = DateTimeOffset.UtcNow,
             Confidence = AgentMemoryConfidence.Low
         };
         await memoryStore.SaveMemoryAsync(lowConfidence);
 
-        // Query with MinimumConfidence=High — store should still return it (retriever filters later)
+        // Query with MinimumConfidence=Low — store should still return it (retriever filters later)
         var storeQuery = new AgentMemoryQuery { TenantId = tenantId, MinimumConfidence = AgentMemoryConfidence.Low };
         var results = await memoryStore.ListMemoriesAsync(storeQuery);
         results.Should().ContainSingle(); // Store returns everything matching persistence fields
     }
 
-    // --- Fix #4: Promotion validation tests ---
+    // --- Promotion validation tests ---
 
     [Fact]
     public async Task Promotion_RequiresNonEmptyReason()
@@ -730,14 +771,14 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.Preference,
             Content = "Test",
-            CanonicalContentHash = "hash"
+            CanonicalContentHash = TestCanonicalHash("hash")
         };
         await memoryStore.SaveCandidateAsync(candidate);
 
         var request = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            Actor = new AgentActorContext { ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "",
             Timestamp = DateTimeOffset.UtcNow,
             Explanation = "Testing empty reason"
@@ -761,14 +802,14 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.Preference,
             Content = "Test",
-            CanonicalContentHash = "hash"
+            CanonicalContentHash = TestCanonicalHash("hash")
         };
         await memoryStore.SaveCandidateAsync(candidate);
 
         var request = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            Actor = new AgentActorContext { ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Valid reason",
             Timestamp = DateTimeOffset.UtcNow
             // No SourceRefs and no Explanation
@@ -792,14 +833,14 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.Preference,
             Content = "Test",
-            CanonicalContentHash = "hash"
+            CanonicalContentHash = TestCanonicalHash("hash")
         };
         await memoryStore.SaveCandidateAsync(candidate);
 
         var request = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            Actor = new AgentActorContext { ActorId = "", ActorKind = "Agent" },
+            InvocationContext = new AgentMemoryInvocationContext { TenantId = tenantId, ActorId = "", ActorKind = "Agent" },
             Reason = "Valid reason",
             Timestamp = DateTimeOffset.UtcNow,
             Explanation = "Testing empty ActorId"
@@ -823,14 +864,14 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.Preference,
             Content = "Test",
-            CanonicalContentHash = "hash"
+            CanonicalContentHash = TestCanonicalHash("hash")
         };
         await memoryStore.SaveCandidateAsync(candidate);
 
         var request = new AgentMemoryOperationRequest
         {
             TenantId = "tenant-2", // Mismatched!
-            Actor = new AgentActorContext { ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = new AgentMemoryInvocationContext { TenantId = "tenant-2", ActorId = "agent-1", ActorKind = "Agent" },
             Reason = "Valid reason",
             Timestamp = DateTimeOffset.UtcNow,
             Explanation = "Testing tenant mismatch"
@@ -841,12 +882,12 @@ public sealed class MainChainTests
             .WithMessage($"*{AgentMemoryDiagnosticCodes.InvalidOperationTenantMismatch}*");
     }
 
-    // --- Fix #5: Snapshot-on-read tests ---
+    // --- Snapshot-on-read tests ---
 
     [Fact]
     public async Task Store_ReturnsSnapshotCopies()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var conversationStore = new InMemoryAgentConversationStore(sanitizer);
         const string tenantId = "tenant-1";
 
@@ -879,12 +920,12 @@ public sealed class MainChainTests
         retrieved.Turns.Should().NotBeSameAs(retrievedAgain.Turns);
     }
 
-    // --- Fix #1 tests: Store sanitization ---
+    // --- Store sanitization tests ---
 
     [Fact]
     public async Task Store_SanitizesContentOnSave()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var store = new InMemoryAgentConversationStore(sanitizer);
         const string tenantId = "tenant-1";
 
@@ -915,7 +956,7 @@ public sealed class MainChainTests
     [Fact]
     public async Task Store_SanitizesTaskEventContentOnSave()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var store = new InMemoryAgentTaskHistoryStore(sanitizer);
         const string tenantId = "tenant-1";
 
@@ -932,7 +973,7 @@ public sealed class MainChainTests
                     TenantId = tenantId,
                     TaskId = "task-sanitize",
                     EventKind = "Progress",
-                    Content = "password=secret"
+                    Content = "Connection string: Server=host;Password=secret;Database=db" // Partially redacted
                 }
             ]
         };
@@ -940,14 +981,15 @@ public sealed class MainChainTests
 
         var retrieved = await store.GetTaskAsync(tenantId, "task-sanitize");
         retrieved!.Events.Should().ContainSingle();
-        retrieved.Events[0].Content.Should().Contain("[REDACTED:credential]");
+        retrieved.Events[0].Content.Should().Contain("[REDACTED:connection-credential]");
         retrieved.Events[0].Content.Should().NotContain("secret");
+        retrieved.Events[0].Content.Should().Contain("Server=host");
     }
 
     [Fact]
     public async Task Expander_ReturnsSanitizedContent()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var conversationStore = new InMemoryAgentConversationStore(sanitizer);
         var taskStore = new InMemoryAgentTaskHistoryStore(sanitizer);
         var contextStore = new InMemoryAgentCompressedContextStore();
@@ -986,12 +1028,12 @@ public sealed class MainChainTests
         result.SanitizedContent.Should().NotContain("xyz789secret");
     }
 
-    // --- Fix #2 tests: Compressor synthetic SourceRef ---
+    // --- Compressor synthetic SourceRef ---
 
     [Fact]
     public async Task Compressor_GeneratesSyntheticSourceRef()
     {
-        var sanitizer = new DefaultAgentMemoryContentSanitizer();
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
         var compressor = new DefaultAgentContextCompressor(sanitizer);
 
         var conversation = new AgentConversationRecord
@@ -1019,16 +1061,17 @@ public sealed class MainChainTests
         compressed.Blocks[0].SourceRefs[0].SourceId.Should().Be("conv-no-refs");
         compressed.Blocks[0].SourceRefs[0].RangeStart.Should().Be(0);
         compressed.Blocks[0].SourceRefs[0].RangeEnd.Should().Be(0);
-        compressed.Blocks[0].SourceRefs[0].CanonicalContentHash.Should().NotBeNullOrEmpty();
+        compressed.Blocks[0].SourceRefs[0].CanonicalContentHash.Should().NotBeNull();
+        compressed.Blocks[0].SourceRefs[0].CanonicalContentHash!.Value.Should().NotBeNullOrEmpty();
     }
 
-    // --- Fix #3 tests: Deterministic recall ordering ---
+    // --- Deterministic recall ordering ---
 
     [Fact]
     public async Task Recall_DeterministicOrdering()
     {
         var memoryStore = new InMemoryAgentMemoryStore();
-        var retriever = new DefaultAgentMemoryRetriever(memoryStore);
+        var retriever = new DefaultAgentMemoryRetriever(memoryStore, CreateTestHashProjector());
         const string tenantId = "tenant-1";
 
         await memoryStore.SaveMemoryAsync(new AgentMemoryItem
@@ -1037,7 +1080,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.ProjectFact,
             Content = "Low confidence",
-            CanonicalContentHash = "hash1",
+            CanonicalContentHash = TestCanonicalHash("hash1"),
             PromotedAt = DateTimeOffset.UtcNow,
             Confidence = AgentMemoryConfidence.Low
         });
@@ -1047,7 +1090,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.ProjectFact,
             Content = "High confidence",
-            CanonicalContentHash = "hash2",
+            CanonicalContentHash = TestCanonicalHash("hash2"),
             PromotedAt = DateTimeOffset.UtcNow,
             Confidence = AgentMemoryConfidence.High
         });
@@ -1057,7 +1100,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.ProjectFact,
             Content = "Medium confidence",
-            CanonicalContentHash = "hash3",
+            CanonicalContentHash = TestCanonicalHash("hash3"),
             PromotedAt = DateTimeOffset.UtcNow,
             Confidence = AgentMemoryConfidence.Medium
         });
@@ -1077,7 +1120,7 @@ public sealed class MainChainTests
     public async Task Recall_DeterministicOrdering_SameConfidence()
     {
         var memoryStore = new InMemoryAgentMemoryStore();
-        var retriever = new DefaultAgentMemoryRetriever(memoryStore);
+        var retriever = new DefaultAgentMemoryRetriever(memoryStore, CreateTestHashProjector());
         const string tenantId = "tenant-1";
         var promotedAt = DateTimeOffset.UtcNow;
 
@@ -1087,7 +1130,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.ProjectFact,
             Content = "Memory C",
-            CanonicalContentHash = "hash1",
+            CanonicalContentHash = TestCanonicalHash("hash1"),
             PromotedAt = promotedAt,
             Confidence = AgentMemoryConfidence.Medium
         });
@@ -1097,7 +1140,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.ProjectFact,
             Content = "Memory A",
-            CanonicalContentHash = "hash2",
+            CanonicalContentHash = TestCanonicalHash("hash2"),
             PromotedAt = promotedAt,
             Confidence = AgentMemoryConfidence.Medium
         });
@@ -1107,7 +1150,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.ProjectFact,
             Content = "Memory B",
-            CanonicalContentHash = "hash3",
+            CanonicalContentHash = TestCanonicalHash("hash3"),
             PromotedAt = promotedAt,
             Confidence = AgentMemoryConfidence.Medium
         });
@@ -1124,13 +1167,13 @@ public sealed class MainChainTests
         pack.Memories[1].MemoryId.Should().Be("m-b");
     }
 
-    // --- Fix #4 test: VisibleDescriptorKinds fail-closed ---
+    // --- VisibleDescriptorKinds fail-closed ---
 
     [Fact]
     public async Task Recall_VisibleDescriptorKinds_FailClosed()
     {
         var memoryStore = new InMemoryAgentMemoryStore();
-        var retriever = new DefaultAgentMemoryRetriever(memoryStore);
+        var retriever = new DefaultAgentMemoryRetriever(memoryStore, CreateTestHashProjector());
         const string tenantId = "tenant-1";
 
         await memoryStore.SaveMemoryAsync(new AgentMemoryItem
@@ -1139,7 +1182,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             Kind = AgentMemoryKind.ProjectFact,
             Content = "Some memory",
-            CanonicalContentHash = "hash",
+            CanonicalContentHash = TestCanonicalHash("hash"),
             PromotedAt = DateTimeOffset.UtcNow
         });
 
@@ -1152,5 +1195,197 @@ public sealed class MainChainTests
         pack.Memories.Should().BeEmpty();
         pack.Diagnostics.Should().Contain(d => d.Code == AgentMemoryDiagnosticCodes.VisibilityKindUnresolvable);
         pack.Diagnostics.Should().Contain(d => d.Severity == SeverityLevel.Warning);
+    }
+
+    // --- Rejected content skipped in store ---
+
+    [Fact]
+    public async Task ConversationStore_SkipsRejectedTurns()
+    {
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
+        var store = new InMemoryAgentConversationStore(sanitizer);
+        const string tenantId = "tenant-1";
+
+        var conversation = new AgentConversationRecord
+        {
+            ConversationId = "conv-skip-rejected",
+            TenantId = tenantId,
+            Turns =
+            [
+                new AgentConversationTurn
+                {
+                    TurnId = "turn-1",
+                    TenantId = tenantId,
+                    Role = AgentConversationRole.User,
+                    Content = "api_key=sk-abc123xyz", // Entirely redacted, will be rejected
+                    CreatedAt = DateTimeOffset.UtcNow
+                },
+                new AgentConversationTurn
+                {
+                    TurnId = "turn-2",
+                    TenantId = tenantId,
+                    Role = AgentConversationRole.Assistant,
+                    Content = "Valid content here.",
+                    CreatedAt = DateTimeOffset.UtcNow
+                }
+            ]
+        };
+        await store.SaveConversationAsync(conversation);
+
+        var retrieved = await store.GetConversationAsync(tenantId, "conv-skip-rejected");
+        retrieved!.Turns.Should().ContainSingle(); // Only turn-2 survives
+        retrieved.Turns[0].TurnId.Should().Be("turn-2");
+        retrieved.Diagnostics.Should().Contain(d => d.Code == AgentMemoryDiagnosticCodes.ContentRejected);
+    }
+
+    [Fact]
+    public async Task TaskStore_SkipsRejectedEvents()
+    {
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
+        var store = new InMemoryAgentTaskHistoryStore(sanitizer);
+        const string tenantId = "tenant-1";
+
+        var task = new AgentTaskRecord
+        {
+            TaskId = "task-skip-rejected",
+            TenantId = tenantId,
+            Title = "Task with rejected events",
+            Events =
+            [
+                new AgentTaskEvent
+                {
+                    EventId = "evt-1",
+                    TenantId = tenantId,
+                    TaskId = "task-skip-rejected",
+                    EventKind = "Progress",
+                    Content = "password=secret123" // Entirely redacted
+                },
+                new AgentTaskEvent
+                {
+                    EventId = "evt-2",
+                    TenantId = tenantId,
+                    TaskId = "task-skip-rejected",
+                    EventKind = "Progress",
+                    Content = "Valid event content"
+                }
+            ]
+        };
+        await store.SaveTaskAsync(task);
+
+        var retrieved = await store.GetTaskAsync(tenantId, "task-skip-rejected");
+        retrieved!.Events.Should().ContainSingle(); // Only evt-2 survives
+        retrieved.Events[0].EventId.Should().Be("evt-2");
+        retrieved.Diagnostics.Should().Contain(d => d.Code == AgentMemoryDiagnosticCodes.ContentRejected);
+    }
+
+    [Fact]
+    public async Task AppendEvent_SkipsRejectedEvent()
+    {
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
+        var store = new InMemoryAgentTaskHistoryStore(sanitizer);
+        const string tenantId = "tenant-1";
+
+        // Create a task first
+        var task = new AgentTaskRecord
+        {
+            TaskId = "task-append-skip",
+            TenantId = tenantId,
+            Title = "Task for append test"
+        };
+        await store.SaveTaskAsync(task);
+
+        // Append a valid event
+        var validEvent = new AgentTaskEvent
+        {
+            EventId = "evt-valid",
+            TenantId = tenantId,
+            TaskId = "task-append-skip",
+            EventKind = "Progress",
+            Content = "Valid content"
+        };
+        await store.AppendEventAsync(tenantId, "task-append-skip", validEvent);
+
+        // Append a rejected event
+        var rejectedEvent = new AgentTaskEvent
+        {
+            EventId = "evt-rejected",
+            TenantId = tenantId,
+            TaskId = "task-append-skip",
+            EventKind = "Progress",
+            Content = "api_key=topsecret123" // Entirely redacted
+        };
+        await store.AppendEventAsync(tenantId, "task-append-skip", rejectedEvent);
+
+        // Verify only the valid event was stored
+        var retrieved = await store.GetTaskAsync(tenantId, "task-append-skip");
+        retrieved!.Events.Should().ContainSingle(); // Only evt-valid survives
+        retrieved.Events[0].EventId.Should().Be("evt-valid");
+    }
+
+    // --- Pack identity fields ---
+
+    [Fact]
+    public async Task Recall_PackHasIdentityFields()
+    {
+        var memoryStore = new InMemoryAgentMemoryStore();
+        var retriever = new DefaultAgentMemoryRetriever(memoryStore, CreateTestHashProjector());
+        const string tenantId = "tenant-1";
+
+        await memoryStore.SaveMemoryAsync(new AgentMemoryItem
+        {
+            MemoryId = "m-1",
+            TenantId = tenantId,
+            Kind = AgentMemoryKind.ProjectFact,
+            Content = "Some memory",
+            CanonicalContentHash = TestCanonicalHash("hash1"),
+            PromotedAt = DateTimeOffset.UtcNow
+        });
+
+        var pack = await retriever.RecallAsync(new AgentMemoryQuery { TenantId = tenantId });
+        pack.ScopeFingerprint.Should().NotBeNull();
+        pack.ScopeFingerprint!.Value.Should().NotBeNullOrEmpty();
+        pack.VisibleMemorySetHash.Should().NotBeNull();
+        pack.VisibleMemorySetHash!.Value.Should().NotBeNullOrEmpty();
+        pack.CanonicalPackHash.Should().NotBeNull();
+        pack.CanonicalPackHash!.Value.Should().NotBeNullOrEmpty();
+    }
+
+    // --- Promotion requires InvocationContext tenant match ---
+
+    [Fact]
+    public async Task Promotion_RequiresInvocationContextTenantMatch()
+    {
+        var memoryStore = new InMemoryAgentMemoryStore();
+        var promotionService = new DefaultAgentMemoryPromotionService(memoryStore);
+
+        const string tenantId = "tenant-1";
+        var candidate = new AgentMemoryCandidate
+        {
+            CandidateId = "c-1",
+            TenantId = tenantId,
+            Kind = AgentMemoryKind.Preference,
+            Content = "Test",
+            CanonicalContentHash = TestCanonicalHash("hash")
+        };
+        await memoryStore.SaveCandidateAsync(candidate);
+
+        // InvocationContext has a different tenant
+        var request = new AgentMemoryOperationRequest
+        {
+            TenantId = tenantId,
+            InvocationContext = new AgentMemoryInvocationContext
+            {
+                TenantId = "tenant-other",
+                ActorId = "agent-1",
+                ActorKind = "Agent"
+            },
+            Reason = "Valid reason",
+            Timestamp = DateTimeOffset.UtcNow,
+            Explanation = "Testing InvocationContext tenant mismatch"
+        };
+
+        var act = async () => await promotionService.PromoteAsync(tenantId, "c-1", request);
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"*{AgentMemoryDiagnosticCodes.InvalidOperationTenantMismatch}*");
     }
 }

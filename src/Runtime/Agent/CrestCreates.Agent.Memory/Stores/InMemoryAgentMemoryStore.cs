@@ -14,7 +14,9 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore
         {
             Tags = candidate.Tags.ToArray(),
             DescriptorRefs = candidate.DescriptorRefs.ToArray(),
-            SourceRefs = candidate.SourceRefs.ToArray()
+            SourceRefs = candidate.SourceRefs.ToArray(),
+            RedactionKinds = candidate.RedactionKinds.ToArray(),
+            SanitizationDiagnostics = candidate.SanitizationDiagnostics.ToArray()
         };
         return ValueTask.CompletedTask;
     }
@@ -28,7 +30,9 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore
         {
             Tags = candidate.Tags.ToArray(),
             DescriptorRefs = candidate.DescriptorRefs.ToArray(),
-            SourceRefs = candidate.SourceRefs.ToArray()
+            SourceRefs = candidate.SourceRefs.ToArray(),
+            RedactionKinds = candidate.RedactionKinds.ToArray(),
+            SanitizationDiagnostics = candidate.SanitizationDiagnostics.ToArray()
         };
         return new ValueTask<AgentMemoryCandidate?>(snapshot);
     }
@@ -39,7 +43,9 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore
         {
             Tags = memory.Tags.ToArray(),
             DescriptorRefs = memory.DescriptorRefs.ToArray(),
-            SourceRefs = memory.SourceRefs.ToArray()
+            SourceRefs = memory.SourceRefs.ToArray(),
+            RedactionKinds = memory.RedactionKinds.ToArray(),
+            SanitizationDiagnostics = memory.SanitizationDiagnostics.ToArray()
         };
         return ValueTask.CompletedTask;
     }
@@ -53,7 +59,9 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore
         {
             Tags = memory.Tags.ToArray(),
             DescriptorRefs = memory.DescriptorRefs.ToArray(),
-            SourceRefs = memory.SourceRefs.ToArray()
+            SourceRefs = memory.SourceRefs.ToArray(),
+            RedactionKinds = memory.RedactionKinds.ToArray(),
+            SanitizationDiagnostics = memory.SanitizationDiagnostics.ToArray()
         };
         return new ValueTask<AgentMemoryItem?>(snapshot);
     }
@@ -67,11 +75,14 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore
             .Where(m => query.MemoryIds.Count == 0 || query.MemoryIds.Contains(m.MemoryId))
             .Where(m => FilterByDescriptorRefs(m, query))
             .Where(m => FilterByStatus(m, query))
+            .OrderBy(m => m.MemoryId, StringComparer.Ordinal)
             .Select(m => m with
             {
                 Tags = m.Tags.ToArray(),
                 DescriptorRefs = m.DescriptorRefs.ToArray(),
-                SourceRefs = m.SourceRefs.ToArray()
+                SourceRefs = m.SourceRefs.ToArray(),
+                RedactionKinds = m.RedactionKinds.ToArray(),
+                SanitizationDiagnostics = m.SanitizationDiagnostics.ToArray()
             })
             .ToArray();
 

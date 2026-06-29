@@ -39,7 +39,9 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
             IsAuthoritative = false,
             Tags = candidate.Tags,
             DescriptorRefs = candidate.DescriptorRefs,
-            SourceRefs = candidate.SourceRefs
+            SourceRefs = candidate.SourceRefs,
+            RedactionKinds = candidate.RedactionKinds,
+            SanitizationDiagnostics = candidate.SanitizationDiagnostics
         };
 
         await _store.SaveMemoryAsync(memory, cancellationToken);
@@ -105,7 +107,9 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
             Tags = replacement.Tags,
             DescriptorRefs = replacement.DescriptorRefs,
             SourceRefs = replacement.SourceRefs,
-            SupersedesMemoryId = memoryId
+            SupersedesMemoryId = memoryId,
+            RedactionKinds = replacement.RedactionKinds,
+            SanitizationDiagnostics = replacement.SanitizationDiagnostics
         };
         await _store.SaveMemoryAsync(newMemory, cancellationToken);
 
@@ -141,24 +145,31 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
                 $"Tenant mismatch. Expected '{tenantId}', got '{request.TenantId}'.");
         }
 
-        // 2. Actor
-        if (request.Actor is null)
+        // 2. InvocationContext
+        if (request.InvocationContext is null)
         {
             throw new InvalidOperationException(
                 $"Operation '{operationName}' failed: {AgentMemoryDiagnosticCodes.InvalidOperationMissingActor} - " +
-                "Actor is required.");
+                "InvocationContext is required.");
         }
-        if (string.IsNullOrWhiteSpace(request.Actor.ActorId))
+        // 2a. InvocationContext.TenantId must match operation tenantId
+        if (request.InvocationContext.TenantId != tenantId)
         {
             throw new InvalidOperationException(
-                $"Operation '{operationName}' failed: {AgentMemoryDiagnosticCodes.InvalidOperationMissingActor} - " +
-                "Actor.ActorId is required.");
+                $"Operation '{operationName}' failed: {AgentMemoryDiagnosticCodes.InvalidOperationTenantMismatch} - " +
+                $"InvocationContext tenant mismatch. Expected '{tenantId}', got '{request.InvocationContext.TenantId}'.");
         }
-        if (string.IsNullOrWhiteSpace(request.Actor.ActorKind))
+        if (string.IsNullOrWhiteSpace(request.InvocationContext.ActorId))
         {
             throw new InvalidOperationException(
                 $"Operation '{operationName}' failed: {AgentMemoryDiagnosticCodes.InvalidOperationMissingActor} - " +
-                "Actor.ActorKind is required.");
+                "InvocationContext.ActorId is required.");
+        }
+        if (string.IsNullOrWhiteSpace(request.InvocationContext.ActorKind))
+        {
+            throw new InvalidOperationException(
+                $"Operation '{operationName}' failed: {AgentMemoryDiagnosticCodes.InvalidOperationMissingActor} - " +
+                "InvocationContext.ActorKind is required.");
         }
 
         // 3. Reason

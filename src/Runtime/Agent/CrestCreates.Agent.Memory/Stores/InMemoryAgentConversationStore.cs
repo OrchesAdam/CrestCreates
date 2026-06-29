@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Agent.Memory.Stores;
 
@@ -15,20 +16,40 @@ public sealed class InMemoryAgentConversationStore : IAgentConversationStore
 
     public ValueTask SaveConversationAsync(AgentConversationRecord conversation, CancellationToken cancellationToken = default)
     {
-        var sanitizedTurns = conversation.Turns.Select(t =>
+        var sanitizedTurns = new List<AgentConversationTurn>();
+        var diagnostics = new List<AgentMemoryDiagnostic>();
+        var rejectedCount = 0;
+
+        foreach (var turn in conversation.Turns)
         {
-            var sanitized = _sanitizer.Sanitize(conversation.TenantId, t.Content, t.SourceRefs);
-            return t with
+            var sanitized = _sanitizer.Sanitize(conversation.TenantId, turn.Content, turn.SourceRefs);
+
+            if (sanitized.Rejected)
+            {
+                rejectedCount++;
+                diagnostics.Add(new AgentMemoryDiagnostic
+                {
+                    Code = AgentMemoryDiagnosticCodes.ContentRejected,
+                    Message = $"Turn '{turn.TurnId}' was rejected after sanitization and will not be stored.",
+                    Severity = SeverityLevel.Warning,
+                    SourceRefs = turn.SourceRefs
+                });
+                continue;
+            }
+
+            sanitizedTurns.Add(turn with
             {
                 Content = sanitized.SanitizedContent,
-                DescriptorRefs = t.DescriptorRefs.ToArray(),
-                SourceRefs = t.SourceRefs.ToArray()
-            };
-        }).ToArray();
+                DescriptorRefs = turn.DescriptorRefs.ToArray(),
+                SourceRefs = turn.SourceRefs.ToArray(),
+                Diagnostics = sanitized.Diagnostics.ToArray()
+            });
+        }
 
         _conversations[(conversation.TenantId, conversation.ConversationId)] = conversation with
         {
-            Turns = sanitizedTurns
+            Turns = sanitizedTurns.ToArray(),
+            Diagnostics = diagnostics.ToArray()
         };
         return ValueTask.CompletedTask;
     }
@@ -41,8 +62,14 @@ public sealed class InMemoryAgentConversationStore : IAgentConversationStore
         var snapshot = conversation with
         {
             Turns = conversation.Turns
-                .Select(t => t with { DescriptorRefs = t.DescriptorRefs.ToArray(), SourceRefs = t.SourceRefs.ToArray() })
-                .ToArray()
+                .Select(t => t with
+                {
+                    DescriptorRefs = t.DescriptorRefs.ToArray(),
+                    SourceRefs = t.SourceRefs.ToArray(),
+                    Diagnostics = t.Diagnostics.ToArray()
+                })
+                .ToArray(),
+            Diagnostics = conversation.Diagnostics.ToArray()
         };
         return new ValueTask<AgentConversationRecord?>(snapshot);
     }

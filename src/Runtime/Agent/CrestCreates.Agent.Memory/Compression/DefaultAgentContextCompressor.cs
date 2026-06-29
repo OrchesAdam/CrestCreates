@@ -1,5 +1,4 @@
 using CrestCreates.Agent.Memory.Abstractions;
-using CrestCreates.Agent.Memory.Internal;
 using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Agent.Memory.Compression;

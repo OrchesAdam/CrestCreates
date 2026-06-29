@@ -1,4 +1,5 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Agent.Memory.Recall;
@@ -6,10 +7,12 @@ namespace CrestCreates.Agent.Memory.Recall;
 public sealed class DefaultAgentMemoryRetriever : IAgentMemoryRetriever
 {
     private readonly IAgentMemoryStore _store;
+    private readonly AgentMemoryCanonicalHashProjector _hashProjector;
 
-    public DefaultAgentMemoryRetriever(IAgentMemoryStore store)
+    public DefaultAgentMemoryRetriever(IAgentMemoryStore store, AgentMemoryCanonicalHashProjector hashProjector)
     {
         _store = store;
+        _hashProjector = hashProjector;
     }
 
     public async ValueTask<AgentMemoryPack> RecallAsync(AgentMemoryQuery query, CancellationToken cancellationToken = default)
@@ -37,11 +40,23 @@ public sealed class DefaultAgentMemoryRetriever : IAgentMemoryRetriever
             .ThenBy(m => m.Kind)
             .ThenByDescending(m => m.PromotedAt)
             .ThenBy(m => m.MemoryId)
-            .ThenBy(m => m.CanonicalContentHash ?? string.Empty)
+            .ThenBy(m => m.CanonicalContentHash.Value)
             .ToArray();
 
         // Apply recall-level filtering
         var filtered = FilterMemories(ordered, query, diagnostics);
+
+        // Capture eligible memory IDs before budget truncation (for visible memory set hash)
+        var eligibleSortedMemoryIds = filtered
+            .Select(m => m.MemoryId)
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToArray();
+
+        // Compute scope fingerprint from query
+        var scopeFingerprint = _hashProjector.ComputeScopeFingerprint(query);
+
+        // Compute visible memory set hash from sorted eligible memory IDs
+        var visibleMemorySetHash = _hashProjector.ComputeVisibleMemorySetHash(eligibleSortedMemoryIds);
 
         // Apply character budget
         var (budgetedMemories, wasTruncated) = ApplyCharacterBudget(filtered, query.CharacterBudget);
@@ -56,12 +71,26 @@ public sealed class DefaultAgentMemoryRetriever : IAgentMemoryRetriever
             });
         }
 
+        // Compute pack hash from final included memories' canonical content hashes
+        var sortedMemoryHashes = budgetedMemories
+            .Select(m => m.CanonicalContentHash)
+            .OrderBy(h => h.Value, StringComparer.Ordinal)
+            .ToArray();
+        var canonicalPackHash = _hashProjector.ComputePackHash(
+            query.TenantId,
+            scopeFingerprint,
+            visibleMemorySetHash,
+            sortedMemoryHashes);
+
         return new AgentMemoryPack
         {
             TenantId = query.TenantId,
             Memories = budgetedMemories,
             Diagnostics = diagnostics.ToArray(),
-            IsAuthoritative = false
+            IsAuthoritative = false,
+            ScopeFingerprint = scopeFingerprint,
+            VisibleMemorySetHash = visibleMemorySetHash,
+            CanonicalPackHash = canonicalPackHash
         };
     }
 

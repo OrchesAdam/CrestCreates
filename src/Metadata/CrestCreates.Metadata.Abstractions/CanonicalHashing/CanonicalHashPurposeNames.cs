@@ -12,6 +12,7 @@ public static class CanonicalHashPurposeNames
     public const string SourceBinding = "SourceBinding";
     public const string Integrity = "Integrity";
     public const string AuditEvidence = "AuditEvidence";
+    public const string SourceIdentity = "SourceIdentity";
 
     /// <summary>
     /// Converts a <see cref="CanonicalHashPurpose"/> to its canonical string representation.

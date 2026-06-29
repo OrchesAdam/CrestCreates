@@ -1,5 +1,6 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Authoring;
+using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Compression;
 using CrestCreates.Agent.Memory.Extraction;
 using CrestCreates.Agent.Memory.Promotion;
@@ -38,6 +39,9 @@ public static class AgentMemoryServiceCollectionExtensions
 
         // Authoring
         services.TryAddSingleton<IAgentAuthoringContextBuilder, DefaultAgentAuthoringContextBuilder>();
+
+        // Canonical Hashing
+        services.TryAddSingleton<AgentMemoryCanonicalHashProjector>();
 
         // TimeProvider
         services.TryAddSingleton(TimeProvider.System);

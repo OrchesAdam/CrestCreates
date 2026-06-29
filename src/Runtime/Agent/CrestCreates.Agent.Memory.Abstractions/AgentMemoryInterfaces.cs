@@ -65,5 +65,9 @@ public interface IAgentContextSourceExpander
 
 public interface IAgentAuthoringContextBuilder
 {
-    ValueTask<AgentAuthoringContext> BuildAsync(AgentAuthoringRequest request, MetadataContextPack metadataContextPack, CancellationToken cancellationToken = default);
+    ValueTask<AgentAuthoringContext> BuildAsync(
+        AgentAuthoringRequest request,
+        MetadataContextPack metadataContextPack,
+        AgentMemoryPack memoryPack,
+        CancellationToken cancellationToken = default);
 }

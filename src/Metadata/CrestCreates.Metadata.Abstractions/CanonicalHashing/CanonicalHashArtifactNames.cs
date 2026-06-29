@@ -14,4 +14,8 @@ public static class CanonicalHashArtifactNames
     public const string PackageManifest = "PackageManifest";
     public const string PackageEvidence = "PackageEvidence";
     public const string PackageEvidenceEnvelope = "PackageEvidenceEnvelope";
+    public const string AgentMemoryContent = "AgentMemoryContent";
+    public const string AgentMemoryPack = "AgentMemoryPack";
+    public const string AgentMemoryScope = "AgentMemoryScope";
+    public const string AgentMemorySet = "AgentMemorySet";
 }
