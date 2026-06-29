@@ -35,7 +35,7 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.ReviewNotRequired,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Activation review task not required for eligibility '{activationRequest.Eligibility}'."
             };
             return AgentToolResult<string>.InvalidRequest([diag]);
@@ -46,7 +46,7 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.BindingHashesRequired,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = "Cannot create review task: BindingSnapshot.Hashes is required but was null. " +
                           "This indicates a malformed activation request."
             };

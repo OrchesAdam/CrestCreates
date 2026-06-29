@@ -712,6 +712,36 @@ This thread achieved the following:
 - **Design spec**: `docs/superpowers/specs/2026-06-25-semantic-string-governance-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-25-semantic-string-governance.md`
 
+### Agent Memory Runtime (2026-06-29)
+
+Status: Abstractions + in-memory runtime implemented.
+
+Projects:
+- `CrestCreates.Agent.Memory.Abstractions` — contracts, interfaces, AoT JSON context
+- `CrestCreates.Agent.Memory` — in-memory default implementations + DI registration
+- `CrestCreates.Agent.Memory.Tests` — 11 tests (4 contract + 5 main chain + 2 boundary)
+
+Abstractions (8 enums, 17 records, 10 interfaces, 1 JSON context):
+- Enums: `AgentSourceKind`, `AgentMemoryConfidence`, `AgentMemoryStatus`, `AgentMemoryKind`, `AgentConversationRole`, `AgentMemoryDiagnosticSeverity`, `AgentMemorySourceExpansionStatus`, `AgentMemoryOperationKind`
+- Records: `AgentContextSourceRef`, `AgentContextEvidenceRef`, `AgentMemoryDiagnostic`, `AgentActorContext`, `AgentConversationTurn/Record`, `AgentTaskEvent/Record`, `SanitizedAgentContent`, `AgentCompressedContextBlock/Context`, `AgentMemoryCandidate/Item`, `AgentMemoryQuery`, `AgentMemoryPack`, `AgentMemoryOperationRequest`, `AgentSourceExpansionResult`, `AgentAuthoringRequest/Context`
+- Interfaces: `IAgentConversationStore`, `IAgentTaskHistoryStore`, `IAgentCompressedContextStore`, `IAgentMemoryStore`, `IAgentMemoryContentSanitizer`, `IAgentContextCompressor`, `IAgentMemoryExtractor`, `IAgentMemoryPromotionService`, `IAgentMemoryRetriever`, `IAgentContextSourceExpander`, `IAgentAuthoringContextBuilder`
+- JSON: `AgentMemoryJsonSerializerContext` with 13 `[JsonSerializable]` types for AoT
+
+Runtime implementations:
+- Stores: `InMemoryAgentConversationStore`, `InMemoryAgentTaskHistoryStore`, `InMemoryAgentCompressedContextStore`, `InMemoryAgentMemoryStore` — all use ConcurrentDictionary with snapshot semantics (ToArray on collection fields)
+- Sanitization: `DefaultAgentMemoryContentSanitizer` — SHA256 canonical hash, empty-content rejection
+- Compression: `DefaultAgentContextCompressor` — conversation/task → compressed context blocks
+- Extraction: `DefaultAgentMemoryExtractor` — one candidate per compressed block, Low confidence
+- Promotion: `DefaultAgentMemoryPromotionService` — Promote/Reject/Supersede/Archive with status guards and chain linking
+- Recall: `DefaultAgentMemoryRetriever` — query filtering + character budget, `DefaultAgentContextSourceExpander` — switch-dispatched source expansion
+- Authoring: `DefaultAgentAuthoringContextBuilder` — assembles MetadataContextPack + MemoryPack
+
+Dependency boundaries enforced:
+- Memory.Abstractions does NOT reference ControlPlane.Abstractions
+- Memory runtime does NOT reference ControlPlane, Framework Api/Web, Platform, or persistence providers
+
+Main chain flow: SaveConversation → Compress → ExtractCandidates → Promote → Recall → BuildAuthoringContext
+
 ---
 
 ## Recommended Next Thread Entry Prompt

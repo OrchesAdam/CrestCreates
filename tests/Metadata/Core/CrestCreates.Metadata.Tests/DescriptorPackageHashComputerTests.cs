@@ -5,6 +5,7 @@ using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using FluentAssertions;
 using Xunit;
+using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Metadata.Tests;
 
@@ -211,7 +212,7 @@ public class DescriptorPackageHashComputerTests
     {
         var finding1 = new EvidenceFinding
         {
-            Source = "test", Code = "T001", Severity = "Error", Message = "msg",
+            Source = "test", Code = new DiagnosticCode("T001"), Severity = SeverityLevel.Error, Message = "msg",
             RelatedRefs = new[]
             {
                 new DescriptorRef("capability", "c2", 1),
@@ -220,7 +221,7 @@ public class DescriptorPackageHashComputerTests
         };
         var finding2 = new EvidenceFinding
         {
-            Source = "test", Code = "T001", Severity = "Error", Message = "msg",
+            Source = "test", Code = new DiagnosticCode("T001"), Severity = SeverityLevel.Error, Message = "msg",
             RelatedRefs = new[]
             {
                 new DescriptorRef("schema", "s1", 1),
@@ -244,12 +245,12 @@ public class DescriptorPackageHashComputerTests
         // but different RelatedRefs — outer finding order must be stable.
         var findingA = new EvidenceFinding
         {
-            Source = "test", Code = "T001", Severity = "Error", Message = "msg",
+            Source = "test", Code = new DiagnosticCode("T001"), Severity = SeverityLevel.Error, Message = "msg",
             RelatedRefs = new[] { new DescriptorRef("capability", "c1", 1) }
         };
         var findingB = new EvidenceFinding
         {
-            Source = "test", Code = "T001", Severity = "Error", Message = "msg",
+            Source = "test", Code = new DiagnosticCode("T001"), Severity = SeverityLevel.Error, Message = "msg",
             RelatedRefs = new[] { new DescriptorRef("schema", "s1", 1) }
         };
 

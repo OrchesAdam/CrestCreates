@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using CrestCreates.Core.Abstractions.Identity;
 using FluentAssertions;
 using Xunit;
@@ -142,6 +143,76 @@ public class SemanticValueObjectTests
         new DescriptorId("schema.T1").RequireValue().Should().Be("schema.T1");
         new VersionKey("event.test:v1").RequireValue().Should().Be("event.test:v1");
         new MessageTemplateId("report.activation.eligible").RequireValue().Should().Be("report.activation.eligible");
+    }
+
+    [Fact]
+    public void DiagnosticCode_JsonSerializesAsString()
+    {
+        var json = JsonSerializer.Serialize(new DiagnosticCode("CCHASH001"));
+
+        json.Should().Be("\"CCHASH001\"");
+    }
+
+    [Fact]
+    public void DiagnosticCode_JsonDeserializesFromString()
+    {
+        var code = JsonSerializer.Deserialize<DiagnosticCode>("\"CCHASS001\"");
+
+        code.RequireValue().Should().Be("CCHASS001");
+    }
+
+    [Fact]
+    public void DiagnosticCode_JsonDeserialize_Null_ThrowsJsonException()
+    {
+        var act = () => JsonSerializer.Deserialize<DiagnosticCode>("null");
+
+        act.Should().Throw<JsonException>();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void DiagnosticCode_JsonDeserialize_EmptyOrWhitespace_ThrowsJsonException(string value)
+    {
+        var json = JsonSerializer.Serialize(value);
+        var act = () => JsonSerializer.Deserialize<DiagnosticCode>(json);
+
+        act.Should().Throw<JsonException>();
+    }
+
+    [Fact]
+    public void SeverityLevel_JsonDeserialize_Null_ThrowsJsonException()
+    {
+        var act = () => JsonSerializer.Deserialize<SeverityLevel>("null");
+
+        act.Should().Throw<JsonException>();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void SeverityLevel_JsonDeserialize_EmptyOrWhitespace_ThrowsJsonException(string value)
+    {
+        var json = JsonSerializer.Serialize(value);
+        var act = () => JsonSerializer.Deserialize<SeverityLevel>(json);
+
+        act.Should().Throw<JsonException>();
+    }
+
+    [Fact]
+    public void SeverityLevel_JsonSerializesAsString()
+    {
+        var json = JsonSerializer.Serialize(SeverityLevel.Warning);
+
+        json.Should().Be("\"Warning\"");
+    }
+
+    [Fact]
+    public void SeverityLevel_JsonDeserializesFromString()
+    {
+        var level = JsonSerializer.Deserialize<SeverityLevel>("\"Warning\"");
+
+        level.Should().Be(SeverityLevel.Warning);
     }
 
     [Theory]

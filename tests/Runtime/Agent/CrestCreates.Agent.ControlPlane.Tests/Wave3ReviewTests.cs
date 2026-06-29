@@ -43,8 +43,8 @@ public class Wave3ReviewTests : AgentControlPlaneTestBase
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
             new DraftAbstractions.DescriptorDraftDiagnostic
             {
-                Code = "DRAFT_ID_EMPTY",
-                Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error,
+                Code = new DiagnosticCode("DRAFT_ID_EMPTY"),
+                Severity = SeverityLevel.Error,
                 Message = "Draft ID must not be empty"
             });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
@@ -275,8 +275,8 @@ public class Wave3ReviewTests : AgentControlPlaneTestBase
         {
             Diagnostics = new List<AgentToolDiagnostic>
             {
-                new() { Code = "DRAFT_ID_EMPTY", Severity = AgentToolDiagnosticSeverity.Error, Message = "Draft ID is empty" },
-                new() { Code = "UNKNOWN_CODE", Severity = AgentToolDiagnosticSeverity.Warning, Message = "Something unknown" }
+                new() { Code = new DiagnosticCode("DRAFT_ID_EMPTY"), Severity = SeverityLevel.Error, Message = "Draft ID is empty" },
+                new() { Code = new DiagnosticCode("UNKNOWN_CODE"), Severity = SeverityLevel.Warning, Message = "Something unknown" }
             },
             DraftId = "draft-001"
         };
@@ -285,7 +285,7 @@ public class Wave3ReviewTests : AgentControlPlaneTestBase
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
         result.Value!.Explanations.Should().HaveCount(2);
-        result.Value.Explanations[0].Code.Should().Be("DRAFT_ID_EMPTY");
+        result.Value.Explanations[0].Code.Should().Be(new DiagnosticCode("DRAFT_ID_EMPTY"));
         result.Value.Explanations[0].Explanation.Should().NotBeNullOrEmpty();
         result.Value.Explanations[0].Remediation.Should().NotBeNullOrEmpty();
         result.Value.Explanations[1].Explanation.Should().Contain("No explanation");
@@ -299,7 +299,7 @@ public class Wave3ReviewTests : AgentControlPlaneTestBase
 
         var request = new ExplainDiagnosticsRequest
         {
-            Diagnostics = [new AgentToolDiagnostic { Code = "DRAFT_ID_EMPTY", Severity = AgentToolDiagnosticSeverity.Error, Message = "Empty" }]
+            Diagnostics = [new AgentToolDiagnostic { Code = new DiagnosticCode("DRAFT_ID_EMPTY"), Severity = SeverityLevel.Error, Message = "Empty" }]
         };
 
         var result = await service.ExplainDiagnosticsAsync(context, request);

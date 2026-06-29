@@ -113,10 +113,10 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
         var allDiagnostics = diagnostics.Concat(reviewDiagnostics).ToList();
 
-        var infoCount = allDiagnostics.Count(d => d.Severity == DescriptorDraftDiagnosticSeverity.Info);
-        var warningCount = allDiagnostics.Count(d => d.Severity == DescriptorDraftDiagnosticSeverity.Warning);
-        var errorCount = allDiagnostics.Count(d => d.Severity == DescriptorDraftDiagnosticSeverity.Error);
-        var blockerCount = allDiagnostics.Count(d => d.Severity == DescriptorDraftDiagnosticSeverity.Blocker);
+        var infoCount = allDiagnostics.Count(d => d.Severity == SeverityLevel.Info);
+        var warningCount = allDiagnostics.Count(d => d.Severity == SeverityLevel.Warning);
+        var errorCount = allDiagnostics.Count(d => d.Severity == SeverityLevel.Error);
+        var blockerCount = allDiagnostics.Count(d => d.Severity == SeverityLevel.Blocker);
 
         var items = new List<DescriptorReviewReportItemDto>();
 
@@ -162,13 +162,13 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         if (reviewResult.IsActivationEligible)
         {
             items.Add(CreateItem("summary_activation", "activation_eligible",
-                DescriptorActivationMessageTemplateIds.ActivationEligible, DescriptorReviewSeverity.Info,
+                DescriptorActivationMessageTemplateIds.ActivationEligible, SeverityLevel.Info,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
         else
         {
             var blockers = (reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>())
-                .Where(d => d.Severity is DescriptorDraftDiagnosticSeverity.Blocker or DescriptorDraftDiagnosticSeverity.Error)
+                .Where(d => d.Severity.Value is "Blocker" or "Error")
                 .Select(d => d.Code)
                 .ToList();
             var blockingReasons = blockers.Count > 0 ? string.Join(", ", blockers.OrderBy(c => c)) : "unknown";
@@ -177,7 +177,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["BlockingReasons"] = blockingReasons,
             };
             items.Add(CreateItem("summary_activation", "activation_blocked",
-                DescriptorActivationMessageTemplateIds.ActivationBlocked, DescriptorReviewSeverity.Blocker, blockParams));
+                DescriptorActivationMessageTemplateIds.ActivationBlocked, SeverityLevel.Blocker, blockParams));
         }
 
         // Governance summary item
@@ -198,19 +198,17 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             };
             var severity = decision.MaxDecision switch
             {
-                DescriptorLifecycleDecisionKind.Allowed => DescriptorReviewSeverity.Info,
-                DescriptorLifecycleDecisionKind.Blocked => DescriptorReviewSeverity.Blocker,
-                DescriptorLifecycleDecisionKind.ReviewRequired => DescriptorReviewSeverity.Warning,
-                _ => DescriptorReviewSeverity.Warning,
+                DescriptorLifecycleDecisionKind.Allowed => SeverityLevel.Info,
+                DescriptorLifecycleDecisionKind.Blocked => SeverityLevel.Blocker,
+                DescriptorLifecycleDecisionKind.ReviewRequired => SeverityLevel.Warning,
+                _ => SeverityLevel.Warning,
             };
             items.Add(CreateItem("summary_governance", "governance_decision", templateId, severity, govParams));
         }
 
         var overallSeverity = items.Count > 0
-            ? items.Max(i => (int)i.Severity) is var max && Enum.IsDefined(typeof(DescriptorReviewSeverity), max)
-                ? (DescriptorReviewSeverity)max
-                : DescriptorReviewSeverity.Info
-            : DescriptorReviewSeverity.Info;
+            ? MaxSeverityLevel(items)
+            : SeverityLevel.Info;
 
         return CreateSection(DescriptorReviewReportSectionKind.Summary, "summary",
             "Summary", 1, items.Count == 0, overallSeverity, items);
@@ -232,7 +230,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             ReasonCode = "draft_identity",
             MessageTemplateId = DescriptorReviewReportMessageTemplateIds.DraftIdentityInfo,
             Message = message,
-            Severity = DescriptorReviewSeverity.Info,
+            Severity = SeverityLevel.Info,
             Parameters = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["DraftId"] = draft.DraftId,
@@ -248,7 +246,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         items.Add(item);
 
         return CreateSection(DescriptorReviewReportSectionKind.DraftIdentity, "draft_identity",
-            "Draft Identity", 2, items.Count == 0, DescriptorReviewSeverity.Info, items);
+            "Draft Identity", 2, items.Count == 0, SeverityLevel.Info, items);
     }
 
     // ── Section 3: ProposedChanges ──────────────────────────────────────────
@@ -267,7 +265,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                     ["ProposedCount"] = materialization.ProposedInventory.Count.ToString(),
                 };
                 items.Add(CreateItem("proposed_materialized", "materialized",
-                    DescriptorReviewReportMessageTemplateIds.ProposedChangesMaterialized, DescriptorReviewSeverity.Info, parameters));
+                    DescriptorReviewReportMessageTemplateIds.ProposedChangesMaterialized, SeverityLevel.Info, parameters));
 
                 // Add items for each proposed descriptor
                 for (int i = 0; i < materialization.ProposedInventory.Count; i++)
@@ -281,7 +279,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                         ["Namespace"] = desc.Namespace,
                     };
                     items.Add(CreateItem($"proposed_desc_{i}", "proposed_descriptor",
-                        DescriptorReviewReportMessageTemplateIds.ProposedChangesMaterialized, DescriptorReviewSeverity.Info, descParams));
+                        DescriptorReviewReportMessageTemplateIds.ProposedChangesMaterialized, SeverityLevel.Info, descParams));
                 }
             }
             else
@@ -298,8 +296,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         }
 
         var overallSeverity = items.Count > 0
-            ? (DescriptorReviewSeverity)items.Max(i => (int)i.Severity)
-            : DescriptorReviewSeverity.Info;
+            ? MaxSeverityLevel(items)
+            : SeverityLevel.Info;
 
         return CreateSection(DescriptorReviewReportSectionKind.ProposedChanges, "proposed_changes",
             "Proposed Changes", 3, items.Count == 0, overallSeverity, items);
@@ -341,14 +339,14 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             else
             {
                 items.Add(CreateItem("impact_none", "impact_none",
-                    DescriptorReviewReportMessageTemplateIds.ImpactNone, DescriptorReviewSeverity.Info,
+                    DescriptorReviewReportMessageTemplateIds.ImpactNone, SeverityLevel.Info,
                     new Dictionary<string, string>(StringComparer.Ordinal)));
             }
         }
 
         var overallSeverity = items.Count > 0
-            ? (DescriptorReviewSeverity)items.Max(i => (int)i.Severity)
-            : DescriptorReviewSeverity.Info;
+            ? MaxSeverityLevel(items)
+            : SeverityLevel.Info;
 
         return CreateSection(DescriptorReviewReportSectionKind.ImpactAnalysis, "impact_analysis",
             "Impact Analysis", 4, items.Count == 0, overallSeverity, items);
@@ -385,12 +383,12 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["EdgeKindSummary"] = edgeKindSummary,
             };
             items.Add(CreateItem("topology_summary", "dependency_summary",
-                DescriptorReviewReportMessageTemplateIds.DependencySummary, DescriptorReviewSeverity.Info, parameters));
+                DescriptorReviewReportMessageTemplateIds.DependencySummary, SeverityLevel.Info, parameters));
         }
 
         var overallSeverity = items.Count > 0
-            ? (DescriptorReviewSeverity)items.Max(i => (int)i.Severity)
-            : DescriptorReviewSeverity.Info;
+            ? MaxSeverityLevel(items)
+            : SeverityLevel.Info;
 
         return CreateSection(DescriptorReviewReportSectionKind.DependencySummary, "dependency_summary",
             "Dependency Summary", 5, items.Count == 0, overallSeverity, items);
@@ -426,8 +424,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                     : DescriptorReviewReportMessageTemplateIds.CompatibilityCompatible;
 
                 var severity = incompatibleCount > 0
-                    ? DescriptorReviewSeverity.Warning
-                    : DescriptorReviewSeverity.Info;
+                    ? SeverityLevel.Warning
+                    : SeverityLevel.Info;
 
                 items.Add(CreateItem("compatibility_summary", "compatibility_assessment",
                     templateId, severity, parameters));
@@ -450,8 +448,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         }
 
         var overallSeverity = items.Count > 0
-            ? (DescriptorReviewSeverity)items.Max(i => (int)i.Severity)
-            : DescriptorReviewSeverity.Info;
+            ? MaxSeverityLevel(items)
+            : SeverityLevel.Info;
 
         return CreateSection(DescriptorReviewReportSectionKind.Compatibility, "compatibility",
             "Compatibility", 6, items.Count == 0, overallSeverity, items);
@@ -476,12 +474,12 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             var (templateId, severity) = gov.MaxDecision switch
             {
                 DescriptorLifecycleDecisionKind.Allowed =>
-                    (DescriptorReviewReportMessageTemplateIds.GovernanceApproved, DescriptorReviewSeverity.Info),
+                    (DescriptorReviewReportMessageTemplateIds.GovernanceApproved, SeverityLevel.Info),
                 DescriptorLifecycleDecisionKind.Blocked =>
-                    (DescriptorReviewReportMessageTemplateIds.GovernanceRejected, DescriptorReviewSeverity.Blocker),
+                    (DescriptorReviewReportMessageTemplateIds.GovernanceRejected, SeverityLevel.Blocker),
                 DescriptorLifecycleDecisionKind.ReviewRequired =>
-                    (DescriptorReviewReportMessageTemplateIds.GovernanceReviewRequired, DescriptorReviewSeverity.Warning),
-                _ => (DescriptorReviewReportMessageTemplateIds.GovernanceReviewRequired, DescriptorReviewSeverity.Warning),
+                    (DescriptorReviewReportMessageTemplateIds.GovernanceReviewRequired, SeverityLevel.Warning),
+                _ => (DescriptorReviewReportMessageTemplateIds.GovernanceReviewRequired, SeverityLevel.Warning),
             };
 
             items.Add(CreateItem("governance_decision", "governance", templateId, severity, parameters));
@@ -501,8 +499,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         }
 
         var overallSeverity = items.Count > 0
-            ? (DescriptorReviewSeverity)items.Max(i => (int)i.Severity)
-            : DescriptorReviewSeverity.Info;
+            ? MaxSeverityLevel(items)
+            : SeverityLevel.Info;
 
         return CreateSection(DescriptorReviewReportSectionKind.Governance, "governance",
             "Governance", 7, items.Count == 0, overallSeverity, items);
@@ -517,8 +515,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             .Concat(reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>())
             .OrderBy(d => d.Code)
             .ThenBy(d => d.Severity)
-            .Where(d => d.Severity is DescriptorDraftDiagnosticSeverity.Blocker
-                or DescriptorDraftDiagnosticSeverity.Error)
+            .Where(d => d.Severity.Value is "Blocker"
+                or "Error")
             .ToList();
 
         foreach (var diag in allDiagnostics)
@@ -547,12 +545,12 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["Path"] = "",
             };
             items.Add(CreateItem("human_review_governance", "GOV_REVIEW_REQUIRED",
-                DescriptorReviewReportMessageTemplateIds.HumanReviewRequired, DescriptorReviewSeverity.Warning, govParams));
+                DescriptorReviewReportMessageTemplateIds.HumanReviewRequired, SeverityLevel.Warning, govParams));
         }
 
         var overallSeverity = items.Count > 0
-            ? (DescriptorReviewSeverity)items.Max(i => (int)i.Severity)
-            : DescriptorReviewSeverity.Info;
+            ? MaxSeverityLevel(items)
+            : SeverityLevel.Info;
 
         return CreateSection(DescriptorReviewReportSectionKind.RequiredHumanReview, "required_human_review",
             "Required Human Review", 8, items.Count == 0, overallSeverity, items);
@@ -567,13 +565,13 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         if (reviewResult.IsActivationEligible)
         {
             items.Add(CreateItem("activation_eligible", "activation_eligible",
-                DescriptorActivationMessageTemplateIds.ActivationEligible, DescriptorReviewSeverity.Info,
+                DescriptorActivationMessageTemplateIds.ActivationEligible, SeverityLevel.Info,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
         else
         {
             var blockerDiags = (reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>())
-                .Where(d => d.Severity is DescriptorDraftDiagnosticSeverity.Blocker or DescriptorDraftDiagnosticSeverity.Error)
+                .Where(d => d.Severity.Value is "Blocker" or "Error")
                 .ToList();
             var blockingReasons = blockerDiags.Count > 0
                 ? string.Join(", ", blockerDiags.Select(d => d.Code).OrderBy(c => c))
@@ -584,7 +582,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["BlockingReasons"] = blockingReasons,
             };
             items.Add(CreateItem("activation_blocked", "activation_blocked",
-                DescriptorActivationMessageTemplateIds.ActivationBlocked, DescriptorReviewSeverity.Blocker, parameters));
+                DescriptorActivationMessageTemplateIds.ActivationBlocked, SeverityLevel.Blocker, parameters));
 
             // Add individual blocker details (explanation only, NOT gate)
             foreach (var blocker in blockerDiags.OrderBy(d => d.Code).ThenBy(d => d.Severity))
@@ -606,13 +604,13 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                     ["BlockingReasons"] = "Governance decision is blocked",
                 };
                 items.Add(CreateItem("activation_blocker_governance", "GOV_BLOCKED",
-                    DescriptorActivationMessageTemplateIds.ActivationBlocked, DescriptorReviewSeverity.Blocker, govParams));
+                    DescriptorActivationMessageTemplateIds.ActivationBlocked, SeverityLevel.Blocker, govParams));
             }
         }
 
         var overallSeverity = items.Count > 0
-            ? (DescriptorReviewSeverity)items.Max(i => (int)i.Severity)
-            : DescriptorReviewSeverity.Info;
+            ? MaxSeverityLevel(items)
+            : SeverityLevel.Info;
 
         return CreateSection(DescriptorReviewReportSectionKind.ActivationEligibility, "activation_eligibility",
             "Activation Eligibility", 9, items.Count == 0, overallSeverity, items);
@@ -663,8 +661,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         }
 
         var overallSeverity = items.Count > 0
-            ? (DescriptorReviewSeverity)items.Max(i => (int)i.Severity)
-            : DescriptorReviewSeverity.Info;
+            ? MaxSeverityLevel(items)
+            : SeverityLevel.Info;
 
         return CreateSection(DescriptorReviewReportSectionKind.Diagnostics, "diagnostics",
             "Diagnostics", 10, items.Count == 0, overallSeverity, items);
@@ -687,44 +685,44 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             reviewResult.GovernanceDecision?.IsAllowed == true)
         {
             items.Add(CreateItem("rec_activation_handoff", "activation_handoff",
-                DescriptorReviewReportMessageTemplateIds.RecommendationActivationHandoff, DescriptorReviewSeverity.Info,
+                DescriptorReviewReportMessageTemplateIds.RecommendationActivationHandoff, SeverityLevel.Info,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
         else if (reviewResult.GovernanceDecision?.RequiresReview == true)
         {
             items.Add(CreateItem("rec_human_review", "human_review_required",
-                DescriptorReviewReportMessageTemplateIds.RecommendationHumanReview, DescriptorReviewSeverity.Warning,
+                DescriptorReviewReportMessageTemplateIds.RecommendationHumanReview, SeverityLevel.Warning,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
         else if (!requiredHumanReviewSection.IsEmpty)
         {
             items.Add(CreateItem("rec_human_review_items", "human_review_required",
-                DescriptorReviewReportMessageTemplateIds.RecommendationHumanReview, DescriptorReviewSeverity.Warning,
+                DescriptorReviewReportMessageTemplateIds.RecommendationHumanReview, SeverityLevel.Warning,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
 
         // Check for blocker/error diagnostics → recommend revision
         var hasBlockers = (reviewResult.ValidationResult.Diagnostics
             .Concat(reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>()))
-            .Any(d => d.Severity is DescriptorDraftDiagnosticSeverity.Blocker
-                or DescriptorDraftDiagnosticSeverity.Error);
+            .Any(d => d.Severity.Value is "Blocker"
+                or "Error");
 
         if (hasBlockers)
         {
             items.Add(CreateItem("rec_revise_draft", "draft_needs_revision",
-                DescriptorReviewReportMessageTemplateIds.RecommendationReviseDraft, DescriptorReviewSeverity.Blocker,
+                DescriptorReviewReportMessageTemplateIds.RecommendationReviseDraft, SeverityLevel.Blocker,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
 
         // Check for warnings with fix proposals available
         var hasWarnings = (reviewResult.ValidationResult.Diagnostics
             .Concat(reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>()))
-            .Any(d => d.Severity == DescriptorDraftDiagnosticSeverity.Warning);
+            .Any(d => d.Severity == SeverityLevel.Warning);
 
         if (hasWarnings && !hasBlockers)
         {
             items.Add(CreateItem("rec_apply_fix", "fix_proposal_available",
-                DescriptorReviewReportMessageTemplateIds.RecommendationApplyFix, DescriptorReviewSeverity.Warning,
+                DescriptorReviewReportMessageTemplateIds.RecommendationApplyFix, SeverityLevel.Warning,
                 new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["FixProposalId"] = "", // Populated by FixProposal system when available
@@ -735,13 +733,13 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         if (items.Count == 0)
         {
             items.Add(CreateItem("rec_no_action", "no_action_required",
-                DescriptorReviewReportMessageTemplateIds.RecommendationNoAction, DescriptorReviewSeverity.Info,
+                DescriptorReviewReportMessageTemplateIds.RecommendationNoAction, SeverityLevel.Info,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
 
         var overallSeverity = items.Count > 0
-            ? (DescriptorReviewSeverity)items.Max(i => (int)i.Severity)
-            : DescriptorReviewSeverity.Info;
+            ? MaxSeverityLevel(items)
+            : SeverityLevel.Info;
 
         return CreateSection(DescriptorReviewReportSectionKind.Recommendations, "recommendations",
             "Recommendations", 11, items.Count == 0, overallSeverity, items);
@@ -765,17 +763,17 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["EnvelopeHash"] = preview.PackageEvidenceEnvelopeHash?.Value ?? "",
             };
             items.Add(CreateItem("package_preview_present", "package_preview_available",
-                DescriptorReviewReportMessageTemplateIds.PackagePreviewPresent, DescriptorReviewSeverity.Info, parameters));
+                DescriptorReviewReportMessageTemplateIds.PackagePreviewPresent, SeverityLevel.Info, parameters));
         }
         else
         {
             items.Add(CreateItem("package_preview_none", "package_preview_missing",
-                DescriptorReviewReportMessageTemplateIds.PackagePreviewNone, DescriptorReviewSeverity.Info,
+                DescriptorReviewReportMessageTemplateIds.PackagePreviewNone, SeverityLevel.Info,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
 
         return CreateSection(DescriptorReviewReportSectionKind.PackagePreview, "package_preview",
-            "Package Preview", 12, items.Count == 0, DescriptorReviewSeverity.Info, items);
+            "Package Preview", 12, items.Count == 0, SeverityLevel.Info, items);
     }
 
     // ── Section 13: StableHashes ────────────────────────────────────────────
@@ -796,17 +794,17 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                 ["BindingHash"] = hashes.BindingHash?.Value ?? "",
             };
             items.Add(CreateItem("stable_hashes_present", "stable_hashes_available",
-                DescriptorReviewReportMessageTemplateIds.StableHashesPresent, DescriptorReviewSeverity.Info, parameters));
+                DescriptorReviewReportMessageTemplateIds.StableHashesPresent, SeverityLevel.Info, parameters));
         }
         else
         {
             items.Add(CreateItem("stable_hashes_none", "stable_hashes_missing",
-                DescriptorReviewReportMessageTemplateIds.StableHashesNone, DescriptorReviewSeverity.Info,
+                DescriptorReviewReportMessageTemplateIds.StableHashesNone, SeverityLevel.Info,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
 
         return CreateSection(DescriptorReviewReportSectionKind.StableHashes, "stable_hashes",
-            "Stable Hashes", 13, items.Count == 0, DescriptorReviewSeverity.Info, items);
+            "Stable Hashes", 13, items.Count == 0, SeverityLevel.Info, items);
     }
 
     // ── Top-level Recommendations ───────────────────────────────────────────
@@ -853,8 +851,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         // 3. If diagnostics contain Blocker/Error → ReviseDraft
         var hasBlockers = (reviewResult.ValidationResult.Diagnostics
             .Concat(reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>()))
-            .Any(d => d.Severity is DescriptorDraftDiagnosticSeverity.Blocker
-                or DescriptorDraftDiagnosticSeverity.Error);
+            .Any(d => d.Severity.Value is "Blocker"
+                or "Error");
 
         if (hasBlockers)
         {
@@ -873,7 +871,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         //    (Only if no blockers are present — blockers take priority)
         var hasWarnings = (reviewResult.ValidationResult.Diagnostics
             .Concat(reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>()))
-            .Any(d => d.Severity == DescriptorDraftDiagnosticSeverity.Warning);
+            .Any(d => d.Severity == SeverityLevel.Warning);
 
         if (hasWarnings && !hasBlockers)
         {
@@ -917,7 +915,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         string itemId,
         string reasonCode,
         string messageTemplateId,
-        DescriptorReviewSeverity severity,
+        SeverityLevel severity,
         IReadOnlyDictionary<string, string> parameters)
     {
         var message = _templateCatalog.Format(messageTemplateId, parameters);
@@ -938,7 +936,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         string title,
         int order,
         bool isEmpty,
-        DescriptorReviewSeverity overallSeverity,
+        SeverityLevel overallSeverity,
         IReadOnlyList<DescriptorReviewReportItemDto> items)
     {
         return new DescriptorReviewReportSectionDto
@@ -955,50 +953,49 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
     // ── Severity Mappings ───────────────────────────────────────────────────
 
-    private static DescriptorReviewSeverity MapDiagnosticSeverity(DescriptorDraftDiagnosticSeverity severity)
+    private static SeverityLevel MaxSeverityLevel(IReadOnlyList<DescriptorReviewReportItemDto> items)
     {
-        return severity switch
-        {
-            DescriptorDraftDiagnosticSeverity.Info => DescriptorReviewSeverity.Info,
-            DescriptorDraftDiagnosticSeverity.Warning => DescriptorReviewSeverity.Warning,
-            DescriptorDraftDiagnosticSeverity.Error => DescriptorReviewSeverity.Error,
-            DescriptorDraftDiagnosticSeverity.Blocker => DescriptorReviewSeverity.Blocker,
-            _ => DescriptorReviewSeverity.Info,
-        };
+        if (items.Count == 0)
+            return SeverityLevel.Info;
+
+        return items.Max(i => i.Severity);
     }
 
-    private static DescriptorReviewSeverity MapMaxSeverity(IReadOnlyList<DescriptorDraftDiagnostic> diagnostics)
+    private static SeverityLevel MapDiagnosticSeverity(SeverityLevel severity)
+        => severity;
+
+    private static SeverityLevel MapMaxSeverity(IReadOnlyList<DescriptorDraftDiagnostic> diagnostics)
     {
         if (diagnostics.Count == 0)
-            return DescriptorReviewSeverity.Info;
+            return SeverityLevel.Info;
 
         return diagnostics.Max(d => MapDiagnosticSeverity(d.Severity));
     }
 
-    private static DescriptorReviewSeverity MapImpactSeverity(DescriptorImpactSeverity severity)
+    private static SeverityLevel MapImpactSeverity(DescriptorImpactSeverity severity)
     {
         return severity switch
         {
-            DescriptorImpactSeverity.None => DescriptorReviewSeverity.Info,
-            DescriptorImpactSeverity.Info => DescriptorReviewSeverity.Info,
-            DescriptorImpactSeverity.Low => DescriptorReviewSeverity.Warning,
-            DescriptorImpactSeverity.Medium => DescriptorReviewSeverity.Warning,
-            DescriptorImpactSeverity.High => DescriptorReviewSeverity.Error,
-            DescriptorImpactSeverity.Critical => DescriptorReviewSeverity.Blocker,
-            _ => DescriptorReviewSeverity.Info,
+            DescriptorImpactSeverity.None => SeverityLevel.Info,
+            DescriptorImpactSeverity.Info => SeverityLevel.Info,
+            DescriptorImpactSeverity.Low => SeverityLevel.Warning,
+            DescriptorImpactSeverity.Medium => SeverityLevel.Warning,
+            DescriptorImpactSeverity.High => SeverityLevel.Error,
+            DescriptorImpactSeverity.Critical => SeverityLevel.Blocker,
+            _ => SeverityLevel.Info,
         };
     }
 
-    private static DescriptorReviewSeverity MapCompatibilityLevel(DescriptorCompatibilityLevel level)
+    private static SeverityLevel MapCompatibilityLevel(DescriptorCompatibilityLevel level)
     {
         return level switch
         {
-            DescriptorCompatibilityLevel.Compatible => DescriptorReviewSeverity.Info,
-            DescriptorCompatibilityLevel.Risky => DescriptorReviewSeverity.Warning,
-            DescriptorCompatibilityLevel.SecuritySensitive => DescriptorReviewSeverity.Error,
-            DescriptorCompatibilityLevel.Breaking => DescriptorReviewSeverity.Blocker,
-            DescriptorCompatibilityLevel.Unsupported => DescriptorReviewSeverity.Error,
-            _ => DescriptorReviewSeverity.Info,
+            DescriptorCompatibilityLevel.Compatible => SeverityLevel.Info,
+            DescriptorCompatibilityLevel.Risky => SeverityLevel.Warning,
+            DescriptorCompatibilityLevel.SecuritySensitive => SeverityLevel.Error,
+            DescriptorCompatibilityLevel.Breaking => SeverityLevel.Blocker,
+            DescriptorCompatibilityLevel.Unsupported => SeverityLevel.Error,
+            _ => SeverityLevel.Info,
         };
     }
 }

@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
@@ -47,7 +48,7 @@ public sealed class WorkflowBindingStatusContributor : IDescriptorBindingStatusC
             var schema = _schemaRegistry.GetByVersion(refVal.Id, refVal.Version);
             if (schema == null)
             {
-                issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_SCHEMA",
+                issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("REF_MISSING_SCHEMA"),
                     $"Variable schema '{refVal.Id}' v{refVal.Version} not found.",
                     fullId, DescriptorKind.Workflow, "VariableSchema"));
             }
@@ -61,7 +62,7 @@ public sealed class WorkflowBindingStatusContributor : IDescriptorBindingStatusC
                     var cap = _capabilityRegistry.GetByVersion(capTarget.Capability.Id, capTarget.Capability.Version);
                     if (cap == null)
                     {
-                        issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_TARGET",
+                        issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("REF_MISSING_TARGET"),
                             $"Capability target '{capTarget.Capability.Id}' v{capTarget.Capability.Version} not found.",
                             fullId, DescriptorKind.Workflow, $"Steps[{step.Id}].Target"));
                     }
@@ -70,13 +71,13 @@ public sealed class WorkflowBindingStatusContributor : IDescriptorBindingStatusC
                     var task = _humanTaskRegistry.GetByVersion(taskTarget.HumanTask.Id, taskTarget.HumanTask.Version);
                     if (task == null)
                     {
-                        issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_TARGET",
+                        issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("REF_MISSING_TARGET"),
                             $"HumanTask target '{taskTarget.HumanTask.Id}' v{taskTarget.HumanTask.Version} not found.",
                             fullId, DescriptorKind.Workflow, $"Steps[{step.Id}].Target"));
                     }
                     break;
                 case SubWorkflowTarget:
-                    issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "UNSUPPORTED_SUBWORKFLOW",
+                    issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("UNSUPPORTED_SUBWORKFLOW"),
                         $"Step '{step.Id}' uses SubWorkflowTarget which is not supported by the current runtime.",
                         fullId, DescriptorKind.Workflow, $"Steps[{step.Id}].Target"));
                     break;
@@ -84,21 +85,21 @@ public sealed class WorkflowBindingStatusContributor : IDescriptorBindingStatusC
 
             if (step.OnError == StepErrorBehavior.Retry)
             {
-                issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "UNSUPPORTED_RETRY",
+                issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("UNSUPPORTED_RETRY"),
                     $"Step '{step.Id}' uses Retry which is not supported by the current runtime.",
                     fullId, DescriptorKind.Workflow, $"Steps[{step.Id}].OnError"));
             }
 
             if (step.OnError == StepErrorBehavior.Compensate)
             {
-                issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "UNSUPPORTED_COMPENSATE",
+                issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("UNSUPPORTED_COMPENSATE"),
                     $"Step '{step.Id}' uses Compensate which is not supported by the current runtime.",
                     fullId, DescriptorKind.Workflow, $"Steps[{step.Id}].OnError"));
             }
 
             if (step.Transitions?.Count > 0)
             {
-                issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "UNSUPPORTED_TRANSITIONS",
+                issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("UNSUPPORTED_TRANSITIONS"),
                     $"Step '{step.Id}' has transitions which are not supported by the current runtime.",
                     fullId, DescriptorKind.Workflow, $"Steps[{step.Id}].Transitions"));
             }

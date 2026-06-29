@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 
@@ -28,7 +29,7 @@ public sealed class CapabilityHandlerValidator : IBootstrapValidator
         {
             if (!mappings.ContainsKey(descriptor.Id))
             {
-                issues.Add(new ValidationIssue(ValidationSeverity.Error,
+                issues.Add(new ValidationIssue(SeverityLevel.Error,
                     $"Capability '{descriptor.Id}' (Name: '{descriptor.Name}') has no registered handler. " +
                     $"Add [GenerateCapabilityHandler] or register manually."));
             }

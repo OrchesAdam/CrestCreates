@@ -176,8 +176,8 @@ public sealed class DescriptorImpactAnalyzer : IDescriptorImpactAnalyzer
                     if (!opts.IncludeAdvisoryRelationships && IsAdvisory(edge))
                     {
                         diagnostics.Add(new DescriptorImpactDiagnostic(
-                            DiagnosticSeverity.Info,
-                            "IMPACT_SKIPPED_WEAK_PATH",
+                            SeverityLevel.Info,
+                            new DiagnosticCode("IMPACT_SKIPPED_WEAK_PATH"),
                             $"Advisory edge skipped: {edge.From.Id} -> {edge.To.Id}",
                             edge.From, null));
                         continue;
@@ -197,8 +197,8 @@ public sealed class DescriptorImpactAnalyzer : IDescriptorImpactAnalyzer
                             };
                             RecordDiscovered(allDiscovered, cn.Ref, path, edge.IsRuntimeBinding);
                             diagnostics.Add(new DescriptorImpactDiagnostic(
-                                DiagnosticSeverity.Warning,
-                                "IMPACT_PATH_TRUNCATED",
+                                SeverityLevel.Warning,
+                                new DiagnosticCode("IMPACT_PATH_TRUNCATED"),
                                 $"Impact path truncated at depth limit {opts.MaxDepth}: {cn.Ref.FullId}",
                                 cn.Ref, null));
                         }
@@ -220,8 +220,8 @@ public sealed class DescriptorImpactAnalyzer : IDescriptorImpactAnalyzer
                     if (consumerNodes.Count == 0)
                     {
                         diagnostics.Add(new DescriptorImpactDiagnostic(
-                            DiagnosticSeverity.Warning,
-                            "IMPACT_UNRESOLVED_CONSUMER",
+                            SeverityLevel.Warning,
+                            new DiagnosticCode("IMPACT_UNRESOLVED_CONSUMER"),
                             $"Unresolved consumer: {lastSegment.From.FullId}",
                             lastSegment.From, null));
                         continue;
@@ -230,8 +230,8 @@ public sealed class DescriptorImpactAnalyzer : IDescriptorImpactAnalyzer
                     if (consumerNodes.Count > 1)
                     {
                         diagnostics.Add(new DescriptorImpactDiagnostic(
-                            DiagnosticSeverity.Warning,
-                            "IMPACT_AMBIGUOUS_UNPINNED_TARGET",
+                            SeverityLevel.Warning,
+                            new DiagnosticCode("IMPACT_AMBIGUOUS_UNPINNED_TARGET"),
                             $"Ambiguous unpinned consumer: {lastSegment.From.FullId} resolves to {consumerNodes.Count} versions",
                             lastSegment.From, null));
                     }
@@ -250,8 +250,8 @@ public sealed class DescriptorImpactAnalyzer : IDescriptorImpactAnalyzer
                         if (opts.MaxDepth.HasValue && nextDepth > opts.MaxDepth.Value)
                         {
                             diagnostics.Add(new DescriptorImpactDiagnostic(
-                                DiagnosticSeverity.Warning,
-                                "IMPACT_PATH_TRUNCATED",
+                                SeverityLevel.Warning,
+                                new DiagnosticCode("IMPACT_PATH_TRUNCATED"),
                                 $"Impact path truncated at depth {opts.MaxDepth}: {consumerNode.Ref.FullId}",
                                 consumerNode.Ref, null));
                             continue;
@@ -266,8 +266,8 @@ public sealed class DescriptorImpactAnalyzer : IDescriptorImpactAnalyzer
                             if (!opts.IncludeAdvisoryRelationships && IsAdvisory(nextEdge))
                             {
                                 diagnostics.Add(new DescriptorImpactDiagnostic(
-                                    DiagnosticSeverity.Info,
-                                    "IMPACT_SKIPPED_WEAK_PATH",
+                                    SeverityLevel.Info,
+                                    new DiagnosticCode("IMPACT_SKIPPED_WEAK_PATH"),
                                     $"Advisory edge skipped: {nextEdge.From.Id} -> {nextEdge.To.Id}",
                                     nextEdge.From, null));
                                 continue;
@@ -352,23 +352,24 @@ public sealed class DescriptorImpactAnalyzer : IDescriptorImpactAnalyzer
             var relatedOnPath = topoDiag.RelatedRefs?.Any(r => allDiscovered.ContainsKey(r)) == true;
             if (subjectOnPath || relatedOnPath)
             {
-                var code = topoDiag.Code switch
+                var codeStr = (string)topoDiag.Code;
+                var code = codeStr switch
                 {
-                    "MISSING_TARGET" => "IMPACT_TOPOLOGY_MISSING_TARGET",
-                    "STRONG_CYCLE" => "IMPACT_TOPOLOGY_STRONG_CYCLE",
-                    "UNSUPPORTED_REFERENCE" => "IMPACT_TOPOLOGY_UNSUPPORTED_REFERENCE",
-                    _ => null
+                    "MISSING_TARGET" => new DiagnosticCode("IMPACT_TOPOLOGY_MISSING_TARGET"),
+                    "STRONG_CYCLE" => new DiagnosticCode("IMPACT_TOPOLOGY_STRONG_CYCLE"),
+                    "UNSUPPORTED_REFERENCE" => new DiagnosticCode("IMPACT_TOPOLOGY_UNSUPPORTED_REFERENCE"),
+                    _ => ((DiagnosticCode?)null)
                 };
                 if (code is not null)
                 {
                     diagnostics.Add(new DescriptorImpactDiagnostic(
-                        topoDiag.Severity, code, topoDiag.Message,
+                        topoDiag.Severity, code.Value, topoDiag.Message,
                         topoDiag.Subject, topoDiag.RelatedRefs));
                 }
             }
         }
 
-        diagnostics.Sort((a, b) => b.Severity.CompareTo(a.Severity));
+        diagnostics.Sort((a, b) => string.CompareOrdinal(b.Severity.RequireValue(), a.Severity.RequireValue()));
 
         var maxSeverity = affectedDescriptors.Count > 0
             ? affectedDescriptors.Max(a => a.Severity)

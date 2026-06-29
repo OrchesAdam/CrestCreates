@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
@@ -43,7 +44,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
             {
                 diagnostics.Add(new MetadataContextPackDiagnostic
                 {
-                    Severity = MetadataContextPackDiagnosticSeverity.Warning,
+                    Severity = SeverityLevel.Warning,
                     Code = MetadataContextPackDiagnosticCodes.AmbiguousDescriptorRef,
                     Message = $"Focus descriptor ref '{focusRef.FullId}' matches multiple versions. Specify an exact version.",
                     Subject = focusRef
@@ -56,7 +57,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
                 // Neither topology nor inventory — not found
                 diagnostics.Add(new MetadataContextPackDiagnostic
                 {
-                    Severity = MetadataContextPackDiagnosticSeverity.Warning,
+                    Severity = SeverityLevel.Warning,
                     Code = MetadataContextPackDiagnosticCodes.FocusNotFound,
                     Message = $"Focus descriptor '{focusRef.FullId}' not found in topology or descriptor inventory.",
                     Subject = focusRef
@@ -69,7 +70,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
                 // Topology has the node but inventory has no descriptor
                 diagnostics.Add(new MetadataContextPackDiagnostic
                 {
-                    Severity = MetadataContextPackDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Code = MetadataContextPackDiagnosticCodes.DescriptorMissingForTopologyRef,
                     Message = $"Topology references descriptor '{focusRef.FullId}' but it is absent from descriptor inventory.",
                     Subject = focusRef
@@ -82,7 +83,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
                 // Inventory-only — include if focused, no traversal possible
                 diagnostics.Add(new MetadataContextPackDiagnostic
                 {
-                    Severity = MetadataContextPackDiagnosticSeverity.Warning,
+                    Severity = SeverityLevel.Warning,
                     Code = MetadataContextPackDiagnosticCodes.TopologyNodeMissingForDescriptor,
                     Message = $"Descriptor '{focusRef.FullId}' exists in inventory but has no topology node.",
                     Subject = focusRef
@@ -167,7 +168,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
         {
             diagnostics.Add(new MetadataContextPackDiagnostic
             {
-                Severity = MetadataContextPackDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Code = MetadataContextPackDiagnosticCodes.RecipeMissing,
                 Message = "RuntimeScenario scope requires a ScenarioRecipe."
             });
@@ -282,7 +283,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
         {
             diagnostics.Add(new MetadataContextPackDiagnostic
             {
-                Severity = MetadataContextPackDiagnosticSeverity.Info,
+                Severity = SeverityLevel.Info,
                 Code = MetadataContextPackDiagnosticCodes.TruncatedByDepth,
                 Message = $"Traversal truncated at depth {maxDepth}. Additional nodes exist beyond this depth."
             });
@@ -371,7 +372,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
             {
                 diagnostics.Add(new MetadataContextPackDiagnostic
                 {
-                    Severity = MetadataContextPackDiagnosticSeverity.Warning,
+                    Severity = SeverityLevel.Warning,
                     Code = MetadataContextPackDiagnosticCodes.FocusKindFiltered,
                     Message = $"Focus descriptor '{focusRef.FullId}' has kind {kind} that would be filtered. Focus is still included.",
                     Subject = focusRef
@@ -409,7 +410,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
         {
             diagnostics.Add(new MetadataContextPackDiagnostic
             {
-                Severity = MetadataContextPackDiagnosticSeverity.Info,
+                Severity = SeverityLevel.Info,
                 Code = MetadataContextPackDiagnosticCodes.KindExcluded,
                 Message = $"{toRemove.Count} descriptor(s) excluded by kind filters."
             });
@@ -449,7 +450,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
 
         diagnostics.Add(new MetadataContextPackDiagnostic
         {
-            Severity = MetadataContextPackDiagnosticSeverity.Info,
+            Severity = SeverityLevel.Info,
             Code = MetadataContextPackDiagnosticCodes.TruncatedByCount,
             Message = $"Result truncated to {maxDescriptorCount} descriptors.",
             Path = $"MaxDescriptorCount={maxDescriptorCount}"
@@ -516,7 +517,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
                     {
                         diagnostics.Add(new MetadataContextPackDiagnostic
                         {
-                            Severity = MetadataContextPackDiagnosticSeverity.Warning,
+                            Severity = SeverityLevel.Warning,
                             Code = MetadataContextPackDiagnosticCodes.AmbiguousDescriptorRef,
                             Message = $"Descriptor ref '{ref_.FullId}' matches multiple versions. Specify an exact version.",
                             Subject = ref_
@@ -526,7 +527,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
                     {
                         diagnostics.Add(new MetadataContextPackDiagnostic
                         {
-                            Severity = MetadataContextPackDiagnosticSeverity.Error,
+                            Severity = SeverityLevel.Error,
                             Code = MetadataContextPackDiagnosticCodes.DescriptorMissingForTopologyRef,
                             Message = $"Topology references descriptor '{ref_.FullId}' but it is absent from descriptor inventory.",
                             Subject = ref_
@@ -552,7 +553,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
                     {
                         diagnostics.Add(new MetadataContextPackDiagnostic
                         {
-                            Severity = MetadataContextPackDiagnosticSeverity.Warning,
+                            Severity = SeverityLevel.Warning,
                             Code = MetadataContextPackDiagnosticCodes.HashBuilderMissing,
                             Message = "IncludeStableHashes is true but no IDescriptorStableHashBuilder is available."
                         });
@@ -644,7 +645,7 @@ public sealed class DefaultMetadataContextPackBuilder : IMetadataContextPackBuil
     {
         return diagnostics
             .OrderByDescending(d => d.Severity)
-            .ThenBy(d => d.Code, StringComparer.Ordinal)
+            .ThenBy(d => d.Code.Value ?? "", StringComparer.Ordinal)
             .ThenBy(d => d.Subject?.Namespace ?? "", StringComparer.Ordinal)
             .ThenBy(d => d.Subject?.Id ?? "", StringComparer.Ordinal)
             .ThenBy(d => d.Subject?.Version ?? -1)

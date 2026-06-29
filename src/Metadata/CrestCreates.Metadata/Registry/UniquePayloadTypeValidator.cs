@@ -17,7 +17,7 @@ public sealed class UniquePayloadTypeValidator : IRegistryValidator<GeneratedEve
             .ToList();
 
         if (violations.Count > 0)
-            issues.Add(new ValidationIssue(ValidationSeverity.Error,
+            issues.Add(new ValidationIssue(SeverityLevel.Error,
                 $"PayloadType uniqueness violation: {violations.Count} CLR types map to multiple Active events."));
 
         return new ValidationReport(issues);

@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
@@ -36,7 +37,7 @@ public sealed class FormBindingStatusContributor : IDescriptorBindingStatusContr
         var schema = _schemaRegistry.GetByVersion(form.Schema.Id, form.Schema.Version);
         if (schema == null)
         {
-            issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_SCHEMA_VERSION",
+            issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("REF_MISSING_SCHEMA_VERSION"),
                 $"Schema '{form.Schema.Id}' v{form.Schema.Version} not found.",
                 fullId, DescriptorKind.Form, "Schema"));
         }
@@ -48,7 +49,7 @@ public sealed class FormBindingStatusContributor : IDescriptorBindingStatusContr
             {
                 if (!schemaFieldNames.Contains(field.SchemaFieldName))
                 {
-                    issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_SCHEMA_FIELD",
+                    issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("REF_MISSING_SCHEMA_FIELD"),
                         $"Form field '{field.SchemaFieldName}' not found in schema '{form.Schema.Id}' v{form.Schema.Version}.",
                         fullId, DescriptorKind.Form, $"Fields.{field.SchemaFieldName}"));
                 }
@@ -60,7 +61,7 @@ public sealed class FormBindingStatusContributor : IDescriptorBindingStatusContr
             {
                 if (!formFieldNames.Contains(schemaField.Name))
                 {
-                    issues.Add(new DescriptorBindingIssue(ValidationSeverity.Warning, "BIND_MISSING_REQUIRED_FIELD",
+                    issues.Add(new DescriptorBindingIssue(SeverityLevel.Warning, new DiagnosticCode("BIND_MISSING_REQUIRED_FIELD"),
                         $"Required schema field '{schemaField.Name}' is missing from form.",
                         fullId, DescriptorKind.Form, $"Fields.{schemaField.Name}"));
                 }

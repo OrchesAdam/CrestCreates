@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
@@ -24,7 +25,7 @@ public sealed class DefaultDescriptorDraftMaterializer : IDescriptorDraftMateria
             DescriptorDraftOperation.Deprecate => Unsupported("Deprecate", draft.DraftId),
             DescriptorDraftOperation.Remove => Unsupported("Remove", draft.DraftId),
             _ => DescriptorDraftMaterializationResult.Failure(
-                Diag("UNKNOWN_OPERATION", DescriptorDraftDiagnosticSeverity.Error,
+                Diag(new DiagnosticCode("UNKNOWN_OPERATION"), SeverityLevel.Error,
                     $"Unknown operation: {draft.Operation}", draft.DraftId))
         };
     }
@@ -40,7 +41,7 @@ public sealed class DefaultDescriptorDraftMaterializer : IDescriptorDraftMateria
 
         if (duplicate is not null)
             return DescriptorDraftMaterializationResult.Failure(
-                Diag("CREATE_DESCRIPTOR_EXISTS", DescriptorDraftDiagnosticSeverity.Error,
+                Diag(new DiagnosticCode("CREATE_DESCRIPTOR_EXISTS"), SeverityLevel.Error,
                     $"Descriptor {proposedDescriptor.Kind}/{proposedDescriptor.Id} v{proposedVersion} already exists.", draft.DraftId));
 
         proposed.Add(proposedDescriptor);
@@ -53,7 +54,7 @@ public sealed class DefaultDescriptorDraftMaterializer : IDescriptorDraftMateria
         var baseVersion = ParseVersion(draft.BaseVersion, "BaseVersion");
         if (baseVersion is null && draft.Operation == DescriptorDraftOperation.Update)
             return DescriptorDraftMaterializationResult.Failure(
-                Diag("UPDATE_BASE_VERSION_INVALID", DescriptorDraftDiagnosticSeverity.Error,
+                Diag(new DiagnosticCode("UPDATE_BASE_VERSION_INVALID"), SeverityLevel.Error,
                     $"BaseVersion '{draft.BaseVersion}' cannot be parsed as a version number.", draft.DraftId));
 
         var index = proposed.FindIndex(d =>
@@ -63,7 +64,7 @@ public sealed class DefaultDescriptorDraftMaterializer : IDescriptorDraftMateria
 
         if (index < 0)
             return DescriptorDraftMaterializationResult.Failure(
-                Diag("UPDATE_BASE_NOT_FOUND", DescriptorDraftDiagnosticSeverity.Error,
+                Diag(new DiagnosticCode("UPDATE_BASE_NOT_FOUND"), SeverityLevel.Error,
                     $"Base descriptor {draft.DescriptorKind}/{draft.DescriptorId} v{baseVersion} not found.", draft.DraftId));
 
         var proposedVersion = (proposedDescriptor as IVersionedDescriptor)?.Version;
@@ -78,7 +79,7 @@ public sealed class DefaultDescriptorDraftMaterializer : IDescriptorDraftMateria
                 (existing as IVersionedDescriptor)?.Version == proposedVersion)
             {
                 return DescriptorDraftMaterializationResult.Failure(
-                    Diag("UPDATE_DESCRIPTOR_EXISTS", DescriptorDraftDiagnosticSeverity.Error,
+                    Diag(new DiagnosticCode("UPDATE_DESCRIPTOR_EXISTS"), SeverityLevel.Error,
                         $"Descriptor {proposedDescriptor.Kind}/{proposedDescriptor.Id} v{proposedVersion} already exists.", draft.DraftId));
             }
         }
@@ -95,10 +96,10 @@ public sealed class DefaultDescriptorDraftMaterializer : IDescriptorDraftMateria
 
     private static DescriptorDraftMaterializationResult Unsupported(string operation, string? draftId)
         => DescriptorDraftMaterializationResult.Failure(
-            Diag("UNSUPPORTED_OPERATION", DescriptorDraftDiagnosticSeverity.Error,
+            Diag(new DiagnosticCode("UNSUPPORTED_OPERATION"), SeverityLevel.Error,
                 $"{operation} materialization is not supported.", draftId));
 
-    private static DescriptorDraftDiagnostic Diag(string code, DescriptorDraftDiagnosticSeverity severity,
+    private static DescriptorDraftDiagnostic Diag(DiagnosticCode code, SeverityLevel severity,
         string message, string? draftId = null)
         => new() { Code = code, Severity = severity, Message = message, DraftId = draftId };
 }

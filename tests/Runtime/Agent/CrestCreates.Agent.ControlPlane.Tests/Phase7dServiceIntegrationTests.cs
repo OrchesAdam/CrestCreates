@@ -285,7 +285,7 @@ public class Phase7dServiceIntegrationTests : AgentControlPlaneTestBase
             Title = "Summary",
             Order = 1,
             IsEmpty = false,
-            OverallSeverity = DescriptorReviewSeverity.Info,
+            OverallSeverity = SeverityLevel.Info,
             Items = new[]
             {
                 new DescriptorReviewReportItemDto
@@ -294,7 +294,7 @@ public class Phase7dServiceIntegrationTests : AgentControlPlaneTestBase
                     ReasonCode = "test",
                     MessageTemplateId = "report.summary.valid",
                     Message = "All valid.",
-                    Severity = DescriptorReviewSeverity.Info,
+                    Severity = SeverityLevel.Info,
                     Parameters = emptyParams,
                 }
             }
@@ -307,7 +307,7 @@ public class Phase7dServiceIntegrationTests : AgentControlPlaneTestBase
             Title = "Empty",
             Order = 2,
             IsEmpty = true,
-            OverallSeverity = DescriptorReviewSeverity.Info,
+            OverallSeverity = SeverityLevel.Info,
             Items = Array.Empty<DescriptorReviewReportItemDto>(),
         };
 

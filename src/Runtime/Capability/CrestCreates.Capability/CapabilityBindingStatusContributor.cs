@@ -1,4 +1,5 @@
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
@@ -41,7 +42,7 @@ public sealed class CapabilityBindingStatusContributor : IDescriptorBindingStatu
             var schema = _schemaRegistry.GetByVersion(refVal.Id, refVal.Version);
             if (schema == null)
             {
-                issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_INPUT_SCHEMA",
+                issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("REF_MISSING_INPUT_SCHEMA"),
                     $"Input schema '{refVal.Id}' v{refVal.Version} not found.",
                     fullId, DescriptorKind.Capability, "InputSchema"));
             }
@@ -53,7 +54,7 @@ public sealed class CapabilityBindingStatusContributor : IDescriptorBindingStatu
             var schema = _schemaRegistry.GetByVersion(refVal.Id, refVal.Version);
             if (schema == null)
             {
-                issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_OUTPUT_SCHEMA",
+                issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("REF_MISSING_OUTPUT_SCHEMA"),
                     $"Output schema '{refVal.Id}' v{refVal.Version} not found.",
                     fullId, DescriptorKind.Capability, "OutputSchema"));
             }
@@ -62,7 +63,7 @@ public sealed class CapabilityBindingStatusContributor : IDescriptorBindingStatu
         var handler = _handlerResolver.Resolve(cap.Id);
         if (handler == null)
         {
-            issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "BIND_NO_HANDLER",
+            issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("BIND_NO_HANDLER"),
                 $"No handler registered for capability '{cap.Id}'.",
                 fullId, DescriptorKind.Capability));
         }

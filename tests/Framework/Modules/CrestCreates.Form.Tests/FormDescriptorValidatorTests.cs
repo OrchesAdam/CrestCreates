@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
@@ -43,7 +44,7 @@ public class FormDescriptorValidatorTests
         var form = CreateValidForm(id: "");
         var report = _validator.Validate([form]);
         report.HasErrors.Should().BeTrue();
-        report.Issues.Should().Contain(i => i.Severity == ValidationSeverity.Error
+        report.Issues.Should().Contain(i => i.Severity == SeverityLevel.Error
             && i.Message.Contains("Id must not be null or whitespace"));
     }
 

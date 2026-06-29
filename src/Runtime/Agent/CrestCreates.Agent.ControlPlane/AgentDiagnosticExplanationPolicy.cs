@@ -10,7 +10,7 @@ namespace CrestCreates.Agent.ControlPlane;
 internal sealed record DiagnosticExplanationTemplate(
     string Explanation,
     string Remediation,
-    AgentToolDiagnosticSeverity Severity,
+    SeverityLevel Severity,
     IReadOnlyList<string> SuggestedFixToolNames);
 
 internal sealed class AgentDiagnosticExplanationPolicy
@@ -21,62 +21,62 @@ internal sealed class AgentDiagnosticExplanationPolicy
             [DescriptorDraftDiagnosticCodes.KindPayloadMismatch] = new(
                 "The declared descriptor kind and payload kind differ.",
                 "Submit a payload whose typed kind matches the declared kind.",
-                AgentToolDiagnosticSeverity.Error,
+                SeverityLevel.Error,
                 [AgentToolName.SuggestDescriptorDraftFixes]),
             [DescriptorDraftDiagnosticCodes.DraftIdEmpty] = new(
                 "The draft identifier must not be empty.",
                 "Provide a non-empty DraftId or use auto-generation.",
-                AgentToolDiagnosticSeverity.Error,
+                SeverityLevel.Error,
                 [AgentToolName.SuggestDescriptorDraftFixes]),
             [DescriptorDraftDiagnosticCodes.DescriptorIdEmpty] = new(
                 "The descriptor identifier must not be empty.",
                 "Provide the descriptor identifier this draft targets.",
-                AgentToolDiagnosticSeverity.Error,
+                SeverityLevel.Error,
                 [AgentToolName.SuggestDescriptorDraftFixes]),
             [DescriptorDraftDiagnosticCodes.AuthorIdEmpty] = new(
                 "The author identifier must not be empty.",
                 "Provide the author identifier.",
-                AgentToolDiagnosticSeverity.Error,
+                SeverityLevel.Error,
                 [AgentToolName.SuggestDescriptorDraftFixes]),
             [DescriptorDraftDiagnosticCodes.RationaleEmpty] = new(
                 "The rationale must not be empty.",
                 "Provide a rationale for the draft.",
-                AgentToolDiagnosticSeverity.Warning,
+                SeverityLevel.Warning,
                 []),
             [DescriptorDraftDiagnosticCodes.IntentEmpty] = new(
                 "The intent must not be empty.",
                 "Provide an intent for the draft.",
-                AgentToolDiagnosticSeverity.Warning,
+                SeverityLevel.Warning,
                 []),
             [DescriptorDraftDiagnosticCodes.ProposedVersionMissing] = new(
                 "ProposedVersion is required for Create and Update operations.",
                 "Set ProposedVersion on the draft.",
-                AgentToolDiagnosticSeverity.Error,
+                SeverityLevel.Error,
                 []),
             [DescriptorDraftDiagnosticCodes.ProposedVersionNotInteger] = new(
                 "ProposedVersion must be a valid integer.",
                 "Set ProposedVersion to an integer string.",
-                AgentToolDiagnosticSeverity.Error,
+                SeverityLevel.Error,
                 []),
             [DescriptorDraftDiagnosticCodes.ProposedVersionMismatch] = new(
                 "ProposedVersion does not match the payload descriptor version.",
                 "Ensure ProposedVersion matches the payload descriptor version.",
-                AgentToolDiagnosticSeverity.Error,
+                SeverityLevel.Error,
                 []),
             [DescriptorDraftDiagnosticCodes.CreateBaseVersionMustBeEmpty] = new(
                 "Create operation must not specify BaseVersion.",
                 "Remove BaseVersion for Create operations.",
-                AgentToolDiagnosticSeverity.Error,
+                SeverityLevel.Error,
                 []),
             [DescriptorDraftDiagnosticCodes.UpdateBaseVersionRequired] = new(
                 "Update operation requires BaseVersion.",
                 "Set BaseVersion for Update operations.",
-                AgentToolDiagnosticSeverity.Error,
+                SeverityLevel.Error,
                 []),
             [DescriptorDraftDiagnosticCodes.PayloadIdMismatch] = new(
                 "The Payload descriptor Id does not match the draft DescriptorId.",
                 "Ensure the Payload descriptor Id matches the draft DescriptorId.",
-                AgentToolDiagnosticSeverity.Error,
+                SeverityLevel.Error,
                 [])
         };
 
@@ -104,7 +104,7 @@ internal sealed class AgentDiagnosticExplanationPolicy
             Code = AgentToolDiagnosticCodes.UnknownDiagnostic,
             Explanation = "No explanation is available for this diagnostic code.",
             Remediation = "Verify the diagnostic code against the allowlisted code table.",
-            Severity = AgentToolDiagnosticSeverity.Warning,
+            Severity = SeverityLevel.Warning,
             SuggestedFixToolNames = []
         };
     }

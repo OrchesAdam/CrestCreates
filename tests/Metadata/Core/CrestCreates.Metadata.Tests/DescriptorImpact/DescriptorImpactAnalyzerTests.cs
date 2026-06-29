@@ -3,6 +3,7 @@ using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 using FluentAssertions;
 using Xunit;
+using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Metadata.Tests.DescriptorImpact;
 
@@ -564,8 +565,8 @@ public class DescriptorImpactAnalyzerTests
             });
 
         var topoDiag = new DescriptorTopologyDiagnostic(
-            DiagnosticSeverity.Error,
-            "MISSING_TARGET",
+            SeverityLevel.Error,
+            new DiagnosticCode("MISSING_TARGET"),
             "Missing target: X",
             form, null);
 
@@ -602,8 +603,8 @@ public class DescriptorImpactAnalyzerTests
             });
 
         var topoDiag = new DescriptorTopologyDiagnostic(
-            DiagnosticSeverity.Error,
-            "MISSING_TARGET",
+            SeverityLevel.Error,
+            new DiagnosticCode("MISSING_TARGET"),
             "Missing target: off-path",
             unrelated, null);
         var diags = new DescriptorTopologyDiagnostics { All = new[] { topoDiag } };

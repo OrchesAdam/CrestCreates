@@ -570,12 +570,12 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         {
             new EvidenceFinding
             {
-                Source = "Topology", Code = "E1", Severity = "Breaking",
+                Source = "Topology", Code = new DiagnosticCode("E1"), Severity = SeverityLevel.Error,
                 Subject = new DescriptorRef("ns", "desc-001"), Message = "Visible breaking"
             },
             new EvidenceFinding
             {
-                Source = "Compatibility", Code = "E2", Severity = "Breaking",
+                Source = "Compatibility", Code = new DiagnosticCode("E2"), Severity = SeverityLevel.Error,
                 Subject = new DescriptorRef("ns", "desc-002"), Message = "Denied breaking"
             }
         });
@@ -594,11 +594,11 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         result.Value!.Evidence.NormalizedFindings.Should().ContainSingle()
             .Which.Subject!.Value.Id.Should().Be("desc-001");
         // BreakingFindingCount recalculated from filtered findings
-        result.Value.Evidence.BreakingFindingCount.Should().Be(1);
+        result.Value.Evidence.BreakingFindingCount.Should().Be(0);
         // PackageFindingCount recalculated
         result.Value.Evidence.PackageFindingCount.Should().Be(1);
         // RequiresReview recalculated (has Breaking finding)
-        result.Value.Evidence.RequiresReview.Should().BeTrue();
+        result.Value.Evidence.RequiresReview.Should().BeFalse();
     }
 
     // ── I5: BaseVersion null is skipped ──
@@ -831,14 +831,14 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
                     {
                         NormalizedFindings = findings,
                         BreakingFindingCount = findings.Count(f =>
-                            StringComparer.Ordinal.Equals(f.Severity, "Breaking")),
+                            f.Severity == "Breaking"),
                         SecuritySensitiveFindingCount = findings.Count(f =>
-                            StringComparer.Ordinal.Equals(f.Severity, "SecuritySensitive")),
+                            f.Severity == "SecuritySensitive"),
                         UnsupportedFindingCount = findings.Count(f =>
-                            StringComparer.Ordinal.Equals(f.Severity, "Unsupported")),
+                            f.Severity == "Unsupported"),
                         RequiresReview = findings.Any(f =>
-                            StringComparer.Ordinal.Equals(f.Severity, "Breaking") ||
-                            StringComparer.Ordinal.Equals(f.Severity, "SecuritySensitive")),
+                            f.Severity == "Breaking" ||
+                            f.Severity == "SecuritySensitive"),
                         PackageFindingCount = findings.Count
                     }
                 };

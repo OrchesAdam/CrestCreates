@@ -1,17 +1,42 @@
+using CrestCreates.Core.Abstractions.Identity;
+
 namespace CrestCreates.Agent.DraftContracts.Dto;
 
 public static class AgentDraftContractErrorCodes
 {
-    public const string NullPayload = "ADPC001";
-    public const string DiscriminatorMismatch = "ADPC002";
-    public const string UnsupportedKind = "ADPC003";
-    public const string EmptyChangedFields = "ADPC004";
-    public const string UnknownChangedField = "ADPC005";
-    public const string MissingRequiredOnCreate = "ADPC006";
-    public const string NonNullableFieldNull = "ADPC007";
-    public const string CreateUnsupported = "ADPC008";
-    public const string InvalidCollectionShape = "ADPC009";
-    public const string PreserveStrategyFailed = "ADPC010";
-    public const string UnrepresentableDomainShape = "ADPC011";
-    public const string InvalidReferenceValue = "ADPC012";
+    private const string NullPayloadValue = "ADPC001";
+    public static DiagnosticCode NullPayload { get; } = new(NullPayloadValue);
+
+    private const string DiscriminatorMismatchValue = "ADPC002";
+    public static DiagnosticCode DiscriminatorMismatch { get; } = new(DiscriminatorMismatchValue);
+
+    private const string UnsupportedKindValue = "ADPC003";
+    public static DiagnosticCode UnsupportedKind { get; } = new(UnsupportedKindValue);
+
+    private const string EmptyChangedFieldsValue = "ADPC004";
+    public static DiagnosticCode EmptyChangedFields { get; } = new(EmptyChangedFieldsValue);
+
+    private const string UnknownChangedFieldValue = "ADPC005";
+    public static DiagnosticCode UnknownChangedField { get; } = new(UnknownChangedFieldValue);
+
+    private const string MissingRequiredOnCreateValue = "ADPC006";
+    public static DiagnosticCode MissingRequiredOnCreate { get; } = new(MissingRequiredOnCreateValue);
+
+    private const string NonNullableFieldNullValue = "ADPC007";
+    public static DiagnosticCode NonNullableFieldNull { get; } = new(NonNullableFieldNullValue);
+
+    private const string CreateUnsupportedValue = "ADPC008";
+    public static DiagnosticCode CreateUnsupported { get; } = new(CreateUnsupportedValue);
+
+    private const string InvalidCollectionShapeValue = "ADPC009";
+    public static DiagnosticCode InvalidCollectionShape { get; } = new(InvalidCollectionShapeValue);
+
+    private const string PreserveStrategyFailedValue = "ADPC010";
+    public static DiagnosticCode PreserveStrategyFailed { get; } = new(PreserveStrategyFailedValue);
+
+    private const string UnrepresentableDomainShapeValue = "ADPC011";
+    public static DiagnosticCode UnrepresentableDomainShape { get; } = new(UnrepresentableDomainShapeValue);
+
+    private const string InvalidReferenceValueValue = "ADPC012";
+    public static DiagnosticCode InvalidReferenceValue { get; } = new(InvalidReferenceValueValue);
 }

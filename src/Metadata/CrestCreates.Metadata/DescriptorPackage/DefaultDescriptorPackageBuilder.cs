@@ -166,12 +166,12 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
             topologyNodeCount = request.TopologySnapshot.NodeCount;
             topologyEdgeCount = request.TopologySnapshot.EdgeCount;
             hasTopologyErrors = request.TopologySnapshot.Diagnostics.All
-                .Any(d => d.Severity == DiagnosticSeverity.Error);
+                .Any(d => d.Severity == SeverityLevel.Error);
             topologyDiagnosticCounts = request.TopologySnapshot.Diagnostics.All
                 .GroupBy(d => new { d.Severity, d.Code })
                 .Select(g => new EvidenceFindingCount
                 {
-                    Severity = g.Key.Severity.ToString(),
+                    Severity = g.Key.Severity,
                     Code = g.Key.Code,
                     Count = g.Count()
                 })
@@ -183,7 +183,7 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
                 {
                     Source = "topology",
                     Code = d.Code,
-                    Severity = d.Severity.ToString(),
+                    Severity = d.Severity,
                     Message = d.Message
                 });
             }
@@ -198,7 +198,7 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
                 .GroupBy(d => new { d.Severity, d.Code })
                 .Select(g => new EvidenceFindingCount
                 {
-                    Severity = g.Key.Severity.ToString(),
+                    Severity = g.Key.Severity,
                     Code = g.Key.Code,
                     Count = g.Count()
                 })
@@ -210,7 +210,7 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
                 {
                     Source = "impact",
                     Code = d.Code,
-                    Severity = d.Severity.ToString(),
+                    Severity = d.Severity,
                     Subject = d.Subject,
                     Message = d.Message,
                     RelatedRefs = d.RelatedRefs ?? Array.Empty<DescriptorRef>()
@@ -233,8 +233,8 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
                 normalizedFindings.Add(new EvidenceFinding
                 {
                     Source = "compatibility",
-                    Code = f.RuleId,
-                    Severity = f.Level.ToString(),
+                    Code = new DiagnosticCode(f.RuleId),
+                    Severity = MapLevelToSeverity(f.Level),
                     Subject = f.Subject,
                     Message = f.Message
                 });
@@ -254,7 +254,7 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
                 {
                     Source = "lifecycle",
                     Code = f.Code,
-                    Severity = f.Severity.ToString(),
+                    Severity = f.Severity,
                     Subject = f.Subject,
                     Message = f.Message,
                     RelatedRefs = f.RelatedRefs
@@ -428,4 +428,14 @@ public sealed class DefaultDescriptorPackageBuilder : IDescriptorPackageBuilder
 
         return diagnostics;
     }
+
+    private static SeverityLevel MapLevelToSeverity(DescriptorCompatibilityLevel level) => level switch
+    {
+        DescriptorCompatibilityLevel.Breaking => SeverityLevel.Blocker,
+        DescriptorCompatibilityLevel.SecuritySensitive => SeverityLevel.Review,
+        DescriptorCompatibilityLevel.Unsupported => SeverityLevel.Warning,
+        DescriptorCompatibilityLevel.Risky => SeverityLevel.Warning,
+        DescriptorCompatibilityLevel.Compatible => SeverityLevel.Info,
+        _ => SeverityLevel.Info
+    };
 }

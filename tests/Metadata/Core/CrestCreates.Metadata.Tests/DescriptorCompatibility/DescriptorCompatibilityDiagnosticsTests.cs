@@ -5,6 +5,7 @@ using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 using CrestCreates.Metadata.DescriptorCompatibility;
 using FluentAssertions;
+using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Metadata.Tests.DescriptorCompatibility;
 
@@ -29,7 +30,7 @@ public class DescriptorCompatibilityDiagnosticsTests
             Diagnostics = new[]
             {
                 new DescriptorImpactDiagnostic(
-                    DiagnosticSeverity.Error, "IMPACT_TOPOLOGY_MISSING_TARGET",
+SeverityLevel.Error, new DiagnosticCode("IMPACT_TOPOLOGY_MISSING_TARGET"),
                     "Missing target", TestRef, new[] { consumer })
             }
         };
@@ -37,7 +38,7 @@ public class DescriptorCompatibilityDiagnosticsTests
         var result = Analyzer.Analyze(Array.Empty<IDescriptor>(), Array.Empty<IDescriptor>(), cs, impactReport);
 
         result.Diagnostics.Should().Contain(d =>
-            d.Code == "COMPAT_BLOCKED_BY_TOPOLOGY_ERROR" && d.Severity == DiagnosticSeverity.Error);
+            d.Code == "COMPAT_BLOCKED_BY_TOPOLOGY_ERROR" && d.Severity == SeverityLevel.Error);
         result.Findings.Should().Contain(f =>
             f.RuleId == "COMPAT_ANALYSIS_UNTRUSTED_IMPACT_REPORT" && f.Level == DescriptorCompatibilityLevel.Unsupported);
     }
@@ -56,7 +57,7 @@ public class DescriptorCompatibilityDiagnosticsTests
             Diagnostics = new[]
             {
                 new DescriptorImpactDiagnostic(
-                    DiagnosticSeverity.Warning, "IMPACT_PATH_TRUNCATED",
+SeverityLevel.Warning, new DiagnosticCode("IMPACT_PATH_TRUNCATED"),
                     "Path truncated", TestRef, null)
             }
         };
@@ -64,7 +65,7 @@ public class DescriptorCompatibilityDiagnosticsTests
         var result = Analyzer.Analyze(Array.Empty<IDescriptor>(), Array.Empty<IDescriptor>(), cs, impactReport);
 
         result.Diagnostics.Should().Contain(d =>
-            d.Code == "COMPAT_ANALYSIS_INCOMPLETE" && d.Severity == DiagnosticSeverity.Warning);
+            d.Code == "COMPAT_ANALYSIS_INCOMPLETE" && d.Severity == SeverityLevel.Warning);
     }
 
     [Fact]
@@ -81,7 +82,7 @@ public class DescriptorCompatibilityDiagnosticsTests
             Diagnostics = new[]
             {
                 new DescriptorImpactDiagnostic(
-                    DiagnosticSeverity.Warning, "IMPACT_AMBIGUOUS_UNPINNED_TARGET",
+SeverityLevel.Warning, new DiagnosticCode("IMPACT_AMBIGUOUS_UNPINNED_TARGET"),
                     "Ambiguous unpinned target", TestRef, null)
             }
         };
@@ -89,7 +90,7 @@ public class DescriptorCompatibilityDiagnosticsTests
         var result = Analyzer.Analyze(Array.Empty<IDescriptor>(), Array.Empty<IDescriptor>(), cs, impactReport);
 
         result.Diagnostics.Should().Contain(d =>
-            d.Code == "COMPAT_VERSION_AMBIGUITY" && d.Severity == DiagnosticSeverity.Warning);
+            d.Code == "COMPAT_VERSION_AMBIGUITY" && d.Severity == SeverityLevel.Warning);
     }
 
     [Fact]
@@ -113,7 +114,7 @@ public class DescriptorCompatibilityDiagnosticsTests
         var result = Analyzer.Analyze(new IDescriptor[] { d1, d2 }, Array.Empty<IDescriptor>(), cs, impactReport);
 
         result.Diagnostics.Should().Contain(d =>
-            d.Code == "COMPAT_DUPLICATE_DESCRIPTOR_REF" && d.Severity == DiagnosticSeverity.Warning);
+            d.Code == "COMPAT_DUPLICATE_DESCRIPTOR_REF" && d.Severity == SeverityLevel.Warning);
     }
 
     [Fact]
@@ -136,7 +137,7 @@ public class DescriptorCompatibilityDiagnosticsTests
         var result = Analyzer.Analyze(Array.Empty<IDescriptor>(), Array.Empty<IDescriptor>(), cs, impactReport);
 
         result.Diagnostics.Should().Contain(d =>
-            d.Code == "COMPAT_CHANGESET_MISMATCH" && d.Severity == DiagnosticSeverity.Error);
+            d.Code == "COMPAT_CHANGESET_MISMATCH" && d.Severity == SeverityLevel.Error);
     }
 
     // Minimal test descriptor

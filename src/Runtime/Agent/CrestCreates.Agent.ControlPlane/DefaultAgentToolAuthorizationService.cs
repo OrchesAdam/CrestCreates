@@ -58,7 +58,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                 new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.RuntimeExecutionDenied,
-                    Severity = AgentToolDiagnosticSeverity.Blocker,
+                    Severity = SeverityLevel.Blocker,
                     Message = "Runtime execution tools are not available through the Control Plane tool surface."
                 }));
         }
@@ -71,7 +71,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                 new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.PermissionDenied,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Permission '{permission.PermissionName}' is denied by policy."
                 }));
         }
@@ -83,7 +83,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                 new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.ToolDenied,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Tool '{expectedToolName}' is denied by policy."
                 }));
         }
@@ -94,7 +94,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                 new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.ActorKindDenied,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Actor kind '{context.ActorKind}' is denied by policy."
                 }));
         }
@@ -121,7 +121,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                     new AgentToolDiagnostic
                     {
                         Code = AgentToolDiagnosticCodes.UnknownAuthorizationMode,
-                        Severity = AgentToolDiagnosticSeverity.Blocker,
+                        Severity = SeverityLevel.Blocker,
                         Message = $"Authorization mode '{_options.Mode}' is not recognized."
                     }));
         }
@@ -145,7 +145,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
             new AgentToolDiagnostic
             {
                 Code = AgentToolDiagnosticCodes.NotExplicitlyAllowed,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Permission '{permission.PermissionName}' for tool '{expectedToolName}' is not explicitly allowed in DenyAll mode."
             }));
     }
@@ -178,7 +178,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                     new AgentToolDiagnostic
                     {
                         Code = DescriptorActivationDiagnosticCodes.HandoffDenied,
-                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Severity = SeverityLevel.Error,
                         Message = $"Activation handoff tool '{expectedToolName}' is not allowed by default. Enable AllowActivationHandoffToolsByDefault or add to AllowedPermissions/AllowedToolNames."
                     }));
             }
@@ -195,7 +195,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                     new AgentToolDiagnostic
                     {
                         Code = AgentToolDiagnosticCodes.MutationDenied,
-                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Severity = SeverityLevel.Error,
                         Message = $"Mutating tool '{expectedToolName}' is not allowed by default. Enable AllowMutationToolsByDefault or add to AllowedPermissions/AllowedToolNames."
                     }));
             }
@@ -212,7 +212,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
                     new AgentToolDiagnostic
                     {
                         Code = AgentToolDiagnosticCodes.ReadOnlyDenied,
-                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Severity = SeverityLevel.Error,
                         Message = $"Read-only tool '{expectedToolName}' is not allowed by default. Enable AllowReadOnlyToolsByDefault or add to AllowedPermissions/AllowedToolNames."
                     }));
             }
@@ -225,7 +225,7 @@ public sealed class DefaultAgentToolAuthorizationService : IAgentToolAuthorizati
             new AgentToolDiagnostic
             {
                 Code = AgentToolDiagnosticCodes.AuthorizationUnresolved,
-                Severity = AgentToolDiagnosticSeverity.Blocker,
+                Severity = SeverityLevel.Blocker,
                 Message = $"Authorization could not be resolved for tool '{expectedToolName}'."
             }));
     }

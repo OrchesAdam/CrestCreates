@@ -62,7 +62,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.BindingSnapshotRequired,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = "BindingSnapshot is required for activation request submission."
             };
             await RecordAudit(context, null, DescriptorActivationAuditAction.Block, "MissingBindingSnapshot", [diag], ct);
@@ -75,7 +75,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.BindingHashesRequired,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = "BindingSnapshot.Hashes is required for activation request submission."
             };
             await RecordAudit(context, null, DescriptorActivationAuditAction.Block, "MissingBindingHashes", [diag], ct);
@@ -90,7 +90,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diags = hashErrors.Select(i => new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.BindingHashValidationFailed,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Binding hash validation failed at slot '{i.Slot}': {i.Description}"
             }).ToList();
             await RecordAudit(context, null, DescriptorActivationAuditAction.Block, "BindingHashValidationFailed", diags, ct);
@@ -127,7 +127,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.BlockedByGovernance,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Activation is blocked by governance decision: {governanceDecision}."
             };
             await RecordAudit(context, null, DescriptorActivationAuditAction.Block, "GovernanceBlocked", [diag], ct);
@@ -150,7 +150,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.IncompleteBinding,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = "Activation request requires complete binding (PackagePreviewId and EvidencePreviewId must be non-empty)."
             };
             await RecordAudit(context, null, DescriptorActivationAuditAction.Block, "IncompleteBinding", [diag], ct);
@@ -256,7 +256,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.BindingHashesRequired,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = "BindingSnapshot.Hashes is required for approval."
             };
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.GateDenied, "MissingBindingHashes", [diag], ct, request);
@@ -269,7 +269,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.ReviewRequestMismatch,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Review decision targets request '{reviewDecision.ActivationRequestId}', but current request is '{request.RequestId}'."
             };
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.Block,
@@ -283,7 +283,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.ReviewDecisionMismatch,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"ApproveActivationRequestAsync called with decision '{reviewDecision.Decision}', expected 'Approved'."
             };
             return AgentToolResult<ActivationRequest>.InvalidRequest([diag]);
@@ -296,7 +296,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.ReviewEvidenceMismatch,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Review decision evidence hash '{reviewDecision.BoundEvidenceHash}' does not match request binding hash '{request.BindingSnapshot.Hashes.PackageEvidenceHash}'."
             };
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.Block,
@@ -309,7 +309,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.ReviewEnvelopeMismatch,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Review decision envelope hash '{reviewDecision.BoundEnvelopeHash}' does not match request binding hash '{request.BindingSnapshot.Hashes.PackageEvidenceEnvelopeHash}'."
             };
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.Block,
@@ -324,7 +324,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.InvalidStatusForApproval,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Cannot approve request in status '{request.Status}'. Expected 'UnderReview' or 'Submitted'."
             };
             return AgentToolResult<ActivationRequest>.InvalidRequest([diag]);
@@ -339,7 +339,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.SelfApprovalForbidden,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Actor '{reviewDecision.ActorId}' cannot approve their own activation request when ForbidSelfApproval is enabled."
             };
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.Block,
@@ -376,7 +376,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.BindingHashesRequired,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = "BindingSnapshot.Hashes is required for rejection."
             };
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.GateDenied, "MissingBindingHashes", [diag], ct);
@@ -389,7 +389,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.ReviewRequestMismatch,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Review decision targets request '{reviewDecision.ActivationRequestId}', but current request is '{request.RequestId}'."
             };
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.Block,
@@ -403,7 +403,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.ReviewDecisionMismatch,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"RejectActivationRequestAsync called with decision '{reviewDecision.Decision}', expected 'Rejected'."
             };
             return AgentToolResult<ActivationRequest>.InvalidRequest([diag]);
@@ -415,7 +415,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.InvalidStatusForRejection,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Cannot reject request in status '{request.Status}'. Expected 'UnderReview' or 'Submitted'."
             };
             return AgentToolResult<ActivationRequest>.InvalidRequest([diag]);
@@ -461,7 +461,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var staleDiagnostics = recheckResult.Drifts.Select(d => new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.EvidenceStale,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Evidence drift detected: {d.FieldName} changed from '{d.BoundHashValue}' to '{d.CurrentHashValue}'."
             }).ToList();
 
@@ -495,7 +495,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.GateInvalidState,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Cannot execute activation gate for request in status '{request.Status}'. Expected 'Approved' or 'Submitted'."
             };
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.GateDenied,
@@ -508,7 +508,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.GateBlocked,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = "Cannot execute activation gate for NotActivatable request."
             };
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.GateDenied,
@@ -525,7 +525,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var staleDiagnostics = recheckResult.Drifts.Select(d => new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.EvidenceStale,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Evidence drift detected: {d.FieldName} changed from '{d.BoundHashValue}' to '{d.CurrentHashValue}'."
             }).ToList();
 
@@ -582,7 +582,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.CannotCancel,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Cannot cancel request in status '{request.Status}'. Only 'Submitted' or 'UnderReview' can be cancelled."
             };
             return AgentToolResult<ActivationRequest>.InvalidRequest([diag]);
@@ -654,7 +654,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             diagnostics.Add(new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.GovernanceBlocked,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Activation blocked by governance decision: {governanceDecision}."
             });
         }
@@ -663,7 +663,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             diagnostics.Add(new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.RequiresHumanReview,
-                Severity = AgentToolDiagnosticSeverity.Warning,
+                Severity = SeverityLevel.Warning,
                 Message = policy.RequireHumanReviewForAll
                     ? "Activation requires human review (policy: RequireHumanReviewForAll)."
                     : $"Activation requires human review (governance: {governanceDecision})."

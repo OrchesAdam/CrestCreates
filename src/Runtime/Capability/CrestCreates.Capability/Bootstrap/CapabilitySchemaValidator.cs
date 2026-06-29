@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 
@@ -31,7 +32,7 @@ public sealed class CapabilitySchemaValidator : IBootstrapValidator
                 var refObj = new DescriptorRef("schema", schemaRef.Id, schemaRef.Version);
                 if (!_descriptorLookup.Exists(refObj))
                 {
-                    issues.Add(new ValidationIssue(ValidationSeverity.Error,
+                    issues.Add(new ValidationIssue(SeverityLevel.Error,
                         $"Capability '{descriptor.Id}' references InputSchema '{schemaRef.Id}' (v{schemaRef.Version}) which does not exist."));
                 }
             }
@@ -42,7 +43,7 @@ public sealed class CapabilitySchemaValidator : IBootstrapValidator
                 var refObj = new DescriptorRef("schema", schemaRef.Id, schemaRef.Version);
                 if (!_descriptorLookup.Exists(refObj))
                 {
-                    issues.Add(new ValidationIssue(ValidationSeverity.Error,
+                    issues.Add(new ValidationIssue(SeverityLevel.Error,
                         $"Capability '{descriptor.Id}' references OutputSchema '{schemaRef.Id}' (v{schemaRef.Version}) which does not exist."));
                 }
             }

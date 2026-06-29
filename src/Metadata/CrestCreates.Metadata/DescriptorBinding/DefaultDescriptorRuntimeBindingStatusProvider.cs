@@ -25,8 +25,8 @@ public sealed class DefaultDescriptorRuntimeBindingStatusProvider
                 Issues = new[]
                 {
                     new DescriptorBindingIssue(
-                        Severity: ValidationSeverity.Warning,
-                        Code: "WARN_NO_BINDING_CONTRIBUTOR",
+                        Severity: SeverityLevel.Warning,
+                        Code: new DiagnosticCode("WARN_NO_BINDING_CONTRIBUTOR"),
                         Message: $"No binding status contributor registered for {descriptor.Kind}.",
                         DescriptorId: descriptor.FullId,
                         DescriptorKind: descriptor.Kind)

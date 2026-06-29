@@ -147,68 +147,68 @@ public class DescriptorReviewReportRendererTests
 
             SummarySection = CreateSection(
                 DescriptorReviewReportSectionKind.Summary, "sec-sum", "Summary", 1,
-                false, DescriptorReviewSeverity.Error,
-                new[] { CreateItem("it-1", "ERR-001", "report.summary.invalid", itemMessage, DescriptorReviewSeverity.Blocker, emptyParams) }),
+                false, SeverityLevel.Error,
+                new[] { CreateItem("it-1", "ERR-001", "report.summary.invalid", itemMessage, SeverityLevel.Blocker, emptyParams) }),
 
             DraftIdentitySection = CreateSection(
                 DescriptorReviewReportSectionKind.DraftIdentity, "sec-di", "Draft Identity", 2,
-                false, DescriptorReviewSeverity.Info,
-                new[] { CreateItem("it-2", "INFO-001", "report.draft_identity.info", "Draft identity created", DescriptorReviewSeverity.Info, emptyParams) }),
+                false, SeverityLevel.Info,
+                new[] { CreateItem("it-2", "INFO-001", "report.draft_identity.info", "Draft identity created", SeverityLevel.Info, emptyParams) }),
 
             ProposedChangesSection = CreateSection(
                 DescriptorReviewReportSectionKind.ProposedChanges, "sec-pc", "Proposed Changes", 3,
-                false, DescriptorReviewSeverity.Info,
-                new[] { CreateItem("it-3", "INFO-002", "report.proposed_changes.materialized", "3 proposed changes", DescriptorReviewSeverity.Info, emptyParams) }),
+                false, SeverityLevel.Info,
+                new[] { CreateItem("it-3", "INFO-002", "report.proposed_changes.materialized", "3 proposed changes", SeverityLevel.Info, emptyParams) }),
 
             ImpactAnalysisSection = CreateSection(
                 DescriptorReviewReportSectionKind.ImpactAnalysis, "sec-ia", "Impact Analysis", 4,
-                false, DescriptorReviewSeverity.Warning,
-                new[] { CreateItem("it-4", "WARN-001", "report.impact.affected", "5 affected", DescriptorReviewSeverity.Warning, emptyParams) }),
+                false, SeverityLevel.Warning,
+                new[] { CreateItem("it-4", "WARN-001", "report.impact.affected", "5 affected", SeverityLevel.Warning, emptyParams) }),
 
             DependencySummarySection = CreateSection(
                 DescriptorReviewReportSectionKind.DependencySummary, "sec-ds", "Dependency Summary", 5,
-                false, DescriptorReviewSeverity.Info,
-                new[] { CreateItem("it-5", "INFO-003", "report.dependency.summary", "10 nodes, 15 edges", DescriptorReviewSeverity.Info, emptyParams) }),
+                false, SeverityLevel.Info,
+                new[] { CreateItem("it-5", "INFO-003", "report.dependency.summary", "10 nodes, 15 edges", SeverityLevel.Info, emptyParams) }),
 
             CompatibilitySection = CreateSection(
                 DescriptorReviewReportSectionKind.Compatibility, "sec-comp", "Compatibility", 6,
-                false, DescriptorReviewSeverity.Info,
-                new[] { CreateItem("it-6", "INFO-004", "report.compatibility.compatible", "All compatible", DescriptorReviewSeverity.Info, emptyParams) }),
+                false, SeverityLevel.Info,
+                new[] { CreateItem("it-6", "INFO-004", "report.compatibility.compatible", "All compatible", SeverityLevel.Info, emptyParams) }),
 
             GovernanceSection = CreateSection(
                 DescriptorReviewReportSectionKind.Governance, "sec-gov", "Governance", 7,
-                false, DescriptorReviewSeverity.Info,
-                new[] { CreateItem("it-7", "GOV-001", "report.governance.approved", "Approved", DescriptorReviewSeverity.Info, emptyParams) }),
+                false, SeverityLevel.Info,
+                new[] { CreateItem("it-7", "GOV-001", "report.governance.approved", "Approved", SeverityLevel.Info, emptyParams) }),
 
             RequiredHumanReviewSection = CreateSection(
                 DescriptorReviewReportSectionKind.RequiredHumanReview, "sec-hr", "Required Human Review", 8,
-                false, DescriptorReviewSeverity.Warning,
-                new[] { CreateItem("it-8", "HR-001", "report.human_review.required", "Human review needed", DescriptorReviewSeverity.Warning, emptyParams) }),
+                false, SeverityLevel.Warning,
+                new[] { CreateItem("it-8", "HR-001", "report.human_review.required", "Human review needed", SeverityLevel.Warning, emptyParams) }),
 
             ActivationEligibilitySection = CreateSection(
                 DescriptorReviewReportSectionKind.ActivationEligibility, "sec-ae", "Activation Eligibility", 9,
-                false, DescriptorReviewSeverity.Info,
-                new[] { CreateItem("it-9", "AE-001", "report.activation.eligible", "Eligible", DescriptorReviewSeverity.Info, emptyParams) }),
+                false, SeverityLevel.Info,
+                new[] { CreateItem("it-9", "AE-001", "report.activation.eligible", "Eligible", SeverityLevel.Info, emptyParams) }),
 
             DiagnosticsSection = CreateSection(
                 DescriptorReviewReportSectionKind.Diagnostics, "sec-diag", "Diagnostics", 10,
-                false, DescriptorReviewSeverity.Error,
-                new[] { CreateItem("it-10", "DIAG-001", "report.diagnostics.count", "3 errors", DescriptorReviewSeverity.Error, emptyParams) }),
+                false, SeverityLevel.Error,
+                new[] { CreateItem("it-10", "DIAG-001", "report.diagnostics.count", "3 errors", SeverityLevel.Error, emptyParams) }),
 
             RecommendationsSection = CreateSection(
                 DescriptorReviewReportSectionKind.Recommendations, "sec-rec", "Recommendations", 11,
-                false, DescriptorReviewSeverity.Info,
-                new[] { CreateItem("it-11", "REC-001", "report.recommendation.apply_fix", "Apply fix", DescriptorReviewSeverity.Info, emptyParams) }),
+                false, SeverityLevel.Info,
+                new[] { CreateItem("it-11", "REC-001", "report.recommendation.apply_fix", "Apply fix", SeverityLevel.Info, emptyParams) }),
 
             PackagePreviewSection = CreateSection(
                 DescriptorReviewReportSectionKind.PackagePreview, "sec-pp", "Package Preview", 12,
-                false, DescriptorReviewSeverity.Info,
-                new[] { CreateItem("it-12", "PP-001", "report.package_preview.present", "5 descriptors", DescriptorReviewSeverity.Info, emptyParams) }),
+                false, SeverityLevel.Info,
+                new[] { CreateItem("it-12", "PP-001", "report.package_preview.present", "5 descriptors", SeverityLevel.Info, emptyParams) }),
 
             StableHashesSection = CreateSection(
                 DescriptorReviewReportSectionKind.StableHashes, "sec-sh", "Stable Hashes", 13,
-                false, DescriptorReviewSeverity.Info,
-                new[] { CreateItem("it-13", "SH-001", "report.stable_hashes.present", "5 hashes", DescriptorReviewSeverity.Info, emptyParams) }),
+                false, SeverityLevel.Info,
+                new[] { CreateItem("it-13", "SH-001", "report.stable_hashes.present", "5 hashes", SeverityLevel.Info, emptyParams) }),
         };
     }
 
@@ -233,13 +233,13 @@ public class DescriptorReviewReportRendererTests
 
             SummarySection = CreateSection(
                 DescriptorReviewReportSectionKind.Summary, "sec-sum", "Summary", 1,
-                false, DescriptorReviewSeverity.Info,
-                new[] { CreateItem("it-1", "INFO-1", "report.summary.valid", "Passed", DescriptorReviewSeverity.Info, emptyParams) }),
+                false, SeverityLevel.Info,
+                new[] { CreateItem("it-1", "INFO-1", "report.summary.valid", "Passed", SeverityLevel.Info, emptyParams) }),
 
             DraftIdentitySection = CreateSection(
                 DescriptorReviewReportSectionKind.DraftIdentity, "sec-di", "Draft Identity", 2,
-                false, DescriptorReviewSeverity.Info,
-                new[] { CreateItem("it-2", "INFO-2", "report.draft_identity.info", "Identity info", DescriptorReviewSeverity.Info, emptyParams) }),
+                false, SeverityLevel.Info,
+                new[] { CreateItem("it-2", "INFO-2", "report.draft_identity.info", "Identity info", SeverityLevel.Info, emptyParams) }),
 
             ProposedChangesSection = EmptySection(DescriptorReviewReportSectionKind.ProposedChanges, "sec-pc", "Proposed Changes", 3),
             ImpactAnalysisSection = EmptySection(DescriptorReviewReportSectionKind.ImpactAnalysis, "sec-ia", "Impact Analysis", 4),
@@ -248,8 +248,8 @@ public class DescriptorReviewReportRendererTests
 
             GovernanceSection = CreateSection(
                 DescriptorReviewReportSectionKind.Governance, "sec-gov", "Governance", 7,
-                false, DescriptorReviewSeverity.Info,
-                new[] { CreateItem("it-3", "GOV-1", "report.governance.approved", "Approved", DescriptorReviewSeverity.Info, emptyParams) }),
+                false, SeverityLevel.Info,
+                new[] { CreateItem("it-3", "GOV-1", "report.governance.approved", "Approved", SeverityLevel.Info, emptyParams) }),
 
             RequiredHumanReviewSection = EmptySection(DescriptorReviewReportSectionKind.RequiredHumanReview, "sec-hr", "Required Human Review", 8),
             ActivationEligibilitySection = EmptySection(DescriptorReviewReportSectionKind.ActivationEligibility, "sec-ae", "Activation Eligibility", 9),
@@ -266,7 +266,7 @@ public class DescriptorReviewReportRendererTests
         string title,
         int order,
         bool isEmpty,
-        DescriptorReviewSeverity overallSeverity,
+        SeverityLevel overallSeverity,
         IReadOnlyList<DescriptorReviewReportItemDto> items)
     {
         return new DescriptorReviewReportSectionDto
@@ -294,7 +294,7 @@ public class DescriptorReviewReportRendererTests
             Title = title,
             Order = order,
             IsEmpty = true,
-            OverallSeverity = DescriptorReviewSeverity.Info,
+            OverallSeverity = SeverityLevel.Info,
             Items = Array.Empty<DescriptorReviewReportItemDto>()
         };
     }
@@ -304,7 +304,7 @@ public class DescriptorReviewReportRendererTests
         string reasonCode,
         string messageTemplateId,
         string message,
-        DescriptorReviewSeverity severity,
+        SeverityLevel severity,
         IReadOnlyDictionary<string, string> parameters)
     {
         return new DescriptorReviewReportItemDto

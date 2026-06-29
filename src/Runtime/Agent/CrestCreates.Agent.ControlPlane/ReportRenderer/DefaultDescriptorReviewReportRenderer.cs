@@ -97,11 +97,11 @@ internal sealed class DefaultDescriptorReviewReportRenderer
         sb.AppendLine();
         foreach (var item in section.Items)
         {
-            var severityBadge = item.Severity switch
+            var severityBadge = item.Severity.Value switch
             {
-                DescriptorReviewSeverity.Blocker => "[BLOCKER]",
-                DescriptorReviewSeverity.Error => "[ERROR]",
-                DescriptorReviewSeverity.Warning => "[WARNING]",
+                "Blocker" => "[BLOCKER]",
+                "Error" => "[ERROR]",
+                "Warning" => "[WARNING]",
                 _ => "[INFO]",
             };
             sb.AppendLine($"- {severityBadge} **[{item.ReasonCode}]** {item.Message}");

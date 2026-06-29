@@ -6,6 +6,7 @@ using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 using CrestCreates.Metadata.DescriptorCompatibility;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
+using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Metadata.Tests.DescriptorCompatibility;
 
@@ -226,7 +227,7 @@ public class DescriptorCompatibilityAnalyzerGenericTests
             Diagnostics = new[]
             {
                 new DescriptorImpactDiagnostic(
-                    DiagnosticSeverity.Error, "IMPACT_TOPOLOGY_MISSING_TARGET",
+SeverityLevel.Error, new DiagnosticCode("IMPACT_TOPOLOGY_MISSING_TARGET"),
                     "Missing target", TestRef, new[] { consumer })
             }
         };

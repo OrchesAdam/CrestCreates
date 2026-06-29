@@ -75,8 +75,8 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
             .Returns(DraftAbstractions.DescriptorDraftMaterializationResult.Failure(
                 new DraftAbstractions.DescriptorDraftDiagnostic
                 {
-                    Code = "MATERIALIZATION_FAILED",
-                    Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error,
+                    Code = new DiagnosticCode("MATERIALIZATION_FAILED"),
+                    Severity = SeverityLevel.Error,
                     Message = "Cannot materialize"
                 }));
 
@@ -165,8 +165,8 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
             ValidationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
                 new DraftAbstractions.DescriptorDraftDiagnostic
                 {
-                    Code = "VALIDATION_ERROR",
-                    Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error,
+                    Code = new DiagnosticCode("VALIDATION_ERROR"),
+                    Severity = SeverityLevel.Error,
                     Message = "Validation failed"
                 }),
             Diagnostics = Array.Empty<DraftAbstractions.DescriptorDraftDiagnostic>(),
@@ -202,8 +202,8 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
             {
                 new()
                 {
-                    Code = "REVIEW_ERROR",
-                    Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error,
+                    Code = new DiagnosticCode("REVIEW_ERROR"),
+                    Severity = SeverityLevel.Error,
                     Message = "Review found errors"
                 }
             },

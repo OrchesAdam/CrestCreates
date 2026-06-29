@@ -554,16 +554,16 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
                     new()
                     {
                         Source = "impact",
-                        Code = "IMP_001",
-                        Severity = "Critical",
+                        Code = new DiagnosticCode("IMP_001"),
+                        Severity = SeverityLevel.Error,
                         Subject = new DescriptorRef("ns", "desc-002"), // denied kind
                         Message = "Critical impact on denied descriptor"
                     },
                     new()
                     {
                         Source = "impact",
-                        Code = "IMP_002",
-                        Severity = "Low",
+                        Code = new DiagnosticCode("IMP_002"),
+                        Severity = SeverityLevel.Info,
                         Subject = new DescriptorRef("ns", "desc-001"), // visible kind
                         Message = "Low impact on visible descriptor"
                     }
@@ -602,8 +602,8 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
         // After projection, the Critical finding from denied subject is filtered out,
-        // so MaxImpactSeverity must reflect only the visible Low finding
-        result.Value!.Evidence.MaxImpactSeverity.Should().Be(DescriptorImpactSeverity.Low,
+        // so MaxImpactSeverity must reflect only the visible Info finding
+        result.Value!.Evidence.MaxImpactSeverity.Should().Be(DescriptorImpactSeverity.Info,
             "MaxImpactSeverity must be recalculated from visible findings only, not copied from source");
     }
 
@@ -673,16 +673,16 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
                     new()
                     {
                         Source = "compatibility",
-                        Code = "COMPAT_001",
-                        Severity = "Breaking",
+                        Code = new DiagnosticCode("COMPAT_001"),
+                        Severity = SeverityLevel.Error,
                         Subject = new DescriptorRef("ns", "desc-002"), // denied kind
                         Message = "Breaking compatibility with denied descriptor"
                     },
                     new()
                     {
                         Source = "compatibility",
-                        Code = "COMPAT_002",
-                        Severity = "Compatible",
+                        Code = new DiagnosticCode("COMPAT_002"),
+                        Severity = SeverityLevel.Info,
                         Subject = new DescriptorRef("ns", "desc-001"), // visible kind
                         Message = "Compatible with visible descriptor"
                     }
@@ -856,8 +856,8 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
                     ValidationResult = DescriptorDraftValidationResult.Failure(
                         new DescriptorDraftDiagnostic
                         {
-                            Code = "VALIDATION_FAILED",
-                            Severity = DescriptorDraftDiagnosticSeverity.Error,
+                            Code = new DiagnosticCode("VALIDATION_FAILED"),
+                            Severity = SeverityLevel.Error,
                             Message = "Draft validation failed"
                         }),
                     ProposedInventory = null, // Not materialized

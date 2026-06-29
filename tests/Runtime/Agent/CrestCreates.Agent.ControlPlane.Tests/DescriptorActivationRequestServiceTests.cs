@@ -1396,8 +1396,8 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
             {
                 new()
                 {
-                    Code = "GATE_REJECTED",
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Code = new DiagnosticCode("GATE_REJECTED"),
+                    Severity = SeverityLevel.Error,
                     Message = "Gate rejected the activation."
                 }
             }));

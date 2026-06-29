@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
@@ -51,7 +52,7 @@ public sealed class HumanTaskBindingStatusContributor : IDescriptorBindingStatus
         var form = _formRegistry.GetByVersion(task.Interaction.Id, task.Interaction.Version);
         if (form == null)
         {
-            issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_INTERACTION",
+            issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("REF_MISSING_INTERACTION"),
                 $"Interaction form '{task.Interaction.Id}' v{task.Interaction.Version} not found.",
                 fullId, DescriptorKind.HumanTask, "Interaction"));
         }
@@ -62,7 +63,7 @@ public sealed class HumanTaskBindingStatusContributor : IDescriptorBindingStatus
             var schema = _schemaRegistry.GetByVersion(refVal.Id, refVal.Version);
             if (schema == null)
             {
-                issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_SCHEMA",
+                issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("REF_MISSING_SCHEMA"),
                     $"Input schema '{refVal.Id}' v{refVal.Version} not found.",
                     fullId, DescriptorKind.HumanTask, "InputSchema"));
             }
@@ -74,7 +75,7 @@ public sealed class HumanTaskBindingStatusContributor : IDescriptorBindingStatus
             var schema = _schemaRegistry.GetByVersion(refVal.Id, refVal.Version);
             if (schema == null)
             {
-                issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_SCHEMA",
+                issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("REF_MISSING_SCHEMA"),
                     $"Output schema '{refVal.Id}' v{refVal.Version} not found.",
                     fullId, DescriptorKind.HumanTask, "OutputSchema"));
             }
@@ -88,7 +89,7 @@ public sealed class HumanTaskBindingStatusContributor : IDescriptorBindingStatus
                 var cap = _capabilityRegistry.GetByVersion(refVal.Id, refVal.Version);
                 if (cap == null)
                 {
-                    issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_CAPABILITY",
+                    issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("REF_MISSING_CAPABILITY"),
                         $"Outcome capability '{refVal.Id}' v{refVal.Version} not found.",
                         fullId, DescriptorKind.HumanTask, "Outcomes"));
                 }
@@ -97,7 +98,7 @@ public sealed class HumanTaskBindingStatusContributor : IDescriptorBindingStatus
 
         if (UnsupportedStrategies.Contains(task.AssigneeStrategy))
         {
-            issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "UNSUPPORTED_ASSIGNEE_STRATEGY",
+            issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("UNSUPPORTED_ASSIGNEE_STRATEGY"),
                 $"Assignee strategy '{task.AssigneeStrategy}' is not supported by the current runtime.",
                 fullId, DescriptorKind.HumanTask, "AssigneeStrategy"));
         }

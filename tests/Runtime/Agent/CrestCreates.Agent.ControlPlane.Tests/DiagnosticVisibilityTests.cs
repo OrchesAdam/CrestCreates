@@ -24,8 +24,8 @@ public class DiagnosticVisibilityTests : AgentControlPlaneTestBase
             [
                 new AgentToolDiagnostic
                 {
-                    Code = "KIND_PAYLOAD_MISMATCH",
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Code = new DiagnosticCode("KIND_PAYLOAD_MISMATCH"),
+                    Severity = SeverityLevel.Error,
                     Message = "Hostile: denied-ref-001"
                 }
             ]
@@ -35,7 +35,7 @@ public class DiagnosticVisibilityTests : AgentControlPlaneTestBase
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
         result.Value!.Explanations.Should().HaveCount(1);
-        result.Value.Explanations[0].Code.Should().Be("KIND_PAYLOAD_MISMATCH");
+        result.Value.Explanations[0].Code.Should().Be(new DiagnosticCode("KIND_PAYLOAD_MISMATCH"));
         // Must not echo the caller's hostile message
         result.Value.Explanations[0].Explanation.Should().NotContain("denied-ref-001");
         result.Value.Explanations[0].Explanation.Should().NotContain("Hostile");
@@ -53,8 +53,8 @@ public class DiagnosticVisibilityTests : AgentControlPlaneTestBase
             [
                 new AgentToolDiagnostic
                 {
-                    Code = "UNSUPPORTED_CODE_12345",
-                    Severity = AgentToolDiagnosticSeverity.Warning,
+                    Code = new DiagnosticCode("UNSUPPORTED_CODE_12345"),
+                    Severity = SeverityLevel.Warning,
                     Message = "Some unknown error"
                 }
             ]
@@ -65,7 +65,7 @@ public class DiagnosticVisibilityTests : AgentControlPlaneTestBase
         result.Status.Should().Be(AgentToolResultStatus.Success);
         result.Value!.Explanations.Should().HaveCount(1);
         // Unknown codes get UNKNOWN_DIAGNOSTIC, NOT the caller's original code
-        result.Value.Explanations[0].Code.Should().Be("UNKNOWN_DIAGNOSTIC");
+        result.Value.Explanations[0].Code.Should().Be(new DiagnosticCode("UNKNOWN_DIAGNOSTIC"));
         // Must not echo the caller's code
         result.Value.Explanations[0].Explanation.Should().NotContain("UNSUPPORTED_CODE_12345");
     }
@@ -83,8 +83,8 @@ public class DiagnosticVisibilityTests : AgentControlPlaneTestBase
             [
                 new AgentToolDiagnostic
                 {
-                    Code = "DRAFT_ID_EMPTY",
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Code = new DiagnosticCode("DRAFT_ID_EMPTY"),
+                    Severity = SeverityLevel.Error,
                     Message = ""
                 }
             ]
@@ -94,7 +94,7 @@ public class DiagnosticVisibilityTests : AgentControlPlaneTestBase
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
         result.Value!.Explanations.Should().HaveCount(1);
-        result.Value.Explanations[0].Code.Should().Be("DRAFT_ID_EMPTY");
+        result.Value.Explanations[0].Code.Should().Be(new DiagnosticCode("DRAFT_ID_EMPTY"));
     }
 
     [Fact]
@@ -113,8 +113,8 @@ public class DiagnosticVisibilityTests : AgentControlPlaneTestBase
             [
                 new AgentToolDiagnostic
                 {
-                    Code = "INTENT_EMPTY",
-                    Severity = AgentToolDiagnosticSeverity.Warning,
+                    Code = new DiagnosticCode("INTENT_EMPTY"),
+                    Severity = SeverityLevel.Warning,
                     Message = ""
                 }
             ],

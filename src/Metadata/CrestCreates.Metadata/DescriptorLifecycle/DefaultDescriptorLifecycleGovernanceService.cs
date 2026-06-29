@@ -81,8 +81,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
         {
             packageFindings.Add(new DescriptorLifecycleFinding
             {
-                Severity = DescriptorLifecycleFindingSeverity.Info,
-                Code = "LIFECYCLE_NO_TRANSITIONS",
+                Severity = SeverityLevel.Info,
+                Code = new DiagnosticCode("LIFECYCLE_NO_TRANSITIONS"),
                 Message = "No transitions requested.",
                 Source = "policy"
             });
@@ -94,12 +94,12 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
 
         // Package-level findings with Review or Blocker severity must upgrade MaxDecision
         var packageMaxSeverity = packageFindings.Count == 0
-            ? DescriptorLifecycleFindingSeverity.Info
+            ? SeverityLevel.Info
             : packageFindings.Max(f => f.Severity);
 
-        if (packageMaxSeverity == DescriptorLifecycleFindingSeverity.Blocker)
+        if (packageMaxSeverity == SeverityLevel.Blocker)
             maxDecision = DescriptorLifecycleDecisionKind.Blocked;
-        else if (packageMaxSeverity == DescriptorLifecycleFindingSeverity.Review
+        else if (packageMaxSeverity == SeverityLevel.Review
                  && maxDecision == DescriptorLifecycleDecisionKind.Allowed)
             maxDecision = DescriptorLifecycleDecisionKind.ReviewRequired;
 
@@ -127,8 +127,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
         {
             packageFindings.Add(new DescriptorLifecycleFinding
             {
-                Severity = DescriptorLifecycleFindingSeverity.Review,
-                Code = "LIFECYCLE_CHANGESET_MISMATCH",
+                Severity = SeverityLevel.Review,
+                Code = new DiagnosticCode("LIFECYCLE_CHANGESET_MISMATCH"),
                 Message = "Impact and compatibility reports have different change sets.",
                 Source = "policy"
             });
@@ -155,8 +155,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
             {
                 packageFindings.Add(new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Review,
-                    Code = "LIFECYCLE_SUBJECT_NOT_IN_CHANGESET",
+                    Severity = SeverityLevel.Review,
+                    Code = new DiagnosticCode("LIFECYCLE_SUBJECT_NOT_IN_CHANGESET"),
                     Message = $"Transition subject {transition.Subject} with operation " +
                               $"{transition.Operation} is not in the change set.",
                     Source = "policy",
@@ -180,8 +180,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
             {
                 packageFindings.Add(new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Review,
-                    Code = "LIFECYCLE_BINDING_ID_UNRESOLVABLE",
+                    Severity = SeverityLevel.Review,
+                    Code = new DiagnosticCode("LIFECYCLE_BINDING_ID_UNRESOLVABLE"),
                     Message = "Binding report has empty or null DescriptorId.",
                     Source = "binding"
                 });
@@ -194,8 +194,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
             {
                 packageFindings.Add(new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Review,
-                    Code = "LIFECYCLE_BINDING_ID_UNRESOLVABLE",
+                    Severity = SeverityLevel.Review,
+                    Code = new DiagnosticCode("LIFECYCLE_BINDING_ID_UNRESOLVABLE"),
                     Message = $"Binding report DescriptorId '{br.DescriptorId}' " +
                               "cannot be parsed as Namespace.Id.",
                     Source = "binding"
@@ -210,8 +210,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
             {
                 packageFindings.Add(new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Review,
-                    Code = "LIFECYCLE_BINDING_KIND_MISMATCH",
+                    Severity = SeverityLevel.Review,
+                    Code = new DiagnosticCode("LIFECYCLE_BINDING_KIND_MISMATCH"),
                     Message = $"Binding report namespace '{ns}' does not match " +
                               $"canonical namespace '{expected}' for DescriptorKind {br.DescriptorKind}.",
                     Source = "binding"
@@ -230,8 +230,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
         {
             packageFindings.Add(new DescriptorLifecycleFinding
             {
-                Severity = DescriptorLifecycleFindingSeverity.Review,
-                Code = "LIFECYCLE_BINDING_KIND_MISMATCH",
+                Severity = SeverityLevel.Review,
+                Code = new DiagnosticCode("LIFECYCLE_BINDING_KIND_MISMATCH"),
                 Message = $"Binding report has multiple DescriptorKind values for " +
                           $"DescriptorId '{group.Key}'.",
                 Source = "binding"
@@ -247,8 +247,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
         {
             packageFindings.Add(new DescriptorLifecycleFinding
             {
-                Severity = DescriptorLifecycleFindingSeverity.Review,
-                Code = "LIFECYCLE_BINDING_VERSION_AMBIGUITY",
+                Severity = SeverityLevel.Review,
+                Code = new DiagnosticCode("LIFECYCLE_BINDING_VERSION_AMBIGUITY"),
                 Message = $"Binding report has multiple statuses for " +
                           $"{group.Key.DescriptorKind}/{group.Key.DescriptorId}.",
                 Source = "binding"
@@ -264,24 +264,24 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
 
         foreach (var issue in report.Issues)
         {
-            if (issue.Severity == ValidationSeverity.Error)
+            if (issue.Severity == SeverityLevel.Error)
             {
                 findings.Add(new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Blocker,
-                    Code = "LIFECYCLE_VALIDATION_ERROR",
+                    Severity = SeverityLevel.Blocker,
+                    Code = new DiagnosticCode("LIFECYCLE_VALIDATION_ERROR"),
                     Message = issue.Message,
                     Source = "validation"
                 });
             }
-            else if (issue.Severity == ValidationSeverity.Warning)
+            else if (issue.Severity == SeverityLevel.Warning)
             {
                 if (options.TreatValidationWarningsAsReviewRequired)
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Review,
-                        Code = "LIFECYCLE_VALIDATION_WARNING",
+                        Severity = SeverityLevel.Review,
+                        Code = new DiagnosticCode("LIFECYCLE_VALIDATION_WARNING"),
                         Message = issue.Message,
                         Source = "validation"
                     });
@@ -290,8 +290,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Warning,
-                        Code = "LIFECYCLE_VALIDATION_WARNING",
+                        Severity = SeverityLevel.Warning,
+                        Code = new DiagnosticCode("LIFECYCLE_VALIDATION_WARNING"),
                         Message = issue.Message,
                         Source = "validation"
                     });
@@ -301,8 +301,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
             {
                 findings.Add(new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Info,
-                    Code = "LIFECYCLE_VALIDATION_INFO",
+                    Severity = SeverityLevel.Info,
+                    Code = new DiagnosticCode("LIFECYCLE_VALIDATION_INFO"),
                     Message = issue.Message,
                     Source = "validation"
                 });
@@ -336,8 +336,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Info,
-                        Code = "LIFECYCLE_BINDING_NOT_READY",
+                        Severity = SeverityLevel.Info,
+                        Code = new DiagnosticCode("LIFECYCLE_BINDING_NOT_READY"),
                         Message = $"Descriptor binding status is {status}.",
                         Source = "binding",
                         Subject = transition.Subject
@@ -365,8 +365,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Info,
-                        Code = "LIFECYCLE_BINDING_NOT_READY",
+                        Severity = SeverityLevel.Info,
+                        Code = new DiagnosticCode("LIFECYCLE_BINDING_NOT_READY"),
                         Message = $"Descriptor binding status is {status}.",
                         Source = "binding",
                         Subject = transition.Subject
@@ -393,8 +393,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
             case DescriptorBindingStatus.Invalid:
                 findings.Add(new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Blocker,
-                    Code = "LIFECYCLE_BINDING_INVALID",
+                    Severity = SeverityLevel.Blocker,
+                    Code = new DiagnosticCode("LIFECYCLE_BINDING_INVALID"),
                     Message = "Binding status is Invalid.",
                     Source = "binding",
                     Subject = transition.Subject
@@ -406,8 +406,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Blocker,
-                        Code = "LIFECYCLE_BINDING_UNBOUND",
+                        Severity = SeverityLevel.Blocker,
+                        Code = new DiagnosticCode("LIFECYCLE_BINDING_UNBOUND"),
                         Message = "Binding status is Unbound.",
                         Source = "binding",
                         Subject = transition.Subject
@@ -417,8 +417,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Review,
-                        Code = "LIFECYCLE_BINDING_UNBOUND",
+                        Severity = SeverityLevel.Review,
+                        Code = new DiagnosticCode("LIFECYCLE_BINDING_UNBOUND"),
                         Message = "Binding status is Unbound.",
                         Source = "binding",
                         Subject = transition.Subject
@@ -431,8 +431,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Blocker,
-                        Code = "LIFECYCLE_BINDING_UNSUPPORTED",
+                        Severity = SeverityLevel.Blocker,
+                        Code = new DiagnosticCode("LIFECYCLE_BINDING_UNSUPPORTED"),
                         Message = "Binding status is Unsupported.",
                         Source = "binding",
                         Subject = transition.Subject
@@ -442,8 +442,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Review,
-                        Code = "LIFECYCLE_BINDING_UNSUPPORTED",
+                        Severity = SeverityLevel.Review,
+                        Code = new DiagnosticCode("LIFECYCLE_BINDING_UNSUPPORTED"),
                         Message = "Binding status is Unsupported.",
                         Source = "binding",
                         Subject = transition.Subject
@@ -456,8 +456,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Review,
-                        Code = "LIFECYCLE_BINDING_PARTIAL",
+                        Severity = SeverityLevel.Review,
+                        Code = new DiagnosticCode("LIFECYCLE_BINDING_PARTIAL"),
                         Message = "Binding status is PartiallyBound.",
                         Source = "binding",
                         Subject = transition.Subject
@@ -481,8 +481,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
             case DescriptorBindingStatus.Invalid:
                 findings.Add(new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Blocker,
-                    Code = "LIFECYCLE_BINDING_INVALID",
+                    Severity = SeverityLevel.Blocker,
+                    Code = new DiagnosticCode("LIFECYCLE_BINDING_INVALID"),
                     Message = "Binding status is Invalid.",
                     Source = "binding",
                     Subject = transition.Subject
@@ -494,8 +494,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
             case DescriptorBindingStatus.PartiallyBound:
                 findings.Add(new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Review,
-                    Code = $"LIFECYCLE_BINDING_{status.ToString().ToUpperInvariant()}",
+                    Severity = SeverityLevel.Review,
+                    Code = new DiagnosticCode($"LIFECYCLE_BINDING_{status.ToString().ToUpperInvariant()}"),
                     Message = $"Binding status is {status}.",
                     Source = "binding",
                     Subject = transition.Subject
@@ -518,8 +518,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
             case DescriptorBindingStatus.Invalid:
                 findings.Add(new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Blocker,
-                    Code = "LIFECYCLE_BINDING_INVALID",
+                    Severity = SeverityLevel.Blocker,
+                    Code = new DiagnosticCode("LIFECYCLE_BINDING_INVALID"),
                     Message = "Binding status is Invalid.",
                     Source = "binding",
                     Subject = transition.Subject
@@ -531,8 +531,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Blocker,
-                        Code = "LIFECYCLE_BINDING_UNBOUND",
+                        Severity = SeverityLevel.Blocker,
+                        Code = new DiagnosticCode("LIFECYCLE_BINDING_UNBOUND"),
                         Message = "Binding status is Unbound.",
                         Source = "binding",
                         Subject = transition.Subject
@@ -545,8 +545,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Blocker,
-                        Code = "LIFECYCLE_BINDING_UNSUPPORTED",
+                        Severity = SeverityLevel.Blocker,
+                        Code = new DiagnosticCode("LIFECYCLE_BINDING_UNSUPPORTED"),
                         Message = "Binding status is Unsupported.",
                         Source = "binding",
                         Subject = transition.Subject
@@ -559,8 +559,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Review,
-                        Code = "LIFECYCLE_BINDING_PARTIAL",
+                        Severity = SeverityLevel.Review,
+                        Code = new DiagnosticCode("LIFECYCLE_BINDING_PARTIAL"),
                         Message = "Binding status is PartiallyBound.",
                         Source = "binding",
                         Subject = transition.Subject
@@ -581,25 +581,25 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
 
         foreach (var diag in topologyDiagnostics.All)
         {
-            if (diag.Severity == DiagnosticSeverity.Error)
+            if (diag.Severity == SeverityLevel.Error)
             {
                 findings.Add(new DescriptorLifecycleFinding
                 {
                     Severity = options.BlockOnTopologyErrors
-                        ? DescriptorLifecycleFindingSeverity.Blocker
-                        : DescriptorLifecycleFindingSeverity.Review,
-                    Code = "LIFECYCLE_TOPOLOGY_ERROR",
+                        ? SeverityLevel.Blocker
+                        : SeverityLevel.Review,
+                    Code = new DiagnosticCode("LIFECYCLE_TOPOLOGY_ERROR"),
                     Message = diag.Message,
                     Source = "topology",
                     Subject = diag.Subject
                 });
             }
-            else if (diag.Severity == DiagnosticSeverity.Warning)
+            else if (diag.Severity == SeverityLevel.Warning)
             {
                 findings.Add(new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Review,
-                    Code = "LIFECYCLE_TOPOLOGY_WARNING",
+                    Severity = SeverityLevel.Review,
+                    Code = new DiagnosticCode("LIFECYCLE_TOPOLOGY_WARNING"),
                     Message = diag.Message,
                     Source = "topology",
                     Subject = diag.Subject
@@ -619,25 +619,25 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
         // Impact diagnostics
         foreach (var diag in impactReport.Diagnostics)
         {
-            if (diag.Severity == DiagnosticSeverity.Error)
+            if (diag.Severity == SeverityLevel.Error)
             {
                 findings.Add(new DescriptorLifecycleFinding
                 {
                     Severity = options.BlockOnImpactDiagnosticsErrors
-                        ? DescriptorLifecycleFindingSeverity.Blocker
-                        : DescriptorLifecycleFindingSeverity.Review,
-                    Code = "LIFECYCLE_IMPACT_DIAGNOSTIC_ERROR",
+                        ? SeverityLevel.Blocker
+                        : SeverityLevel.Review,
+                    Code = new DiagnosticCode("LIFECYCLE_IMPACT_DIAGNOSTIC_ERROR"),
                     Message = diag.Message,
                     Source = "impact",
                     Subject = diag.Subject
                 });
             }
-            else if (diag.Severity == DiagnosticSeverity.Warning)
+            else if (diag.Severity == SeverityLevel.Warning)
             {
                 findings.Add(new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Review,
-                    Code = "LIFECYCLE_IMPACT_DIAGNOSTIC_WARNING",
+                    Severity = SeverityLevel.Review,
+                    Code = new DiagnosticCode("LIFECYCLE_IMPACT_DIAGNOSTIC_WARNING"),
                     Message = diag.Message,
                     Source = "impact",
                     Subject = diag.Subject
@@ -651,8 +651,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
             // Important: impact severity triggers review but must NOT be labeled breaking
             findings.Add(new DescriptorLifecycleFinding
             {
-                Severity = DescriptorLifecycleFindingSeverity.Review,
-                Code = "LIFECYCLE_IMPACT_SEVERITY_THRESHOLD",
+                Severity = SeverityLevel.Review,
+                Code = new DiagnosticCode("LIFECYCLE_IMPACT_SEVERITY_THRESHOLD"),
                 Message = $"Impact severity {impactReport.MaxSeverity} meets or exceeds " +
                           $"threshold {options.ReviewRequiredImpactThreshold}.",
                 Source = "impact"
@@ -696,8 +696,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Blocker,
-                        Code = "LIFECYCLE_COMPAT_BREAKING",
+                        Severity = SeverityLevel.Blocker,
+                        Code = new DiagnosticCode("LIFECYCLE_COMPAT_BREAKING"),
                         Message = "Breaking compatibility change detected.",
                         Source = "compatibility",
                         Subject = transition.Subject
@@ -707,8 +707,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Review,
-                        Code = "LIFECYCLE_COMPAT_BREAKING",
+                        Severity = SeverityLevel.Review,
+                        Code = new DiagnosticCode("LIFECYCLE_COMPAT_BREAKING"),
                         Message = "Breaking compatibility change detected.",
                         Source = "compatibility",
                         Subject = transition.Subject
@@ -721,8 +721,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Review,
-                        Code = "LIFECYCLE_COMPAT_SECURITY_SENSITIVE",
+                        Severity = SeverityLevel.Review,
+                        Code = new DiagnosticCode("LIFECYCLE_COMPAT_SECURITY_SENSITIVE"),
                         Message = "Security-sensitive compatibility change detected.",
                         Source = "compatibility",
                         Subject = transition.Subject
@@ -735,8 +735,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Review,
-                        Code = "LIFECYCLE_COMPAT_RISKY",
+                        Severity = SeverityLevel.Review,
+                        Code = new DiagnosticCode("LIFECYCLE_COMPAT_RISKY"),
                         Message = "Risky compatibility change detected.",
                         Source = "compatibility",
                         Subject = transition.Subject
@@ -749,8 +749,8 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
                 {
                     findings.Add(new DescriptorLifecycleFinding
                     {
-                        Severity = DescriptorLifecycleFindingSeverity.Review,
-                        Code = "LIFECYCLE_COMPAT_UNSUPPORTED",
+                        Severity = SeverityLevel.Review,
+                        Code = new DiagnosticCode("LIFECYCLE_COMPAT_UNSUPPORTED"),
                         Message = "Unsupported compatibility change detected. " +
                                   "This indicates insufficient rule knowledge, not a breaking change.",
                         Source = "compatibility",
@@ -773,25 +773,25 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
 
         foreach (var diag in compatibilityReport.Diagnostics)
         {
-            if (diag.Severity == DiagnosticSeverity.Error)
+            if (diag.Severity == SeverityLevel.Error)
             {
                 findings.Add(new DescriptorLifecycleFinding
                 {
                     Severity = options.BlockOnCompatibilityDiagnosticsErrors
-                        ? DescriptorLifecycleFindingSeverity.Blocker
-                        : DescriptorLifecycleFindingSeverity.Review,
-                    Code = "LIFECYCLE_COMPAT_DIAGNOSTIC_ERROR",
+                        ? SeverityLevel.Blocker
+                        : SeverityLevel.Review,
+                    Code = new DiagnosticCode("LIFECYCLE_COMPAT_DIAGNOSTIC_ERROR"),
                     Message = diag.Message,
                     Source = "compatibility",
                     Subject = diag.Subject
                 });
             }
-            else if (diag.Severity == DiagnosticSeverity.Warning)
+            else if (diag.Severity == SeverityLevel.Warning)
             {
                 findings.Add(new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Review,
-                    Code = "LIFECYCLE_COMPAT_DIAGNOSTIC_WARNING",
+                    Severity = SeverityLevel.Review,
+                    Code = new DiagnosticCode("LIFECYCLE_COMPAT_DIAGNOSTIC_WARNING"),
                     Message = diag.Message,
                     Source = "compatibility",
                     Subject = diag.Subject
@@ -805,10 +805,10 @@ public sealed class DefaultDescriptorLifecycleGovernanceService
     private static DescriptorLifecycleDecisionKind ComputeDecision(
         IReadOnlyList<DescriptorLifecycleFinding> findings)
     {
-        if (findings.Any(f => f.Severity == DescriptorLifecycleFindingSeverity.Blocker))
+        if (findings.Any(f => f.Severity == SeverityLevel.Blocker))
             return DescriptorLifecycleDecisionKind.Blocked;
 
-        if (findings.Any(f => f.Severity == DescriptorLifecycleFindingSeverity.Review))
+        if (findings.Any(f => f.Severity == SeverityLevel.Review))
             return DescriptorLifecycleDecisionKind.ReviewRequired;
 
         return DescriptorLifecycleDecisionKind.Allowed;

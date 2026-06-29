@@ -30,7 +30,7 @@ public class Phase7dCoverageTests : AgentControlPlaneTestBase
             Title = "Impact Analysis",
             Order = 4,
             IsEmpty = false,
-            OverallSeverity = DescriptorReviewSeverity.Warning,
+            OverallSeverity = SeverityLevel.Warning,
             Items = new[]
             {
                 new DescriptorReviewReportItemDto
@@ -39,7 +39,7 @@ public class Phase7dCoverageTests : AgentControlPlaneTestBase
                     ReasonCode = "affected_descriptor",
                     MessageTemplateId = "report.impact.affected",
                     Message = "Descriptor affected by changes.",
-                    Severity = DescriptorReviewSeverity.Warning,
+                    Severity = SeverityLevel.Warning,
                     Parameters = new Dictionary<string, string>(StringComparer.Ordinal)
                     {
                         ["DescriptorName"] = "HiddenDescriptor",
@@ -60,7 +60,7 @@ public class Phase7dCoverageTests : AgentControlPlaneTestBase
             Title = "Empty",
             Order = 1,
             IsEmpty = true,
-            OverallSeverity = DescriptorReviewSeverity.Info,
+            OverallSeverity = SeverityLevel.Info,
             Items = Array.Empty<DescriptorReviewReportItemDto>(),
         };
 

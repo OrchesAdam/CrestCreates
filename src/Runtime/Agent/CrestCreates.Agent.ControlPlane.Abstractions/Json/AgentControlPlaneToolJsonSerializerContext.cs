@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorPackage;
@@ -110,7 +111,6 @@ namespace CrestCreates.Agent.ControlPlane.Abstractions.Json;
 [JsonSerializable(typeof(DescriptorReviewRecommendationDto))]
 [JsonSerializable(typeof(DescriptorReviewReportBuildRequest))]
 [JsonSerializable(typeof(DescriptorReviewReportSectionKind))]
-[JsonSerializable(typeof(DescriptorReviewSeverity))]
 [JsonSerializable(typeof(DescriptorReviewRecommendationKind))]
 [JsonSerializable(typeof(DescriptorReviewReportFormat))]
 [JsonSerializable(typeof(FixProposalKind))]
@@ -133,7 +133,6 @@ namespace CrestCreates.Agent.ControlPlane.Abstractions.Json;
 // ── Base types not covered by wave sections above ──────────────────────
 [JsonSerializable(typeof(AgentToolResultStatus))]
 [JsonSerializable(typeof(AgentToolDiagnostic))]
-[JsonSerializable(typeof(AgentToolDiagnosticSeverity))]
 [JsonSerializable(typeof(AgentToolInvocationAuditRecord))]
 [JsonSerializable(typeof(AgentToolCategory))]
 [JsonSerializable(typeof(AgentToolActorKind))]
@@ -147,7 +146,10 @@ namespace CrestCreates.Agent.ControlPlane.Abstractions.Json;
 [JsonSerializable(typeof(FixProposalRiskLevel))]
 [JsonSerializable(typeof(ActivationRequestStatus))]
 [JsonSerializable(typeof(ActivationReadinessBlocker))]
-[JsonSerializable(typeof(ActivationReadinessBlockerSeverity))]
+
+// ── Core identity types used in diagnostics ───────────────────────────
+[JsonSerializable(typeof(DiagnosticCode))]
+[JsonSerializable(typeof(SeverityLevel))]
 
 public sealed partial class AgentControlPlaneToolJsonSerializerContext
     : JsonSerializerContext

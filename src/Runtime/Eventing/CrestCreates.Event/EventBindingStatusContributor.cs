@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
@@ -34,12 +35,12 @@ public sealed class EventBindingStatusContributor : IDescriptorBindingStatusCont
 
         if (evt.State == DescriptorState.Deprecated)
         {
-            issues.Add(new DescriptorBindingIssue(ValidationSeverity.Warning, "WARN_DEPRECATED",
+            issues.Add(new DescriptorBindingIssue(SeverityLevel.Warning, new DiagnosticCode("WARN_DEPRECATED"),
                 $"Event '{evt.Name}' is deprecated.", fullId, DescriptorKind.Event));
         }
         else if (evt.State == DescriptorState.Removed)
         {
-            issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "UNSUPPORTED_REMOVED",
+            issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("UNSUPPORTED_REMOVED"),
                 $"Event '{evt.Name}' has been removed.", fullId, DescriptorKind.Event));
         }
 
@@ -48,7 +49,7 @@ public sealed class EventBindingStatusContributor : IDescriptorBindingStatusCont
             var schema = _schemaRegistry.GetByVersion(evt.PayloadSchemaRef.Id, evt.PayloadSchemaRef.Version);
             if (schema == null)
             {
-                issues.Add(new DescriptorBindingIssue(ValidationSeverity.Error, "REF_MISSING_SCHEMA",
+                issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("REF_MISSING_SCHEMA"),
                     $"Payload schema '{evt.PayloadSchemaRef.Id}' v{evt.PayloadSchemaRef.Version} not found.",
                     fullId, DescriptorKind.Event, "PayloadSchemaRef"));
             }

@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.Registry;
@@ -37,13 +38,13 @@ public sealed class FormSchemaBindingValidator
             var latest = schemaRegistry.GetById(form.Schema.Id);
             if (latest != null)
             {
-                issues.Add(new ValidationIssue(ValidationSeverity.Error,
+                issues.Add(new ValidationIssue(SeverityLevel.Error,
                     $"{ctx}: Schema '{form.Schema.Id}' v{form.Schema.Version} not found. " +
                     $"Latest version is v{latest.Version}."));
             }
             else
             {
-                issues.Add(new ValidationIssue(ValidationSeverity.Error,
+                issues.Add(new ValidationIssue(SeverityLevel.Error,
                     $"{ctx}: Schema '{form.Schema.Id}' not found in registry."));
             }
             return;
@@ -56,7 +57,7 @@ public sealed class FormSchemaBindingValidator
         {
             if (!schemaFieldNames.Contains(field.SchemaFieldName))
             {
-                issues.Add(new ValidationIssue(ValidationSeverity.Error,
+                issues.Add(new ValidationIssue(SeverityLevel.Error,
                     $"{ctx}: Field '{field.SchemaFieldName}' not found in " +
                     $"Schema '{schema.Name}' v{schema.Version} Fields."));
             }
@@ -68,7 +69,7 @@ public sealed class FormSchemaBindingValidator
             if (!form.Fields.Any(ff =>
                 string.Equals(ff.SchemaFieldName, schemaField.Name, StringComparison.Ordinal)))
             {
-                issues.Add(new ValidationIssue(ValidationSeverity.Warning,
+                issues.Add(new ValidationIssue(SeverityLevel.Warning,
                     $"{ctx}: Schema required field '{schemaField.Name}' is not present " +
                     $"in Form fields."));
             }

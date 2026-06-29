@@ -9,6 +9,7 @@ using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
 using Moq;
 using Xunit;
+using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Metadata.Tests.DescriptorTopology;
 
@@ -82,7 +83,7 @@ public class DescriptorTopologyDiagnosticsTests
         var snapshot = builder.Build(new[] { formDesc });
 
         var diag = snapshot.Diagnostics.All.Should().ContainSingle(d =>
-            d.Code == "MISSING_TARGET" && d.Severity == DiagnosticSeverity.Error).Subject;
+            d.Code == "MISSING_TARGET" && d.Severity == SeverityLevel.Error).Subject;
         diag.Message.Should().Contain("MissingSchema");
     }
 
@@ -105,7 +106,7 @@ public class DescriptorTopologyDiagnosticsTests
         var snapshot = builder.Build(new[] { capDesc });
 
         var diag = snapshot.Diagnostics.All.Should().ContainSingle(d =>
-            d.Code == "MISSING_TARGET" && d.Severity == DiagnosticSeverity.Warning).Subject;
+            d.Code == "MISSING_TARGET" && d.Severity == SeverityLevel.Warning).Subject;
     }
 
     [Fact]
@@ -131,7 +132,7 @@ public class DescriptorTopologyDiagnosticsTests
         var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new[] { a, b });
 
-        snapshot.Diagnostics.All.Should().Contain(d => d.Code == "STRONG_CYCLE" && d.Severity == DiagnosticSeverity.Error);
+        snapshot.Diagnostics.All.Should().Contain(d => d.Code == "STRONG_CYCLE" && d.Severity == SeverityLevel.Error);
     }
 
     [Fact]
@@ -171,7 +172,7 @@ public class DescriptorTopologyDiagnosticsTests
         var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new[] { orphan });
 
-        snapshot.Diagnostics.All.Should().Contain(d => d.Code == "ORPHAN" && d.Severity == DiagnosticSeverity.Warning);
+        snapshot.Diagnostics.All.Should().Contain(d => d.Code == "ORPHAN" && d.Severity == SeverityLevel.Warning);
     }
 
     [Fact]
@@ -209,7 +210,7 @@ public class DescriptorTopologyDiagnosticsTests
         var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new[] { a, b });
 
-        snapshot.Diagnostics.All.Should().Contain(d => d.Code == "EXACT_DUPLICATE" && d.Severity == DiagnosticSeverity.Warning);
+        snapshot.Diagnostics.All.Should().Contain(d => d.Code == "EXACT_DUPLICATE" && d.Severity == SeverityLevel.Warning);
     }
 
     [Fact]
@@ -257,7 +258,7 @@ public class DescriptorTopologyDiagnosticsTests
         var builder = new DescriptorTopologyBuilder(mockProvider.Object, _hashBuilder);
         var snapshot = builder.Build(new IDescriptor[] { wfDesc, subWfDesc });
 
-        snapshot.Diagnostics.All.Should().Contain(d => d.Code == "UNSUPPORTED_REFERENCE" && d.Severity == DiagnosticSeverity.Warning);
+        snapshot.Diagnostics.All.Should().Contain(d => d.Code == "UNSUPPORTED_REFERENCE" && d.Severity == SeverityLevel.Warning);
     }
 
     [Fact]

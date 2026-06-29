@@ -309,8 +309,8 @@ public class ToolDtoSemanticPreservationTests
             ValidationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
                 new DraftAbstractions.DescriptorDraftDiagnostic
                 {
-                    Code = "CONTRACT_BREAKING_CHANGE",
-                    Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Blocker,
+                    Code = new DiagnosticCode("CONTRACT_BREAKING_CHANGE"),
+                    Severity = SeverityLevel.Blocker,
                     Message = "Contract hash changed on compatible version increment",
                     Path = "contractHash",
                     DescriptorKind = DescriptorKind.Capability,
@@ -318,15 +318,15 @@ public class ToolDtoSemanticPreservationTests
                 },
                 new DraftAbstractions.DescriptorDraftDiagnostic
                 {
-                    Code = "MISSING_DESCRIPTION",
-                    Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning,
+                    Code = new DiagnosticCode("MISSING_DESCRIPTION"),
+                    Severity = SeverityLevel.Warning,
                     Message = "Descriptor does not have a description",
                     DescriptorId = "test.cap-001"
                 },
                 new DraftAbstractions.DescriptorDraftDiagnostic
                 {
-                    Code = "UNVERSIONED_REFERENCE",
-                    Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Info,
+                    Code = new DiagnosticCode("UNVERSIONED_REFERENCE"),
+                    Severity = SeverityLevel.Info,
                     Message = "Reference to 'test.dep' is not version-pinned",
                     RelatedDiagnosticCode = "AMBIGUOUS_REF_PINNING"
                 }
@@ -335,8 +335,8 @@ public class ToolDtoSemanticPreservationTests
             {
                 new DraftAbstractions.DescriptorDraftDiagnostic
                 {
-                    Code = "TOPOLOGY_ORPHAN",
-                    Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error,
+                    Code = new DiagnosticCode("TOPOLOGY_ORPHAN"),
+                    Severity = SeverityLevel.Error,
                     Message = "Descriptor has no incoming or outgoing edges",
                     DescriptorKind = DescriptorKind.Capability
                 }
@@ -351,27 +351,27 @@ public class ToolDtoSemanticPreservationTests
         // Explicit diagnostic validation
         roundTripped.ValidationResult.IsValid.Should().BeFalse();
         roundTripped.ValidationResult.Diagnostics.Should().HaveCount(3);
-        roundTripped.ValidationResult.Diagnostics[0].Code.Should().Be("CONTRACT_BREAKING_CHANGE");
+        roundTripped.ValidationResult.Diagnostics[0].Code.Should().Be(new DiagnosticCode("CONTRACT_BREAKING_CHANGE"));
         roundTripped.ValidationResult.Diagnostics[0].Severity.Should()
-            .Be(DraftAbstractions.DescriptorDraftDiagnosticSeverity.Blocker);
+            .Be(SeverityLevel.Blocker);
         roundTripped.ValidationResult.Diagnostics[0].Message.Should()
             .Be("Contract hash changed on compatible version increment");
         roundTripped.ValidationResult.Diagnostics[0].Path.Should().Be("contractHash");
 
-        roundTripped.ValidationResult.Diagnostics[1].Code.Should().Be("MISSING_DESCRIPTION");
+        roundTripped.ValidationResult.Diagnostics[1].Code.Should().Be(new DiagnosticCode("MISSING_DESCRIPTION"));
         roundTripped.ValidationResult.Diagnostics[1].Severity.Should()
-            .Be(DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning);
+            .Be(SeverityLevel.Warning);
 
-        roundTripped.ValidationResult.Diagnostics[2].Code.Should().Be("UNVERSIONED_REFERENCE");
+        roundTripped.ValidationResult.Diagnostics[2].Code.Should().Be(new DiagnosticCode("UNVERSIONED_REFERENCE"));
         roundTripped.ValidationResult.Diagnostics[2].Severity.Should()
-            .Be(DraftAbstractions.DescriptorDraftDiagnosticSeverity.Info);
+            .Be(SeverityLevel.Info);
         roundTripped.ValidationResult.Diagnostics[2].RelatedDiagnosticCode.Should()
             .Be("AMBIGUOUS_REF_PINNING");
 
         roundTripped.Diagnostics.Should().HaveCount(1);
-        roundTripped.Diagnostics[0].Code.Should().Be("TOPOLOGY_ORPHAN");
+        roundTripped.Diagnostics[0].Code.Should().Be(new DiagnosticCode("TOPOLOGY_ORPHAN"));
         roundTripped.Diagnostics[0].Severity.Should()
-            .Be(DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error);
+            .Be(SeverityLevel.Error);
 
         roundTripped.IsActivationEligible.Should().BeFalse();
     }
@@ -389,7 +389,7 @@ public class ToolDtoSemanticPreservationTests
             Kind = FixProposalKind.CreateMissingDescriptor,
             Title = "Fix high risk contract hash",
             Explanation = "Contract hash must be updated to reflect breaking change",
-            ReasonCode = "CONTRACT_BREAKING_CHANGE",
+            ReasonCode = new DiagnosticCode("CONTRACT_BREAKING_CHANGE"),
             Applicability = FixProposalApplicability.CurrentMutableDraft,
             IsExecutable = true,
             RequiresManualAction = false,
@@ -424,8 +424,8 @@ public class ToolDtoSemanticPreservationTests
             {
                 new AgentToolDiagnostic
                 {
-                    Code = "FIX_REQUIRES_REVIEW",
-                    Severity = AgentToolDiagnosticSeverity.Warning,
+                    Code = new DiagnosticCode("FIX_REQUIRES_REVIEW"),
+                    Severity = SeverityLevel.Warning,
                     Message = "This fix proposal requires human review before application"
                 }
             },
@@ -792,8 +792,8 @@ public class ToolDtoSemanticPreservationTests
         {
             new DraftAbstractions.DescriptorDraftDiagnostic
             {
-                Code = "REVIEW_MISSING_DESCRIPTION",
-                Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning,
+                Code = new DiagnosticCode("REVIEW_MISSING_DESCRIPTION"),
+                Severity = SeverityLevel.Warning,
                 Message = "Descriptor lacks description"
             }
         },
@@ -804,8 +804,8 @@ public class ToolDtoSemanticPreservationTests
         DraftAbstractions.DescriptorDraftValidationResult.Failure(
             new DraftAbstractions.DescriptorDraftDiagnostic
             {
-                Code = "DRAFT_NAME_EMPTY",
-                Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error,
+                Code = new DiagnosticCode("DRAFT_NAME_EMPTY"),
+                Severity = SeverityLevel.Error,
                 Message = "Name must not be empty"
             });
 
@@ -817,7 +817,7 @@ public class ToolDtoSemanticPreservationTests
         Kind = FixProposalKind.CreateMissingDescriptor,
         Title = "Test fix proposal",
         Explanation = "Test explanation for sample",
-        ReasonCode = "TEST_REASON",
+        ReasonCode = new DiagnosticCode("TEST_REASON"),
         Applicability = FixProposalApplicability.CurrentMutableDraft,
         IsExecutable = true,
         RequiresManualAction = false,
@@ -1045,8 +1045,8 @@ public class ToolDtoSemanticPreservationTests
 
     private static AgentToolDiagnostic BuildSampleToolDiagnostic() => new()
     {
-        Code = "TEST_DIAG",
-        Severity = AgentToolDiagnosticSeverity.Warning,
+        Code = new DiagnosticCode("TEST_DIAG"),
+        Severity = SeverityLevel.Warning,
         Message = "Test diagnostic",
         Path = "some.field",
         RelatedDiagnosticCode = "RELATED_TEST"

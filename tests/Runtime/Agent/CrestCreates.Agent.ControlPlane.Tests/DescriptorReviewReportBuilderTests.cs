@@ -98,8 +98,8 @@ public class DescriptorReviewReportBuilderTests
     }
 
     private static DraftAbstractions.DescriptorDraftDiagnostic CreateDiagnostic(
-        string code = "TEST_DIAG",
-        DraftAbstractions.DescriptorDraftDiagnosticSeverity severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning,
+        DiagnosticCode code,
+        SeverityLevel severity,
         string message = "Test diagnostic")
     {
         return new DraftAbstractions.DescriptorDraftDiagnostic
@@ -157,7 +157,7 @@ public class DescriptorReviewReportBuilderTests
         section.Should().NotBeNull();
         section.IsEmpty.Should().BeFalse();
         section.Items.Should().Contain(i => i.ReasonCode == "activation_eligible");
-        section.OverallSeverity.Should().Be(DescriptorReviewSeverity.Info);
+        section.OverallSeverity.Should().Be(SeverityLevel.Info);
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -168,7 +168,7 @@ public class DescriptorReviewReportBuilderTests
     public void Build_BlockedDraft_ReturnsActivationEligibleSectionWithBlockers()
     {
         var draft = CreateDraft();
-        var blocker = CreateDiagnostic("DRAFT_BLOCKER", DraftAbstractions.DescriptorDraftDiagnosticSeverity.Blocker, "Blocked reason");
+        var blocker = CreateDiagnostic(new DiagnosticCode("DRAFT_BLOCKER"), SeverityLevel.Blocker, "Blocked reason");
         var reviewResult = CreateReviewResult(
             isActivationEligible: false,
             diagnostics: new[] { blocker });
@@ -178,7 +178,7 @@ public class DescriptorReviewReportBuilderTests
 
         var section = report.ActivationEligibilitySection;
         section.IsEmpty.Should().BeFalse();
-        section.OverallSeverity.Should().Be(DescriptorReviewSeverity.Blocker);
+        section.OverallSeverity.Should().Be(SeverityLevel.Blocker);
         section.Items.Should().Contain(i => i.ReasonCode == "activation_blocked");
         // Parameters should contain blocking reasons
         var blockedItem = section.Items.First(i => i.ReasonCode == "activation_blocked");
@@ -260,10 +260,10 @@ public class DescriptorReviewReportBuilderTests
     public void Build_DiagnosticsGroupedBySeverity()
     {
         var draft = CreateDraft();
-        var infoDiag = CreateDiagnostic("INFO_001", DraftAbstractions.DescriptorDraftDiagnosticSeverity.Info, "Info message");
-        var warnDiag = CreateDiagnostic("WARN_001", DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, "Warning message");
-        var errorDiag = CreateDiagnostic("ERR_001", DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, "Error message");
-        var blockerDiag = CreateDiagnostic("BLOCK_001", DraftAbstractions.DescriptorDraftDiagnosticSeverity.Blocker, "Blocker message");
+        var infoDiag = CreateDiagnostic(new DiagnosticCode("INFO_001"), SeverityLevel.Info, "Info message");
+        var warnDiag = CreateDiagnostic(new DiagnosticCode("WARN_001"), SeverityLevel.Warning, "Warning message");
+        var errorDiag = CreateDiagnostic(new DiagnosticCode("ERR_001"), SeverityLevel.Error, "Error message");
+        var blockerDiag = CreateDiagnostic(new DiagnosticCode("BLOCK_001"), SeverityLevel.Blocker, "Blocker message");
 
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
             infoDiag, warnDiag, errorDiag, blockerDiag);
@@ -280,10 +280,10 @@ public class DescriptorReviewReportBuilderTests
 
         // All diagnostics should be present
         section.Items.Should().HaveCountGreaterThanOrEqualTo(4);
-        section.Items.Should().Contain(i => i.ReasonCode == "INFO_001" && i.Severity == DescriptorReviewSeverity.Info);
-        section.Items.Should().Contain(i => i.ReasonCode == "WARN_001" && i.Severity == DescriptorReviewSeverity.Warning);
-        section.Items.Should().Contain(i => i.ReasonCode == "ERR_001" && i.Severity == DescriptorReviewSeverity.Error);
-        section.Items.Should().Contain(i => i.ReasonCode == "BLOCK_001" && i.Severity == DescriptorReviewSeverity.Blocker);
+        section.Items.Should().Contain(i => i.ReasonCode == "INFO_001" && i.Severity == SeverityLevel.Info);
+        section.Items.Should().Contain(i => i.ReasonCode == "WARN_001" && i.Severity == SeverityLevel.Warning);
+        section.Items.Should().Contain(i => i.ReasonCode == "ERR_001" && i.Severity == SeverityLevel.Error);
+        section.Items.Should().Contain(i => i.ReasonCode == "BLOCK_001" && i.Severity == SeverityLevel.Blocker);
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -436,8 +436,8 @@ public class DescriptorReviewReportBuilderTests
     public void Build_BlocksActivationUntilResolved_IsExplanationNotGate()
     {
         var draft = CreateDraft();
-        var blocker1 = CreateDiagnostic("BLOCK_A", DraftAbstractions.DescriptorDraftDiagnosticSeverity.Blocker, "First blocker");
-        var blocker2 = CreateDiagnostic("BLOCK_B", DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error, "Error message");
+        var blocker1 = CreateDiagnostic(new DiagnosticCode("BLOCK_A"), SeverityLevel.Blocker, "First blocker");
+        var blocker2 = CreateDiagnostic(new DiagnosticCode("BLOCK_B"), SeverityLevel.Error, "Error message");
         var reviewResult = CreateReviewResult(
             isActivationEligible: false,
             diagnostics: new[] { blocker1, blocker2 });
@@ -552,7 +552,7 @@ public class DescriptorReviewReportBuilderTests
     {
         var draft = CreateDraft();
         // Blockers produce ReviseDraft recommendation (actionable=true)
-        var blocker = CreateDiagnostic("BLOCK_001", DraftAbstractions.DescriptorDraftDiagnosticSeverity.Blocker, "Blocker");
+        var blocker = CreateDiagnostic(new DiagnosticCode("BLOCK_001"), SeverityLevel.Blocker, "Blocker");
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(blocker);
         var reviewResult = CreateReviewResult(
             validationResult: validationResult,
@@ -611,7 +611,7 @@ public class DescriptorReviewReportBuilderTests
         var draft = CreateDraft();
 
         // Scenario 1: Blocked draft → ReviseDraft recommendation → IsActionable=true
-        var blocker = CreateDiagnostic("BLOCK_001", DraftAbstractions.DescriptorDraftDiagnosticSeverity.Blocker, "Blocker");
+        var blocker = CreateDiagnostic(new DiagnosticCode("BLOCK_001"), SeverityLevel.Blocker, "Blocker");
         var blockedValidation = DraftAbstractions.DescriptorDraftValidationResult.Failure(blocker);
         var blockedReview = CreateReviewResult(
             validationResult: blockedValidation,
@@ -766,7 +766,7 @@ public class DescriptorReviewReportBuilderTests
             }
         };
 
-        var diag = CreateDiagnostic("DIAG_001", DraftAbstractions.DescriptorDraftDiagnosticSeverity.Info, "Info diagnostic");
+        var diag = CreateDiagnostic(new DiagnosticCode("DIAG_001"), SeverityLevel.Info, "Info diagnostic");
 
         var reviewResult = new DraftAbstractions.DescriptorDraftReviewResult
         {

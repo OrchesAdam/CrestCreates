@@ -110,6 +110,8 @@
   </Folder>
   <Folder Name="/src/Runtime/Agent/">
     <Project Path="src/Runtime/Agent/CrestCreates.Agent.Abstractions/CrestCreates.Agent.Abstractions.csproj" />
+    <Project Path="src/Runtime/Agent/CrestCreates.Agent.Memory.Abstractions/CrestCreates.Agent.Memory.Abstractions.csproj" />
+    <Project Path="src/Runtime/Agent/CrestCreates.Agent.Memory/CrestCreates.Agent.Memory.csproj" />
     <Project Path="src/Runtime/Agent/CrestCreates.Agent.Runtime/CrestCreates.Agent.Runtime.csproj" />
     <Project Path="src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
     <Project Path="src/Runtime/Agent/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj" />
@@ -222,6 +224,7 @@
   <Folder Name="/tests/Runtime/Agent/">
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.DraftContracts.Tests/CrestCreates.Agent.DraftContracts.Tests.csproj" />
+    <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Memory.Tests/CrestCreates.Agent.Memory.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Runtime/Eventing/">
     <Project Path="tests/Runtime/Eventing/CrestCreates.Event.Tests/CrestCreates.Event.Tests.csproj" />

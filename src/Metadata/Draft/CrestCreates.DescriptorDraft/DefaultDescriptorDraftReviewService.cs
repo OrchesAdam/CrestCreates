@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
@@ -95,7 +96,7 @@ public sealed class DefaultDescriptorDraftReviewService : IDescriptorDraftReview
         catch (Exception ex)
         {
             _logger.LogError(ex, "DescriptorDraftReview: Topology build failed for draft {DraftId}", draft.DraftId);
-            diagnostics.Add(Diag("REVIEW_TOPOLOGY_FAILED", DescriptorDraftDiagnosticSeverity.Error,
+            diagnostics.Add(Diag(new DiagnosticCode("REVIEW_TOPOLOGY_FAILED"), SeverityLevel.Error,
                 $"Topology build failed: {ex.Message}", draft.DraftId));
         }
 
@@ -108,7 +109,7 @@ public sealed class DefaultDescriptorDraftReviewService : IDescriptorDraftReview
         catch (Exception ex)
         {
             _logger.LogError(ex, "DescriptorDraftReview: ChangeSet build failed for draft {DraftId}", draft.DraftId);
-            diagnostics.Add(Diag("REVIEW_CHANGESET_FAILED", DescriptorDraftDiagnosticSeverity.Error,
+            diagnostics.Add(Diag(new DiagnosticCode("REVIEW_CHANGESET_FAILED"), SeverityLevel.Error,
                 $"ChangeSet build failed: {ex.Message}", draft.DraftId));
         }
 
@@ -123,7 +124,7 @@ public sealed class DefaultDescriptorDraftReviewService : IDescriptorDraftReview
             catch (Exception ex)
             {
                 _logger.LogError(ex, "DescriptorDraftReview: Impact analysis failed for draft {DraftId}", draft.DraftId);
-                diagnostics.Add(Diag("REVIEW_IMPACT_FAILED", DescriptorDraftDiagnosticSeverity.Error,
+                diagnostics.Add(Diag(new DiagnosticCode("REVIEW_IMPACT_FAILED"), SeverityLevel.Error,
                     $"Impact analysis failed: {ex.Message}", draft.DraftId));
             }
         }
@@ -140,7 +141,7 @@ public sealed class DefaultDescriptorDraftReviewService : IDescriptorDraftReview
             catch (Exception ex)
             {
                 _logger.LogError(ex, "DescriptorDraftReview: Compatibility analysis failed for draft {DraftId}", draft.DraftId);
-                diagnostics.Add(Diag("REVIEW_COMPAT_FAILED", DescriptorDraftDiagnosticSeverity.Error,
+                diagnostics.Add(Diag(new DiagnosticCode("REVIEW_COMPAT_FAILED"), SeverityLevel.Error,
                     $"Compatibility analysis failed: {ex.Message}", draft.DraftId));
             }
         }
@@ -156,7 +157,7 @@ public sealed class DefaultDescriptorDraftReviewService : IDescriptorDraftReview
         catch (Exception ex)
         {
             _logger.LogError(ex, "DescriptorDraftReview: Governance evaluation failed for draft {DraftId}", draft.DraftId);
-            diagnostics.Add(Diag("REVIEW_GOVERNANCE_FAILED", DescriptorDraftDiagnosticSeverity.Error,
+            diagnostics.Add(Diag(new DiagnosticCode("REVIEW_GOVERNANCE_FAILED"), SeverityLevel.Error,
                 $"Governance evaluation failed: {ex.Message}", draft.DraftId));
         }
 
@@ -211,7 +212,7 @@ public sealed class DefaultDescriptorDraftReviewService : IDescriptorDraftReview
 
         // Phase 6 blockers must suppress eligibility
         if (isActivationEligible && diagnostics.Any(d =>
-                d.Severity is DescriptorDraftDiagnosticSeverity.Error or DescriptorDraftDiagnosticSeverity.Blocker))
+                d.Severity == SeverityLevel.Error || d.Severity == SeverityLevel.Blocker))
         {
             isActivationEligible = false;
         }
@@ -307,19 +308,12 @@ public sealed class DefaultDescriptorDraftReviewService : IDescriptorDraftReview
     private static ValidationReport ConvertToValidationReport(DescriptorDraftValidationResult result)
     {
         var issues = result.Diagnostics
-            .Select(d => new ValidationIssue(MapSeverity(d.Severity), d.Message))
+            .Select(d => new ValidationIssue(d.Severity, d.Message))
             .ToList()
             .AsReadOnly();
 
         return new ValidationReport(issues);
     }
-
-    private static ValidationSeverity MapSeverity(DescriptorDraftDiagnosticSeverity severity) => severity switch
-    {
-        DescriptorDraftDiagnosticSeverity.Error or DescriptorDraftDiagnosticSeverity.Blocker => ValidationSeverity.Error,
-        DescriptorDraftDiagnosticSeverity.Warning => ValidationSeverity.Warning,
-        _ => ValidationSeverity.Info
-    };
 
     private static DescriptorLifecycleOperation MapToLifecycleOperation(DescriptorDraftOperation operation) => operation switch
     {
@@ -353,7 +347,7 @@ public sealed class DefaultDescriptorDraftReviewService : IDescriptorDraftReview
         _logger.LogDebug("DescriptorDraftReview: Early stop after {Phase} for draft {DraftId}", phase, draftId);
     }
 
-    private static DescriptorDraftDiagnostic Diag(string code, DescriptorDraftDiagnosticSeverity severity,
+    private static DescriptorDraftDiagnostic Diag(DiagnosticCode code, SeverityLevel severity,
         string message, string? draftId = null)
         => new() { Code = code, Severity = severity, Message = message, DraftId = draftId };
 }

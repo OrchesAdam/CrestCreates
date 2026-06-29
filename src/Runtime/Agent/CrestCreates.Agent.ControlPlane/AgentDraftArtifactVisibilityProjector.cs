@@ -139,11 +139,11 @@ internal sealed class AgentDraftArtifactVisibilityProjector
         if (governance is not null)
         {
             isActivationEligible = governance.MaxDecision == DescriptorLifecycleDecisionKind.Allowed
-                && diagnostics.All(d => d.Severity != DescriptorDraftDiagnosticSeverity.Error);
+                && diagnostics.All(d => d.Severity != SeverityLevel.Error);
         }
         else if (diagnostics.Count > 0)
         {
-            isActivationEligible = diagnostics.All(d => d.Severity != DescriptorDraftDiagnosticSeverity.Error);
+            isActivationEligible = diagnostics.All(d => d.Severity != SeverityLevel.Error);
         }
 
         return source with
@@ -304,15 +304,15 @@ internal sealed class AgentDraftArtifactVisibilityProjector
                 })
                 .ToList().AsReadOnly(),
             HasTopologyErrors = topologyFindings.Any(f =>
-                StringComparer.Ordinal.Equals(f.Severity, "Error")),
+                f.Severity == "Error"),
 
             // Impact — recompute from filtered impact findings
             MaxImpactSeverity =
-                impactFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Critical")) ? DescriptorImpactSeverity.Critical :
-                impactFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "High")) ? DescriptorImpactSeverity.High :
-                impactFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Medium")) ? DescriptorImpactSeverity.Medium :
-                impactFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Low")) ? DescriptorImpactSeverity.Low :
-                impactFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Info")) ? DescriptorImpactSeverity.Info :
+                impactFindings.Any(f => f.Severity == "Critical") ? DescriptorImpactSeverity.Critical :
+                impactFindings.Any(f => f.Severity == "High") ? DescriptorImpactSeverity.High :
+                impactFindings.Any(f => f.Severity == "Medium") ? DescriptorImpactSeverity.Medium :
+                impactFindings.Any(f => f.Severity == "Low") ? DescriptorImpactSeverity.Low :
+                impactFindings.Any(f => f.Severity == "Info") ? DescriptorImpactSeverity.Info :
                 DescriptorImpactSeverity.None,
             AffectedDescriptorCount = impactFindings
                 .Where(f => f.Subject is not null)
@@ -332,28 +332,28 @@ internal sealed class AgentDraftArtifactVisibilityProjector
 
             // Compatibility — recompute from filtered compatibility findings
             MaxCompatibilityLevel =
-                compatibilityFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Breaking")) ? DescriptorCompatibilityLevel.Breaking :
-                compatibilityFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "SecuritySensitive")) ? DescriptorCompatibilityLevel.SecuritySensitive :
-                compatibilityFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Risky")) ? DescriptorCompatibilityLevel.Risky :
-                compatibilityFindings.Count > 0 && compatibilityFindings.All(f => StringComparer.Ordinal.Equals(f.Severity, "Unsupported")) ? DescriptorCompatibilityLevel.Unsupported :
+                compatibilityFindings.Any(f => f.Severity == "Breaking") ? DescriptorCompatibilityLevel.Breaking :
+                compatibilityFindings.Any(f => f.Severity == "SecuritySensitive") ? DescriptorCompatibilityLevel.SecuritySensitive :
+                compatibilityFindings.Any(f => f.Severity == "Risky") ? DescriptorCompatibilityLevel.Risky :
+                compatibilityFindings.Count > 0 && compatibilityFindings.All(f => f.Severity == "Unsupported") ? DescriptorCompatibilityLevel.Unsupported :
                 DescriptorCompatibilityLevel.Compatible,
             BreakingFindingCount = filteredFindings.Count(f =>
-                StringComparer.Ordinal.Equals(f.Severity, "Breaking")),
+                f.Severity == "Breaking"),
             SecuritySensitiveFindingCount = filteredFindings.Count(f =>
-                StringComparer.Ordinal.Equals(f.Severity, "SecuritySensitive")),
+                f.Severity == "SecuritySensitive"),
             UnsupportedFindingCount = filteredFindings.Count(f =>
-                StringComparer.Ordinal.Equals(f.Severity, "Unsupported")),
+                f.Severity == "Unsupported"),
 
             // Lifecycle — recompute from filtered lifecycle findings
             MaxLifecycleDecision =
-                lifecycleFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Blocker")) ? DescriptorLifecycleDecisionKind.Blocked :
-                lifecycleFindings.Any(f => StringComparer.Ordinal.Equals(f.Severity, "Review")) ? DescriptorLifecycleDecisionKind.ReviewRequired :
+                lifecycleFindings.Any(f => f.Severity == "Blocker") ? DescriptorLifecycleDecisionKind.Blocked :
+                lifecycleFindings.Any(f => f.Severity == "Review") ? DescriptorLifecycleDecisionKind.ReviewRequired :
                 DescriptorLifecycleDecisionKind.Allowed,
             RequiresReview = filteredFindings.Any(f =>
-                StringComparer.Ordinal.Equals(f.Severity, "Breaking") ||
-                StringComparer.Ordinal.Equals(f.Severity, "SecuritySensitive")),
+                f.Severity == "Breaking" ||
+                f.Severity == "SecuritySensitive"),
             IsBlocked = lifecycleFindings.Any(f =>
-                StringComparer.Ordinal.Equals(f.Severity, "Blocker")),
+                f.Severity == "Blocker"),
             PackageFindingCount = filteredFindings.Count,
 
             // Unified

@@ -11,6 +11,7 @@ using CrestCreates.Metadata.Abstractions.Evidence;
 using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.DescriptorPackage.CanonicalHashing;
 using FluentAssertions;
+using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Metadata.Tests.DescriptorPackage.CanonicalHashing;
 
@@ -93,12 +94,12 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
     {
         var findingA = new EvidenceFinding
         {
-            Severity = "Error", Code = "C", Source = "test", Message = "M3",
+            Severity = SeverityLevel.Error, Code = new DiagnosticCode("C"), Source = "test", Message = "M3",
             RelatedRefs = new[] { new DescriptorRef("z", "z", 1) }
         };
         var findingB = new EvidenceFinding
         {
-            Severity = "Error", Code = "C", Source = "test", Message = "M1",
+            Severity = SeverityLevel.Error, Code = new DiagnosticCode("C"), Source = "test", Message = "M1",
             RelatedRefs = new[] { new DescriptorRef("a", "a", 1) }
         };
         var evidence = new DescriptorPackageEvidence
@@ -120,9 +121,9 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
         {
             TopologyDiagnosticCounts = new[]
             {
-                new EvidenceFindingCount { Severity = "Error", Code = "E002", Count = 2 },
-                new EvidenceFindingCount { Severity = "Error", Code = "E001", Count = 1 },
-                new EvidenceFindingCount { Severity = "Info", Code = "I001", Count = 3 }
+                new EvidenceFindingCount { Severity = SeverityLevel.Error, Code = new DiagnosticCode("E002"), Count = 2 },
+                new EvidenceFindingCount { Severity = SeverityLevel.Error, Code = new DiagnosticCode("E001"), Count = 1 },
+                new EvidenceFindingCount { Severity = SeverityLevel.Info, Code = new DiagnosticCode("I001"), Count = 3 }
             }
         };
 
@@ -376,7 +377,7 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
             HasTopologyErrors = false,
             TopologyDiagnosticCounts = new[]
             {
-                new EvidenceFindingCount { Severity = "Info", Code = "T001", Count = 1 }
+                new EvidenceFindingCount { Severity = SeverityLevel.Info, Code = new DiagnosticCode("T001"), Count = 1 }
             },
             MaxImpactSeverity = DescriptorImpactSeverity.Low,
             AffectedDescriptorCount = 0,
@@ -394,8 +395,8 @@ public sealed class DescriptorPackageCanonicalHashWriterTests
             {
                 new EvidenceFinding
                 {
-                    Severity = "Info",
-                    Code = "P001",
+                    Severity = SeverityLevel.Info,
+                    Code = new DiagnosticCode("P001"),
                     Source = "test",
                     Message = "Package is valid",
                     Subject = new DescriptorRef("capability", "c1", 2),

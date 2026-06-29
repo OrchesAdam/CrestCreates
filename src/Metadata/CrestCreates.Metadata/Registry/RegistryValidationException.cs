@@ -8,8 +8,8 @@ public sealed class RegistryValidationException : Exception
     public IReadOnlyList<ValidationIssue> Issues { get; }
 
     public RegistryValidationException(IReadOnlyList<ValidationIssue> issues)
-        : base($"Registry validation failed with {issues.Count(i => i.Severity == ValidationSeverity.Error)} error(s):\n" +
-               string.Join("\n", issues.Where(i => i.Severity == ValidationSeverity.Error).Select(i => $"  - {i.Message}")))
+        : base($"Registry validation failed with {issues.Count(i => i.Severity == SeverityLevel.Error)} error(s):\n" +
+               string.Join("\n", issues.Where(i => i.Severity == SeverityLevel.Error).Select(i => $"  - {i.Message}")))
     {
         Issues = issues;
     }

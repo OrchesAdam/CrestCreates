@@ -389,8 +389,8 @@ public class Phase7dFixProposalTests : AgentControlPlaneTestBase
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
             new DraftAbstractions.DescriptorDraftDiagnostic
             {
-                Code = "MISSING_REF",
-                Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning,
+                Code = new DiagnosticCode("MISSING_REF"),
+                Severity = SeverityLevel.Warning,
                 Message = "A required reference is missing"
             });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
@@ -416,8 +416,8 @@ public class Phase7dFixProposalTests : AgentControlPlaneTestBase
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
             new DraftAbstractions.DescriptorDraftDiagnostic
             {
-                Code = "RATIONALE_EMPTY",
-                Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning,
+                Code = new DiagnosticCode("RATIONALE_EMPTY"),
+                Severity = SeverityLevel.Warning,
                 Message = "Rationale must not be empty"
             });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
@@ -445,8 +445,8 @@ public class Phase7dFixProposalTests : AgentControlPlaneTestBase
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
             new DraftAbstractions.DescriptorDraftDiagnostic
             {
-                Code = "BREAKING_CHANGE_DETECTED",
-                Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error,
+                Code = new DiagnosticCode("BREAKING_CHANGE_DETECTED"),
+                Severity = SeverityLevel.Error,
                 Message = "Breaking change detected in proposed descriptor"
             });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
@@ -519,8 +519,8 @@ public class Phase7dFixProposalTests : AgentControlPlaneTestBase
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
             new DraftAbstractions.DescriptorDraftDiagnostic
             {
-                Code = "UNKNOWN_DIAG_CODE",
-                Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error,
+                Code = new DiagnosticCode("UNKNOWN_DIAG_CODE"),
+                Severity = SeverityLevel.Error,
                 Message = "An unrecognized diagnostic"
             });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
@@ -940,7 +940,7 @@ public class Phase7dFixProposalTests : AgentControlPlaneTestBase
             Kind = FixProposalKind.CreateMissingDescriptor,
             Title = "Test Fix",
             Explanation = "Test explanation",
-            ReasonCode = "TEST_FIX",
+            ReasonCode = new DiagnosticCode("TEST_FIX"),
             Applicability = applicability,
             IsExecutable = isExecutable,
             RequiresManualAction = false,

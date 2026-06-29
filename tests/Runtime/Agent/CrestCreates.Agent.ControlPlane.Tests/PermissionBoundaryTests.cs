@@ -57,8 +57,8 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
             .Setup(a => a.AuthorizeAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<AgentToolPermissionRequirement>(), It.IsAny<string>()))
             .Returns(Task.FromResult(AgentToolAuthorizationResult.Denied(new AgentToolDiagnostic
             {
-                Code = "PERMISSION_DENIED",
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Code = new DiagnosticCode("PERMISSION_DENIED"),
+                Severity = SeverityLevel.Error,
                 Message = "Not allowed"
             })));
 
@@ -91,8 +91,8 @@ public class PermissionBoundaryTests : AgentControlPlaneTestBase
             .Setup(a => a.AuthorizeAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<AgentToolPermissionRequirement>(), It.IsAny<string>()))
             .Returns(Task.FromResult(AgentToolAuthorizationResult.Denied(new AgentToolDiagnostic
             {
-                Code = "PERMISSION_DENIED",
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Code = new DiagnosticCode("PERMISSION_DENIED"),
+                Severity = SeverityLevel.Error,
                 Message = "Not allowed"
             })));
 

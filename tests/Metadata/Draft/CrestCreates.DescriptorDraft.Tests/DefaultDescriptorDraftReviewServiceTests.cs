@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
@@ -91,8 +92,8 @@ public class DefaultDescriptorDraftReviewServiceTests
         var failedValidation = DescriptorDraftValidationResult.Failure(
             new DescriptorDraftDiagnostic
             {
-                Code = "DRAFT_ID_EMPTY",
-                Severity = DescriptorDraftDiagnosticSeverity.Error,
+                Code = new DiagnosticCode("DRAFT_ID_EMPTY"),
+                Severity = SeverityLevel.Error,
                 Message = "DraftId must not be empty."
             });
 
@@ -136,8 +137,8 @@ public class DefaultDescriptorDraftReviewServiceTests
             .Returns(DescriptorDraftMaterializationResult.Failure(
                 new DescriptorDraftDiagnostic
                 {
-                    Code = "CREATE_DESCRIPTOR_EXISTS",
-                    Severity = DescriptorDraftDiagnosticSeverity.Error,
+                    Code = new DiagnosticCode("CREATE_DESCRIPTOR_EXISTS"),
+                    Severity = SeverityLevel.Error,
                     Message = "Descriptor already exists.",
                     DraftId = draft.DraftId
                 }));

@@ -37,7 +37,7 @@ public sealed class DescriptorCompatibilityAnalyzer : IDescriptorCompatibilityAn
         if (!ChangeSetsEqual(impactReport.ChangeSet, changeSet))
         {
             diagnostics.Add(new DescriptorCompatibilityDiagnostic(
-                DiagnosticSeverity.Error, "COMPAT_CHANGESET_MISMATCH",
+                SeverityLevel.Error, new DiagnosticCode("COMPAT_CHANGESET_MISMATCH"),
                 "Provided changeSet differs from impactReport.ChangeSet.", null, null));
         }
 
@@ -160,7 +160,7 @@ public sealed class DescriptorCompatibilityAnalyzer : IDescriptorCompatibilityAn
             if (index.ContainsKey(key))
             {
                 diagnostics.Add(new DescriptorCompatibilityDiagnostic(
-                    DiagnosticSeverity.Warning, "COMPAT_DUPLICATE_DESCRIPTOR_REF",
+                    SeverityLevel.Warning, new DiagnosticCode("COMPAT_DUPLICATE_DESCRIPTOR_REF"),
                     $"Duplicate descriptor ref {key.FullId} in inventory. Using first occurrence.", key, null));
                 continue;
             }
@@ -200,14 +200,15 @@ public sealed class DescriptorCompatibilityAnalyzer : IDescriptorCompatibilityAn
     {
         foreach (var diag in impactReport.Diagnostics)
         {
-            var mapped = diag.Code switch
+            var codeStr = (string)diag.Code;
+            var mapped = codeStr switch
             {
-                "IMPACT_TOPOLOGY_MISSING_TARGET" => ("COMPAT_BLOCKED_BY_TOPOLOGY_ERROR", DiagnosticSeverity.Error),
-                var c when c.StartsWith("IMPACT_TOPOLOGY_") => ("COMPAT_ANALYSIS_INCOMPLETE", DiagnosticSeverity.Error),
-                "IMPACT_AMBIGUOUS_UNPINNED_TARGET" => ("COMPAT_VERSION_AMBIGUITY", DiagnosticSeverity.Warning),
-                "IMPACT_PATH_TRUNCATED" => ("COMPAT_ANALYSIS_INCOMPLETE", DiagnosticSeverity.Warning),
-                "IMPACT_CHANGE_NOT_IN_TOPOLOGY" => ("COMPAT_CHANGE_NOT_IN_TOPOLOGY", DiagnosticSeverity.Warning),
-                _ => ((string Code, DiagnosticSeverity Severity)?)null
+                "IMPACT_TOPOLOGY_MISSING_TARGET" => (new DiagnosticCode("COMPAT_BLOCKED_BY_TOPOLOGY_ERROR"), SeverityLevel.Error),
+                var c when c.StartsWith("IMPACT_TOPOLOGY_") => (new DiagnosticCode("COMPAT_ANALYSIS_INCOMPLETE"), SeverityLevel.Error),
+                "IMPACT_AMBIGUOUS_UNPINNED_TARGET" => (new DiagnosticCode("COMPAT_VERSION_AMBIGUITY"), SeverityLevel.Warning),
+                "IMPACT_PATH_TRUNCATED" => (new DiagnosticCode("COMPAT_ANALYSIS_INCOMPLETE"), SeverityLevel.Warning),
+                "IMPACT_CHANGE_NOT_IN_TOPOLOGY" => (new DiagnosticCode("COMPAT_CHANGE_NOT_IN_TOPOLOGY"), SeverityLevel.Warning),
+                _ => ((DiagnosticCode Code, SeverityLevel Severity)?)null
             };
 
             if (mapped == null) continue;
@@ -216,7 +217,7 @@ public sealed class DescriptorCompatibilityAnalyzer : IDescriptorCompatibilityAn
                 mapped.Value.Severity, mapped.Value.Code, diag.Message, diag.Subject, diag.RelatedRefs));
 
             // Add Unsupported finding for error-level diagnostics (or warnings if option enabled)
-            if (diag.Severity == DiagnosticSeverity.Error || treatWarningsAsUnsupported)
+            if (diag.Severity == SeverityLevel.Error || treatWarningsAsUnsupported)
             {
                 unsupportedFindings.Add(new DescriptorCompatibilityFinding
                 {

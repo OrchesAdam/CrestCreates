@@ -356,7 +356,7 @@ public class ActivationBindingHashValidatorIntegrationTests
         result.Diagnostics.Should().NotBeEmpty();
         result.Diagnostics.Should().Contain(d =>
             d.Code == DescriptorActivationDiagnosticCodes.BindingHashValidationFailed &&
-            d.Severity == AgentToolDiagnosticSeverity.Error);
+            d.Severity == SeverityLevel.Error);
     }
 
     // ════════════════════════════════════════════════════════════════════════

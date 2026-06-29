@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
 using CrestCreates.DescriptorDraft.CanonicalHashing;
@@ -144,7 +145,7 @@ public sealed class DescriptorDraftReviewHashServiceTests
         {
             Diagnostics = new List<DescriptorDraftDiagnostic>
             {
-                new() { Code = "ERR-01", Severity = DescriptorDraftDiagnosticSeverity.Error, Message = "msg" }
+                new() { Code = new DiagnosticCode("ERR-01"), Severity = SeverityLevel.Error, Message = "msg" }
             }
         };
 
@@ -162,16 +163,16 @@ public sealed class DescriptorDraftReviewHashServiceTests
         {
             Diagnostics = new List<DescriptorDraftDiagnostic>
             {
-                new() { Code = "ERR-01", Severity = DescriptorDraftDiagnosticSeverity.Error, Message = "msg" },
-                new() { Code = "WARN-01", Severity = DescriptorDraftDiagnosticSeverity.Warning, Message = "msg" }
+                new() { Code = new DiagnosticCode("ERR-01"), Severity = SeverityLevel.Error, Message = "msg" },
+                new() { Code = new DiagnosticCode("WARN-01"), Severity = SeverityLevel.Warning, Message = "msg" }
             }
         };
         var r2 = CreateReview() with
         {
             Diagnostics = new List<DescriptorDraftDiagnostic>
             {
-                new() { Code = "WARN-01", Severity = DescriptorDraftDiagnosticSeverity.Warning, Message = "msg" },
-                new() { Code = "ERR-01", Severity = DescriptorDraftDiagnosticSeverity.Error, Message = "msg" }
+                new() { Code = new DiagnosticCode("WARN-01"), Severity = SeverityLevel.Warning, Message = "msg" },
+                new() { Code = new DiagnosticCode("ERR-01"), Severity = SeverityLevel.Error, Message = "msg" }
             }
         };
 
@@ -206,8 +207,8 @@ public sealed class DescriptorDraftReviewHashServiceTests
         {
             Diagnostics = new List<DescriptorDraftDiagnostic>
             {
-                new() { Code = "ERR-01", Severity = DescriptorDraftDiagnosticSeverity.Error, Message = "msg" },
-                new() { Code = "WARN-01", Severity = DescriptorDraftDiagnosticSeverity.Warning, Message = "msg" }
+                new() { Code = new DiagnosticCode("ERR-01"), Severity = SeverityLevel.Error, Message = "msg" },
+                new() { Code = new DiagnosticCode("WARN-01"), Severity = SeverityLevel.Warning, Message = "msg" }
             }
         };
 

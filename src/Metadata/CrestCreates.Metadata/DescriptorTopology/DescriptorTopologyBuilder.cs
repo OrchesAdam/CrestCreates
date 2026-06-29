@@ -114,11 +114,11 @@ internal sealed class DescriptorTopologyBuilder : IDescriptorTopologyBuilder
             if (!ContainsNode(edge.To, nodes))
             {
                 var severity = edge.Strength == RelationshipStrength.Strong
-                    ? DiagnosticSeverity.Error
-                    : DiagnosticSeverity.Warning;
+                    ? SeverityLevel.Error
+                    : SeverityLevel.Warning;
                 diagnosticList.Add(new DescriptorTopologyDiagnostic(
                     severity,
-                    "MISSING_TARGET",
+                    new DiagnosticCode("MISSING_TARGET"),
                     $"Edge {edge.From.FullId} --[{edge.Kind}]--> {edge.To.FullId}: target descriptor not found. " +
                     $"Role='{edge.Role}', SourcePath='{edge.SourcePath}', Strength={edge.Strength}.",
                     edge.From,
@@ -145,8 +145,8 @@ internal sealed class DescriptorTopologyBuilder : IDescriptorTopologyBuilder
                 && node.State != DescriptorState.Removed)
             {
                 diagnosticList.Add(new DescriptorTopologyDiagnostic(
-                    DiagnosticSeverity.Warning,
-                    "ORPHAN",
+                    SeverityLevel.Warning,
+                    new DiagnosticCode("ORPHAN"),
                     $"Descriptor '{node.Ref.FullId}' ({node.Kind}) has no consumers.",
                     node.Ref,
                     null));
@@ -161,8 +161,8 @@ internal sealed class DescriptorTopologyBuilder : IDescriptorTopologyBuilder
             if (!seen.Add(key))
             {
                 diagnosticList.Add(new DescriptorTopologyDiagnostic(
-                    DiagnosticSeverity.Warning,
-                    "EXACT_DUPLICATE",
+                    SeverityLevel.Warning,
+                    new DiagnosticCode("EXACT_DUPLICATE"),
                     $"Duplicate edge: {edge.From.FullId} --[{edge.Kind}]--> {edge.To.FullId} " +
                     $"(Role='{edge.Role}', SourcePath='{edge.SourcePath}', Strength={edge.Strength})",
                     edge.From,
@@ -180,8 +180,8 @@ internal sealed class DescriptorTopologyBuilder : IDescriptorTopologyBuilder
             if (edge.Role is not null && knownUnsupported.Contains((edge.Role, edge.Kind)))
             {
                 diagnosticList.Add(new DescriptorTopologyDiagnostic(
-                    DiagnosticSeverity.Warning,
-                    "UNSUPPORTED_REFERENCE",
+                    SeverityLevel.Warning,
+                    new DiagnosticCode("UNSUPPORTED_REFERENCE"),
                     $"Edge '{edge.Role}' ({edge.Kind}) from {edge.From.FullId} to {edge.To.FullId} " +
                     $"is not supported at runtime.",
                     edge.From,
@@ -275,8 +275,8 @@ internal sealed class DescriptorTopologyBuilder : IDescriptorTopologyBuilder
                     path.Reverse();
 
                     diagnostics.Add(new DescriptorTopologyDiagnostic(
-                        DiagnosticSeverity.Error,
-                        "STRONG_CYCLE",
+                        SeverityLevel.Error,
+                        new DiagnosticCode("STRONG_CYCLE"),
                         $"Strong dependency cycle detected: {string.Join(" → ", path.Select(r => r.FullId))}",
                         current,
                         path.AsReadOnly()));

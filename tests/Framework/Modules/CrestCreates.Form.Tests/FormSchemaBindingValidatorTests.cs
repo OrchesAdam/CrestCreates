@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
@@ -86,7 +87,7 @@ public class FormSchemaBindingValidatorTests
         var report = _validator.Validate([form], schemaRegistry);
 
         report.HasErrors.Should().BeTrue();
-        report.Issues.Should().Contain(i => i.Severity == ValidationSeverity.Error
+        report.Issues.Should().Contain(i => i.Severity == SeverityLevel.Error
             && i.Message.Contains("Phone"));
     }
 
@@ -128,7 +129,7 @@ public class FormSchemaBindingValidatorTests
 
         report.HasErrors.Should().BeFalse();
         report.HasWarnings.Should().BeTrue();
-        report.Issues.Should().Contain(i => i.Severity == ValidationSeverity.Warning
+        report.Issues.Should().Contain(i => i.Severity == SeverityLevel.Warning
             && i.Message.Contains("InternalId"));
     }
 

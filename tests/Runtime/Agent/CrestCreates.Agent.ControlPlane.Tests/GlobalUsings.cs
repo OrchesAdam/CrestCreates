@@ -1,3 +1,5 @@
+global using CrestCreates.Core.Abstractions.Identity;
+
 // ── DraftContracts DTO forwarders ──────────────────────────────────────────
 // The hand-written DTOs previously in ToolDtos/ have been replaced by
 // generated types in CrestCreates.Agent.DraftContracts.Dto namespace.

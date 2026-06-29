@@ -27,8 +27,8 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
             new DraftAbstractions.DescriptorDraftDiagnostic
             {
-                Code = "RATIONALE_EMPTY",
-                Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning,
+                Code = new DiagnosticCode("RATIONALE_EMPTY"),
+                Severity = SeverityLevel.Warning,
                 Message = "Rationale must not be empty"
             });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
@@ -86,7 +86,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
             .Returns(Task.FromResult<Draft?>(draft));
 
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
-            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "RATIONALE_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, Message = "Empty" });
+            new DraftAbstractions.DescriptorDraftDiagnostic { Code = new DiagnosticCode("RATIONALE_EMPTY"), Severity = SeverityLevel.Warning, Message = "Empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
         var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
@@ -125,7 +125,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
 
         // RATIONALE_EMPTY generates a fix for Rationale (an allowed mutable draft field)
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
-            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "RATIONALE_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, Message = "Empty" });
+            new DraftAbstractions.DescriptorDraftDiagnostic { Code = new DiagnosticCode("RATIONALE_EMPTY"), Severity = SeverityLevel.Warning, Message = "Empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
         await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
@@ -152,7 +152,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
 
         // RATIONALE_EMPTY generates a fix for Rationale (an allowed mutable draft field)
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
-            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "RATIONALE_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, Message = "Rationale is empty" });
+            new DraftAbstractions.DescriptorDraftDiagnostic { Code = new DiagnosticCode("RATIONALE_EMPTY"), Severity = SeverityLevel.Warning, Message = "Rationale is empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
         var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
@@ -180,7 +180,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
 
         // Use RATIONALE_EMPTY — generates a fix for Rationale (a mutable scalar field)
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
-            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "RATIONALE_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, Message = "Rationale is empty" });
+            new DraftAbstractions.DescriptorDraftDiagnostic { Code = new DiagnosticCode("RATIONALE_EMPTY"), Severity = SeverityLevel.Warning, Message = "Rationale is empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
         var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
@@ -251,7 +251,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
             .Returns(Task.FromResult<Draft?>(draft));
 
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
-            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "RATIONALE_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, Message = "Empty" });
+            new DraftAbstractions.DescriptorDraftDiagnostic { Code = new DiagnosticCode("RATIONALE_EMPTY"), Severity = SeverityLevel.Warning, Message = "Empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
         var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
@@ -283,7 +283,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
 
         // RATIONALE_EMPTY generates a fix for Rationale (an allowed draft field)
         var validationResult = DraftAbstractions.DescriptorDraftValidationResult.Failure(
-            new DraftAbstractions.DescriptorDraftDiagnostic { Code = "RATIONALE_EMPTY", Severity = DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning, Message = "Rationale is empty" });
+            new DraftAbstractions.DescriptorDraftDiagnostic { Code = new DiagnosticCode("RATIONALE_EMPTY"), Severity = SeverityLevel.Warning, Message = "Rationale is empty" });
         DraftValidatorMock.Setup(v => v.Validate(draft)).Returns(validationResult);
 
         var suggestResult = await service.SuggestDescriptorDraftFixesAsync(suggestContext, "draft-001");
@@ -310,7 +310,7 @@ public class Wave4FixProposalTests : AgentControlPlaneTestBase
             Kind = FixProposalKind.SetRequiredField,
             Title = "Test fix",
             Explanation = "Test",
-            ReasonCode = "TEST",
+            ReasonCode = new DiagnosticCode("TEST"),
             DraftId = draft.DraftId,
             TenantId = tenantId,
             Applicability = FixProposalApplicability.CurrentMutableDraft,

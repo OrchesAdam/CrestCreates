@@ -95,6 +95,33 @@ public class DependencyBoundaryTests
     }
 
     [Fact]
+    public void AgentMemoryAbstractions_DoesNotReferenceControlPlaneAbstractions()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.Memory.Abstractions",
+            "Agent Memory abstractions must remain runtime-context contracts and must not depend on ControlPlane contracts.",
+            new[] { "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions" });
+    }
+
+    [Fact]
+    public void AgentMemoryProjects_DoNotReferenceForbiddenRuntimeOrPlatformLayers()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.Memory",
+            "Agent Memory runtime must not depend on ControlPlane, Framework Api/Web, Platform, or persistence providers.",
+            new[]
+            {
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Framework/Api",
+                "src/Framework/Web",
+                "src/Platform",
+                "src/Persistence/CrestCreates.Data.FreeSql",
+                "src/Persistence/CrestCreates.Data.SqlSugar"
+            });
+    }
+
+    [Fact]
     public void ControlPlaneAbstractions_MayReferenceHumanTaskAbstractions_ButNotFrameworkOrWeb()
     {
         AssertNoDirectProjectReferences(

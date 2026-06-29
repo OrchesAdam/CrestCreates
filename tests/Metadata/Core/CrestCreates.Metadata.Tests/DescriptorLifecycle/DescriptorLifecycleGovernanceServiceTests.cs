@@ -7,6 +7,7 @@ using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 using CrestCreates.Metadata.DescriptorLifecycle;
+using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Metadata.Tests.DescriptorLifecycle;
 
@@ -96,7 +97,7 @@ public class DescriptorLifecycleGovernanceServiceTests
     {
         var request = MakeRequest(
             validationReport: ValidationReport.FromIssues(
-                new ValidationIssue(ValidationSeverity.Error, "Something is wrong")));
+                new ValidationIssue(SeverityLevel.Error, "Something is wrong")));
 
         var report = Service.Evaluate(request);
 
@@ -104,7 +105,7 @@ public class DescriptorLifecycleGovernanceServiceTests
         report.Decisions.Should().ContainSingle()
             .Which.Findings.Should().Contain(f =>
                 f.Code == "LIFECYCLE_VALIDATION_ERROR" &&
-                f.Severity == DescriptorLifecycleFindingSeverity.Blocker);
+                f.Severity == SeverityLevel.Blocker);
     }
 
     [Fact]
@@ -112,7 +113,7 @@ public class DescriptorLifecycleGovernanceServiceTests
     {
         var request = MakeRequest(
             validationReport: ValidationReport.FromIssues(
-                new ValidationIssue(ValidationSeverity.Warning, "Minor issue")));
+                new ValidationIssue(SeverityLevel.Warning, "Minor issue")));
 
         var report = Service.Evaluate(request);
 
@@ -124,7 +125,7 @@ public class DescriptorLifecycleGovernanceServiceTests
     {
         var request = MakeRequest(
             validationReport: ValidationReport.FromIssues(
-                new ValidationIssue(ValidationSeverity.Warning, "Minor issue")),
+                new ValidationIssue(SeverityLevel.Warning, "Minor issue")),
             options: new DescriptorLifecycleGovernanceOptions
             {
                 TreatValidationWarningsAsReviewRequired = true
@@ -494,8 +495,8 @@ public class DescriptorLifecycleGovernanceServiceTests
             All = new[]
             {
                 new DescriptorTopologyDiagnostic(
-                    DiagnosticSeverity.Error,
-                    "MISSING_TARGET",
+                    SeverityLevel.Error,
+                    new DiagnosticCode("MISSING_TARGET"),
                     "Target missing",
                     TestRef,
                     null)
@@ -517,8 +518,8 @@ public class DescriptorLifecycleGovernanceServiceTests
             All = new[]
             {
                 new DescriptorTopologyDiagnostic(
-                    DiagnosticSeverity.Warning,
-                    "SOME_WARNING",
+                    SeverityLevel.Warning,
+                    new DiagnosticCode("SOME_WARNING"),
                     "Some warning",
                     TestRef,
                     null)
@@ -542,8 +543,7 @@ public class DescriptorLifecycleGovernanceServiceTests
             diagnostics: new[]
             {
                 new DescriptorImpactDiagnostic(
-                    DiagnosticSeverity.Error,
-                    "IMPACT_TEST",
+SeverityLevel.Error, new DiagnosticCode("IMPACT_TEST"),
                     "Impact error",
                     TestRef,
                     null)
@@ -566,8 +566,7 @@ public class DescriptorLifecycleGovernanceServiceTests
             diagnostics: new[]
             {
                 new DescriptorImpactDiagnostic(
-                    DiagnosticSeverity.Warning,
-                    "IMPACT_TEST",
+SeverityLevel.Warning, new DiagnosticCode("IMPACT_TEST"),
                     "Impact warning",
                     TestRef,
                     null)
@@ -600,7 +599,7 @@ public class DescriptorLifecycleGovernanceServiceTests
         report.Decisions.Should().ContainSingle()
             .Which.Findings.Should().NotContain(f =>
                 f.Code == "LIFECYCLE_IMPACT_SEVERITY_THRESHOLD" &&
-                f.Severity == DescriptorLifecycleFindingSeverity.Blocker);
+                f.Severity == SeverityLevel.Blocker);
     }
 
     // --- 10.8 Compatibility Policy ---
@@ -748,7 +747,7 @@ public class DescriptorLifecycleGovernanceServiceTests
         report.Decisions.Should().ContainSingle()
             .Which.Findings.Should().NotContain(f =>
                 f.Code == "LIFECYCLE_COMPAT_UNSUPPORTED" &&
-                f.Severity == DescriptorLifecycleFindingSeverity.Blocker);
+                f.Severity == SeverityLevel.Blocker);
     }
 
     [Fact]
@@ -773,8 +772,8 @@ public class DescriptorLifecycleGovernanceServiceTests
             diagnostics: new[]
             {
                 new DescriptorCompatibilityDiagnostic(
-                    DiagnosticSeverity.Error,
-                    "COMPAT_TEST",
+                    SeverityLevel.Error,
+                    new DiagnosticCode("COMPAT_TEST"),
                     "Compat error",
                     TestRef,
                     null)
@@ -910,8 +909,8 @@ public class DescriptorLifecycleGovernanceServiceTests
             All = new[]
             {
                 new DescriptorTopologyDiagnostic(
-                    DiagnosticSeverity.Warning,
-                    "WARN",
+                    SeverityLevel.Warning,
+                    new DiagnosticCode("WARN"),
                     "Topology warning",
                     TestRef,
                     null)
@@ -943,7 +942,7 @@ public class DescriptorLifecycleGovernanceServiceTests
         // Test Blocked state
         var blockedRequest = MakeRequest(
             validationReport: ValidationReport.FromIssues(
-                new ValidationIssue(ValidationSeverity.Error, "Error")));
+                new ValidationIssue(SeverityLevel.Error, "Error")));
         var blockedReport = Service.Evaluate(blockedRequest);
         blockedReport.IsAllowed.Should().BeFalse();
         blockedReport.RequiresReview.Should().BeFalse();
@@ -954,7 +953,7 @@ public class DescriptorLifecycleGovernanceServiceTests
     public void DoesNotMutateDescriptorsOrReports()
     {
         var originalValidation = ValidationReport.FromIssues(
-            new ValidationIssue(ValidationSeverity.Warning, "Original"));
+            new ValidationIssue(SeverityLevel.Warning, "Original"));
         var originalBinding = new RuntimeBindingReport
         {
             Descriptors = new[]
@@ -1138,7 +1137,7 @@ public class DescriptorLifecycleGovernanceServiceTests
 
         report.PackageFindings.Should().Contain(f =>
             f.Code == "LIFECYCLE_CHANGESET_MISMATCH" &&
-            f.Severity == DescriptorLifecycleFindingSeverity.Review);
+            f.Severity == SeverityLevel.Review);
         report.MaxDecision.Should().Be(DescriptorLifecycleDecisionKind.ReviewRequired);
     }
 
@@ -1155,7 +1154,7 @@ public class DescriptorLifecycleGovernanceServiceTests
 
         var request = MakeRequest(
             validationReport: ValidationReport.FromIssues(
-                new ValidationIssue(ValidationSeverity.Error, "Error")),
+                new ValidationIssue(SeverityLevel.Error, "Error")),
             impactReport: impactReport,
             compatibilityReport: compatReport);
 

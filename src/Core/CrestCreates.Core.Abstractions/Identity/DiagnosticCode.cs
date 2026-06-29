@@ -1,6 +1,9 @@
+using System.Text.Json.Serialization;
+
 namespace CrestCreates.Core.Abstractions.Identity;
 
-public readonly record struct DiagnosticCode
+[JsonConverter(typeof(DiagnosticCodeJsonConverter))]
+public readonly record struct DiagnosticCode : IComparable<DiagnosticCode>
 {
     public string? Value { get; }
 
@@ -19,4 +22,6 @@ public readonly record struct DiagnosticCode
     public override string ToString() => Value ?? string.Empty;
 
     public static implicit operator string(DiagnosticCode code) => code.Value ?? string.Empty;
+
+    public int CompareTo(DiagnosticCode other) => StringComparer.Ordinal.Compare(Value, other.Value);
 }

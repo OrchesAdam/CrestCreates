@@ -1,6 +1,9 @@
+using System.Text.Json.Serialization;
+
 namespace CrestCreates.Core.Abstractions.Identity;
 
-public readonly record struct SeverityLevel
+[JsonConverter(typeof(SeverityLevelJsonConverter))]
+public readonly record struct SeverityLevel : IComparable<SeverityLevel>
 {
     public string? Value { get; }
 
@@ -21,7 +24,21 @@ public readonly record struct SeverityLevel
     public static implicit operator string(SeverityLevel level)
         => level.Value ?? string.Empty;
 
+    private int Ordinal => Value switch
+    {
+        "Blocker" => 5,
+        "Error" => 4,
+        "Review" => 3,
+        "Warning" => 2,
+        "Info" => 1,
+        _ => 0
+    };
+
+    public int CompareTo(SeverityLevel other) => Ordinal.CompareTo(other.Ordinal);
+
     public static SeverityLevel Error { get; } = new("Error");
     public static SeverityLevel Warning { get; } = new("Warning");
     public static SeverityLevel Info { get; } = new("Info");
+    public static SeverityLevel Blocker { get; } = new("Blocker");
+    public static SeverityLevel Review { get; } = new("Review");
 }

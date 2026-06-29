@@ -527,8 +527,8 @@ public abstract class AgentControlPlaneTestBase
                     return AgentToolResult<ActivationRequest>.InvalidRequest(
                         [new AgentToolDiagnostic
                         {
-                            Code = "ACTIVATION_REQUEST_TERMINAL",
-                            Severity = AgentToolDiagnosticSeverity.Error,
+                            Code = new DiagnosticCode("ACTIVATION_REQUEST_TERMINAL"),
+                            Severity = SeverityLevel.Error,
                             Message = $"Activation request '{requestId}' is in terminal state '{request.Status}' and cannot be cancelled."
                         }]);
                 }

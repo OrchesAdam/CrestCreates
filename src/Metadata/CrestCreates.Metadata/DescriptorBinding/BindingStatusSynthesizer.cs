@@ -8,13 +8,13 @@ public static class BindingStatusSynthesizer
     {
         if (issues.Count == 0) return DescriptorBindingStatus.RuntimeReady;
 
-        if (issues.Any(i => i.Severity == ValidationSeverity.Error && i.Code.StartsWith("REF_")))
+        if (issues.Any(i => i.Severity == SeverityLevel.Error && i.Code.Value.StartsWith("REF_")))
             return DescriptorBindingStatus.Invalid;
 
-        if (issues.Any(i => i.Severity == ValidationSeverity.Error && i.Code.StartsWith("BIND_")))
+        if (issues.Any(i => i.Severity == SeverityLevel.Error && i.Code.Value.StartsWith("BIND_")))
             return DescriptorBindingStatus.Unbound;
 
-        if (issues.Any(i => i.Severity == ValidationSeverity.Error && i.Code.StartsWith("UNSUPPORTED_")))
+        if (issues.Any(i => i.Severity == SeverityLevel.Error && i.Code.Value.StartsWith("UNSUPPORTED_")))
             return DescriptorBindingStatus.Unsupported;
 
         return DescriptorBindingStatus.PartiallyBound; // warnings only

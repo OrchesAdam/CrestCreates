@@ -1,11 +1,11 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Metadata.Abstractions;
-using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 
 namespace CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 
 public sealed record DescriptorCompatibilityDiagnostic(
-    DiagnosticSeverity Severity,
-    string Code,
+    SeverityLevel Severity,
+    DiagnosticCode Code,
     string Message,
     DescriptorRef? Subject,
     IReadOnlyList<DescriptorRef>? RelatedRefs);

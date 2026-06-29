@@ -1,3 +1,5 @@
+using CrestCreates.Core.Abstractions.Identity;
+
 namespace CrestCreates.Agent.ControlPlane.Abstractions;
 
 public sealed record AgentToolResult<T> where T : class
@@ -36,8 +38,8 @@ public sealed record AgentToolResult<T> where T : class
             Value = null,
             Diagnostics = [new AgentToolDiagnostic
             {
-                Code = "TOOL_TARGET_NOT_FOUND",
-                Severity = AgentToolDiagnosticSeverity.Warning,
+                Code = new DiagnosticCode("TOOL_TARGET_NOT_FOUND"),
+                Severity = SeverityLevel.Warning,
                 Message = message
             }],
             AuditRecord = audit

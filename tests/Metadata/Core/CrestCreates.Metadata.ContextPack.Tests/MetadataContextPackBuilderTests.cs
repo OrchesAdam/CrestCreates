@@ -1,3 +1,4 @@
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
@@ -542,7 +543,7 @@ public class MetadataContextPackBuilderTests
 
         pack.Diagnostics.Should().Contain(d =>
             d.Code == MetadataContextPackDiagnosticCodes.RecipeMissing &&
-            d.Severity == MetadataContextPackDiagnosticSeverity.Error);
+            d.Severity == SeverityLevel.Error);
     }
 
     [Fact]
@@ -1087,7 +1088,7 @@ public class MetadataContextPackBuilderTests
         pack.Descriptors.Should().BeEmpty();
         pack.Diagnostics.Should().Contain(d =>
             d.Code == MetadataContextPackDiagnosticCodes.DescriptorMissingForTopologyRef &&
-            d.Severity == MetadataContextPackDiagnosticSeverity.Error);
+            d.Severity == SeverityLevel.Error);
     }
 
     [Fact]
@@ -1119,7 +1120,7 @@ public class MetadataContextPackBuilderTests
         pack.Descriptors[0].Ref.Should().Be(cap);
         pack.Diagnostics.Should().Contain(d =>
             d.Code == MetadataContextPackDiagnosticCodes.TopologyNodeMissingForDescriptor &&
-            d.Severity == MetadataContextPackDiagnosticSeverity.Warning);
+            d.Severity == SeverityLevel.Warning);
     }
 
     [Fact]

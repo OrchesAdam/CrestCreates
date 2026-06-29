@@ -2,6 +2,7 @@ using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
+using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Metadata.Tests;
 
@@ -104,8 +105,8 @@ public class DescriptorRefTests
     public void ValidationReport_aggregates_issues()
     {
         var report = ValidationReport.FromIssues(
-            new ValidationIssue(ValidationSeverity.Error, "Duplicate name"),
-            new ValidationIssue(ValidationSeverity.Warning, "Missing description"));
+            new ValidationIssue(SeverityLevel.Error, "Duplicate name"),
+            new ValidationIssue(SeverityLevel.Warning, "Missing description"));
 
         report.HasErrors.Should().BeTrue();
         report.HasWarnings.Should().BeTrue();

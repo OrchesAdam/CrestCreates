@@ -11,6 +11,7 @@ using CrestCreates.Metadata.DescriptorPackage.CanonicalHashing;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
+using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Metadata.Tests;
 
@@ -355,8 +356,8 @@ public class DescriptorPackageBuilderTests
             {
                 new DescriptorLifecycleFinding
                 {
-                    Severity = DescriptorLifecycleFindingSeverity.Review,
-                    Code = "LCF001",
+                    Severity = SeverityLevel.Review,
+                    Code = new DiagnosticCode("LCF001"),
                     Message = "Package requires review",
                     Subject = new DescriptorRef("ns", "s1", 1)
                 }

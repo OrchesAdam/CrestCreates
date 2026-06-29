@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
 using Xunit;
+using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Metadata.Tests;
 
@@ -170,7 +171,7 @@ public class RegistryBaseTests
     {
         public int Order => 0;
         public ValidationReport Validate(IReadOnlyList<TestDescriptor> descriptors)
-            => ValidationReport.FromIssues(new ValidationIssue(ValidationSeverity.Error, "Always fails"));
+            => ValidationReport.FromIssues(new ValidationIssue(SeverityLevel.Error, "Always fails"));
     }
 
     private class ErrorValidator : IRegistryValidator<TestDescriptor>
@@ -179,6 +180,6 @@ public class RegistryBaseTests
         public ErrorValidator(string message) => _message = message;
         public int Order => 0;
         public ValidationReport Validate(IReadOnlyList<TestDescriptor> descriptors)
-            => ValidationReport.FromIssues(new ValidationIssue(ValidationSeverity.Error, _message));
+            => ValidationReport.FromIssues(new ValidationIssue(SeverityLevel.Error, _message));
     }
 }

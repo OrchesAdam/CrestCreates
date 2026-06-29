@@ -142,7 +142,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var mismatchDiag = new AgentToolDiagnostic
             {
                 Code = AgentToolDiagnosticCodes.ToolNameMismatch,
-                Severity = AgentToolDiagnosticSeverity.Blocker,
+                Severity = SeverityLevel.Blocker,
                 Message = $"Invocation context tool '{context.ToolName}' does not match expected tool '{expectedToolName}'."
             };
             var mismatchAudit = BuildAudit(context with { ToolName = expectedToolName },
@@ -158,7 +158,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var notFoundDiag = new AgentToolDiagnostic
             {
                 Code = AgentToolDiagnosticCodes.ToolNotFound,
-                Severity = AgentToolDiagnosticSeverity.Warning,
+                Severity = SeverityLevel.Warning,
                 Message = $"Tool '{expectedToolName}' is not a known Agent Control Plane tool."
             };
             var notFoundAudit = BuildAudit(context, AgentToolResultStatus.NotFound, [notFoundDiag]);
@@ -226,7 +226,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var errorDiag = new AgentToolDiagnostic
             {
                 Code = AgentToolDiagnosticCodes.ToolInvocationFailed,
-                Severity = AgentToolDiagnosticSeverity.Error,
+                Severity = SeverityLevel.Error,
                 Message = $"Tool '{expectedToolName}' invocation failed: {ex.Message}"
             };
             var errorAudit = BuildAudit(context, AgentToolResultStatus.Failed, [errorDiag]);
@@ -260,8 +260,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
         var diagnostic = new AgentToolDiagnostic
         {
-            Code = code,
-            Severity = AgentToolDiagnosticSeverity.Error,
+            Code = new DiagnosticCode(code),
+            Severity = SeverityLevel.Error,
             Message = decision == AgentDescriptorKindDecision.Denied
                 ? "The requested descriptor kind is not visible to this invocation."
                 : "The descriptor kind could not be validated and is denied by fail-closed policy."
@@ -340,7 +340,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         => new()
         {
             Code = error.Code,
-            Severity = AgentToolDiagnosticSeverity.Error,
+            Severity = SeverityLevel.Error,
             Message = error.Message,
         };
 
@@ -357,7 +357,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         new AgentToolDiagnostic
         {
             Code = AgentToolDiagnosticCodes.ResultsSecurityTrimmed,
-            Severity = AgentToolDiagnosticSeverity.Info,
+            Severity = SeverityLevel.Info,
             Message = "Results reflect the invocation's descriptor visibility scope."
         }
     ];
@@ -373,8 +373,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     {
         var diagnostic = new AgentToolDiagnostic
         {
-            Code = code,
-            Severity = AgentToolDiagnosticSeverity.Error,
+            Code = new DiagnosticCode(code),
+            Severity = SeverityLevel.Error,
             Message = "The visible aggregate could not be constructed safely."
         };
         var audit = BuildAudit(context, AgentToolResultStatus.Failed, [diagnostic]);
@@ -419,7 +419,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     var ambigDiag = new AgentToolDiagnostic
                     {
                         Code = AgentToolDiagnosticCodes.DescriptorRefAmbiguous,
-                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Severity = SeverityLevel.Error,
                         Message = $"Focus descriptor ref '{focusRef.FullId}' is ambiguous."
                     };
                     var ambigAudit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [ambigDiag]);
@@ -444,7 +444,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     var denyDiag = new AgentToolDiagnostic
                     {
                         Code = AgentToolDiagnosticCodes.DescKindDenied,
-                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Severity = SeverityLevel.Error,
                         Message = $"IncludeKinds value '{explicitKind}' is not visible to this invocation."
                     };
                     var denyAudit = BuildAudit(context, AgentToolResultStatus.Denied, [denyDiag]);
@@ -506,7 +506,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var ambiguousDiag = new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.DescriptorRefAmbiguous,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Descriptor ref '{descriptorRef.FullId}' is ambiguous. Specify a version to disambiguate."
                 };
                 var ambiguousAudit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [ambiguousDiag]);
@@ -625,7 +625,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 diags.Add(new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.SearchTruncated,
-                    Severity = AgentToolDiagnosticSeverity.Info,
+                    Severity = SeverityLevel.Info,
                     Message = "Search results were truncated to the maximum allowed count."
                 });
             }
@@ -662,7 +662,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var ambiguousDiag = new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.DescriptorRefAmbiguous,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Descriptor ref '{descriptorRef.FullId}' is ambiguous. Specify a version to disambiguate."
                 };
                 var ambiguousAudit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [ambiguousDiag]);
@@ -773,10 +773,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     [
                         new AgentToolDiagnostic
                         {
-                            Code = "KindDiscriminatorMismatch",
+                            Code = new DiagnosticCode("KindDiscriminatorMismatch"),
                             Message = $"DescriptorKind ({request.DescriptorKind}) does not match Payload.Discriminator ({request.Payload.Discriminator}). " +
                                       "The declared kind and payload type must be consistent.",
-                            Severity = AgentToolDiagnosticSeverity.Error,
+                            Severity = SeverityLevel.Error,
                         }
                     ]));
             }
@@ -827,8 +827,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (dto is null)
             {
                 return AgentToolResult<AgentDescriptorDraftDto>.Failed(
-                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
-                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
+                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = SeverityLevel.Error, Message = "Failed to project draft to DTO." }],
+                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = SeverityLevel.Error, Message = "Failed to project draft to DTO." }]));
             }
             return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, audit);
         }, ct);
@@ -863,10 +863,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     [
                         new AgentToolDiagnostic
                         {
-                            Code = "KindDiscriminatorMismatch",
+                            Code = new DiagnosticCode("KindDiscriminatorMismatch"),
                             Message = $"Draft DescriptorKind ({snapshot.Draft.DescriptorKind}) does not match Payload.Discriminator ({request.Payload.Discriminator}). " +
                                       "The payload type must be consistent with the draft's declared kind.",
-                            Severity = AgentToolDiagnosticSeverity.Error,
+                            Severity = SeverityLevel.Error,
                         }
                     ]));
             }
@@ -902,8 +902,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (dto is null)
             {
                 return AgentToolResult<AgentDescriptorDraftDto>.Failed(
-                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
-                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
+                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = SeverityLevel.Error, Message = "Failed to project draft to DTO." }],
+                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = SeverityLevel.Error, Message = "Failed to project draft to DTO." }]));
             }
             return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, audit);
         }, ct);
@@ -938,8 +938,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (dto is null)
             {
                 return AgentToolResult<AgentDescriptorDraftDto>.Failed(
-                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
-                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
+                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = SeverityLevel.Error, Message = "Failed to project draft to DTO." }],
+                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = SeverityLevel.Error, Message = "Failed to project draft to DTO." }]));
             }
             return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, audit);
         }, ct);
@@ -965,7 +965,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     var denyDiag = new AgentToolDiagnostic
                     {
                         Code = AgentToolDiagnosticCodes.DescKindDenied,
-                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Severity = SeverityLevel.Error,
                         Message = $"Descriptor kind '{kind}' is denied for this invocation."
                     };
                     var denyAudit = BuildAudit(context, AgentToolResultStatus.Denied, [denyDiag]);
@@ -1031,8 +1031,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (dto is null)
             {
                 return AgentToolResult<AgentDescriptorDraftDto>.Failed(
-                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
-                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
+                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = SeverityLevel.Error, Message = "Failed to project draft to DTO." }],
+                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = SeverityLevel.Error, Message = "Failed to project draft to DTO." }]));
             }
             return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, audit);
         }, ct);
@@ -1116,8 +1116,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (compareDraftDto is null)
             {
                 return AgentToolResult<DraftComparisonResult>.Failed(
-                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft for comparison." }],
-                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft for comparison." }]));
+                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = SeverityLevel.Error, Message = "Failed to project draft for comparison." }],
+                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = SeverityLevel.Error, Message = "Failed to project draft for comparison." }]));
             }
             var result = new DraftComparisonResult
             {
@@ -1370,7 +1370,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var noReviewDiag = new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.NoReviewResult,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"No review result found for draft '{draftId}'. Run ReviewDescriptorDraft first."
                 };
                 var noReviewAudit = BuildAudit(context, AgentToolResultStatus.Failed, [noReviewDiag]);
@@ -1407,7 +1407,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var diag = new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.UnsupportedReportContractVersion,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Report contract version '{report.ContractVersion}' is not supported. Current: '{AgentControlPlaneContractVersion.Current}'."
                 };
                 var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [diag]);
@@ -1427,7 +1427,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var diag = new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.UnsupportedReportFormat,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Report format '{format}' is not supported."
                 };
                 var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [diag]);
@@ -1486,8 +1486,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     Applicability = applicability,
                     IsExecutable = isExecutable,
                     RequiresManualAction = !hasActions,
-                    RequiresHumanReview = diag.Severity is DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error
-                        or DraftAbstractions.DescriptorDraftDiagnosticSeverity.Blocker,
+                    RequiresHumanReview = diag.Severity.Value is "Error" or "Blocker",
                     BlocksActivationUntilResolved = false,
                     RiskLevel = MapDiagnosticToRiskLevel(diag.Severity),
                     ContractVersion = AgentControlPlaneContractVersion.Current,
@@ -1618,7 +1617,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var mismatchDiag = new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.ProposalDraftMismatch,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Fix proposal '{request.ProposalId}' is for draft '{proposal.DraftId}', not '{request.DraftId}'."
                 };
                 var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [mismatchDiag]);
@@ -1632,7 +1631,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var multiActionDiag = new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.UnsupportedMultiActionFixProposal,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Fix proposal '{request.ProposalId}' contains {proposal.Actions.Count} actions. Only single-action fix proposals are supported."
                 };
                 var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [multiActionDiag]);
@@ -1646,7 +1645,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var noActionDiag = new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.FixProposalHasNoActions,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Fix proposal '{request.ProposalId}' has no actions to apply."
                 };
                 var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [noActionDiag]);
@@ -1660,7 +1659,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var applicabilityDiag = new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.FixProposalNotApplicable,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Fix proposal applicability is '{proposal.Applicability}', but only '{FixProposalApplicability.CurrentMutableDraft}' proposals can be applied."
                 };
                 var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [applicabilityDiag]);
@@ -1674,7 +1673,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var nonExecProposalDiag = new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.NonExecutableFixProposal,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Fix proposal '{request.ProposalId}' is not executable."
                 };
                 var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [nonExecProposalDiag]);
@@ -1695,7 +1694,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     var nonExecDiag = new AgentToolDiagnostic
                     {
                         Code = AgentToolDiagnosticCodes.NonExecutableFixAction,
-                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Severity = SeverityLevel.Error,
                         Message = $"Fix action for target '{action.TargetPath}' is not executable."
                     };
                     var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [nonExecDiag]);
@@ -1708,7 +1707,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     var unsupportedKindDiag = new AgentToolDiagnostic
                     {
                         Code = AgentToolDiagnosticCodes.UnsupportedFixActionKind,
-                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Severity = SeverityLevel.Error,
                         Message = $"Fix action kind '{action.Kind}' is not supported for draft field mutation. Only SetValue is currently supported."
                     };
                     var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [unsupportedKindDiag]);
@@ -1720,7 +1719,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     var unsafeDiag = new AgentToolDiagnostic
                     {
                         Code = AgentToolDiagnosticCodes.UnsafeFixActionRejected,
-                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Severity = SeverityLevel.Error,
                         Message = $"Fix action for target '{action.TargetPath}' has Unsafe safety level and is rejected."
                     };
                     var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [unsafeDiag]);
@@ -1739,7 +1738,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     var boundaryDiag = new AgentToolDiagnostic
                     {
                         Code = AgentToolDiagnosticCodes.FixActionTargetBoundaryViolation,
-                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Severity = SeverityLevel.Error,
                         Message = $"Fix action targets descriptor '{action.TargetDescriptorId}', but draft fix proposals can only mutate the draft's own fields (descriptor '{draft.DescriptorId}')."
                     };
                     var boundaryAudit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [boundaryDiag]);
@@ -1755,7 +1754,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     var boundaryDiag = new AgentToolDiagnostic
                     {
                         Code = AgentToolDiagnosticCodes.FixActionTargetBoundaryViolation,
-                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Severity = SeverityLevel.Error,
                         Message = $"Fix action targets boundary-violating path '{action.TargetPath}'. Draft fix proposals cannot mutate the active descriptor registry."
                     };
                     var boundaryAudit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [boundaryDiag]);
@@ -1768,7 +1767,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     var targetDiag = new AgentToolDiagnostic
                     {
                         Code = AgentToolDiagnosticCodes.FixActionTargetNotAllowed,
-                        Severity = AgentToolDiagnosticSeverity.Error,
+                        Severity = SeverityLevel.Error,
                         Message = $"Fix action target '{action.TargetPath}' is not an allowed draft field."
                     };
                     var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [targetDiag]);
@@ -1787,7 +1786,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                             var valueKindDiag = new AgentToolDiagnostic
                             {
                                 Code = AgentToolDiagnosticCodes.FixActionValueKindNotSupported,
-                                Severity = AgentToolDiagnosticSeverity.Error,
+                                Severity = SeverityLevel.Error,
                                 Message = $"Fix action for target '{action.TargetPath}' has unsupported value kind '{valueKind}'. Only String and Null are allowed for draft scalar fields."
                             };
                             var valueKindAudit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [valueKindDiag]);
@@ -1821,7 +1820,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 successDiags.Add(new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.FixActionsApplied,
-                    Severity = AgentToolDiagnosticSeverity.Info,
+                    Severity = SeverityLevel.Info,
                     Message = $"Applied {appliedPaths.Count} action(s) to draft fields: {string.Join(", ", appliedPaths)}."
                 });
             }
@@ -1837,8 +1836,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (dto is null)
             {
                 return AgentToolResult<AgentDescriptorDraftDto>.Failed(
-                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }],
-                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = AgentToolDiagnosticSeverity.Error, Message = "Failed to project draft to DTO." }]));
+                    [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = SeverityLevel.Error, Message = "Failed to project draft to DTO." }],
+                    BuildAudit(context, AgentToolResultStatus.Failed, [new AgentToolDiagnostic { Code = AgentToolDiagnosticCodes.DraftProjectionFailed, Severity = SeverityLevel.Error, Message = "Failed to project draft to DTO." }]));
             }
             return AgentToolResult<AgentDescriptorDraftDto>.Success(dto, successDiags, successAudit);
         }, ct);
@@ -2055,7 +2054,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var validationDiag = new AgentToolDiagnostic
                 {
                     Code = AgentToolDiagnosticCodes.ReviewValidationFailed,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = "Review validation failed; evidence preview cannot be computed."
                 };
                 var failedAudit = BuildAudit(context, AgentToolResultStatus.Failed, [validationDiag]) with
@@ -2214,7 +2213,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 {
                     Code = AgentToolDiagnosticCodes.ValidationFailed,
                     Message = "Draft validation failed.",
-                    Severity = ActivationReadinessBlockerSeverity.Blocker,
+                    Severity = SeverityLevel.Blocker,
                     Remedy = "Fix validation errors before requesting activation."
                 });
             }
@@ -2226,14 +2225,13 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 .ToList().AsReadOnly();
 
             if (visibleDiagnostics.Any(d =>
-                    d.Severity is DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error
-                        or DraftAbstractions.DescriptorDraftDiagnosticSeverity.Blocker))
+                    d.Severity.Value is "Error" or "Blocker"))
             {
                 blockers.Add(new ActivationReadinessBlocker
                 {
                     Code = AgentToolDiagnosticCodes.ReviewHasErrors,
                     Message = "Review produced error or blocker diagnostics.",
-                    Severity = ActivationReadinessBlockerSeverity.Blocker,
+                    Severity = SeverityLevel.Blocker,
                     Remedy = "Resolve error/blocker diagnostics before requesting activation."
                 });
             }
@@ -2244,7 +2242,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 {
                     Code = AgentToolDiagnosticCodes.NotActivationEligible,
                     Message = "Governance decision does not allow activation.",
-                    Severity = ActivationReadinessBlockerSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Remedy = "Review governance findings and adjust draft."
                 });
             }
@@ -2318,7 +2316,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                         new AgentToolDiagnostic
                         {
                             Code = DescriptorActivationDiagnosticCodes.BindingSnapshotRequired,
-                            Severity = AgentToolDiagnosticSeverity.Error,
+                            Severity = SeverityLevel.Error,
                             Message = "BindingSnapshot is required for activation request submission."
                         }
                     ]));
@@ -2332,7 +2330,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                         new AgentToolDiagnostic
                         {
                             Code = DescriptorActivationDiagnosticCodes.BindingHashesRequired,
-                            Severity = AgentToolDiagnosticSeverity.Error,
+                            Severity = SeverityLevel.Error,
                             Message = "BindingSnapshot.Hashes is required for activation request submission."
                         }
                     ]));
@@ -2346,7 +2344,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
                     Code = DescriptorActivationDiagnosticCodes.ReviewResultNotFound,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Referenced review result '{request.BindingSnapshot.ReviewResultId}' not found for this tenant."
                 });
             }
@@ -2355,7 +2353,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
                     Code = DescriptorActivationDiagnosticCodes.ReviewResultDraftMismatch,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Referenced review result '{request.BindingSnapshot.ReviewResultId}' belongs to draft '{reviewRef.Review.DraftId}', not '{request.DraftId}'."
                 });
             }
@@ -2366,7 +2364,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
                     Code = DescriptorActivationDiagnosticCodes.PackagePreviewNotFound,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = "PackagePreviewId is required for activation request submission."
                 });
             }
@@ -2375,7 +2373,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
                     Code = DescriptorActivationDiagnosticCodes.PackagePreviewNotFound,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Referenced package preview '{request.BindingSnapshot.PackagePreviewId}' not found for this tenant."
                 });
             }
@@ -2384,7 +2382,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
                     Code = DescriptorActivationDiagnosticCodes.PackagePreviewDraftMismatch,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Referenced package preview '{request.BindingSnapshot.PackagePreviewId}' belongs to draft '{packageRef.Preview.DraftId}', not '{request.DraftId}'."
                 });
             }
@@ -2395,7 +2393,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
                     Code = DescriptorActivationDiagnosticCodes.EvidencePreviewNotFound,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = "EvidencePreviewId is required for activation request submission."
                 });
             }
@@ -2404,7 +2402,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
                     Code = DescriptorActivationDiagnosticCodes.EvidencePreviewNotFound,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Referenced evidence preview '{request.BindingSnapshot.EvidencePreviewId}' not found for this tenant."
                 });
             }
@@ -2413,7 +2411,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
                     Code = DescriptorActivationDiagnosticCodes.EvidencePreviewDraftMismatch,
-                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Severity = SeverityLevel.Error,
                     Message = $"Referenced evidence preview '{request.BindingSnapshot.EvidencePreviewId}' belongs to draft '{evidenceRef.Evidence.DraftId}', not '{request.DraftId}'."
                 });
             }
@@ -2554,15 +2552,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             RelatedDiagnosticCode = d.RelatedDiagnosticCode
         };
 
-    private static AgentToolDiagnosticSeverity MapFromDraftSeverity(
-        DraftAbstractions.DescriptorDraftDiagnosticSeverity severity) => severity switch
-        {
-            DraftAbstractions.DescriptorDraftDiagnosticSeverity.Info => AgentToolDiagnosticSeverity.Info,
-            DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning => AgentToolDiagnosticSeverity.Warning,
-            DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error => AgentToolDiagnosticSeverity.Error,
-            DraftAbstractions.DescriptorDraftDiagnosticSeverity.Blocker => AgentToolDiagnosticSeverity.Blocker,
-            _ => AgentToolDiagnosticSeverity.Info
-        };
+    private static SeverityLevel MapFromDraftSeverity(
+        SeverityLevel severity) => severity;
 
     private static AgentToolDiagnostic MapFromContextPackDiagnostic(MetadataContextPackDiagnostic d)
         => new()
@@ -2573,31 +2564,25 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             Path = d.Path
         };
 
-    private static AgentToolDiagnosticSeverity MapFromContextPackSeverity(
-        MetadataContextPackDiagnosticSeverity severity) => severity switch
-    {
-        MetadataContextPackDiagnosticSeverity.Info => AgentToolDiagnosticSeverity.Info,
-        MetadataContextPackDiagnosticSeverity.Warning => AgentToolDiagnosticSeverity.Warning,
-        MetadataContextPackDiagnosticSeverity.Error => AgentToolDiagnosticSeverity.Error,
-        _ => AgentToolDiagnosticSeverity.Info
-    };
+    private static SeverityLevel MapFromContextPackSeverity(
+        SeverityLevel severity) => severity;
 
-    private static AgentToolDiagnosticSeverity MapTopologyDiagnosticSeverity(DiagnosticSeverity severity)
-        => severity switch
+    private static SeverityLevel MapTopologyDiagnosticSeverity(SeverityLevel severity)
+        => severity.Value switch
         {
-            DiagnosticSeverity.Info => AgentToolDiagnosticSeverity.Info,
-            DiagnosticSeverity.Warning => AgentToolDiagnosticSeverity.Warning,
-            DiagnosticSeverity.Error => AgentToolDiagnosticSeverity.Error,
-            _ => AgentToolDiagnosticSeverity.Info
+            "Info" => SeverityLevel.Info,
+            "Warning" => SeverityLevel.Warning,
+            "Error" => SeverityLevel.Error,
+            _ => SeverityLevel.Info
         };
 
     private static FixProposalRiskLevel MapDiagnosticToRiskLevel(
-        DraftAbstractions.DescriptorDraftDiagnosticSeverity severity) => severity switch
+        SeverityLevel severity) => severity.Value switch
     {
-        DraftAbstractions.DescriptorDraftDiagnosticSeverity.Info => FixProposalRiskLevel.Safe,
-        DraftAbstractions.DescriptorDraftDiagnosticSeverity.Warning => FixProposalRiskLevel.Low,
-        DraftAbstractions.DescriptorDraftDiagnosticSeverity.Error => FixProposalRiskLevel.High,
-        DraftAbstractions.DescriptorDraftDiagnosticSeverity.Blocker => FixProposalRiskLevel.Unsafe,
+        "Blocker" => FixProposalRiskLevel.Unsafe,
+        "Error" => FixProposalRiskLevel.High,
+        "Warning" => FixProposalRiskLevel.Low,
+        "Info" => FixProposalRiskLevel.Safe,
         _ => FixProposalRiskLevel.Medium
     };
 

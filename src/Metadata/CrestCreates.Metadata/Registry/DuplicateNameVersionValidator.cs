@@ -18,7 +18,7 @@ public sealed class DuplicateNameVersionValidator : IRegistryValidator<Generated
             .ToList();
 
         if (duplicates.Count > 0)
-            issues.Add(new ValidationIssue(ValidationSeverity.Error,
+            issues.Add(new ValidationIssue(SeverityLevel.Error,
                 $"Duplicate (name, version) pairs: {string.Join(", ", duplicates)}."));
 
         return new ValidationReport(issues);

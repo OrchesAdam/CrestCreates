@@ -1,6 +1,7 @@
 // Global Usings — re-export all Metadata.Abstractions sub-namespace types
 // so Metadata project files can reference them without explicit using directives.
 
+global using CrestCreates.Core.Abstractions.Identity;
 global using CrestCreates.Metadata.Abstractions;
 global using CrestCreates.Metadata.Abstractions.Bootstrap;
 global using CrestCreates.Metadata.Abstractions.CanonicalHashing;
