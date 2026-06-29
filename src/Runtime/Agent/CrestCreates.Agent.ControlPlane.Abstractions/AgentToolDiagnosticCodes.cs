@@ -94,8 +94,14 @@ public static class AgentToolDiagnosticCodes
     private const string FixProposalNotApplicableValue = "FIX_PROPOSAL_NOT_APPLICABLE";
     public static DiagnosticCode FixProposalNotApplicable { get; } = new(FixProposalNotApplicableValue);
 
+    private const string NonExecutableFixProposalValue = "NON_EXECUTABLE_FIX_PROPOSAL";
+    public static DiagnosticCode NonExecutableFixProposal { get; } = new(NonExecutableFixProposalValue);
+
     private const string NonExecutableFixActionValue = "NON_EXECUTABLE_FIX_ACTION";
     public static DiagnosticCode NonExecutableFixAction { get; } = new(NonExecutableFixActionValue);
+
+    private const string FixActionValueKindNotSupportedValue = "FIX_ACTION_VALUE_KIND_NOT_SUPPORTED";
+    public static DiagnosticCode FixActionValueKindNotSupported { get; } = new(FixActionValueKindNotSupportedValue);
 
     private const string UnsupportedFixActionKindValue = "UNSUPPORTED_FIX_ACTION_KIND";
     public static DiagnosticCode UnsupportedFixActionKind { get; } = new(UnsupportedFixActionKindValue);

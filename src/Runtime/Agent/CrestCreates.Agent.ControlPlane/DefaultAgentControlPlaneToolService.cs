@@ -1668,6 +1668,20 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([applicabilityDiag], audit);
             }
 
+            // Proposal-level executability guard — reject non-executable proposals before action-level checks
+            if (!proposal.IsExecutable)
+            {
+                var nonExecProposalDiag = new AgentToolDiagnostic
+                {
+                    Code = AgentToolDiagnosticCodes.NonExecutableFixProposal,
+                    Severity = AgentToolDiagnosticSeverity.Error,
+                    Message = $"Fix proposal '{request.ProposalId}' is not executable."
+                };
+                var audit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [nonExecProposalDiag]);
+                await _auditor.RecordAsync(audit, ct);
+                return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([nonExecProposalDiag], audit);
+            }
+
             var updatedDraft = draft;
 
             var appliedPaths = new List<string>();
@@ -1764,6 +1778,24 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
                 if (action.Kind == FixProposalActionKind.SetValue)
                 {
+                    // Validate JsonElement ValueKind — only String, Null, and missing/null ProposedValue are allowed
+                    if (action.ProposedValue.HasValue)
+                    {
+                        var valueKind = action.ProposedValue.Value.ValueKind;
+                        if (valueKind != JsonValueKind.String && valueKind != JsonValueKind.Null)
+                        {
+                            var valueKindDiag = new AgentToolDiagnostic
+                            {
+                                Code = AgentToolDiagnosticCodes.FixActionValueKindNotSupported,
+                                Severity = AgentToolDiagnosticSeverity.Error,
+                                Message = $"Fix action for target '{action.TargetPath}' has unsupported value kind '{valueKind}'. Only String and Null are allowed for draft scalar fields."
+                            };
+                            var valueKindAudit = BuildAudit(context, AgentToolResultStatus.InvalidRequest, [valueKindDiag]);
+                            await _auditor.RecordAsync(valueKindAudit, ct);
+                            return AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([valueKindDiag], valueKindAudit);
+                        }
+                    }
+
                     var value = action.ProposedValue?.GetString();
                     updatedDraft = action.TargetPath switch
                     {

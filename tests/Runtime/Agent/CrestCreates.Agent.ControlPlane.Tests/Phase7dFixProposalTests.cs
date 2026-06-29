@@ -664,6 +664,261 @@ public class Phase7dFixProposalTests : AgentControlPlaneTestBase
         DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // ── Phase 7d follow-up #44: Proposal-level executability guard ──
+
+    [Fact]
+    public async Task Apply_NonExecutableProposal_Returns_NonExecutableFixProposal()
+    {
+        var service = CreateService();
+        var draft = CreateTestDraft();
+        var proposal = CreateMinimalFixProposal(
+            applicability: FixProposalApplicability.CurrentMutableDraft,
+            isExecutable: false,
+            actions: new List<FixProposalAction>
+            {
+                new()
+                {
+                    Kind = FixProposalActionKind.SetValue,
+                    TargetPath = "Rationale",
+                    ProposedValue = JsonSerializer.SerializeToElement("value"),
+                    IsExecutable = true, // action-level executable, but proposal-level is not
+                    SafetyLevel = FixProposalActionSafetyLevel.Safe
+                }
+            });
+
+        SetupDraftStore(draft);
+        InsertFixProposal(service, proposal, draft);
+
+        var context = CreateContext("ApplyFixProposalToDraft");
+        var request = new ApplyFixProposalRequest { ProposalId = proposal.Id, DraftId = proposal.DraftId };
+        var result = await service.ApplyFixProposalToDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "NON_EXECUTABLE_FIX_PROPOSAL");
+    }
+
+    [Fact]
+    public async Task Apply_NonExecutableProposal_DoesNotSaveDraft()
+    {
+        var service = CreateService();
+        var draft = CreateTestDraft();
+        var proposal = CreateMinimalFixProposal(
+            applicability: FixProposalApplicability.CurrentMutableDraft,
+            isExecutable: false,
+            actions: new List<FixProposalAction>
+            {
+                new()
+                {
+                    Kind = FixProposalActionKind.SetValue,
+                    TargetPath = "Rationale",
+                    ProposedValue = JsonSerializer.SerializeToElement("value"),
+                    IsExecutable = true,
+                    SafetyLevel = FixProposalActionSafetyLevel.Safe
+                }
+            });
+
+        SetupDraftStore(draft);
+        InsertFixProposal(service, proposal, draft);
+
+        var context = CreateContext("ApplyFixProposalToDraft");
+        var request = new ApplyFixProposalRequest { ProposalId = proposal.Id, DraftId = proposal.DraftId };
+        var result = await service.ApplyFixProposalToDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── Phase 7d follow-up #44: SetValue JsonElement ValueKind validation ──
+
+    [Fact]
+    public async Task Apply_SetValue_ObjectValue_Returns_FixActionValueKindNotSupported()
+    {
+        var service = CreateService();
+        var draft = CreateTestDraft();
+        var proposal = CreateMinimalFixProposal(
+            actions: new List<FixProposalAction>
+            {
+                new()
+                {
+                    Kind = FixProposalActionKind.SetValue,
+                    TargetPath = "Rationale",
+                    ProposedValue = JsonSerializer.SerializeToElement(new { Name = "bad" }),
+                    IsExecutable = true,
+                    SafetyLevel = FixProposalActionSafetyLevel.Safe
+                }
+            });
+
+        SetupDraftStore(draft);
+        InsertFixProposal(service, proposal, draft);
+
+        var context = CreateContext("ApplyFixProposalToDraft");
+        var request = new ApplyFixProposalRequest { ProposalId = proposal.Id, DraftId = proposal.DraftId };
+        var result = await service.ApplyFixProposalToDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "FIX_ACTION_VALUE_KIND_NOT_SUPPORTED");
+
+        DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Apply_SetValue_ArrayValue_Returns_FixActionValueKindNotSupported()
+    {
+        var service = CreateService();
+        var draft = CreateTestDraft();
+        var proposal = CreateMinimalFixProposal(
+            actions: new List<FixProposalAction>
+            {
+                new()
+                {
+                    Kind = FixProposalActionKind.SetValue,
+                    TargetPath = "Rationale",
+                    ProposedValue = JsonSerializer.SerializeToElement(new[] { "a", "b" }),
+                    IsExecutable = true,
+                    SafetyLevel = FixProposalActionSafetyLevel.Safe
+                }
+            });
+
+        SetupDraftStore(draft);
+        InsertFixProposal(service, proposal, draft);
+
+        var context = CreateContext("ApplyFixProposalToDraft");
+        var request = new ApplyFixProposalRequest { ProposalId = proposal.Id, DraftId = proposal.DraftId };
+        var result = await service.ApplyFixProposalToDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "FIX_ACTION_VALUE_KIND_NOT_SUPPORTED");
+
+        DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Apply_SetValue_NumberValue_Returns_FixActionValueKindNotSupported()
+    {
+        var service = CreateService();
+        var draft = CreateTestDraft();
+        var proposal = CreateMinimalFixProposal(
+            actions: new List<FixProposalAction>
+            {
+                new()
+                {
+                    Kind = FixProposalActionKind.SetValue,
+                    TargetPath = "Rationale",
+                    ProposedValue = JsonSerializer.SerializeToElement(42),
+                    IsExecutable = true,
+                    SafetyLevel = FixProposalActionSafetyLevel.Safe
+                }
+            });
+
+        SetupDraftStore(draft);
+        InsertFixProposal(service, proposal, draft);
+
+        var context = CreateContext("ApplyFixProposalToDraft");
+        var request = new ApplyFixProposalRequest { ProposalId = proposal.Id, DraftId = proposal.DraftId };
+        var result = await service.ApplyFixProposalToDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "FIX_ACTION_VALUE_KIND_NOT_SUPPORTED");
+
+        DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Apply_SetValue_BooleanValue_Returns_FixActionValueKindNotSupported()
+    {
+        var service = CreateService();
+        var draft = CreateTestDraft();
+        var proposal = CreateMinimalFixProposal(
+            actions: new List<FixProposalAction>
+            {
+                new()
+                {
+                    Kind = FixProposalActionKind.SetValue,
+                    TargetPath = "Rationale",
+                    ProposedValue = JsonSerializer.SerializeToElement(true),
+                    IsExecutable = true,
+                    SafetyLevel = FixProposalActionSafetyLevel.Safe
+                }
+            });
+
+        SetupDraftStore(draft);
+        InsertFixProposal(service, proposal, draft);
+
+        var context = CreateContext("ApplyFixProposalToDraft");
+        var request = new ApplyFixProposalRequest { ProposalId = proposal.Id, DraftId = proposal.DraftId };
+        var result = await service.ApplyFixProposalToDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().Contain(d => d.Code == "FIX_ACTION_VALUE_KIND_NOT_SUPPORTED");
+
+        DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Apply_SetValue_NullValue_AllowsClearingNullableDraftField()
+    {
+        var service = CreateService();
+        var draft = CreateTestDraft();
+        // Create a JsonElement representing null
+        var nullElement = JsonSerializer.SerializeToElement((string?)null);
+        var proposal = CreateMinimalFixProposal(
+            actions: new List<FixProposalAction>
+            {
+                new()
+                {
+                    Kind = FixProposalActionKind.SetValue,
+                    TargetPath = "Rationale",
+                    ProposedValue = nullElement,
+                    IsExecutable = true,
+                    SafetyLevel = FixProposalActionSafetyLevel.Safe
+                }
+            });
+
+        SetupDraftStore(draft);
+        InsertFixProposal(service, proposal, draft);
+
+        var context = CreateContext("ApplyFixProposalToDraft");
+        var request = new ApplyFixProposalRequest { ProposalId = proposal.Id, DraftId = proposal.DraftId };
+        var result = await service.ApplyFixProposalToDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Value!.Rationale.Should().BeNull("SetValue with null JSON value clears the field");
+
+        DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Apply_SetValue_StringValue_StillSucceeds()
+    {
+        var service = CreateService();
+        var draft = CreateTestDraft();
+        var newValue = "Updated via SetValue";
+        var proposal = CreateMinimalFixProposal(
+            actions: new List<FixProposalAction>
+            {
+                new()
+                {
+                    Kind = FixProposalActionKind.SetValue,
+                    TargetPath = "Rationale",
+                    ProposedValue = JsonSerializer.SerializeToElement(newValue),
+                    IsExecutable = true,
+                    SafetyLevel = FixProposalActionSafetyLevel.Safe
+                }
+            });
+
+        SetupDraftStore(draft);
+        InsertFixProposal(service, proposal, draft);
+
+        var context = CreateContext("ApplyFixProposalToDraft");
+        var request = new ApplyFixProposalRequest { ProposalId = proposal.Id, DraftId = proposal.DraftId };
+        var result = await service.ApplyFixProposalToDraftAsync(context, request);
+
+        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Value!.Rationale.Should().Be(newValue);
+
+        DraftStoreMock.Verify(s => s.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     // ── Helpers ──
 
     /// <summary>

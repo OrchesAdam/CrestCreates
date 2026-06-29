@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-06-27
+Last Updated: 2026-06-29
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -615,11 +615,12 @@ This thread achieved the following:
 - **Report Renderer**: `IDescriptorReviewReportRenderer`/`DefaultDescriptorReviewReportRenderer` — Markdown + PlainText, reads DTO Message directly, ContractVersion validation (UnsupportedReportContractVersion on mismatch), no external services/LLM
 - **Message Template Catalog**: `IDescriptorReviewMessageTemplateCatalog`/`DefaultDescriptorReviewMessageTemplateCatalog` — 31 templates, regex-based parameter substitution, TemplateVersion="7d.v1"
 - **Service integration**: `BuildDescriptorReviewReportAsync` + `RenderDescriptorReviewReportAsync` (2 new tools), single-action constraint on ApplyFixProposal (UnsupportedMultiActionFixProposal diagnostic), Applicability check (FIX_PROPOSAL_NOT_APPLICABLE), MapDiagnosticToFixProposalKind (RATIONALE_EMPTY/INTENT_EMPTY→SetRequiredField, default→MarkRequiresReview)
+- **Runtime guardrails** (Phase 7d follow-up #44): Proposal-level IsExecutable guard (`NON_EXECUTABLE_FIX_PROPOSAL` diagnostic, rejects before action-level checks, no draft mutation); SetValue JsonElement ValueKind validation (`FIX_ACTION_VALUE_KIND_NOT_SUPPORTED` diagnostic, rejects Object/Array/Number/True/False, allows String/Null/missing)
 - **Contract version**: bumped to "7d.v1"
 - **Tool count**: 30 → 34 (BuildDescriptorReviewReport + RenderDescriptorReviewReport + 2 convenience)
 - **Code review**: 3 rounds, 4 Critical + 7 Important + 4 Minor fixed; 2 issues rejected with technical reasoning (I#6 YAGNI, M#13 no NRE path)
-- **Test suites**: 8+ test files, 67+ new tests total — Builder (20+), Renderer (7+), Catalog (8), FixProposal (18+), Service Integration (8), Coverage (5+), Semantic Preservation, Wave4 updates
-- **366 ControlPlane tests + 7 Boundary tests pass** (373 total)
+- **Test suites**: 8+ test files, 75+ new tests total — Builder (20+), Renderer (7+), Catalog (8), FixProposal (26+), Service Integration (8), Coverage (5+), Semantic Preservation, Wave4 updates
+- **479 ControlPlane tests + 11 Boundary tests pass**
 - **Design spec**: `docs/superpowers/specs/2026-06-22-phase-7d-review-report-fix-proposal-design.md`
 - **Implementation plan**: `docs/superpowers/plans/2026-06-22-phase-7d-review-report-fix-proposal.md`
 
@@ -703,7 +704,7 @@ This thread achieved the following:
 - **CrestErrorCodes** centralized: `General`, `Validation`, `Authorization`, `NotFound`, `Concurrency`, `PreconditionRequired` — replaces 6 inline `"CrestError.X"` literals across exception classes
 - **Typed exception overloads**: `CrestException(ErrorCode)`, `CrestBusinessException(ErrorCode)`, `CrestPermissionException(PermissionName)`, `CrestValidationException(ErrorCode)` — existing string overloads preserved for backward compat
 - **Framework constant classes**: `FeatureManagementErrorCodes` (7 entries), `SchemaValidationErrorCodes` (8 entries), `MetadataContextPackDiagnosticCodes` (3 entries), `DescriptorPackageDiagnosticCodes` (12 entries with typed DiagnosticCode properties)
-- **Agent constant classes**: `DescriptorActivationDiagnosticCodes` (35 entries), `DescriptorActivationHumanTaskIds` (2 entries), `DescriptorActivationMessageTemplateIds` (8 entries), `AgentToolPermissionNames` (20 entries + RuntimePrefix), `AgentToolDiagnosticCodes` (51 entries), `DescriptorReviewReportMessageTemplateIds` (31 entries), `DescriptorDraftDiagnosticCodes` (12 entries)
+- **Agent constant classes**: `DescriptorActivationDiagnosticCodes` (35 entries), `DescriptorActivationHumanTaskIds` (2 entries), `DescriptorActivationMessageTemplateIds` (8 entries), `AgentToolPermissionNames` (20 entries + RuntimePrefix), `AgentToolDiagnosticCodes` (53 entries), `DescriptorReviewReportMessageTemplateIds` (31 entries), `DescriptorDraftDiagnosticCodes` (12 entries)
 - **Tooling constant classes** (netstandard2.0 — const string only, no typed properties): `CanonicalHashDiagnosticCodes` (28 entries), `ObjectMappingDiagnosticCodes` (12 entries), `CodeGeneratorDiagnosticCodes` (4 entries)
 - **Generated permission shape**: `XxxPermissions.Create` → `XxxPermissions.CreateValue` (const string) + `XxxPermissions.Create` (typed PermissionName property); `GetAllPermissions()` yields `XxxValue` strings
 - **Architecture guard**: `SemanticStringGuardTests` in DependencyBoundaries — 6 forbidden patterns (ACTIVATION_*, CCHASH*, OM*, FIELD_REQUIRED, descriptor-activation-review, agent.*), definition file exemptions, `// semantic-string-guard: allow` opt-out for test fixtures
