@@ -1,7 +1,7 @@
 # Phase 7e+ — Agent Memory & Context Compression Runtime
 
 > Date: 2026-06-29  
-> Status: Design  
+> Status: Approved for Implementation  
 > Scope: Issue #43 first implementation phase
 
 ## 1. Goal
@@ -156,6 +156,14 @@ public interface IAgentConversationStore
     ValueTask<IReadOnlyList<AgentConversationRecord>> ListConversationsAsync(AgentConversationQuery query, CancellationToken cancellationToken = default);
 }
 
+public interface IAgentTaskHistoryStore
+{
+    ValueTask SaveTaskAsync(AgentTaskRecord task, CancellationToken cancellationToken = default);
+    ValueTask<AgentTaskRecord?> GetTaskAsync(string tenantId, string taskId, CancellationToken cancellationToken = default);
+    ValueTask AppendEventAsync(string tenantId, string taskId, AgentTaskEvent taskEvent, CancellationToken cancellationToken = default);
+    ValueTask<IReadOnlyList<AgentTaskRecord>> ListTasksAsync(AgentTaskHistoryQuery query, CancellationToken cancellationToken = default);
+}
+
 public interface IAgentCompressedContextStore
 {
     ValueTask SaveBlockAsync(AgentCompressedContextBlock block, CancellationToken cancellationToken = default);
@@ -171,7 +179,7 @@ public interface IAgentMemoryStore
     ValueTask<AgentMemoryItem?> GetMemoryAsync(string tenantId, string memoryId, CancellationToken cancellationToken = default);
     ValueTask<IReadOnlyList<AgentMemoryItem>> ListMemoriesAsync(AgentMemoryQuery query, CancellationToken cancellationToken = default);
     ValueTask SupersedeAsync(AgentMemorySupersedeRequest request, CancellationToken cancellationToken = default);
-    ValueTask ArchiveAsync(string tenantId, string memoryId, AgentInvocationContext actor, CancellationToken cancellationToken = default);
+    ValueTask ArchiveAsync(AgentMemoryArchiveRequest request, CancellationToken cancellationToken = default);
 }
 
 public interface IAgentMemoryContentSanitizer
@@ -214,6 +222,7 @@ public interface IAgentAuthoringContextBuilder
 The implementation project provides default in-memory and rule-based services:
 
 - `InMemoryAgentConversationStore`
+- `InMemoryAgentTaskHistoryStore`
 - `InMemoryAgentCompressedContextStore`
 - `InMemoryAgentMemoryStore`
 - `DefaultAgentMemoryContentSanitizer`
@@ -229,6 +238,7 @@ DI registration follows existing patterns:
 ```text
 AddAgentMemory()
   TryAddSingleton<IAgentConversationStore, InMemoryAgentConversationStore>
+  TryAddSingleton<IAgentTaskHistoryStore, InMemoryAgentTaskHistoryStore>
   TryAddSingleton<IAgentCompressedContextStore, InMemoryAgentCompressedContextStore>
   TryAddSingleton<IAgentMemoryStore, InMemoryAgentMemoryStore>
   TryAddSingleton<IAgentMemoryContentSanitizer, DefaultAgentMemoryContentSanitizer>
@@ -242,6 +252,10 @@ AddAgentMemory()
 ```
 
 Do not register persistence providers, LLM adapters, or Control Plane tool adapters in this phase.
+
+`TimeProvider` may be used for `CreatedAt`, `UpdatedAt`, `PromotedAt`, `ArchivedAt`, and similar model timestamps. It must not be read during canonical hash computation. Any timestamp that affects a canonical hash must already be a stable model field and must be normalized before hashing.
+
+`IAgentMemoryStore` is a persistence-like store boundary. It must not own promotion policy, dedup policy, authority decisions, or memory lifecycle semantics beyond atomic state writes. `IAgentMemoryPromotionService` owns candidate-to-memory semantics. If `SupersedeAsync` and `ArchiveAsync` remain on the store, they are atomic state-write helpers only; the request must already carry actor, reason, timestamp, and source/explanation data validated by the service layer.
 
 ## 6. Contracts
 
@@ -261,13 +275,15 @@ AgentContextSourceRef
   CausationId?
   CanonicalContentHash?
 
-AgentEvidenceRef
+AgentContextEvidenceRef
   EvidenceId
   EvidenceKind
   TenantId
   SourceRefs
   CanonicalContentHash?
 ```
+
+`AgentContextEvidenceRef` means context-source evidence only. It is not ActivationEvidence, package evidence, HumanTask evidence, or approval evidence, and activation services must not accept it as activation proof.
 
 `AgentSourceKind` initial values:
 
@@ -283,6 +299,8 @@ AgentEvidenceRef
 - ActivationRequest
 
 Source expansion in this phase only expands sources owned by memory stores: conversation turns, task events, compressed blocks, candidates, and memory items. It must not query Control Plane private dictionaries, activation stores, HumanTask stores, or registries.
+
+Non-memory source kinds may be recorded as trace references in this phase, but `DefaultAgentContextSourceExpander` must return a structured `NotExpandable` / `ExternalSourceNotSupported` diagnostic for sources not owned by memory stores. They are trace references, not expansion targets.
 
 ### 6.2 Conversation and Task History
 
@@ -306,6 +324,8 @@ Required semantics:
 - Stable source refs.
 - Optional descriptor refs.
 - Optional workflow/human task/capability refs as refs only, not service dependencies.
+
+Task history has its own store boundary through `IAgentTaskHistoryStore`. `AgentTaskRecord` and `AgentTaskEvent` must not be model-only contracts with no storage path.
 
 ### 6.3 Sanitization
 
@@ -384,6 +404,9 @@ Models:
 - `AgentMemoryVerificationState`
 - `AgentMemoryPromotionRequest`
 - `AgentMemoryPromotionResult`
+- `AgentMemorySupersedeRequest`
+- `AgentMemoryArchiveRequest`
+- `AgentMemoryCandidateRejectionRequest`
 
 Extraction produces candidates only:
 
@@ -399,11 +422,16 @@ Default extractor must not auto-promote candidates.
 Promotion requirements:
 
 - Requires actor/invocation context.
+- Requires a reason.
+- Requires a timestamp, supplied through the request or assigned by the promotion service via `TimeProvider`.
+- Requires source refs or an explicit explanation.
 - Promotes sanitized content only.
 - Preserves source refs and redaction metadata.
 - Produces recallable memory, not validated fact.
 - Can reject stale, duplicate, invalid, or unsafe candidates.
 - Supports superseding an active memory item with an explicit relationship.
+
+Promotion, rejection, supersede, and archive are recall-universe-changing operations. All four require actor context, reason, timestamp, and source refs or explanation. They do not create validated facts, but they must be explainable.
 
 Initial `AgentMemoryKind` values:
 
@@ -427,6 +455,20 @@ Initial `AgentMemoryStatus` values:
 - Stale
 - Archived
 
+`AgentMemoryConfidence` should be a closed enum in this phase, not a floating-point score:
+
+```csharp
+public enum AgentMemoryConfidence
+{
+    Unknown = 0,
+    Low = 1,
+    Medium = 2,
+    High = 3
+}
+```
+
+Avoid pseudo-precise confidence values such as `0.873` until there is a real calibration model and acceptance criteria for it.
+
 ### 6.6 Recall and Pack Building
 
 Models:
@@ -440,6 +482,7 @@ Recall query supports:
 
 - Tenant id.
 - Caller/invocation context.
+- Already-resolved visible descriptor refs or visibility scope.
 - Intent text.
 - Focus descriptor refs.
 - Descriptor kinds.
@@ -462,6 +505,8 @@ IncludeArchived = false
 ```
 
 Initial retrieval uses deterministic keyword/tag/ref matching. Vector search and embeddings are out of scope.
+
+The memory runtime does not resolve descriptor visibility by itself in this phase. `AgentMemoryQuery` must carry an already-resolved visibility boundary, such as visible descriptor refs, visible descriptor kinds, or a caller-provided visibility scope. The retriever filters against that supplied boundary only. It must not call `AgentControlPlaneResourceResolver`, `IAgentControlPlaneToolService`, descriptor stores, draft stores, activation stores, or registries.
 
 Recommended scoring inputs:
 
@@ -516,6 +561,8 @@ public interface IAgentContextSourceExpander
 ```
 
 Expansion returns sanitized stored source content for stored source refs only.
+
+For non-memory source kinds such as `MetadataContextPack`, `ReviewReport`, `FixProposal`, `PackagePreview`, or `ActivationRequest`, the default expander returns `NotExpandable` / `ExternalSourceNotSupported` with no leaked counts, summaries, or existence details.
 
 Expansion is not validation. It only shows traceable origin.
 
@@ -642,9 +689,9 @@ Adding memory recall/compression directly to `IAgentControlPlaneToolService` wou
 
 ### Approach C: Contract Only
 
-Rejected for this phase.
+Deferred / insufficient as the #43 exit state.
 
-Only adding contracts would not prove the main chain that #32 needs. This phase should include in-memory stores and default deterministic runtime services so a no-LLM main-chain test can exercise the full context flow.
+Contract-only work may be used as implementation step 1, but it is not sufficient to close #43. It would not prove the runnable context chain that #32 needs. This phase should include in-memory stores and default deterministic runtime services so a no-LLM main-chain test can exercise the full context flow.
 
 ### Broad Agent Runtime Stack
 
@@ -659,6 +706,7 @@ Do not introduce AgentRuntime Domain/Application/DynamicApi modules, generated e
 - Memory projects do not reference `CrestCreates.Agent.ControlPlane` implementation.
 - Memory projects do not reference DynamicApi, OpenApi, Web, Platform, persistence providers, concrete EventBus providers, DescriptorDraft implementation, HumanTask implementation, or activation implementations.
 - `CrestCreates.Agent.Abstractions` or Memory-owned contracts provide neutral invocation identity.
+- `IAgentTaskHistoryStore` provides a storage path for `AgentTaskRecord` and `AgentTaskEvent`.
 - Public memory contracts are registered in a source-generated JSON context.
 - In-memory stores are tenant-isolated.
 - In-memory stores are snapshot-safe on read and write, including nested collections.
@@ -674,10 +722,14 @@ Do not introduce AgentRuntime Domain/Application/DynamicApi modules, generated e
 - Extraction creates candidates only.
 - Promotion requires actor context and does not create validated facts.
 - Recall is tenant-aware, budgeted, and deterministic.
+- Recall filters against caller-supplied visibility boundaries and does not resolve descriptor visibility internally.
 - Recall skips stale, superseded, and archived memory by default.
 - Recall output includes source refs and non-authoritative markings.
-- Source expansion only expands Memory-owned stored sources in this phase.
+- Source expansion only expands Memory-owned stored sources in this phase; external source kinds return non-expanding diagnostics.
 - `AgentAuthoringContextBuilder` composes `MetadataContextPack + AgentMemoryPack + AgentAuthoringRequest` without mutating inputs.
+- `AgentAuthoringContextBuilder` preserves authoritative MetadataContextPack content when recalled memory conflicts with it.
+- Promote, reject, supersede, and archive requests require actor, reason, timestamp, and source refs or explanation.
+- `AgentMemoryConfidence` is a closed enum, not a pseudo-precise floating-point score.
 - Existing activation, review, governance, authorization, and runtime gate boundaries remain untouched.
 - Boundary tests, Metadata ContextPack tests, Agent ControlPlane tests, and new Agent Memory tests pass.
 
@@ -690,6 +742,8 @@ Minimum tests:
 - `ConversationStore_PreservesTenantIsolation`
 - `ConversationStore_ReturnsSnapshotCopies`
 - `ConversationStore_DefensivelyCopiesNestedCollections`
+- `TaskHistoryStore_PreservesTenantIsolation`
+- `TaskHistoryStore_ReturnsSnapshotCopies`
 - `Sanitizer_RedactsSecretLikeContent_BeforeStorage`
 - `Sanitizer_RejectedContent_IsNotCompressed`
 - `Compression_IsDeterministic_ForSameSanitizedInput`
@@ -697,7 +751,11 @@ Minimum tests:
 - `Compression_TruncationProducesDiagnostic`
 - `Extractor_CreatesCandidates_WithoutAutoPromoting`
 - `Promotion_RequiresActorContext`
+- `Promotion_RequiresReasonAndSourceExplanation`
 - `Promotion_PreservesSourceRefsAndRedactionMetadata`
+- `RejectCandidate_RequiresActorAndReason`
+- `Supersede_RequiresActorAndReason`
+- `Archive_RequiresActorAndReason`
 - `MemoryStore_UpsertUsesDeterministicOrdering`
 - `MemoryStore_SupersedeHidesOriginalByDefault`
 - `Recall_FiltersByTenant`
@@ -708,9 +766,12 @@ Minimum tests:
 - `Recall_ExcludesStaleByDefault`
 - `Recall_ExcludesSupersededByDefault`
 - `Recall_DiagnosticsDoNotLeakDeniedDescriptorExistence`
+- `Recall_UsesSuppliedVisibilityBoundary_WithoutResolvingDescriptors`
 - `SourceExpansion_ReturnsSanitizedStoredContent`
+- `SourceExpansion_ExternalSource_ReturnsNotExpandable`
 - `SourceExpansion_DoesNotQueryControlPlaneStores`
 - `AuthoringContextBuilder_ComposesMetadataAndMemoryPacks_WithoutMutation`
+- `AuthoringContextBuilder_MarksMemoryAsNonAuthoritative_WhenMetadataContextConflicts`
 - `AgentMemory_MainChain_BuildsSourceTraceableAuthoringContext`
 
 The main-chain test must run without a real LLM:
@@ -733,7 +794,7 @@ The implementation plan should split the work into small phases:
 1. Project scaffolding and dependency boundary tests.
 2. Neutral invocation context and memory contract DTOs.
 3. Source-generated JSON context.
-4. In-memory stores with snapshot semantics.
+4. In-memory conversation, task history, compressed context, and memory stores with snapshot semantics.
 5. Sanitizer and sanitization metadata.
 6. Deterministic compressor.
 7. Candidate extractor and promotion service.
