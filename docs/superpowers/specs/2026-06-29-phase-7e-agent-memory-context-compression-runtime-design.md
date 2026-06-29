@@ -257,6 +257,8 @@ Do not register persistence providers, LLM adapters, or Control Plane tool adapt
 
 `IAgentMemoryStore` is a persistence-like store boundary. It must not own promotion policy, dedup policy, authority decisions, or memory lifecycle semantics beyond atomic state writes. `IAgentMemoryPromotionService` owns candidate-to-memory semantics. If `SupersedeAsync` and `ArchiveAsync` remain on the store, they are atomic state-write helpers only; the request must already carry actor, reason, timestamp, and source/explanation data validated by the service layer.
 
+`SaveMemoryAsync` is a persistence primitive, not the production promotion path. Runtime services and main-chain flows must use `IAgentMemoryPromotionService` to turn a candidate into active memory. Unit tests may use `SaveMemoryAsync` to seed store state, but production code must not bypass promotion semantics for candidate promotion.
+
 ## 6. Contracts
 
 ### 6.1 Source and Evidence
@@ -508,6 +510,20 @@ Initial retrieval uses deterministic keyword/tag/ref matching. Vector search and
 
 The memory runtime does not resolve descriptor visibility by itself in this phase. `AgentMemoryQuery` must carry an already-resolved visibility boundary, such as visible descriptor refs, visible descriptor kinds, or a caller-provided visibility scope. The retriever filters against that supplied boundary only. It must not call `AgentControlPlaneResourceResolver`, `IAgentControlPlaneToolService`, descriptor stores, draft stores, activation stores, or registries.
 
+`AgentMemoryQuery` is intentionally shared by `IAgentMemoryStore.ListMemoriesAsync` and `IAgentMemoryRetriever.RecallAsync` in the first phase to keep contract count small. Implementers must keep the two semantics distinct:
+
+- Store filtering fields: tenant, status, kinds, tags, descriptor refs, candidate or memory ids, and visibility-safe filters.
+- Recall fields: intent text, scoring inputs, max counts, character budget, confidence threshold, and source inclusion.
+
+If this DTO becomes ambiguous or bloated during implementation, split it before expanding behavior:
+
+```text
+AgentMemoryStoreQuery
+AgentMemoryRecallQuery
+```
+
+Store code must not interpret recall scoring or budget fields as persistence rules.
+
 Recommended scoring inputs:
 
 - tenant match
@@ -723,11 +739,13 @@ Do not introduce AgentRuntime Domain/Application/DynamicApi modules, generated e
 - Promotion requires actor context and does not create validated facts.
 - Recall is tenant-aware, budgeted, and deterministic.
 - Recall filters against caller-supplied visibility boundaries and does not resolve descriptor visibility internally.
+- Store filtering and recall scoring semantics remain distinct even if `AgentMemoryQuery` is shared in the first phase.
 - Recall skips stale, superseded, and archived memory by default.
 - Recall output includes source refs and non-authoritative markings.
 - Source expansion only expands Memory-owned stored sources in this phase; external source kinds return non-expanding diagnostics.
 - `AgentAuthoringContextBuilder` composes `MetadataContextPack + AgentMemoryPack + AgentAuthoringRequest` without mutating inputs.
 - `AgentAuthoringContextBuilder` preserves authoritative MetadataContextPack content when recalled memory conflicts with it.
+- Runtime promotion flows use `IAgentMemoryPromotionService`; `SaveMemoryAsync` remains a persistence primitive and is not the production candidate-promotion path.
 - Promote, reject, supersede, and archive requests require actor, reason, timestamp, and source refs or explanation.
 - `AgentMemoryConfidence` is a closed enum, not a pseudo-precise floating-point score.
 - Existing activation, review, governance, authorization, and runtime gate boundaries remain untouched.
@@ -753,9 +771,11 @@ Minimum tests:
 - `Promotion_RequiresActorContext`
 - `Promotion_RequiresReasonAndSourceExplanation`
 - `Promotion_PreservesSourceRefsAndRedactionMetadata`
+- `PromotionService_IsProductionPath_ForCandidatePromotion`
 - `RejectCandidate_RequiresActorAndReason`
 - `Supersede_RequiresActorAndReason`
 - `Archive_RequiresActorAndReason`
+- `MemoryStore_SaveMemoryAsync_IsPersistencePrimitiveOnly`
 - `MemoryStore_UpsertUsesDeterministicOrdering`
 - `MemoryStore_SupersedeHidesOriginalByDefault`
 - `Recall_FiltersByTenant`
@@ -767,6 +787,7 @@ Minimum tests:
 - `Recall_ExcludesSupersededByDefault`
 - `Recall_DiagnosticsDoNotLeakDeniedDescriptorExistence`
 - `Recall_UsesSuppliedVisibilityBoundary_WithoutResolvingDescriptors`
+- `Recall_DoesNotApplyBudgetInsideStoreFiltering`
 - `SourceExpansion_ReturnsSanitizedStoredContent`
 - `SourceExpansion_ExternalSource_ReturnsNotExpandable`
 - `SourceExpansion_DoesNotQueryControlPlaneStores`
