@@ -1,7 +1,7 @@
 # Phase 7f - AI-assisted Descriptor Authoring Golden Scenario
 
 > Date: 2026-06-30  
-> Status: Draft  
+> Status: APPROVED / READY FOR IMPLEMENTATION  
 > Issue: #32  
 > Depends on: #43 first closure, Phase 7a-7e descriptor governance foundation
 
@@ -260,6 +260,10 @@ Rules:
 - Each subsequent draft is reviewed against the previous proposed inventory.
 - The final proposed inventory is the only inventory eligible for package
   evidence and runtime proof.
+- Each draft may produce its own `DescriptorDraftReviewResult`, but the golden
+  scenario must derive one final scenario-level decision from the complete
+  final proposed inventory. Only this final decision can feed package/evidence
+  binding and activation request creation.
 - Any validation, materialization, review, governance, compatibility, topology,
   or package evidence blocker on any draft blocks the entire draft set.
 - A failing draft path must still produce a review report and fix proposal path
@@ -288,6 +292,13 @@ finalProposedInventory
 If a sample-local aggregate/envelope subject is needed, it must remain local to
 the golden scenario unless a later design promotes batch activation into a core
 contract.
+
+In the first implementation, prefer using the workflow update draft as the
+activation subject if the existing single-`DraftId` contract is preserved. The
+activation binding must still cover the complete final proposed inventory,
+including both the finance HumanTask creation and the workflow update. A
+sample-local aggregate/envelope subject may be used only if it avoids changing
+core activation contracts.
 
 The binding snapshot must bind the final reviewed state, including review,
 package, evidence, contract, and definition hashes. Memory evidence must not be
@@ -358,10 +369,13 @@ InitialReviewHumanTaskInstanceId
 FinanceReviewHumanTaskInstanceId
 CompletedHumanTaskCount
 ApprovedEventCaptured
+ActivatedInventoryHash
+ActivatedPackageEvidenceHash
 ```
 
 `CompletedHumanTaskCount == 2` alone is not sufficient. The report must also
-show the descriptor ids and workflow step sequence.
+show the descriptor ids, workflow step sequence, and approved inventory/evidence
+identity.
 
 ## 12. Error and Block Semantics
 
@@ -448,11 +462,13 @@ Minimum tests:
 - `DraftSet_Review_Is_AllOrBlock_When_HumanTaskDraft_Invalid`
 - `DraftSet_Review_Is_AllOrBlock_When_WorkflowDraft_Invalid`
 - `DraftSet_SequentialMaterialization_Produces_FinalProposedInventory`
+- `DraftSet_FinalDecision_Rechecks_CompleteInventory`
 - `DraftSet_FinalTopology_Includes_Workflow_To_FinanceHumanTask`
 - `InvalidDraft_Builds_ReviewReport_And_FixProposal`
 - `ActivationRequest_Binds_FinalReview_And_PackageEvidenceHashes`
 - `ReviewRequired_Creates_HumanTaskApproval`
 - `Approval_Executes_Through_ActivationRequestService_And_RuntimeActivationGate`
+- `ActivationGateSuccess_Alone_DoesNot_Count_As_RuntimeProof`
 - `RuntimeProof_Builds_FreshHost_From_ApprovedFinalInventory`
 - `RuntimeProof_DoesNotUse_StaticBaselineWorkflow`
 - `RuntimeProof_Completes_InitialReview_Then_FinanceReview`
@@ -478,4 +494,3 @@ Possible later phases may add:
 - richer remediation loops.
 
 None of these are required for Phase 7f.
-
