@@ -124,7 +124,7 @@ Migrate these metadata/draft/package models:
 - `DescriptorAuthoringResult`
 - `DescriptorPackageEvidence`
 - `DescriptorPackage`
-- package evidence/finding structures that own collections
+- package-owned evidence structures that own collections
 
 `DescriptorDraftPayload` should expose `Snapshot()` at the abstract base level. Concrete payloads should snapshot their descriptor object and nested collections using the same defensive-copy rules currently implemented by `CreateClone()`.
 
@@ -133,6 +133,8 @@ Migrate these metadata/draft/package models:
 `DescriptorDraftSet` and `DescriptorAuthoringResult` should snapshot nested drafts and diagnostics.
 
 Package evidence and package models should snapshot nested collections. This is not a package-build behavior change.
+
+`EvidenceFinding` and `EvidenceFindingCount` are generic evidence models, not package diagnostic models. They must continue to use `SeverityLevel`. They may implement `ISnapshotable<T>` only if required as nested boundary values under package evidence; that does not make them part of the `DescriptorPackageDiagnosticSeverity` migration.
 
 ## 8. Runtime and Organization Snapshot Migration
 
@@ -172,16 +174,17 @@ Migrate leaf models first:
 - `AgentContextSourceRef`
 - `AgentContextEvidenceRef`
 - `AgentMemoryDiagnostic`
+- `AgentMemoryInvocationContext`
 - `SanitizedAgentContent`
-- source range, metadata, and evidence reference models if present
 
 These models are copied by many aggregate contracts. They should be migrated first so later snapshots do not duplicate leaf-copy logic.
+
+`AgentContextSourceRef` currently owns source range fields directly through `RangeStart` and `RangeEnd`; no standalone source-range model is required unless one already exists at implementation time.
 
 ### 9.2 Memory Aggregate and Store Boundary Models
 
 Migrate aggregate and store boundary models after leaf models:
 
-- `AgentMemoryInvocationContext`
 - `AgentConversationTurn`
 - `AgentConversationRecord`
 - `AgentTaskEvent`
@@ -198,11 +201,10 @@ These are the primary objects saved to or returned from in-memory stores. Store 
 Migrate query/result/composition models last:
 
 - `AgentMemoryPack`
-- `AgentMemoryPackEntry` if present
 - `AgentMemoryOperationRequest`
 - `AgentAuthoringRequest`
 - `AgentAuthoringContext`
-- `AgentSourceExpansionResult` and entry models if present
+- `AgentSourceExpansionResult`
 
 `AgentMemoryQuery` and other request models should not automatically implement `ISnapshotable<T>`. Migrate a request/query model only when at least one of these is true:
 
@@ -248,7 +250,7 @@ Add or update focused snapshot tests for:
 
 - `DescriptorDraft` and each draft payload type.
 - `DescriptorDraftSet` and `DescriptorAuthoringResult`.
-- `DescriptorPackageEvidence` and package diagnostics where collections exist.
+- `DescriptorPackageEvidence`, including nested generic evidence value models when they are snapshotted as part of package evidence.
 - `WorkflowInstance`.
 - `HumanTaskInstance`.
 - Organization models.
