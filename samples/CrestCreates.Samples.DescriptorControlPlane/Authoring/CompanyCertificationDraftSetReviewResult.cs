@@ -1,5 +1,7 @@
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
+using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 
@@ -15,4 +17,6 @@ public sealed record CompanyCertificationDraftSetReviewResult
     public string? BlockReason { get; init; }
     public DescriptorTopologySnapshot? FinalTopology { get; init; }
     public DescriptorLifecycleGovernanceReport? FinalGovernance { get; init; }
+    public DescriptorImpactAnalysisReport? FinalImpact { get; init; }
+    public DescriptorCompatibilityReport? FinalCompat { get; init; }
 }

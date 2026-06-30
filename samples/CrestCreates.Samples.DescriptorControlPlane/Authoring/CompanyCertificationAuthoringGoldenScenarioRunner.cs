@@ -141,6 +141,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
                 IsBlocked = true,
                 FinalDecisionSource = "AllOrBlock",
                 BlockReason = $"Final topology build failed: {ex.Message}",
+                FinalImpact = null,
+                FinalCompat = null,
             };
         }
 
@@ -159,8 +161,19 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
                 FinalDecisionSource = "AllOrBlock",
                 BlockReason = $"Final topology has blocking findings: {string.Join("; ", blockingDiags)}",
                 FinalTopology = finalTopology,
+                FinalImpact = null,
+                FinalCompat = null,
             };
         }
+
+        // ── Compute final impact/compat from complete inventory diff ──
+        var changeSetBuilder = _serviceProvider.GetRequiredService<IDescriptorChangeSetBuilder>();
+        var impactAnalyzer = _serviceProvider.GetRequiredService<IDescriptorImpactAnalyzer>();
+        var compatAnalyzer = _serviceProvider.GetRequiredService<IDescriptorCompatibilityAnalyzer>();
+
+        var finalChangeSet = changeSetBuilder.Build(startingInventory, finalInventory);
+        var finalImpact = impactAnalyzer.Analyze(finalTopology!, finalChangeSet);
+        var finalCompat = compatAnalyzer.Analyze(startingInventory, finalInventory, finalChangeSet, finalImpact);
 
         DescriptorLifecycleGovernanceReport? finalGovernance = null;
         try
@@ -175,31 +188,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
                     {
                         All = Array.Empty<DescriptorTopologyDiagnostic>()
                     },
-                ImpactReport = perDraftResults.LastOrDefault()?.ImpactAnalysisResult
-                    ?? new DescriptorImpactAnalysisReport
-                    {
-                        ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
-                        AffectedDescriptors = Array.Empty<AffectedDescriptor>(),
-                        Paths = Array.Empty<DescriptorImpactPath>(),
-                        MaxSeverity = DescriptorImpactSeverity.None,
-                        Diagnostics = Array.Empty<DescriptorImpactDiagnostic>()
-                    },
-                CompatibilityReport = perDraftResults.LastOrDefault()?.CompatibilityResult
-                    ?? new DescriptorCompatibilityReport
-                    {
-                        ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
-                        ImpactReport = new DescriptorImpactAnalysisReport
-                        {
-                            ChangeSet = new DescriptorChangeSet { Changes = Array.Empty<DescriptorChange>() },
-                            AffectedDescriptors = Array.Empty<AffectedDescriptor>(),
-                            Paths = Array.Empty<DescriptorImpactPath>(),
-                            MaxSeverity = DescriptorImpactSeverity.None,
-                            Diagnostics = Array.Empty<DescriptorImpactDiagnostic>()
-                        },
-                        Findings = Array.Empty<DescriptorCompatibilityFinding>(),
-                        MaxLevel = DescriptorCompatibilityLevel.Compatible,
-                        Diagnostics = Array.Empty<DescriptorCompatibilityDiagnostic>()
-                    },
+                ImpactReport = finalImpact,
+                CompatibilityReport = finalCompat,
             };
             finalGovernance = governanceService.Evaluate(governanceRequest);
         }
@@ -214,6 +204,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
                 FinalDecisionSource = "AllOrBlock",
                 BlockReason = $"Final governance evaluation failed: {ex.Message}",
                 FinalTopology = finalTopology,
+                FinalImpact = finalImpact,
+                FinalCompat = finalCompat,
             };
         }
 
@@ -230,6 +222,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
                 BlockReason = "Final governance decision is Blocked",
                 FinalTopology = finalTopology,
                 FinalGovernance = finalGovernance,
+                FinalImpact = finalImpact,
+                FinalCompat = finalCompat,
             };
         }
 
@@ -242,6 +236,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
             FinalDecisionSource = "FinalProposedInventory",
             FinalTopology = finalTopology,
             FinalGovernance = finalGovernance,
+            FinalImpact = finalImpact,
+            FinalCompat = finalCompat,
         };
     }
 
@@ -336,8 +332,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
             CreatedAt = GoldenScenarioCreatedAt,
             Descriptors = reviewReport.FinalProposedInventory,
             TopologySnapshot = reviewReport.FinalTopology,
-            ImpactReport = workflowReviewResult.ImpactAnalysisResult,
-            CompatibilityReport = workflowReviewResult.CompatibilityResult,
+            ImpactReport = reviewReport.FinalImpact!,
+            CompatibilityReport = reviewReport.FinalCompat!,
             GovernanceReport = reviewReport.FinalGovernance,
         };
         var descriptorPackage = packageBuilder.Build(buildRequest);
@@ -637,8 +633,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
             CreatedAt = GoldenScenarioCreatedAt,
             Descriptors = reviewReport.FinalProposedInventory,
             TopologySnapshot = reviewReport.FinalTopology,
-            ImpactReport = workflowReviewResult.ImpactAnalysisResult,
-            CompatibilityReport = workflowReviewResult.CompatibilityResult,
+            ImpactReport = reviewReport.FinalImpact!,
+            CompatibilityReport = reviewReport.FinalCompat!,
             GovernanceReport = reviewReport.FinalGovernance,
         };
         var descriptorPackage = packageBuilder.Build(buildRequest);
