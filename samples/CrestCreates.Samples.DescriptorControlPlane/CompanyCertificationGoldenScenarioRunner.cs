@@ -94,6 +94,7 @@ public sealed class CompanyCertificationGoldenScenarioRunner
             // Multi-step HumanTask completion loop
             var observedHumanTaskDescriptorIds = new List<string>();
             var completedCount = 0;
+            var completedHumanTaskInstanceIds = new HashSet<string>();
             string? initialReviewHtId = null;
             string? financeReviewHtId = null;
 
@@ -137,7 +138,8 @@ public sealed class CompanyCertificationGoldenScenarioRunner
 
                 // Suspended on a HumanTask?
                 if (wf.Status == WorkflowInstanceStatus.Suspended
-                    && wf.WaitingHumanTaskId is not null)
+                    && wf.WaitingHumanTaskId is not null
+                    && !completedHumanTaskInstanceIds.Contains(wf.WaitingHumanTaskId))
                 {
                     var htInstance = await htStore.GetByIdAsync(wf.WaitingHumanTaskId);
                     var humanTaskId = htInstance?.HumanTaskId;
@@ -162,6 +164,7 @@ public sealed class CompanyCertificationGoldenScenarioRunner
                             Decision: "Approve"),
                     });
                     completedCount++;
+                    completedHumanTaskInstanceIds.Add(wf.WaitingHumanTaskId);
                 }
 
                 await Task.Delay(100);

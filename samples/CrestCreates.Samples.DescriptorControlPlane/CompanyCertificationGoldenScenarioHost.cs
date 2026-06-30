@@ -14,6 +14,7 @@ using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.ContextPack;
 using CrestCreates.Samples.DescriptorControlPlane.Authoring;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
@@ -123,6 +124,7 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
     {
         services.AddRelationshipKernel();
         services.AddTopologyKernel();
+        services.AddMetadataContextPack();
         services.AddDescriptorImpactAnalysis();
         services.AddDescriptorCompatibilityAnalysis();
         services.AddDescriptorLifecycleGovernance();

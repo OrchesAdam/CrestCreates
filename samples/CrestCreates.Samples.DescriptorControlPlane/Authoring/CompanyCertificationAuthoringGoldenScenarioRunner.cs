@@ -29,6 +29,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
 {
     private readonly IServiceProvider _serviceProvider;
 
+    private static readonly DateTimeOffset GoldenScenarioCreatedAt = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
     public CompanyCertificationAuthoringGoldenScenarioRunner(IServiceProvider serviceProvider)
     {
         _serviceProvider = serviceProvider;
@@ -64,7 +66,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
         var tenantId = "tenant-company-certification";
 
         // ── Step 1: Build AgentAuthoringContext ──
-        var context = BuildAuthoringContext(tenantId, intentText);
+        var context = await BuildAuthoringContext(tenantId, intentText, startingInventory, ct);
 
         // ── Step 2: Author drafts ──
         var authoringResult = await authoringAgent.AuthorAsync(context, ct);
@@ -243,51 +245,50 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
         };
     }
 
-    private static AgentAuthoringContext BuildAuthoringContext(string tenantId, string intentText)
+    private async Task<AgentAuthoringContext> BuildAuthoringContext(
+        string tenantId,
+        string intentText,
+        IReadOnlyList<IDescriptor> startingInventory,
+        CancellationToken ct)
     {
-        return new AgentAuthoringContext
+        var contextPackBuilder = _serviceProvider.GetRequiredService<IMetadataContextPackBuilder>();
+        var topologyBuilder = _serviceProvider.GetRequiredService<IDescriptorTopologyBuilder>();
+
+        var topology = topologyBuilder.Build(startingInventory);
+
+        var metadataRequest = new MetadataContextPackRequest
         {
-            Request = new AgentAuthoringRequest
+            Scope = MetadataContextPackScope.DirectDependencies,
+            TenantId = tenantId,
+            Intent = intentText,
+            FocusDescriptors = new[]
             {
-                TenantId = tenantId,
-                IntentText = intentText,
-            },
-            MetadataContextPack = new MetadataContextPack
-            {
-                Request = new MetadataContextPackRequest
-                {
-                    Scope = MetadataContextPackScope.RuntimeScenario,
-                    TenantId = tenantId,
-                    Intent = intentText,
-                    FocusDescriptors = new[]
-                    {
-                        new DescriptorRef("workflow", "wf_company_certification", 1)
-                    }
-                },
-                Descriptors = Array.Empty<MetadataContextPackDescriptorEntry>(),
-                Relationships = Array.Empty<MetadataContextPackRelationshipEntry>(),
-                Summary = new MetadataContextPackSummary
-                {
-                    TotalDescriptorCount = 0,
-                    DescriptorCountsByKind = new Dictionary<DescriptorKind, int>(),
-                    TotalRelationshipCount = 0,
-                    RelationshipCountsByKind = new Dictionary<RelationshipKind, int>(),
-                    FocusRefs = new[]
-                    {
-                        new DescriptorRef("workflow", "wf_company_certification", 1)
-                    },
-                    WasTruncated = false,
-                    TruncatedAtCount = null,
-                    TraversalDepthReached = 0
-                },
-                Diagnostics = Array.Empty<MetadataContextPackDiagnostic>()
-            },
-            MemoryPack = new AgentMemoryPack
-            {
-                TenantId = tenantId,
-                IsAuthoritative = false,
+                new DescriptorRef("workflow", "wf_company_certification", 1)
             }
         };
+
+        var metadataContextPack = contextPackBuilder.Build(metadataRequest, topology, startingInventory);
+
+        var memoryRetriever = _serviceProvider.GetRequiredService<IAgentMemoryRetriever>();
+        var memoryQuery = new AgentMemoryQuery
+        {
+            TenantId = tenantId,
+            IntentText = intentText,
+            DescriptorRefs = new[]
+            {
+                new DescriptorRef("workflow", "wf_company_certification", 1)
+            }
+        };
+        var memoryPack = await memoryRetriever.RecallAsync(memoryQuery, ct);
+
+        var authoringContextBuilder = _serviceProvider.GetRequiredService<IAgentAuthoringContextBuilder>();
+        var authoringRequest = new AgentAuthoringRequest
+        {
+            TenantId = tenantId,
+            IntentText = intentText,
+        };
+
+        return await authoringContextBuilder.BuildAsync(authoringRequest, metadataContextPack, memoryPack, ct);
     }
 
     /// <summary>
@@ -332,7 +333,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
             PackageVersion = "1.0.0",
             CreatedBy = "phase7f-golden-scenario-runner",
             Source = "golden-scenario",
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = GoldenScenarioCreatedAt,
             Descriptors = reviewReport.FinalProposedInventory,
             TopologySnapshot = reviewReport.FinalTopology,
             ImpactReport = workflowReviewResult.ImpactAnalysisResult,
@@ -392,7 +393,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
             EvidencePreviewId = evidencePreviewId,
             Hashes = bindingHashes,
             CorrelationId = "phase7f-golden-scenario",
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = GoldenScenarioCreatedAt,
         };
 
         // ── Store hashes in artifact resolver ──
@@ -500,7 +501,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
                 ActorKind = DescriptorActivationActorKind.Human,
                 ActorId = "phase7f-human-approver",
                 Reason = "Phase7f golden scenario approval",
-                DecidedAt = DateTimeOffset.UtcNow,
+                DecidedAt = GoldenScenarioCreatedAt,
                 BoundEvidenceHash = packageEvidenceHash,
                 BoundEnvelopeHash = packageEvidenceEnvelopeHash,
             };
@@ -633,7 +634,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
             PackageVersion = "1.0.0",
             CreatedBy = "phase7f-golden-scenario-runner",
             Source = "golden-scenario",
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = GoldenScenarioCreatedAt,
             Descriptors = reviewReport.FinalProposedInventory,
             TopologySnapshot = reviewReport.FinalTopology,
             ImpactReport = workflowReviewResult.ImpactAnalysisResult,
@@ -692,7 +693,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
             EvidencePreviewId = evidencePreviewId,
             Hashes = bindingHashes,
             CorrelationId = "phase7f-golden-scenario",
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = GoldenScenarioCreatedAt,
         };
 
         // ── Store hashes in artifact resolver ──
@@ -800,7 +801,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
                 ActorKind = DescriptorActivationActorKind.Human,
                 ActorId = "phase7f-human-approver",
                 Reason = "Phase7f golden scenario approval",
-                DecidedAt = DateTimeOffset.UtcNow,
+                DecidedAt = GoldenScenarioCreatedAt,
                 BoundEvidenceHash = packageEvidenceHash,
                 BoundEnvelopeHash = packageEvidenceEnvelopeHash,
             };
