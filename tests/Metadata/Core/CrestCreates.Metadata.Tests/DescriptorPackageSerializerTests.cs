@@ -82,6 +82,7 @@ public class DescriptorPackageSerializerTests
         });
 
         var json = _serializer.Serialize(pkg);
+        json.Should().Contain("\"severity\":\"Error\"");
         var deserialized = _serializer.Deserialize(json);
 
         deserialized!.Diagnostics.Should().Contain(d =>

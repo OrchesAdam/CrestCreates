@@ -716,6 +716,56 @@ public class DescriptorPackageBuilderTests
     }
 
     [Fact]
+    public void DescriptorManifestAndSnapshot_Snapshot_DeepCopiesNestedEntries()
+    {
+        var manifestEntry = new DescriptorManifestEntry
+        {
+            Ref = new DescriptorRef("schema", "s1", 1),
+            Kind = DescriptorKind.Schema,
+            Name = "S1",
+            State = DescriptorState.Active,
+            ContractHash = "contract",
+            DefinitionHash = "definition"
+        };
+        var snapshotEntry = new SnapshotEntry
+        {
+            Ref = new DescriptorRef("schema", "s1", 1),
+            DescriptorName = "S1",
+            Kind = DescriptorKind.Schema,
+            State = DescriptorState.Active,
+            ContractHash = "contract",
+            DefinitionHash = "definition"
+        };
+        var relationship = new DescriptorPackageRelationshipEntry
+        {
+            From = new DescriptorRef("schema", "s1", 1),
+            To = new DescriptorRef("schema", "s2", 1),
+            Kind = RelationshipKind.DependsOn,
+            Strength = RelationshipStrength.Weak,
+            IsRuntimeBinding = false
+        };
+
+        var manifest = new DescriptorManifest
+        {
+            DescriptorEntries = [manifestEntry]
+        };
+        var snapshot = new DescriptorSnapshot
+        {
+            Descriptors = [snapshotEntry],
+            Relationships = [relationship]
+        };
+
+        var manifestSnapshot = manifest.Snapshot();
+        var snapshotCopy = snapshot.Snapshot();
+
+        manifestSnapshot.DescriptorEntries.Should().NotBeSameAs(manifest.DescriptorEntries);
+        manifestSnapshot.DescriptorEntries[0].Should().NotBeSameAs(manifest.DescriptorEntries[0]);
+        snapshotCopy.Descriptors.Should().NotBeSameAs(snapshot.Descriptors);
+        snapshotCopy.Descriptors[0].Should().NotBeSameAs(snapshot.Descriptors[0]);
+        snapshotCopy.Relationships.Should().NotBeSameAs(snapshot.Relationships);
+    }
+
+    [Fact]
     public void PackageDiagnostics_UsePackageSeverityEnum()
     {
         var diagnostic = new DescriptorPackageDiagnostic

@@ -19,7 +19,8 @@ public sealed class DescriptorSnapshot : ISnapshotable<DescriptorSnapshot>
         PackageId = PackageId,
         PackageVersion = PackageVersion,
         CreatedAt = CreatedAt,
-        Descriptors = Descriptors.ToArray(),
+        Descriptors = Descriptors.Select(e => e.Snapshot()).ToArray(),
+        // Relationship entries are value-style immutable records and are intentionally reused by reference.
         Relationships = Relationships.ToArray()
     };
 }

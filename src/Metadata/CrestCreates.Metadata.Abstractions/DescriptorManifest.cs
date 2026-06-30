@@ -25,7 +25,7 @@ public sealed class DescriptorManifest : ISnapshotable<DescriptorManifest>
         CreatedBy = CreatedBy,
         Source = Source,
         DescriptorCount = DescriptorCount,
-        DescriptorEntries = DescriptorEntries.ToArray()
+        DescriptorEntries = DescriptorEntries.Select(e => e.Snapshot()).ToArray()
     };
 }
 
