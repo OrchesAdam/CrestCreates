@@ -15,5 +15,6 @@
     <ProjectReference Include="../../../Runtime/Eventing/CrestCreates.Event.Abstractions/CrestCreates.Event.Abstractions.csproj" />
     <ProjectReference Include="../../../Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
     <ProjectReference Include="../../../Runtime/Workflow/CrestCreates.Workflow.Abstractions/CrestCreates.Workflow.Abstractions.csproj" />
+    <ProjectReference Include="..\..\CrestCreates.Snapshot.Abstractions\CrestCreates.Snapshot.Abstractions.csproj" />
   </ItemGroup>
 </Project>

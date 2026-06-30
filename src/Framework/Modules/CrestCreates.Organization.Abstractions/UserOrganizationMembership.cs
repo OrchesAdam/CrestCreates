@@ -1,6 +1,8 @@
+using CrestCreates.Snapshot.Abstractions;
+
 namespace CrestCreates.Organization.Abstractions;
 
-public sealed class UserOrganizationMembership
+public sealed class UserOrganizationMembership : ISnapshotable<UserOrganizationMembership>
 {
     public string Id { get; init; } = default!;
     public string? TenantId { get; init; }
@@ -11,7 +13,7 @@ public sealed class UserOrganizationMembership
     public bool IsActive { get; init; } = true;
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 
-    public UserOrganizationMembership Clone() => new()
+    public UserOrganizationMembership Snapshot() => new()
     {
         Id = Id,
         TenantId = TenantId,

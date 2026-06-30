@@ -39,7 +39,7 @@ public sealed class DefaultOrganizationHierarchyService : IOrganizationHierarchy
             if (!unitMap.TryGetValue(parentKey, out var parent))
                 break;
 
-            result.Add(parent.Clone());
+            result.Add(parent.Snapshot());
             currentId = parentId;
         }
 
@@ -78,7 +78,7 @@ public sealed class DefaultOrganizationHierarchyService : IOrganizationHierarchy
             if (!unitMap.TryGetValue(currentKey, out var current))
                 continue;
 
-            result.Add(current.Clone());
+            result.Add(current.Snapshot());
 
             if (childrenMap.TryGetValue(currentKey, out var children))
             {

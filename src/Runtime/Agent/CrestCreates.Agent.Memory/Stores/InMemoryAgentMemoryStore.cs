@@ -10,14 +10,7 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore
 
     public ValueTask SaveCandidateAsync(AgentMemoryCandidate candidate, CancellationToken cancellationToken = default)
     {
-        _candidates[(candidate.TenantId, candidate.CandidateId)] = candidate with
-        {
-            Tags = candidate.Tags.ToArray(),
-            DescriptorRefs = candidate.DescriptorRefs.ToArray(),
-            SourceRefs = candidate.SourceRefs.ToArray(),
-            RedactionKinds = candidate.RedactionKinds.ToArray(),
-            SanitizationDiagnostics = candidate.SanitizationDiagnostics.ToArray()
-        };
+        _candidates[(candidate.TenantId, candidate.CandidateId)] = candidate.Snapshot();
         return ValueTask.CompletedTask;
     }
 
@@ -26,27 +19,13 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore
         _candidates.TryGetValue((tenantId, candidateId), out var candidate);
         if (candidate is null) return new ValueTask<AgentMemoryCandidate?>((AgentMemoryCandidate?)null);
 
-        var snapshot = candidate with
-        {
-            Tags = candidate.Tags.ToArray(),
-            DescriptorRefs = candidate.DescriptorRefs.ToArray(),
-            SourceRefs = candidate.SourceRefs.ToArray(),
-            RedactionKinds = candidate.RedactionKinds.ToArray(),
-            SanitizationDiagnostics = candidate.SanitizationDiagnostics.ToArray()
-        };
+        var snapshot = candidate.Snapshot();
         return new ValueTask<AgentMemoryCandidate?>(snapshot);
     }
 
     public ValueTask SaveMemoryAsync(AgentMemoryItem memory, CancellationToken cancellationToken = default)
     {
-        _memories[(memory.TenantId, memory.MemoryId)] = memory with
-        {
-            Tags = memory.Tags.ToArray(),
-            DescriptorRefs = memory.DescriptorRefs.ToArray(),
-            SourceRefs = memory.SourceRefs.ToArray(),
-            RedactionKinds = memory.RedactionKinds.ToArray(),
-            SanitizationDiagnostics = memory.SanitizationDiagnostics.ToArray()
-        };
+        _memories[(memory.TenantId, memory.MemoryId)] = memory.Snapshot();
         return ValueTask.CompletedTask;
     }
 
@@ -55,14 +34,7 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore
         _memories.TryGetValue((tenantId, memoryId), out var memory);
         if (memory is null) return new ValueTask<AgentMemoryItem?>((AgentMemoryItem?)null);
 
-        var snapshot = memory with
-        {
-            Tags = memory.Tags.ToArray(),
-            DescriptorRefs = memory.DescriptorRefs.ToArray(),
-            SourceRefs = memory.SourceRefs.ToArray(),
-            RedactionKinds = memory.RedactionKinds.ToArray(),
-            SanitizationDiagnostics = memory.SanitizationDiagnostics.ToArray()
-        };
+        var snapshot = memory.Snapshot();
         return new ValueTask<AgentMemoryItem?>(snapshot);
     }
 
@@ -76,14 +48,7 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore
             .Where(m => FilterByDescriptorRefs(m, query))
             .Where(m => FilterByStatus(m, query))
             .OrderBy(m => m.MemoryId, StringComparer.Ordinal)
-            .Select(m => m with
-            {
-                Tags = m.Tags.ToArray(),
-                DescriptorRefs = m.DescriptorRefs.ToArray(),
-                SourceRefs = m.SourceRefs.ToArray(),
-                RedactionKinds = m.RedactionKinds.ToArray(),
-                SanitizationDiagnostics = m.SanitizationDiagnostics.ToArray()
-            })
+            .Select(m => m.Snapshot())
             .ToArray();
 
         return new ValueTask<IReadOnlyList<AgentMemoryItem>>(results);

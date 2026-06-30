@@ -470,7 +470,7 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
                     PackageVersion = "1",
                     DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
                 },
-                Snapshot = new DescriptorSnapshot(),
+                SnapshotData = new DescriptorSnapshot(),
                 Evidence = new DescriptorPackageEvidence(),
                 Hashes = hashes
             });

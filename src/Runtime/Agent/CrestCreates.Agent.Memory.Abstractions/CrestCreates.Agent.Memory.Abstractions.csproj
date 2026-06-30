@@ -10,5 +10,6 @@
     <ProjectReference Include="..\CrestCreates.Agent.Abstractions\CrestCreates.Agent.Abstractions.csproj" />
     <ProjectReference Include="..\..\..\Metadata\CrestCreates.Metadata.Abstractions\CrestCreates.Metadata.Abstractions.csproj" />
     <ProjectReference Include="..\..\..\Metadata\CrestCreates.Metadata.ContextPack.Abstractions\CrestCreates.Metadata.ContextPack.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\Metadata\CrestCreates.Snapshot.Abstractions\CrestCreates.Snapshot.Abstractions.csproj" />
   </ItemGroup>
 </Project>

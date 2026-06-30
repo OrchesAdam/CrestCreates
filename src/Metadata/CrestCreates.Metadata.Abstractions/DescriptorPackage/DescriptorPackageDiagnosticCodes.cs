@@ -39,13 +39,4 @@ public static class DescriptorPackageDiagnosticCodes
 
     private const string TopologyNotProvidedValue = "PACKAGE_TOPOLOGY_NOT_PROVIDED";
     public static DiagnosticCode TopologyNotProvided { get; } = new(TopologyNotProvidedValue);
-
-    private const string SeverityErrorValue = "Error";
-    public static SeverityLevel SeverityError { get; } = SeverityLevel.Error;
-
-    private const string SeverityWarningValue = "Warning";
-    public static SeverityLevel SeverityWarning { get; } = SeverityLevel.Warning;
-
-    private const string SeverityInfoValue = "Info";
-    public static SeverityLevel SeverityInfo { get; } = SeverityLevel.Info;
 }

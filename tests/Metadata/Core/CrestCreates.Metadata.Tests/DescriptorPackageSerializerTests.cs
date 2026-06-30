@@ -51,7 +51,7 @@ public class DescriptorPackageSerializerTests
         deserialized!.PackageId.Should().Be("test.pkg");
         deserialized.Manifest.DescriptorEntries.Should().HaveCount(1);
         deserialized.ContentHash.Should().Be(pkg.ContentHash);
-        deserialized.Snapshot.Descriptors.Should().HaveCount(1);
+        deserialized.SnapshotData.Descriptors.Should().HaveCount(1);
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public class DescriptorPackageSerializerTests
         var json = _serializer.Serialize(pkg);
         var deserialized = _serializer.Deserialize(json);
 
-        var entry = deserialized!.Snapshot.Descriptors[0];
+        var entry = deserialized!.SnapshotData.Descriptors[0];
         entry.Ref.Id.Should().Be("s1");
         entry.ContractHash.Should().NotBeNullOrEmpty();
         entry.ContractHash.Should().HaveLength(64); // SHA-256 hex

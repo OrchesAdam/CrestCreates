@@ -9,7 +9,7 @@ public sealed record FormDescriptorDraftPayload(
 {
     public override DescriptorKind DescriptorKind => DescriptorKind.Form;
     public override IDescriptor GetDescriptor() => Descriptor;
-    public override DescriptorDraftPayload CreateClone() => this with
+    public override DescriptorDraftPayload Snapshot() => this with
     {
         Descriptor = new FormDescriptor
         {

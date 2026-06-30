@@ -1,11 +1,12 @@
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Snapshot.Abstractions;
 
 namespace CrestCreates.Metadata.Abstractions.DescriptorPackage;
 
-public sealed class DescriptorPackage
+public sealed class DescriptorPackage : ISnapshotable<DescriptorPackage>
 {
     public DescriptorManifest Manifest { get; init; } = new();
-    public DescriptorSnapshot Snapshot { get; init; } = new();
+    public DescriptorSnapshot SnapshotData { get; init; } = new();
     public DescriptorPackageEvidence Evidence { get; init; } = new();
     public IReadOnlyList<DescriptorPackageDiagnostic> Diagnostics { get; init; }
         = Array.Empty<DescriptorPackageDiagnostic>();
@@ -29,4 +30,14 @@ public sealed class DescriptorPackage
     /// Canonical hash of the package manifest. Uses <see cref="Hashes"/> when available.
     /// </summary>
     public string ContentHash => Hashes?.PackageManifestHash.Value ?? string.Empty;
+
+    public DescriptorPackage Snapshot() => new()
+    {
+        Manifest = Manifest.Snapshot(),
+        SnapshotData = SnapshotData.Snapshot(),
+        Evidence = Evidence.Snapshot(),
+        Diagnostics = Diagnostics.ToArray(),
+        Hashes = Hashes,
+        EvidenceEnvelope = EvidenceEnvelope
+    };
 }

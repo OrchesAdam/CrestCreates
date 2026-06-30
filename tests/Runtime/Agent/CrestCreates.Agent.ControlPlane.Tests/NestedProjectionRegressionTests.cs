@@ -826,7 +826,7 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
                 return new DescriptorPackage
                 {
                     Manifest = manifest,
-                    Snapshot = new DescriptorSnapshot(),
+                    SnapshotData = new DescriptorSnapshot(),
                     Evidence = new DescriptorPackageEvidence
                     {
                         NormalizedFindings = findings,

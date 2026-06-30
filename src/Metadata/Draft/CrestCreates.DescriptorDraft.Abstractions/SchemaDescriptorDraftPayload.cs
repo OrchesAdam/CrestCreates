@@ -9,7 +9,7 @@ public sealed record SchemaDescriptorDraftPayload(
 {
     public override DescriptorKind DescriptorKind => DescriptorKind.Schema;
     public override IDescriptor GetDescriptor() => Descriptor;
-    public override DescriptorDraftPayload CreateClone() => this with
+    public override DescriptorDraftPayload Snapshot() => this with
     {
         Descriptor = new SchemaDescriptor
         {

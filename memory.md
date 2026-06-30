@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-06-30
+Last Updated: 2026-06-30 (Issues #35 + #46 closed)
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -277,7 +277,7 @@ This thread achieved the following:
 ### Organization Identity Kernel (Phase 5c, 2026-06-11)
 
 - Three new projects: `CrestCreates.Organization.Abstractions`, `CrestCreates.Organization`, `CrestCreates.Organization.Tests`.
-- Models: `OrganizationUnit`, `Position`, `UserOrganizationMembership`, `UserOrganizationRoleAssignment`. All with `Clone()` and composite-key support (`(tenantId, id)`).
+- Models: `OrganizationUnit`, `Position`, `UserOrganizationMembership`, `UserOrganizationRoleAssignment`. All with `Snapshot()` (ISnapshotable<T>) and composite-key support (`(tenantId, id)`).
 - `IOrganizationStore` + `InMemoryOrganizationStore` (ConcurrentDictionary, composite keys, snapshot-on-read, LW upsert).
 - `IOrganizationHierarchyService` + `DefaultOrganizationHierarchyService` (BFS/DFS, cycle detection via `OrganizationHierarchyException`, tenantId-scoped traversal, tenant-aware graph keys).
 - `IOrganizationIdentityService` + `DefaultOrganizationIdentityService` (active-only filtering, dedup, stable primary-org selection).
@@ -703,7 +703,7 @@ This thread achieved the following:
 - **SeverityLevel** value object: private constructor, static factory properties (Info/Warning/Error), get-only Value, implicit conversion to string
 - **CrestErrorCodes** centralized: `General`, `Validation`, `Authorization`, `NotFound`, `Concurrency`, `PreconditionRequired` — replaces 6 inline `"CrestError.X"` literals across exception classes
 - **Typed exception overloads**: `CrestException(ErrorCode)`, `CrestBusinessException(ErrorCode)`, `CrestPermissionException(PermissionName)`, `CrestValidationException(ErrorCode)` — existing string overloads preserved for backward compat
-- **Framework constant classes**: `FeatureManagementErrorCodes` (7 entries), `SchemaValidationErrorCodes` (8 entries), `MetadataContextPackDiagnosticCodes` (3 entries), `DescriptorPackageDiagnosticCodes` (12 entries with typed DiagnosticCode properties)
+- **Framework constant classes**: `FeatureManagementErrorCodes` (7 entries), `SchemaValidationErrorCodes` (8 entries), `MetadataContextPackDiagnosticCodes` (3 entries), `DescriptorPackageDiagnosticCodes` (12 diagnostic code entries; severity helpers removed — use `DescriptorPackageDiagnosticSeverity` enum directly)
 - **Agent constant classes**: `DescriptorActivationDiagnosticCodes` (35 entries), `DescriptorActivationHumanTaskIds` (2 entries), `DescriptorActivationMessageTemplateIds` (8 entries), `AgentToolPermissionNames` (20 entries + RuntimePrefix), `AgentToolDiagnosticCodes` (53 entries), `DescriptorReviewReportMessageTemplateIds` (31 entries), `DescriptorDraftDiagnosticCodes` (12 entries)
 - **Tooling constant classes** (netstandard2.0 — const string only, no typed properties): `CanonicalHashDiagnosticCodes` (28 entries), `ObjectMappingDiagnosticCodes` (12 entries), `CodeGeneratorDiagnosticCodes` (4 entries)
 - **Generated permission shape**: `XxxPermissions.Create` → `XxxPermissions.CreateValue` (const string) + `XxxPermissions.Create` (typed PermissionName property); `GetAllPermissions()` yields `XxxValue` strings
@@ -741,6 +741,48 @@ Dependency boundaries enforced:
 - Memory runtime does NOT reference ControlPlane, Framework Api/Web, Platform, or persistence providers
 
 Main chain flow: SaveConversation → Compress → ExtractCandidates → Promote → Recall → BuildAuthoringContext
+
+### Boundary Snapshot Migration + Package Diagnostic Severity (Issues #35 + #46, 2026-06-30)
+
+Status: Completed.
+
+**#46 Package Diagnostic Severity:**
+- `DescriptorPackageDiagnosticSeverity` enum (Info/Warning/Error) added to `CrestCreates.Metadata.Abstractions/DescriptorPackage/`
+- `DescriptorPackageDiagnostic.Severity` migrated from `SeverityLevel` to `DescriptorPackageDiagnosticSeverity`
+- `DescriptorPackageDiagnosticCodes.SeverityError/Warning/Info` helpers removed (no longer needed — use enum directly)
+- `DefaultDescriptorPackageBuilder` updated: 8 assignments + `CompanyCertificationControlPlaneReport` string comparison → enum equality
+- `EvidenceFinding.Severity` and `EvidenceFindingCount.Severity` remain `SeverityLevel` — they are NOT package diagnostic models
+- `MapLevelToSeverity` unchanged (feeds `EvidenceFinding.Severity`)
+
+**#35 ISnapshotable<T> Boundary Migration:**
+- `ISnapshotable<T>.Snapshot()` is now the sole boundary-copy verb across the entire codebase
+- Zero `Clone()` / `CreateClone()` references remain in src/, tests/, or samples/
+- Hard migration: no `[Obsolete]` bridges, no dual-path period
+
+Models migrated (30 production types):
+- **Metadata.Abstractions**: `EvidenceFinding`, `EvidenceFindingCount`, `DescriptorPackageEvidence`, `DescriptorManifest`, `DescriptorManifestEntry`, `DescriptorSnapshot`, `SnapshotEntry`, `DescriptorPackage` (explicit interface impl due to `Snapshot` property collision)
+- **DescriptorDraft.Abstractions**: `DescriptorDraftPayload` (abstract `Snapshot()`), `DescriptorDraft`, `CapabilityDescriptorDraftPayload`, `EventDescriptorDraftPayload`, `FormDescriptorDraftPayload`, `HumanTaskDescriptorDraftPayload`, `SchemaDescriptorDraftPayload`, `WorkflowDescriptorDraftPayload`
+- **Workflow.Abstractions**: `WorkflowInstance`
+- **HumanTask.Abstractions**: `HumanTaskInstance`
+- **Organization.Abstractions**: `OrganizationUnit`, `Position`, `UserOrganizationMembership`, `UserOrganizationRoleAssignment`
+- **Agent.Memory.Abstractions** (16 types): `AgentContextSourceRef`, `AgentContextEvidenceRef`, `AgentMemoryDiagnostic`, `AgentMemoryInvocationContext`, `AgentConversationTurn`, `AgentConversationRecord`, `AgentTaskEvent`, `AgentTaskRecord`, `SanitizedAgentContent`, `AgentCompressedContextBlock`, `AgentCompressedContext`, `AgentMemoryCandidate`, `AgentMemoryItem`, `AgentMemoryPack`, `AgentMemoryOperationRequest`, `AgentSourceExpansionResult`, `AgentAuthoringRequest`, `AgentAuthoringContext`
+- **Samples**: `DescriptorDraftSet`, `DescriptorAuthoringResult`
+
+Store migration (all `.Clone()`/`.CreateClone()` → `.Snapshot()`):
+- `InMemoryDescriptorDraftStore`, `InMemoryWorkflowInstanceStore`, `InMemoryHumanTaskInstanceStore`, `InMemoryOrganizationStore`, `DefaultOrganizationHierarchyService`
+- Agent Memory stores: `InMemoryAgentMemoryStore` (5 call sites), `InMemoryAgentConversationStore` (read path), `InMemoryAgentCompressedContextStore` (both paths), `InMemoryAgentTaskHistoryStore` (read path + list) — write paths with sanitization transforms kept inline
+
+Project references added for `CrestCreates.Snapshot.Abstractions`:
+- Metadata.Abstractions, DescriptorDraft.Abstractions, Workflow.Abstractions, HumanTask.Abstractions, Organization.Abstractions, Agent.Memory.Abstractions
+
+Test updates:
+- Removed `LegacyBridgeModel` + 2 bridge-pattern tests from `ISnapshotableContractTests` (no longer applicable after hard migration)
+- New tests: `PackageDiagnostics_UsePackageSeverityEnum`, `SaveAsync_StoresSnapshot_NotOriginalDraftReference`, `DescriptorPackageEvidence_Snapshot_CopiesNestedCollections`
+- 1263 tests across 9 affected projects pass, 0 failures, 0 regressions
+- Dependency boundary tests pass (13/13)
+
+**Design spec**: `docs/superpowers/specs/2026-06-30-boundary-snapshot-and-package-diagnostic-severity-design.md`
+**Implementation plan**: `docs/superpowers/plans/2026-06-30-boundary-snapshot-and-package-diagnostic-severity.md`
 
 ### AI-assisted Descriptor Authoring Golden Scenario (Phase 7f, 2026-06-30)
 

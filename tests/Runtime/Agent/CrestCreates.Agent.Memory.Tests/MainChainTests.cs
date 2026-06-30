@@ -921,6 +921,90 @@ public sealed class MainChainTests
         retrieved.Turns.Should().NotBeSameAs(retrievedAgain.Turns);
     }
 
+    [Fact]
+    public void AgentAuthoringContext_Snapshot_CopiesMetadataContextPackNestedCollections()
+    {
+        var focusDescriptors = new[] { new DescriptorRef("ns", "desc-1", 1) };
+        var includeKinds = new[] { DescriptorKind.Form };
+        var countsByKind = new Dictionary<DescriptorKind, int> { [DescriptorKind.Form] = 1 };
+        var focusRefs = new[] { new DescriptorRef("ns", "desc-1", 1) };
+
+        var contextPack = new MetadataContextPack
+        {
+            Request = new MetadataContextPackRequest
+            {
+                Scope = MetadataContextPackScope.FocusOnly,
+                FocusDescriptors = focusDescriptors,
+                TenantId = "tenant-1",
+                IncludeKinds = includeKinds,
+                ScenarioRecipe = new RuntimeScenarioRecipe
+                {
+                    Name = "test-recipe",
+                    Steps = [new ScenarioTraversalStep { FollowKind = RelationshipKind.Uses }]
+                }
+            },
+            Descriptors = Array.Empty<MetadataContextPackDescriptorEntry>(),
+            Relationships = Array.Empty<MetadataContextPackRelationshipEntry>(),
+            Summary = new MetadataContextPackSummary
+            {
+                TotalDescriptorCount = 1,
+                DescriptorCountsByKind = countsByKind,
+                TotalRelationshipCount = 0,
+                RelationshipCountsByKind = new Dictionary<RelationshipKind, int>(),
+                FocusRefs = focusRefs,
+                WasTruncated = false,
+                TruncatedAtCount = null,
+                TraversalDepthReached = 1
+            },
+            Diagnostics = Array.Empty<MetadataContextPackDiagnostic>()
+        };
+
+        var request = new AgentAuthoringRequest
+        {
+            TenantId = "tenant-1",
+            IntentText = "Test",
+            MemoryQuery = new AgentMemoryQuery
+            {
+                TenantId = "tenant-1",
+                Tags = new[] { "tag1" }
+            }
+        };
+
+        var context = new AgentAuthoringContext
+        {
+            Request = request,
+            MetadataContextPack = contextPack,
+            MemoryPack = new AgentMemoryPack { TenantId = "tenant-1", Memories = Array.Empty<AgentMemoryItem>() },
+            Diagnostics = Array.Empty<AgentMemoryDiagnostic>()
+        };
+
+        var snapshot = context.Snapshot();
+
+        // Top-level MetadataContextPack must be a different instance
+        snapshot.MetadataContextPack.Should().NotBeSameAs(context.MetadataContextPack);
+
+        // Request.FocusDescriptors must be a different array instance
+        snapshot.MetadataContextPack.Request.FocusDescriptors.Should().NotBeSameAs(focusDescriptors);
+
+        // Request.IncludeKinds must be a different array instance
+        snapshot.MetadataContextPack.Request.IncludeKinds.Should().NotBeSameAs(includeKinds);
+
+        // Request.ScenarioRecipe must be a different instance with copied Steps
+        snapshot.MetadataContextPack.Request.ScenarioRecipe.Should().NotBeSameAs(context.MetadataContextPack.Request.ScenarioRecipe);
+        snapshot.MetadataContextPack.Request.ScenarioRecipe!.Steps.Should().NotBeSameAs(context.MetadataContextPack.Request.ScenarioRecipe!.Steps);
+
+        // Summary.DescriptorCountsByKind must be a different dictionary instance
+        snapshot.MetadataContextPack.Summary.DescriptorCountsByKind.Should().NotBeSameAs(countsByKind);
+
+        // Summary.FocusRefs must be a different array instance
+        snapshot.MetadataContextPack.Summary.FocusRefs.Should().NotBeSameAs(focusRefs);
+
+        // AgentAuthoringRequest.MemoryQuery must be a different instance with copied Tags
+        snapshot.Request.Should().NotBeSameAs(request);
+        snapshot.Request.MemoryQuery.Should().NotBeSameAs(request.MemoryQuery);
+        snapshot.Request.MemoryQuery!.Tags.Should().NotBeSameAs(request.MemoryQuery!.Tags);
+    }
+
     // --- Store sanitization tests ---
 
     [Fact]

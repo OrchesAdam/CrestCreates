@@ -9,12 +9,7 @@ public sealed class InMemoryAgentCompressedContextStore : IAgentCompressedContex
 
     public ValueTask SaveCompressedContextAsync(AgentCompressedContext context, CancellationToken cancellationToken = default)
     {
-        _contexts[(context.TenantId, context.ContextId)] = context with
-        {
-            Blocks = context.Blocks
-                .Select(b => b with { SourceRefs = b.SourceRefs.ToArray(), Diagnostics = b.Diagnostics.ToArray() })
-                .ToArray()
-        };
+        _contexts[(context.TenantId, context.ContextId)] = context.Snapshot();
         return ValueTask.CompletedTask;
     }
 
@@ -23,12 +18,7 @@ public sealed class InMemoryAgentCompressedContextStore : IAgentCompressedContex
         _contexts.TryGetValue((tenantId, contextId), out var context);
         if (context is null) return new ValueTask<AgentCompressedContext?>((AgentCompressedContext?)null);
 
-        var snapshot = context with
-        {
-            Blocks = context.Blocks
-                .Select(b => b with { SourceRefs = b.SourceRefs.ToArray(), Diagnostics = b.Diagnostics.ToArray() })
-                .ToArray()
-        };
+        var snapshot = context.Snapshot();
         return new ValueTask<AgentCompressedContext?>(snapshot);
     }
 }

@@ -11,7 +11,7 @@ public sealed class InMemoryWorkflowInstanceStore : IWorkflowInstanceStore
 
     public Task SaveAsync(WorkflowInstance instance, CancellationToken ct = default)
     {
-        var snapshot = instance.Clone();
+        var snapshot = instance.Snapshot();
         snapshot.UpdatedAt = DateTimeOffset.UtcNow;
 
         while (true)
@@ -50,7 +50,7 @@ public sealed class InMemoryWorkflowInstanceStore : IWorkflowInstanceStore
     public Task<WorkflowInstance?> GetAsync(string instanceId, CancellationToken ct = default)
     {
         if (_instances.TryGetValue(instanceId, out var existing))
-            return Task.FromResult<WorkflowInstance?>(existing.Clone());
+            return Task.FromResult<WorkflowInstance?>(existing.Snapshot());
         return Task.FromResult<WorkflowInstance?>(null);
     }
 
@@ -66,6 +66,6 @@ public sealed class InMemoryWorkflowInstanceStore : IWorkflowInstanceStore
             throw new WorkflowCorrelationException(
                 $"Multiple suspended instances found for HumanTask '{humanTaskId}'.");
 
-        return Task.FromResult(matches.SingleOrDefault()?.Clone());
+        return Task.FromResult(matches.SingleOrDefault()?.Snapshot());
     }
 }

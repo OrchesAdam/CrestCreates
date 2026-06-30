@@ -2,10 +2,11 @@ using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using CrestCreates.Metadata.Abstractions.Evidence;
+using CrestCreates.Snapshot.Abstractions;
 
 namespace CrestCreates.Metadata.Abstractions.DescriptorPackage;
 
-public sealed class DescriptorPackageEvidence
+public sealed class DescriptorPackageEvidence : ISnapshotable<DescriptorPackageEvidence>
 {
     // Topology
     public int TopologyNodeCount { get; init; }
@@ -36,4 +37,25 @@ public sealed class DescriptorPackageEvidence
     // Unified
     public IReadOnlyList<EvidenceFinding> NormalizedFindings { get; init; }
         = Array.Empty<EvidenceFinding>();
+
+    public DescriptorPackageEvidence Snapshot() => new()
+    {
+        TopologyNodeCount = TopologyNodeCount,
+        TopologyEdgeCount = TopologyEdgeCount,
+        TopologyDiagnosticCounts = TopologyDiagnosticCounts.Select(item => item.Snapshot()).ToArray(),
+        HasTopologyErrors = HasTopologyErrors,
+        MaxImpactSeverity = MaxImpactSeverity,
+        AffectedDescriptorCount = AffectedDescriptorCount,
+        ImpactPathCount = ImpactPathCount,
+        ImpactDiagnosticCounts = ImpactDiagnosticCounts.Select(item => item.Snapshot()).ToArray(),
+        MaxCompatibilityLevel = MaxCompatibilityLevel,
+        BreakingFindingCount = BreakingFindingCount,
+        SecuritySensitiveFindingCount = SecuritySensitiveFindingCount,
+        UnsupportedFindingCount = UnsupportedFindingCount,
+        MaxLifecycleDecision = MaxLifecycleDecision,
+        RequiresReview = RequiresReview,
+        IsBlocked = IsBlocked,
+        PackageFindingCount = PackageFindingCount,
+        NormalizedFindings = NormalizedFindings.Select(item => item.Snapshot()).ToArray()
+    };
 }

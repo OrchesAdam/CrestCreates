@@ -1,6 +1,8 @@
+using CrestCreates.Snapshot.Abstractions;
+
 namespace CrestCreates.Organization.Abstractions;
 
-public sealed class UserOrganizationRoleAssignment
+public sealed class UserOrganizationRoleAssignment : ISnapshotable<UserOrganizationRoleAssignment>
 {
     public string Id { get; init; } = default!;
     public string? TenantId { get; init; }
@@ -10,7 +12,7 @@ public sealed class UserOrganizationRoleAssignment
     public bool IsActive { get; init; } = true;
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 
-    public UserOrganizationRoleAssignment Clone() => new()
+    public UserOrganizationRoleAssignment Snapshot() => new()
     {
         Id = Id,
         TenantId = TenantId,

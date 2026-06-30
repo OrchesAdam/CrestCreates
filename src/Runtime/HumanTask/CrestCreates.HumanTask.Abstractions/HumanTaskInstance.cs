@@ -1,8 +1,9 @@
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Snapshot.Abstractions;
 
 namespace CrestCreates.HumanTask.Abstractions;
 
-public sealed class HumanTaskInstance
+public sealed class HumanTaskInstance : ISnapshotable<HumanTaskInstance>
 {
     public string Id { get; init; } = default!;
     public string HumanTaskId { get; init; } = default!;
@@ -38,33 +39,33 @@ public sealed class HumanTaskInstance
     public string ConcurrencyStamp { get; set; } = Guid.NewGuid().ToString("N");
     public DateTimeOffset? UpdatedAt { get; set; }
 
-    public HumanTaskInstance Clone()
+    public HumanTaskInstance Snapshot()
     {
         return new HumanTaskInstance
         {
-            Id = this.Id,
-            HumanTaskId = this.HumanTaskId,
-            HumanTaskVersion = this.HumanTaskVersion,
-            Status = this.Status,
-            TenantId = this.TenantId,
-            AssigneeUserId = this.AssigneeUserId,
-            AssigneeRoleId = this.AssigneeRoleId,
-            WorkflowInstanceId = this.WorkflowInstanceId,
-            WorkflowStepId = this.WorkflowStepId,
-            Input = this.Input,
-            Output = this.Output,
-            Outcome = this.Outcome,
-            CreatedAt = this.CreatedAt,
-            CompletedAt = this.CompletedAt,
-            CancelledAt = this.CancelledAt,
-            CancellationReason = this.CancellationReason,
-            ConcurrencyStamp = this.ConcurrencyStamp,
-            UpdatedAt = this.UpdatedAt,
-            CandidateUserIds = this.CandidateUserIds.ToArray(),
-            CandidateRoleIds = this.CandidateRoleIds.ToArray(),
-            OrganizationUnitId = this.OrganizationUnitId,
-            PositionId = this.PositionId,
-            AssigneeResolutionReason = this.AssigneeResolutionReason
+            Id = Id,
+            HumanTaskId = HumanTaskId,
+            HumanTaskVersion = HumanTaskVersion,
+            Status = Status,
+            TenantId = TenantId,
+            AssigneeUserId = AssigneeUserId,
+            AssigneeRoleId = AssigneeRoleId,
+            WorkflowInstanceId = WorkflowInstanceId,
+            WorkflowStepId = WorkflowStepId,
+            Input = Input,
+            Output = Output,
+            Outcome = Outcome,
+            CreatedAt = CreatedAt,
+            CompletedAt = CompletedAt,
+            CancelledAt = CancelledAt,
+            CancellationReason = CancellationReason,
+            ConcurrencyStamp = ConcurrencyStamp,
+            UpdatedAt = UpdatedAt,
+            CandidateUserIds = CandidateUserIds.ToArray(),
+            CandidateRoleIds = CandidateRoleIds.ToArray(),
+            OrganizationUnitId = OrganizationUnitId,
+            PositionId = PositionId,
+            AssigneeResolutionReason = AssigneeResolutionReason
         };
     }
 }

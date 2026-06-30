@@ -15,7 +15,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
     public Task SaveOrganizationUnitAsync(OrganizationUnit organizationUnit, CancellationToken cancellationToken = default)
     {
         var key = CompKey(organizationUnit.TenantId, organizationUnit.Id);
-        _orgUnits[key] = organizationUnit.Clone();
+        _orgUnits[key] = organizationUnit.Snapshot();
         return Task.CompletedTask;
     }
 
@@ -23,7 +23,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
     {
         var key = CompKey(tenantId, organizationUnitId);
         if (_orgUnits.TryGetValue(key, out var existing))
-            return Task.FromResult<OrganizationUnit?>(existing.Clone());
+            return Task.FromResult<OrganizationUnit?>(existing.Snapshot());
         return Task.FromResult<OrganizationUnit?>(null);
     }
 
@@ -33,7 +33,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
         if (tenantId is not null)
             query = query.Where(o => o.TenantId == tenantId);
 
-        var result = query.Select(o => o.Clone()).ToList().AsReadOnly();
+        var result = query.Select(o => o.Snapshot()).ToList().AsReadOnly();
         return Task.FromResult((IReadOnlyList<OrganizationUnit>)result);
     }
 
@@ -42,7 +42,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
     public Task SavePositionAsync(Position position, CancellationToken cancellationToken = default)
     {
         var key = CompKey(position.TenantId, position.Id);
-        _positions[key] = position.Clone();
+        _positions[key] = position.Snapshot();
         return Task.CompletedTask;
     }
 
@@ -50,7 +50,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
     {
         var key = CompKey(tenantId, positionId);
         if (_positions.TryGetValue(key, out var existing))
-            return Task.FromResult<Position?>(existing.Clone());
+            return Task.FromResult<Position?>(existing.Snapshot());
         return Task.FromResult<Position?>(null);
     }
 
@@ -60,7 +60,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
         if (tenantId is not null)
             query = query.Where(p => p.TenantId == tenantId);
 
-        var result = query.Select(p => p.Clone()).ToList().AsReadOnly();
+        var result = query.Select(p => p.Snapshot()).ToList().AsReadOnly();
         return Task.FromResult((IReadOnlyList<Position>)result);
     }
 
@@ -73,7 +73,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
     public Task SaveMembershipAsync(UserOrganizationMembership membership, CancellationToken cancellationToken = default)
     {
         var key = CompKey(membership.TenantId, membership.Id);
-        _memberships[key] = membership.Clone();
+        _memberships[key] = membership.Snapshot();
         return Task.CompletedTask;
     }
 
@@ -83,7 +83,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
         if (tenantId is not null)
             query = query.Where(m => m.TenantId == tenantId);
 
-        var result = query.Select(m => m.Clone()).ToList().AsReadOnly();
+        var result = query.Select(m => m.Snapshot()).ToList().AsReadOnly();
         return Task.FromResult((IReadOnlyList<UserOrganizationMembership>)result);
     }
 
@@ -93,7 +93,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
         if (tenantId is not null)
             query = query.Where(m => m.TenantId == tenantId);
 
-        var result = query.Select(m => m.Clone()).ToList().AsReadOnly();
+        var result = query.Select(m => m.Snapshot()).ToList().AsReadOnly();
         return Task.FromResult((IReadOnlyList<UserOrganizationMembership>)result);
     }
 
@@ -102,7 +102,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
     public Task SaveRoleAssignmentAsync(UserOrganizationRoleAssignment assignment, CancellationToken cancellationToken = default)
     {
         var key = CompKey(assignment.TenantId, assignment.Id);
-        _roleAssignments[key] = assignment.Clone();
+        _roleAssignments[key] = assignment.Snapshot();
         return Task.CompletedTask;
     }
 
@@ -112,7 +112,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
         if (tenantId is not null)
             query = query.Where(a => a.TenantId == tenantId);
 
-        var result = query.Select(a => a.Clone()).ToList().AsReadOnly();
+        var result = query.Select(a => a.Snapshot()).ToList().AsReadOnly();
         return Task.FromResult((IReadOnlyList<UserOrganizationRoleAssignment>)result);
     }
 }

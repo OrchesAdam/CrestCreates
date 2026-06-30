@@ -12,4 +12,14 @@ public sealed record MetadataContextPackSummary
     public required bool WasTruncated { get; init; }
     public required int? TruncatedAtCount { get; init; }
     public required int TraversalDepthReached { get; init; }
+
+    /// <summary>
+    /// Deep copy for boundary snapshot isolation.
+    /// </summary>
+    public MetadataContextPackSummary Copy() => this with
+    {
+        DescriptorCountsByKind = new Dictionary<DescriptorKind, int>(DescriptorCountsByKind),
+        RelationshipCountsByKind = new Dictionary<RelationshipKind, int>(RelationshipCountsByKind),
+        FocusRefs = FocusRefs.ToArray()
+    };
 }

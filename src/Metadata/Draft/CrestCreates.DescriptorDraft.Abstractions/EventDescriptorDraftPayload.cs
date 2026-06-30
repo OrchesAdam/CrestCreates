@@ -9,8 +9,8 @@ public sealed record EventDescriptorDraftPayload(
 {
     public override DescriptorKind DescriptorKind => DescriptorKind.Event;
     public override IDescriptor GetDescriptor() => Descriptor;
-    // EventDescriptor has no IReadOnlyList properties — all scalars/value types. Clone is identity-safe.
-    public override DescriptorDraftPayload CreateClone() => this with
+    // EventDescriptor has no IReadOnlyList properties — all scalars/value types. Snapshot is identity-safe.
+    public override DescriptorDraftPayload Snapshot() => this with
     {
         Descriptor = new EventDescriptor
         {

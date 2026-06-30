@@ -212,7 +212,7 @@ public class InMemoryHumanTaskInstanceStoreTests
             CreatedAt = DateTimeOffset.UtcNow
         };
 
-        var clone = original.Clone();
+        var clone = original.Snapshot();
 
         clone.CandidateUserIds.Should().BeEquivalentTo(new[] { "user-a", "user-b" });
         clone.CandidateRoleIds.Should().BeEquivalentTo(new[] { "role-reviewers" });

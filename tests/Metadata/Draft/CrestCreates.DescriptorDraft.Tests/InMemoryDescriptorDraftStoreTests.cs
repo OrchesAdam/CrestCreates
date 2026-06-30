@@ -162,6 +162,23 @@ public class InMemoryDescriptorDraftStoreTests
     }
 
     [Fact]
+    public async Task SaveAsync_StoresSnapshot_NotOriginalDraftReference()
+    {
+        var store = new InMemoryDescriptorDraftStore();
+        var metadata = new Dictionary<string, string> { ["before"] = "value" };
+        var draft = CreateDraft() with { Metadata = metadata };
+
+        await store.SaveAsync(draft);
+        metadata["after"] = "mutated";
+
+        var stored = await store.GetAsync(draft.TenantId, draft.DraftId);
+
+        stored.Should().NotBeSameAs(draft);
+        stored!.Metadata.Should().ContainKey("before");
+        stored.Metadata.Should().NotContainKey("after");
+    }
+
+    [Fact]
     public async Task DeepClone_Isolates_WorkflowStep_Transitions_List()
     {
         var transitions = new List<string> { "approve" };

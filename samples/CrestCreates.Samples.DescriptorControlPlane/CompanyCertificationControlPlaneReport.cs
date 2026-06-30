@@ -38,7 +38,7 @@ public sealed record CompanyCertificationControlPlaneReport
         Topology.Diagnostics.IsHealthy
         && !Governance.IsBlocked
         && !Package.Diagnostics.Any(d =>
-            string.Equals(d.Severity, "Error", StringComparison.OrdinalIgnoreCase));
+            d.Severity == DescriptorPackageDiagnosticSeverity.Error);
 
     /// <summary>
     /// The most severe lifecycle decision across all transitions.

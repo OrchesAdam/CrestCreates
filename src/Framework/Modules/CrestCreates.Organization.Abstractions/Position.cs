@@ -1,6 +1,8 @@
+using CrestCreates.Snapshot.Abstractions;
+
 namespace CrestCreates.Organization.Abstractions;
 
-public sealed class Position
+public sealed class Position : ISnapshotable<Position>
 {
     public string Id { get; init; } = default!;
     public string? TenantId { get; init; }
@@ -9,7 +11,7 @@ public sealed class Position
     public bool IsActive { get; init; } = true;
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 
-    public Position Clone() => new()
+    public Position Snapshot() => new()
     {
         Id = Id,
         TenantId = TenantId,

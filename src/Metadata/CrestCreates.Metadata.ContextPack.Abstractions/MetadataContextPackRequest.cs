@@ -15,4 +15,15 @@ public sealed record MetadataContextPackRequest
     public int MaxDescriptorCount { get; init; } = 64;
     public bool IncludeStableHashes { get; init; }
     public bool IncludeGovernanceState { get; init; }
+
+    /// <summary>
+    /// Deep copy for boundary snapshot isolation.
+    /// </summary>
+    public MetadataContextPackRequest Copy() => this with
+    {
+        FocusDescriptors = FocusDescriptors.ToArray(),
+        ScenarioRecipe = ScenarioRecipe?.Copy(),
+        IncludeKinds = IncludeKinds?.ToArray(),
+        ExcludeKinds = ExcludeKinds?.ToArray()
+    };
 }

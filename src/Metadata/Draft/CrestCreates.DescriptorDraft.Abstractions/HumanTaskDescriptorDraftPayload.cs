@@ -9,7 +9,7 @@ public sealed record HumanTaskDescriptorDraftPayload(
 {
     public override DescriptorKind DescriptorKind => DescriptorKind.HumanTask;
     public override IDescriptor GetDescriptor() => Descriptor;
-    public override DescriptorDraftPayload CreateClone() => this with
+    public override DescriptorDraftPayload Snapshot() => this with
     {
         Descriptor = new HumanTaskDescriptor
         {

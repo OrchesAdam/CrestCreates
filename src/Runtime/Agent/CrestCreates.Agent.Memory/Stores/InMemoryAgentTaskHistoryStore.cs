@@ -62,12 +62,13 @@ public sealed class InMemoryAgentTaskHistoryStore : IAgentTaskHistoryStore
             });
         }
 
-        _tasks[(task.TenantId, task.TaskId)] = task with
+        var record = task with
         {
             Summary = sanitizedSummary,
             Events = sanitizedEvents.ToArray(),
             Diagnostics = diagnostics.ToArray()
         };
+        _tasks[(task.TenantId, task.TaskId)] = record.Snapshot();
         return ValueTask.CompletedTask;
     }
 
@@ -76,17 +77,7 @@ public sealed class InMemoryAgentTaskHistoryStore : IAgentTaskHistoryStore
         _tasks.TryGetValue((tenantId, taskId), out var task);
         if (task is null) return new ValueTask<AgentTaskRecord?>((AgentTaskRecord?)null);
 
-        var snapshot = task with
-        {
-            Events = task.Events
-                .Select(e => e with
-                {
-                    SourceRefs = e.SourceRefs.ToArray(),
-                    Diagnostics = e.Diagnostics.ToArray()
-                })
-                .ToArray(),
-            Diagnostics = task.Diagnostics.ToArray()
-        };
+        var snapshot = task.Snapshot();
         return new ValueTask<AgentTaskRecord?>(snapshot);
     }
 
@@ -112,10 +103,11 @@ public sealed class InMemoryAgentTaskHistoryStore : IAgentTaskHistoryStore
             Diagnostics = sanitized.Diagnostics.ToArray()
         };
 
-        _tasks[key] = existing with
+        var updated = existing with
         {
             Events = [..existing.Events, sanitizedEvent]
         };
+        _tasks[key] = updated.Snapshot();
         return ValueTask.CompletedTask;
     }
 
@@ -124,17 +116,7 @@ public sealed class InMemoryAgentTaskHistoryStore : IAgentTaskHistoryStore
         var tasks = _tasks.Values
             .Where(t => t.TenantId == tenantId)
             .OrderBy(t => t.TaskId, StringComparer.Ordinal)
-            .Select(t => t with
-            {
-                Events = t.Events
-                    .Select(e => e with
-                    {
-                        SourceRefs = e.SourceRefs.ToArray(),
-                        Diagnostics = e.Diagnostics.ToArray()
-                    })
-                    .ToArray(),
-                Diagnostics = t.Diagnostics.ToArray()
-            })
+            .Select(t => t.Snapshot())
             .ToArray();
         return new ValueTask<IReadOnlyList<AgentTaskRecord>>(tasks);
     }

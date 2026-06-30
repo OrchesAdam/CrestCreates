@@ -53,7 +53,7 @@ public class DescriptorPackageBuilderTests
         package.PackageId.Should().Be("test.pkg");
         package.Manifest.DescriptorCount.Should().Be(2);
         package.Manifest.DescriptorEntries.Should().HaveCount(2);
-        package.Snapshot.Descriptors.Should().HaveCount(2);
+        package.SnapshotData.Descriptors.Should().HaveCount(2);
         package.ContentHash.Should().NotBeEmpty();
     }
 
@@ -69,7 +69,7 @@ public class DescriptorPackageBuilderTests
         var pkg1 = _builder.Build(request);
         var pkg2 = _builder.Build(request);
         pkg1.ContentHash.Should().Be(pkg2.ContentHash);
-        pkg1.Snapshot.SnapshotId.Should().Be(pkg2.Snapshot.SnapshotId);
+        pkg1.SnapshotData.SnapshotId.Should().Be(pkg2.SnapshotData.SnapshotId);
     }
 
     [Fact]
@@ -137,9 +137,9 @@ public class DescriptorPackageBuilderTests
         };
         var pkg1 = _builder.Build(request);
         var pkg2 = _builder.Build(request);
-        pkg1.Snapshot.SnapshotId.Should().Be(pkg2.Snapshot.SnapshotId);
-        pkg1.Snapshot.SnapshotId.Should().StartWith("snapshot_");
-        pkg1.Snapshot.SnapshotId.Should().NotContain("-");
+        pkg1.SnapshotData.SnapshotId.Should().Be(pkg2.SnapshotData.SnapshotId);
+        pkg1.SnapshotData.SnapshotId.Should().StartWith("snapshot_");
+        pkg1.SnapshotData.SnapshotId.Should().NotContain("-");
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public class DescriptorPackageBuilderTests
             Descriptors = new IDescriptor[] { MakeSchema("s1", 1, "S1") }
         });
         var expectedPrefix = pkg.ContentHash[..16];
-        pkg.Snapshot.SnapshotId.Should().Be($"snapshot_{expectedPrefix}");
+        pkg.SnapshotData.SnapshotId.Should().Be($"snapshot_{expectedPrefix}");
     }
 
     [Fact]
@@ -436,7 +436,7 @@ public class DescriptorPackageBuilderTests
             PackageVersion = "1.0.0",
             Descriptors = new IDescriptor[] { MakeSchema("s1", 1, "S1") }
         });
-        pkg.Snapshot.Relationships.Should().BeEmpty();
+        pkg.SnapshotData.Relationships.Should().BeEmpty();
     }
 
     [Fact]
@@ -511,8 +511,8 @@ public class DescriptorPackageBuilderTests
             Descriptors = new IDescriptor[] { MakeSchema("a", 1, "A"), MakeSchema("b", 1, "B") },
             TopologySnapshot = snapshot
         });
-        pkg.Snapshot.Relationships.Should().HaveCount(1);
-        var rel = pkg.Snapshot.Relationships[0];
+        pkg.SnapshotData.Relationships.Should().HaveCount(1);
+        var rel = pkg.SnapshotData.Relationships[0];
         rel.From.Namespace.Should().Be("ns");
         rel.From.Id.Should().Be("a");
         rel.To.Namespace.Should().Be("ns");
@@ -682,6 +682,49 @@ public class DescriptorPackageBuilderTests
         });
 
         pkg1.ContentHash.Should().Be(pkg2.ContentHash);
-        pkg1.Snapshot.SnapshotId.Should().Be(pkg2.Snapshot.SnapshotId);
+        pkg1.SnapshotData.SnapshotId.Should().Be(pkg2.SnapshotData.SnapshotId);
+    }
+
+    [Fact]
+    public void DescriptorPackageEvidence_Snapshot_CopiesNestedCollections()
+    {
+        var evidence = new DescriptorPackageEvidence
+        {
+            TopologyDiagnosticCounts =
+            [
+                new EvidenceFindingCount { Severity = SeverityLevel.Warning, Code = new DiagnosticCode("T001"), Count = 1 }
+            ],
+            NormalizedFindings =
+            [
+                new EvidenceFinding
+                {
+                    Source = "test",
+                    Code = new DiagnosticCode("F001"),
+                    Severity = SeverityLevel.Warning,
+                    Message = "finding",
+                    RelatedRefs = [new DescriptorRef("workflow", "wf", 1)]
+                }
+            ]
+        };
+
+        var snapshot = evidence.Snapshot();
+
+        snapshot.Should().NotBeSameAs(evidence);
+        snapshot.TopologyDiagnosticCounts.Should().NotBeSameAs(evidence.TopologyDiagnosticCounts);
+        snapshot.NormalizedFindings.Should().NotBeSameAs(evidence.NormalizedFindings);
+        snapshot.NormalizedFindings[0].RelatedRefs.Should().NotBeSameAs(evidence.NormalizedFindings[0].RelatedRefs);
+    }
+
+    [Fact]
+    public void PackageDiagnostics_UsePackageSeverityEnum()
+    {
+        var diagnostic = new DescriptorPackageDiagnostic
+        {
+            Code = DescriptorPackageDiagnosticCodes.TopologyNotProvided,
+            Severity = DescriptorPackageDiagnosticSeverity.Info,
+            Message = "Topology was not provided."
+        };
+
+        diagnostic.Severity.Should().Be(DescriptorPackageDiagnosticSeverity.Info);
     }
 }

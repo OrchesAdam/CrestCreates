@@ -340,7 +340,7 @@ public abstract class AgentControlPlaneTestBase
                     PackageVersion = "1",
                     DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
                 },
-                Snapshot = new DescriptorSnapshot(),
+                SnapshotData = new DescriptorSnapshot(),
                 Evidence = new DescriptorPackageEvidence()
             });
     }
@@ -600,5 +600,5 @@ public sealed record TestDraftPayload : DraftAbstractions.DescriptorDraftPayload
         Kind = _kind
     };
 
-    public override DraftAbstractions.DescriptorDraftPayload CreateClone() => new TestDraftPayload(_kind, _id, _name);
+    public override DraftAbstractions.DescriptorDraftPayload Snapshot() => new TestDraftPayload(_kind, _id, _name);
 }

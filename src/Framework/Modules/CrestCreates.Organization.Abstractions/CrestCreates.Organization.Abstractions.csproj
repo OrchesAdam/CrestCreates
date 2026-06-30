@@ -5,4 +5,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>CrestCreates.Organization.Abstractions</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../Metadata/CrestCreates.Snapshot.Abstractions/CrestCreates.Snapshot.Abstractions.csproj" />
+  </ItemGroup>
 </Project>

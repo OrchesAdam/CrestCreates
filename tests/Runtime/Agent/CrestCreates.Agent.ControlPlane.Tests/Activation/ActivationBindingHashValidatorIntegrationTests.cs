@@ -39,7 +39,7 @@ public class ActivationBindingHashValidatorIntegrationTests
             Kind = DescriptorKind.Event,
             State = DescriptorState.Active
         };
-        public override DraftAbstractions.DescriptorDraftPayload CreateClone() => this;
+        public override DraftAbstractions.DescriptorDraftPayload Snapshot() => this;
     }
 
     // ════════════════════════════════════════════════════════════════════════

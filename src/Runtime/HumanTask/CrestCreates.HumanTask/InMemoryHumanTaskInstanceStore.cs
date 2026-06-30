@@ -10,7 +10,7 @@ public sealed class InMemoryHumanTaskInstanceStore : IHumanTaskInstanceStore
 
     public Task SaveAsync(HumanTaskInstance instance, CancellationToken ct = default)
     {
-        var snapshot = instance.Clone();
+        var snapshot = instance.Snapshot();
         snapshot.UpdatedAt = DateTimeOffset.UtcNow;
 
         while (true)
@@ -49,7 +49,7 @@ public sealed class InMemoryHumanTaskInstanceStore : IHumanTaskInstanceStore
     public Task<HumanTaskInstance?> GetByIdAsync(string instanceId, CancellationToken ct = default)
     {
         if (_instances.TryGetValue(instanceId, out var existing))
-            return Task.FromResult<HumanTaskInstance?>(existing.Clone());
+            return Task.FromResult<HumanTaskInstance?>(existing.Snapshot());
         return Task.FromResult<HumanTaskInstance?>(null);
     }
 
@@ -60,7 +60,7 @@ public sealed class InMemoryHumanTaskInstanceStore : IHumanTaskInstanceStore
             .Where(i => (i.Status == HumanTaskInstanceStatus.Created ||
                          i.Status == HumanTaskInstanceStatus.Assigned) &&
                         i.AssigneeUserId == assigneeUserId)
-            .Select(i => i.Clone())
+            .Select(i => i.Snapshot())
             .ToList()
             .AsReadOnly();
 
@@ -74,7 +74,7 @@ public sealed class InMemoryHumanTaskInstanceStore : IHumanTaskInstanceStore
             .Where(i => (i.Status == HumanTaskInstanceStatus.Created ||
                          i.Status == HumanTaskInstanceStatus.Assigned) &&
                         i.WorkflowInstanceId == workflowInstanceId)
-            .Select(i => i.Clone())
+            .Select(i => i.Snapshot())
             .ToList()
             .AsReadOnly();
 
@@ -88,7 +88,7 @@ public sealed class InMemoryHumanTaskInstanceStore : IHumanTaskInstanceStore
             .Where(i => (i.Status == HumanTaskInstanceStatus.Created ||
                          i.Status == HumanTaskInstanceStatus.Assigned) &&
                         i.CandidateUserIds.Contains(userId))
-            .Select(i => i.Clone())
+            .Select(i => i.Snapshot())
             .ToList()
             .AsReadOnly();
 
@@ -102,7 +102,7 @@ public sealed class InMemoryHumanTaskInstanceStore : IHumanTaskInstanceStore
             .Where(i => (i.Status == HumanTaskInstanceStatus.Created ||
                          i.Status == HumanTaskInstanceStatus.Assigned) &&
                         i.CandidateRoleIds.Contains(roleId))
-            .Select(i => i.Clone())
+            .Select(i => i.Snapshot())
             .ToList()
             .AsReadOnly();
 
@@ -116,7 +116,7 @@ public sealed class InMemoryHumanTaskInstanceStore : IHumanTaskInstanceStore
             .Where(i => (i.Status == HumanTaskInstanceStatus.Created ||
                          i.Status == HumanTaskInstanceStatus.Assigned) &&
                         i.OrganizationUnitId == organizationUnitId)
-            .Select(i => i.Clone())
+            .Select(i => i.Snapshot())
             .ToList()
             .AsReadOnly();
 
@@ -130,7 +130,7 @@ public sealed class InMemoryHumanTaskInstanceStore : IHumanTaskInstanceStore
             .Where(i => (i.Status == HumanTaskInstanceStatus.Created ||
                          i.Status == HumanTaskInstanceStatus.Assigned) &&
                         i.PositionId == positionId)
-            .Select(i => i.Clone())
+            .Select(i => i.Snapshot())
             .ToList()
             .AsReadOnly();
 

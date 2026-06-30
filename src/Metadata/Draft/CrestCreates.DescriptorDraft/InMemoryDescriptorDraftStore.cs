@@ -10,14 +10,14 @@ public sealed class InMemoryDescriptorDraftStore : IDescriptorDraftStore
 
     public Task SaveAsync(Draft draft, CancellationToken ct = default)
     {
-        _drafts[(draft.TenantId, draft.DraftId)] = draft.CreateClone();
+        _drafts[(draft.TenantId, draft.DraftId)] = draft.Snapshot();
         return Task.CompletedTask;
     }
 
     public Task<Draft?> GetAsync(string tenantId, string draftId, CancellationToken ct = default)
     {
         if (_drafts.TryGetValue((tenantId, draftId), out var existing))
-            return Task.FromResult<Draft?>(existing.CreateClone());
+            return Task.FromResult<Draft?>(existing.Snapshot());
         return Task.FromResult<Draft?>(null);
     }
 
@@ -42,7 +42,7 @@ public sealed class InMemoryDescriptorDraftStore : IDescriptorDraftStore
                 results = results.Where(d => d.CreatedAt <= query.CreatedTo.Value);
         }
 
-        var list = results.Select(d => d.CreateClone()).ToList().AsReadOnly();
+        var list = results.Select(d => d.Snapshot()).ToList().AsReadOnly();
         return Task.FromResult((IReadOnlyList<Draft>)list);
     }
 }

@@ -1,8 +1,9 @@
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Snapshot.Abstractions;
 
 namespace CrestCreates.DescriptorDraft.Abstractions;
 
-public sealed record DescriptorDraft
+public sealed record DescriptorDraft : ISnapshotable<DescriptorDraft>
 {
     public required string TenantId { get; init; }
     public required string DraftId { get; init; }
@@ -30,9 +31,9 @@ public sealed record DescriptorDraft
     /// the stored snapshot does not share list or dictionary state with callers.
     /// Metadata dictionary is also copied to prevent shared mutable references.
     /// </summary>
-    public DescriptorDraft CreateClone() => this with
+    public DescriptorDraft Snapshot() => this with
     {
-        Payload = Payload.CreateClone(),
+        Payload = Payload.Snapshot(),
         Metadata = Metadata is null
             ? null
             : new Dictionary<string, string>(Metadata, StringComparer.Ordinal)

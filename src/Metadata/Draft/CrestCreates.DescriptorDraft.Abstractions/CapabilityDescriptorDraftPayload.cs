@@ -14,7 +14,7 @@ public sealed record CapabilityDescriptorDraftPayload(
 {
     public override DescriptorKind DescriptorKind => DescriptorKind.Capability;
     public override IDescriptor GetDescriptor() => Descriptor;
-    public override DescriptorDraftPayload CreateClone() => this with
+    public override DescriptorDraftPayload Snapshot() => this with
     {
         Descriptor = new CapabilityDescriptor
         {

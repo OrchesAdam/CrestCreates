@@ -577,7 +577,7 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
                         PackageVersion = "1",
                         DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
                     },
-                    Snapshot = new DescriptorSnapshot(),
+                    SnapshotData = new DescriptorSnapshot(),
                     Evidence = new DescriptorPackageEvidence
                     {
                         NormalizedFindings = findings.AsReadOnly(),
@@ -696,7 +696,7 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
                         PackageVersion = "1",
                         DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
                     },
-                    Snapshot = new DescriptorSnapshot(),
+                    SnapshotData = new DescriptorSnapshot(),
                     Evidence = new DescriptorPackageEvidence
                     {
                         NormalizedFindings = findings.AsReadOnly(),
@@ -795,7 +795,7 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
                         PackageVersion = "1",
                         DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
                     },
-                    Snapshot = new DescriptorSnapshot(),
+                    SnapshotData = new DescriptorSnapshot(),
                     Evidence = new DescriptorPackageEvidence
                     {
                         NormalizedFindings = Array.Empty<EvidenceFinding>(),
@@ -1107,7 +1107,7 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
                         PackageVersion = "1",
                         DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
                     },
-                Snapshot = new DescriptorSnapshot(),
+                SnapshotData = new DescriptorSnapshot(),
                 Evidence = new DescriptorPackageEvidence()
             });
     }

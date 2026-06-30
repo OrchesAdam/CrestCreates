@@ -46,11 +46,12 @@ public sealed class InMemoryAgentConversationStore : IAgentConversationStore
             });
         }
 
-        _conversations[(conversation.TenantId, conversation.ConversationId)] = conversation with
+        var record = conversation with
         {
             Turns = sanitizedTurns.ToArray(),
             Diagnostics = diagnostics.ToArray()
         };
+        _conversations[(conversation.TenantId, conversation.ConversationId)] = record.Snapshot();
         return ValueTask.CompletedTask;
     }
 
@@ -59,18 +60,7 @@ public sealed class InMemoryAgentConversationStore : IAgentConversationStore
         _conversations.TryGetValue((tenantId, conversationId), out var conversation);
         if (conversation is null) return new ValueTask<AgentConversationRecord?>((AgentConversationRecord?)null);
 
-        var snapshot = conversation with
-        {
-            Turns = conversation.Turns
-                .Select(t => t with
-                {
-                    DescriptorRefs = t.DescriptorRefs.ToArray(),
-                    SourceRefs = t.SourceRefs.ToArray(),
-                    Diagnostics = t.Diagnostics.ToArray()
-                })
-                .ToArray(),
-            Diagnostics = conversation.Diagnostics.ToArray()
-        };
+        var snapshot = conversation.Snapshot();
         return new ValueTask<AgentConversationRecord?>(snapshot);
     }
 }
