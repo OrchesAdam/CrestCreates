@@ -1,4 +1,7 @@
+using System.Linq;
 using System.Threading.Tasks;
+using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Samples.DescriptorControlPlane;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
@@ -100,5 +103,41 @@ public sealed class CompanyCertificationGoldenScenarioTests : IAsyncLifetime
         report.ControlPlanePassed.Should().BeFalse();
         report.RuntimeBlockedByGovernance.Should().BeTrue();
         report.RuntimeExecuted.Should().BeFalse();
+    }
+
+    [Fact]
+    public void GoldenScenarioHost_Should_Build_RuntimeRegistries_From_ExplicitInventory()
+    {
+        var inventory = CompanyCertificationDescriptorCloner.CopyAllDescriptors()
+            .Where(d => d.Id != "ht_review_company_certification")
+            .ToList();
+
+        var original = (HumanTaskDescriptor)CompanyCertificationDescriptorCloner
+            .CopyDescriptor(CompanyCertificationDescriptors.ReviewCompanyCertification);
+
+        var financeTask = new HumanTaskDescriptor
+        {
+            Id = "ht_finance_review_company_certification",
+            Name = "humantask.FinanceReviewCompanyCertification",
+            Version = original.Version,
+            State = original.State,
+            SupersededById = original.SupersededById,
+            Interaction = original.Interaction,
+            InputSchema = original.InputSchema,
+            OutputSchema = original.OutputSchema,
+            AssigneeStrategy = original.AssigneeStrategy,
+            Timeout = original.Timeout,
+            Permissions = "CompanyCertification.FinanceReview",
+            Outcomes = original.Outcomes
+        };
+        inventory.Add(financeTask);
+
+        using var host = new CompanyCertificationGoldenScenarioHost(inventory);
+        using var scope = host.CreateScope();
+
+        var registry = scope.ServiceProvider.GetRequiredService<IHumanTaskRegistry>();
+
+        registry.GetById("ht_review_company_certification").Should().BeNull();
+        registry.GetById("ht_finance_review_company_certification").Should().NotBeNull();
     }
 }

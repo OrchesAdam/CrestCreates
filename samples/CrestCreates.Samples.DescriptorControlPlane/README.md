@@ -78,3 +78,27 @@ Event: CompanyCertificationApproved captured
 | HumanTask | 1 | ReviewCompanyCertification (both Approve + Reject outcomes) |
 | Workflow | 1 | 3-step: submit → review (human task) → finalize approval |
 | Event | 3 | Submitted, Approved, Rejected |
+
+## Phase 7f AI-assisted Authoring Golden Scenario
+
+The sample includes a deterministic fake authoring agent for the intent
+`Add second-level finance review before approving company certification.`
+The scenario proves intent -> AgentAuthoringContext -> DescriptorDraftSet ->
+review/fix path -> activation evidence binding -> RuntimeActivationGate ->
+fresh activated runtime host execution.
+
+### Authoring Golden Scenario Tests (13 tests)
+- Fake agent output is deterministic
+- Draft set creates finance review HumanTask
+- Draft set updates workflow with finance review step
+- Draft set sequential materialization produces final proposed inventory
+- Draft set final decision rechecks complete inventory
+- Runtime proof builds fresh host from approved final inventory
+- Runtime proof completes initial review then finance review
+- Activation request binds final review and package evidence hashes
+- Activation gate success alone does not count as runtime proof
+- Authoring context memory is non-authoritative
+- Authoring context metadata wins when memory conflicts
+- Fake authoring agent cannot call RuntimeActivationGate
+- Fake authoring agent cannot call runtime handlers
+- Phase 7f end-to-end: authoring to activated runtime golden scenario

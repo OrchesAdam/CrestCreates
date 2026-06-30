@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-06-29
+Last Updated: 2026-06-30
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -741,6 +741,28 @@ Dependency boundaries enforced:
 - Memory runtime does NOT reference ControlPlane, Framework Api/Web, Platform, or persistence providers
 
 Main chain flow: SaveConversation → Compress → ExtractCandidates → Promote → Recall → BuildAuthoringContext
+
+### AI-assisted Descriptor Authoring Golden Scenario (Phase 7f, 2026-06-30)
+
+Status: Implemented.
+
+Sample-level orchestration proving intent → AgentAuthoringContext → DescriptorDraftSet → review/fix → activation evidence binding → RuntimeActivationGate → fresh activated runtime host execution.
+
+Key components:
+- `FakeCompanyCertificationAuthoringAgent` — deterministic fake consuming only `AgentAuthoringContext`; no DI, no runtime services, no LLM calls
+- `CompanyCertificationDescriptorCloner` — deep-copy helpers for all descriptor kinds used in the sample
+- `CompanyCertificationAuthoringGoldenScenarioRunner` — orchestrates authoring → draft set review → activation → fresh host runtime proof
+- `CompanyCertificationAuthoringGoldenScenarioReport` — captures full pipeline result (authoring, review, activation, runtime proof fields)
+- `CompanyCertificationChangeScenarios.FromInventory` — builds change scenario from explicit descriptor inventory
+
+Key invariants:
+- Draft set is atomic — any single draft failure fails the entire set
+- Review uses `IDescriptorDraftReviewService` (not ad-hoc approval)
+- Activation binding uses 7-slot `BindingHashes` with `IActivationBindingArtifactResolver` storage
+- Runtime proof exercises fresh host built from approved final inventory (not the original host)
+- `AgentMemoryPack.IsAuthoritative` is always false — metadata wins over conflicting memory
+- Fake agent has no constructor dependencies — cannot access RuntimeActivationGate or runtime handlers
+- 14 tests in `CompanyCertificationAuthoringGoldenScenarioTests`
 
 ---
 
