@@ -161,29 +161,57 @@ After all call sites are migrated, delete `Clone()`.
 
 Agent Memory should be included because #43 has completed and the memory runtime now has many stable public boundary contracts plus hand-written defensive copy logic.
 
-Migrate stable public memory contracts that carry nested collections or cross service/store boundaries, including:
+Do not migrate a model solely because it exists in Agent Memory. Migrate it only if it crosses a store, service, runtime, or authoring boundary and currently requires or already implements defensive-copy semantics.
+
+Migrate Agent Memory in layers so aggregate models can recursively use leaf snapshots before query/result/composition models are considered.
+
+### 9.1 Memory Value and Reference Leaf Models
+
+Migrate leaf models first:
 
 - `AgentContextSourceRef`
 - `AgentContextEvidenceRef`
 - `AgentMemoryDiagnostic`
+- `SanitizedAgentContent`
+- source range, metadata, and evidence reference models if present
+
+These models are copied by many aggregate contracts. They should be migrated first so later snapshots do not duplicate leaf-copy logic.
+
+### 9.2 Memory Aggregate and Store Boundary Models
+
+Migrate aggregate and store boundary models after leaf models:
+
 - `AgentMemoryInvocationContext`
 - `AgentConversationTurn`
 - `AgentConversationRecord`
 - `AgentTaskEvent`
 - `AgentTaskRecord`
-- `SanitizedAgentContent`
 - `AgentCompressedContextBlock`
 - `AgentCompressedContext`
 - `AgentMemoryCandidate`
 - `AgentMemoryItem`
-- `AgentMemoryQuery`
+
+These are the primary objects saved to or returned from in-memory stores. Store implementations should stop duplicating manual copy expressions and call model-owned `Snapshot()`.
+
+### 9.3 Query, Result, and Composition Models
+
+Migrate query/result/composition models last:
+
 - `AgentMemoryPack`
+- `AgentMemoryPackEntry` if present
 - `AgentMemoryOperationRequest`
 - `AgentAuthoringRequest`
 - `AgentAuthoringContext`
-- source expansion request/result/entry models if present
+- `AgentSourceExpansionResult` and entry models if present
 
-Agent Memory stores should stop duplicating manual copy expressions and call model-owned `Snapshot()`.
+`AgentMemoryQuery` and other request models should not automatically implement `ISnapshotable<T>`. Migrate a request/query model only when at least one of these is true:
+
+- it is stored or cached;
+- it is held across an asynchronous pipeline boundary;
+- it contains mutable collections and is reused after submission;
+- existing code already performs defensive-copy logic for it.
+
+This preserves the rule that `ISnapshotable<T>` is a boundary-copy contract, not a generic DTO marker.
 
 This migration must preserve:
 
