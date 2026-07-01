@@ -1,7 +1,7 @@
 # Phase 7g - LLM-backed Descriptor Authoring Adapter
 
 > Date: 2026-07-01  
-> Status: Design Approved  
+> Status: Draft - Review Required  
 > Issue: #48  
 > Builds on: #43 Agent Memory first closure, #32 Phase 7f authoring golden scenario
 
@@ -105,6 +105,7 @@ Add framework-level authoring projects:
 src/Runtime/Agent/
   CrestCreates.Agent.Authoring.Abstractions/
   CrestCreates.Agent.Authoring/
+  CrestCreates.Agent.Authoring.Http/
 
 tests/Runtime/Agent/
   CrestCreates.Agent.Authoring.Tests/
@@ -123,10 +124,13 @@ DescriptorAuthoringDiagnostic
 DescriptorAuthoringDiagnosticCodes
 DescriptorAuthoringPromptInput
 DescriptorAuthoringPromptOutput
+DescriptorAuthoringMetadataContextProjection
+DescriptorAuthoringMemoryProjection
 DescriptorAuthoringModelRequest
 DescriptorAuthoringModelResponse
 DescriptorAuthoringModelProfile
 DescriptorAuthoringProviderProfile
+IDescriptorAuthoringCredentialProvider
 ```
 
 Dependency direction:
@@ -174,13 +178,45 @@ Dependency direction:
 ```text
 CrestCreates.Agent.Authoring
   -> CrestCreates.Agent.Authoring.Abstractions
+  -> CrestCreates.Agent.Memory.Abstractions
+  -> CrestCreates.DescriptorDraft.Abstractions
+  -> CrestCreates.Metadata.Abstractions
+  -> CrestCreates.Metadata.ContextPack.Abstractions
+  -> canonical hash infrastructure
+  -> System.Text.Json
   -> Microsoft.Extensions.DependencyInjection.Abstractions
+  -> Microsoft.Extensions.Logging.Abstractions
+  -> Microsoft.Extensions.Options
+```
+
+`CrestCreates.Agent.Authoring` remains provider-agnostic. It must not reference
+HTTP provider DTOs, provider SDKs, or concrete provider projects.
+
+### 4.3 Provider Integration Project
+
+`CrestCreates.Agent.Authoring.Http` owns the first real provider client:
+
+```text
+HttpDescriptorAuthoringModelClient
+OpenAI-compatible request/response projection
+provider options binding
+credential reference resolution
+```
+
+Dependency direction:
+
+```text
+CrestCreates.Agent.Authoring.Http
+  -> CrestCreates.Agent.Authoring.Abstractions
+  -> Microsoft.Extensions.Http
+  -> Microsoft.Extensions.Options
   -> Microsoft.Extensions.Logging.Abstractions
 ```
 
-Provider-specific SDKs may be referenced only by real provider client
-implementations behind `IDescriptorAuthoringModelClient`. Provider SDK types
-must not leak into public authoring contracts.
+Provider-specific SDKs or HTTP DTOs may be referenced only by provider
+integration projects behind `IDescriptorAuthoringModelClient`. Provider SDK,
+HTTP DTO, credential, and options types must not leak into
+`CrestCreates.Agent.Authoring.Abstractions` or `CrestCreates.Agent.Authoring`.
 
 ## 5. Productizing the Phase 7f Boundary
 
@@ -241,14 +277,30 @@ DescriptorAuthoringStatus Status
 
 ```text
 Succeeded
-Failed
+SucceededWithDiagnostics
 Blocked
 InvalidProviderOutput
 ProviderUnavailable
+Failed
 ```
+
+Status semantics:
+
+| Status | Meaning |
+| --- | --- |
+| `Succeeded` | Generated a plan and draft set with no diagnostics. |
+| `SucceededWithDiagnostics` | Generated a plan and draft set with info or warning diagnostics. |
+| `Blocked` | Deterministic governance, hash, descriptor kind, operation, or boundary rules rejected the output. |
+| `InvalidProviderOutput` | Provider returned a response, but JSON, contract, parser, or discriminator validation failed. |
+| `ProviderUnavailable` | Timeout, network, rate-limit, authentication, or provider availability failure. |
+| `Failed` | Unexpected internal failure. |
 
 `DescriptorAuthoringDiagnostic` must use `DiagnosticCode` and
 `SeverityLevel`, matching the platform diagnostic style.
+
+`DescriptorAuthoringDiagnosticCodes` must be centralized as semantic-string
+governed constants. Inline diagnostic code literals are not allowed outside the
+definition class and test fixtures.
 
 ## 7. LLM Adapter Data Flow
 
@@ -270,6 +322,7 @@ AgentAuthoringContext
 ### 7.1 Prompt Input
 
 `DescriptorAuthoringPromptInput` is structural, stable, and canonical-hashable.
+It contains normalized authoring projections, not raw upstream object graphs.
 
 It includes:
 
@@ -277,11 +330,21 @@ It includes:
 ContractVersion
 TenantId
 IntentText
-MetadataContextPack
-AgentMemoryPack
+DescriptorAuthoringMetadataContextProjection
+DescriptorAuthoringMemoryProjection
 VisibleDescriptorRefs
 SupportedDescriptorKinds
 ```
+
+The metadata projection contains only authoring-relevant facts from
+`MetadataContextPack`: visible descriptor summaries, stable hashes,
+relationships needed for authoring, topology/governance summaries, and
+diagnostics that affect authoring decisions.
+
+The memory projection contains only authoring-relevant recalled memory facts:
+memory ids, kinds, sanitized content summaries, source refs, confidence,
+canonical content hashes, and non-authoritative status. It must not carry raw
+conversation or task history.
 
 The prompt input hash is the deterministic fixture key.
 
@@ -296,6 +359,11 @@ PromptInputHash
 
 The implementation must use the existing canonical hash runtime. It must not
 add ad-hoc SHA256, pipe-delimited string hashing, or helper-style hash utilities.
+
+The prompt input hash must be computed from the normalized authoring projection,
+not from arbitrary upstream object serialization. Upstream `MetadataContextPack`
+or `AgentMemoryPack` field additions must not invalidate recorded fixtures
+unless those fields are explicitly projected into the authoring input.
 
 ### 7.2 Prompt Output
 
@@ -332,6 +400,7 @@ DescriptorAuthoringProviderProfile
   ProviderName
   Endpoint
   Timeout
+  CredentialReference
 
 DescriptorAuthoringModelProfile
   ProfileName
@@ -343,9 +412,21 @@ DescriptorAuthoringModelProfile
   SupportsStructuredOutput
 ```
 
-Phase 7g includes one real provider client behind this interface, but tests and
-CI must use fake or recorded clients. Live provider access is not required for
-deterministic verification.
+Phase 7g includes one real provider client in a provider-specific integration
+project behind this interface, but tests and CI must use fake or recorded
+clients. Live provider access is not required for deterministic verification.
+
+`DescriptorAuthoringProviderProfile` must not carry raw secret values. Secrets
+must be resolved through an injected credential provider, options source, or
+setting source. Provider profiles may carry only secret names, setting names,
+environment variable names, or credential references.
+
+Runtime-manageable provider configuration should reuse Setting Management where
+appropriate, but Phase 7g does not implement a production prompt or provider
+configuration platform.
+
+Diagnostics, logs, prompt outputs, model request records, and recorded fixtures
+must never include secret material.
 
 ## 8. Output Parser
 
@@ -360,6 +441,20 @@ LLM JSON
   -> DescriptorDraftSet
 ```
 
+The plan DTO must make evidence explicit enough for parser diagnostics:
+
+```text
+DescriptorAuthoringPlanItem
+  DescriptorKind
+  DescriptorId
+  Operation
+  Payload
+  Rationale
+  EvidenceRefs[]
+  MemoryRefs[]
+  Assumptions[]
+```
+
 The parser must validate:
 
 - contract version match;
@@ -372,10 +467,16 @@ The parser must validate:
 - no runtime mutation request;
 - no runtime handler execution request;
 - no Control Plane tool invocation request;
-- no memory claim overriding `MetadataContextPack`.
+- no explicit memory authority claim over `MetadataContextPack`.
 
 Invalid output returns structured diagnostics. It must not escape as an
 uncontrolled exception from `LlmDescriptorAuthoringAgent.AuthorAsync`.
+
+The parser is not required to prove every semantic conflict between memory and
+metadata. It must reject explicit claims that memory is authoritative over active
+metadata, and it may diagnose field-level conflicts when the plan item provides
+enough evidence refs to do so. Deterministic draft review and governance remain
+the final detectors for semantic conflicts.
 
 ## 9. Governance Boundaries
 
@@ -427,6 +528,11 @@ DescriptorDraftSet
   -> RuntimeActivationGate
 ```
 
+`DescriptorDraftSet` is an atomic authoring proposal. If any draft in the set is
+invalid, unsupported, or blocked by parser governance rules, the adapter returns
+`Blocked` or `InvalidProviderOutput` and does not return a partially successful
+draft set. Partial draft set success is not part of Phase 7g.
+
 ## 10. Memory Authority Rule
 
 `AgentMemoryPack` is recalled context only.
@@ -470,6 +576,7 @@ Public DTOs should remain AoT-friendly:
 - no `dynamic`;
 - no `object` payloads in public contract models;
 - no provider SDK request/response types in public contracts;
+- no HTTP/provider DTO types in authoring abstractions or authoring core;
 - source-generated `JsonSerializerContext` for authoring DTOs and parser DTOs;
 - stable discriminators for descriptor draft payloads;
 - immutable collection surfaces.
@@ -492,15 +599,21 @@ Minimum tests:
 Contracts_Are_FrameworkNamespace_NotSampleNamespace
 AuthoringAbstractions_DoNotReference_ControlPlane
 AuthoringRuntime_DoNotReference_ControlPlane_Or_RuntimeExecution
+AuthoringAbstractions_DoNotReference_Http_Or_ProviderSdk
+AuthoringCore_DoNotReference_Http_Or_ProviderSdk
+AuthoringRuntime_DoesNotReference_ProviderSpecificProject
 LlmAgent_Consumes_Only_AgentAuthoringContext
 PromptInputHash_IsStable
 PromptInputHash_Changes_When_MetadataContextPack_Changes
+PromptInputHash_UsesAuthoringProjection_NotRawObjectSerialization
 PromptInputHashMismatch_IsRejected
 InvalidJson_ReturnsParserDiagnostics
 UnknownDescriptorKind_IsRejected
 RuntimeOperationRequest_IsRejected
 AgentMemoryPack_IsNonAuthoritative_MetadataWins
+ProviderProfile_DoesNotExpose_Secrets
 RecordedFixture_ProducesStableDraftSet
+DescriptorDraftSet_IsAtomic_OnSingleInvalidDraft
 LlmResult_Output_IsDraftSet_NotActiveDescriptor
 GoldenScenario_LlmFixture_StillUsesGovernanceMainline
 ```
@@ -537,9 +650,14 @@ No test should require live provider access.
 ### Slice C - Provider Profile and Real Client Boundary
 
 - Add provider and model profile contracts.
-- Add one real provider client behind `IDescriptorAuthoringModelClient`.
+- Add `IDescriptorAuthoringCredentialProvider`.
+- Add `CrestCreates.Agent.Authoring.Http`.
+- Add one real provider client behind `IDescriptorAuthoringModelClient` in the
+  provider integration project.
 - Keep live provider execution out of CI.
-- Keep provider SDK details out of public contracts.
+- Keep provider SDK, HTTP DTO, option, and credential details out of public
+  contracts and authoring core.
+- Add secret redaction and profile boundary tests.
 
 ### Slice D - Golden Scenario Fixture Integration
 
@@ -558,9 +676,15 @@ Phase 7g is complete when:
 - the LLM adapter consumes only `AgentAuthoringContext`;
 - the LLM adapter produces `DescriptorAuthoringPlan` and `DescriptorDraftSet`;
 - prompt input is canonical-hashable and fixture-friendly;
+- prompt input hashes are computed from normalized authoring projections, not
+  raw upstream object serialization;
 - model output is parsed through deterministic diagnostics;
 - fake and recorded model clients make tests deterministic;
-- one real provider client boundary exists without leaking provider SDK types;
+- one real provider client boundary exists in a provider-specific integration
+  project without leaking provider SDK or HTTP DTO types into authoring
+  abstractions or authoring core;
+- provider profiles do not carry raw secret values;
+- `DescriptorDraftSet` is treated as an atomic authoring proposal;
 - produced drafts still flow through existing review, report/fix, package
   preview, evidence binding, activation handoff, HumanTask review when required,
   and `RuntimeActivationGate`;
