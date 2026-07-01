@@ -23,7 +23,7 @@ namespace CrestCreates.MultiTenancy
         /// </summary>
         public static IServiceCollection AddMultiTenancy(
             this IServiceCollection services,
-            Action<MultiTenancyOptions> configureOptions = null)
+            Action<MultiTenancyOptions>? configureOptions = null)
         {
             if (services == null) throw new ArgumentNullException(nameof(services));
 
@@ -49,7 +49,7 @@ namespace CrestCreates.MultiTenancy
         /// </summary>
         public static IServiceCollection AddInMemoryTenantProvider(
             this IServiceCollection services,
-            Action<InMemoryTenantProvider> configure = null)
+            Action<InMemoryTenantProvider>? configure = null)
         {
             services.TryAddSingleton<ITenantProvider>(sp =>
             {
@@ -125,8 +125,8 @@ namespace CrestCreates.MultiTenancy
         /// </summary>
         public static IServiceCollection AddMultiTenancyWithInMemory(
             this IServiceCollection services,
-            Action<MultiTenancyOptions> configureOptions = null,
-            Action<InMemoryTenantProvider> configureTenants = null)
+            Action<MultiTenancyOptions>? configureOptions = null,
+            Action<InMemoryTenantProvider>? configureTenants = null)
         {
             services.AddMultiTenancy(configureOptions);
             services.AddTenantResolversFromOptions();
@@ -139,7 +139,7 @@ namespace CrestCreates.MultiTenancy
         /// </summary>
         public static IServiceCollection AddMultiTenancyWithConfiguration(
             this IServiceCollection services,
-            Action<MultiTenancyOptions> configureOptions = null)
+            Action<MultiTenancyOptions>? configureOptions = null)
         {
             services.AddMultiTenancy(configureOptions);
             services.AddTenantResolversFromOptions();

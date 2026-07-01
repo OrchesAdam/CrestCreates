@@ -1,4 +1,5 @@
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 
 namespace CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 
@@ -28,10 +29,12 @@ public interface IDescriptorActivationRequestService
     /// <summary>
     /// Evaluates activation eligibility for a draft without creating a request.
     /// Advisory — not authorization to activate.
+    /// When no governanceDecision is provided, defaults to ReviewRequired (fail-closed).
     /// </summary>
     Task<AgentToolResult<DescriptorActivationDecision>> EvaluateActivationEligibilityAsync(
         AgentToolInvocationContext context,
         string draftId,
+        DescriptorLifecycleDecisionKind? governanceDecision = null,
         CancellationToken ct = default);
 
     /// <summary>

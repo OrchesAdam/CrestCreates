@@ -20,9 +20,9 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         where TKey : IEquatable<TKey>
     {
         protected readonly ISqlSugarClient _sqlSugarClient;
-        protected readonly ILogger<SqlSugarRepository<TEntity, TKey>> _logger;
+        protected readonly ILogger<SqlSugarRepository<TEntity, TKey>>? _logger;
 
-        protected SqlSugarRepository(ISqlSugarClient sqlSugarClient, ILogger<SqlSugarRepository<TEntity, TKey>> logger = null)
+        protected SqlSugarRepository(ISqlSugarClient sqlSugarClient, ILogger<SqlSugarRepository<TEntity, TKey>>? logger = null)
         {
             _sqlSugarClient = sqlSugarClient;
             _logger = logger;

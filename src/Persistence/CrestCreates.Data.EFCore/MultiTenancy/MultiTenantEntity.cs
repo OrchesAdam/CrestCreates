@@ -16,6 +16,6 @@ namespace CrestCreates.Data.EFCore.MultiTenancy
     /// </summary>
     public abstract class MultiTenantEntity<TKey> : MultiTenantEntity
     {
-        public virtual TKey Id { get; set; }
+        public virtual TKey Id { get; set; } = default!;
     }
 }

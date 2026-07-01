@@ -321,12 +321,12 @@ namespace CrestCreates.Data.EFCore.DbContexts
             return new EfCoreDataBaseTransaction(transaction, this);
         }
 
-        public IDataBaseTransaction CurrentTransaction => 
+        public IDataBaseTransaction? CurrentTransaction => 
             Database.CurrentTransaction != null 
                 ? new EfCoreDataBaseTransaction(Database.CurrentTransaction, this) 
                 : null;
 
-        public string ConnectionString => Database.GetConnectionString();
+        public string? ConnectionString => Database.GetConnectionString();
 
         public object GetNativeContext() => this;
 
@@ -337,7 +337,7 @@ namespace CrestCreates.Data.EFCore.DbContexts
             return new EfCoreQueryableBuilder<TEntity>(base.Set<TEntity>());
         }
 
-        public Task<int> ExecuteSqlRawAsync(string sql, IEnumerable<object> parameters = null, CancellationToken cancellationToken = default)
+        public Task<int> ExecuteSqlRawAsync(string sql, IEnumerable<object>? parameters = null, CancellationToken cancellationToken = default)
         {
             return Database.ExecuteSqlRawAsync(sql, parameters ?? new object[0], cancellationToken);
         }

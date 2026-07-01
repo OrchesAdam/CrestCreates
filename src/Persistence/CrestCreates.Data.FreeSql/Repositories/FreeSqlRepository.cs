@@ -29,16 +29,16 @@ namespace CrestCreates.Data.FreeSql.Repositories
         where TKey : IEquatable<TKey>
     {
         protected readonly IFreeSql _orm;
-        protected readonly ILogger<FreeSqlRepository<TEntity, TKey>> _logger;
+        protected readonly ILogger<FreeSqlRepository<TEntity, TKey>>? _logger;
 
         /// <summary>
         /// 构造函数（支持 UnitOfWorkManager）
         /// </summary>
         /// <param name="uowManager">工作单元管理器</param>
         /// <param name="logger">日志记录器</param>
-        public FreeSqlRepository(UnitOfWork.FreeSqlUnitOfWorkManager uowManager, ILogger<FreeSqlRepository<TEntity, TKey>> logger = null)
+        public FreeSqlRepository(UnitOfWork.FreeSqlUnitOfWorkManager uowManager, ILogger<FreeSqlRepository<TEntity, TKey>>? logger = null)
         {
-            _orm = uowManager?.Orm;
+            _orm = uowManager.Orm ?? throw new InvalidOperationException("UnitOfWorkManager.Orm must not be null.");
             _logger = logger;
         }
 

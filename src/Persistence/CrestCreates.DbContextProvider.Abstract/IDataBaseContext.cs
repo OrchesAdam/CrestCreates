@@ -37,12 +37,12 @@ namespace CrestCreates.DbContextProvider.Abstract
         /// <summary>
         /// 获取当前活动的数据库事务
         /// </summary>
-        IDataBaseTransaction CurrentTransaction { get; }
+        IDataBaseTransaction? CurrentTransaction { get; }
 
         /// <summary>
         /// 获取数据库连接字符串
         /// </summary>
-        string ConnectionString { get; }
+        string? ConnectionString { get; }
         
         /// <summary>
         /// 获取查询构建器

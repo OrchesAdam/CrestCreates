@@ -9,7 +9,7 @@ namespace CrestCreates.DistributedTransaction.CAP.Implementations
 {
     public class DistributedTransactionManager : IDistributedTransactionManager
     {
-        private IDistributedTransaction _currentTransaction;
+        private IDistributedTransaction? _currentTransaction;
         private readonly IServiceProvider _serviceProvider;
 
         public DistributedTransactionManager(IServiceProvider serviceProvider)
@@ -17,7 +17,7 @@ namespace CrestCreates.DistributedTransaction.CAP.Implementations
             _serviceProvider = serviceProvider;
         }
 
-        public IDistributedTransaction CurrentTransaction => _currentTransaction;
+        public IDistributedTransaction? CurrentTransaction => _currentTransaction;
         public bool HasActiveTransaction => CurrentTransaction != null;
 
         public async Task<IDistributedTransaction> CreateTransactionAsync()

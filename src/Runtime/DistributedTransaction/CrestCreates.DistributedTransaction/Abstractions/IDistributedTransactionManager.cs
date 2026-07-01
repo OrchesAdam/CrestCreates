@@ -7,7 +7,7 @@ namespace CrestCreates.DistributedTransaction.Abstractions
     public interface IDistributedTransactionManager
     {
         Task<IDistributedTransaction> CreateTransactionAsync();
-        IDistributedTransaction CurrentTransaction { get; }
+        IDistributedTransaction? CurrentTransaction { get; }
         bool HasActiveTransaction { get; }
         
         Task<TResult> ExecuteInTransactionAsync<TResult>(

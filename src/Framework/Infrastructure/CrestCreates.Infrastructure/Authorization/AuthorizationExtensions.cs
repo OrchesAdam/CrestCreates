@@ -18,7 +18,7 @@ namespace CrestCreates.Infrastructure.Authorization
     {
         public static IServiceCollection AddRbacAuthorization(
             this IServiceCollection services,
-            Action<AuthorizationOptions> configureOptions = null)
+            Action<AuthorizationOptions>? configureOptions = null)
         {
             if (services == null) throw new ArgumentNullException(nameof(services));
 
@@ -42,7 +42,7 @@ namespace CrestCreates.Infrastructure.Authorization
 
         public static IServiceCollection AddPermissionPolicies(
             this IServiceCollection services,
-            Action<Microsoft.AspNetCore.Authorization.AuthorizationOptions> configure = null)
+            Action<Microsoft.AspNetCore.Authorization.AuthorizationOptions>? configure = null)
         {
             services.AddAuthorization(options =>
             {

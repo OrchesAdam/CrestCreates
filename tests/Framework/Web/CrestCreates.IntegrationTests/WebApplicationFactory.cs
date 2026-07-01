@@ -58,8 +58,7 @@ namespace CrestCreates.IntegrationTests;
 public sealed class LibraryManagementWebApplicationFactory
     : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
-        .WithImage("postgres:16-alpine")
+    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine")
         .WithDatabase("crestcreates_test")
         .WithUsername("test")
         .WithPassword("test")
@@ -375,10 +374,8 @@ public sealed class LibraryManagementWebApplicationFactory
 
             // Tenant infrastructure - use no-op stubs since the SQL Server provisioner
             // does not work with PostgreSQL test containers.
-            services.AddScoped<ITenantDatabaseProvisioner, NoOpTenantDatabaseInitializer>();
-            services.AddScoped<ITenantDatabaseInitializer, NoOpTenantDatabaseInitializer>();
-            services.AddScoped<ITenantSchemaMigrator, NoOpTenantMigrationRunner>();
-            services.AddScoped<ITenantMigrationRunner, NoOpTenantMigrationRunner>();
+            services.AddScoped<ITenantDatabaseProvisioner, NoOpTenantDatabaseProvisioner>();
+            services.AddScoped<ITenantSchemaMigrator, NoOpTenantSchemaMigrator>();
             services.AddScoped<ITenantInitializationStore, NoOpTenantInitializationStore>();
 
             // Security & event bus services — normally registered by SecurityModule / AddCrestWeb
@@ -401,14 +398,14 @@ public sealed class LibraryManagementWebApplicationFactory
         await base.DisposeAsync();
     }
 
-    private sealed class NoOpTenantDatabaseInitializer : ITenantDatabaseInitializer
+    private sealed class NoOpTenantDatabaseProvisioner : ITenantDatabaseProvisioner
     {
         public Task<TenantDatabaseInitializeResult> InitializeAsync(
             TenantInitializationContext context, CancellationToken cancellationToken = default)
             => Task.FromResult(TenantDatabaseInitializeResult.Succeeded());
     }
 
-    private sealed class NoOpTenantMigrationRunner : ITenantMigrationRunner
+    private sealed class NoOpTenantSchemaMigrator : ITenantSchemaMigrator
     {
         public Task<TenantMigrationResult> RunAsync(
             TenantInitializationContext context, CancellationToken cancellationToken = default)

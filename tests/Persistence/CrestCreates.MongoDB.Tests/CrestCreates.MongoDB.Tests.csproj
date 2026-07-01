@@ -6,7 +6,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <NoWarn>$(NoWarn);NU1504;NU1510</NoWarn>
+    <NoWarn>$(NoWarn);NU1504</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

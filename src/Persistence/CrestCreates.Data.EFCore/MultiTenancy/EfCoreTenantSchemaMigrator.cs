@@ -26,7 +26,7 @@ public class EfCoreTenantSchemaMigrator : ITenantSchemaMigrator
     {
         try
         {
-            await using var dbContext = _tenantDbContextFactory(context.ConnectionString);
+            await using var dbContext = _tenantDbContextFactory(context.ConnectionString!);
             await dbContext.Database.MigrateAsync(cancellationToken);
             return TenantMigrationResult.Succeeded();
         }

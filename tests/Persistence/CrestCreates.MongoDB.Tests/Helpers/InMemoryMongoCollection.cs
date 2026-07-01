@@ -252,6 +252,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
     public Task InsertOneAsync(IClientSessionHandle session, TDocument document, InsertOneOptions options, CancellationToken cancellationToken = default) =>
         InsertOneAsync(document, options, cancellationToken);
 
+    #pragma warning disable CS0618
     public IAsyncCursor<TResult> MapReduce<TResult>(BsonJavaScript map, BsonJavaScript reduce, MapReduceOptions<TDocument, TResult> options, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
@@ -263,6 +264,7 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
     public Task<IAsyncCursor<TResult>> MapReduceAsync<TResult>(IClientSessionHandle session, BsonJavaScript map, BsonJavaScript reduce, MapReduceOptions<TDocument, TResult> options, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+#pragma warning restore CS0618
 
     public IFilteredMongoCollection<TDerivedDocument> OfType<TDerivedDocument>()
         where TDerivedDocument : TDocument =>

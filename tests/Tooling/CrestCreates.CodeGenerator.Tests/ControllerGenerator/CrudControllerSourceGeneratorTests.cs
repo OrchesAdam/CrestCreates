@@ -86,7 +86,9 @@ namespace TestNamespace.Services
 }
 ";
 
+            #pragma warning disable CS0618
             var result = SourceGeneratorTestHelper.RunGenerator<CrudControllerSourceGenerator>(source);
+#pragma warning restore CS0618
 
             Assert.True(result.ContainsFile("BookController"));
             var controllerSource = result.GetSourceByFileName("BookController");

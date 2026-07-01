@@ -45,7 +45,7 @@ public static class MongoServiceCollectionExtensions
         {
             var database = sp.GetRequiredService<IMongoDatabase>();
             var currentTenant = sp.GetService<ICurrentTenant>();
-            return ActivatorUtilities.CreateInstance<TRepository>(sp, database, currentTenant);
+            return ActivatorUtilities.CreateInstance<TRepository>(sp, database, currentTenant!);
         });
 
         return services;

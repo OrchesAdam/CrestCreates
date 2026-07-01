@@ -12,27 +12,27 @@ namespace CrestCreates.Infrastructure.Localization
             _resourceManager = resourceManager;
         }
         
-        public string GetString(string name)
+        public string? GetString(string name)
         {
             return _resourceManager.GetString(name);
         }
 
-        public string GetString(string name, params object[] args)
+        public string? GetString(string name, params object[] args)
         {
-            string value = GetString(name);
+            string? value = GetString(name);
             if (value == null) return null;
             
             return string.Format(value, args);
         }
 
-        public string GetString(string name, CultureInfo culture)
+        public string? GetString(string name, CultureInfo culture)
         {
             return _resourceManager.GetString(name, culture);
         }
 
-        public string GetString(string name, CultureInfo culture, params object[] args)
+        public string? GetString(string name, CultureInfo culture, params object[] args)
         {
-            string value = GetString(name, culture);
+            string? value = GetString(name, culture);
             if (value == null) return null;
             
             return string.Format(value, args);

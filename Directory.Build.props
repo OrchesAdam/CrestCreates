@@ -9,6 +9,9 @@
     <!-- 启用中央包管理 -->
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+
+    <!-- Suppress MSB4011: duplicate nuget.g.props/targets import (harmless SDK-level issue) -->
+    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB4011</MSBuildWarningsAsMessages>
   </PropertyGroup>
 
   <Import Project="$(MSBuildThisFileDirectory)Directory.Build.Aot.props" />

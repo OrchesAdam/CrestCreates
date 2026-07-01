@@ -4,9 +4,9 @@ namespace CrestCreates.MultiTenancy.Abstract
 {
     public interface ICurrentTenant
     {
-        ITenantInfo Tenant { get; }
+        ITenantInfo? Tenant { get; }
 
-        string Id { get; }
+        string? Id { get; }
 
         /// <summary>
         /// Switch to a tenant resolved from the database. Used at request entry

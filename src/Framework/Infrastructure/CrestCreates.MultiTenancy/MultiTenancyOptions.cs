@@ -41,12 +41,12 @@ namespace CrestCreates.MultiTenancy
         /// 根域名（用于 Subdomain 策略）
         /// 例如: example.com，则 tenant1.example.com 会解析为 tenant1
         /// </summary>
-        public string RootDomain { get; set; }
+        public string? RootDomain { get; set; }
 
         /// <summary>
         /// 默认租户ID（当无法解析租户时使用）
         /// </summary>
-        public string DefaultTenantId { get; set; }
+        public string? DefaultTenantId { get; set; }
 
         /// <summary>
         /// 是否允许无租户访问

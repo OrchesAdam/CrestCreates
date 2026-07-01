@@ -4,6 +4,7 @@ using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.AuditLog;
+using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.DTOs;
 using CrestCreates.MultiTenancy.Abstract;
@@ -20,8 +21,19 @@ public class EfCoreAuditLogRepository : EfCoreRepositoryBase<AuditLog, Guid>, IA
     public EfCoreAuditLogRepository(
         IDbContextProvider.IDataBaseContext dbContext,
         ICurrentTenant currentTenant)
-        : base(dbContext, currentTenant, null)
+        : base(dbContext, currentTenant, CreateNoTenantFilterState())
     {
+    }
+
+    /// <summary>
+    /// Creates a DataFilterState with tenant filter explicitly disabled.
+    /// Audit logs must be visible across tenant boundaries.
+    /// </summary>
+    private static DataFilterState CreateNoTenantFilterState()
+    {
+        var state = new DataFilterState();
+        state.SetFilterState<TenantFilter>(false);
+        return state;
     }
 
     public async Task<PagedResult<AuditLog>> GetPagedListAsync(

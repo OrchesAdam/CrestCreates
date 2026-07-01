@@ -3,8 +3,12 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Activation;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions.DescriptorBinding;
+using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
+using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using CrestCreates.Metadata.Abstractions.DescriptorPackage;
+using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -20,33 +24,10 @@ namespace CrestCreates.Agent.ControlPlane.Tests;
 public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
 {
     // ════════════════════════════════════════════════════════════════════════
-    // Testable subclass — forces governance decision for controlled testing
+    // Governance decision is now passed via SubmitActivationRequestRequest.GovernanceDecision,
+    // not via IDescriptorLifecycleGovernanceService mock (memory #153: governance evaluation
+    // lives outside RequestService). Tests set GovernanceDecision on the request object.
     // ════════════════════════════════════════════════════════════════════════
-
-    private sealed class TestableDescriptorActivationRequestService : DefaultDescriptorActivationRequestService
-    {
-        private DescriptorLifecycleDecisionKind _forcedGovernanceDecision = DescriptorLifecycleDecisionKind.Allowed;
-
-        public TestableDescriptorActivationRequestService(
-            IDescriptorLifecycleGovernanceService governanceService,
-            IDescriptorActivationPolicyProvider policyProvider,
-            IDescriptorActivationAuditor auditor,
-            IDescriptorStableHashBuilder hashBuilder,
-            DraftAbstractions.IDescriptorDraftStore draftStore,
-            IRuntimeActivationGate activationGate,
-            IActivationEvidenceRechecker evidenceRechecker,
-            ActivationBindingHashValidator bindingHashValidator,
-            ILogger<DefaultDescriptorActivationRequestService> logger)
-            : base(governanceService, policyProvider, auditor, hashBuilder, draftStore, activationGate, evidenceRechecker, bindingHashValidator, logger)
-        {
-        }
-
-        public void ForceGovernanceDecision(DescriptorLifecycleDecisionKind decision)
-            => _forcedGovernanceDecision = decision;
-
-        protected override DescriptorLifecycleDecisionKind EvaluateGovernance(Draft draft)
-            => _forcedGovernanceDecision;
-    }
 
     // ════════════════════════════════════════════════════════════════════════
     // Static helper factories
@@ -170,9 +151,9 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         => CreateContext(toolName, actorId: actorId, actorKind: actorKind);
 
     /// <summary>
-    /// Creates a fresh testable service with in-memory auditor, mock policy provider, mock draft store.
+    /// Creates a fresh service with in-memory auditor, mock policy provider, mock draft store.
     /// </summary>
-    private (TestableDescriptorActivationRequestService Service,
+    private (DefaultDescriptorActivationRequestService Service,
             InMemoryDescriptorActivationAuditor Auditor,
             Mock<IDescriptorActivationPolicyProvider> PolicyMock,
             Mock<DraftAbstractions.IDescriptorDraftStore> DraftStoreMock,
@@ -183,7 +164,6 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var auditor = new InMemoryDescriptorActivationAuditor();
         var policyMock = new Mock<IDescriptorActivationPolicyProvider>();
         var draftStoreMock = new Mock<DraftAbstractions.IDescriptorDraftStore>();
-        var governanceMock = new Mock<IDescriptorLifecycleGovernanceService>();
         var hashBuilderMock = new Mock<IDescriptorStableHashBuilder>();
         var activationGateMock = new Mock<IRuntimeActivationGate>();
         var evidenceRecheckerMock = new Mock<IActivationEvidenceRechecker>();
@@ -208,8 +188,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
                 ActivatedAt = DateTimeOffset.UtcNow
             }));
 
-        var service = new TestableDescriptorActivationRequestService(
-            governanceMock.Object,
+        var service = new DefaultDescriptorActivationRequestService(
             policyMock.Object,
             auditor,
             hashBuilderMock.Object,
@@ -252,12 +231,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: true, requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var context = CreateActivationContext();
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
 
@@ -279,18 +258,18 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
     }
 
     [Fact]
-    public async Task CreateActivationRequestAsync_AllowedWithReviewPolicy_CreatesRequiresHumanReviewUnderReviewRequest()
-    {
-        // Arrange
-        var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
-        var policy = CreatePolicy(requireHumanReviewForAll: true);
-        SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
+     public async Task CreateActivationRequestAsync_AllowedWithReviewPolicy_CreatesRequiresHumanReviewUnderReviewRequest()
+     {
+         // Arrange
+         var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
+         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: true, requireHumanReviewForAll: true);
+         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
 
-        var context = CreateActivationContext();
+         var context = CreateActivationContext();
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
 
@@ -315,12 +294,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
         var policy = CreatePolicy(requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.ReviewRequired);
 
         var context = CreateActivationContext();
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.ReviewRequired,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
 
@@ -340,12 +319,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         // Arrange
         var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
         SetupDraftAndPolicy(draftStoreMock, policyMock);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Blocked);
 
         var context = CreateActivationContext();
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Blocked,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
 
@@ -388,22 +367,22 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
     }
 
     [Fact]
-    public async Task CreateActivationRequestAsync_BindingSnapshot_RequiredFields_EnforcedByTypeSystem()
-    {
-        // PackagePreviewId and EvidencePreviewId are now required string fields on ActivationBindingSnapshot.
-        // The type system enforces completeness at compile time — there is no runtime null check needed.
-        // This test verifies that creation succeeds when all required binding fields are provided.
-        var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
-        var policy = CreatePolicy();
-        SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
+     public async Task CreateActivationRequestAsync_BindingSnapshot_RequiredFields_EnforcedByTypeSystem()
+     {
+         // PackagePreviewId and EvidencePreviewId are now required string fields on ActivationBindingSnapshot.
+         // The type system enforces completeness at compile time — there is no runtime null check needed.
+         // This test verifies that creation succeeds when all required binding fields are provided.
+         var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
+         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: true, requireHumanReviewForAll: false);
+         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
 
-        var context = CreateActivationContext();
-        var request = new SubmitActivationRequestRequest
-        {
-            DraftId = "draft-001",
-            BindingSnapshot = CreateTestBindingSnapshot()
-        };
+         var context = CreateActivationContext();
+         var request = new SubmitActivationRequestRequest
+         {
+             DraftId = "draft-001",
+             GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
+             BindingSnapshot = CreateTestBindingSnapshot()
+         };
 
         // Act
         var result = await service.CreateActivationRequestAsync(context, request);
@@ -426,7 +405,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
     /// Creates a request in UnderReview state by using a policy that requires human review.
     /// Returns the created request ID for subsequent approval/rejection tests.
     /// </summary>
-    private async Task<(TestableDescriptorActivationRequestService Service,
+    private async Task<(DefaultDescriptorActivationRequestService Service,
                          InMemoryDescriptorActivationAuditor Auditor,
                          string RequestId)>
         CreateUnderReviewRequestAsync(
@@ -437,7 +416,6 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
         var policy = CreatePolicy(requireHumanReviewForAll: true, forbidSelfApproval: forbidSelfApproval);
         SetupDraftAndPolicy(draftStoreMock, policyMock, draftId: draftId, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var context = CreateActivationContext(actorId: actorId);
         var request = new SubmitActivationRequestRequest
@@ -507,12 +485,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, _, policyMock, draftStoreMock, _, _) = CreateTestService();
         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: true, requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var createContext = CreateActivationContext();
         var submitRequest = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
         var createResult = await service.CreateActivationRequestAsync(createContext, submitRequest);
@@ -601,12 +579,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, _, policyMock, draftStoreMock, _, _) = CreateTestService();
         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: true, requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var createContext = CreateActivationContext();
         var submitRequest = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
         var createResult = await service.CreateActivationRequestAsync(createContext, submitRequest);
@@ -678,12 +656,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
             autoActivateAllowedWhenPolicyPermits: false,
             requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var createContext = CreateActivationContext();
         var submitRequest = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
         var createResult = await service.CreateActivationRequestAsync(createContext, submitRequest);
@@ -730,12 +708,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, _, policyMock, draftStoreMock, _, _) = CreateTestService();
         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: true, requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var createContext = CreateActivationContext();
         var submitRequest = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
         var createResult = await service.CreateActivationRequestAsync(createContext, submitRequest);
@@ -776,7 +754,6 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         // Arrange
         var (service, _, policyMock, draftStoreMock, _, _) = CreateTestService();
         SetupDraftAndPolicy(draftStoreMock, policyMock);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var createContext = CreateActivationContext();
         var submitRequest = new SubmitActivationRequestRequest
@@ -843,12 +820,11 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, _, policyMock, draftStoreMock, _, _) = CreateTestService();
         var policy = CreatePolicy(requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var context = CreateActivationContext();
 
         // Act
-        var result = await service.EvaluateActivationEligibilityAsync(context, "draft-001");
+        var result = await service.EvaluateActivationEligibilityAsync(context, "draft-001", DescriptorLifecycleDecisionKind.Allowed);
 
         // Assert
         result.Status.Should().Be(AgentToolResultStatus.Success);
@@ -864,12 +840,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, _, policyMock, draftStoreMock, _, _) = CreateTestService();
         var policy = CreatePolicy(requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Blocked);
 
         var context = CreateActivationContext();
 
         // Act
-        var result = await service.EvaluateActivationEligibilityAsync(context, "draft-001");
+        var result = await service.EvaluateActivationEligibilityAsync(context, "draft-001",
+            governanceDecision: DescriptorLifecycleDecisionKind.Blocked);
 
         // Assert
         result.Status.Should().Be(AgentToolResultStatus.Success);
@@ -885,12 +861,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, _, policyMock, draftStoreMock, _, _) = CreateTestService();
         var policy = CreatePolicy(requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.ReviewRequired);
 
         var context = CreateActivationContext();
 
         // Act
-        var result = await service.EvaluateActivationEligibilityAsync(context, "draft-001");
+        var result = await service.EvaluateActivationEligibilityAsync(context, "draft-001",
+            governanceDecision: DescriptorLifecycleDecisionKind.ReviewRequired);
 
         // Assert
         result.Status.Should().Be(AgentToolResultStatus.Success);
@@ -907,14 +883,13 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
     {
         // Arrange
         var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
-        var policy = CreatePolicy(requireHumanReviewForAll: false, autoActivateAllowedWhenPolicyPermits: false);
-        SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
+        SetupDraftAndPolicy(draftStoreMock, policyMock);
 
-        var context = CreateActivationContext(actorId: "submitter-001");
+        var context = CreateActivationContext();
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
 
@@ -925,7 +900,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var records = auditor.GetAllRecords();
         var submitRecord = records.Should().ContainSingle(r => r.Action == DescriptorActivationAuditAction.Submit)
             .Subject;
-        submitRecord.ActorId.Should().Be("submitter-001");
+        submitRecord.ActorId.Should().Be("actor-001");
         submitRecord.TargetDescriptorRef.Should().NotBeNull();
         submitRecord.EvidenceHash.Should().NotBeNull();
         submitRecord.EnvelopeHash.Should().NotBeNull();
@@ -999,12 +974,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         // Arrange
         var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
         SetupDraftAndPolicy(draftStoreMock, policyMock);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Blocked);
 
         var context = CreateActivationContext(actorId: "blocked-actor");
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Blocked,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
 
@@ -1025,13 +1000,13 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: false, requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var context = CreateActivationContext();
         var bindingSnapshot = CreateTestBindingSnapshot();
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = bindingSnapshot
         };
 
@@ -1067,10 +1042,10 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         // The EvaluateActivationEligibilityAsync tests above already cover this path.
         // This test validates via the full pipeline.
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Blocked);
 
         var context = CreateActivationContext();
-        var result = await service.EvaluateActivationEligibilityAsync(context, "draft-001");
+        var result = await service.EvaluateActivationEligibilityAsync(context, "draft-001",
+            governanceDecision: DescriptorLifecycleDecisionKind.Blocked);
 
         result.Value!.Eligibility.Should().Be(DescriptorActivationEligibility.NotActivatable);
     }
@@ -1081,10 +1056,9 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, _, policyMock, draftStoreMock, _, _) = CreateTestService();
         var policy = CreatePolicy(requireHumanReviewForAll: true);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var context = CreateActivationContext();
-        var result = await service.EvaluateActivationEligibilityAsync(context, "draft-001");
+        var result = await service.EvaluateActivationEligibilityAsync(context, "draft-001", DescriptorLifecycleDecisionKind.Allowed);
 
         result.Value!.Eligibility.Should().Be(DescriptorActivationEligibility.RequiresHumanReview);
     }
@@ -1095,10 +1069,9 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, _, policyMock, draftStoreMock, _, _) = CreateTestService();
         var policy = CreatePolicy(requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var context = CreateActivationContext();
-        var result = await service.EvaluateActivationEligibilityAsync(context, "draft-001");
+        var result = await service.EvaluateActivationEligibilityAsync(context, "draft-001", DescriptorLifecycleDecisionKind.Allowed);
 
         result.Value!.Eligibility.Should().Be(DescriptorActivationEligibility.AutoActivatable);
     }
@@ -1113,12 +1086,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         // Arrange
         var (service, _, policyMock, draftStoreMock, _, _) = CreateTestService();
         SetupDraftAndPolicy(draftStoreMock, policyMock);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var context = CreateActivationContext();
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
         var createResult = await service.CreateActivationRequestAsync(context, request);
@@ -1153,20 +1126,20 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
     // ════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task ExecuteActivationGateAsync_SubmittedRequest_ReturnsSuccess()
-    {
-        // Arrange — create Submitted request (auto-activation disabled to keep status at Submitted)
-        var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
-        var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: false, requireHumanReviewForAll: false);
-        SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
+     public async Task ExecuteActivationGateAsync_SubmittedRequest_ReturnsSuccess()
+     {
+         // Arrange — create Submitted request (auto-activation disabled to keep status at Submitted)
+         var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
+         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: false, requireHumanReviewForAll: false);
+         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
 
-        var context = CreateActivationContext();
-        var request = new SubmitActivationRequestRequest
-        {
-            DraftId = "draft-001",
-            BindingSnapshot = CreateTestBindingSnapshot()
-        };
+         var context = CreateActivationContext();
+         var request = new SubmitActivationRequestRequest
+         {
+             DraftId = "draft-001",
+             GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
+             BindingSnapshot = CreateTestBindingSnapshot()
+         };
         var createResult = await service.CreateActivationRequestAsync(context, request);
         var requestId = createResult.Value!.RequestId;
         createResult.Value!.Status.Should().Be(ActivationRequestStatus.Submitted);
@@ -1207,12 +1180,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, _, policyMock, draftStoreMock, _, evidenceRecheckerMock) = CreateTestService();
         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: false, requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var context = CreateActivationContext();
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
         var createResult = await service.CreateActivationRequestAsync(context, request);
@@ -1237,12 +1210,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, auditor, policyMock, draftStoreMock, _, evidenceRecheckerMock) = CreateTestService();
         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: false, requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var context = CreateActivationContext();
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
         var createResult = await service.CreateActivationRequestAsync(context, request);
@@ -1285,12 +1258,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, _, policyMock, draftStoreMock, _, evidenceRecheckerMock) = CreateTestService();
         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: true, requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var context = CreateActivationContext();
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
         var createResult = await service.CreateActivationRequestAsync(context, request);
@@ -1329,12 +1302,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, auditor, policyMock, draftStoreMock, _, evidenceRecheckerMock) = CreateTestService();
         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: false, requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var context = CreateActivationContext();
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
         var createResult = await service.CreateActivationRequestAsync(context, request);
@@ -1378,12 +1351,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, auditor, policyMock, draftStoreMock, activationGateMock, _) = CreateTestService();
         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: false, requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var context = CreateActivationContext();
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
         var createResult = await service.CreateActivationRequestAsync(context, request);
@@ -1418,52 +1391,28 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
     }
 
     [Fact]
-    public async Task ExecuteActivationGateAsync_NotActivatable_ReturnsError()
-    {
-        // Arrange
-        var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
-        SetupDraftAndPolicy(draftStoreMock, policyMock);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Blocked);
+     public async Task ExecuteActivationGateAsync_NotActivatable_ReturnsError()
+     {
+         // Arrange
+         var (service, _, policyMock, draftStoreMock, _, _) = CreateTestService();
+         SetupDraftAndPolicy(draftStoreMock, policyMock);
 
-        var context = CreateActivationContext();
-        var request = new SubmitActivationRequestRequest
-        {
-            DraftId = "draft-001",
-            BindingSnapshot = CreateTestBindingSnapshot()
-        };
+         var context = CreateActivationContext();
+         var request = new SubmitActivationRequestRequest
+         {
+             DraftId = "draft-001",
+             GovernanceDecision = DescriptorLifecycleDecisionKind.Blocked,
+             BindingSnapshot = CreateTestBindingSnapshot()
+         };
 
-        // CreateActivationRequestAsync already blocks Blocked governance requests.
-        // To test NotActivatable gate, manually create a request with NotActivatable eligibility
-        // by using the internal _requests dictionary approach...
-        // Since we cannot directly set NotActivatable through normal flow (Blocked returns InvalidRequest),
-        // we create a request with Submitted status and override eligibility.
-        // We use the auto-activation off + review off policy to get a Submitted request,
-        // then we can test by using those that are already in the store.
-        // Actually, the simplest approach: create a Submitted request, but the gate already rejects
-        // UnderReview. Let's use a different approach: test that a NotActivatable request
-        // in Submitted status is rejected.
-        var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: false, requireHumanReviewForAll: false);
-        SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
-
+         // CreateActivationRequestAsync returns InvalidRequest for Blocked governance.
+        // No request is created in the store — this is a design invariant.
+        // The NotActivatable gate check is defense-in-depth; verified by type system invariant.
         var createResult = await service.CreateActivationRequestAsync(context, request);
-        var requestId = createResult.Value!.RequestId;
-
-        // Now we need to make the request NotActivatable. Since the internal storage is in-memory,
-        // we can use GetRequestSnapshot to access it. But it's private.
-        // Instead, let's verify that the gate rejects UnderReview status (already tested).
-        // For NotActivatable: the DeriveEligibility function produces NotActivatable from Blocked,
-        // and Blocked causes CreateActivationRequestAsync to return InvalidRequest without creating.
-        // So there's no valid path to have a NotActivatable request in the store.
-        // This is a design invariant — if Blocked, no request is created.
-        // The gate check for NotActivatable is a defense-in-depth measure.
-        // We can verify it by directly calling the gate on an UnderReview request
-        // (which already tests "invalid state") — the NotActivatable check is similar.
-        // For completeness, let's verify gate denies UnderReview status (covered above).
+        createResult.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
 
         // The NotActivatable gate check is compile-time tested via the type system —
         // no request with NotActivatable eligibility enters the store through normal flow.
-        // This test validates that ExecuteActivationGateAsync properly handles the error path.
         true.Should().BeTrue("NotActivatable gate check is defense-in-depth; verified by type system invariant");
     }
 
@@ -1490,12 +1439,12 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
         var policy = CreatePolicy(autoActivateAllowedWhenPolicyPermits: true, requireHumanReviewForAll: false);
         SetupDraftAndPolicy(draftStoreMock, policyMock, policy: policy);
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
         var context = CreateActivationContext();
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
 
@@ -1526,7 +1475,6 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var auditor = new InMemoryDescriptorActivationAuditor();
         var policyMock = new Mock<IDescriptorActivationPolicyProvider>();
         var draftStoreMock = new Mock<DraftAbstractions.IDescriptorDraftStore>();
-        var governanceMock = new Mock<IDescriptorLifecycleGovernanceService>();
         var hashBuilderMock = new Mock<IDescriptorStableHashBuilder>();
         var evidenceRecheckerMock = new Mock<IActivationEvidenceRechecker>();
 
@@ -1541,8 +1489,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var gate = new InMemoryRuntimeActivationGate(NullLogger<InMemoryRuntimeActivationGate>.Instance, new ActivationBindingHashValidator());
         gate.CanReject = true;
 
-        var service = new TestableDescriptorActivationRequestService(
-            governanceMock.Object,
+        var service = new DefaultDescriptorActivationRequestService(
             policyMock.Object,
             auditor,
             hashBuilderMock.Object,
@@ -1561,13 +1508,13 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         policyMock.Setup(p => p.GetPolicyAsync(TestTenantId, It.IsAny<DescriptorKind?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(policy);
 
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.Allowed);
 
-        // Create a Submitted request
+        // Create a Submitted request (Allowed governance + auto-off + review-off policy → Submitted)
         var createContext = CreateActivationContext();
         var submitRequest = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
             BindingSnapshot = CreateTestBindingSnapshot()
         };
         var createResult = await service.CreateActivationRequestAsync(createContext, submitRequest);
@@ -1650,8 +1597,8 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",
-            BindingSnapshot = CreateTestBindingSnapshot(),
-            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed,
+            BindingSnapshot = CreateTestBindingSnapshot()
         };
 
         var context = CreateActivationContext();
@@ -1691,14 +1638,11 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
     }
 
     [Fact]
-    public async Task CreateActivationRequest_WithoutGovernanceDecision_DefaultsToFallback()
+    public async Task CreateActivationRequest_WithoutGovernanceDecision_DefaultsToReviewRequired()
     {
-        // When no GovernanceDecision is provided, the service falls back to
-        // EvaluateGovernance(draft). The testable subclass simulates ReviewRequired
-        // (the safe default of the base class) via ForceGovernanceDecision.
+        // When no GovernanceDecision is provided, the service defaults to ReviewRequired
+        // (fail-closed, memory #153: governance evaluation lives outside RequestService).
         var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
-
-        service.ForceGovernanceDecision(DescriptorLifecycleDecisionKind.ReviewRequired);
 
         var draft = CreateTestDraft();
         draftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -1708,7 +1652,7 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         policyMock.Setup(p => p.GetPolicyAsync(TestTenantId, It.IsAny<DescriptorKind?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(policy);
 
-        // No GovernanceDecision provided — falls back to EvaluateGovernance (ReviewRequired)
+        // No GovernanceDecision provided — defaults to ReviewRequired (fail-closed)
         var request = new SubmitActivationRequestRequest
         {
             DraftId = "draft-001",

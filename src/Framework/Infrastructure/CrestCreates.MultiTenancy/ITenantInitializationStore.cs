@@ -10,7 +10,7 @@ public interface ITenantInitializationStore
     Task<TenantInitializationRecord?> TryBeginInitializationAsync(
         Guid tenantId, string correlationId, CancellationToken cancellationToken = default);
 
-    Task<TenantInitializationRecord> ForceBeginInitializationAsync(
+    Task<TenantInitializationRecord?> ForceBeginInitializationAsync(
         Guid tenantId, string correlationId, string reason, CancellationToken cancellationToken = default);
 
     Task<TenantInitializationRecord?> GetLatestAsync(

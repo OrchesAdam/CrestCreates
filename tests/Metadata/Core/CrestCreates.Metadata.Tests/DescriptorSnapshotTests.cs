@@ -17,7 +17,9 @@ public class DescriptorSnapshotTests
         registry.Register(new SchemaDescriptor { Id = "schema_01", Name = "CustomerInput", Version = 1 });
         registry.Register(new SchemaDescriptor { Id = "schema_02", Name = "OrderInput", Version = 1 });
 
+#pragma warning disable CS0618
         var snapshot = DescriptorSnapshotBuilder.TakeSnapshot(registry, "CrestCreates.CRM", "1.0.0", hashBuilder);
+#pragma warning restore CS0618
 
         snapshot.Descriptors.Should().HaveCount(2);
         snapshot.PackageId.Should().Be("CrestCreates.CRM");

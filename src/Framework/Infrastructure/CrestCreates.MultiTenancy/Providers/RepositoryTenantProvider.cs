@@ -21,13 +21,13 @@ public class RepositoryTenantProvider : ITenantProvider
         _logger = logger;
     }
 
-    public async Task<ITenantInfo> GetTenantAsync(
+    public async Task<ITenantInfo?> GetTenantAsync(
         string tenantId,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(tenantId))
         {
-            return null!;
+            return null;
         }
 
         using var scope = _serviceScopeFactory.CreateScope();
@@ -48,13 +48,13 @@ public class RepositoryTenantProvider : ITenantProvider
         if (tenant == null)
         {
             _logger.LogWarning("Tenant not found in repository: {TenantId}", tenantId);
-            return null!;
+            return null;
         }
 
         if (!tenant.IsActive || tenant.LifecycleState != Domain.Permission.TenantLifecycleState.Active)
         {
             _logger.LogWarning("Tenant is inactive and will not be resolved: {TenantId}", tenantId);
-            return null!;
+            return null;
         }
 
         return new TenantInfo(

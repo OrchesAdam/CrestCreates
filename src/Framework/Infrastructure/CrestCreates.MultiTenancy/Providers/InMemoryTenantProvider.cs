@@ -23,11 +23,11 @@ namespace CrestCreates.MultiTenancy.Providers
             _logger = logger;
         }
 
-        public Task<ITenantInfo> GetTenantAsync(string tenantId, CancellationToken cancellationToken = default)
+        public Task<ITenantInfo?> GetTenantAsync(string tenantId, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(tenantId))
             {
-                return Task.FromResult<ITenantInfo>(null);
+                return Task.FromResult<ITenantInfo?>(null);
             }
 
             if (_tenants.TryGetValue(tenantId, out var tenant))
@@ -37,7 +37,7 @@ namespace CrestCreates.MultiTenancy.Providers
             }
 
             _logger.LogWarning("Tenant not found: {TenantId}", tenantId);
-            return Task.FromResult<ITenantInfo>(null);
+            return Task.FromResult<ITenantInfo?>(null);
         }
 
         /// <summary>

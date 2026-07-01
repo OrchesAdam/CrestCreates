@@ -469,7 +469,7 @@ internal sealed class CanonicalHashModelBuilder
             var filterType = GetNamedArgTypeValue(attr, "Filter");
 
             // Resolve property on target type
-            var propertySymbol = targetType.GetMembers(propertyName)
+            var propertySymbol = targetType.GetMembers(propertyName!)
                 .OfType<IPropertySymbol>()
                 .FirstOrDefault();
 
@@ -478,7 +478,7 @@ internal sealed class CanonicalHashModelBuilder
                 _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
                     CanonicalHashDiagnostics.PropertyNotFound,
                     attr.ApplicationSyntaxReference?.GetSyntax().GetLocation(),
-                    propertyName, targetType.Name));
+                    propertyName!, targetType.Name));
                 attrIndex++;
                 continue;
             }
@@ -505,7 +505,7 @@ internal sealed class CanonicalHashModelBuilder
                     attrIndex++;
                     continue;
                 }
-                ordersSeen[order] = propertyName;
+                ordersSeen[order] = propertyName!;
             }
 
             var propertyType = propertySymbol.Type;
@@ -519,7 +519,7 @@ internal sealed class CanonicalHashModelBuilder
                 _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
                     CanonicalHashDiagnostics.CollectionRequiresOrderMode,
                     attr.ApplicationSyntaxReference?.GetSyntax().GetLocation(),
-                    propertyName));
+                    propertyName!));
             }
 
             // CCHASH012: OrderedKeyValue only for dictionary-like fields
@@ -528,7 +528,7 @@ internal sealed class CanonicalHashModelBuilder
                 _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
                     CanonicalHashDiagnostics.OrderedKeyValueOnlyForDictionaries,
                     attr.ApplicationSyntaxReference?.GetSyntax().GetLocation(),
-                    propertyName));
+                    propertyName!));
             }
 
             // CCHASH011: OrdinalByProperty requires OrderByProperty
@@ -537,7 +537,7 @@ internal sealed class CanonicalHashModelBuilder
                 _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
                     CanonicalHashDiagnostics.OrdinalByPropertyRequiresOrderBy,
                     attr.ApplicationSyntaxReference?.GetSyntax().GetLocation(),
-                    propertyName));
+                    propertyName!));
             }
 
             // Parse and validate Filter
@@ -550,7 +550,7 @@ internal sealed class CanonicalHashModelBuilder
                     _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
                         CanonicalHashDiagnostics.FilterNotSupportedOnDictionary,
                         attr.ApplicationSyntaxReference?.GetSyntax().GetLocation(),
-                        propertyName));
+                        propertyName!));
                 }
                 // CCHASH024: Filter only for collection fields
                 else if (!isCollection)
@@ -558,19 +558,19 @@ internal sealed class CanonicalHashModelBuilder
                     _context.ReportDiagnostic(CanonicalHashDiagnostics.Create(
                         CanonicalHashDiagnostics.FilterOnlyForCollection,
                         attr.ApplicationSyntaxReference?.GetSyntax().GetLocation(),
-                        propertyName));
+                        propertyName!));
                 }
                 else
                 {
                     filterModel = ValidateFilter(filterType, propertyType,
                         attr.ApplicationSyntaxReference?.GetSyntax().GetLocation(),
-                        propertyName);
+                        propertyName!);
                 }
             }
 
             fields.Add(new ProfileFieldModel
             {
-                PropertyName = propertyName,
+                PropertyName = propertyName!,
                 Classification = classification,
                 Order = order,
                 CollectionOrderMode = collectionOrderMode,

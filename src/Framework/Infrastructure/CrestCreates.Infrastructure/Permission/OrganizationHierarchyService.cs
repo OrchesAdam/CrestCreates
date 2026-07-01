@@ -25,14 +25,14 @@ public class OrganizationHierarchyService : IOrganizationHierarchyService
     {
         var cacheKey = $"{CacheKeyPrefix}{organizationId}";
         
-        return await _cache.GetOrCreateAsync(cacheKey, async entry =>
-        {
-            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30);
-            
-            var result = new List<Guid> { organizationId };
-            await CollectDescendantIdsAsync(organizationId, result);
-            return result;
-        });
+        return (await _cache.GetOrCreateAsync(cacheKey, async entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30);
+
+                var result = new List<Guid> { organizationId };
+                await CollectDescendantIdsAsync(organizationId, result);
+                return result;
+            }))!;
     }
 
     private async Task CollectDescendantIdsAsync(Guid parentId, List<Guid> result)

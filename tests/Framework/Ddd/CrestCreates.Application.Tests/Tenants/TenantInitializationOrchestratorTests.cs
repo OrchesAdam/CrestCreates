@@ -20,7 +20,7 @@ public class TenantInitializationOrchestratorTests
 {
     private readonly Mock<ITenantDatabaseProvisioner> _dbInitializerMock;
     private readonly Mock<ITenantSchemaMigrator> _migrationRunnerMock;
-    private readonly Mock<ITenantDataSeeder> _dataSeederMock;
+    private readonly Mock<ITenantDataSeedContributor> _dataSeederMock;
     private readonly Mock<ITenantSettingDefaultsSeeder> _settingsSeederMock;
     private readonly Mock<ITenantFeatureDefaultsSeeder> _featuresSeederMock;
     private readonly Mock<ITenantInitializationStore> _storeMock;
@@ -30,7 +30,7 @@ public class TenantInitializationOrchestratorTests
     {
         _dbInitializerMock = new Mock<ITenantDatabaseProvisioner>();
         _migrationRunnerMock = new Mock<ITenantSchemaMigrator>();
-        _dataSeederMock = new Mock<ITenantDataSeeder>();
+        _dataSeederMock = new Mock<ITenantDataSeedContributor>();
         _settingsSeederMock = new Mock<ITenantSettingDefaultsSeeder>();
         _featuresSeederMock = new Mock<ITenantFeatureDefaultsSeeder>();
         _storeMock = new Mock<ITenantInitializationStore>();

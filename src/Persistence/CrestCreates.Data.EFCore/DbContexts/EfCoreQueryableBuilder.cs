@@ -141,7 +141,7 @@ namespace CrestCreates.Data.EFCore.DbContexts
             return await _queryable.FirstAsync(cancellationToken);
         }
 
-        public async Task<TEntity> FirstOrDefaultAsync(CancellationToken cancellationToken = default)
+        public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default)
         {
             return await _queryable.FirstOrDefaultAsync(cancellationToken);
         }
@@ -151,7 +151,7 @@ namespace CrestCreates.Data.EFCore.DbContexts
             return await _queryable.SingleAsync(cancellationToken);
         }
 
-        public async Task<TEntity> SingleOrDefaultAsync(CancellationToken cancellationToken = default)
+        public async Task<TEntity?> SingleOrDefaultAsync(CancellationToken cancellationToken = default)
         {
             return await _queryable.SingleOrDefaultAsync(cancellationToken);
         }

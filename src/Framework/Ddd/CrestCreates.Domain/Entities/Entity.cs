@@ -59,7 +59,7 @@ namespace CrestCreates.Domain.Entities
             return left.Equals(right);
         }
 
-        public static bool operator !=(Entity<TId> left, Entity<TId> right)
+        public static bool operator !=(Entity<TId>? left, Entity<TId>? right)
         {
             return !(left == right);
         }

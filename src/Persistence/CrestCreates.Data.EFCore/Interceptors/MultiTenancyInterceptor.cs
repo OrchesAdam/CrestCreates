@@ -27,7 +27,7 @@ namespace CrestCreates.Data.EFCore.Interceptors
             DbContextEventData eventData,
             InterceptionResult<int> result)
         {
-            SetTenantId(eventData.Context);
+            SetTenantId(eventData.Context!);
             return base.SavingChanges(eventData, result);
         }
 
@@ -36,7 +36,7 @@ namespace CrestCreates.Data.EFCore.Interceptors
             InterceptionResult<int> result,
             CancellationToken cancellationToken = default)
         {
-            SetTenantId(eventData.Context);
+            SetTenantId(eventData.Context!);
             return await base.SavingChangesAsync(eventData, result, cancellationToken);
         }
 
@@ -65,7 +65,7 @@ namespace CrestCreates.Data.EFCore.Interceptors
             switch (state)
             {
                 case EntityState.Added:
-                    if (string.IsNullOrEmpty(entity.TenantId))
+                    if (string.IsNullOrEmpty(entity.TenantId) && _currentTenant.Id is not null)
                     {
                         entity.TenantId = _currentTenant.Id;
                     }
@@ -84,6 +84,9 @@ namespace CrestCreates.Data.EFCore.Interceptors
                 case EntityState.Added:
                     if (string.IsNullOrEmpty(entity.TenantId))
                     {
+                        if (_currentTenant.Id is null)
+                            throw new InvalidOperationException(
+                                "Cannot set TenantId on IMustHaveTenant entity: no tenant in current context.");
                         entity.TenantId = _currentTenant.Id;
                     }
                     break;

@@ -38,7 +38,7 @@ namespace CrestCreates.Data.EFCore.MultiTenancy
 
             if (string.IsNullOrEmpty(entity.TenantId))
             {
-                entity.TenantId = currentTenant.Id;
+                entity.TenantId = currentTenant.Id!;
             }
         }
     }

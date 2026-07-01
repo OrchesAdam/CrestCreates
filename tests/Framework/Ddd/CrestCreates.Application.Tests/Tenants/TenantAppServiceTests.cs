@@ -143,7 +143,7 @@ public class TenantAppServiceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(TenantMigrationResult.Succeeded());
 
-        var seederMock = new Mock<ITenantDataSeeder>();
+        var seederMock = new Mock<ITenantDataSeedContributor>();
         seederMock
             .Setup(s => s.SeedAsync(
                 It.IsAny<TenantInitializationContext>(),

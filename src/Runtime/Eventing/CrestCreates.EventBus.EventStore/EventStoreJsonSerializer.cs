@@ -25,7 +25,7 @@ namespace CrestCreates.EventBus.EventStore
 
         public IDomainEvent Deserialize(string json, Type eventType)
         {
-            return (IDomainEvent)JsonSerializer.Deserialize(json, eventType, _options);
+            return (IDomainEvent)JsonSerializer.Deserialize(json, eventType, _options)!;
         }
     }
 }

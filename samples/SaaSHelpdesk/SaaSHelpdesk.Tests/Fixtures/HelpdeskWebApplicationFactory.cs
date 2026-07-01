@@ -440,9 +440,9 @@ public sealed class HelpdeskWebApplicationFactory
             => Task.FromResult<TenantInitializationRecord?>(
                 new TenantInitializationRecord(Guid.NewGuid(), tenantId, 1, correlationId));
 
-        public Task<TenantInitializationRecord> ForceBeginInitializationAsync(
+        public Task<TenantInitializationRecord?> ForceBeginInitializationAsync(
             Guid tenantId, string correlationId, string reason, CancellationToken cancellationToken = default)
-            => Task.FromResult(
+            => Task.FromResult<TenantInitializationRecord?>(
                 new TenantInitializationRecord(Guid.NewGuid(), tenantId, 1, correlationId));
 
         public Task<TenantInitializationRecord?> GetLatestAsync(

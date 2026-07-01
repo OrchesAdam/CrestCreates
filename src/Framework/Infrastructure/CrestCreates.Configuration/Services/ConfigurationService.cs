@@ -15,13 +15,13 @@ namespace CrestCreates.Configuration.Services
             _configuration = configuration;
         }
 
-        public T Get<T>(string key, T defaultValue = default)
+        public T? Get<T>(string key, T? defaultValue = default)
         {
             var value = _configuration.GetValue<T>(key, defaultValue);
             return value;
         }
 
-        public async Task<T> GetAsync<T>(string key, T defaultValue = default)
+        public async Task<T?> GetAsync<T>(string key, T? defaultValue = default)
         {
             // 异步实现，实际上配置读取是同步的
             return await Task.FromResult(Get(key, defaultValue));

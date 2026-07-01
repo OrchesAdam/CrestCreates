@@ -12,6 +12,6 @@ namespace CrestCreates.MultiTenancy.Abstract
         /// <param name="tenantId">租户ID</param>
         /// <param name="cancellationToken">取消令牌</param>
         /// <returns>租户信息,如果不存在则返回 null</returns>
-        Task<ITenantInfo> GetTenantAsync(string tenantId, CancellationToken cancellationToken = default);
+        Task<ITenantInfo?> GetTenantAsync(string tenantId, CancellationToken cancellationToken = default);
     }
 }

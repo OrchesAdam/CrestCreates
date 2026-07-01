@@ -25,7 +25,7 @@ namespace CrestCreates.Data.EFCore.Interceptors
             DbContextEventData eventData,
             InterceptionResult<int> result)
         {
-            UpdateAuditFields(eventData.Context);
+            UpdateAuditFields(eventData.Context!);
             return base.SavingChanges(eventData, result);
         }
 
@@ -34,7 +34,7 @@ namespace CrestCreates.Data.EFCore.Interceptors
             InterceptionResult<int> result,
             CancellationToken cancellationToken = default)
         {
-            UpdateAuditFields(eventData.Context);
+            UpdateAuditFields(eventData.Context!);
             return base.SavingChangesAsync(eventData, result, cancellationToken);
         }
 

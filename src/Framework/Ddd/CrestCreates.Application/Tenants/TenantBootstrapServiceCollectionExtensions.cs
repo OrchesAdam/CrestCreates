@@ -16,7 +16,6 @@ public static class TenantBootstrapServiceCollectionExtensions
         });
 
         services.TryAddScoped<ITenantDataSeedContributor, TenantBootstrapper>();
-        services.AddScoped<ITenantDataSeeder, TenantBootstrapper>();
 
         return services;
     }

@@ -24,11 +24,11 @@ namespace CrestCreates.MultiTenancy.Providers
             _logger = logger;
         }
 
-        public Task<ITenantInfo> GetTenantAsync(string tenantId, CancellationToken cancellationToken = default)
+        public Task<ITenantInfo?> GetTenantAsync(string tenantId, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(tenantId))
             {
-                return Task.FromResult<ITenantInfo>(null);
+                return Task.FromResult<ITenantInfo?>(null);
             }
 
             // 从配置中读取租户信息
@@ -64,14 +64,14 @@ namespace CrestCreates.MultiTenancy.Providers
             }
 
             _logger.LogWarning("Tenant not found in configuration: {TenantId}", tenantId);
-            return Task.FromResult<ITenantInfo>(null);
+            return Task.FromResult<ITenantInfo?>(null);
         }
 
         private class TenantConfiguration
         {
-            public string Id { get; set; }
-            public string Name { get; set; }
-            public string ConnectionString { get; set; }
+            public string Id { get; set; } = string.Empty;
+            public string Name { get; set; } = string.Empty;
+            public string? ConnectionString { get; set; }
         }
     }
 }

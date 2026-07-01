@@ -22,12 +22,12 @@ public class EfCoreDbContextAdapter : IEntityFrameworkCoreDbContext
 
     public OrmProvider Provider => OrmProvider.EfCore;
 
-    public IDataBaseTransaction CurrentTransaction =>
+    public IDataBaseTransaction? CurrentTransaction =>
         _dbContext.Database.CurrentTransaction != null
             ? new EfCoreDataBaseTransaction(_dbContext.Database.CurrentTransaction, _dbContext)
-            : null!;
+            : null;
 
-    public string ConnectionString => _dbContext.Database.GetConnectionString() ?? string.Empty;
+    public string? ConnectionString => _dbContext.Database.GetConnectionString();
 
     public IDataBaseSet<TEntity> Set<TEntity>() where TEntity : class
     {

@@ -16,13 +16,13 @@ namespace CrestCreates.MultiTenancy
             _serviceProvider = serviceProvider;
         }
 
-        public ITenantInfo Tenant => _currentTenant.Value?.Tenant;
-        public string Id => Tenant?.Id;
+        public ITenantInfo? Tenant => _currentTenant.Value?.Tenant;
+        public string? Id => Tenant?.Id;
 
         public Task<IDisposable> ChangeAsync(string tenantId)
         {
             var oldTenant = Tenant;
-            ITenantInfo newTenant = null;
+            ITenantInfo? newTenant = null;
 
             if (!string.IsNullOrEmpty(tenantId))
             {
@@ -64,7 +64,7 @@ namespace CrestCreates.MultiTenancy
         
         private class TenantContextHolder
         {
-            public ITenantInfo Tenant { get; set; }
+            public ITenantInfo? Tenant { get; set; }
         }
         
         private class DisposeAction : IDisposable

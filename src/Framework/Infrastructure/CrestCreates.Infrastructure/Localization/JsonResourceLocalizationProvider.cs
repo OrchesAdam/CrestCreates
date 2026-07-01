@@ -30,23 +30,23 @@ namespace CrestCreates.Infrastructure.Localization
                 var jsonContent = File.ReadAllText(file);
                 var resourceDict = JsonSerializer.Deserialize<Dictionary<string, string>>(jsonContent);
                 
-                _resources[cultureName] = resourceDict;
+                _resources[cultureName] = resourceDict!;
             }
         }
         
-        public string GetString(string name)
+        public string? GetString(string name)
         {
             return GetString(name, CultureInfo.CurrentCulture);
         }
 
-        public string GetString(string name, params object[] args)
+        public string? GetString(string name, params object[] args)
         {
             return GetString(name, CultureInfo.CurrentCulture, args);
         }
 
-        public string GetString(string name, CultureInfo culture)
+        public string? GetString(string name, CultureInfo culture)
         {
-            if (TryGetResource(name, culture, out string value))
+            if (TryGetResource(name, culture, out var value))
                 return value;
                 
             // 回退到默认文化
@@ -60,13 +60,13 @@ namespace CrestCreates.Infrastructure.Localization
             return name;
         }
 
-        public string GetString(string name, CultureInfo culture, params object[] args)
+        public string? GetString(string name, CultureInfo culture, params object[] args)
         {
-            string value = GetString(name, culture);
-            return string.Format(value, args);
+            string? value = GetString(name, culture);
+            return value is not null ? string.Format(value, args) : null;
         }
         
-        private bool TryGetResource(string name, CultureInfo culture, out string value)
+        private bool TryGetResource(string name, CultureInfo culture, out string? value)
         {
             value = null;
             

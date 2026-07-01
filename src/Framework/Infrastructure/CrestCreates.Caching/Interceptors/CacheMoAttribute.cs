@@ -88,11 +88,11 @@ public class CacheMoAttribute : AsyncMoAttribute
 
                 if (string.IsNullOrWhiteSpace(tenantId))
                 {
-                    await cache.SetAsync(_prefix, context.ReturnValue, expiration, context.Arguments);
+                    await cache.SetAsync(_prefix, context.ReturnValue, expiration, context.Arguments!);
                 }
                 else
                 {
-                    await cache.SetAsync(_prefix, tenantId, context.ReturnValue, context.Arguments);
+                    await cache.SetAsync(_prefix, tenantId, context.ReturnValue, context.Arguments!);
                 }
             }
         }

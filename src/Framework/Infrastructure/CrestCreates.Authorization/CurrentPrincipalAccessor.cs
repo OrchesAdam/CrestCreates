@@ -38,7 +38,7 @@ public class CurrentPrincipalAccessor : ICurrentPrincipalAccessor
 
         return new DisposeAction(() =>
         {
-            _currentPrincipal.Value = oldPrincipal;
+            _currentPrincipal.Value = oldPrincipal!;
         });
     }
 

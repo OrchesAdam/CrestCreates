@@ -62,7 +62,7 @@ namespace CrestCreates.Data.FreeSql.Attributes
         /// <summary>
         /// 获取当前服务提供者
         /// </summary>
-        protected static IServiceProvider ServiceProvider => _serviceProvider.Value;
+        protected static IServiceProvider? ServiceProvider => _serviceProvider.Value;
     }
 
     #region Rougamo 实现版本（需要安装 Rougamo.Fody）

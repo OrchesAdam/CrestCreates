@@ -145,7 +145,7 @@ public class EfCoreDbContextRegistrationTests
             InvokeOnModelCreating(context, modelBuilder);
 
             Assert.Equal(1, applyAllCalls);
-            Assert.NotNull(modelBuilder.Model.FindEntityType(typeof(Role))?.GetQueryFilter());
+            Assert.NotEmpty(modelBuilder.Model.FindEntityType(typeof(Role))?.GetDeclaredQueryFilters());
         }
         finally
         {
@@ -165,7 +165,7 @@ public class EfCoreDbContextRegistrationTests
 
         Assert.False(TenantFilterRegistryStore.HasRegistrations);
         InvokeOnModelCreating(context, modelBuilder);
-        Assert.Null(modelBuilder.Model.FindEntityType(typeof(Role))?.GetQueryFilter());
+        Assert.Empty(modelBuilder.Model.FindEntityType(typeof(Role))?.GetDeclaredQueryFilters());
     }
 
     [Fact]

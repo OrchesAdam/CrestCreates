@@ -12,7 +12,7 @@ namespace CrestCreates.Configuration.Services
         /// <param name="key">配置键</param>
         /// <param name="defaultValue">默认值</param>
         /// <returns>配置值</returns>
-        T Get<T>(string key, T defaultValue = default);
+        T? Get<T>(string key, T? defaultValue = default);
 
         /// <summary>
         /// 获取配置值（异步）
@@ -21,7 +21,7 @@ namespace CrestCreates.Configuration.Services
         /// <param name="key">配置键</param>
         /// <param name="defaultValue">默认值</param>
         /// <returns>配置值</returns>
-        Task<T> GetAsync<T>(string key, T defaultValue = default);
+        Task<T?> GetAsync<T>(string key, T? defaultValue = default);
 
         /// <summary>
         /// 设置配置值

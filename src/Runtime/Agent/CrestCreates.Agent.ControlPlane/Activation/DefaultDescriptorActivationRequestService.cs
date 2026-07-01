@@ -19,7 +19,6 @@ namespace CrestCreates.Agent.ControlPlane.Activation;
 /// </summary>
 public class DefaultDescriptorActivationRequestService : IDescriptorActivationRequestService
 {
-    private readonly IDescriptorLifecycleGovernanceService _governanceService;
     private readonly IDescriptorActivationPolicyProvider _policyProvider;
     private readonly IDescriptorActivationAuditor _auditor;
     private readonly IDescriptorStableHashBuilder _hashBuilder;
@@ -32,7 +31,6 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
     private readonly ConcurrentDictionary<(string TenantId, string RequestId), ActivationResourceSnapshot> _requests = new();
 
     public DefaultDescriptorActivationRequestService(
-        IDescriptorLifecycleGovernanceService governanceService,
         IDescriptorActivationPolicyProvider policyProvider,
         IDescriptorActivationAuditor auditor,
         IDescriptorStableHashBuilder hashBuilder,
@@ -42,7 +40,6 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         ActivationBindingHashValidator bindingHashValidator,
         ILogger<DefaultDescriptorActivationRequestService> logger)
     {
-        _governanceService = governanceService;
         _policyProvider = policyProvider;
         _auditor = auditor;
         _hashBuilder = hashBuilder;
@@ -111,9 +108,11 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             return AgentToolResult<ActivationRequest>.NotFound($"Draft '{request.DraftId}' not found.");
         }
 
-        // Use pre-evaluated governance decision from the request, or fall back to safe default.
+        // Use pre-evaluated governance decision from the request, or fail-closed default.
+        // Per architecture (memory #153): governance evaluation lives outside RequestService.
+        // When no GovernanceDecision is provided, ReviewRequired is the safe default.
         var governanceDecision = request.GovernanceDecision
-            ?? EvaluateGovernance(draft);
+            ?? DescriptorLifecycleDecisionKind.ReviewRequired;
 
         // Get policy
         var policy = await _policyProvider.GetPolicyAsync(context.TenantId, draft.DescriptorKind, ct);
@@ -215,7 +214,9 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
     }
 
     public async Task<AgentToolResult<DescriptorActivationDecision>> EvaluateActivationEligibilityAsync(
-        AgentToolInvocationContext context, string draftId, CancellationToken ct = default)
+        AgentToolInvocationContext context, string draftId,
+        DescriptorLifecycleDecisionKind? governanceDecision = null,
+        CancellationToken ct = default)
     {
         var draft = await _draftStore.GetAsync(context.TenantId, draftId, ct);
         if (draft is null)
@@ -223,16 +224,19 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             return AgentToolResult<DescriptorActivationDecision>.NotFound($"Draft '{draftId}' not found.");
         }
 
-        var governanceDecision = EvaluateGovernance(draft);
+        // Governance evaluation lives outside RequestService (memory #153).
+        // When no pre-evaluated GovernanceDecision is provided, fail-closed to ReviewRequired.
+        var effectiveDecision = governanceDecision
+            ?? DescriptorLifecycleDecisionKind.ReviewRequired;
         var policy = await _policyProvider.GetPolicyAsync(context.TenantId, draft.DescriptorKind, ct);
-        var eligibility = DeriveEligibility(governanceDecision, policy);
+        var eligibility = DeriveEligibility(effectiveDecision, policy);
 
         var decision = new DescriptorActivationDecision
         {
             Eligibility = eligibility,
             Policy = policy,
-            GovernanceDecision = governanceDecision,
-            Diagnostics = BuildEligibilityDiagnostics(eligibility, governanceDecision, policy)
+            GovernanceDecision = effectiveDecision,
+            Diagnostics = BuildEligibilityDiagnostics(eligibility, effectiveDecision, policy)
         };
 
         return AgentToolResult<DescriptorActivationDecision>.Success(decision);
@@ -349,7 +353,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
 
         // Transition to Approved
         var updatedRequest = request with { Status = ActivationRequestStatus.Approved };
-        _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(updatedRequest, snapshot.Owner);
+        _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(updatedRequest, snapshot.Owner!);
 
         await RecordAudit(context, requestId, DescriptorActivationAuditAction.Approve,
             "Approved", [], ct, updatedRequest);
@@ -422,7 +426,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         }
 
         var updatedRequest = request with { Status = ActivationRequestStatus.Rejected };
-        _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(updatedRequest, snapshot.Owner);
+        _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(updatedRequest, snapshot.Owner!);
 
         await RecordAudit(context, requestId, DescriptorActivationAuditAction.Reject,
             "Rejected", [], ct, updatedRequest);
@@ -466,7 +470,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             }).ToList();
 
             var updatedRequest = request with { Status = ActivationRequestStatus.Stale };
-            _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(updatedRequest, snapshot.Owner);
+            _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(updatedRequest, snapshot.Owner!);
 
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.Stale,
                 "EvidenceStale", staleDiagnostics, ct, updatedRequest);
@@ -530,7 +534,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             }).ToList();
 
             var staleRequest = request with { Status = ActivationRequestStatus.Stale };
-            _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(staleRequest, snapshot.Owner);
+            _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(staleRequest, snapshot.Owner!);
 
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.Stale,
                 "EvidenceStale", staleDiagnostics, ct, staleRequest);
@@ -544,7 +548,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         if (gateResult.Status != AgentToolResultStatus.Success)
         {
             var failedRequest = request with { Status = ActivationRequestStatus.ActivationFailed };
-            _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(failedRequest, snapshot.Owner);
+            _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(failedRequest, snapshot.Owner!);
 
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.GateDenied,
                 "GateRejected", gateResult.Diagnostics, ct, failedRequest);
@@ -553,7 +557,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
 
         // Transition to Activated — gate executed successfully
         var activatedRequest = request with { Status = ActivationRequestStatus.Activated };
-        _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(activatedRequest, snapshot.Owner);
+        _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(activatedRequest, snapshot.Owner!);
 
         await RecordAudit(context, requestId, DescriptorActivationAuditAction.Activate,
             "GateExecuted", [], ct, activatedRequest);
@@ -589,7 +593,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         }
 
         var updatedRequest = request with { Status = ActivationRequestStatus.Cancelled };
-        _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(updatedRequest, snapshot.Owner);
+        _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(updatedRequest, snapshot.Owner!);
 
         await RecordAudit(context, requestId, DescriptorActivationAuditAction.Cancel,
             reason, [], ct, updatedRequest);
@@ -614,17 +618,6 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
 
     private ActivationResourceSnapshot? GetRequestSnapshot(string tenantId, string requestId)
         => _requests.TryGetValue((tenantId, requestId), out var snapshot) ? snapshot : null;
-
-    [Obsolete("Pre-evaluate governance via IDescriptorLifecycleGovernanceService and pass via request.GovernanceDecision")]
-    protected virtual DescriptorLifecycleDecisionKind EvaluateGovernance(Draft draft)
-    {
-        // Phase 7e: safety-first default — require explicit governance clearance
-        // before allowing auto-activation. Production implementations should override
-        // this to evaluate actual governance rules.
-        // Full evaluation with validation/topology/impact/compat/binding reports
-        // requires the full review pipeline — wired in Phase D.
-        return DescriptorLifecycleDecisionKind.ReviewRequired;
-    }
 
     protected static DescriptorActivationEligibility DeriveEligibility(
         DescriptorLifecycleDecisionKind governanceDecision,

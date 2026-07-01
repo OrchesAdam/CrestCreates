@@ -6,7 +6,6 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <RootNamespace>CrestCreates.Logging</RootNamespace>
     <AssemblyName>CrestCreates.Logging</AssemblyName>
-    <NoWarn>$(NoWarn);NU1510</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

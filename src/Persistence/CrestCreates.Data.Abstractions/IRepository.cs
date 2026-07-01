@@ -35,7 +35,7 @@ namespace CrestCreates.Data.Abstractions
         /// <param name="predicate">查询条件</param>
         /// <param name="cancellationToken">取消令牌</param>
         /// <returns>匹配的实体，如果不存在则返回 null</returns>
-        Task<TEntity> FirstOrDefaultAsync(Expression<Func<TEntity, bool>> predicate,
+        Task<TEntity?> FirstOrDefaultAsync(Expression<Func<TEntity, bool>> predicate,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -52,7 +52,7 @@ namespace CrestCreates.Data.Abstractions
         /// <param name="predicate">查询条件，如果为 null 则计算所有实体</param>
         /// <param name="cancellationToken">取消令牌</param>
         /// <returns>实体数量</returns>
-        Task<int> CountAsync(Expression<Func<TEntity, bool>> predicate = null,
+        Task<int> CountAsync(Expression<Func<TEntity, bool>>? predicate = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -61,7 +61,7 @@ namespace CrestCreates.Data.Abstractions
         /// <param name="predicate">查询条件，如果为 null 则计算所有实体</param>
         /// <param name="cancellationToken">取消令牌</param>
         /// <returns>实体数量</returns>
-        Task<long> LongCountAsync(Expression<Func<TEntity, bool>> predicate = null,
+        Task<long> LongCountAsync(Expression<Func<TEntity, bool>>? predicate = null,
             CancellationToken cancellationToken = default);
 
         #endregion
@@ -159,7 +159,7 @@ namespace CrestCreates.Data.Abstractions
         /// <param name="id">主键值</param>
         /// <param name="cancellationToken">取消令牌</param>
         /// <returns>找到的实体，如果不存在则返回 null</returns>
-        Task<TEntity> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
+        Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// 根据主键集合获取实体列表
@@ -205,7 +205,7 @@ namespace CrestCreates.Data.Abstractions
         /// <summary>
         /// 根据条件查询单个实体
         /// </summary>
-        Task<TEntity> FirstOrDefaultAsync(Expression<Func<TEntity, bool>> predicate,
+        Task<TEntity?> FirstOrDefaultAsync(Expression<Func<TEntity, bool>> predicate,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -216,7 +216,7 @@ namespace CrestCreates.Data.Abstractions
         /// <summary>
         /// 获取满足条件的实体数量
         /// </summary>
-        Task<int> CountAsync(Expression<Func<TEntity, bool>> predicate = null,
+        Task<int> CountAsync(Expression<Func<TEntity, bool>>? predicate = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -237,7 +237,7 @@ namespace CrestCreates.Data.Abstractions
         /// <summary>
         /// 根据主键获取实体
         /// </summary>
-        Task<TEntity> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
+        Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// 根据主键集合获取实体列表

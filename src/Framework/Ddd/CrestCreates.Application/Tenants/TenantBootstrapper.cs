@@ -13,7 +13,7 @@ using Microsoft.Extensions.Options;
 
 namespace CrestCreates.Application.Tenants;
 
-public class TenantBootstrapper : ITenantDataSeeder
+public class TenantBootstrapper : ITenantDataSeedContributor
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly TenantBootstrapOptions _options;

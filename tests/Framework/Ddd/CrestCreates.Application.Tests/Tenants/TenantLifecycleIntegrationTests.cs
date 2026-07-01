@@ -148,7 +148,7 @@ public class TenantLifecycleIntegrationTests
         var storeMock = new Mock<ITenantInitializationStore>();
         var dbInitializerMock = new Mock<ITenantDatabaseProvisioner>();
         var migrationRunnerMock = new Mock<ITenantSchemaMigrator>();
-        var dataSeederMock = new Mock<ITenantDataSeeder>();
+        var dataSeederMock = new Mock<ITenantDataSeedContributor>();
         var settingsSeederMock = new Mock<ITenantSettingDefaultsSeeder>();
         var featuresSeederMock = new Mock<ITenantFeatureDefaultsSeeder>();
 

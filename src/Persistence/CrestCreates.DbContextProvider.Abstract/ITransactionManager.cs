@@ -24,7 +24,7 @@ public interface ITransactionManager
     /// <summary>
     /// 获取当前活动事务
     /// </summary>
-    IDataBaseTransaction CurrentTransaction { get; }
+    IDataBaseTransaction? CurrentTransaction { get; }
 
     /// <summary>
     /// 是否存在活动事务

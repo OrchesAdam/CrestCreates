@@ -165,7 +165,7 @@ namespace CrestCreates.DbContextProvider.Abstract
         /// </summary>
         /// <param name="cancellationToken">取消令牌</param>
         /// <returns>第一个实体，如果不存在则返回 null</returns>
-        Task<TEntity> FirstOrDefaultAsync(CancellationToken cancellationToken = default);
+        Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default);
 
         /// <summary>
         /// 获取单个元素
@@ -179,7 +179,7 @@ namespace CrestCreates.DbContextProvider.Abstract
         /// </summary>
         /// <param name="cancellationToken">取消令牌</param>
         /// <returns>单个实体，如果不存在则返回 null，如果有多个则抛出异常</returns>
-        Task<TEntity> SingleOrDefaultAsync(CancellationToken cancellationToken = default);
+        Task<TEntity?> SingleOrDefaultAsync(CancellationToken cancellationToken = default);
 
         /// <summary>
         /// 检查是否存在任何元素

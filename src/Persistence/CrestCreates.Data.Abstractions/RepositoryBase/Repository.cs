@@ -29,7 +29,7 @@ public abstract class Repository<TEntity, TId> : IRepository<TEntity, TId>
         return await _queryableBuilder.Where(predicate).ToListAsync(cancellationToken);
     }
 
-    public async Task<TEntity> FirstOrDefaultAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
+    public async Task<TEntity?> FirstOrDefaultAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
     {
         return await _queryableBuilder.Where(predicate).FirstOrDefaultAsync(cancellationToken);
     }
@@ -39,14 +39,14 @@ public abstract class Repository<TEntity, TId> : IRepository<TEntity, TId>
         return await _queryableBuilder.AnyAsync(predicate, cancellationToken);
     }
 
-    public async Task<int> CountAsync(Expression<Func<TEntity, bool>> predicate = null, CancellationToken cancellationToken = default)
+    public async Task<int> CountAsync(Expression<Func<TEntity, bool>>? predicate = null, CancellationToken cancellationToken = default)
     {
-        return await _queryableBuilder.Where(predicate).CountAsync(cancellationToken);
+        return await (predicate != null ? _queryableBuilder.Where(predicate) : _queryableBuilder).CountAsync(cancellationToken);
     }
 
-    public async Task<long> LongCountAsync(Expression<Func<TEntity, bool>> predicate = null, CancellationToken cancellationToken = default)
+    public async Task<long> LongCountAsync(Expression<Func<TEntity, bool>>? predicate = null, CancellationToken cancellationToken = default)
     {
-        return await _queryableBuilder.Where(predicate).LongCountAsync(cancellationToken);
+        return await (predicate != null ? _queryableBuilder.Where(predicate) : _queryableBuilder).LongCountAsync(cancellationToken);
     }
 
     public async Task<TEntity> AddAsync(TEntity entity, CancellationToken cancellationToken = default)
@@ -91,7 +91,7 @@ public abstract class Repository<TEntity, TId> : IRepository<TEntity, TId>
         return _queryableBuilder;
     }
 
-    public async Task<TEntity> GetByIdAsync(TId id, CancellationToken cancellationToken = default)
+    public async Task<TEntity?> GetByIdAsync(TId id, CancellationToken cancellationToken = default)
     {
         return await _queryableBuilder.Where(x => x.Id.Equals(id)).FirstOrDefaultAsync(cancellationToken);
     }

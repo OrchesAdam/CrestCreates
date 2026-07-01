@@ -51,7 +51,7 @@ public class TenantEventContextAccessor : ITenantEventContextAccessor
 
     public void ClearTenantContext()
     {
-        _context.Value = null;
+        _context.Value = new TenantEventContextHolder();
     }
 
     private class TenantEventContextHolder
