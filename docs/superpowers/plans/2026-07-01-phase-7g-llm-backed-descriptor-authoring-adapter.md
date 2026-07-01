@@ -122,13 +122,13 @@ Required project references:
 - `CrestCreates.Metadata.Abstractions`
 - `CrestCreates.Metadata.ContextPack.Abstractions`
 - `CrestCreates.DescriptorDraft.Abstractions`
-- `CrestCreates.Agent.DraftContracts`
 
 Forbidden project references:
 
 - `CrestCreates.Agent.ControlPlane`
 - `CrestCreates.Agent.ControlPlane.Abstractions`
 - `CrestCreates.Agent.Authoring.Http`
+- `CrestCreates.Agent.DraftContracts`
 - runtime execution projects such as `CrestCreates.Capability`, `CrestCreates.Workflow`, and `CrestCreates.HumanTask`
 
 - [ ] Add boundary tests for forbidden references.
@@ -141,6 +141,7 @@ Forbidden project references:
 - [ ] Implement `IDescriptorAuthoringPromptBuilder`.
 - [ ] Ensure prompt builder states memory is non-authoritative and metadata wins on conflict.
 - [ ] Register provider-agnostic services through DI.
+- [ ] Do not use `AgentDraftPayloadProjection` or generated DraftContracts DTOs in the authoring runtime.
 - [ ] Run `dotnet test tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests/CrestCreates.Agent.Authoring.Tests.csproj --filter "FullyQualifiedName~PromptInputHashTests|FullyQualifiedName~AuthoringBoundaryTests"`.
 - [ ] Run `dotnet build src/Runtime/Agent/CrestCreates.Agent.Authoring/CrestCreates.Agent.Authoring.csproj`.
 - [ ] Commit with `feat: add provider agnostic authoring runtime`.
