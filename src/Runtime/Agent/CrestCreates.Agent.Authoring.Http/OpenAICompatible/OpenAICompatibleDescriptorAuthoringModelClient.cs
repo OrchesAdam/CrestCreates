@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using CrestCreates.Agent.Authoring.Abstractions.Model;
 using CrestCreates.Agent.Authoring.Http.Credentials;
+using CrestCreates.Agent.Authoring.Http.Json;
 using Microsoft.Extensions.Options;
 
 namespace CrestCreates.Agent.Authoring.Http.OpenAICompatible;
@@ -13,6 +14,8 @@ public sealed class OpenAICompatibleDescriptorAuthoringModelClient : IDescriptor
     private readonly HttpClient _httpClient;
     private readonly IDescriptorAuthoringCredentialProvider _credentialProvider;
     private readonly DescriptorAuthoringProviderProfile _providerProfile;
+    private static readonly OpenAICompatibleAuthoringJsonSerializerContext OpenAIContext =
+        new(new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
     public OpenAICompatibleDescriptorAuthoringModelClient(
         HttpClient httpClient,
@@ -71,15 +74,18 @@ public sealed class OpenAICompatibleDescriptorAuthoringModelClient : IDescriptor
         var endpoint = _providerProfile.Endpoint ?? new Uri("https://api.openai.com/v1/chat/completions");
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
         httpRequest.Content = new StringContent(
-            JsonSerializer.Serialize(chatRequest),
+            JsonSerializer.Serialize(chatRequest, OpenAIContext.OpenAICompatibleChatRequest),
             Encoding.UTF8,
             "application/json");
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
         try
         {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(_providerProfile.Timeout);
+
             using var response = await _httpClient.SendAsync(
-                httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                httpRequest, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
 
             // 4. Handle error responses
             if (response.StatusCode == HttpStatusCode.Unauthorized)
@@ -125,8 +131,8 @@ public sealed class OpenAICompatibleDescriptorAuthoringModelClient : IDescriptor
 
             // 5. Parse response
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            var chatResponse = JsonSerializer.Deserialize<OpenAICompatibleChatResponse>(
-                responseBody, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var chatResponse = JsonSerializer.Deserialize(
+                responseBody, OpenAIContext.OpenAICompatibleChatResponse);
 
             var responseText = chatResponse?.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
 
@@ -142,6 +148,10 @@ public sealed class OpenAICompatibleDescriptorAuthoringModelClient : IDescriptor
         {
             throw;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (HttpRequestException ex)
         {
             return new DescriptorAuthoringModelResponse
@@ -154,9 +164,9 @@ public sealed class OpenAICompatibleDescriptorAuthoringModelClient : IDescriptor
                 FailureDetail = ex.Message
             };
         }
-        catch (TaskCanceledException)
+        catch (OperationCanceledException)
         {
-            // Timeout
+            // Provider timeout (linked CTS cancelled, but caller token was not)
             return new DescriptorAuthoringModelResponse
             {
                 ResponseText = string.Empty,

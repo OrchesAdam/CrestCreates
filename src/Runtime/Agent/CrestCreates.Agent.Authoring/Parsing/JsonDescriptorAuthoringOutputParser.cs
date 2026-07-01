@@ -1,6 +1,8 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using CrestCreates.Agent.Authoring.Abstractions.Authoring;
+using CrestCreates.Agent.Authoring.Json;
 using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -12,7 +14,8 @@ namespace CrestCreates.Agent.Authoring.Parsing;
 
 public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOutputParser
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly DescriptorAuthoringParserJsonSerializerContext ParserContext =
+        new(new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
 
     private const string ExpectedContractVersion = "7g.v1";
 
@@ -35,7 +38,7 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
         DescriptorAuthoringProviderOutputDto? dto;
         try
         {
-            dto = JsonSerializer.Deserialize<DescriptorAuthoringProviderOutputDto>(providerOutputText, JsonOptions);
+            dto = JsonSerializer.Deserialize(providerOutputText, ParserContext.DescriptorAuthoringProviderOutputDto);
         }
         catch (JsonException)
         {
@@ -71,8 +74,8 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
             diagnostics.Add(CreateDiagnostic(
                 DescriptorAuthoringDiagnosticCodes.PromptHashMismatch,
                 $"Prompt input hash mismatch. Expected '{context.ExpectedPromptInputHash}', got '{dto.PromptInputHash ?? "null"}'.",
-                SeverityLevel.Error));
-            return CreateResult(DescriptorAuthoringStatus.InvalidProviderOutput, emptyPlan, emptyDraftSet, diagnostics);
+                SeverityLevel.Blocker));
+            return CreateResult(DescriptorAuthoringStatus.Blocked, emptyPlan, emptyDraftSet, diagnostics);
         }
 
         // 4. Validate plan exists
@@ -197,7 +200,11 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
         DescriptorDraftPayload payload;
         try
         {
-            payload = MaterializePayload(kind, payloadElement);
+            payload = MaterializePayload(kind, payloadElement, diagnostics, out var payloadValid);
+            if (!payloadValid)
+            {
+                return false;
+            }
         }
         catch (Exception ex)
         {
@@ -286,12 +293,17 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
         return false;
     }
 
-    private static DescriptorDraftPayload MaterializePayload(DescriptorKind kind, JsonElement payloadElement)
+    private static DescriptorDraftPayload MaterializePayload(
+        DescriptorKind kind,
+        JsonElement payloadElement,
+        List<DescriptorAuthoringDiagnostic> diagnostics,
+        out bool valid)
     {
+        valid = true;
         return kind switch
         {
             DescriptorKind.HumanTask => MaterializeHumanTaskPayload(payloadElement),
-            DescriptorKind.Workflow => MaterializeWorkflowPayload(payloadElement),
+            DescriptorKind.Workflow => MaterializeWorkflowPayload(payloadElement, diagnostics, out valid),
             _ => throw new NotSupportedException($"Descriptor kind '{kind}' is not supported for payload materialization.")
         };
     }
@@ -338,15 +350,25 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
         return new HumanTaskDescriptorDraftPayload(descriptor);
     }
 
-    private static DescriptorDraftPayload MaterializeWorkflowPayload(JsonElement element)
+    private static DescriptorDraftPayload MaterializeWorkflowPayload(
+        JsonElement element,
+        List<DescriptorAuthoringDiagnostic> diagnostics,
+        out bool valid)
     {
+        valid = true;
         var steps = Array.Empty<WorkflowStep>();
         if (element.TryGetProperty("steps", out var stepsProp) && stepsProp.ValueKind == JsonValueKind.Array)
         {
             var stepList = new List<WorkflowStep>();
             foreach (var stepElement in stepsProp.EnumerateArray())
             {
-                stepList.Add(MaterializeWorkflowStep(stepElement));
+                var stepId = stepElement.TryGetProperty("id", out var sidProp) ? sidProp.GetString() ?? string.Empty : string.Empty;
+                var step = MaterializeWorkflowStep(stepElement, diagnostics, stepId, out var stepValid);
+                if (!stepValid)
+                {
+                    valid = false;
+                }
+                stepList.Add(step);
             }
             steps = stepList.ToArray();
         }
@@ -364,12 +386,29 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
         return new WorkflowDescriptorDraftPayload(descriptor);
     }
 
-    private static WorkflowStep MaterializeWorkflowStep(JsonElement element)
+    private static WorkflowStep MaterializeWorkflowStep(
+        JsonElement element,
+        List<DescriptorAuthoringDiagnostic> diagnostics,
+        string stepId,
+        out bool valid)
     {
+        valid = true;
+
         InteractionTarget? target = null;
         if (element.TryGetProperty("target", out var targetProp) && targetProp.ValueKind == JsonValueKind.Object)
         {
-            target = MaterializeInteractionTarget(targetProp);
+            if (!TryMaterializeInteractionTarget(targetProp, diagnostics, stepId, out target))
+            {
+                valid = false;
+            }
+        }
+        else
+        {
+            diagnostics.Add(CreateDiagnostic(
+                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                $"Workflow step '{stepId}' is missing required 'target'.",
+                SeverityLevel.Error));
+            valid = false;
         }
 
         var transitions = Array.Empty<string>();
@@ -393,74 +432,166 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
 
         return new WorkflowStep
         {
-            Id = element.TryGetProperty("id", out var stepIdProp) ? stepIdProp.GetString() ?? string.Empty : string.Empty,
+            Id = stepId,
             Name = element.TryGetProperty("name", out var stepNameProp) ? stepNameProp.GetString() ?? string.Empty : string.Empty,
-            Target = target ?? new HumanTaskTarget { HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("unknown", 1) },
+            Target = target ?? new HumanTaskTarget { HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>(string.Empty, 0) },
             Condition = element.TryGetProperty("condition", out var condProp) ? condProp.GetString() : null,
             Transitions = transitions,
             OnError = onError
         };
     }
 
-    private static InteractionTarget MaterializeInteractionTarget(JsonElement element)
+    private static bool TryMaterializeInteractionTarget(
+        JsonElement element,
+        List<DescriptorAuthoringDiagnostic> diagnostics,
+        string stepId,
+        out InteractionTarget? target)
     {
+        target = null;
         var kind = element.TryGetProperty("kind", out var kindProp) ? kindProp.GetString() ?? string.Empty : string.Empty;
+
+        if (string.IsNullOrEmpty(kind))
+        {
+            diagnostics.Add(CreateDiagnostic(
+                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                $"Workflow step '{stepId}' target is missing required 'kind'.",
+                SeverityLevel.Error));
+            return false;
+        }
 
         return kind switch
         {
-            "HumanTask" => MaterializeHumanTaskTarget(element),
-            "Capability" => MaterializeCapabilityTarget(element),
-            "SubWorkflow" => MaterializeSubWorkflowTarget(element),
-            _ => new HumanTaskTarget { HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("unknown", 1) }
+            "HumanTask" => TryMaterializeHumanTaskTarget(element, diagnostics, stepId, out target),
+            "Capability" => TryMaterializeCapabilityTarget(element, diagnostics, stepId, out target),
+            "SubWorkflow" => TryMaterializeSubWorkflowTarget(element, diagnostics, stepId, out target),
+            _ => ReportUnsupportedTargetKind(kind, stepId, diagnostics)
         };
     }
 
-    private static HumanTaskTarget MaterializeHumanTaskTarget(JsonElement element)
+    private static bool ReportUnsupportedTargetKind(
+        string kind,
+        string stepId,
+        List<DescriptorAuthoringDiagnostic> diagnostics)
     {
-        if (element.TryGetProperty("humanTask", out var htProp) && htProp.ValueKind == JsonValueKind.Object)
-        {
-            return new HumanTaskTarget
-            {
-                HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>(
-                    htProp.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty,
-                    htProp.TryGetProperty("version", out var verProp) && verProp.ValueKind == JsonValueKind.Number
-                        ? verProp.GetInt32()
-                        : 1)
-            };
-        }
-        return new HumanTaskTarget { HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>("unknown", 1) };
+        diagnostics.Add(CreateDiagnostic(
+            DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+            $"Workflow step '{stepId}' has unsupported target kind '{kind}'. Supported kinds: HumanTask, Capability, SubWorkflow.",
+            SeverityLevel.Error));
+        return false;
     }
 
-    private static CapabilityTarget MaterializeCapabilityTarget(JsonElement element)
+    private static bool TryMaterializeHumanTaskTarget(
+        JsonElement element,
+        List<DescriptorAuthoringDiagnostic> diagnostics,
+        string stepId,
+        out InteractionTarget? target)
     {
-        if (element.TryGetProperty("capability", out var capProp) && capProp.ValueKind == JsonValueKind.Object)
+        target = null;
+
+        if (!element.TryGetProperty("humanTask", out var htProp) || htProp.ValueKind != JsonValueKind.Object)
         {
-            return new CapabilityTarget
-            {
-                Capability = new VersionedDescriptorRef<IVersionedDescriptor>(
-                    capProp.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty,
-                    capProp.TryGetProperty("version", out var verProp) && verProp.ValueKind == JsonValueKind.Number
-                        ? verProp.GetInt32()
-                        : 1)
-            };
+            diagnostics.Add(CreateDiagnostic(
+                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                $"Workflow step '{stepId}' HumanTask target is missing required 'humanTask' reference.",
+                SeverityLevel.Error));
+            return false;
         }
-        return new CapabilityTarget { Capability = new VersionedDescriptorRef<IVersionedDescriptor>("unknown", 1) };
+
+        var id = htProp.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty;
+        if (string.IsNullOrEmpty(id))
+        {
+            diagnostics.Add(CreateDiagnostic(
+                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                $"Workflow step '{stepId}' HumanTask target has empty 'id'.",
+                SeverityLevel.Error));
+            return false;
+        }
+
+        var version = htProp.TryGetProperty("version", out var verProp) && verProp.ValueKind == JsonValueKind.Number
+            ? verProp.GetInt32()
+            : 1;
+
+        target = new HumanTaskTarget
+        {
+            HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>(id, version)
+        };
+        return true;
     }
 
-    private static SubWorkflowTarget MaterializeSubWorkflowTarget(JsonElement element)
+    private static bool TryMaterializeCapabilityTarget(
+        JsonElement element,
+        List<DescriptorAuthoringDiagnostic> diagnostics,
+        string stepId,
+        out InteractionTarget? target)
     {
-        if (element.TryGetProperty("subWorkflow", out var swProp) && swProp.ValueKind == JsonValueKind.Object)
+        target = null;
+
+        if (!element.TryGetProperty("capability", out var capProp) || capProp.ValueKind != JsonValueKind.Object)
         {
-            return new SubWorkflowTarget
-            {
-                SubWorkflow = new VersionedDescriptorRef<WorkflowDescriptor>(
-                    swProp.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty,
-                    swProp.TryGetProperty("version", out var verProp) && verProp.ValueKind == JsonValueKind.Number
-                        ? verProp.GetInt32()
-                        : 1)
-            };
+            diagnostics.Add(CreateDiagnostic(
+                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                $"Workflow step '{stepId}' Capability target is missing required 'capability' reference.",
+                SeverityLevel.Error));
+            return false;
         }
-        return new SubWorkflowTarget { SubWorkflow = new VersionedDescriptorRef<WorkflowDescriptor>("unknown", 1) };
+
+        var id = capProp.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty;
+        if (string.IsNullOrEmpty(id))
+        {
+            diagnostics.Add(CreateDiagnostic(
+                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                $"Workflow step '{stepId}' Capability target has empty 'id'.",
+                SeverityLevel.Error));
+            return false;
+        }
+
+        var version = capProp.TryGetProperty("version", out var verProp) && verProp.ValueKind == JsonValueKind.Number
+            ? verProp.GetInt32()
+            : 1;
+
+        target = new CapabilityTarget
+        {
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor>(id, version)
+        };
+        return true;
+    }
+
+    private static bool TryMaterializeSubWorkflowTarget(
+        JsonElement element,
+        List<DescriptorAuthoringDiagnostic> diagnostics,
+        string stepId,
+        out InteractionTarget? target)
+    {
+        target = null;
+
+        if (!element.TryGetProperty("subWorkflow", out var swProp) || swProp.ValueKind != JsonValueKind.Object)
+        {
+            diagnostics.Add(CreateDiagnostic(
+                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                $"Workflow step '{stepId}' SubWorkflow target is missing required 'subWorkflow' reference.",
+                SeverityLevel.Error));
+            return false;
+        }
+
+        var id = swProp.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty;
+        if (string.IsNullOrEmpty(id))
+        {
+            diagnostics.Add(CreateDiagnostic(
+                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                $"Workflow step '{stepId}' SubWorkflow target has empty 'id'.",
+                SeverityLevel.Error));
+            return false;
+        }
+
+        var version = swProp.TryGetProperty("version", out var verProp) && verProp.ValueKind == JsonValueKind.Number
+            ? verProp.GetInt32()
+            : 1;
+
+        target = new SubWorkflowTarget
+        {
+            SubWorkflow = new VersionedDescriptorRef<WorkflowDescriptor>(id, version)
+        };
+        return true;
     }
 
     private static VersionedDescriptorRef<T> ParseDescriptorRef<T>(JsonElement element, string propertyName)

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.Agent.Authoring.Parsing;
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -49,16 +50,18 @@ public sealed class OutputParserTests
     }
 
     [Fact]
-    public void PromptHashMismatch_Returns_PromptHashMismatch()
+    public void PromptHashMismatch_Returns_Blocked()
     {
         var json = BuildValidOutputJson("abc123hash");
         var context = _validContext with { ExpectedPromptInputHash = "different_hash" };
 
         var result = _parser.Parse(json, context);
 
-        result.Status.Should().Be(DescriptorAuthoringStatus.InvalidProviderOutput);
+        result.Status.Should().Be(DescriptorAuthoringStatus.Blocked);
         result.Diagnostics.Should().Contain(d =>
             d.Code == DescriptorAuthoringDiagnosticCodes.PromptHashMismatch);
+        result.Diagnostics.Should().Contain(d =>
+            d.Severity == SeverityLevel.Blocker);
     }
 
     [Fact]

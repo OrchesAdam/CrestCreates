@@ -72,12 +72,7 @@ public sealed class LlmDescriptorAuthoringAgent : IDescriptorAuthoringAgent
         var modelRequest = new DescriptorAuthoringModelRequest
         {
             Prompt = promptOutput,
-            ModelProfile = new DescriptorAuthoringModelProfile
-            {
-                ProfileName = "default",
-                ProviderName = "unknown",
-                ModelName = "unknown"
-            }
+            ModelProfile = _options.ModelProfile
         };
 
         var modelResponse = await _modelClient.CompleteAsync(modelRequest, cancellationToken);
