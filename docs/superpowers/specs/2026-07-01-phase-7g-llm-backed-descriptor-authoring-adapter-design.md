@@ -130,7 +130,7 @@ DescriptorAuthoringModelRequest
 DescriptorAuthoringModelResponse
 DescriptorAuthoringModelProfile
 DescriptorAuthoringProviderProfile
-IDescriptorAuthoringCredentialProvider
+IDescriptorAuthoringModelClient
 ```
 
 Dependency direction:
@@ -197,10 +197,14 @@ HTTP provider DTOs, provider SDKs, or concrete provider projects.
 `CrestCreates.Agent.Authoring.Http` owns the first real provider client:
 
 ```text
-HttpDescriptorAuthoringModelClient
+OpenAICompatibleDescriptorAuthoringModelClient
+OpenAICompatibleAuthoringRequest
+OpenAICompatibleAuthoringResponse
 OpenAI-compatible request/response projection
 provider options binding
 credential reference resolution
+IDescriptorAuthoringCredentialProvider
+DefaultDescriptorAuthoringCredentialProvider
 ```
 
 Dependency direction:
@@ -217,6 +221,10 @@ Provider-specific SDKs or HTTP DTOs may be referenced only by provider
 integration projects behind `IDescriptorAuthoringModelClient`. Provider SDK,
 HTTP DTO, credential, and options types must not leak into
 `CrestCreates.Agent.Authoring.Abstractions` or `CrestCreates.Agent.Authoring`.
+
+`IDescriptorAuthoringCredentialProvider` belongs to the provider integration
+project for Phase 7g. It is not part of the stable descriptor authoring domain
+contract because credential lookup is provider/configuration infrastructure.
 
 ## 5. Productizing the Phase 7f Boundary
 
@@ -292,7 +300,7 @@ Status semantics:
 | `SucceededWithDiagnostics` | Generated a plan and draft set with info or warning diagnostics. |
 | `Blocked` | Deterministic governance, hash, descriptor kind, operation, or boundary rules rejected the output. |
 | `InvalidProviderOutput` | Provider returned a response, but JSON, contract, parser, or discriminator validation failed. |
-| `ProviderUnavailable` | Timeout, network, rate-limit, authentication, or provider availability failure. |
+| `ProviderUnavailable` | Timeout, network, rate-limit, credential, authentication, or provider availability failure. |
 | `Failed` | Unexpected internal failure. |
 
 `DescriptorAuthoringDiagnostic` must use `DiagnosticCode` and
@@ -301,6 +309,23 @@ Status semantics:
 `DescriptorAuthoringDiagnosticCodes` must be centralized as semantic-string
 governed constants. Inline diagnostic code literals are not allowed outside the
 definition class and test fixtures.
+
+Diagnostic codes must distinguish provider and parser causes even when status
+remains coarse-grained. At minimum, reserve distinct diagnostics for:
+
+```text
+AUTHORING_PROVIDER_TIMEOUT
+AUTHORING_PROVIDER_RATE_LIMITED
+AUTHORING_PROVIDER_UNAUTHORIZED
+AUTHORING_CREDENTIAL_UNAVAILABLE
+AUTHORING_CREDENTIAL_REJECTED
+AUTHORING_INVALID_PROVIDER_OUTPUT
+AUTHORING_PROMPT_HASH_MISMATCH
+AUTHORING_UNKNOWN_DESCRIPTOR_KIND
+AUTHORING_UNSUPPORTED_DRAFT_OPERATION
+AUTHORING_GOVERNANCE_BOUNDARY_VIOLATION
+AUTHORING_MEMORY_AUTHORITY_CLAIM_REJECTED
+```
 
 ## 7. LLM Adapter Data Flow
 
@@ -427,6 +452,10 @@ configuration platform.
 
 Diagnostics, logs, prompt outputs, model request records, and recorded fixtures
 must never include secret material.
+
+Authentication or credential resolution failures may map to
+`ProviderUnavailable`, but diagnostics must distinguish credential unavailable,
+credential rejected, and provider unauthorized causes.
 
 ## 8. Output Parser
 
@@ -650,10 +679,12 @@ No test should require live provider access.
 ### Slice C - Provider Profile and Real Client Boundary
 
 - Add provider and model profile contracts.
-- Add `IDescriptorAuthoringCredentialProvider`.
 - Add `CrestCreates.Agent.Authoring.Http`.
-- Add one real provider client behind `IDescriptorAuthoringModelClient` in the
-  provider integration project.
+- Add `IDescriptorAuthoringCredentialProvider` and
+  `DefaultDescriptorAuthoringCredentialProvider` in the provider integration
+  project.
+- Add `OpenAICompatibleDescriptorAuthoringModelClient` behind
+  `IDescriptorAuthoringModelClient`.
 - Keep live provider execution out of CI.
 - Keep provider SDK, HTTP DTO, option, and credential details out of public
   contracts and authoring core.
