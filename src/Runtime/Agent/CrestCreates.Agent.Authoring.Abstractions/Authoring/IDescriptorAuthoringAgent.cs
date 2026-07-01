@@ -1,6 +1,6 @@
 using CrestCreates.Agent.Memory.Abstractions;
 
-namespace CrestCreates.Samples.DescriptorControlPlane.Authoring;
+namespace CrestCreates.Agent.Authoring.Abstractions.Authoring;
 
 public interface IDescriptorAuthoringAgent
 {

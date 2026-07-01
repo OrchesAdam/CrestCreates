@@ -1,18 +1,29 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Agent.Authoring.Abstractions.Authoring;
+using CrestCreates.Agent.Authoring.Abstractions.Model;
+using CrestCreates.Agent.Authoring.Abstractions.Prompting;
+using CrestCreates.Agent.Authoring.Authoring;
+using CrestCreates.Agent.Authoring.Clients;
+using CrestCreates.Agent.Authoring.Parsing;
+using CrestCreates.Agent.Authoring.Prompting;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.ContextPack.Abstractions;
 using CrestCreates.Samples.DescriptorControlPlane;
 using CrestCreates.Samples.DescriptorControlPlane.Authoring;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace CrestCreates.Samples.Tests;
@@ -143,7 +154,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
         var context = TestAuthoringContext(memoryIsAuthoritative: false);
         var result = await new FakeCompanyCertificationAuthoringAgent().AuthorAsync(context);
 
-        result.Diagnostics.Should().NotContain(d => d.Contains("authoritative", StringComparison.OrdinalIgnoreCase));
+        result.Diagnostics.Should().NotContain(d => d.Message.Contains("authoritative", StringComparison.OrdinalIgnoreCase));
         result.DraftSet.Drafts.Should().NotBeEmpty();
     }
 
@@ -163,15 +174,15 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
     public async Task FakeAuthoringAgent_Cannot_Call_RuntimeActivationGate()
     {
         var result = await new FakeCompanyCertificationAuthoringAgent().AuthorAsync(TestAuthoringContext());
-        result.Diagnostics.Should().NotContain(d => d.Contains("RuntimeActivationGate", StringComparison.OrdinalIgnoreCase));
+        result.Diagnostics.Should().NotContain(d => d.Message.Contains("RuntimeActivationGate", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
     public async Task FakeAuthoringAgent_Cannot_Call_RuntimeHandlers()
     {
         var result = await new FakeCompanyCertificationAuthoringAgent().AuthorAsync(TestAuthoringContext());
-        result.Plan.PlannedDescriptorIds.Should().Contain("wf_company_certification");
-        result.Diagnostics.Should().NotContain(d => d.Contains("handler", StringComparison.OrdinalIgnoreCase));
+        result.Plan.PlannedDescriptorRefs.Select(r => r.Id).Should().Contain("wf_company_certification");
+        result.Diagnostics.Should().NotContain(d => d.Message.Contains("handler", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -381,8 +392,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
         var result = await agent.AuthorAsync(context);
 
         result.DraftSet.Drafts.Should().HaveCount(2);
-        result.Plan.PlannedDescriptorIds.Should().Contain("wf_company_certification");
-        result.Plan.PlannedDescriptorIds.Should().Contain("ht_finance_review_company_certification");
+        result.Plan.PlannedDescriptorRefs.Select(r => r.Id).Should().Contain("wf_company_certification");
+        result.Plan.PlannedDescriptorRefs.Select(r => r.Id).Should().Contain("ht_finance_review_company_certification");
     }
 
     [Fact]
@@ -406,6 +417,242 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
             "AgentMemoryPack.IsAuthoritative must always be false in auth contexts");
     }
 
+    [Fact]
+    public void FakeAgent_Implements_Framework_IDescriptorAuthoringAgent()
+    {
+        typeof(FakeCompanyCertificationAuthoringAgent)
+            .GetInterfaces()
+            .Should()
+            .Contain(typeof(CrestCreates.Agent.Authoring.Abstractions.Authoring.IDescriptorAuthoringAgent));
+    }
+
+    [Fact]
+    public async Task LlmAgent_GoldenScenario_DraftsFlowThroughReviewPipeline()
+    {
+        // 1. Create golden scenario host (provides review/governance DI services)
+        using var host = new CompanyCertificationGoldenScenarioHost();
+
+        // 2. Build the exact same AgentAuthoringContext the runner will build internally,
+        //    so we can pre-compute the prompt input hash for the recorded model client.
+        var inventory = CompanyCertificationDescriptorCloner.CopyAllDescriptors();
+        var contextPackBuilder = host.Provider.GetRequiredService<IMetadataContextPackBuilder>();
+        var topologyBuilder = host.Provider.GetRequiredService<IDescriptorTopologyBuilder>();
+
+        var topology = topologyBuilder.Build(inventory);
+
+        var metadataRequest = new MetadataContextPackRequest
+        {
+            Scope = MetadataContextPackScope.DirectDependencies,
+            TenantId = "tenant-company-certification",
+            Intent = "Add second-level finance review before approving company certification.",
+            FocusDescriptors = new[] { new DescriptorRef("workflow", "wf_company_certification", 1) }
+        };
+        var metadataContextPack = contextPackBuilder.Build(metadataRequest, topology, inventory);
+
+        var memoryRetriever = host.Provider.GetRequiredService<IAgentMemoryRetriever>();
+        var memoryQuery = new AgentMemoryQuery
+        {
+            TenantId = "tenant-company-certification",
+            IntentText = "Add second-level finance review before approving company certification.",
+            DescriptorRefs = new[] { new DescriptorRef("workflow", "wf_company_certification", 1) }
+        };
+        var memoryPack = await memoryRetriever.RecallAsync(memoryQuery);
+
+        var authoringContextBuilder = host.Provider.GetRequiredService<IAgentAuthoringContextBuilder>();
+        var authoringRequest = new AgentAuthoringRequest
+        {
+            TenantId = "tenant-company-certification",
+            IntentText = "Add second-level finance review before approving company certification.",
+        };
+        var context = await authoringContextBuilder.BuildAsync(authoringRequest, metadataContextPack, memoryPack);
+
+        // 3. Compute the real prompt input hash from the context
+        var hashComputer = new DefaultCanonicalHashComputer();
+        var hashService = new DefaultDescriptorAuthoringPromptInputHashService(hashComputer);
+        var factory = new DefaultDescriptorAuthoringPromptInputFactory(hashService);
+        var promptInput = factory.Create(context);
+        var hashValue = promptInput.PromptInputHash!.Value;
+
+        // 4. Build the recorded model client pre-keyed with the real hash
+        var fixtureJson = BuildCompanyCertificationFixtureJson(hashValue);
+        var fixtures = new Dictionary<string, string> { [hashValue] = fixtureJson };
+        var modelClient = new RecordedDescriptorAuthoringModelClient(fixtures);
+
+        // 5. Build LLM agent with recorded client
+        var builder = new DefaultDescriptorAuthoringPromptBuilder();
+        var parser = new JsonDescriptorAuthoringOutputParser();
+        var options = Options.Create(new LlmDescriptorAuthoringAgentOptions());
+        var agent = new LlmDescriptorAuthoringAgent(factory, builder, modelClient, parser, options, TimeProvider.System);
+
+        // 6. Create runner with injected LLM agent and run through the review/governance pipeline.
+        //    The agent's options default AuthorId to "llm-descriptor-authoring-agent" so
+        //    the DescriptorDraftValidator's AuthorId check passes.
+        var runner = new CompanyCertificationAuthoringGoldenScenarioRunner(host.Provider, agent);
+        var result = await runner.RunUntilDraftSetReviewAsync(
+            "Add second-level finance review before approving company certification.");
+
+        // 7. Verify the pipeline: no blockers, drafts flow through validation and materialization
+        result.IsBlocked.Should().BeFalse(result.BlockReason);
+        result.FinalProposedInventory.Should().NotBeEmpty();
+
+        // 8. Verify the HumanTask draft was created with correct properties
+        var humanTaskDescriptor = result.FinalProposedInventory
+            .OfType<HumanTaskDescriptor>()
+            .Single(d => d.Id == "ht_finance_review_company_certification");
+        humanTaskDescriptor.Permissions.Should().Be("CompanyCertification.FinanceReview");
+        humanTaskDescriptor.AssigneeStrategy.Should().Be(AssigneeStrategy.CandidateGroup);
+        humanTaskDescriptor.Outcomes.Should().HaveCount(2);
+        humanTaskDescriptor.Outcomes.Select(o => o.Condition)
+            .Should().Contain(new[] { CompletionCondition.Approve, CompletionCondition.Reject });
+
+        // 9. Verify the Workflow has step_finance_review targeting the new HumanTask
+        var workflowDescriptor = result.FinalProposedInventory
+            .OfType<WorkflowDescriptor>()
+            .Single(d => d.Id == "wf_company_certification");
+        workflowDescriptor.Steps.Should().NotBeEmpty();
+        workflowDescriptor.Steps.Select(s => s.Id).Should().Contain("step_finance_review");
+        var financeStep = workflowDescriptor.Steps.Single(s => s.Id == "step_finance_review");
+        financeStep.Target.Should().BeOfType<HumanTaskTarget>()
+            .Which.HumanTask.Id.Should().Be("ht_finance_review_company_certification");
+    }
+
+    /// <summary>
+    /// Builds the golden scenario fixture JSON with the given prompt input hash embedded,
+    /// so the parser's hash verification passes.
+    /// </summary>
+    private static string BuildCompanyCertificationFixtureJson(string promptInputHash)
+    {
+        return $$"""
+            {
+              "contractVersion": "7g.v1",
+              "promptInputHash": "{{promptInputHash}}",
+              "plan": {
+                "planId": "plan_company_certification_finance_review",
+                "intentText": "Add second-level finance review before approving company certification.",
+                "assumptions": [
+                  "Finance team available for review"
+                ],
+                "plannedDescriptorRefs": [
+                  {
+                    "namespace": "humantask",
+                    "id": "ht_finance_review_company_certification",
+                    "version": 1
+                  },
+                  {
+                    "namespace": "workflow",
+                    "id": "wf_company_certification",
+                    "version": 1
+                  }
+                ]
+              },
+              "items": [
+                {
+                  "descriptorKind": "HumanTask",
+                  "descriptorId": "ht_finance_review_company_certification",
+                  "operation": "Create",
+                  "rationale": "Need finance review step before approval",
+                  "payload": {
+                    "id": "ht_finance_review_company_certification",
+                    "name": "humantask.FinanceReviewCompanyCertification",
+                    "version": 1,
+                    "permissions": "CompanyCertification.FinanceReview",
+                    "interaction": {
+                      "id": "form_company_certification_review",
+                      "version": 1
+                    },
+                    "inputSchema": {
+                      "id": "schema_company_certification_review_input",
+                      "version": 1
+                    },
+                    "outputSchema": {
+                      "id": "schema_company_certification_result",
+                      "version": 1
+                    },
+                    "assigneeStrategy": "CandidateGroup",
+                    "outcomes": [
+                      { "condition": "Approve" },
+                      { "condition": "Reject" }
+                    ]
+                  },
+                  "assumptions": [
+                    "Finance team available for review"
+                  ]
+                },
+                {
+                  "descriptorKind": "Workflow",
+                  "descriptorId": "wf_company_certification",
+                  "operation": "Update",
+                  "rationale": "Insert finance review step between review and approve",
+                  "payload": {
+                    "id": "wf_company_certification",
+                    "name": "workflow.CompanyCertification",
+                    "version": 1,
+                    "steps": [
+                      {
+                        "id": "step_submit",
+                        "name": "Submit Certification",
+                        "target": {
+                          "kind": "Capability",
+                          "capability": {
+                            "namespace": "capability",
+                            "id": "cap_submit_company_certification",
+                            "version": 1
+                          }
+                        },
+                        "transitions": ["step_review"]
+                      },
+                      {
+                        "id": "step_review",
+                        "name": "Review Certification",
+                        "target": {
+                          "kind": "HumanTask",
+                          "humanTask": {
+                            "namespace": "humantask",
+                            "id": "ht_review_company_certification",
+                            "version": 1
+                          }
+                        },
+                        "condition": "previousOutcome == 'Approve'",
+                        "transitions": ["step_finance_review"]
+                      },
+                      {
+                        "id": "step_finance_review",
+                        "name": "Finance Review Certification",
+                        "target": {
+                          "kind": "HumanTask",
+                          "humanTask": {
+                            "namespace": "humantask",
+                            "id": "ht_finance_review_company_certification",
+                            "version": 1
+                          }
+                        },
+                        "transitions": ["step_approve"]
+                      },
+                      {
+                        "id": "step_approve",
+                        "name": "Finalize Approval",
+                        "target": {
+                          "kind": "Capability",
+                          "capability": {
+                            "namespace": "capability",
+                            "id": "cap_approve_company_certification",
+                            "version": 1
+                          }
+                        },
+                        "condition": "previousOutcome == 'Approve'",
+                        "transitions": []
+                      }
+                    ]
+                  },
+                  "assumptions": [
+                    "Existing workflow structure preserved"
+                  ]
+                }
+              ]
+            }
+            """;
+    }
+    
     private static AgentAuthoringContext TestAuthoringContextWithConflictingMemory(string memoryText)
     {
         return TestAuthoringContext(memoryIsAuthoritative: false, memoryText: memoryText);

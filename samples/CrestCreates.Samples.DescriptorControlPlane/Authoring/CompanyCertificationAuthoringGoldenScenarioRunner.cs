@@ -1,3 +1,4 @@
+using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.Memory.Abstractions;
@@ -28,12 +29,25 @@ namespace CrestCreates.Samples.DescriptorControlPlane.Authoring;
 public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
 {
     private readonly IServiceProvider _serviceProvider;
+    private readonly IDescriptorAuthoringAgent? _authoringAgent;
 
     private static readonly DateTimeOffset GoldenScenarioCreatedAt = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     public CompanyCertificationAuthoringGoldenScenarioRunner(IServiceProvider serviceProvider)
     {
         _serviceProvider = serviceProvider;
+    }
+
+    /// <summary>
+    /// Constructs a runner that uses the provided <paramref name="authoringAgent"/>
+    /// instead of resolving one from the service provider.
+    /// </summary>
+    public CompanyCertificationAuthoringGoldenScenarioRunner(
+        IServiceProvider serviceProvider,
+        IDescriptorAuthoringAgent authoringAgent)
+    {
+        _serviceProvider = serviceProvider;
+        _authoringAgent = authoringAgent;
     }
 
     /// <summary>
@@ -57,7 +71,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
         IReadOnlyList<IDescriptor> startingInventory,
         CancellationToken ct = default)
     {
-        var authoringAgent = _serviceProvider.GetRequiredService<IDescriptorAuthoringAgent>();
+        var authoringAgent = _authoringAgent ?? _serviceProvider.GetRequiredService<IDescriptorAuthoringAgent>();
         var draftStore = _serviceProvider.GetRequiredService<IDescriptorDraftStore>();
         var reviewService = _serviceProvider.GetRequiredService<IDescriptorDraftReviewService>();
         var topologyBuilder = _serviceProvider.GetRequiredService<IDescriptorTopologyBuilder>();
@@ -70,6 +84,25 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
 
         // ── Step 2: Author drafts ──
         var authoringResult = await authoringAgent.AuthorAsync(context, ct);
+
+        // Block on non-success authoring status — do not persist or review drafts
+        if (authoringResult.Status != DescriptorAuthoringStatus.Succeeded &&
+            authoringResult.Status != DescriptorAuthoringStatus.SucceededWithDiagnostics)
+        {
+            var diagnosticMessages = authoringResult.Diagnostics.Count > 0
+                ? string.Join("; ", authoringResult.Diagnostics.Select(d => d.Message))
+                : "No diagnostics available";
+            return new CompanyCertificationDraftSetReviewResult
+            {
+                DraftSet = authoringResult.DraftSet,
+                PerDraftReviewResults = Array.Empty<DescriptorDraftReviewResult>(),
+                FinalProposedInventory = Array.Empty<IDescriptor>(),
+                IsBlocked = true,
+                FinalDecisionSource = "AllOrBlock",
+                BlockReason = $"Authoring failed with status {authoringResult.Status}: {diagnosticMessages}",
+            };
+        }
+
         var draftSet = authoringResult.DraftSet;
 
         // ── Step 3: Save all drafts to store ──

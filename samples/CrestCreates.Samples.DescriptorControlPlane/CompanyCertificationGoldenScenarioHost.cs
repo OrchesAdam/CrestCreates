@@ -1,3 +1,4 @@
+using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.Agent.ControlPlane;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
@@ -149,7 +150,7 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
         services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
 
         // ── Phase 7f Authoring ─────────────────────────────────────────────
-        services.TryAddSingleton<IDescriptorAuthoringAgent, FakeCompanyCertificationAuthoringAgent>();
+        services.TryAddSingleton<CrestCreates.Agent.Authoring.Abstractions.Authoring.IDescriptorAuthoringAgent, FakeCompanyCertificationAuthoringAgent>();
         services.TryAddSingleton<CompanyCertificationAuthoringGoldenScenarioRunner>();
         services.TryAddSingleton<ActivationBindingReferenceRegistry>();
 

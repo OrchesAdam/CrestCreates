@@ -138,6 +138,52 @@ public class DependencyBoundaryTests
             });
     }
 
+    [Fact]
+    public void AgentAuthoringAbstractions_DoesNotReferenceControlPlaneOrDraftContractsOrHttp()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.Authoring.Abstractions",
+            "Authoring abstractions must remain authoring contracts only — no ControlPlane, DraftContracts, or HTTP provider.",
+            new[]
+            {
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.DraftContracts",
+                "src/Runtime/Agent/CrestCreates.Agent.Authoring.Http"
+            });
+    }
+
+    [Fact]
+    public void AgentAuthoringRuntime_DoesNotReferenceControlPlaneOrDraftContractsOrHttpOrPlatform()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.Authoring",
+            "Authoring runtime must not depend on ControlPlane, DraftContracts, HTTP provider, or Platform.",
+            new[]
+            {
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.DraftContracts",
+                "src/Runtime/Agent/CrestCreates.Agent.Authoring.Http",
+                "src/Platform"
+            });
+    }
+
+    [Fact]
+    public void AgentAuthoringHttp_DoesNotReferenceControlPlaneOrDraftContractsOrPlatform()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.Authoring.Http",
+            "Authoring HTTP provider must not depend on ControlPlane, DraftContracts, or Platform.",
+            new[]
+            {
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.DraftContracts",
+                "src/Platform"
+            });
+    }
+
     private static void AssertNoDirectProjectReferences(
         string projectRootRelativePath,
         string reason,

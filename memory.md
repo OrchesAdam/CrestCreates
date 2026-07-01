@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-06-30 (Issues #35 + #46 closed)
+Last Updated: 2026-07-01 (Phase 7g: LLM-backed Descriptor Authoring Adapter — complete)
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -805,6 +805,67 @@ Key invariants:
 - `AgentMemoryPack.IsAuthoritative` is always false — metadata wins over conflicting memory
 - Fake agent has no constructor dependencies — cannot access RuntimeActivationGate or runtime handlers
 - 14 tests in `CompanyCertificationAuthoringGoldenScenarioTests`
+
+---
+
+### Agent Authoring Runtime + Prompt Hash (Phase 7g Task 3, 2026-07-01)
+
+Status: Superseded by full Phase 7g completion below.
+
+### LLM-backed Descriptor Authoring Adapter (Phase 7g, 2026-07-01)
+
+Status: Completed.
+
+**New projects** (3):
+- `src/Runtime/Agent/CrestCreates.Agent.Authoring.Abstractions/` — framework contracts, interfaces, AoT JSON context, diagnostic codes
+- `src/Runtime/Agent/CrestCreates.Agent.Authoring/` — provider-agnostic runtime (prompting, parsing, agent, clients, DI)
+- `src/Runtime/Agent/CrestCreates.Agent.Authoring.Http/` — OpenAI-compatible provider (separate from core runtime)
+
+**New test project** (1):
+- `tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests/` — 38 tests (contracts + hashing + parser + agent + golden + boundary)
+
+**Abstractions** (17 files):
+- Authoring contracts: `IDescriptorAuthoringAgent`, `DescriptorAuthoringPlan`, `DescriptorAuthoringResult`, `DescriptorDraftSet`, `DescriptorAuthoringDiagnostic`, `DescriptorAuthoringStatus`, `DescriptorAuthoringDiagnosticCodes`
+- Prompt contracts: `DescriptorAuthoringPromptInput`, `DescriptorAuthoringPromptOutput`, `DescriptorAuthoringDescriptorProjection`, `DescriptorAuthoringMemoryProjection`
+- Model contracts: `IDescriptorAuthoringModelClient`, `DescriptorAuthoringModelRequest`, `DescriptorAuthoringModelResponse`, `DescriptorAuthoringModelProfile`, `DescriptorAuthoringProviderProfile`
+- JSON: `DescriptorAuthoringJsonSerializerContext`
+
+**Runtime** (11 files):
+- Prompting: `IDescriptorAuthoringPromptInputFactory` + `DefaultDescriptorAuthoringPromptInputFactory`, `IDescriptorAuthoringPromptInputHashService` + `DefaultDescriptorAuthoringPromptInputHashService`, `IDescriptorAuthoringPromptBuilder` + `DefaultDescriptorAuthoringPromptBuilder`
+- Parsing: `IDescriptorAuthoringOutputParser` + `JsonDescriptorAuthoringOutputParser`, `DescriptorAuthoringParseContext`, `DescriptorAuthoringProviderOutputDto`
+- Authoring: `LlmDescriptorAuthoringAgent`
+- Clients: `RecordedDescriptorAuthoringModelClient`, `FakeDescriptorAuthoringModelClient`
+- DI: `AgentAuthoringServiceCollectionExtensions`
+
+**HTTP Provider** (6 files):
+- `OpenAICompatibleDescriptorAuthoringModelClient`, `OpenAICompatibleChatRequest`, `OpenAICompatibleChatResponse`
+- `IDescriptorAuthoringCredentialProvider` + `DefaultDescriptorAuthoringCredentialProvider`
+- DI: `AgentAuthoringHttpServiceCollectionExtensions`
+
+**Golden scenario**:
+- `CompanyCertificationLlmFixture` — recorded provider-output JSON for company certification (HumanTask Create + Workflow Update)
+- `GoldenScenarioLlmFixtureTests` — 4 tests verifying full LLM agent pipeline with recorded fixtures
+- `CompanyCertificationAuthoringGoldenScenarioRunner` — added constructor overload accepting framework `IDescriptorAuthoringAgent`
+
+**Sample migration**:
+- `FakeCompanyCertificationAuthoringAgent` now consumes framework `CrestCreates.Agent.Authoring.Abstractions` types (not local sample types)
+- Sample `DescriptorAuthoringResult`, `DescriptorDraftSet`, `IDescriptorAuthoringAgent`, `DescriptorAuthoringPlan` replaced by framework types
+- 20 sample tests pass (including 14 golden scenario tests)
+
+**Key invariants**:
+- LLM agent only produces drafts — never activates, approves, mutates registries, executes handlers, or bypasses Control Plane review
+- Prompt hashing uses `DefaultCanonicalHashComputer` (SHA-256 over canonical JSON bytes) — NO ad-hoc SHA-256, NO string builder, NO pipe-delimited format
+- Hash metadata: `Purpose=SourceIdentity`, `Scope=InternalFull`, `ArtifactKind=DescriptorAuthoringPromptInput`
+- Parser validates `promptInputHash` in provider output against `DescriptorAuthoringParseContext.ExpectedPromptInputHash`
+- Parser receives `DescriptorAuthoringParseContext` (tenantId, authorId, authorKind, timestamp, expectedPromptInputHash) — no hard-coded values
+- `CrestCreates.Agent.DraftContracts` is NOT a dependency of Authoring runtime — authoring produces domain-level `DescriptorDraftSet`, materialization uses existing `HumanTaskDescriptorDraftPayload`/`WorkflowDescriptorDraftPayload` directly
+- OpenAI client sets Authorization on each `HttpRequestMessage` (not shared `_httpClient.DefaultRequestHeaders`)
+- Missing fixture in RecordedClient surfaces as `ProviderUnavailable`, not empty success
+- Boundary enforced: Authoring runtime does NOT reference ControlPlane, DraftContracts, HTTP SDKs, or provider implementations
+- Authoring Abstractions does NOT reference HumanTask/Workflow/Schema/Form/Event/Capability Abstractions — only `Core.Abstractions`, `Snapshot.Abstractions`, `Metadata.Abstractions`, `Metadata.ContextPack.Abstractions`, `Agent.Memory.Abstractions`, `DescriptorDraft.Abstractions`
+- Authoring runtime references HumanTask/Workflow Abstractions (for parser materialization) but NOT their runtime execution projects
+
+**Test counts**: 38 Authoring tests + 20 Sample tests + 48 Memory tests + 479 ControlPlane tests — all passing. Full solution build 0 errors.
 
 ---
 

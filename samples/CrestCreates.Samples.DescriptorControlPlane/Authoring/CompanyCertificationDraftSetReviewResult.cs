@@ -1,3 +1,4 @@
+using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;

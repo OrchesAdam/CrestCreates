@@ -1,3 +1,4 @@
+using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -20,7 +21,7 @@ public sealed class FakeCompanyCertificationAuthoringAgent : IDescriptorAuthorin
     private const string DraftIdPrefix = "draft_company_certification";
     private const string CorrelationId = "phase7f-fake-authoring-correlation";
 
-    public Task<DescriptorAuthoringResult> AuthorAsync(
+    public Task<CrestCreates.Agent.Authoring.Abstractions.Authoring.DescriptorAuthoringResult> AuthorAsync(
         AgentAuthoringContext context,
         CancellationToken cancellationToken = default)
     {
@@ -145,20 +146,25 @@ public sealed class FakeCompanyCertificationAuthoringAgent : IDescriptorAuthorin
             Source = "Phase7fFakeAuthoringAgent",
         };
 
-        var result = new DescriptorAuthoringResult
+        var result = new CrestCreates.Agent.Authoring.Abstractions.Authoring.DescriptorAuthoringResult
         {
+            Status = DescriptorAuthoringStatus.Succeeded,
             Plan = new DescriptorAuthoringPlan
             {
                 PlanId = "plan_company_certification_finance_review",
                 IntentText = Phase7fIntent,
-                PlannedDescriptorIds = new[] { financeTask.Id, updatedWorkflow.Id },
+                PlannedDescriptorRefs = new DescriptorRef[]
+                {
+                    new("humantask", financeTask.Id, 1),
+                    new("workflow", updatedWorkflow.Id, 1),
+                },
             },
             DraftSet = new DescriptorDraftSet
             {
                 DraftSetId = "draftset_company_certification_finance_review",
                 Drafts = new[] { humanTaskDraft, workflowDraft },
             },
-            Diagnostics = Array.Empty<string>(),
+            Diagnostics = Array.Empty<DescriptorAuthoringDiagnostic>(),
         };
 
         return Task.FromResult(result);
