@@ -96,12 +96,12 @@ Protocol Adapters (MCP / HTTP / SignalR)
 | `CrestCreates.Agent.ControlPlane` | Wrapper 投影（`AgentDescriptorDraftDtoProjection`）、`AgentDraftPayloadProjection` 的调用者、工具服务实现、权限/审计/可见性基础设施 |
 | `CrestCreates.Agent.Memory.Abstractions` | Agent Memory 合约（27 个 sealed record/enum + 11 个接口 + DiagnosticCodes + CanonicalShapeVersions + AgentMemoryJsonSerializerContext）；不引用 ControlPlane.Abstractions |
 | `CrestCreates.Agent.Memory` | 11 个默认服务实现：4 个 InMemory Store、Sanitizer、Compressor、Extractor、PromotionService、Retriever、SourceExpander、AuthoringContextBuilder、AgentMemoryCanonicalHashProjector |
-| `samples/CrestCreates.Samples.DescriptorControlPlane/Authoring` | IDescriptorAuthoringAgent、FakeCompanyCertificationAuthoringAgent、CompanyCertificationAuthoringGoldenScenarioRunner/Report、ActivationBindingReferenceRegistry |
+| `samples/CrestCreates.Samples.DescriptorControlPlane/Authoring` | FakeCompanyCertificationAuthoringAgent、CompanyCertificationAuthoringGoldenScenarioRunner/Report、ActivationBindingReferenceRegistry；消费框架级 `IDescriptorAuthoringAgent` |
 | `CrestCreates.Agent.Authoring.Abstractions` | Authoring 合约（20 个 sealed record/enum/interface + DiagnosticCodes + JsonSerializerContext）；不引用 ControlPlane.Abstractions、DraftContracts |
 | `CrestCreates.Agent.Authoring` | Authoring runtime（LlmDescriptorAuthoringAgent、Parser、PromptBuilder、PromptInputFactory、PromptInputHashService、RecordedClient、FakeClient、ParserJsonSerializerContext、DI） |
 | `CrestCreates.Agent.Authoring.Http` | OpenAI-compatible provider client（OpenAICompatibleDescriptorAuthoringModelClient、chat DTOs、CredentialProvider、JsonSerializerContext、DI） |
-| `CrestCreates.Agent.Authoring.Tests` | 45 个 Authoring 测试（Parser 12 + Boundary 4 + GoldenScenario 4 + ProviderBoundary 3 + Contract 4 + Agent 13 + PromptHash 5） |
-| `CrestCreates.Agent.ControlPlane.Tests` | 479 个 ControlPlane 测试（含 DraftContracts + Generator + Activation）+ 边界测试 |
+| `CrestCreates.Agent.Authoring.Tests` | 46 个 Authoring 测试（Parser、Boundary、GoldenScenario、ProviderBoundary、Contract、Agent、PromptHash） |
+| `CrestCreates.Agent.ControlPlane.Tests` | 469 个 ControlPlane 测试（含 DraftContracts + Generator + Activation）+ 边界测试 |
 
 ---
 
@@ -252,7 +252,7 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `FixProposalApplicability` | Abstractions | 4 值枚举：CurrentMutableDraft=1 至 NotApplicable=4 | **Implemented (Phase 7d)** |
 | `FixProposalActionSafetyLevel` | Abstractions | 4 值枚举：Safe=1 至 Unsafe=4 | **Implemented (Phase 7d)** |
 | `ActivationRequest` | Abstractions/Activation | 激活请求记录，含 RequestId、DraftId、TenantId、Status、BindingSnapshot、Policy、CreatedAt、GovernanceDecision | **Implemented (Phase 7e)** |
-| `ActivationBindingSnapshot` | Abstractions/Activation | 激活请求时的绑定引用与哈希快照，`required` 字段：ReviewResultId、DraftVersion、PackagePreviewId、EvidencePreviewId、Hashes | **Implemented (Phase 7e)** |
+| `ActivationBindingSnapshot` | Abstractions/Activation | 激活请求时的绑定引用与哈希快照，`required` 字段：TenantId、DraftId、DraftVersion、ReviewResultId、PackagePreviewId、EvidencePreviewId、Hashes、CreatedAt | **Implemented (Phase 7e)** |
 | `BindingHashes` | Abstractions/Activation | 7 个 CanonicalHash 字段：SourceReviewHash、ReviewManifestHash、PackageManifestHash、PackageEvidenceHash、PackageEvidenceEnvelopeHash、ContractHash、DefinitionHash；PackageHashes 便捷访问器返回 DescriptorPackageHashSet | **Implemented (Phase 7e → 7e.1 升级)** |
 | `ActivationRequestStatus` | Abstractions/Activation | 6 值枚举：Submitted、UnderReview、Approved、Rejected、Cancelled、Expired | **Implemented (Phase 7e)** |
 | `DescriptorActivationReviewDecision` | Abstractions/Activation | 审查决策 DTO，含 ActivationRequestId、ActorId、ActorKind、Decision、BoundEvidenceHash、BoundEnvelopeHash | **Implemented (Phase 7e)** |
@@ -262,7 +262,7 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `DescriptorActivationAuditRecord` | Abstractions/Activation | 激活事件审计跟踪 | **Implemented (Phase 7e)** |
 | `DescriptorActivationAuditAction` | Abstractions/Activation | 审计动作枚举：Submit、Approve、Reject、Cancel、Block、GateDenied、Expire | **Implemented (Phase 7e)** |
 | `DescriptorActivationActorKind` | Abstractions/Activation | 请求者种类：Agent、Human、System | **Implemented (Phase 7e)** |
-| `DescriptorActivationReviewOutcome` | Abstractions/Activation | 审查结果：Approved、Rejected、Deferred | **Implemented (Phase 7e)** |
+| `DescriptorActivationReviewOutcome` | Abstractions/Activation | 审查结果：Approved、Rejected | **Implemented (Phase 7e)** |
 | `SubmitActivationRequestRequest` | Abstractions | 提交激活请求 DTO，新增 GovernanceDecision 字段（DescriptorLifecycleDecisionKind?） | **Implemented (Phase 7e)** |
 | `DescriptorActivationReviewDecisionParser` | Abstractions/Activation | AoT 安全 TryParse，从 JSON 解析审查决策 | **Implemented (Phase 7e)** |
 | `IDescriptorActivationRequestService` | ControlPlane/Activation | 激活请求生命周期接口：Create、Approve、Reject、Cancel、GetStatus | **Implemented (Phase 7e)** |
@@ -592,10 +592,10 @@ Phase 7e 实现了从已审查的描述符草稿到运行时激活的完整工�
 **关键架构决策**：
 
 1. **IRuntimeActivationGate 是唯一运行时状态变异入口** — 除 Gate 外，没有其他代码路径可以修改运行时描述符注册表
-2. **证据重校验比较全部 6 个 BindingHashes 字段** — 使用完整的 CanonicalHash 记录相等性（不仅仅是 .Value 摘要）
+2. **证据重校验比较全部 7 个 BindingHashes 字段** — 使用完整的 CanonicalHash 记录相等性（不仅仅是 .Value 摘要）
 3. **治理决策从审查结果流向激活请求** — ToolService 提取 `reviewRef.Review.GovernanceDecision?.MaxDecision`，通过 `SubmitActivationRequestRequest.GovernanceDecision` 传递给 RequestService
 4. **绑定完整性由编译期 + 运行时共同强制执行** — `required string` 在 `PackagePreviewId`/`EvidencePreviewId` 上 + `IsNullOrWhiteSpace` 运行时守卫 + `ACTIVATION_INCOMPLETE_BINDING` 次级 fail-closed
-5. **审批绑定到证据快照** — `ApproveActivationRequestAsync` 验证 `reviewDecision.BoundEvidenceHash`/`BoundEnvelopeHash` 与 `request.BindingSnapshot.Hashes.EvidenceHash`/`EnvelopeHash`
+5. **审批绑定到证据快照** — `ApproveActivationRequestAsync` 验证 `reviewDecision.BoundEvidenceHash`/`BoundEnvelopeHash` 与 `request.BindingSnapshot.Hashes.PackageEvidenceHash`/`PackageEvidenceEnvelopeHash`
 6. **审批/拒绝验证 ActivationRequestId** — 两条路径均检查 `reviewDecision.ActivationRequestId == request.RequestId`
 7. **自我审批使用快照策略** — `request.Policy` 在创建时捕获，不使用实时查找；回退使用 `snapshot.Owner.DescriptorKind`
 8. **Fail-closed 空值守卫** — `BindingSnapshot` 和 `BindingSnapshot.Hashes` 在所有入口点执行空值检查，附带结构化诊断
@@ -633,7 +633,7 @@ public sealed record DescriptorReviewReportDto
     public required string DraftId { get; init; }
     public required string TenantId { get; init; }
     public required string ReviewResultId { get; init; }          // 源绑定：绑定到哪个审查结果
-    public required string DraftVersion { get; init; }            // 源绑定：绑定到哪个草稿修订版
+    public required int DraftVersion { get; init; }               // 源绑定：绑定到哪个草稿修订版
     public required string SourceReviewHash { get; init; }        // 审查结果的稳定身份
     public required string TemplateVersion { get; init; }         // 消息模板目录版本
     public required DateTimeOffset GeneratedAt { get; init; }
@@ -1054,8 +1054,8 @@ Protocol Adapters (MCP / HTTP / SignalR)
 │                                                              │
 │  ApproveAsync(decision):                                     │
 │    - Verify decision.ActivationRequestId == request.Id       │
-│    - Verify decision.BoundEvidenceHash == snapshot.EvidenceHash │
-│    - Verify decision.BoundEnvelopeHash == snapshot.EnvelopeHash │
+│    - Verify decision.BoundEvidenceHash == snapshot.PackageEvidenceHash │
+│    - Verify decision.BoundEnvelopeHash == snapshot.PackageEvidenceEnvelopeHash │
 │    - → _evidenceRechecker.RecheckAsync(request)              │
 │    - → _runtimeActivationGate.ActivateAsync(request)         │
 │    - Update status → Approved + audit                        │
@@ -1106,7 +1106,6 @@ SubmitAsync
     → Routes decision to IDescriptorActivationRequestService:
         - Approval → ApproveActivationRequestAsync(reviewDecision)
         - Rejection → RejectActivationRequestAsync(reviewDecision)
-        - Deferred  → no status change
 ```
 
 **HumanTask 负载**：`DescriptorActivationReviewTaskInput` 包含完整的审查上下文：
@@ -1132,8 +1131,8 @@ SubmitAsync
 | SubmitAsync — EvidencePreviewId 为空 | `ACTIVATION_INCOMPLETE_EVIDENCE_BINDING` | 证据预览 ID 缺失 |
 | ApproveAsync — request.Id 不匹配 | `ACTIVATION_REVIEW_REQUEST_MISMATCH` | 审查决策引用了错误的激活请求 |
 | ApproveAsync — 决策种类不匹配 | `ACTIVATION_REVIEW_DECISION_MISMATCH` | 审查决策种类不是 Approval |
-| ApproveAsync — EvidenceHash 不匹配 | `ACTIVATION_REVIEW_EVIDENCE_MISMATCH` | 审批时证据哈希漂移 |
-| ApproveAsync — EnvelopeHash 不匹配 | `ACTIVATION_REVIEW_ENVELOPE_MISMATCH` | 审批时信封哈希漂移 |
+| ApproveAsync — PackageEvidenceHash 不匹配 | `ACTIVATION_REVIEW_EVIDENCE_MISMATCH` | 审批时证据哈希漂移 |
+| ApproveAsync — PackageEvidenceEnvelopeHash 不匹配 | `ACTIVATION_REVIEW_ENVELOPE_MISMATCH` | 审批时信封哈希漂移 |
 | RejectAsync — 状态不允许拒绝 | `ACTIVATION_INVALID_STATUS_FOR_REJECTION` | 请求状态不允许拒绝操作 |
 
 ### 12.4 关键架构决策
@@ -1157,7 +1156,7 @@ SubmitAsync
 
 **5. 审批绑定到证据快照**
 
-`ApproveActivationRequestAsync` 验证审查决策中的 `BoundEvidenceHash` 和 `BoundEnvelopeHash` 必须与激活请求快照中的 `Hashes.EvidenceHash` 和 `Hashes.EnvelopeHash` 匹配。这防止了在审查期间证据被篡改。
+`ApproveActivationRequestAsync` 验证审查决策中的 `BoundEvidenceHash` 和 `BoundEnvelopeHash` 必须与激活请求快照中的 `Hashes.PackageEvidenceHash` 和 `Hashes.PackageEvidenceEnvelopeHash` 匹配。这防止了在审查期间证据被篡改。
 
 **6. 审批/拒绝均验证 ActivationRequestId**
 
@@ -1214,7 +1213,7 @@ Submitted ──→ UnderReview ──→ Approved ──→ [Runtime Activation
 | 类型 | 说明 |
 |------|------|
 | `ActivationRequest` | 主激活请求记录：RequestId、DraftId、TenantId、Status、BindingSnapshot、Policy、CreatedAt、GovernanceDecision |
-| `ActivationBindingSnapshot` | 绑定引用与哈希快照，`required` 字段：ReviewResultId、DraftVersion、PackagePreviewId、EvidencePreviewId、Hashes |
+| `ActivationBindingSnapshot` | 绑定引用与哈希快照，`required` 字段：TenantId、DraftId、DraftVersion、ReviewResultId、PackagePreviewId、EvidencePreviewId、Hashes、CreatedAt |
 | `BindingHashes` | 7 个 CanonicalHash：SourceReviewHash、ReviewManifestHash、PackageManifestHash、PackageEvidenceHash、PackageEvidenceEnvelopeHash、ContractHash、DefinitionHash；PackageHashes 便捷访问器 |
 | `ActivationRequestStatus` | 6 值枚举：Submitted、UnderReview、Approved、Rejected、Cancelled、Expired |
 | `DescriptorActivationReviewDecision` | 审查决策：ActivationRequestId、ActorId、ActorKind、Decision、BoundEvidenceHash、BoundEnvelopeHash |
@@ -1224,8 +1223,8 @@ Submitted ──→ UnderReview ──→ Approved ──→ [Runtime Activation
 | `DescriptorActivationActorKind` | 请求者种类：Agent、Human、System |
 | `DescriptorActivationAuditRecord` | 激活事件审计跟踪 |
 | `DescriptorActivationAuditAction` | 7 值审计动作枚举 |
-| `DescriptorActivationReviewOutcome` | 审查结果：Approved、Rejected、Deferred |
-| `DescriptorActivationDecision` | 审批/拒绝决策：ActivationRequestId + ActorId + Decision + BoundEvidenceHash/EnvelopeHash |
+| `DescriptorActivationReviewOutcome` | 审查结果：Approved、Rejected |
+| `DescriptorActivationDecision` | 激活资格、策略和治理决策的结构化组合：Eligibility + Policy + GovernanceDecision + Diagnostics |
 | `SubmitActivationRequestRequest` | 提交请求 DTO，新增 GovernanceDecision 字段 |
 | `DescriptorActivationReviewDecisionParser` | AoT 安全 TryParse，从 JSON 解析审查决策 |
 
@@ -1285,7 +1284,7 @@ Phase 7e.1 将激活工作流中的哈希生产与验证迁移到 canonical hash
 - `StoreEvidenceHashes(tenantId, evidencePreviewId, DescriptorPackageHashSet)` — 存储证据预览哈希
 - `ResolvedBindingArtifacts` 携带 `CurrentPackageHashes` 和 `CurrentEvidenceHashes`
 
-重校验器独立比较 package hashes（PackageManifestHash）和 evidence hashes（EvidenceHash、EvidenceEnvelopeHash），防止 stale preview 交叉接受。
+重校验器独立比较 package hashes（PackageManifestHash）和 evidence hashes（PackageEvidenceHash、PackageEvidenceEnvelopeHash），防止 stale preview 交叉接受。
 
 #### 12.8.4 Package Preview Reuse Identity
 
@@ -1504,7 +1503,7 @@ Intent Text
 
 | 项目 | 内容 |
 |------|------|
-| `samples/CrestCreates.Samples.DescriptorControlPlane/Authoring` | IDescriptorAuthoringAgent、FakeCompanyCertificationAuthoringAgent、CompanyCertificationAuthoringGoldenScenarioRunner/Report/DraftSetReviewResult、ActivationBindingReferenceRegistry |
+| `samples/CrestCreates.Samples.DescriptorControlPlane/Authoring` | FakeCompanyCertificationAuthoringAgent、CompanyCertificationAuthoringGoldenScenarioRunner/Report/DraftSetReviewResult、ActivationBindingReferenceRegistry；消费框架级 `IDescriptorAuthoringAgent` |
 | `tests/Framework/Testing/CrestCreates.Samples.Tests` | 21 个 Authoring Golden Scenario 测试 + 7 个 ControlPlane Golden Scenario 测试 |
 
 ### 14.3 关键合约类型
@@ -1604,7 +1603,7 @@ IDescriptorAuthoringOutputParser.Parse(responseText, parseContext)
 | `CrestCreates.Agent.Authoring.Abstractions` | net10.0 | 20 个 public types：合约、prompt 模型、model client 接口、JSON context、diagnostic codes |
 | `CrestCreates.Agent.Authoring` | net10.0 | 18 个 public types：LLM agent、parser、prompt builder/factory/hash、recorded/fake client、DI |
 | `CrestCreates.Agent.Authoring.Http` | net10.0 | 9 个 public types：OpenAI-compatible client、chat DTOs、credential provider、JSON context、DI |
-| `CrestCreates.Agent.Authoring.Tests` | net10.0 | 7 test classes, 45 test methods |
+| `CrestCreates.Agent.Authoring.Tests` | net10.0 | 7 test classes, 46 test methods |
 
 ### 15.3 核心合约类型
 

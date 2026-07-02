@@ -186,23 +186,29 @@ public sealed record SubmitActivationRequestRequest
 ```csharp
 public sealed record ActivationBindingSnapshot
 {
+    public required string TenantId { get; init; }
+    public required string DraftId { get; init; }
+    public required int DraftVersion { get; init; }
     public required string ReviewResultId { get; init; }
-    public required string DraftVersion { get; init; }
-    public required string PackagePreviewId { get; init; }    // required (Phase 7e) — 原 string?
-    public required string EvidencePreviewId { get; init; }   // required (Phase 7e) — 原 string?
+    public string? ReportId { get; init; }
+    public required string PackagePreviewId { get; init; }    // required (Phase 7e) - 原 string?
+    public required string EvidencePreviewId { get; init; }   // required (Phase 7e) - 原 string?
     public required BindingHashes Hashes { get; init; }
+    public string? CorrelationId { get; init; }
+    public required DateTimeOffset CreatedAt { get; init; }
 }
 ```
 
-**BindingHashes** — 6 个 CanonicalHash 字段：
+**BindingHashes** — 7 个 CanonicalHash 字段：
 
 ```csharp
 public sealed record BindingHashes
 {
     public required CanonicalHash SourceReviewHash { get; init; }
-    public required CanonicalHash ManifestHash { get; init; }
-    public required CanonicalHash EvidenceHash { get; init; }
-    public required CanonicalHash EnvelopeHash { get; init; }
+    public required CanonicalHash ReviewManifestHash { get; init; }
+    public required CanonicalHash PackageManifestHash { get; init; }
+    public required CanonicalHash PackageEvidenceHash { get; init; }
+    public required CanonicalHash PackageEvidenceEnvelopeHash { get; init; }
     public required CanonicalHash ContractHash { get; init; }
     public required CanonicalHash DefinitionHash { get; init; }
 }
@@ -1368,19 +1374,25 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 // 从审查结果构建绑定快照
 var bindingSnapshot = new ActivationBindingSnapshot
 {
+    TenantId = tenantId,
+    DraftId = draft.DraftId,
     ReviewResultId = reviewResult.ReviewResultId,
     DraftVersion = draft.CurrentVersion,
+    ReportId = reviewReport.ReportId,
     PackagePreviewId = packagePreview.PreviewId,     // required — 编译期强制
     EvidencePreviewId = evidencePreview.PreviewId,   // required — 编译期强制
     Hashes = new BindingHashes
     {
         SourceReviewHash = reviewResult.StableHash,
-        ManifestHash = packagePreview.ManifestHash,
-        EvidenceHash = evidencePreview.EvidenceHash,
-        EnvelopeHash = packagePreview.EnvelopeHash,
+        ReviewManifestHash = reviewHashService.ComputeReviewManifestHash(reviewResult),
+        PackageManifestHash = packagePreview.PackageManifestHash,
+        PackageEvidenceHash = evidencePreview.PackageEvidenceHash,
+        PackageEvidenceEnvelopeHash = evidencePreview.PackageEvidenceEnvelopeHash,
         ContractHash = draft.ContractHash,
         DefinitionHash = draft.DefinitionHash
-    }
+    },
+    CorrelationId = correlationId,
+    CreatedAt = timeProvider.GetUtcNow()
 };
 
 // 治理决策从审查结果流向激活请求
@@ -1467,8 +1479,8 @@ var reviewDecision = new DescriptorActivationReviewDecision
     ActorId = reviewerUserId,
     ActorKind = DescriptorActivationActorKind.Human,
     Decision = DescriptorActivationReviewOutcome.Approved,
-    BoundEvidenceHash = request.BindingSnapshot.Hashes.EvidenceHash,  // 绑定到证据快照
-    BoundEnvelopeHash = request.BindingSnapshot.Hashes.EnvelopeHash    // 绑定到信封快照
+    BoundEvidenceHash = request.BindingSnapshot.Hashes.PackageEvidenceHash,  // 绑定到证据快照
+    BoundEnvelopeHash = request.BindingSnapshot.Hashes.PackageEvidenceEnvelopeHash    // 绑定到信封快照
 };
 
 // ApproveAsync 内部验证序列：
@@ -1476,12 +1488,12 @@ var reviewDecision = new DescriptorActivationReviewDecision
 //    → 不匹配: ACTIVATION_REVIEW_REQUEST_MISMATCH
 // 2. reviewDecision.Decision == DescriptorActivationReviewOutcome.Approved
 //    → 不匹配: ACTIVATION_REVIEW_DECISION_MISMATCH
-// 3. reviewDecision.BoundEvidenceHash == request.BindingSnapshot.Hashes.EvidenceHash
+// 3. reviewDecision.BoundEvidenceHash == request.BindingSnapshot.Hashes.PackageEvidenceHash
 //    → 不匹配: ACTIVATION_REVIEW_EVIDENCE_MISMATCH（证据漂移）
-// 4. reviewDecision.BoundEnvelopeHash == request.BindingSnapshot.Hashes.EnvelopeHash
+// 4. reviewDecision.BoundEnvelopeHash == request.BindingSnapshot.Hashes.PackageEvidenceEnvelopeHash
 //    → 不匹配: ACTIVATION_REVIEW_ENVELOPE_MISMATCH（信封漂移）
 // 5. → _evidenceRechecker.RecheckAsync(request)
-//    → 所有 6 字段 CanonicHash 比较通过
+//    → 所有 7 字段 CanonicalHash 比较通过
 // 6. → _runtimeActivationGate.ActivateAsync(request)
 //    → 唯一运行时状态变异入口
 
@@ -1492,8 +1504,8 @@ var rejectDecision = new DescriptorActivationReviewDecision
     ActorId = reviewerUserId,
     ActorKind = DescriptorActivationActorKind.Human,
     Decision = DescriptorActivationReviewOutcome.Rejected,
-    BoundEvidenceHash = request.BindingSnapshot.Hashes.EvidenceHash,
-    BoundEnvelopeHash = request.BindingSnapshot.Hashes.EnvelopeHash
+    BoundEvidenceHash = request.BindingSnapshot.Hashes.PackageEvidenceHash,
+    BoundEnvelopeHash = request.BindingSnapshot.Hashes.PackageEvidenceEnvelopeHash
 };
 
 // RejectAsync 内部验证：
@@ -1505,18 +1517,19 @@ var rejectDecision = new DescriptorActivationReviewDecision
 
 ### 14.5 证据重校验
 
-证据重校验在审批前执行，比较全部 6 个 BindingHashes 字段：
+证据重校验在审批前执行，比较全部 7 个 BindingHashes 字段：
 
 ```csharp
 // IActivationEvidenceRechecker.RecheckAsync(request)
 
 // 重校验逻辑（伪代码）：
 // 1. 通过 IActivationBindingArtifactResolver 解析当前制品哈希
-// 2. 比较 BindingHashes 的全部 6 个字段，使用 CanonicalHash 记录相等性：
+// 2. 比较 BindingHashes 的全部 7 个字段，使用 CanonicalHash 记录相等性：
 //    - SourceReviewHash: 审查结果哈希是否一致
-//    - ManifestHash: 包清单哈希是否一致
-//    - EvidenceHash: 证据哈希是否一致
-//    - EnvelopeHash: 信封哈希是否一致
+//    - ReviewManifestHash: 审查结果 manifest 哈希是否一致
+//    - PackageManifestHash: 包清单哈希是否一致
+//    - PackageEvidenceHash: 证据哈希是否一致
+//    - PackageEvidenceEnvelopeHash: 证据信封哈希是否一致
 //    - ContractHash: 契约哈希是否一致
 //    - DefinitionHash: 定义哈希是否一致
 // 3. 返回重校验结果
@@ -1553,9 +1566,6 @@ if (DescriptorActivationReviewDecisionParser.TryParse(decisionJson, out var deci
             break;
         case DescriptorActivationReviewOutcome.Rejected:
             await _requestService.RejectActivationRequestAsync(decision);
-            break;
-        case DescriptorActivationReviewOutcome.Deferred:
-            // 无状态变更，保留 UnderReview
             break;
     }
 }
@@ -1633,9 +1643,9 @@ services.AddTransient<DescriptorActivationReviewHumanTaskEventHandler>();
 |------|------|
 | **BindingSnapshot 为 required** | `PackagePreviewId` 和 `EvidencePreviewId` 为 `required string`，编译期强制非空 |
 | **自我审批用快照策略** | `request.Policy` 在创建时捕获，不使用实时查询 |
-| **证据重校验比较 6 字段 CanonicalHash** | 使用完整的 `CanonicalHash` 记录相等性，不只用 `.Value` 摘要 |
+| **证据重校验比较 7 字段 CanonicalHash** | 使用完整的 `CanonicalHash` 记录相等性，不只用 `.Value` 摘要 |
 | **IRuntimeActivationGate 是唯一变异入口** | 任何代码路径都不应在 Gate 之外修改运行时注册表 |
-| **审批绑定到证据快照** | `BoundEvidenceHash` / `BoundEnvelopeHash` 必须与激活请求快照的 `Hashes.EvidenceHash` / `Hashes.EnvelopeHash` 匹配 |
+| **审批绑定到证据快照** | `BoundEvidenceHash` / `BoundEnvelopeHash` 必须与激活请求快照的 `Hashes.PackageEvidenceHash` / `Hashes.PackageEvidenceEnvelopeHash` 匹配 |
 | **ActivationRequestId 绑定** | 审批和拒绝路径均检查 `reviewDecision.ActivationRequestId == request.RequestId` |
 | **审计动作语义** | 验证失败用 `Block` 或 `GateDenied`，不用 `Reject`（后者表示人工拒绝） |
 | **ToolService 不维护双轨逻辑** | ToolService 委托给 `_requestService`，无独立的激活代码路径 |
