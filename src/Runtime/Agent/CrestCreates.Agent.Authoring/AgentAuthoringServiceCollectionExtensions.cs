@@ -16,7 +16,9 @@ public static class AgentAuthoringServiceCollectionExtensions
         // Note: AddAgentPrompting() must be called by the consumer (host/Platform) separately.
         // Authoring does not own the Prompting runtime lifecycle.
 
+        #pragma warning disable CS0618 // Type or member is obsolete — compatibility registration
         services.TryAddSingleton<IDescriptorAuthoringPromptInputHashService, DefaultDescriptorAuthoringPromptInputHashService>();
+        #pragma warning restore CS0618
         services.TryAddSingleton<IDescriptorAuthoringPromptInputFactory, DefaultDescriptorAuthoringPromptInputFactory>();
         services.TryAddSingleton<IDescriptorAuthoringPromptBuilder, DefaultDescriptorAuthoringPromptBuilder>();
         services.TryAddSingleton<IDescriptorAuthoringOutputParser, JsonDescriptorAuthoringOutputParser>();

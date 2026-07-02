@@ -865,9 +865,9 @@ Status: Completed.
 - Missing fixture in RecordedClient surfaces as `ProviderUnavailable`, not empty success
 - Boundary enforced: Authoring runtime does NOT reference ControlPlane, DraftContracts, HTTP SDKs, or provider implementations
 - Authoring Abstractions does NOT reference HumanTask/Workflow/Schema/Form/Event/Capability Abstractions — only `Core.Abstractions`, `Snapshot.Abstractions`, `Metadata.Abstractions`, `Metadata.ContextPack.Abstractions`, `Agent.Memory.Abstractions`, `Agent.Prompting.Abstractions`, `DescriptorDraft.Abstractions`
-- Authoring runtime references HumanTask/Workflow Abstractions (for parser materialization) and Prompting runtime (for evidence integration) but NOT their runtime execution projects
+- Authoring runtime references HumanTask/Workflow Abstractions (for parser materialization) and Prompting.Abstractions (for evidence integration) but NOT Prompting runtime or their runtime execution projects
 
-**Test counts**: 49 Authoring tests + 13 Prompting tests + 20 Sample tests + 48 Memory tests + 479 ControlPlane tests + 19 Boundary tests — all passing. Full solution build 0 errors.
+**Test counts**: 50 Authoring tests + 15 Prompting tests + 20 Sample tests + 48 Memory tests + 479 ControlPlane tests + 20 Boundary tests — all passing. Full solution build 0 errors.
 
 ---
 
@@ -881,7 +881,7 @@ Status: Completed.
 **New projects**:
 - `CrestCreates.Agent.Prompting.Abstractions` — prompt evidence contracts (11 files)
 - `CrestCreates.Agent.Prompting` — prompt evidence runtime (5 files)
-- `CrestCreates.Agent.Prompting.Tests` — 13 tests
+- `CrestCreates.Agent.Prompting.Tests` — 15 tests
 
 **Prompting.Abstractions** (11 files):
 - Identity: `AgentPromptTemplateId`, `AgentPromptVersion`, `AgentPromptContractVersion`, `AgentPromptModelProfileRef`, `AgentPromptProviderProfileRef`
@@ -892,31 +892,33 @@ Status: Completed.
 - Hash: `IAgentPromptHashService`
 - Request: `AgentPromptEvidenceCreationRequest<T>`
 - JSON: `AgentPromptingJsonSerializerContext`
-- DI: `AgentPromptingServiceCollectionExtensions`
+- Shape versions: `AgentPromptCanonicalShapeVersions` (InputEvidence, OutputEvidence)
+- Summary factory: `AgentPromptEvidenceSummaryFactory` (static, moved from runtime to Abstractions)
 
 **Prompting.Runtime** (5 files):
 - `DefaultAgentPromptHashService` — delegates to `ICanonicalHashComputer` + `IAgentPromptCanonicalPayloadProjector<T>` registry
-- `DefaultAgentPromptEvidenceFactory` — creates input/output evidence with summaries
-- `AgentPromptEvidenceSummaryFactory` — static summary construction
-- `CanonicalHashArtifactNames` — 3 new constants: `AgentPromptInputEvidence`, `AgentPromptOutputEvidence`, `AgentPromptProviderObservation`
+- `DefaultAgentPromptEvidenceFactory` — creates input/output evidence with summaries; produces `OutputHashUnavailable` diagnostic when output hash is null
+- `InMemoryAgentPromptTemplateRegistry` — defensive-copy returns from Find/List
 - `AgentPromptingServiceCollectionExtensions` — `AddAgentPrompting()` DI registration
+- `CanonicalHashArtifactNames` — 3 new constants: `AgentPromptInputEvidence`, `AgentPromptOutputEvidence`, `AgentPromptTemplateDescriptor`
 
 **Authoring integration** (3 new files + 8 modified):
 - `DescriptorAuthoringPromptInputProjector` — `IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringPromptInput>` (order-independent canonical JSON)
 - `DescriptorAuthoringModelResponseEvidenceProjection` — safe output record (excludes `ResponseText`)
 - `DescriptorAuthoringModelResponseEvidenceProjector` — `IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringModelResponseEvidenceProjection>`
-- `DefaultDescriptorAuthoringPromptInputHashService` → adapter around `IAgentPromptHashService`
+- `DefaultDescriptorAuthoringPromptInputHashService` → [Obsolete] adapter around `IAgentPromptHashService`; uses default template identity from `LlmDescriptorAuthoringAgentOptions`
 - `DefaultDescriptorAuthoringPromptInputFactory` → no longer computes hash (returns `PromptInputHash = null`)
 - `LlmDescriptorAuthoringAgent` → new `IAgentPromptEvidenceFactory` dependency; creates input/output evidence; attaches summaries on all result paths
 - `LlmDescriptorAuthoringAgentOptions` → prompt template identity properties
 - `DescriptorAuthoringResult` → `PromptInputEvidence`/`PromptOutputEvidence` summary properties
 - `DescriptorAuthoringJsonSerializerContext` → 5 new `[JsonSerializable]` entries
-- `AgentAuthoringServiceCollectionExtensions` → `AddAgentPrompting()` + 2 projector registrations
+- `AgentAuthoringServiceCollectionExtensions` → 2 projector registrations; `AddAgentPrompting()` called by consumer (host/Platform), NOT by Authoring
 
-**Boundary tests** (3 new):
+**Boundary tests** (4 new):
 - `AgentPromptingAbstractions_DoesNotReferenceControlPlaneDraftContractsAuthoringHttpOrPlatform`
 - `AgentPromptingRuntime_DoesNotReferenceControlPlaneDraftContractsAuthoringHttpOrPlatform`
 - `AgentPrompting_DoesNotExposePromptExecutorModelClientOrCompletionService`
+- `AgentAuthoringRuntime_DoesNotReferencePromptingRuntime`
 
 **Key invariants**:
 - Prompting.Abstractions does NOT reference ControlPlane, DraftContracts, Authoring.Http, or Platform
@@ -924,13 +926,15 @@ Status: Completed.
 - Output evidence hash excludes `ResponseText` — only safe fields (ProviderName, ModelName, PromptInputHash, FailureKind, FailureDetail)
 - Input evidence hash uses `CanonicalHashArtifactNames.AgentPromptInputEvidence` + `CanonicalHashPurposeNames.SourceIdentity`
 - Output evidence hash uses `CanonicalHashArtifactNames.AgentPromptOutputEvidence` + `CanonicalHashPurposeNames.AuditEvidence`
-- `IAgentPromptCanonicalPayloadProjector<T>` is AoT-safe — no reflection, no `JsonTypeInfo<T>`, no runtime type scanning
+- `IAgentPromptCanonicalPayloadProjector<T>` is AoT-safe — no reflection, no `JsonTypeInfo<T>`, no runtime type scanning; projectors must write one complete JSON value (WriteStartObject/EndObject)
 - Missing projector throws `InvalidOperationException` instead of falling back to reflection serialization
+- `AgentPromptCanonicalShapeVersions` centralizes shape version strings (not inline in DefaultAgentPromptHashService)
+- `InMemoryAgentPromptTemplateRegistry` returns defensive copies from Find/List — metadata dictionaries are not shared with callers
 - `AgentPromptPurpose` is a sealed record (semantic string), not an enum — extensible without recompilation
 - `AgentPromptDiagnostic.Severity` uses `string` (not `SeverityLevel`) — Prompting.Abstractions does not reference Core.Abstractions
 - `AgentPromptDiagnostic.Code` uses `string` (not `DiagnosticCode`) — consistent with `AgentToolDiagnostic.Code` pattern
 
-**Test counts**: 13 Prompting + 49 Authoring + 19 Boundary — all passing. Full solution build 0 errors.
+**Test counts**: 15 Prompting + 50 Authoring + 20 Boundary — all passing. Full solution build 0 errors.
 
 ---
 

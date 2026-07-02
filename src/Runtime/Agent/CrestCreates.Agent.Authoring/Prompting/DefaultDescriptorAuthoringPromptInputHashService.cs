@@ -5,6 +5,17 @@ using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace CrestCreates.Agent.Authoring.Prompting;
 
+/// <summary>
+/// Compatibility adapter that computes descriptor-authoring prompt input hash
+/// using the default prompt template identity from <see cref="LlmDescriptorAuthoringAgentOptions"/>.
+/// </summary>
+/// <remarks>
+/// This adapter uses fixed <c>DefaultPromptTemplateId</c>, <c>DefaultPromptTemplateVersion</c>,
+/// and <c>DefaultPromptContractVersion</c> from <see cref="LlmDescriptorAuthoringAgentOptions"/>.
+/// For real LLM authoring execution, use <see cref="IAgentPromptEvidenceFactory"/> with explicit
+/// <see cref="LlmDescriptorAuthoringAgentOptions"/> values instead.
+/// </remarks>
+[Obsolete("Use IAgentPromptEvidenceFactory with explicit LlmDescriptorAuthoringAgentOptions for prompt evidence creation.")]
 public sealed class DefaultDescriptorAuthoringPromptInputHashService : IDescriptorAuthoringPromptInputHashService
 {
     private readonly IAgentPromptHashService _promptHashService;
