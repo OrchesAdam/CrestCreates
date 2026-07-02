@@ -67,6 +67,49 @@ Agent Memory boundary tests already assert that memory runtime does not depend
 on Agent Control Plane. Phase 7g+ must extend that boundary instead of weakening
 it.
 
+Before implementation, inspect and preserve the exact current signatures and
+contract shapes of:
+
+```text
+IAgentContextCompressor
+IAgentMemoryExtractor
+AgentCompressedContext
+AgentCompressedContextBlock
+AgentMemoryCandidate
+AgentMemoryDiagnostic
+```
+
+The current compressor contract returns `AgentCompressedContext`. The current
+extractor contract returns `IReadOnlyList<AgentMemoryCandidate>`. These return
+types are fixed for this phase.
+
+Existing diagnostic carriers must be reused:
+
+```text
+AgentCompressedContext.Diagnostics
+AgentCompressedContextBlock.Diagnostics
+AgentMemoryCandidate.SanitizationDiagnostics
+```
+
+If implementation discovers that prompt evidence or canonical output hashes
+need to cross the existing memory boundary, only minimal additive nullable
+fields are allowed:
+
+```text
+PromptInputEvidence?
+PromptOutputEvidence?
+Diagnostics?
+CanonicalOutputHash?
+```
+
+The implementation must not:
+
+- Replace `IAgentContextCompressor` return type with a new result wrapper.
+- Replace `IAgentMemoryExtractor` return type with a new result wrapper.
+- Introduce a second memory lifecycle result model only for LLM.
+- Force broad changes into `Agent.Memory.Abstractions` to carry adapter-local
+  diagnostics.
+
 Phase 7g descriptor authoring already established the project-local LLM adapter
 pattern:
 
@@ -167,6 +210,7 @@ CrestCreates.Agent.Memory.Llm
   -> CrestCreates.Agent.Memory
   -> CrestCreates.Agent.Prompting.Abstractions
   -> CrestCreates.Metadata.Abstractions
+  -> minimal canonical hash abstraction/runtime package when needed
   -> Microsoft.Extensions.DependencyInjection.Abstractions
   -> Microsoft.Extensions.Options
 ```
@@ -174,6 +218,18 @@ CrestCreates.Agent.Memory.Llm
 The dependency on `CrestCreates.Agent.Memory` is allowed only so the LLM adapter
 can delegate to concrete deterministic fallback implementations such as
 `DefaultAgentContextCompressor` and `DefaultAgentMemoryExtractor`.
+
+The canonical hash dependency must be the minimum package required to access:
+
+```text
+ICanonicalHashComputer
+CanonicalHashProjectionResult
+CanonicalHashArtifactNames
+CanonicalHashPurposeNames
+```
+
+Memory.Llm must not reference descriptor registry, topology, impact,
+compatibility, lifecycle, or package services merely to compute memory hashes.
 
 Forbidden dependencies:
 
@@ -193,11 +249,10 @@ CrestCreates.Agent.Memory.Llm -> runtime handler implementation projects
 
 ### 6.1 Options
 
-`AgentMemoryLlmAdapterOptions` controls adapter behavior:
+`AgentMemoryLlmAdapterOptions` controls adapter behavior after an adapter has
+already been selected by DI:
 
 ```text
-UseLlmCompressor
-UseLlmExtractor
 EnableDeterministicFallback
 MaxCompressedBlockCount
 MaxCompressedBlockCharacters
@@ -216,10 +271,29 @@ ProviderProfileRef
 The default options must be conservative:
 
 ```text
-UseLlmCompressor = false
-UseLlmExtractor = false
 EnableDeterministicFallback = true
 MaxCandidateConfidence = AgentMemoryConfidence.Medium
+```
+
+Adapter selection is not a runtime option on `LlmAgentContextCompressor` or
+`LlmAgentMemoryExtractor`. Per-adapter registration is authoritative:
+
+```text
+AddAgentMemoryLlmCompressor()
+  always replaces IAgentContextCompressor with LlmAgentContextCompressor
+
+AddAgentMemoryLlmExtractor()
+  always replaces IAgentMemoryExtractor with LlmAgentMemoryExtractor
+```
+
+If an aggregate registration is provided, adapter selection belongs to the
+aggregate registration API, not to the adapter implementations. The aggregate
+may use a selection enum such as:
+
+```text
+AgentMemoryLlmAdapterSelection.Compressor
+AgentMemoryLlmAdapterSelection.Extractor
+AgentMemoryLlmAdapterSelection.Both
 ```
 
 ### 6.2 Model Boundary
@@ -254,6 +328,20 @@ RecordedAgentMemoryLlmModelClient
 raw response text must never enter output evidence hash payloads or public
 evidence summaries.
 
+`RecordedAgentMemoryLlmModelClient` must match fixtures by:
+
+```text
+PromptInputHash
+TemplateId
+TemplateVersion
+ModelProfileRef
+ProviderProfileRef
+```
+
+Missing fixtures must return a provider-failure response such as
+`ProviderUnavailable` with a `MissingRecordedFixture` diagnostic. A missing
+fixture must not produce an empty successful output.
+
 ### 6.3 Compression Adapter
 
 `LlmAgentContextCompressor` implements `IAgentContextCompressor`.
@@ -278,9 +366,14 @@ If provider, parse, validation, source-ref, tenant, or redaction validation
 fails and deterministic fallback is enabled, it delegates to
 `DefaultAgentContextCompressor`.
 
-The adapter must use sanitized content only. Raw conversation turns or task
-events may be read so they can be sanitized, but only sanitized content may
-enter prompt input or model request text.
+The adapter must follow the existing `IAgentContextCompressor` input contract.
+In the current codebase, compression receives `AgentConversationRecord` and
+`AgentTaskRecord`, so the LLM compressor must invoke
+`IAgentMemoryContentSanitizer` before prompt construction. If the contract is
+later narrowed to already-sanitized input, the LLM compressor must not access
+raw content and must use only sanitized fields.
+
+Only sanitized content may enter prompt input or model request text.
 
 The LLM may propose block content. The framework must own and validate:
 
@@ -421,10 +514,26 @@ PromptOutputEvidenceHash
   - hash over safe provider observation/output projection
   - purpose: AuditEvidence
 
-CompressedOutputHash / CandidateOutputHash
+CompressedOutputHash
   - hash over validated sanitized domain output
-  - purpose: SourceIdentity or Integrity, depending on existing canonical hash naming
+  - purpose: SourceIdentity
+  - reason: identifies sanitized compressed content derived from source refs
+
+CandidateOutputHash
+  - hash over validated sanitized domain output
+  - purpose: SourceIdentity
+  - reason: identifies candidate semantic content before promotion
 ```
+
+Required artifact names:
+
+```text
+CanonicalHashArtifactNames.AgentMemoryCompressedOutput
+CanonicalHashArtifactNames.AgentMemoryCandidateOutput
+```
+
+Do not extend a canonical hash enum for these artifacts. Follow the Phase 7h
+pattern of using governed artifact-name constants.
 
 Compressed output hash must include stable semantic fields, not random runtime
 IDs:
@@ -490,16 +599,21 @@ services.AddAgentMemoryLlmExtractor();
 An aggregate registration may exist for host convenience:
 
 ```csharp
-services.AddAgentMemoryLlmAdapters(options =>
-{
-    options.UseLlmCompressor = true;
-    options.UseLlmExtractor = true;
-    options.EnableDeterministicFallback = true;
-});
+services.AddAgentMemoryLlmAdapters(
+    adapters: AgentMemoryLlmAdapterSelection.Both,
+    configure: options =>
+    {
+        options.EnableDeterministicFallback = true;
+    });
 ```
 
 Explicit per-adapter registration is the preferred main path because it keeps
 replacement boundaries clear.
+
+`UseLlmCompressor` and `UseLlmExtractor` must not be read by
+`LlmAgentContextCompressor` or `LlmAgentMemoryExtractor` at runtime. Prefer not
+to add those flags at all. If an aggregate registration needs selection, use an
+explicit selection parameter on the registration method.
 
 Memory.Llm registration must not register a real HTTP provider. Hosts or tests
 must register `IAgentMemoryLlmModelClient` explicitly.
@@ -535,9 +649,23 @@ OutputBudgetTruncated
 ```
 
 Diagnostics should be attached to returned `AgentCompressedContext`,
-`AgentCompressedContextBlock`, or `AgentMemoryCandidate` objects where that is
-the existing memory contract surface. Prompt evidence diagnostics should remain
-prompt-evidence diagnostics and should not replace memory diagnostics.
+`AgentCompressedContextBlock`, or `AgentMemoryCandidate` objects through the
+existing fields identified in section 2. Prompt evidence diagnostics should
+remain prompt-evidence diagnostics and should not replace memory diagnostics.
+
+Prompt diagnostics describe prompt, evidence, hash, template, model-profile, and
+provider-observation availability. Memory diagnostics describe memory-domain
+validation:
+
+```text
+source ref validity
+source range preservation
+redaction preservation
+confidence capping
+fallback
+non-authoritative enforcement
+promotion-required semantics
+```
 
 ## 9. Error Handling
 
@@ -569,8 +697,27 @@ Extraction must fallback when:
 Fallback must add diagnostics. It must not silently hide provider or validation
 failure.
 
-If `EnableDeterministicFallback` is false, the adapter should return an empty
-safe result with diagnostics instead of producing partially trusted output.
+If `EnableDeterministicFallback` is false, the adapter must not return partially
+trusted provider output.
+
+For compression:
+
+- Return an `AgentCompressedContext` with zero blocks only if the current memory
+  contract and tests allow empty compressed contexts.
+- Otherwise return deterministic minimal compression created from sanitized
+  input without provider output, marked with diagnostics such as
+  `ProviderFailed` and `UntrustedOutputSkipped`.
+- Do not return null.
+
+For extraction:
+
+- Return an empty `IReadOnlyList<AgentMemoryCandidate>` when provider output is
+  unavailable or untrusted.
+- Do not create placeholder candidates merely to carry diagnostics.
+- If no candidate-level diagnostics carrier is available because there are no
+  candidates, diagnostics must be carried through prompt output evidence,
+  compressor/context diagnostics, or a test-visible adapter diagnostic hook.
+- Do not fabricate a candidate solely to preserve diagnostics.
 
 ## 10. Testing and Exit Criteria
 
@@ -617,7 +764,22 @@ ProviderUnavailable_FallsBackWithDiagnostic
 FallbackDisabled_ReturnsSafeDiagnosticsWithoutTrustedOutput
 ```
 
-### 10.6 Non-authoritative Lifecycle
+### 10.6 Malicious Provider Output
+
+```text
+LlmExtractor_ProviderOutputWithActiveStatus_IsRejectedOrNormalizedToCandidate
+LlmExtractor_ProviderOutputWithAuthoritativeFlag_IsRejectedOrForcedFalse
+LlmExtractor_ProviderOutputWithUnknownTenant_IsRejectedAndFallbacks
+LlmCompressor_ProviderOutputDropsRedactionMarker_IsRejectedAndFallbacks
+LlmCompressor_ProviderOutputReferencesRawSecret_IsRejectedOrSanitized
+```
+
+These tests are required because the LLM adapter is an untrusted boundary. The
+parser and validator must prove that provider output cannot escalate candidate
+state, cross tenant boundaries, drop redaction metadata, or reintroduce raw
+secret content.
+
+### 10.7 Non-authoritative Lifecycle
 
 ```text
 LlmExtractor_CandidatesAreNotActiveMemoryItems
@@ -626,7 +788,7 @@ Candidates_DoNotAppearInRecall_BeforePromotion
 Candidates_AppearInRecall_OnlyAfterExplicitPromotion
 ```
 
-### 10.7 Prompt Evidence and Hashing
+### 10.8 Prompt Evidence and Hashing
 
 ```text
 LlmCompressor_AttachesPromptInputAndOutputEvidence
@@ -636,7 +798,7 @@ PromptInputHash_Changes_WhenSanitizedInputChanges
 CanonicalOutputHash_Changes_WhenSanitizedOutputChanges
 ```
 
-### 10.8 Boundary Tests
+### 10.9 Boundary Tests
 
 ```text
 AgentMemoryRuntime_DoesNotReferenceMemoryLlm
@@ -658,6 +820,11 @@ Reject the implementation if any of these occur:
 - Raw unsanitized source content enters prompt input or model request.
 - Source refs are accepted without validation against input.
 - Redaction metadata can be dropped silently.
+- Malicious provider output can promote, authorize, cross tenant boundaries, or
+  reintroduce raw secret content.
+- Missing recorded fixtures produce empty successful output.
+- `UseLlmCompressor` or `UseLlmExtractor` flags control adapter behavior inside
+  `LlmAgentContextCompressor` or `LlmAgentMemoryExtractor`.
 - Prompting becomes a model executor/provider abstraction.
 - Memory.Llm references ControlPlane, Activation, Authoring.Http, Platform,
   Framework Api/Web, persistence providers, or runtime handlers.
