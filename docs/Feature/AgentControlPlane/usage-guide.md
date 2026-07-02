@@ -1,6 +1,6 @@
 # Tool DTO, JSON Contract & Review Report — Usage Guide
 
-> **Date:** 2026-06-25 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow)**
+> **Date:** 2026-07-02 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow) + Phase 7e+ (#43 Agent Memory & Context Compression Runtime) + Phase 7f (#32 AI-assisted Descriptor Authoring Golden Scenario)**
 
 ## 1. 快速开始 (Quick Start)
 
@@ -1665,3 +1665,407 @@ Phase 7b 核心组件（尚未实现）：
 | `ILLMProvider` | 可插拔 LLM 后端抽象 |
 | `PromptTemplateRegistry` | 按描述符种类存储和解析提示模板 |
 | `DescriptorDraftBuilder` | LLM 结构化输出 → DescriptorDraft |
+
+---
+
+## 16. Agent Memory & Context Compression Runtime 使用 (Phase 7e+)
+
+> **Phase 7e+ (#43)** 实现了从对话/任务历史到压缩上下文、记忆候选提取、晋升/召回、源扩展和 AuthoringContext 组装的完整链路。所有合约类型使用 `CanonicalHash` 标识内容身份和完整性。
+
+### 16.1 DI 注册
+
+```csharp
+// 一次性注册所有 Agent Memory 服务
+services.AddAgentMemoryRuntime();
+
+// 等价于注册 11 个默认服务 + AgentMemoryCanonicalHashProjector + TimeProvider.System
+```
+
+### 16.2 内容脱敏
+
+所有内容在进入 Memory 系统前必须经过脱敏：
+
+```csharp
+var sanitizer = services.GetRequiredService<IAgentMemoryContentSanitizer>();
+
+var result = sanitizer.Sanitize(
+    tenantId: "tenant_1",
+    content: "User mentioned bearer token: Bearer eyJhbGciOi...",
+    sourceRefs: new[] { new AgentContextSourceRef { ... } });
+
+if (result.Rejected)
+{
+    // 内容被完全拒绝（所有内容都被脱敏）
+    Console.WriteLine($"Content rejected: {string.Join(", ", result.RedactionKinds)}");
+}
+else
+{
+    // result.SanitizedContent — 脱敏后内容
+    // result.CanonicalContentHash — 内容身份哈希
+}
+```
+
+脱敏规则：
+- Bearer token（`Bearer ...`）
+- Credential 模式（`password=...`, `secret=...`）
+- Connection string（`Server=...;Password=...`）
+- Long base64 token（>100 字符的 base64 字符串）
+
+### 16.3 上下文压缩
+
+对话和任务历史可以压缩为上下文块：
+
+```csharp
+var compressor = services.GetRequiredService<IAgentContextCompressor>();
+
+// 压缩对话
+var conversation = new AgentConversationRecord
+{
+    ConversationId = "conv_1",
+    TenantId = "tenant_1",
+    Turns = turns // AgentConversationTurn[]
+};
+var compressed = await compressor.CompressConversationAsync(conversation, ct);
+// compressed.Blocks — AgentCompressedContextBlock[]
+// 每个 block 有 CanonicalContentHash 和 SourceRefs
+
+// 压缩任务历史
+var task = new AgentTaskRecord { ... };
+var compressedTask = await compressor.CompressTaskAsync(task, ct);
+```
+
+### 16.4 记忆候选提取与晋升
+
+```csharp
+var extractor = services.GetRequiredService<IAgentMemoryExtractor>();
+var promotionService = services.GetRequiredService<IAgentMemoryPromotionService>();
+
+// 从压缩上下文提取候选
+var candidates = await extractor.ExtractCandidatesAsync(compressedContext, ct);
+// 每个 candidate: Kind=ProjectFact, Confidence=Low, Status=Candidate
+
+// 晋升为正式记忆
+var operationRequest = new AgentMemoryOperationRequest
+{
+    TenantId = "tenant_1",
+    InvocationContext = new AgentMemoryInvocationContext
+    {
+        TenantId = "tenant_1",
+        ActorId = "agent_1",
+        ActorKind = DescriptorActivationActorKind.Agent,
+        Reason = "High confidence project fact"
+    },
+    Reason = "Verified project constraint",
+    Timestamp = DateTimeOffset.UtcNow,
+    SourceRefs = candidate.SourceRefs
+};
+
+var promoted = await promotionService.PromoteAsync("tenant_1", candidate.CandidateId, operationRequest, ct);
+// promoted — AgentMemoryItem (Status=Active, IsAuthoritative=false)
+
+// 其他生命周期操作
+await promotionService.RejectAsync(tenantId, candidateId, operationRequest, ct);
+await promotionService.SupersedeAsync(tenantId, memoryId, newMemoryId, operationRequest, ct);
+await promotionService.ArchiveAsync(tenantId, memoryId, operationRequest, ct);
+```
+
+### 16.5 记忆召回
+
+```csharp
+var retriever = services.GetRequiredService<IAgentMemoryRetriever>();
+
+var query = new AgentMemoryQuery
+{
+    TenantId = "tenant_1",
+    IntentText = "What are the project constraints for company certification?",
+    Kinds = new HashSet<AgentMemoryKind> { AgentMemoryKind.Constraint, AgentMemoryKind.ProjectFact },
+    VisibleDescriptorRefs = new HashSet<string> { "wf_company_certification", "cap_approve_certification" },
+    VisibleDescriptorKinds = new HashSet<DescriptorKind> { DescriptorKind.Workflow, DescriptorKind.Capability },
+    CharacterBudget = 2000,
+    MinimumConfidence = AgentMemoryConfidence.Medium
+};
+
+var memoryPack = await retriever.RecallAsync(query, ct);
+// memoryPack.Memories — 排序后的 AgentMemoryItem 列表（置信度→种类→晋升时间→ID）
+// memoryPack.IsAuthoritative — 始终为 false
+// memoryPack.ScopeFingerprint — 查询范围指纹（CanonicalHash）
+// memoryPack.VisibleMemorySetHash — 可见记忆集合哈希（CanonicalHash）
+// memoryPack.CanonicalPackHash — 整体包哈希（CanonicalHash）
+```
+
+**关键约束**：
+- `IsAuthoritative` 始终为 `false` — 元数据优先于冲突记忆
+- `VisibleDescriptorKinds` fail-closed — 无法解析的值导致返回空结果
+- 排序确定性：Confidence(desc) → Kind(ordinal) → PromotedAt(desc) → MemoryId(ordinal)
+
+### 16.6 源扩展
+
+```csharp
+var expander = services.GetRequiredService<IAgentContextSourceExpander>();
+
+var sourceRef = new AgentContextSourceRef
+{
+    SourceKind = AgentSourceKind.ConversationTurn,
+    TenantId = "tenant_1",
+    SourceId = "conv_1"
+};
+
+var expansion = await expander.ExpandAsync(sourceRef, ct);
+// expansion.Status — Expanded / NotExpandable / NotFound / Redacted
+// expansion.SanitizedContent — 扩展后的脱敏内容（如果 Status == Expanded）
+```
+
+SourceKind 分发规则：
+
+| SourceKind | 目标 Store |
+|------------|-----------|
+| ConversationTurn | IAgentConversationStore |
+| TaskRecord / TaskEvent | IAgentTaskHistoryStore |
+| CompressedContextBlock | IAgentCompressedContextStore |
+| MemoryCandidate / MemoryItem | IAgentMemoryStore |
+| 其他 | NotExpandable |
+
+### 16.7 AuthoringContext 组装
+
+```csharp
+var authoringBuilder = services.GetRequiredService<IAgentAuthoringContextBuilder>();
+
+// 调用者负责构建 MetadataContextPack 和 AgentMemoryPack
+var metadataPack = await metadataPackBuilder.BuildAsync(request, topology, descriptors, ct);
+var memoryPack = await retriever.RecallAsync(query, ct);
+
+var authoringContext = await authoringBuilder.BuildAsync(
+    new AgentAuthoringRequest
+    {
+        TenantId = "tenant_1",
+        IntentText = "Add second-level finance review before approving company certification"
+    },
+    metadataPack,
+    memoryPack,
+    ct);
+
+// authoringContext.Request — AgentAuthoringRequest
+// authoringContext.MetadataContextPack — MetadataContextPack
+// authoringContext.MemoryPack — AgentMemoryPack (IsAuthoritative=false)
+// authoringContext.Diagnostics — 诊断列表
+```
+
+**关键设计**：`IAgentAuthoringContextBuilder.BuildAsync` 不内部调用 retriever。调用者传入预构建的 `AgentMemoryPack`，确保调用者控制记忆召回策略和预算。
+
+### 16.8 JSON 序列化
+
+```csharp
+using CrestCreates.Agent.Memory.Abstractions.Json;
+
+// AgentMemoryJsonSerializerContext 注册了 19 个 Root 类型
+var options = new JsonSerializerOptions
+{
+    TypeInfoResolver = JsonTypeInfoResolver.Combine(
+        AgentControlPlaneToolJsonSerializerContext.Default,
+        AgentMemoryJsonSerializerContext.Default)
+};
+
+var json = JsonSerializer.Serialize(memoryPack, options);
+var deserialized = JsonSerializer.Deserialize<AgentMemoryPack>(json, options);
+```
+
+### 16.9 关键使用约束
+
+| 约束 | 说明 |
+|------|------|
+| **IsAuthoritative 始终为 false** | Agent 不应将记忆视为权威真相；元数据优先于冲突记忆 |
+| **CanonicalHash 贯穿所有合约** | 内容身份和完整性通过 CanonicalHash 标识，不使用 string |
+| **Snapshot-on-read** | 所有 InMemory Store 返回防御性拷贝，防止外部修改内部状态 |
+| **VisibleDescriptorKinds fail-closed** | 无法解析的 DescriptorKind 值导致返回空结果 |
+| **MemoryPack 由调用者构建** | IAgentAuthoringContextBuilder 不内部调用 retriever |
+| **Memory.Abstractions 不引用 ControlPlane.Abstractions** | 依赖边界由 Boundary 测试强制执行 |
+
+---
+
+## 17. AI-assisted Descriptor Authoring Golden Scenario 使用 (Phase 7f)
+
+> **Phase 7f (#32)** 在 Phase 7e+ Agent Memory 基础之上，实现了从意图文本到描述符草稿创作、审查、治理、激活绑定、运行时证明的完整端到端链路。所有新增类型均在 sample 项目中，不修改框架核心合约。
+
+### 17.1 IDescriptorAuthoringAgent 接口
+
+```csharp
+public interface IDescriptorAuthoringAgent
+{
+    Task<DescriptorAuthoringResult> AuthorAsync(AgentAuthoringContext context, CancellationToken ct);
+}
+```
+
+Agent 仅消费 `AgentAuthoringContext`（含 Request、MetadataContextPack、MemoryPack），产出 `DescriptorAuthoringResult`（含 `DescriptorDraftSet`）。Agent 不访问 raw memory stores、runtime handlers、activation gate 或任何 Control Plane 内部服务。
+
+### 17.2 FakeCompanyCertificationAuthoringAgent
+
+确定性假 Agent，用于 golden scenario 测试：
+
+```csharp
+// DI 注册
+services.AddSingleton<IDescriptorAuthoringAgent, FakeCompanyCertificationAuthoringAgent>();
+
+// 使用
+var agent = services.GetRequiredService<IDescriptorAuthoringAgent>();
+var result = await agent.AuthorAsync(authoringContext, ct);
+
+// result.DraftSet.Drafts 包含 2 个 draft：
+// 1. HumanTask: ht_finance_review_company_certification
+// 2. Workflow update: wf_company_certification + step_finance_review
+```
+
+**约束**：
+- 无构造函数依赖 — 不注入任何服务
+- 仅消费 `AgentAuthoringContext.Request.TenantId` 和 `Request.IntentText`
+- 输出确定性 — 相同输入 → 相同 draft set
+- 不使用 raw memory stores（IAgentMemoryStore 等）
+- 不访问 runtime handlers 或 activation gate
+
+### 17.3 CompanyCertificationAuthoringGoldenScenarioRunner
+
+三方法编排器：
+
+```csharp
+var runner = services.GetRequiredService<CompanyCertificationAuthoringGoldenScenarioRunner>();
+
+// 方法 1：意图 → 创作 → 审查 → final governance
+var reviewResult = await runner.RunUntilDraftSetReviewAsync(
+    intentText: "Add second-level finance review before approving company certification",
+    startingInventory: baselineDescriptors,
+    ct: cancellationToken);
+
+// reviewResult.IsBlocked — 是否被 block
+// reviewResult.FinalProposedInventory — 最终提议清单
+// reviewResult.FinalDecisionSource — 决策来源
+// reviewResult.FinalImpact / FinalCompat — 基于 inventory diff 的最终影响/兼容性
+// reviewResult.FinalGovernance — 最终治理决策
+
+// 方法 2：完整链路（+ 激活 + 运行时证明）
+var fullReport = await runner.RunAsync(
+    intentText: "Add second-level finance review before approving company certification",
+    ct: cancellationToken);
+
+// fullReport.AuthoringSucceeded — 创作是否成功
+// fullReport.DraftSetBlocked — Draft set 是否被 block
+// fullReport.RuntimeActivationGateSucceeded — 激活门是否通过
+// fullReport.RuntimeProofUsedFreshActivatedHost — 是否使用 fresh host 证明
+// fullReport.ActivatedWorkflowDescriptorId — 激活的 Workflow ID
+// fullReport.WorkflowStepSequence — Workflow 步骤序列
+
+// 方法 3：到激活门为止
+var activationReport = await runner.RunActivationOnlyAsync(
+    intentText: "Add second-level finance review before approving company certification",
+    ct: cancellationToken);
+```
+
+### 17.4 Draft Set 原子性
+
+Draft set 实现原子性——全部 draft 创建成功或全部 block：
+
+```csharp
+// 如果任何一个 draft 的 materialization 失败：
+// → IsBlocked = true
+// → BlockReason = "Draft set materialization failed for draft: ..."
+
+// 如果 final inventory 的 topology 构建失败：
+// → IsBlocked = true
+// → BlockReason = "Final topology build failed: ..."
+
+// 如果 final governance 评估失败：
+// → IsBlocked = true
+// → BlockReason = "Final governance evaluation failed: ..."
+```
+
+### 17.5 Final Decision 基于 Inventory Diff
+
+Final scenario-level decision 使用完整 inventory diff，不取最后一个 draft review 的结果：
+
+```csharp
+// Runner 内部逻辑（伪代码）：
+var changeSet = changeSetBuilder.Build(startingInventory, finalProposedInventory);
+var finalImpact = impactAnalyzer.Analyze(topology, changeSet);
+var finalCompat = compatibilityAnalyzer.Analyze(startingInventory, finalProposedInventory, changeSet, finalImpact);
+var finalGovernance = governanceService.EvaluateGovernance(governanceRequest with {
+    ImpactReport = finalImpact,
+    CompatibilityReport = finalCompat
+});
+```
+
+这确保了 3+ draft 场景下，final decision 基于完整的 baseline→final 变更，而非最后一个 draft 的局部视图。
+
+### 17.6 激活绑定使用真实 Hash
+
+所有 7 个 BindingHashes slot 使用真实 hash 计算，无 placeholder fallback：
+
+| Slot | 计算方式 |
+|------|---------|
+| SourceReviewHash | `IDescriptorDraftReviewHashService.ComputeSourceReviewHash(draft, reviewResult)` |
+| ReviewManifestHash | `IDescriptorDraftReviewHashService.ComputeReviewManifestHash(draft, reviewResult)` |
+| PackageManifestHash | `IDescriptorPackageBuilder.Build(request).Hashes.PackageManifestHash` |
+| PackageEvidenceHash | `IDescriptorPackageBuilder.Build(request).Hashes.PackageEvidenceHash` |
+| PackageEvidenceEnvelopeHash | `IDescriptorPackageBuilder.Build(request).Hashes.PackageEvidenceEnvelopeHash` |
+| ContractHash | `IDescriptorStableHashBuilder.Build(descriptor).ContractHash` |
+| DefinitionHash | `IDescriptorStableHashBuilder.Build(descriptor).DefinitionHash` |
+
+如果任何 hash 计算失败或返回 null → 激活被 block。
+
+### 17.7 绑定引用注册与验证
+
+`ActivationBindingReferenceRegistry` 在 artifact 创建点注册引用，激活前只读验证：
+
+```csharp
+var registry = services.GetRequiredService<ActivationBindingReferenceRegistry>();
+
+// 在 artifact 创建时注册（review result 创建后）
+registry.RegisterReviewResult(tenantId, reviewResultId, draftId);
+
+// 在 package preview 创建后
+registry.RegisterPackagePreview(tenantId, packagePreviewId, draftId);
+
+// 在 evidence preview 创建后
+registry.RegisterEvidencePreview(tenantId, evidencePreviewId, draftId);
+
+// 在激活前验证（只读）
+var validation = registry.ValidateReferences(
+    tenantId, draftId, reviewResultId, packagePreviewId, evidencePreviewId);
+
+if (!validation.IsValid)
+{
+    // validation.Errors — 引用不存在或 DraftId 不匹配
+    // → 激活被 block
+}
+```
+
+等价于 Control Plane 内部 `_reviewResults`/`_packagePreviews`/`_evidencePreviews` 字典 + DraftId mismatch 校验。
+
+### 17.8 运行时证明
+
+运行时证明从 approved final inventory 构建新 host：
+
+```csharp
+// Runner 内部逻辑（伪代码）：
+var freshHost = new CompanyCertificationGoldenScenarioHost(
+    runtimeInventory: reviewResult.FinalProposedInventory);
+var freshRunner = freshHost.GetRequiredService<CompanyCertificationGoldenScenarioRunner>();
+
+// 在 fresh host 上执行 workflow
+// → 验证 activated descriptors 可执行
+// → 完成 HumanTask instances
+// → 验证 workflow step sequence
+```
+
+**关键约束**：不使用原始 host。Fresh host 确保激活后的描述符在独立 runtime 中可执行。
+
+### 17.9 关键使用约束
+
+| 约束 | 说明 |
+|------|------|
+| **FakeAgent 无构造函数依赖** | 仅消费 AgentAuthoringContext，不注入任何服务 |
+| **Draft set 原子性** | 全部成功或全部 block，无部分成功 |
+| **Final decision 基于 inventory diff** | 不取最后一个 draft review 的 impact/compat |
+| **激活绑定无 placeholder** | 所有 7 slot 使用真实 hash，缺 hash 即 block |
+| **引用注册在创建点** | 激活前只读验证，不在验证前补登记 |
+| **运行时证明用 fresh host** | 不使用原始 host，确保独立 runtime |
+| **IsAuthoritative 始终 false** | 元数据优先于冲突记忆 |
+| **CreatedAt 固定时间** | GoldenScenarioCreatedAt = 2026-01-01T00:00:00Z |
+| **不修改框架核心合约** | 所有新增类型在 sample 项目中 |

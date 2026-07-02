@@ -1,6 +1,6 @@
 # Tool DTO, JSON Contract & Review Report — Architecture Design
 
-> **Date:** 2026-06-27 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow) + Phase 7e.1: Canonical Evidence Hashing**
+> **Date:** 2026-07-02 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow) + Phase 7e.1: Canonical Evidence Hashing + Phase 7e+ (#43 Agent Memory & Context Compression Runtime) + Phase 7f (#32 AI-assisted Descriptor Authoring Golden Scenario)**
 
 ## 1. 概述 (Overview)
 
@@ -9,6 +9,10 @@ Phase 7c 在 Agent Control Plane 与外部协议适配器（MCP、HTTP、SignalR
 Phase 7d 在 Phase 7c DTO 边界之上增加了审查报告（Review Report）与修复提案（Fix Proposal）契约层。审查报告将审查结果转换为结构化、确定性、人工/Agent 可读的报告；修复提案契约升级使提案能表达结构化值变更、种类标签和安全等级。审查报告无治理决定权、无激活决定权、无运行时注册表变异能力。
 
 Phase 7e 实现了安全激活工作流（Safe Activation Workflow）——从已审查的描述符草稿到运行时激活的完整路径。核心能力包括：激活请求生命周期管理（提交/审批/拒绝/取消/状态查询）、基于 HumanTask 的人工审核编排、证据重校验（通过 7 字段 CanonicalHash 比较检测激活请求创建后的漂移）、治理决策传递、以及 `IRuntimeActivationGate` 作为唯一运行时状态变异入口的架构不变量。合约版本迭代至 `7e.v1`，Phase 7e.1 将哈希生产与验证迁移到 canonical hash 基础设施，替换了 ad-hoc SHA256 管道拼接。
+
+Phase 7e+ 实现了 Agent Memory & Context Compression Runtime——从对话/任务历史到压缩上下文、记忆候选提取、晋升/拒绝/替代/归档、召回与源扩展的完整链路。核心能力包括：内容脱敏（Regex-based redaction + 全量拒绝）、上下文压缩（对话/任务 → 压缩块）、记忆候选提取、记忆生命周期管理（Promote/Reject/Supersede/Archive）、基于查询的记忆召回（含置信度排序、字符预算、可见描述符过滤、ScopeFingerprint）、源扩展（按 SourceKind 分发到对应 Store）、以及 AgentAuthoringContext 组装（Request + MetadataContextPack + MemoryPack → AuthoringContext）。所有合约类型使用 CanonicalHash 标识内容身份和完整性，AgentMemoryPack.IsAuthoritative 始终为 false——元数据优先于冲突记忆。依赖边界：Memory.Abstractions 不引用 ControlPlane.Abstractions。
+
+Phase 7f 实现了 AI-assisted Descriptor Authoring Golden Scenario——从意图文本到描述符草稿创作、审查、治理、激活绑定、运行时证明的完整端到端链路。核心交付物包括：IDescriptorAuthoringAgent 接口（消费 AgentAuthoringContext，产出 DescriptorDraftSet）、FakeCompanyCertificationAuthoringAgent（确定性假 Agent，无 LLM 依赖）、CompanyCertificationAuthoringGoldenScenarioRunner（三方法编排：RunUntilDraftSetReviewAsync / RunAsync / RunActivationOnlyAsync）、ActivationBindingReferenceRegistry（绑定引用在创建点注册，激活前只读验证）、以及 CompanyCertificationAuthoringGoldenScenarioReport。Draft set 实现原子性——全部成功或全部 block。Final scenario-level decision 基于 startingInventory → finalProposedInventory 的完整 inventory diff（IDescriptorChangeSetBuilder → IDescriptorImpactAnalyzer → IDescriptorCompatibilityAnalyzer），不取最后一个 draft review 的结果。激活绑定使用真实 review hash（IDescriptorDraftReviewHashService）、真实 package hash（IDescriptorPackageBuilder + IDescriptorPackageCanonicalHashComputer）、真实 descriptor hash（IDescriptorStableHashBuilder），无 placeholder fallback。运行时证明从 fresh host 构建，使用 approved final inventory。
 
 核心交付物：
 - **34 个 Tool DTO** — 统一的密封 record 类型，代替所有领域类型（新增 2 个：BuildDescriptorReviewReport、RenderDescriptorReviewReport）
@@ -26,6 +30,13 @@ Phase 7e 实现了安全激活工作流（Safe Activation Workflow）——从�
 - **Activation Services (Phase 7e)** — 7 个核心接口 + 8 个实现：`IDescriptorActivationRequestService`（生命周期）、`IActivationEvidenceRechecker`（证据重校验）、`IRuntimeActivationGate`（唯一运行时状态变异入口）、`IActivationReviewOrchestrator`（HumanTask 编排）、`IActivationBindingArtifactResolver`（绑定引用哈希解析）、`IDescriptorActivationPolicyProvider`（策略）、`IDescriptorActivationAuditor`（审计）
 - **HumanTask + EventBus Integration (Phase 7e)** — `DescriptorActivationReviewHumanTaskEventHandler` 处理 HumanTask 完成回调，触发审查决策处理
 - **Governance Integration (Phase 7e)** — 治理决策从审查结果流向 `SubmitActivationRequestRequest.GovernanceDecision`，绑定到激活请求快照
+- **Agent Memory Contracts (Phase 7e+)** — 27 个 sealed record/enum + 11 个接口 + DiagnosticCodes + CanonicalShapeVersions，覆盖对话存储、任务历史、压缩上下文、记忆存储/提取/晋升/召回、源扩展、内容脱敏、AuthoringContext 组装
+- **Agent Memory Implementations (Phase 7e+)** — 11 个默认服务：4 个 InMemory Store、Sanitizer、Compressor、Extractor、PromotionService、Retriever、SourceExpander、AuthoringContextBuilder
+- **Agent Memory JSON Context (Phase 7e+)** — `AgentMemoryJsonSerializerContext`，AoT 兼容，注册 19 个 Root 类型
+- **Authoring Agent Contracts (Phase 7f)** — `IDescriptorAuthoringAgent`、`DescriptorDraftSet`、`DescriptorAuthoringResult`
+- **Fake Authoring Agent (Phase 7f)** — `FakeCompanyCertificationAuthoringAgent`，确定性，仅消费 `AgentAuthoringContext`
+- **Authoring Golden Scenario Runner (Phase 7f)** — `CompanyCertificationAuthoringGoldenScenarioRunner`，三方法编排 + `ActivationBindingReferenceRegistry`
+- **Authoring Golden Scenario Report (Phase 7f)** — `CompanyCertificationAuthoringGoldenScenarioReport`
 
 ### 1.1 目标
 
@@ -78,6 +89,9 @@ Protocol Adapters (MCP / HTTP / SignalR)
 | `CrestCreates.Agent.DraftContracts` | Spec 文件（`[AgentDraftContractSpec]`、`[AgentDraftField]` 等）、引用 `CrestCreates.CodeGenerator` → 生成 payload DTO、patch DTO、changed-field 枚举、投影类、manifest |
 | `CrestCreates.Agent.ControlPlane.Abstractions` | Tool DTO（请求/结果类型）、JSON 序列化上下文、契约版本、工具描述符、工具名称常量；payload DTO 类型通过 global using 别名映射到 DraftContracts 生成类型 |
 | `CrestCreates.Agent.ControlPlane` | Wrapper 投影（`AgentDescriptorDraftDtoProjection`）、`AgentDraftPayloadProjection` 的调用者、工具服务实现、权限/审计/可见性基础设施 |
+| `CrestCreates.Agent.Memory.Abstractions` | Agent Memory 合约（27 个 sealed record/enum + 11 个接口 + DiagnosticCodes + CanonicalShapeVersions + AgentMemoryJsonSerializerContext）；不引用 ControlPlane.Abstractions |
+| `CrestCreates.Agent.Memory` | 11 个默认服务实现：4 个 InMemory Store、Sanitizer、Compressor、Extractor、PromotionService、Retriever、SourceExpander、AuthoringContextBuilder、AgentMemoryCanonicalHashProjector |
+| `samples/CrestCreates.Samples.DescriptorControlPlane/Authoring` | IDescriptorAuthoringAgent、FakeCompanyCertificationAuthoringAgent、CompanyCertificationAuthoringGoldenScenarioRunner/Report、ActivationBindingReferenceRegistry |
 | `CrestCreates.Agent.ControlPlane.Tests` | 423 个 ControlPlane 测试（含 DraftContracts + Generator + Activation）+ 8 个 Boundary 测试 = **431 个测试** |
 
 ---
@@ -557,7 +571,8 @@ public sealed record AgentToolDescriptor
 | 7c-sub | #42: AgentDraftContract Generator, Patch DTO, ChangedField enums, Projection 生成 | Implemented |
 | **7d** | Tool DTO, JSON Contract & Review Report — Review Report DTO, Builder, Renderer, Fix Proposal Contract Upgrade (#16) | **Implemented** |
 | 7e | Activation Workflow（已审查的草稿 → 运行时激活） | **Implemented (#17)** |
-| 7f | Continuous Improvement Loop（运行时反馈 → prompt 优化） | Future |
+| **7e+** | Agent Memory & Context Compression Runtime（对话/任务历史→压缩→提取→晋升→召回→AuthoringContext） | **Implemented (#43)** |
+| **7f** | AI-assisted Descriptor Authoring Golden Scenario（意图→创作→审查→激活→运行时证明完整链路） | **Implemented (#32)** |
 | 7a | Descriptor Draft Runtime（存储、验证、物化、审查） | Implemented |
 
 ### 10.1 Phase 7e — Safe Activation Workflow (#17)
@@ -1299,3 +1314,253 @@ Phase 7e.1 将激活工作流中的哈希生产与验证迁移到 canonical hash
 - `DescriptorManifest.ContentHash`/`EvidenceHash`/`EnvelopeHash` string 字段已完全删除
 - `DescriptorPackageHashComputer`（ad-hoc string concatenation）标记 `[Obsolete]`
 - `DescriptorPackage.ContentHash` 便捷属性回退到 `Hashes?.PackageManifestHash.Value ?? string.Empty`
+
+---
+
+## 13. Agent Memory & Context Compression Runtime (Phase 7e+)
+
+> **Phase 7e+ (#43)** 实现了 Agent Memory & Context Compression Runtime——从对话/任务历史到压缩上下文、记忆候选提取、晋升/拒绝/替代/归档、召回与源扩展的完整链路。所有合约类型使用 CanonicalHash 标识内容身份和完整性。
+
+### 13.1 架构概览
+
+主链：Sanitize → Compress → ExtractCandidates → Promote → Recall → Expand → BuildAgentAuthoringContext
+
+- **3 个项目**：`CrestCreates.Agent.Memory.Abstractions`（27 个 sealed record/enum + 11 个接口）、`CrestCreates.Agent.Memory`（11 个默认服务）、`CrestCreates.Agent.Memory.Tests`（47 个测试）
+- **AgentMemoryJsonSerializerContext** — AoT 兼容，注册 19 个 Root 类型
+
+### 13.2 合约类型总览
+
+#### 对话/任务历史
+
+| Type | Kind | Description |
+|------|------|-------------|
+| `AgentConversationRole` | enum | User/Assistant/Tool/System |
+| `AgentConversationTurn` | sealed record | TurnId, Role, Content, CreatedAt, DescriptorRefs, SourceRefs, Diagnostics |
+| `AgentConversationRecord` | sealed record | ConversationId, Turns, Diagnostics |
+| `AgentTaskEvent` | sealed record | EventId, TaskId, EventKind, Content, CreatedAt, SourceRefs |
+| `AgentTaskRecord` | sealed record | TaskId, Title, Summary?, Events, Diagnostics |
+
+#### 压缩上下文
+
+| Type | Kind | Description |
+|------|------|-------------|
+| `AgentCompressedContextBlock` | sealed record | BlockId, Content, CanonicalContentHash, SourceRefs, ApproximateCharacterCount |
+| `AgentCompressedContext` | sealed record | ContextId, Blocks, Diagnostics |
+
+#### 记忆
+
+| Type | Kind | Description |
+|------|------|-------------|
+| `AgentMemoryKind` | enum | Preference/ProjectFact/Decision/Constraint/WorkflowHint/Risk |
+| `AgentMemoryConfidence` | enum | Unknown/Low/Medium/High |
+| `AgentMemoryStatus` | enum | Candidate/Active/Rejected/Superseded/Archived |
+| `AgentMemoryCandidate` | sealed record | CandidateId, Kind, Content, CanonicalContentHash, Confidence, Tags, DescriptorRefs, SourceRefs, Status |
+| `AgentMemoryItem` | sealed record | MemoryId, Kind, Content, CanonicalContentHash, PromotedAt, Confidence, Status, IsAuthoritative, Tags, SupersedesMemoryId?, SupersededByMemoryId? |
+| `AgentMemoryQuery` | sealed record | TenantId, IntentText?, MemoryIds, Kinds, Tags, DescriptorRefs, VisibleDescriptorRefs, VisibleDescriptorKinds, MaxCount?, CharacterBudget?, MinimumConfidence |
+| `AgentMemoryPack` | sealed record | TenantId, Memories, Diagnostics, IsAuthoritative(false), ScopeFingerprint?, VisibleMemorySetHash?, CanonicalPackHash? |
+
+#### 源扩展与引用
+
+| Type | Kind | Description |
+|------|------|-------------|
+| `AgentSourceKind` | enum | 11 values: ConversationTurn through ActivationRequest |
+| `AgentContextSourceRef` | sealed record | SourceKind, TenantId, SourceId, RangeStart?, RangeEnd?, DescriptorRefs, CorrelationId?, CausationId?, CanonicalContentHash? |
+| `AgentContextEvidenceRef` | sealed record | EvidenceId, EvidenceKind, TenantId, SourceRefs, CanonicalContentHash? |
+| `AgentSourceExpansionStatus` | enum | Expanded/NotExpandable/ExternalSourceNotSupported/NotFound/Redacted |
+| `AgentSourceExpansionResult` | sealed record | SourceRef, Status, SanitizedContent?, Diagnostics |
+
+#### 脱敏与诊断
+
+| Type | Kind | Description |
+|------|------|-------------|
+| `SanitizedAgentContent` | sealed record | SanitizedContent, CanonicalContentHash, Rejected, RedactionKinds, Diagnostics |
+| `AgentMemoryDiagnostic` | sealed record | Code(DiagnosticCode), Message, Severity(SeverityLevel), SourceRefs |
+| `AgentMemoryOperationKind` | enum | Promote/Reject/Supersede/Archive |
+| `AgentMemoryOperationRequest` | sealed record | TenantId, InvocationContext, Reason, Timestamp, SourceRefs, Explanation? |
+| `AgentMemoryInvocationContext` | sealed record | TenantId, ActorId, ActorKind, AgentId?, SessionId?, CorrelationId?, CausationId?, InvocationSource?, DisplayName?, TraceAttributes |
+
+#### Authoring Context
+
+| Type | Kind | Description |
+|------|------|-------------|
+| `AgentAuthoringRequest` | sealed record | TenantId, IntentText, MemoryQuery? |
+| `AgentAuthoringContext` | sealed record | Request, MetadataContextPack, MemoryPack, Diagnostics |
+
+### 13.3 接口总览
+
+| Interface | Method | Description |
+|-----------|--------|-------------|
+| `IAgentConversationStore` | SaveConversationAsync, GetConversationAsync | 对话持久化与检索 |
+| `IAgentTaskHistoryStore` | SaveTaskAsync, GetTaskAsync, AppendEventAsync, ListTasksAsync | 任务历史持久化与检索 |
+| `IAgentCompressedContextStore` | SaveCompressedContextAsync, GetCompressedContextAsync | 压缩上下文持久化与检索 |
+| `IAgentMemoryStore` | SaveCandidateAsync, GetCandidateAsync, SaveMemoryAsync, GetMemoryAsync, ListMemoriesAsync | 记忆候选与正式记忆持久化 |
+| `IAgentMemoryContentSanitizer` | Sanitize(tenantId, content, sourceRefs) | 内容脱敏：bearer token、credential、connection string、long base64 |
+| `IAgentContextCompressor` | CompressConversationAsync, CompressTaskAsync | 对话/任务 → 压缩块 |
+| `IAgentMemoryExtractor` | ExtractCandidatesAsync | 压缩上下文 → 记忆候选 |
+| `IAgentMemoryPromotionService` | PromoteAsync, RejectAsync, SupersedeAsync, ArchiveAsync | 记忆生命周期管理 |
+| `IAgentMemoryRetriever` | RecallAsync(query) | 基于查询的记忆召回，含置信度排序、字符预算、ScopeFingerprint |
+| `IAgentContextSourceExpander` | ExpandAsync(sourceRef) | 按 SourceKind 分发到对应 Store 扩展 |
+| `IAgentAuthoringContextBuilder` | BuildAsync(request, metadataContextPack, memoryPack, ct) | 组装 AuthoringContext |
+
+### 13.4 关键架构决策
+
+1. **AgentMemoryPack.IsAuthoritative 始终为 false** — 元数据优先于冲突记忆。Agent 不应将记忆视为权威真相。
+2. **CanonicalHash 贯穿所有合约** — `AgentContextSourceRef.CanonicalContentHash`、`SanitizedAgentContent.CanonicalContentHash`、`AgentCompressedContextBlock.CanonicalContentHash`、`AgentMemoryCandidate.CanonicalContentHash`、`AgentMemoryItem.CanonicalContentHash`、`AgentMemoryPack.CanonicalPackHash/ScopeFingerprint/VisibleMemorySetHash` 全部使用 `CanonicalHash` 类型。
+3. **Snapshot-on-read 防御性拷贝** — 所有 InMemory Store 在读写时执行深拷贝，防止外部代码修改内部状态。
+4. **DI 使用 TryAddSingleton + TimeProvider.System** — 允许测试替换，默认使用系统时间。
+5. **依赖边界** — Memory.Abstractions 不引用 ControlPlane.Abstractions 或 Core.Abstractions。Memory.Abstractions 引用 Metadata.Abstractions、Metadata.ContextPack.Abstractions。
+6. **VisibleDescriptorKinds fail-closed** — 当 `AgentMemoryQuery.VisibleDescriptorKinds` 包含无法解析的值时，召回返回空结果而非暴露不可见记忆。
+7. **AgentMemoryInvocationContext 替代 AgentActorContext** — 使用更完整的调用身份（TenantId, ActorId, ActorKind, AgentId, SessionId, CorrelationId, CausationId, InvocationSource, DisplayName, TraceAttributes），与 Agent.Abstractions 对齐。
+8. **IAgentAuthoringContextBuilder.BuildAsync 三参数签名** — `(AgentAuthoringRequest, MetadataContextPack, AgentMemoryPack)` — 不内部调用 retriever；调用者传入预构建的 MemoryPack。
+
+### 13.5 主链数据流
+
+```
+AgentConversationTurn / AgentTaskEvent
+    → IAgentMemoryContentSanitizer.Sanitize(content, sourceRefs)
+    → SanitizedAgentContent (脱敏后内容 + CanonicalContentHash)
+    → IAgentContextCompressor.CompressConversationAsync / CompressTaskAsync
+    → AgentCompressedContext (压缩块列表)
+    → IAgentMemoryExtractor.ExtractCandidatesAsync
+    → AgentMemoryCandidate[] (Kind=ProjectFact, Confidence=Low)
+    → IAgentMemoryPromotionService.PromoteAsync / RejectAsync / SupersedeAsync / ArchiveAsync
+    → AgentMemoryItem (正式记忆)
+
+AgentMemoryQuery (IntentText, Kinds, Tags, DescriptorRefs, VisibleDescriptorRefs, CharacterBudget)
+    → IAgentMemoryRetriever.RecallAsync(query)
+    → AgentMemoryPack (IsAuthoritative=false, ScopeFingerprint, VisibleMemorySetHash, CanonicalPackHash)
+
+AgentContextSourceRef
+    → IAgentContextSourceExpander.ExpandAsync(sourceRef)
+    → AgentSourceExpansionResult (Expanded/NotExpandable/NotFound/Redacted)
+
+AgentAuthoringRequest + MetadataContextPack + AgentMemoryPack
+    → IAgentAuthoringContextBuilder.BuildAsync(request, pack, memoryPack, ct)
+    → AgentAuthoringContext (Request, MetadataContextPack, MemoryPack, Diagnostics)
+```
+
+### 13.6 DI 注册
+
+```csharp
+services.AddAgentMemoryRuntime();
+// 等价于：
+services.TryAddSingleton<IAgentConversationStore, InMemoryAgentConversationStore>();
+services.TryAddSingleton<IAgentTaskHistoryStore, InMemoryAgentTaskHistoryStore>();
+services.TryAddSingleton<IAgentCompressedContextStore, InMemoryAgentCompressedContextStore>();
+services.TryAddSingleton<IAgentMemoryStore, InMemoryAgentMemoryStore>();
+services.TryAddSingleton<IAgentMemoryContentSanitizer, DefaultAgentMemoryContentSanitizer>();
+services.TryAddSingleton<IAgentContextCompressor, DefaultAgentContextCompressor>();
+services.TryAddSingleton<IAgentMemoryExtractor, DefaultAgentMemoryExtractor>();
+services.TryAddSingleton<IAgentMemoryPromotionService, DefaultAgentMemoryPromotionService>();
+services.TryAddSingleton<IAgentMemoryRetriever, DefaultAgentMemoryRetriever>();
+services.TryAddSingleton<IAgentContextSourceExpander, DefaultAgentContextSourceExpander>();
+services.TryAddSingleton<IAgentAuthoringContextBuilder, DefaultAgentAuthoringContextBuilder>();
+services.TryAddSingleton<AgentMemoryCanonicalHashProjector>();
+```
+
+### 13.7 测试覆盖
+
+- **Memory 主链测试**：39 个（MainChainTests）
+- **Memory 边界测试**：2 个（BoundaryTests — 依赖边界检查）
+- **Memory 合约测试**：6 个（ContractTests — enum shape, JSON serialization, collection immutability）
+- **总测试数**：47 个
+
+### 13.8 Canonical Hash Shape Versions
+
+| 常量 | 值 | 用途 |
+|------|-----|------|
+| `MemoryContentV1` | `"memory-content-hash-v1"` | AgentMemoryItem/AgentMemoryCandidate 内容哈希 |
+| `MemoryPackV1` | `"memory-pack-hash-v1"` | AgentMemoryPack 整体哈希 |
+| `MemoryScopeV1` | `"memory-scope-hash-v1"` | AgentMemoryPack 范围指纹 |
+| `MemorySetV1` | `"memory-set-hash-v1"` | AgentMemoryPack 可见记忆集合哈希 |
+
+---
+
+## 14. AI-assisted Descriptor Authoring Golden Scenario (Phase 7f)
+
+> **Phase 7f (#32)** 在 Phase 7e+ Agent Memory 基础之上，实现了从意图文本到描述符草稿创作、审查、治理、激活绑定、运行时证明的完整端到端链路。核心组件均位于 sample 项目中，不修改框架核心合约。
+
+### 14.1 架构概览
+
+核心链路：
+
+```
+Intent Text
+  → IAgentAuthoringContextBuilder.BuildAsync (MetadataContextPack + AgentMemoryPack)
+  → AgentAuthoringContext
+  → IDescriptorAuthoringAgent.AuthorAsync(authoringContext, ct)
+  → DescriptorDraftSet (all-or-block)
+  → Per-draft Review / Materialization
+  → Final Inventory Diff → Final Impact / Compatibility / Governance
+  → Activation Binding (real hashes from IDescriptorDraftReviewHashService + IDescriptorPackageBuilder + IDescriptorStableHashBuilder)
+  → IRuntimeActivationGate
+  → Fresh Host from Approved Final Inventory → Runtime Proof
+```
+
+### 14.2 组件归属
+
+| 项目 | 内容 |
+|------|------|
+| `samples/CrestCreates.Samples.DescriptorControlPlane/Authoring` | IDescriptorAuthoringAgent、FakeCompanyCertificationAuthoringAgent、CompanyCertificationAuthoringGoldenScenarioRunner/Report/DraftSetReviewResult、ActivationBindingReferenceRegistry |
+| `tests/Framework/Testing/CrestCreates.Samples.Tests` | 21 个 Authoring Golden Scenario 测试 + 7 个 ControlPlane Golden Scenario 测试 |
+
+### 14.3 关键合约类型
+
+| Type | Kind | Description |
+|------|------|-------------|
+| `IDescriptorAuthoringAgent` | interface | `Task<DescriptorAuthoringResult> AuthorAsync(AgentAuthoringContext, CancellationToken)` |
+| `DescriptorAuthoringResult` | sealed record | 创作结果，实现 ISnapshotable |
+| `DescriptorDraftSet` | sealed record | 包装 `IReadOnlyList<DescriptorDraft>`，原子性 |
+| `FakeCompanyCertificationAuthoringAgent` | sealed class | 确定性假 Agent，无构造函数依赖，仅消费 AgentAuthoringContext |
+| `CompanyCertificationAuthoringGoldenScenarioRunner` | sealed class | 三方法编排：RunUntilDraftSetReviewAsync / RunAsync / RunActivationOnlyAsync |
+| `CompanyCertificationAuthoringGoldenScenarioReport` | sealed record | 完整报告：AuthoringSucceeded, DraftSetBlocked, FinalDecisionSource, RuntimeActivationGateSucceeded, RuntimeProofUsedFreshActivatedHost, etc. |
+| `CompanyCertificationDraftSetReviewResult` | sealed record | DraftSet, PerDraftReviewResults, FinalProposedInventory, IsBlocked, FinalDecisionSource, FinalTopology, FinalGovernance, FinalImpact, FinalCompat |
+| `ActivationBindingReferenceRegistry` | sealed class | 在创建点注册 review/package/evidence 引用 + DraftId；激活前只读验证 |
+| `BindingReferenceValidationResult` | sealed record | IsValid, Errors |
+
+### 14.4 关键架构决策
+
+1. **FakeAgent 无构造函数依赖** — `FakeCompanyCertificationAuthoringAgent` 仅消费 `AgentAuthoringContext`（含 Request.TenantId, Request.IntentText），不注入任何服务，不访问 raw memory stores 或 runtime handlers。
+
+2. **Draft set 原子性** — 全部 draft 创建成功或全部 block。Materialization 失败 → IsBlocked = true。
+
+3. **Final decision 基于 inventory diff** — Final scenario-level decision 使用 `IDescriptorChangeSetBuilder.Build(startingInventory, finalProposedInventory)` → `IDescriptorImpactAnalyzer.Analyze(topology, changeSet)` → `IDescriptorCompatibilityAnalyzer.Analyze(before, after, changeSet, impactReport)`，不取最后一个 draft review 的 impact/compat 结果。
+
+4. **激活绑定使用真实 hash** — SourceReviewHash/ReviewManifestHash 通过 `IDescriptorDraftReviewHashService` 计算；PackageManifestHash/PackageEvidenceHash/PackageEvidenceEnvelopeHash 通过 `IDescriptorPackageBuilder.Build()` + `IDescriptorPackageCanonicalHashComputer.ComputeHashSet()` 计算；ContractHash/DefinitionHash 通过 `IDescriptorStableHashBuilder.Build()` 计算。无 placeholder fallback，缺 hash 即 block。
+
+5. **绑定引用注册在创建点** — `ActivationBindingReferenceRegistry.RegisterReviewResult/RegisterPackagePreview/RegisterEvidencePreview` 在 artifact 创建时调用；激活前 `ValidateReferences` 只读验证，检查存在性和 DraftId 匹配。等价于 Control Plane 内部 `_reviewResults`/`_packagePreviews`/`_evidencePreviews` 字典 + DraftId mismatch 校验。
+
+6. **运行时证明用 fresh host** — 从 approved final inventory 构建新 `CompanyCertificationGoldenScenarioHost`，不使用原始 host。证明激活后的描述符在独立 runtime 中可执行。
+
+7. **AgentMemoryPack.IsAuthoritative 始终为 false** — 当记忆与元数据冲突时，元数据优先。Agent 不应将记忆视为权威真相。
+
+8. **CreatedAt 使用固定时间** — `DescriptorPackageBuildRequest.CreatedAt` 使用 `GoldenScenarioCreatedAt`（2026-01-01T00:00:00Z），确保 evidence binding hash 确定性。
+
+9. **HumanTask 完成去重** — 使用 `completedHumanTaskInstanceIds` HashSet 防止重复完成同一 HumanTask。
+
+10. **不修改框架核心合约** — Phase 7f 所有新增类型均在 sample 项目中，`CompanyCertificationGoldenScenarioHost` 新增接受 `IReadOnlyList<IDescriptor>` 的构造函数重载，不改变已有接口。
+
+### 14.5 Runner 方法说明
+
+| 方法 | 输入 | 输出 | 范围 |
+|------|------|------|------|
+| `RunUntilDraftSetReviewAsync` | intentText, startingInventory?, ct | CompanyCertificationDraftSetReviewResult | 意图→创作→per-draft审查→final inventory diff→final governance |
+| `RunAsync` | intentText, ct | CompanyCertificationAuthoringGoldenScenarioReport | 完整链路：+ 激活绑定 + runtime gate + fresh host 运行时证明 |
+| `RunActivationOnlyAsync` | intentText, ct | CompanyCertificationAuthoringGoldenScenarioReport | 到激活门为止，不构建 fresh host |
+
+### 14.6 测试覆盖
+
+21 个 Authoring Golden Scenario 测试：
+
+| 类别 | 测试数 | 覆盖范围 |
+|------|--------|---------|
+| Fake Agent 确定性 + 约束 | 5 | 输出确定性、不使用 raw memory stores、不访问 runtime handlers、IsAuthoritative=false、实现框架接口 |
+| Draft Set 原子性 | 4 | HumanTask 创建、Workflow 更新、sequential materialization、all-or-block (materialization fail / incomplete inventory / valid drafts) |
+| Final Decision | 2 | Final decision rechecks complete inventory、final impact/compat from inventory diff |
+| 激活绑定 | 2 | Activation request binds final review + package evidence hashes、activation gate alone ≠ runtime proof |
+| 运行时证明 | 2 | Fresh host from approved inventory、completes initial review then finance review |
+| 内存边界 | 2 | Memory is non-authoritative、metadata wins when memory conflicts |
+| 端到端 | 1 | Full authoring → activated runtime golden scenario |
+| Review Pipeline | 1 | LLM agent golden scenario drafts flow through review pipeline |
+
+加上 7 个 ControlPlane Golden Scenario 测试（baseline、happy path、approval event、breaking schema、missing target、explicit inventory），总计 28 个测试。
