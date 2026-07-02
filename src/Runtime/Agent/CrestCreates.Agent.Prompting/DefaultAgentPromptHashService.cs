@@ -39,7 +39,7 @@ public sealed class DefaultAgentPromptHashService : IAgentPromptHashService
                 Scope = CanonicalHashScopeNames.InternalFull,
                 AlgorithmVersion = DefaultCanonicalHashComputer.AlgorithmVersion,
                 ContractVersion = CanonicalHashContractVersions.DescriptorHash,
-                CanonicalShapeVersion = "agent-prompt-input-evidence-shape-v1"
+                CanonicalShapeVersion = AgentPromptCanonicalShapeVersions.InputEvidence
             },
             writer =>
             {
@@ -77,7 +77,7 @@ public sealed class DefaultAgentPromptHashService : IAgentPromptHashService
                 Scope = CanonicalHashScopeNames.InternalFull,
                 AlgorithmVersion = DefaultCanonicalHashComputer.AlgorithmVersion,
                 ContractVersion = CanonicalHashContractVersions.DescriptorHash,
-                CanonicalShapeVersion = "agent-prompt-output-evidence-shape-v1"
+                CanonicalShapeVersion = AgentPromptCanonicalShapeVersions.OutputEvidence
             },
             writer =>
             {

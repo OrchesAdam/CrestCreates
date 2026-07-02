@@ -481,7 +481,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
         var factory = new DefaultDescriptorAuthoringPromptInputFactory();
         var rawPromptInput = factory.Create(context);
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(promptHashService);
-        var hashValue = hashService.ComputeHash(rawPromptInput).Value;
+        var hashValue = hashService.ComputeHash(rawPromptInput, new AgentPromptModelProfileRef("default"), new AgentPromptProviderProfileRef("unknown")).Value;
 
         // 4. Build the recorded model client pre-keyed with the real hash
         var fixtureJson = BuildCompanyCertificationFixtureJson(hashValue);

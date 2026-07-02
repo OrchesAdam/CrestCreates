@@ -2420,7 +2420,7 @@ public void Write(Utf8JsonWriter writer, T payload)
 
 ### 19.7 Canonical Hash 常量扩展
 
-Phase 7h 新增 3 个 `CanonicalHashArtifactNames` 常量和 1 个 `CanonicalHashContractVersions` 常量：
+Phase 7h 新增 3 个 `CanonicalHashArtifactNames` 常量和 2 个 `AgentPromptCanonicalShapeVersions` 常量。Prompt hash 复用 `CanonicalHashContractVersions.DescriptorHash`。
 
 ```csharp
 // CanonicalHashArtifactNames 新增
@@ -2428,8 +2428,12 @@ public const string AgentPromptInputEvidence = "AgentPromptInputEvidence";
 public const string AgentPromptOutputEvidence = "AgentPromptOutputEvidence";
 public const string AgentPromptTemplate = "AgentPromptTemplate";
 
-// CanonicalHashContractVersions 新增
-public const string AgentPromptHash = "canonical-hash-v1";
+// AgentPromptCanonicalShapeVersions (Prompting.Abstractions)
+public const string InputEvidence = "agent-prompt-input-evidence-shape-v1";
+public const string OutputEvidence = "agent-prompt-output-evidence-shape-v1";
+
+// Prompt hash uses existing ContractVersion
+// CanonicalHashContractVersions.DescriptorHash = "canonical-hash-v1"
 ```
 
 ### 19.8 Prompt 诊断码

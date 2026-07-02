@@ -47,6 +47,17 @@ public sealed class DefaultAgentPromptEvidenceFactory : IAgentPromptEvidenceFact
         var outputHash = _hashService.ComputeOutputHash(request, inputHash, providerObservation);
         var now = _timeProvider.GetUtcNow();
 
+        var diagnostics = new List<AgentPromptDiagnostic>();
+        if (outputHash is null)
+        {
+            diagnostics.Add(new AgentPromptDiagnostic
+            {
+                Code = AgentPromptDiagnosticCodes.OutputHashUnavailable,
+                Severity = "Warning",
+                Message = "Output evidence hash is unavailable because no canonical payload projector was registered for the output type."
+            });
+        }
+
         return new AgentPromptOutputEvidence<TOutput>
         {
             TemplateId = request.TemplateId,
@@ -59,7 +70,8 @@ public sealed class DefaultAgentPromptEvidenceFactory : IAgentPromptEvidenceFact
             OutputHash = outputHash,
             Output = request.Payload,
             ProviderObservation = providerObservation,
-            CreatedAt = now
+            CreatedAt = now,
+            Diagnostics = diagnostics
         };
     }
 }

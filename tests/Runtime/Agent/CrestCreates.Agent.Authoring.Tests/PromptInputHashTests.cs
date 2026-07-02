@@ -22,8 +22,11 @@ public sealed class PromptInputHashTests
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(provider.GetRequiredService<IAgentPromptHashService>());
         var input = TestPromptInput();
 
-        var hash1 = hashService.ComputeHash(input);
-        var hash2 = hashService.ComputeHash(input);
+        var modelRef = new AgentPromptModelProfileRef("test-model");
+        var providerRef = new AgentPromptProviderProfileRef("test-provider");
+
+        var hash1 = hashService.ComputeHash(input, modelRef, providerRef);
+        var hash2 = hashService.ComputeHash(input, modelRef, providerRef);
 
         hash1.Value.Should().Be(hash2.Value);
     }
@@ -36,9 +39,11 @@ public sealed class PromptInputHashTests
 
         var input1 = TestPromptInput("Add finance review");
         var input2 = TestPromptInput("Add legal review");
+        var modelRef = new AgentPromptModelProfileRef("test-model");
+        var providerRef = new AgentPromptProviderProfileRef("test-provider");
 
-        var hash1 = hashService.ComputeHash(input1);
-        var hash2 = hashService.ComputeHash(input2);
+        var hash1 = hashService.ComputeHash(input1, modelRef, providerRef);
+        var hash2 = hashService.ComputeHash(input2, modelRef, providerRef);
 
         hash1.Value.Should().NotBe(hash2.Value);
     }
@@ -50,7 +55,10 @@ public sealed class PromptInputHashTests
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(provider.GetRequiredService<IAgentPromptHashService>());
         var input = TestPromptInput();
 
-        var hash = hashService.ComputeHash(input);
+        var hash = hashService.ComputeHash(
+            input,
+            new AgentPromptModelProfileRef("test-model"),
+            new AgentPromptProviderProfileRef("test-provider"));
 
         hash.Algorithm.Should().Be("SHA-256");
         hash.ArtifactKind.Should().Be(CanonicalHashArtifactNames.AgentPromptInputEvidence);
@@ -127,8 +135,8 @@ public sealed class PromptInputHashTests
         var input1 = TestPromptInputWithDescriptors(descriptors1, memories1);
         var input2 = TestPromptInputWithDescriptors(descriptors2, memories2);
 
-        var hash1 = hashService.ComputeHash(input1);
-        var hash2 = hashService.ComputeHash(input2);
+        var hash1 = hashService.ComputeHash(input1, new AgentPromptModelProfileRef("test-model"), new AgentPromptProviderProfileRef("test-provider"));
+        var hash2 = hashService.ComputeHash(input2, new AgentPromptModelProfileRef("test-model"), new AgentPromptProviderProfileRef("test-provider"));
 
         hash1.Value.Should().Be(hash2.Value);
     }

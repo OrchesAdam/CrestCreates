@@ -2,7 +2,6 @@ using CrestCreates.Agent.Authoring.Abstractions.Prompting;
 using CrestCreates.Agent.Authoring.Authoring;
 using CrestCreates.Agent.Authoring.Parsing;
 using CrestCreates.Agent.Authoring.Prompting;
-using CrestCreates.Agent.Prompting;
 using CrestCreates.Agent.Prompting.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,7 +13,8 @@ public static class AgentAuthoringServiceCollectionExtensions
 {
     public static IServiceCollection AddDescriptorAuthoring(this IServiceCollection services)
     {
-        services.AddAgentPrompting();
+        // Note: AddAgentPrompting() must be called by the consumer (host/Platform) separately.
+        // Authoring does not own the Prompting runtime lifecycle.
 
         services.TryAddSingleton<IDescriptorAuthoringPromptInputHashService, DefaultDescriptorAuthoringPromptInputHashService>();
         services.TryAddSingleton<IDescriptorAuthoringPromptInputFactory, DefaultDescriptorAuthoringPromptInputFactory>();

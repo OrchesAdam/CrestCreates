@@ -14,7 +14,10 @@ public sealed class DefaultDescriptorAuthoringPromptInputHashService : IDescript
         _promptHashService = promptHashService;
     }
 
-    public CanonicalHash ComputeHash(DescriptorAuthoringPromptInput input)
+    public CanonicalHash ComputeHash(
+        DescriptorAuthoringPromptInput input,
+        AgentPromptModelProfileRef modelProfileRef,
+        AgentPromptProviderProfileRef providerProfileRef)
     {
         return _promptHashService.ComputeInputHash(new AgentPromptEvidenceCreationRequest<DescriptorAuthoringPromptInput>
         {
@@ -22,8 +25,8 @@ public sealed class DefaultDescriptorAuthoringPromptInputHashService : IDescript
             TemplateVersion = LlmDescriptorAuthoringAgentOptions.DefaultPromptTemplateVersion,
             Purpose = AgentPromptPurpose.DescriptorAuthoring,
             ContractVersion = LlmDescriptorAuthoringAgentOptions.DefaultPromptContractVersion,
-            ModelProfileRef = new AgentPromptModelProfileRef("default"),
-            ProviderProfileRef = new AgentPromptProviderProfileRef("unknown"),
+            ModelProfileRef = modelProfileRef,
+            ProviderProfileRef = providerProfileRef,
             Payload = input,
             TenantId = input.TenantId
         });

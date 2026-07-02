@@ -201,6 +201,15 @@ public class DependencyBoundaryTests
     }
 
     [Fact]
+    public void AgentAuthoringRuntime_DoesNotReferencePromptingRuntime()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.Authoring",
+            "Authoring runtime must reference Prompting.Abstractions only, not Prompting runtime which owns implementation logic.",
+            new[] { "src/Runtime/Agent/CrestCreates.Agent.Prompting/CrestCreates.Agent.Prompting.csproj" });
+    }
+
+    [Fact]
     public void AgentPromptingRuntime_DoesNotReferenceControlPlaneDraftContractsAuthoringHttpOrPlatform()
     {
         AssertNoDirectProjectReferences(

@@ -1,6 +1,6 @@
 using CrestCreates.Agent.Prompting.Abstractions;
 
-namespace CrestCreates.Agent.Prompting;
+namespace CrestCreates.Agent.Prompting.Abstractions;
 
 public static class AgentPromptEvidenceSummaryFactory
 {

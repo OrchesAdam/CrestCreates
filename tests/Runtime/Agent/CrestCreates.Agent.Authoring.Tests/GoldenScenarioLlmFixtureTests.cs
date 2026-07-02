@@ -45,7 +45,7 @@ public sealed class GoldenScenarioLlmFixtureTests
         // 3. Compute prompt input hash to use as fixture key
         var rawPromptInput = factory.Create(context);
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(promptHashService);
-        var hashValue = hashService.ComputeHash(rawPromptInput).Value;
+        var hashValue = hashService.ComputeHash(rawPromptInput, new AgentPromptModelProfileRef("default"), new AgentPromptProviderProfileRef("unknown")).Value;
 
         // 4. Create recorded client with fixture
         var fixtureJson = CompanyCertificationLlmFixture.GetRecordedOutput(hashValue);
@@ -86,7 +86,7 @@ public sealed class GoldenScenarioLlmFixtureTests
 
         var rawPromptInput = factory.Create(context);
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(promptHashService);
-        var hashValue = hashService.ComputeHash(rawPromptInput).Value;
+        var hashValue = hashService.ComputeHash(rawPromptInput, new AgentPromptModelProfileRef("default"), new AgentPromptProviderProfileRef("unknown")).Value;
 
         var fixtureJson = CompanyCertificationLlmFixture.GetRecordedOutput(hashValue);
         var fixtures = new Dictionary<string, string> { [hashValue] = fixtureJson };
@@ -155,7 +155,7 @@ public sealed class GoldenScenarioLlmFixtureTests
 
         var rawPromptInput = factory.Create(context);
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(promptHashService);
-        var hashValue = hashService.ComputeHash(rawPromptInput).Value;
+        var hashValue = hashService.ComputeHash(rawPromptInput, new AgentPromptModelProfileRef("default"), new AgentPromptProviderProfileRef("unknown")).Value;
 
         var fixtureJson = CompanyCertificationLlmFixture.GetRecordedOutput(hashValue);
         var fixtures = new Dictionary<string, string> { [hashValue] = fixtureJson };

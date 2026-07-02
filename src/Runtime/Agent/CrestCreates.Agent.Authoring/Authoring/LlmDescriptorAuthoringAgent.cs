@@ -4,7 +4,6 @@ using CrestCreates.Agent.Authoring.Abstractions.Prompting;
 using CrestCreates.Agent.Authoring.Parsing;
 using CrestCreates.Agent.Authoring.Prompting;
 using CrestCreates.Agent.Memory.Abstractions;
-using CrestCreates.Agent.Prompting;
 using CrestCreates.Agent.Prompting.Abstractions;
 using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
