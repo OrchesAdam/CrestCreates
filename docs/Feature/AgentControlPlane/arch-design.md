@@ -1,6 +1,6 @@
 # Tool DTO, JSON Contract & Review Report — Architecture Design
 
-> **Date:** 2026-07-02 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow) + Phase 7e.1: Canonical Evidence Hashing + Phase 7e+ (#43 Agent Memory & Context Compression Runtime) + Phase 7f (#32 AI-assisted Descriptor Authoring Golden Scenario)**
+> **Date:** 2026-07-02 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow) + Phase 7e.1: Canonical Evidence Hashing + Phase 7e+ (#43 Agent Memory & Context Compression Runtime) + Phase 7f (#32 AI-assisted Descriptor Authoring Golden Scenario) + Phase 7g (#48 LLM-backed Descriptor Authoring Adapter)**
 
 ## 1. 概述 (Overview)
 
@@ -13,6 +13,8 @@ Phase 7e 实现了安全激活工作流（Safe Activation Workflow）——从�
 Phase 7e+ 实现了 Agent Memory & Context Compression Runtime——从对话/任务历史到压缩上下文、记忆候选提取、晋升/拒绝/替代/归档、召回与源扩展的完整链路。核心能力包括：内容脱敏（Regex-based redaction + 全量拒绝）、上下文压缩（对话/任务 → 压缩块）、记忆候选提取、记忆生命周期管理（Promote/Reject/Supersede/Archive）、基于查询的记忆召回（含置信度排序、字符预算、可见描述符过滤、ScopeFingerprint）、源扩展（按 SourceKind 分发到对应 Store）、以及 AgentAuthoringContext 组装（Request + MetadataContextPack + MemoryPack → AuthoringContext）。所有合约类型使用 CanonicalHash 标识内容身份和完整性，AgentMemoryPack.IsAuthoritative 始终为 false——元数据优先于冲突记忆。依赖边界：Memory.Abstractions 不引用 ControlPlane.Abstractions。
 
 Phase 7f 实现了 AI-assisted Descriptor Authoring Golden Scenario——从意图文本到描述符草稿创作、审查、治理、激活绑定、运行时证明的完整端到端链路。核心交付物包括：IDescriptorAuthoringAgent 接口（消费 AgentAuthoringContext，产出 DescriptorDraftSet）、FakeCompanyCertificationAuthoringAgent（确定性假 Agent，无 LLM 依赖）、CompanyCertificationAuthoringGoldenScenarioRunner（三方法编排：RunUntilDraftSetReviewAsync / RunAsync / RunActivationOnlyAsync）、ActivationBindingReferenceRegistry（绑定引用在创建点注册，激活前只读验证）、以及 CompanyCertificationAuthoringGoldenScenarioReport。Draft set 实现原子性——全部成功或全部 block。Final scenario-level decision 基于 startingInventory → finalProposedInventory 的完整 inventory diff（IDescriptorChangeSetBuilder → IDescriptorImpactAnalyzer → IDescriptorCompatibilityAnalyzer），不取最后一个 draft review 的结果。激活绑定使用真实 review hash（IDescriptorDraftReviewHashService）、真实 package hash（IDescriptorPackageBuilder + IDescriptorPackageCanonicalHashComputer）、真实 descriptor hash（IDescriptorStableHashBuilder），无 placeholder fallback。运行时证明从 fresh host 构建，使用 approved final inventory。
+
+Phase 7g 实现了 LLM-backed Descriptor Authoring Adapter——将 Phase 7f 的 sample-level authoring 合约产品化为框架级项目，并引入 LLM 提供者适配层。核心交付物包括：3 个新项目（Authoring.Abstractions、Authoring、Authoring.Http）+ 1 个测试项目；IDescriptorAuthoringAgent 从 sample 提升为框架合约；LlmDescriptorAuthoringAgent 实现 PromptBuilder → ModelClient → OutputParser → Plan → DraftSet 链路；OpenAI-compatible provider client；RecordedDescriptorAuthoringModelClient 用于确定性测试；source-generated JsonSerializerContext（Parser + OpenAI client）；canonical hash-based prompt input hash（排序后写入，顺序无关）；结构化 provider failure diagnostics（8 种 DescriptorAuthoringProviderFailureKind）；Parser 使用 DescriptorAuthoringParseContext（无硬编码 tenant/author/timestamp）；Workflow target 解析拒绝缺失/未知 target（不静默 fallback "unknown"）；PromptHashMismatch 返回 Blocked（非 InvalidProviderOutput）；ProviderProfile.Timeout 通过 linked CancellationTokenSource 生效；LLM fixture golden scenario 通过 RecordedDescriptorAuthoringModelClient 接入 sample review/governance 管线。核心不变量：LLM agent 只产出 draft——不激活、不审批、不变异注册表、不绕过 Control Plane 审查。依赖边界：Authoring runtime 不引用 ControlPlane.Abstractions、DraftContracts、Http provider。
 
 核心交付物：
 - **34 个 Tool DTO** — 统一的密封 record 类型，代替所有领域类型（新增 2 个：BuildDescriptorReviewReport、RenderDescriptorReviewReport）
@@ -37,6 +39,9 @@ Phase 7f 实现了 AI-assisted Descriptor Authoring Golden Scenario——从意�
 - **Fake Authoring Agent (Phase 7f)** — `FakeCompanyCertificationAuthoringAgent`，确定性，仅消费 `AgentAuthoringContext`
 - **Authoring Golden Scenario Runner (Phase 7f)** — `CompanyCertificationAuthoringGoldenScenarioRunner`，三方法编排 + `ActivationBindingReferenceRegistry`
 - **Authoring Golden Scenario Report (Phase 7f)** — `CompanyCertificationAuthoringGoldenScenarioReport`
+- **Authoring Abstractions (Phase 7g)** — 20 个 public types：IDescriptorAuthoringAgent、DescriptorAuthoringResult、DescriptorDraftSet、DescriptorAuthoringPlan、DescriptorAuthoringDiagnostic、DescriptorAuthoringStatus（6 值）、DescriptorAuthoringProviderFailureKind（8 值）、prompt 模型（DescriptorAuthoringModelProfile/Request/Response/ProviderProfile）、prompt 投影（DescriptorAuthoringPromptInput/Output/MemoryProjection/MemoryItemProjection/DescriptorProjection/MetadataContextProjection）、DescriptorAuthoringDiagnosticCodes（12 个诊断码）、DescriptorAuthoringJsonSerializerContext
+- **Authoring Runtime (Phase 7g)** — 18 个 public types：LlmDescriptorAuthoringAgent + Options、JsonDescriptorAuthoringOutputParser + ParseContext、RecordedDescriptorAuthoringModelClient、FakeDescriptorAuthoringModelClient、DefaultDescriptorAuthoringPromptBuilder、DefaultDescriptorAuthoringPromptInputFactory、DefaultDescriptorAuthoringPromptInputHashService、DescriptorAuthoringParserJsonSerializerContext、DI（AddDescriptorAuthoring）
+- **OpenAI-Compatible Provider (Phase 7g)** — 9 个 public types：OpenAICompatibleDescriptorAuthoringModelClient、chat request/response DTOs（5 个）、DefaultDescriptorAuthoringCredentialProvider、OpenAICompatibleAuthoringJsonSerializerContext、DI（AddOpenAICompatibleAuthoringProvider）
 
 ### 1.1 目标
 
@@ -92,7 +97,11 @@ Protocol Adapters (MCP / HTTP / SignalR)
 | `CrestCreates.Agent.Memory.Abstractions` | Agent Memory 合约（27 个 sealed record/enum + 11 个接口 + DiagnosticCodes + CanonicalShapeVersions + AgentMemoryJsonSerializerContext）；不引用 ControlPlane.Abstractions |
 | `CrestCreates.Agent.Memory` | 11 个默认服务实现：4 个 InMemory Store、Sanitizer、Compressor、Extractor、PromotionService、Retriever、SourceExpander、AuthoringContextBuilder、AgentMemoryCanonicalHashProjector |
 | `samples/CrestCreates.Samples.DescriptorControlPlane/Authoring` | IDescriptorAuthoringAgent、FakeCompanyCertificationAuthoringAgent、CompanyCertificationAuthoringGoldenScenarioRunner/Report、ActivationBindingReferenceRegistry |
-| `CrestCreates.Agent.ControlPlane.Tests` | 423 个 ControlPlane 测试（含 DraftContracts + Generator + Activation）+ 8 个 Boundary 测试 = **431 个测试** |
+| `CrestCreates.Agent.Authoring.Abstractions` | Authoring 合约（20 个 sealed record/enum/interface + DiagnosticCodes + JsonSerializerContext）；不引用 ControlPlane.Abstractions、DraftContracts |
+| `CrestCreates.Agent.Authoring` | Authoring runtime（LlmDescriptorAuthoringAgent、Parser、PromptBuilder、PromptInputFactory、PromptInputHashService、RecordedClient、FakeClient、ParserJsonSerializerContext、DI） |
+| `CrestCreates.Agent.Authoring.Http` | OpenAI-compatible provider client（OpenAICompatibleDescriptorAuthoringModelClient、chat DTOs、CredentialProvider、JsonSerializerContext、DI） |
+| `CrestCreates.Agent.Authoring.Tests` | 45 个 Authoring 测试（Parser 12 + Boundary 4 + GoldenScenario 4 + ProviderBoundary 3 + Contract 4 + Agent 13 + PromptHash 5） |
+| `CrestCreates.Agent.ControlPlane.Tests` | 479 个 ControlPlane 测试（含 DraftContracts + Generator + Activation）+ 边界测试 |
 
 ---
 
@@ -573,6 +582,7 @@ public sealed record AgentToolDescriptor
 | 7e | Activation Workflow（已审查的草稿 → 运行时激活） | **Implemented (#17)** |
 | **7e+** | Agent Memory & Context Compression Runtime（对话/任务历史→压缩→提取→晋升→召回→AuthoringContext） | **Implemented (#43)** |
 | **7f** | AI-assisted Descriptor Authoring Golden Scenario（意图→创作→审查→激活→运行时证明完整链路） | **Implemented (#32)** |
+| **7g** | LLM-backed Descriptor Authoring Adapter（框架级 authoring 合约 + LLM provider 适配 + source-generated JSON + canonical hash prompt hash + 结构化 failure diagnostics） | **Implemented (#48)** |
 | 7a | Descriptor Draft Runtime（存储、验证、物化、审查） | Implemented |
 
 ### 10.1 Phase 7e — Safe Activation Workflow (#17)
@@ -602,14 +612,7 @@ Phase 7e 实现了从已审查的描述符草稿到运行时激活的完整工�
 
 ### 10.2 Phase 7b — LLM Bootstrap Plane
 
-Phase 7b 将引入 LLM 驱动的描述符草稿生成。核心组件已设计但尚未实现：
-
-- `PromptTemplate` — 结构化提示模板，带描述符上下文注入
-- `ILLMProvider` — 可插拔的 LLM 后端抽象（OpenAI、Anthropic、本地模型）
-- `PromptTemplateRegistry` — 按描述符类型存储和解析提示模板
-- `DescriptorDraftBuilder` — 将 LLM 结构化输出转换为 `DescriptorDraft` 实例
-
-LLM 生成的草稿将经过与人工草稿相同的 `IDescriptorDraftValidator` 验证管道，确保一致性。
+Phase 7b 的核心能力已由 Phase 7g 实现。`ILLMProvider` 对应 `IDescriptorAuthoringModelClient`，`DescriptorDraftBuilder` 对应 `JsonDescriptorAuthoringOutputParser`，`PromptTemplate` 对应 `DefaultDescriptorAuthoringPromptBuilder`。Phase 7g 产出的 draft 经过与人工草稿相同的审查/治理/激活管线。
 
 ---
 
@@ -1564,3 +1567,176 @@ Intent Text
 | Review Pipeline | 1 | LLM agent golden scenario drafts flow through review pipeline |
 
 加上 7 个 ControlPlane Golden Scenario 测试（baseline、happy path、approval event、breaking schema、missing target、explicit inventory），总计 28 个测试。
+
+---
+
+## 15. LLM-backed Descriptor Authoring Adapter (Phase 7g)
+
+> **Phase 7g (#48)** 实现了 LLM-backed Descriptor Authoring Adapter——将 Phase 7f 的 sample-level authoring 合约产品化为框架级项目，并引入 LLM 提供者适配层。核心不变量：LLM agent 只产出 draft——不激活、不审批、不变异注册表、不绕过 Control Plane 审查。
+
+### 15.1 架构概览
+
+```
+AgentAuthoringContext (Request + MetadataContextPack + MemoryPack)
+    ↓
+IDescriptorAuthoringPromptInputFactory.Create(context)
+    → DescriptorAuthoringPromptInput (TenantId, IntentText, Metadata, Memory, Refs, Kinds)
+    ↓
+IDescriptorAuthoringPromptInputHashService.ComputeHash(input)
+    → CanonicalHash (排序后写入，顺序无关)
+    ↓
+IDescriptorAuthoringPromptBuilder.Build(input)
+    → DescriptorAuthoringPromptOutput (SystemPrompt + UserPrompt)
+    ↓
+IDescriptorAuthoringModelClient.CompleteAsync(request)
+    → DescriptorAuthoringModelResponse (ResponseText + FailureKind + FailureDetail)
+    ↓
+IDescriptorAuthoringOutputParser.Parse(responseText, parseContext)
+    → DescriptorAuthoringResult (Status + Plan + DraftSet + Diagnostics)
+    ↓
+[Existing deterministic review/fix/package/activation chain]
+```
+
+### 15.2 项目结构
+
+| 项目 | 目标框架 | 内容 |
+|------|---------|------|
+| `CrestCreates.Agent.Authoring.Abstractions` | net10.0 | 20 个 public types：合约、prompt 模型、model client 接口、JSON context、diagnostic codes |
+| `CrestCreates.Agent.Authoring` | net10.0 | 18 个 public types：LLM agent、parser、prompt builder/factory/hash、recorded/fake client、DI |
+| `CrestCreates.Agent.Authoring.Http` | net10.0 | 9 个 public types：OpenAI-compatible client、chat DTOs、credential provider、JSON context、DI |
+| `CrestCreates.Agent.Authoring.Tests` | net10.0 | 7 test classes, 45 test methods |
+
+### 15.3 核心合约类型
+
+#### Abstractions (20 types)
+
+| Type | Kind | Description |
+|------|------|-------------|
+| `IDescriptorAuthoringAgent` | interface | `AuthorAsync(AgentAuthoringContext, CancellationToken) → DescriptorAuthoringResult` |
+| `DescriptorAuthoringResult` | sealed record | Status + Plan + DraftSet + Diagnostics |
+| `DescriptorDraftSet` | sealed record | DraftSetId + Drafts (IReadOnlyList<DescriptorDraft>) |
+| `DescriptorAuthoringPlan` | sealed record | PlanId + IntentText + PlannedDescriptorRefs + Assumptions |
+| `DescriptorAuthoringDiagnostic` | sealed record | Code + Message + Severity + Path |
+| `DescriptorAuthoringStatus` | enum (6) | Succeeded=0, SucceededWithDiagnostics=1, Blocked=2, InvalidProviderOutput=3, ProviderUnavailable=4, Failed=5 |
+| `DescriptorAuthoringProviderFailureKind` | enum (8) | None=0, CredentialUnavailable=1, CredentialRejected=2, Unauthorized=3, RateLimited=4, Timeout=5, NetworkError=6, Unknown=7 |
+| `DescriptorAuthoringModelProfile` | sealed record | ProfileName + ProviderName + ModelName + MaxInputTokens? + MaxOutputTokens? + SupportsJsonMode + SupportsStructuredOutput |
+| `DescriptorAuthoringModelRequest` | sealed record | Prompt + ModelProfile |
+| `DescriptorAuthoringModelResponse` | sealed record | ResponseText + ProviderName + ModelName + PromptInputHash? + FailureKind + FailureDetail? |
+| `DescriptorAuthoringProviderProfile` | sealed record | ProviderName + Endpoint + Timeout + CredentialReference |
+| `IDescriptorAuthoringModelClient` | interface | `CompleteAsync(DescriptorAuthoringModelRequest, CancellationToken) → DescriptorAuthoringModelResponse` |
+| `DescriptorAuthoringPromptInput` | sealed record | ContractVersion + TenantId + IntentText + Metadata + Memory + VisibleDescriptorRefs + SupportedDescriptorKinds + PromptInputHash |
+| `DescriptorAuthoringPromptOutput` | sealed record | ContractVersion + PromptTemplateVersion + PromptInputHash + SystemPrompt + UserPrompt |
+| `DescriptorAuthoringMetadataContextProjection` | sealed record | Descriptors + VisibleDescriptorRefs |
+| `DescriptorAuthoringDescriptorProjection` | sealed record | Ref + Kind + Name + ContractHash + DefinitionHash |
+| `DescriptorAuthoringMemoryProjection` | sealed record | IsAuthoritative + ScopeFingerprint + VisibleMemorySetHash + CanonicalPackHash + Memories |
+| `DescriptorAuthoringMemoryItemProjection` | sealed record | MemoryId + Kind + Content + Confidence + CanonicalContentHash + DescriptorRefs |
+| `DescriptorAuthoringDiagnosticCodes` | static class | 12 个诊断码常量 |
+| `DescriptorAuthoringJsonSerializerContext` | sealed partial class | Source-generated JSON context |
+
+#### Runtime (18 types)
+
+| Type | Kind | Description |
+|------|------|-------------|
+| `LlmDescriptorAuthoringAgent` | sealed class | 实现 IDescriptorAuthoringAgent；PromptBuilder → ModelClient → Parser 链路 |
+| `LlmDescriptorAuthoringAgentOptions` | sealed class | AuthorId + ModelProfile；DefaultAuthorId = "llm-descriptor-authoring-agent" |
+| `DescriptorAuthoringParseContext` | sealed record | TenantId + AuthorId + AuthorKind + CreatedAt + IntentText + ExpectedPromptInputHash |
+| `JsonDescriptorAuthoringOutputParser` | sealed class | 实现 IDescriptorAuthoringOutputParser；source-generated JSON；拒绝缺失/未知 target |
+| `IDescriptorAuthoringOutputParser` | interface | Parse(providerOutput, parseContext) → DescriptorAuthoringResult |
+| `RecordedDescriptorAuthoringModelClient` | sealed class | Keyed by prompt input hash 的录制客户端；fixture lookup 失败返回 FailureKind=Unknown |
+| `FakeDescriptorAuthoringModelClient` | sealed class | 确定性假客户端；支持成功/失败响应 |
+| `DefaultDescriptorAuthoringPromptBuilder` | sealed class | 实现 IDescriptorAuthoringPromptBuilder；上下文完整（descriptors + memory + refs + kinds） |
+| `DefaultDescriptorAuthoringPromptInputFactory` | sealed class | 实现 IDescriptorAuthoringPromptInputFactory；ParserSupportedKinds = [HumanTask, Workflow] |
+| `DefaultDescriptorAuthoringPromptInputHashService` | sealed class | 实现 IDescriptorAuthoringPromptInputHashService；canonical hash + 排序 |
+| `DescriptorAuthoringParserJsonSerializerContext` | sealed partial class | Source-generated JSON context for parser DTOs |
+| `AgentAuthoringServiceCollectionExtensions` | static class | AddDescriptorAuthoring DI 注册 |
+
+#### Http Provider (9 types)
+
+| Type | Kind | Description |
+|------|------|-------------|
+| `OpenAICompatibleDescriptorAuthoringModelClient` | sealed class | 实现 IDescriptorAuthoringModelClient；per-request Authorization header；linked CTS timeout；5 种 failure → FailureKind 映射 |
+| `OpenAICompatibleChatRequest` | sealed class | Model + Messages + Temperature + MaxTokens + ResponseFormat |
+| `OpenAICompatibleChatMessage` | sealed class | Role + Content |
+| `OpenAICompatibleResponseFormat` | sealed class | Type |
+| `OpenAICompatibleChatResponse` | sealed class | Id + Choices + Model |
+| `OpenAICompatibleChatChoice` | sealed class | Message + FinishReason |
+| `DefaultDescriptorAuthoringCredentialProvider` | sealed class | 从 IConfiguration 读取 API key |
+| `IDescriptorAuthoringCredentialProvider` | interface | GetApiKeyAsync(credentialReference, ct) |
+| `OpenAICompatibleAuthoringJsonSerializerContext` | sealed partial class | Source-generated JSON context for OpenAI DTOs |
+
+### 15.4 诊断码
+
+| 诊断码 | FailureKind | 触发条件 |
+|--------|-------------|---------|
+| `AUTHORING_PROVIDER_TIMEOUT` | Timeout | HTTP 请求超时（linked CTS） |
+| `AUTHORING_PROVIDER_RATE_LIMITED` | RateLimited | HTTP 429 |
+| `AUTHORING_PROVIDER_UNAUTHORIZED` | Unauthorized | HTTP 401 |
+| `AUTHORING_CREDENTIAL_UNAVAILABLE` | CredentialUnavailable | API key 解析失败 |
+| `AUTHORING_CREDENTIAL_REJECTED` | CredentialRejected | HTTP 403 |
+| `AUTHORING_INVALID_PROVIDER_OUTPUT` | — | JSON 解析失败、contract version 不匹配、空 items |
+| `AUTHORING_PROMPT_HASH_MISMATCH` | — | Prompt input hash 不匹配（→ Blocked） |
+| `AUTHORING_UNKNOWN_DESCRIPTOR_KIND` | — | Parser 不支持的 DescriptorKind（→ Blocked） |
+| `AUTHORING_UNSUPPORTED_DRAFT_OPERATION` | — | 不支持的 DraftOperation（→ Blocked） |
+| `AUTHORING_GOVERNANCE_BOUNDARY_VIOLATION` | — | LLM 尝试激活/审批/变异（→ Blocked） |
+| `AUTHORING_MEMORY_AUTHORITY_CLAIM_REJECTED` | — | LLM 声称记忆权威（→ Blocked） |
+| `AUTHORING_PROVIDER_UNAVAILABLE` | Unknown/NetworkError | fixture lookup 失败、网络错误 |
+
+### 15.5 关键架构决策
+
+1. **LLM 只产出 draft** — LlmDescriptorAuthoringAgent 只返回 DescriptorDraftSet，不激活、不审批、不变异注册表、不绕过 Control Plane 审查。GovernanceBoundaryViolation 和 MemoryAuthorityClaimRejected 诊断码强制此边界。
+
+2. **Parser 拒绝缺失/未知 target** — WorkflowStep 的 InteractionTarget 缺失、未知 kind、空 id 均产出诊断并拒绝，不静默 fallback 到 "unknown" 引用。
+
+3. **PromptHashMismatch → Blocked** — Prompt input hash 不匹配是 governance boundary rejection，不是普通 JSON 错误。返回 Blocked + SeverityLevel.Blocker。
+
+4. **Source-generated JSON** — Parser 使用 DescriptorAuthoringParserJsonSerializerContext，OpenAI client 使用 OpenAICompatibleAuthoringJsonSerializerContext。无反射式 JsonSerializer.Deserialize。
+
+5. **Canonical hash-based prompt input hash** — 使用 ICanonicalHashComputer.ComputeFromProjection，排序后写入（Descriptors by Namespace/Id/Version、Memories by MemoryId、Refs by Namespace/Id/Version、Kinds by Ordinal），确保顺序无关。
+
+6. **ProviderProfile.Timeout 生效** — 使用 CancellationTokenSource.CreateLinkedTokenSource + CancelAfter(timeout)，区分 caller cancellation（rethrow）和 provider timeout（返回 Timeout failure）。
+
+7. **Parser 使用 ParseContext** — DescriptorAuthoringParseContext 携带 TenantId、AuthorId、AuthorKind、CreatedAt、IntentText、ExpectedPromptInputHash。无硬编码值。
+
+8. **ModelProfile 可配置** — LlmDescriptorAuthoringAgentOptions.ModelProfile 允许配置真实 provider/model 名称。不再硬编码 "unknown"。
+
+9. **依赖边界** — Authoring.Abstractions 不引用 ControlPlane.Abstractions、DraftContracts、Http provider。Authoring runtime 不引用 ControlPlane.Abstractions、DraftContracts、Http provider。由 DependencyBoundaryTests 强制执行。
+
+### 15.6 依赖边界
+
+| 项目 | 禁止引用 |
+|------|---------|
+| Authoring.Abstractions | ControlPlane.Abstractions, DraftContracts, Authoring.Http |
+| Authoring | ControlPlane.Abstractions, DraftContracts, Authoring.Http |
+| Authoring.Http | ControlPlane.Abstractions, DraftContracts |
+
+### 15.7 DI 注册
+
+```csharp
+// Authoring runtime
+services.AddDescriptorAuthoring();
+// 注册: IDescriptorAuthoringPromptInputFactory, IDescriptorAuthoringPromptBuilder,
+//       IDescriptorAuthoringPromptInputHashService, IDescriptorAuthoringOutputParser,
+//       IDescriptorAuthoringModelClient (FakeDescriptorAuthoringModelClient),
+//       LlmDescriptorAuthoringAgentOptions, TimeProvider
+
+// OpenAI-compatible provider（替换 FakeClient）
+services.AddOpenAICompatibleAuthoringProvider(
+    providerName: "openai",
+    credentialReference: "Authoring:OpenAI:ApiKey",
+    endpoint: new Uri("https://api.openai.com/v1"));
+// 注册: IDescriptorAuthoringModelClient → OpenAICompatibleDescriptorAuthoringModelClient
+```
+
+### 15.8 测试覆盖
+
+| 测试类 | 测试数 | 覆盖范围 |
+|--------|--------|---------|
+| OutputParserTests | 12 | JSON 解析、contract version、hash mismatch、unknown kind、unsupported operation、authority claim、HumanTask/Workflow materialization、no hard-code、atomic failure |
+| AuthoringBoundaryTests | 4 | Abstractions/Authoring 不引用 ControlPlane/Http |
+| GoldenScenarioLlmFixtureTests | 4 | LLM fixture 产出 draft set、不激活/变异、correct descriptor IDs |
+| ProviderBoundaryTests | 3 | Abstractions 无 credential、Authoring 不引用 Http、Http 只引用 Abstractions |
+| AuthoringContractTests | 4 | Framework namespace、status values、profile 无 secrets、JSON context |
+| LlmDescriptorAuthoringAgentTests | 13 | Provider failure mapping (5 kinds)、fixture lookup、valid response、no activation、recorded client、injected AuthorId/TimeProvider |
+| PromptInputHashTests | 5 | Same input → same hash、changed intent → different hash、canonical hash infra、factory produces hash、order independence |
+
+加上 Sample 测试中的 LLM fixture golden scenario 测试（1 个），总计 46 个 Authoring 测试。

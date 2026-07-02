@@ -1,6 +1,6 @@
 # Tool DTO, JSON Contract & Review Report — Usage Guide
 
-> **Date:** 2026-07-02 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow) + Phase 7e+ (#43 Agent Memory & Context Compression Runtime) + Phase 7f (#32 AI-assisted Descriptor Authoring Golden Scenario)**
+> **Date:** 2026-07-02 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow) + Phase 7e+ (#43 Agent Memory & Context Compression Runtime) + Phase 7f (#32 AI-assisted Descriptor Authoring Golden Scenario) + Phase 7g (#48 LLM-backed Descriptor Authoring Adapter)**
 
 ## 1. 快速开始 (Quick Start)
 
@@ -1642,29 +1642,18 @@ services.AddTransient<DescriptorActivationReviewHumanTaskEventHandler>();
 
 ---
 
-## 15. 未来：LLM 集成 (Future: LLM Integration)
+## 15. LLM 集成 (Implemented as Phase 7g)
 
-Phase 7b（LLM Bootstrap Plane）将在此 DTO 边界之上构建。LLM 集成将使用相同的 Tool DTO 与 Control Plane 交互：
+Phase 7b 的 LLM 集成能力已由 Phase 7g 实现。核心映射：
 
-```
-LLM Provider → Prompt → DescriptorDraftBuilder → DescriptorDraft
-    → Projection (FromDraft) → AgentDescriptorDraftDto → JSON → Adapter → HTTP/MCP
-```
+| Phase 7b 设计 | Phase 7g 实现 |
+|---------------|---------------|
+| `ILLMProvider` | `IDescriptorAuthoringModelClient` |
+| `DescriptorDraftBuilder` | `JsonDescriptorAuthoringOutputParser` |
+| `PromptTemplate` | `DefaultDescriptorAuthoringPromptBuilder` |
+| `PromptTemplateRegistry` | `DefaultDescriptorAuthoringPromptInputFactory` |
 
-设计考虑：
-- 所有 DTO 已经可以被 LLM 原生理解和生成（纯 JSON，无抽象类型）
-- `CreateDescriptorDraftRequest` 是 LLM 直接调用的理想接口
-- 区分器不变式确保 LLM 输出无歧义
-- 契约版本允许 LLM 工具描述在运行时自我描述
-
-Phase 7b 核心组件（尚未实现）：
-
-| 组件 | 说明 |
-|------|------|
-| `PromptTemplate` | 结构化提示模板，带描述符上下文注入 |
-| `ILLMProvider` | 可插拔 LLM 后端抽象 |
-| `PromptTemplateRegistry` | 按描述符种类存储和解析提示模板 |
-| `DescriptorDraftBuilder` | LLM 结构化输出 → DescriptorDraft |
+LLM 产出的 draft 经过与人工草稿相同的审查/治理/激活管线。参见 §18 获取完整使用说明。
 
 ---
 
@@ -2069,3 +2058,203 @@ var freshRunner = freshHost.GetRequiredService<CompanyCertificationGoldenScenari
 | **IsAuthoritative 始终 false** | 元数据优先于冲突记忆 |
 | **CreatedAt 固定时间** | GoldenScenarioCreatedAt = 2026-01-01T00:00:00Z |
 | **不修改框架核心合约** | 所有新增类型在 sample 项目中 |
+
+---
+
+## 18. LLM-backed Descriptor Authoring Adapter 使用 (Phase 7g)
+
+> **Phase 7g (#48)** 实现了 LLM-backed Descriptor Authoring Adapter——将 Phase 7f 的 sample-level authoring 合约产品化为框架级项目，并引入 LLM 提供者适配层。LLM agent 只产出 draft，不激活、不审批、不变异注册表。
+
+### 18.1 DI 注册
+
+```csharp
+// 基础 Authoring runtime（使用 FakeClient）
+services.AddDescriptorAuthoring();
+
+// 替换为 OpenAI-compatible provider
+services.AddOpenAICompatibleAuthoringProvider(
+    providerName: "openai",
+    credentialReference: "Authoring:OpenAI:ApiKey",
+    endpoint: new Uri("https://api.openai.com/v1"));
+
+// 配置 Agent options
+services.Configure<LlmDescriptorAuthoringAgentOptions>(options =>
+{
+    options.AuthorId = "my-llm-authoring-agent";
+    options.ModelProfile = new DescriptorAuthoringModelProfile
+    {
+        ProfileName = "production",
+        ProviderName = "openai",
+        ModelName = "gpt-4o",
+        MaxOutputTokens = 4096,
+        SupportsJsonMode = true,
+        SupportsStructuredOutput = true
+    };
+});
+```
+
+### 18.2 使用 LLM Authoring Agent
+
+```csharp
+using CrestCreates.Agent.Authoring.Abstractions.Authoring;
+
+// Agent 通过 DI 注入
+var agent = services.GetRequiredService<IDescriptorAuthoringAgent>();
+
+// AuthoringContext 由 Agent Memory 系统构建
+var authoringContext = await authoringContextBuilder.BuildAsync(
+    request, metadataPack, memoryPack, ct);
+
+// 调用 LLM agent
+var result = await agent.AuthorAsync(authoringContext, ct);
+
+// 检查结果
+switch (result.Status)
+{
+    case DescriptorAuthoringStatus.Succeeded:
+    case DescriptorAuthoringStatus.SucceededWithDiagnostics:
+        // result.Plan — DescriptorAuthoringPlan (PlanId, IntentText, PlannedDescriptorRefs, Assumptions)
+        // result.DraftSet — DescriptorDraftSet (Drafts 列表)
+        // result.Diagnostics — 可能有非阻塞诊断
+        break;
+
+    case DescriptorAuthoringStatus.Blocked:
+        // 治理边界拒绝（prompt hash mismatch、authority claim、unsupported operation 等）
+        break;
+
+    case DescriptorAuthoringStatus.InvalidProviderOutput:
+        // LLM 输出无法解析（JSON 格式错误、contract version 不匹配）
+        break;
+
+    case DescriptorAuthoringStatus.ProviderUnavailable:
+        // 提供者不可用（credential、network、timeout 等）
+        break;
+
+    case DescriptorAuthoringStatus.Failed:
+        // 未知失败
+        break;
+}
+```
+
+### 18.3 Provider Failure 诊断
+
+当 provider 返回失败时，`DescriptorAuthoringModelResponse.FailureKind` 携带结构化失败信息：
+
+| FailureKind | 诊断码 | 触发条件 |
+|-------------|--------|---------|
+| `CredentialUnavailable` | `AUTHORING_CREDENTIAL_UNAVAILABLE` | API key 配置缺失 |
+| `CredentialRejected` | `AUTHORING_CREDENTIAL_REJECTED` | HTTP 403 |
+| `Unauthorized` | `AUTHORING_PROVIDER_UNAUTHORIZED` | HTTP 401 |
+| `RateLimited` | `AUTHORING_PROVIDER_RATE_LIMITED` | HTTP 429 |
+| `Timeout` | `AUTHORING_PROVIDER_TIMEOUT` | 请求超时（ProviderProfile.Timeout） |
+| `NetworkError` | `AUTHORING_PROVIDER_UNAVAILABLE` | HttpRequestException |
+| `Unknown` | `AUTHORING_PROVIDER_UNAVAILABLE` | fixture lookup 失败、非特定错误 |
+
+### 18.4 Recorded Client（确定性测试）
+
+`RecordedDescriptorAuthoringModelClient` 按 prompt input hash 查找预录制的 fixture 响应：
+
+```csharp
+// 构造 recorded client
+var fixtures = new Dictionary<string, string>
+{
+    [expectedPromptInputHash] = File.ReadAllText("fixtures/company_certification_authoring.json")
+};
+var recordedClient = new RecordedDescriptorAuthoringModelClient(fixtures);
+
+// 当 hash 匹配时返回 fixture；不匹配时返回 FailureKind=Unknown
+```
+
+### 18.5 Parser 严格验证
+
+Parser 拒绝以下情况并返回 `Blocked`：
+
+| 情况 | 诊断码 |
+|------|--------|
+| Prompt input hash 不匹配 | `AUTHORING_PROMPT_HASH_MISMATCH` |
+| 不支持的 DescriptorKind | `AUTHORING_UNKNOWN_DESCRIPTOR_KIND` |
+| 不支持的 DraftOperation | `AUTHORING_UNSUPPORTED_DRAFT_OPERATION` |
+| LLM 尝试激活/审批/变异 | `AUTHORING_GOVERNANCE_BOUNDARY_VIOLATION` |
+| LLM 声称记忆权威 | `AUTHORING_MEMORY_AUTHORITY_CLAIM_REJECTED` |
+| WorkflowStep 缺失 target | `AUTHORING_INVALID_PROVIDER_OUTPUT` |
+| WorkflowStep 未知 target kind | `AUTHORING_INVALID_PROVIDER_OUTPUT` |
+| WorkflowStep target 空 id | `AUTHORING_INVALID_PROVIDER_OUTPUT` |
+
+### 18.6 Prompt Input Hash
+
+Prompt input hash 使用 canonical hash 基础设施计算，排序后写入确保顺序无关：
+
+```csharp
+var hashService = services.GetRequiredService<IDescriptorAuthoringPromptInputHashService>();
+var promptInput = promptInputFactory.Create(authoringContext);
+var hash = hashService.ComputeHash(promptInput);
+// hash — CanonicalHash，基于 SHA256，排序后写入
+```
+
+排序规则：
+- Descriptors: by (Namespace, Id, Version)
+- Memories: by MemoryId
+- Visible Descriptor Refs: by (Namespace, Id, Version)
+- Supported Descriptor Kinds: by Ordinal
+
+### 18.7 OpenAI-Compatible Provider
+
+```csharp
+// 配置
+services.AddOpenAICompatibleAuthoringProvider(
+    providerName: "azure-openai",
+    credentialReference: "Authoring:AzureOpenAI:ApiKey",
+    endpoint: new Uri("https://my-resource.openai.azure.com/openai/deployments/my-deployment"));
+
+// appsettings.json
+{
+    "Authoring": {
+        "AzureOpenAI": {
+            "ApiKey": "your-api-key"
+        }
+    }
+}
+```
+
+Provider 行为：
+- Per-request Authorization header（不修改 HttpClient.DefaultRequestHeaders）
+- Linked CancellationTokenSource + CancelAfter(ProviderProfile.Timeout)
+- 区分 caller cancellation（rethrow）和 provider timeout（返回 Timeout failure）
+- Source-generated JSON（OpenAICompatibleAuthoringJsonSerializerContext）
+
+### 18.8 JSON 序列化
+
+```csharp
+using CrestCreates.Agent.Authoring.Abstractions.Json;
+
+// Abstractions JSON context（注册 20 个类型 + CanonicalHash + DescriptorDraft）
+var options = new JsonSerializerOptions
+{
+    TypeInfoResolver = JsonTypeInfoResolver.Combine(
+        AgentControlPlaneToolJsonSerializerContext.Default,
+        AgentMemoryJsonSerializerContext.Default,
+        DescriptorAuthoringJsonSerializerContext.Default)
+};
+
+// Parser JSON context（在 Authoring runtime 项目内）
+// DescriptorAuthoringParserJsonSerializerContext — 注册 DescriptorAuthoringProviderOutputDto 及子 DTO
+
+// OpenAI JSON context（在 Http 项目内）
+// OpenAICompatibleAuthoringJsonSerializerContext — 注册 chat request/response DTOs
+```
+
+### 18.9 关键使用约束
+
+| 约束 | 说明 |
+|------|------|
+| **LLM 只产出 draft** | 不激活、不审批、不变异注册表、不绕过 Control Plane 审查 |
+| **Parser 拒绝缺失 target** | 不静默 fallback 到 "unknown" 引用 |
+| **PromptHashMismatch → Blocked** | Governance boundary rejection，非普通 JSON 错误 |
+| **Source-generated JSON** | Parser 和 OpenAI client 均使用 JsonSerializerContext |
+| **Canonical hash prompt hash** | 排序后写入，顺序无关 |
+| **ProviderProfile.Timeout 生效** | Linked CTS，区分 caller cancellation 和 provider timeout |
+| **ParseContext 无硬编码** | TenantId、AuthorId、AuthorKind、CreatedAt 全部来自注入 |
+| **ModelProfile 可配置** | 不硬编码 "unknown" |
+| **依赖边界** | Authoring 不引用 ControlPlane/DraftContracts/Http |
+| **ParserSupportedKinds** | 只暴露 Parser 支持的 DescriptorKind（HumanTask、Workflow） |
+| **PlanId 稳定** | 使用 prompt input hash 前 16 字符作为 fallback，不用 GetHashCode() |
