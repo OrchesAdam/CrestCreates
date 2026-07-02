@@ -18,4 +18,7 @@ public static class CanonicalHashArtifactNames
     public const string AgentMemoryPack = "AgentMemoryPack";
     public const string AgentMemoryScope = "AgentMemoryScope";
     public const string AgentMemorySet = "AgentMemorySet";
+    public const string AgentPromptInputEvidence = "AgentPromptInputEvidence";
+    public const string AgentPromptOutputEvidence = "AgentPromptOutputEvidence";
+    public const string AgentPromptTemplateDescriptor = "AgentPromptTemplateDescriptor";
 }

@@ -1,16 +1,20 @@
 using CrestCreates.Agent.Authoring.Abstractions.Authoring;
+using CrestCreates.Agent.Authoring.Abstractions.Prompting;
 using CrestCreates.Agent.Authoring.Authoring;
 using CrestCreates.Agent.Authoring.Clients;
 using CrestCreates.Agent.Authoring.Tests.Fixtures;
 using CrestCreates.Agent.Authoring.Parsing;
 using CrestCreates.Agent.Authoring.Prompting;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Prompting;
+using CrestCreates.Agent.Prompting.Abstractions;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.ContextPack.Abstractions;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -21,10 +25,17 @@ public sealed class GoldenScenarioLlmFixtureTests
     [Fact]
     public async Task LlmFixture_ProducesDraftSet_WithHumanTaskAndWorkflow()
     {
-        // 1. Set up real components
-        var hashComputer = new DefaultCanonicalHashComputer();
-        var hashService = new DefaultDescriptorAuthoringPromptInputHashService(hashComputer);
-        var factory = new DefaultDescriptorAuthoringPromptInputFactory(hashService);
+        // 1. Set up service provider for prompting services
+        var services = new ServiceCollection();
+        services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
+        services.AddAgentPrompting();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringPromptInput>, DescriptorAuthoringPromptInputProjector>();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringModelResponseEvidenceProjection>, DescriptorAuthoringModelResponseEvidenceProjector>();
+        var provider = services.BuildServiceProvider();
+        var promptHashService = provider.GetRequiredService<IAgentPromptHashService>();
+        var promptEvidenceFactory = provider.GetRequiredService<IAgentPromptEvidenceFactory>();
+
+        var factory = new DefaultDescriptorAuthoringPromptInputFactory();
         var builder = new DefaultDescriptorAuthoringPromptBuilder();
         var parser = new JsonDescriptorAuthoringOutputParser();
 
@@ -32,8 +43,9 @@ public sealed class GoldenScenarioLlmFixtureTests
         var context = CreateCompanyCertificationContext();
 
         // 3. Compute prompt input hash to use as fixture key
-        var promptInput = factory.Create(context);
-        var hashValue = promptInput.PromptInputHash!.Value;
+        var rawPromptInput = factory.Create(context);
+        var hashService = new DefaultDescriptorAuthoringPromptInputHashService(promptHashService);
+        var hashValue = hashService.ComputeHash(rawPromptInput).Value;
 
         // 4. Create recorded client with fixture
         var fixtureJson = CompanyCertificationLlmFixture.GetRecordedOutput(hashValue);
@@ -43,7 +55,7 @@ public sealed class GoldenScenarioLlmFixtureTests
         // 5. Create agent
         var options = Options.Create(new LlmDescriptorAuthoringAgentOptions());
         var timeProvider = TimeProvider.System;
-        var agent = new LlmDescriptorAuthoringAgent(factory, builder, recordedClient, parser, options, timeProvider);
+        var agent = new LlmDescriptorAuthoringAgent(factory, builder, recordedClient, parser, promptEvidenceFactory, options, timeProvider);
 
         // 6. Run authoring
         var result = await agent.AuthorAsync(context);
@@ -58,20 +70,30 @@ public sealed class GoldenScenarioLlmFixtureTests
     [Fact]
     public async Task LlmFixture_DoesNotActivate_OrMutateRuntime()
     {
-        var hashComputer = new DefaultCanonicalHashComputer();
-        var hashService = new DefaultDescriptorAuthoringPromptInputHashService(hashComputer);
-        var factory = new DefaultDescriptorAuthoringPromptInputFactory(hashService);
+        var services = new ServiceCollection();
+        services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
+        services.AddAgentPrompting();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringPromptInput>, DescriptorAuthoringPromptInputProjector>();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringModelResponseEvidenceProjection>, DescriptorAuthoringModelResponseEvidenceProjector>();
+        var provider = services.BuildServiceProvider();
+        var promptHashService = provider.GetRequiredService<IAgentPromptHashService>();
+        var promptEvidenceFactory = provider.GetRequiredService<IAgentPromptEvidenceFactory>();
+
+        var factory = new DefaultDescriptorAuthoringPromptInputFactory();
         var builder = new DefaultDescriptorAuthoringPromptBuilder();
         var parser = new JsonDescriptorAuthoringOutputParser();
         var context = CreateCompanyCertificationContext();
-        var promptInput = factory.Create(context);
-        var hashValue = promptInput.PromptInputHash!.Value;
+
+        var rawPromptInput = factory.Create(context);
+        var hashService = new DefaultDescriptorAuthoringPromptInputHashService(promptHashService);
+        var hashValue = hashService.ComputeHash(rawPromptInput).Value;
+
         var fixtureJson = CompanyCertificationLlmFixture.GetRecordedOutput(hashValue);
         var fixtures = new Dictionary<string, string> { [hashValue] = fixtureJson };
         var recordedClient = new RecordedDescriptorAuthoringModelClient(fixtures);
         var options = Options.Create(new LlmDescriptorAuthoringAgentOptions());
         var timeProvider = TimeProvider.System;
-        var agent = new LlmDescriptorAuthoringAgent(factory, builder, recordedClient, parser, options, timeProvider);
+        var agent = new LlmDescriptorAuthoringAgent(factory, builder, recordedClient, parser, promptEvidenceFactory, options, timeProvider);
 
         var result = await agent.AuthorAsync(context);
 
@@ -117,20 +139,30 @@ public sealed class GoldenScenarioLlmFixtureTests
 
     private static LlmDescriptorAuthoringAgent CreateAgentWithFixture()
     {
-        var hashComputer = new DefaultCanonicalHashComputer();
-        var hashService = new DefaultDescriptorAuthoringPromptInputHashService(hashComputer);
-        var factory = new DefaultDescriptorAuthoringPromptInputFactory(hashService);
+        var services = new ServiceCollection();
+        services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
+        services.AddAgentPrompting();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringPromptInput>, DescriptorAuthoringPromptInputProjector>();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringModelResponseEvidenceProjection>, DescriptorAuthoringModelResponseEvidenceProjector>();
+        var provider = services.BuildServiceProvider();
+        var promptHashService = provider.GetRequiredService<IAgentPromptHashService>();
+        var promptEvidenceFactory = provider.GetRequiredService<IAgentPromptEvidenceFactory>();
+
+        var factory = new DefaultDescriptorAuthoringPromptInputFactory();
         var builder = new DefaultDescriptorAuthoringPromptBuilder();
         var parser = new JsonDescriptorAuthoringOutputParser();
         var context = CreateCompanyCertificationContext();
-        var promptInput = factory.Create(context);
-        var hashValue = promptInput.PromptInputHash!.Value;
+
+        var rawPromptInput = factory.Create(context);
+        var hashService = new DefaultDescriptorAuthoringPromptInputHashService(promptHashService);
+        var hashValue = hashService.ComputeHash(rawPromptInput).Value;
+
         var fixtureJson = CompanyCertificationLlmFixture.GetRecordedOutput(hashValue);
         var fixtures = new Dictionary<string, string> { [hashValue] = fixtureJson };
         var recordedClient = new RecordedDescriptorAuthoringModelClient(fixtures);
         var options = Options.Create(new LlmDescriptorAuthoringAgentOptions());
         var timeProvider = TimeProvider.System;
-        return new LlmDescriptorAuthoringAgent(factory, builder, recordedClient, parser, options, timeProvider);
+        return new LlmDescriptorAuthoringAgent(factory, builder, recordedClient, parser, promptEvidenceFactory, options, timeProvider);
     }
 
     private static AgentAuthoringContext CreateCompanyCertificationContext()

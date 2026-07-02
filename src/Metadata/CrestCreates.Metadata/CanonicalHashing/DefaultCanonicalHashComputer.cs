@@ -21,7 +21,7 @@ namespace CrestCreates.Metadata.CanonicalHashing;
 public sealed class DefaultCanonicalHashComputer : ICanonicalHashComputer
 {
     private const string Algorithm = "SHA-256";
-    private const string AlgorithmVersion = "sha256-canonical-json-v1";
+    public const string AlgorithmVersion = "sha256-canonical-json-v1";
 
     public CanonicalHash ComputeContractHash(IDescriptor descriptor, CanonicalHashScope scope)
     {

@@ -7,12 +7,15 @@ using CrestCreates.Agent.Authoring.Clients;
 using CrestCreates.Agent.Authoring.Parsing;
 using CrestCreates.Agent.Authoring.Prompting;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Prompting;
+using CrestCreates.Agent.Prompting.Abstractions;
 using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.ContextPack.Abstractions;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
@@ -31,6 +34,8 @@ public sealed class LlmDescriptorAuthoringAgentTests
         result.Status.Should().Be(DescriptorAuthoringStatus.ProviderUnavailable);
         result.Diagnostics.Should().Contain(d =>
             d.Code == DescriptorAuthoringDiagnosticCodes.ProviderUnavailable);
+        result.PromptInputEvidence.Should().NotBeNull();
+        result.PromptOutputEvidence.Should().NotBeNull();
     }
 
     [Fact]
@@ -46,6 +51,8 @@ public sealed class LlmDescriptorAuthoringAgentTests
         result.Status.Should().Be(DescriptorAuthoringStatus.ProviderUnavailable);
         result.Diagnostics.Should().ContainSingle(d =>
             d.Code == DescriptorAuthoringDiagnosticCodes.CredentialUnavailable);
+        result.PromptInputEvidence.Should().NotBeNull();
+        result.PromptOutputEvidence.Should().NotBeNull();
     }
 
     [Fact]
@@ -61,6 +68,8 @@ public sealed class LlmDescriptorAuthoringAgentTests
         result.Status.Should().Be(DescriptorAuthoringStatus.ProviderUnavailable);
         result.Diagnostics.Should().ContainSingle(d =>
             d.Code == DescriptorAuthoringDiagnosticCodes.ProviderUnauthorized);
+        result.PromptInputEvidence.Should().NotBeNull();
+        result.PromptOutputEvidence.Should().NotBeNull();
     }
 
     [Fact]
@@ -76,6 +85,8 @@ public sealed class LlmDescriptorAuthoringAgentTests
         result.Status.Should().Be(DescriptorAuthoringStatus.ProviderUnavailable);
         result.Diagnostics.Should().ContainSingle(d =>
             d.Code == DescriptorAuthoringDiagnosticCodes.ProviderRateLimited);
+        result.PromptInputEvidence.Should().NotBeNull();
+        result.PromptOutputEvidence.Should().NotBeNull();
     }
 
     [Fact]
@@ -91,6 +102,8 @@ public sealed class LlmDescriptorAuthoringAgentTests
         result.Status.Should().Be(DescriptorAuthoringStatus.ProviderUnavailable);
         result.Diagnostics.Should().ContainSingle(d =>
             d.Code == DescriptorAuthoringDiagnosticCodes.ProviderTimeout);
+        result.PromptInputEvidence.Should().NotBeNull();
+        result.PromptOutputEvidence.Should().NotBeNull();
     }
 
     [Fact]
@@ -106,6 +119,8 @@ public sealed class LlmDescriptorAuthoringAgentTests
         result.Status.Should().Be(DescriptorAuthoringStatus.ProviderUnavailable);
         result.Diagnostics.Should().ContainSingle(d =>
             d.Code == DescriptorAuthoringDiagnosticCodes.ProviderUnavailable);
+        result.PromptInputEvidence.Should().NotBeNull();
+        result.PromptOutputEvidence.Should().NotBeNull();
     }
 
     [Fact]
@@ -118,6 +133,8 @@ public sealed class LlmDescriptorAuthoringAgentTests
         var result = await agent.AuthorAsync(TestAuthoringContext());
 
         result.Status.Should().Be(DescriptorAuthoringStatus.ProviderUnavailable);
+        result.PromptInputEvidence.Should().NotBeNull();
+        result.PromptOutputEvidence.Should().NotBeNull();
     }
 
     [Fact]
@@ -137,6 +154,8 @@ public sealed class LlmDescriptorAuthoringAgentTests
             DescriptorAuthoringStatus.Blocked,
             DescriptorAuthoringStatus.InvalidProviderOutput,
             DescriptorAuthoringStatus.ProviderUnavailable);
+        result.PromptInputEvidence.Should().NotBeNull();
+        result.PromptOutputEvidence.Should().NotBeNull();
     }
 
     [Fact]
@@ -150,6 +169,8 @@ public sealed class LlmDescriptorAuthoringAgentTests
         // It does not activate, approve, mutate registries, or execute handlers.
         result.DraftSet.Should().NotBeNull();
         result.Plan.Should().NotBeNull();
+        result.PromptInputEvidence.Should().NotBeNull();
+        result.PromptOutputEvidence.Should().NotBeNull();
     }
 
     [Fact]
@@ -218,29 +239,68 @@ public sealed class LlmDescriptorAuthoringAgentTests
 
     private static LlmDescriptorAuthoringAgent CreateAgentWithFakeResponse(string responseText)
     {
-        var hashComputer = new DefaultCanonicalHashComputer();
-        var hashService = new DefaultDescriptorAuthoringPromptInputHashService(hashComputer);
-        var factory = new DefaultDescriptorAuthoringPromptInputFactory(hashService);
+        var services = new ServiceCollection();
+        services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
+        services.AddAgentPrompting();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringPromptInput>, DescriptorAuthoringPromptInputProjector>();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringModelResponseEvidenceProjection>, DescriptorAuthoringModelResponseEvidenceProjector>();
+        var provider = services.BuildServiceProvider();
+        var promptEvidenceFactory = provider.GetRequiredService<IAgentPromptEvidenceFactory>();
+        var factory = new DefaultDescriptorAuthoringPromptInputFactory();
         var builder = new DefaultDescriptorAuthoringPromptBuilder();
         var client = new FakeDescriptorAuthoringModelClient(responseText);
         var parser = new JsonDescriptorAuthoringOutputParser();
         var options = Options.Create(new LlmDescriptorAuthoringAgentOptions());
         var timeProvider = TimeProvider.System;
 
-        return new LlmDescriptorAuthoringAgent(factory, builder, client, parser, options, timeProvider);
+        return new LlmDescriptorAuthoringAgent(factory, builder, client, parser, promptEvidenceFactory, options, timeProvider);
     }
 
     private static LlmDescriptorAuthoringAgent CreateAgentWithClient(IDescriptorAuthoringModelClient client)
     {
-        var hashComputer = new DefaultCanonicalHashComputer();
-        var hashService = new DefaultDescriptorAuthoringPromptInputHashService(hashComputer);
-        var factory = new DefaultDescriptorAuthoringPromptInputFactory(hashService);
+        var services = new ServiceCollection();
+        services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
+        services.AddAgentPrompting();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringPromptInput>, DescriptorAuthoringPromptInputProjector>();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringModelResponseEvidenceProjection>, DescriptorAuthoringModelResponseEvidenceProjector>();
+        var provider = services.BuildServiceProvider();
+        var promptEvidenceFactory = provider.GetRequiredService<IAgentPromptEvidenceFactory>();
+        var factory = new DefaultDescriptorAuthoringPromptInputFactory();
         var builder = new DefaultDescriptorAuthoringPromptBuilder();
         var parser = new JsonDescriptorAuthoringOutputParser();
         var options = Options.Create(new LlmDescriptorAuthoringAgentOptions());
         var timeProvider = TimeProvider.System;
 
-        return new LlmDescriptorAuthoringAgent(factory, builder, client, parser, options, timeProvider);
+        return new LlmDescriptorAuthoringAgent(factory, builder, client, parser, promptEvidenceFactory, options, timeProvider);
+    }
+
+    [Fact]
+    public async Task AuthorAsync_ReturnsPromptEvidenceSummaries()
+    {
+        var agent = CreateAgentWithFakeResponse(BuildValidHumanTaskOutputJson("mismatched-hash"));
+        var context = TestAuthoringContext();
+        var result = await agent.AuthorAsync(context);
+        result.PromptInputEvidence.Should().NotBeNull();
+        result.PromptOutputEvidence.Should().NotBeNull();
+        result.PromptInputEvidence!.TemplateId.Value.Should().Be("descriptor-authoring");
+        result.PromptInputEvidence.TemplateVersion.Value.Should().Be("descriptor-authoring-prompt-template-v1");
+        result.PromptInputEvidence.Purpose.Should().Be(AgentPromptPurpose.DescriptorAuthoring);
+        result.PromptOutputEvidence!.InputHash.Value.Should().Be(result.PromptInputEvidence.InputHash.Value);
+    }
+
+    [Fact]
+    public async Task AuthorAsync_ProviderObservation_UsesResponseProviderAndModelNames()
+    {
+        var client = new FakeDescriptorAuthoringModelClient(new DescriptorAuthoringModelResponse
+        {
+            ResponseText = BuildValidHumanTaskOutputJson("mismatched-hash"),
+            ProviderName = "observed-provider",
+            ModelName = "observed-model"
+        });
+        var agent = CreateAgentWithClient(client);
+        var result = await agent.AuthorAsync(TestAuthoringContext());
+        result.PromptOutputEvidence!.ProviderObservation!.ProviderName.Should().Be("observed-provider");
+        result.PromptOutputEvidence.ProviderObservation.ModelName.Should().Be("observed-model");
     }
 
     private static CanonicalHash TestHash(string value) => new()
@@ -317,14 +377,19 @@ public sealed class LlmDescriptorAuthoringAgentTests
                 DraftSet = new DescriptorDraftSet { DraftSetId = "test_draftset" }
             });
 
-        var hashComputer = new DefaultCanonicalHashComputer();
-        var hashService = new DefaultDescriptorAuthoringPromptInputHashService(hashComputer);
-        var factory = new DefaultDescriptorAuthoringPromptInputFactory(hashService);
+        var services = new ServiceCollection();
+        services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
+        services.AddAgentPrompting();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringPromptInput>, DescriptorAuthoringPromptInputProjector>();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringModelResponseEvidenceProjection>, DescriptorAuthoringModelResponseEvidenceProjector>();
+        var provider = services.BuildServiceProvider();
+        var promptEvidenceFactory = provider.GetRequiredService<IAgentPromptEvidenceFactory>();
+        var factory = new DefaultDescriptorAuthoringPromptInputFactory();
         var builder = new DefaultDescriptorAuthoringPromptBuilder();
         var responseJson = BuildValidHumanTaskOutputJson("abc123");
         var client = new FakeDescriptorAuthoringModelClient(responseJson);
 
-        var agent = new LlmDescriptorAuthoringAgent(factory, builder, client, mockParser.Object, options, timeProvider);
+        var agent = new LlmDescriptorAuthoringAgent(factory, builder, client, mockParser.Object, promptEvidenceFactory, options, timeProvider);
 
         await agent.AuthorAsync(TestAuthoringContext());
 
@@ -352,14 +417,19 @@ public sealed class LlmDescriptorAuthoringAgentTests
                 DraftSet = new DescriptorDraftSet { DraftSetId = "test_draftset" }
             });
 
-        var hashComputer = new DefaultCanonicalHashComputer();
-        var hashService = new DefaultDescriptorAuthoringPromptInputHashService(hashComputer);
-        var factory = new DefaultDescriptorAuthoringPromptInputFactory(hashService);
+        var services = new ServiceCollection();
+        services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
+        services.AddAgentPrompting();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringPromptInput>, DescriptorAuthoringPromptInputProjector>();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringModelResponseEvidenceProjection>, DescriptorAuthoringModelResponseEvidenceProjector>();
+        var provider = services.BuildServiceProvider();
+        var promptEvidenceFactory = provider.GetRequiredService<IAgentPromptEvidenceFactory>();
+        var factory = new DefaultDescriptorAuthoringPromptInputFactory();
         var builder = new DefaultDescriptorAuthoringPromptBuilder();
         var responseJson = BuildValidHumanTaskOutputJson("abc123");
         var client = new FakeDescriptorAuthoringModelClient(responseJson);
 
-        var agent = new LlmDescriptorAuthoringAgent(factory, builder, client, mockParser.Object, options, timeProvider);
+        var agent = new LlmDescriptorAuthoringAgent(factory, builder, client, mockParser.Object, promptEvidenceFactory, options, timeProvider);
 
         await agent.AuthorAsync(TestAuthoringContext());
 

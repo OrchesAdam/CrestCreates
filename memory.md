@@ -464,7 +464,7 @@ This thread achieved the following:
   - `AgentToolAuthorizationPolicy` — AllowAll/ReadOnly/ProductionDefaults (legacy, superseded by AgentToolAuthorizationOptions)
   - `AgentToolAuthorizationMode` — DevelopmentAllowAll/ExplicitPolicy/DenyAll
   - `AgentToolAuthorizationOptions` — mode-driven options with category-aware defaults (AllowReadOnlyToolsByDefault, AllowMutationToolsByDefault, AllowActivationHandoffToolsByDefault), explicit allow/deny lists
-  - `AgentToolName` — 30 canonical tool name constants (single source of truth)
+  - `AgentToolName` — 32 canonical tool name constants (30 facade + 2 manifest query; single source of truth)
   - `AgentToolPermissionRequirement` — extended with ToolCategory and IsReadOnly for category-aware authorization
   - `IAgentToolAuthorizationService` + `DefaultAgentToolAuthorizationService` — mode-driven authorization: DevelopmentAllowAll/ExplicitPolicy/DenyAll, category-aware defaults, deny-overrides-allow, legacy policy compatibility
   - `IAgentToolManifestProvider` + `StaticAgentToolManifestProvider` — hardcoded 32-tool manifest
@@ -533,7 +533,7 @@ This thread achieved the following:
     - **Production closed-world semantics**: Empty `AllowedDescriptorKinds` = nothing visible; open-world development permits valid kinds unless explicitly denied
     - **Deny-wins semantics**: `DeniedDescriptorKinds` always overrides `AllowedDescriptorKinds` — no allow-list escape hatch
     - **Explicit denied kind → Denied (not empty Success)**: Per spec §6.2, when a caller explicitly supplies a denied DescriptorKind filter, the response is `Denied` with `DESC_KIND_DENIED`, not an empty `Success`
-    - **30-tool full coverage**: All 30 manifest tools now enforce visibility via `_resourceResolver` + `DenyIfInvisible` pipeline
+    - **32-tool full coverage (30 facade + 2 manifest query)**: All 30 manifest tools now enforce visibility via `_resourceResolver` + `DenyIfInvisible` pipeline
     - **9 resource shapes covered**: None, DirectKind, SingleDescriptor, SingleDraft, Aggregate, Graph, ContextPack, Indirect, Nested — bidirectionally mapped per tool
     - **Owner-kind resolution for indirect artifacts**: Reviews, proposals, previews, activations inherit visibility from their owning Draft's `DescriptorKind` — no orphaned visibility gaps
     - **Two-pass ref resolution (anti-probing)**: `AgentControlPlaneResourceResolver.ResolveDescriptor(ref, scope)` resolves version-pinned and unambiguous refs against the full catalog (so denied kinds resolve to snapshots for Denied responses), but resolves ambiguous unpinned refs against visible descriptors only (preventing denied version count leakage)
@@ -617,7 +617,7 @@ This thread achieved the following:
 - **Service integration**: `BuildDescriptorReviewReportAsync` + `RenderDescriptorReviewReportAsync` (2 new tools), single-action constraint on ApplyFixProposal (UnsupportedMultiActionFixProposal diagnostic), Applicability check (FIX_PROPOSAL_NOT_APPLICABLE), MapDiagnosticToFixProposalKind (RATIONALE_EMPTY/INTENT_EMPTY→SetRequiredField, default→MarkRequiresReview)
 - **Runtime guardrails** (Phase 7d follow-up #44): Proposal-level IsExecutable guard (`NON_EXECUTABLE_FIX_PROPOSAL` diagnostic, rejects before action-level checks, no draft mutation); SetValue JsonElement ValueKind validation (`FIX_ACTION_VALUE_KIND_NOT_SUPPORTED` diagnostic, rejects Object/Array/Number/True/False, allows String/Null/missing)
 - **Contract version**: bumped to "7d.v1"
-- **Tool count**: 30 → 34 (BuildDescriptorReviewReport + RenderDescriptorReviewReport + 2 convenience)
+- **Tool count**: 30 → 32 (BuildDescriptorReviewReport + RenderDescriptorReviewReport are new facade tools; total AgentToolName constants = 32: 30 facade + 2 manifest query)
 - **Code review**: 3 rounds, 4 Critical + 7 Important + 4 Minor fixed; 2 issues rejected with technical reasoning (I#6 YAGNI, M#13 no NRE path)
 - **Test suites**: 8+ test files, 75+ new tests total — Builder (20+), Renderer (7+), Catalog (8), FixProposal (26+), Service Integration (8), Coverage (5+), Semantic Preservation, Wave4 updates
 - **479 ControlPlane tests + 11 Boundary tests pass**
@@ -637,7 +637,7 @@ This thread achieved the following:
 - **Runtime gate**: IRuntimeActivationGate is the ONLY component that mutates runtime state
 - **Safety-first default**: EvaluateGovernance defaults to ReviewRequired (not Allowed)
 - **Audit trail**: IDescriptorActivationAuditor records all decisions with ordering
-- **AoT safety**: TryParseReviewDecision moved to DescriptorActivationReviewDecisionParser with JsonSerializerContext
+- **AoT safety**: TryParseReviewDecision lives in DescriptorActivationReviewDecisionParser (implementation project, not Abstractions) with JsonSerializerContext — not on the record in Abstractions for AoT safety
 - **Tenant isolation**: DescriptorActivationReviewDecision carries TenantId/CorrelationId; HumanTask callback resolves from instance
 - **Contract version**: bumped to "7e.v1"
 - **471 ControlPlane tests + 11 Boundary tests pass**
@@ -854,18 +854,83 @@ Status: Completed.
 
 **Key invariants**:
 - LLM agent only produces drafts — never activates, approves, mutates registries, executes handlers, or bypasses Control Plane review
-- Prompt hashing uses `DefaultCanonicalHashComputer` (SHA-256 over canonical JSON bytes) — NO ad-hoc SHA-256, NO string builder, NO pipe-delimited format
-- Hash metadata: `Purpose=SourceIdentity`, `Scope=InternalFull`, `ArtifactKind=DescriptorAuthoringPromptInput`
+- Prompt hashing delegates to `IAgentPromptHashService` via Prompting infrastructure — NO ad-hoc SHA-256, NO string builder, NO pipe-delimited format, NO direct `ICanonicalHashComputer` usage
+- Hash metadata: `Purpose=SourceIdentity`, `Scope=InternalFull`, `ArtifactKind=AgentPromptInputEvidence` (via `CanonicalHashArtifactNames.AgentPromptInputEvidence`)
+- Output evidence hash excludes `ResponseText` — uses `DescriptorAuthoringModelResponseEvidenceProjection` (safe fields only)
+- Every `DescriptorAuthoringResult` carries `PromptInputEvidence` and `PromptOutputEvidence` summaries from `IAgentPromptEvidenceFactory`
 - Parser validates `promptInputHash` in provider output against `DescriptorAuthoringParseContext.ExpectedPromptInputHash`
 - Parser receives `DescriptorAuthoringParseContext` (tenantId, authorId, authorKind, timestamp, expectedPromptInputHash) — no hard-coded values
 - `CrestCreates.Agent.DraftContracts` is NOT a dependency of Authoring runtime — authoring produces domain-level `DescriptorDraftSet`, materialization uses existing `HumanTaskDescriptorDraftPayload`/`WorkflowDescriptorDraftPayload` directly
 - OpenAI client sets Authorization on each `HttpRequestMessage` (not shared `_httpClient.DefaultRequestHeaders`)
 - Missing fixture in RecordedClient surfaces as `ProviderUnavailable`, not empty success
 - Boundary enforced: Authoring runtime does NOT reference ControlPlane, DraftContracts, HTTP SDKs, or provider implementations
-- Authoring Abstractions does NOT reference HumanTask/Workflow/Schema/Form/Event/Capability Abstractions — only `Core.Abstractions`, `Snapshot.Abstractions`, `Metadata.Abstractions`, `Metadata.ContextPack.Abstractions`, `Agent.Memory.Abstractions`, `DescriptorDraft.Abstractions`
-- Authoring runtime references HumanTask/Workflow Abstractions (for parser materialization) but NOT their runtime execution projects
+- Authoring Abstractions does NOT reference HumanTask/Workflow/Schema/Form/Event/Capability Abstractions — only `Core.Abstractions`, `Snapshot.Abstractions`, `Metadata.Abstractions`, `Metadata.ContextPack.Abstractions`, `Agent.Memory.Abstractions`, `Agent.Prompting.Abstractions`, `DescriptorDraft.Abstractions`
+- Authoring runtime references HumanTask/Workflow Abstractions (for parser materialization) and Prompting runtime (for evidence integration) but NOT their runtime execution projects
 
-**Test counts**: 38 Authoring tests + 20 Sample tests + 48 Memory tests + 479 ControlPlane tests — all passing. Full solution build 0 errors.
+**Test counts**: 49 Authoring tests + 13 Prompting tests + 20 Sample tests + 48 Memory tests + 479 ControlPlane tests + 19 Boundary tests — all passing. Full solution build 0 errors.
+
+---
+
+### Phase 7h — Agent Prompt Contracts and Prompt Versioning (2026-07-02)
+
+**Status**: ✅ Complete
+
+**Spec**: `docs/superpowers/specs/2026-07-02-phase-7h-agent-prompt-evidence-contract-design.md`
+**Plan**: `docs/superpowers/plans/2026-07-02-phase-7h-agent-prompt-evidence-contract.md`
+
+**New projects**:
+- `CrestCreates.Agent.Prompting.Abstractions` — prompt evidence contracts (11 files)
+- `CrestCreates.Agent.Prompting` — prompt evidence runtime (5 files)
+- `CrestCreates.Agent.Prompting.Tests` — 13 tests
+
+**Prompting.Abstractions** (11 files):
+- Identity: `AgentPromptTemplateId`, `AgentPromptVersion`, `AgentPromptContractVersion`, `AgentPromptModelProfileRef`, `AgentPromptProviderProfileRef`
+- Evidence: `AgentPromptInputEvidence`, `AgentPromptOutputEvidence`, `AgentPromptProviderObservation`, `AgentPromptDiagnostic`, `AgentPromptPurpose`
+- Summaries: `AgentPromptInputEvidenceSummary`, `AgentPromptOutputEvidenceSummary`
+- Factory: `IAgentPromptEvidenceFactory`
+- Projector: `IAgentPromptCanonicalPayloadProjector<T>`
+- Hash: `IAgentPromptHashService`
+- Request: `AgentPromptEvidenceCreationRequest<T>`
+- JSON: `AgentPromptingJsonSerializerContext`
+- DI: `AgentPromptingServiceCollectionExtensions`
+
+**Prompting.Runtime** (5 files):
+- `DefaultAgentPromptHashService` — delegates to `ICanonicalHashComputer` + `IAgentPromptCanonicalPayloadProjector<T>` registry
+- `DefaultAgentPromptEvidenceFactory` — creates input/output evidence with summaries
+- `AgentPromptEvidenceSummaryFactory` — static summary construction
+- `CanonicalHashArtifactNames` — 3 new constants: `AgentPromptInputEvidence`, `AgentPromptOutputEvidence`, `AgentPromptProviderObservation`
+- `AgentPromptingServiceCollectionExtensions` — `AddAgentPrompting()` DI registration
+
+**Authoring integration** (3 new files + 8 modified):
+- `DescriptorAuthoringPromptInputProjector` — `IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringPromptInput>` (order-independent canonical JSON)
+- `DescriptorAuthoringModelResponseEvidenceProjection` — safe output record (excludes `ResponseText`)
+- `DescriptorAuthoringModelResponseEvidenceProjector` — `IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringModelResponseEvidenceProjection>`
+- `DefaultDescriptorAuthoringPromptInputHashService` → adapter around `IAgentPromptHashService`
+- `DefaultDescriptorAuthoringPromptInputFactory` → no longer computes hash (returns `PromptInputHash = null`)
+- `LlmDescriptorAuthoringAgent` → new `IAgentPromptEvidenceFactory` dependency; creates input/output evidence; attaches summaries on all result paths
+- `LlmDescriptorAuthoringAgentOptions` → prompt template identity properties
+- `DescriptorAuthoringResult` → `PromptInputEvidence`/`PromptOutputEvidence` summary properties
+- `DescriptorAuthoringJsonSerializerContext` → 5 new `[JsonSerializable]` entries
+- `AgentAuthoringServiceCollectionExtensions` → `AddAgentPrompting()` + 2 projector registrations
+
+**Boundary tests** (3 new):
+- `AgentPromptingAbstractions_DoesNotReferenceControlPlaneDraftContractsAuthoringHttpOrPlatform`
+- `AgentPromptingRuntime_DoesNotReferenceControlPlaneDraftContractsAuthoringHttpOrPlatform`
+- `AgentPrompting_DoesNotExposePromptExecutorModelClientOrCompletionService`
+
+**Key invariants**:
+- Prompting.Abstractions does NOT reference ControlPlane, DraftContracts, Authoring.Http, or Platform
+- Prompting runtime does NOT expose `IAgentPromptExecutor`, `IAgentPromptModelClient`, or `IAgentPromptCompletionService`
+- Output evidence hash excludes `ResponseText` — only safe fields (ProviderName, ModelName, PromptInputHash, FailureKind, FailureDetail)
+- Input evidence hash uses `CanonicalHashArtifactNames.AgentPromptInputEvidence` + `CanonicalHashPurposeNames.SourceIdentity`
+- Output evidence hash uses `CanonicalHashArtifactNames.AgentPromptOutputEvidence` + `CanonicalHashPurposeNames.AuditEvidence`
+- `IAgentPromptCanonicalPayloadProjector<T>` is AoT-safe — no reflection, no `JsonTypeInfo<T>`, no runtime type scanning
+- Missing projector throws `InvalidOperationException` instead of falling back to reflection serialization
+- `AgentPromptPurpose` is a sealed record (semantic string), not an enum — extensible without recompilation
+- `AgentPromptDiagnostic.Severity` uses `string` (not `SeverityLevel`) — Prompting.Abstractions does not reference Core.Abstractions
+- `AgentPromptDiagnostic.Code` uses `string` (not `DiagnosticCode`) — consistent with `AgentToolDiagnostic.Code` pattern
+
+**Test counts**: 13 Prompting + 49 Authoring + 19 Boundary — all passing. Full solution build 0 errors.
 
 ---
 

@@ -10,20 +10,13 @@ public sealed class DefaultDescriptorAuthoringPromptInputFactory : IDescriptorAu
     private static readonly DescriptorKind[] ParserSupportedKinds =
         [DescriptorKind.HumanTask, DescriptorKind.Workflow];
 
-    private readonly IDescriptorAuthoringPromptInputHashService _hashService;
-
-    public DefaultDescriptorAuthoringPromptInputFactory(IDescriptorAuthoringPromptInputHashService hashService)
-    {
-        _hashService = hashService;
-    }
-
     public DescriptorAuthoringPromptInput Create(AgentAuthoringContext context)
     {
         var visibleDescriptorRefs = context.MetadataContextPack.Descriptors.Select(d => d.Ref).ToArray();
         var metadata = ProjectMetadata(context.MetadataContextPack, visibleDescriptorRefs);
         var memory = ProjectMemory(context.MemoryPack);
 
-        var input = new DescriptorAuthoringPromptInput
+        return new DescriptorAuthoringPromptInput
         {
             ContractVersion = "7g.v1",
             TenantId = context.Request.TenantId,
@@ -31,10 +24,9 @@ public sealed class DefaultDescriptorAuthoringPromptInputFactory : IDescriptorAu
             Metadata = metadata,
             Memory = memory,
             VisibleDescriptorRefs = visibleDescriptorRefs,
-            SupportedDescriptorKinds = ParserSupportedKinds
+            SupportedDescriptorKinds = ParserSupportedKinds,
+            PromptInputHash = null
         };
-
-        return input with { PromptInputHash = _hashService.ComputeHash(input) };
     }
 
     private static DescriptorAuthoringMetadataContextProjection ProjectMetadata(

@@ -4,6 +4,8 @@ using CrestCreates.Agent.Authoring.Abstractions.Prompting;
 using CrestCreates.Agent.Authoring.Parsing;
 using CrestCreates.Agent.Authoring.Prompting;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Prompting;
+using CrestCreates.Agent.Prompting.Abstractions;
 using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
 using Microsoft.Extensions.Options;
@@ -16,6 +18,7 @@ public sealed class LlmDescriptorAuthoringAgent : IDescriptorAuthoringAgent
     private readonly IDescriptorAuthoringPromptBuilder _promptBuilder;
     private readonly IDescriptorAuthoringModelClient _modelClient;
     private readonly IDescriptorAuthoringOutputParser _outputParser;
+    private readonly IAgentPromptEvidenceFactory _promptEvidenceFactory;
     private readonly LlmDescriptorAuthoringAgentOptions _options;
     private readonly TimeProvider _timeProvider;
 
@@ -24,6 +27,7 @@ public sealed class LlmDescriptorAuthoringAgent : IDescriptorAuthoringAgent
         IDescriptorAuthoringPromptBuilder promptBuilder,
         IDescriptorAuthoringModelClient modelClient,
         IDescriptorAuthoringOutputParser outputParser,
+        IAgentPromptEvidenceFactory promptEvidenceFactory,
         IOptions<LlmDescriptorAuthoringAgentOptions> options,
         TimeProvider timeProvider)
     {
@@ -31,6 +35,7 @@ public sealed class LlmDescriptorAuthoringAgent : IDescriptorAuthoringAgent
         _promptBuilder = promptBuilder;
         _modelClient = modelClient;
         _outputParser = outputParser;
+        _promptEvidenceFactory = promptEvidenceFactory;
         _options = options.Value;
         _timeProvider = timeProvider;
     }
@@ -39,36 +44,29 @@ public sealed class LlmDescriptorAuthoringAgent : IDescriptorAuthoringAgent
         AgentAuthoringContext context,
         CancellationToken cancellationToken = default)
     {
-        // 1. Create prompt input from context
-        var promptInput = _promptInputFactory.Create(context);
+        // 1. Create raw prompt input from context (without hash)
+        var rawPromptInput = _promptInputFactory.Create(context);
 
-        if (promptInput.PromptInputHash is null)
+        // 2. Create input evidence and set the hash
+        var inputEvidenceRequest = new AgentPromptEvidenceCreationRequest<DescriptorAuthoringPromptInput>
         {
-            return new DescriptorAuthoringResult
-            {
-                Status = DescriptorAuthoringStatus.Failed,
-                Plan = new DescriptorAuthoringPlan
-                {
-                    PlanId = "plan_error",
-                    IntentText = context.Request.IntentText
-                },
-                DraftSet = new DescriptorDraftSet { DraftSetId = "draftset_error" },
-                Diagnostics = new[]
-                {
-                    new DescriptorAuthoringDiagnostic
-                    {
-                        Code = DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
-                        Message = "Prompt input hash computation failed.",
-                        Severity = SeverityLevel.Error
-                    }
-                }
-            };
-        }
+            TemplateId = _options.PromptTemplateId,
+            TemplateVersion = _options.PromptTemplateVersion,
+            Purpose = AgentPromptPurpose.DescriptorAuthoring,
+            ContractVersion = _options.PromptContractVersion,
+            ModelProfileRef = new AgentPromptModelProfileRef(_options.ModelProfile.ProfileName),
+            ProviderProfileRef = _options.ProviderProfileRef,
+            Payload = rawPromptInput,
+            TenantId = context.Request.TenantId
+        };
 
-        // 2. Build prompt output
+        var inputEvidence = _promptEvidenceFactory.CreateInputEvidence(inputEvidenceRequest);
+        var promptInput = rawPromptInput with { PromptInputHash = inputEvidence.InputHash };
+
+        // 3. Build prompt output
         var promptOutput = _promptBuilder.Build(promptInput);
 
-        // 3. Send to model
+        // 4. Send to model
         var modelRequest = new DescriptorAuthoringModelRequest
         {
             Prompt = promptOutput,
@@ -77,7 +75,43 @@ public sealed class LlmDescriptorAuthoringAgent : IDescriptorAuthoringAgent
 
         var modelResponse = await _modelClient.CompleteAsync(modelRequest, cancellationToken);
 
-        // 4. Check for empty response (provider unavailable)
+        // 5. Create provider observation from model response
+        var providerObservation = new AgentPromptProviderObservation
+        {
+            ProviderName = modelResponse.ProviderName,
+            ModelName = modelResponse.ModelName
+        };
+
+        // 6. Create output evidence projection (excluding ResponseText)
+        var outputProjection = new DescriptorAuthoringModelResponseEvidenceProjection
+        {
+            ProviderName = modelResponse.ProviderName,
+            ModelName = modelResponse.ModelName,
+            PromptInputHash = modelResponse.PromptInputHash,
+            FailureKind = modelResponse.FailureKind,
+            FailureDetail = modelResponse.FailureDetail
+        };
+
+        // 7. Create output evidence
+        var outputEvidenceRequest = new AgentPromptEvidenceCreationRequest<DescriptorAuthoringModelResponseEvidenceProjection>
+        {
+            TemplateId = _options.PromptTemplateId,
+            TemplateVersion = _options.PromptTemplateVersion,
+            Purpose = AgentPromptPurpose.DescriptorAuthoring,
+            ContractVersion = _options.PromptContractVersion,
+            ModelProfileRef = new AgentPromptModelProfileRef(_options.ModelProfile.ProfileName),
+            ProviderProfileRef = _options.ProviderProfileRef,
+            Payload = outputProjection,
+            TenantId = context.Request.TenantId
+        };
+
+        var outputEvidence = _promptEvidenceFactory.CreateOutputEvidence(
+            outputEvidenceRequest, inputEvidence.InputHash, providerObservation);
+
+        var inputSummary = AgentPromptEvidenceSummaryFactory.CreateInputSummary(inputEvidence);
+        var outputSummary = AgentPromptEvidenceSummaryFactory.CreateOutputSummary(outputEvidence);
+
+        // 8. Check for empty response (provider unavailable)
         if (string.IsNullOrWhiteSpace(modelResponse.ResponseText))
         {
             var (status, code, message) = modelResponse.FailureKind switch
@@ -124,6 +158,8 @@ public sealed class LlmDescriptorAuthoringAgent : IDescriptorAuthoringAgent
                     IntentText = context.Request.IntentText
                 },
                 DraftSet = new DescriptorDraftSet { DraftSetId = "draftset_provider_failure" },
+                PromptInputEvidence = inputSummary,
+                PromptOutputEvidence = outputSummary,
                 Diagnostics = new[]
                 {
                     new DescriptorAuthoringDiagnostic
@@ -136,7 +172,7 @@ public sealed class LlmDescriptorAuthoringAgent : IDescriptorAuthoringAgent
             };
         }
 
-        // 5. Parse model response
+        // 9. Parse model response
         var parseContext = new DescriptorAuthoringParseContext
         {
             TenantId = context.Request.TenantId,
@@ -147,6 +183,11 @@ public sealed class LlmDescriptorAuthoringAgent : IDescriptorAuthoringAgent
             ExpectedPromptInputHash = promptInput.PromptInputHash.Value
         };
 
-        return _outputParser.Parse(modelResponse.ResponseText, parseContext);
+        var result = _outputParser.Parse(modelResponse.ResponseText, parseContext);
+        return result with
+        {
+            PromptInputEvidence = inputSummary,
+            PromptOutputEvidence = outputSummary
+        };
     }
 }

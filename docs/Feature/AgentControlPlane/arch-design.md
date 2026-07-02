@@ -1,6 +1,6 @@
 # Tool DTO, JSON Contract & Review Report — Architecture Design
 
-> **Date:** 2026-07-02 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow) + Phase 7e.1: Canonical Evidence Hashing + Phase 7e+ (#43 Agent Memory & Context Compression Runtime) + Phase 7f (#32 AI-assisted Descriptor Authoring Golden Scenario) + Phase 7g (#48 LLM-backed Descriptor Authoring Adapter)**
+> **Date:** 2026-07-02 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow) + Phase 7e.1: Canonical Evidence Hashing + Phase 7e+ (#43 Agent Memory & Context Compression Runtime) + Phase 7f (#32 AI-assisted Descriptor Authoring Golden Scenario) + Phase 7g (#48 LLM-backed Descriptor Authoring Adapter) + Phase 7h (#52 Agent Prompt Contracts and Prompt Versioning)**
 
 ## 1. 概述 (Overview)
 
@@ -16,8 +16,10 @@ Phase 7f 实现了 AI-assisted Descriptor Authoring Golden Scenario——从意�
 
 Phase 7g 实现了 LLM-backed Descriptor Authoring Adapter——将 Phase 7f 的 sample-level authoring 合约产品化为框架级项目，并引入 LLM 提供者适配层。核心交付物包括：3 个新项目（Authoring.Abstractions、Authoring、Authoring.Http）+ 1 个测试项目；IDescriptorAuthoringAgent 从 sample 提升为框架合约；LlmDescriptorAuthoringAgent 实现 PromptBuilder → ModelClient → OutputParser → Plan → DraftSet 链路；OpenAI-compatible provider client；RecordedDescriptorAuthoringModelClient 用于确定性测试；source-generated JsonSerializerContext（Parser + OpenAI client）；canonical hash-based prompt input hash（排序后写入，顺序无关）；结构化 provider failure diagnostics（8 种 DescriptorAuthoringProviderFailureKind）；Parser 使用 DescriptorAuthoringParseContext（无硬编码 tenant/author/timestamp）；Workflow target 解析拒绝缺失/未知 target（不静默 fallback "unknown"）；PromptHashMismatch 返回 Blocked（非 InvalidProviderOutput）；ProviderProfile.Timeout 通过 linked CancellationTokenSource 生效；LLM fixture golden scenario 通过 RecordedDescriptorAuthoringModelClient 接入 sample review/governance 管线。核心不变量：LLM agent 只产出 draft——不激活、不审批、不变异注册表、不绕过 Control Plane 审查。依赖边界：Authoring runtime 不引用 ControlPlane.Abstractions、DraftContracts、Http provider。
 
+Phase 7h 实现了 Agent Prompt Contracts 和 Prompt Versioning——为 LLM-backed Descriptor Authoring 引入结构化 prompt 证据链路。核心交付物包括：2 个新项目（Prompting.Abstractions、Prompting）；`IAgentPromptEvidenceFactory` 创建 input/output evidence 和 summaries；`IAgentPromptHashService` 使用 AoT-safe canonical hash（通过 `IAgentPromptCanonicalPayloadProjector<T>` 注册 projector，无反射）；output evidence hash 排除 `ResponseText`（仅投影 ProviderName、ModelName、PromptInputHash、FailureKind、FailureDetail）；Authoring agent 全路径携带 `AgentPromptEvidenceSummary`（InputEvidence + OutputEvidence）；`InMemoryAgentPromptTemplateRegistry` 提供 prompt template 查找（Find/List 返回防御性拷贝）；新增 3 个 `CanonicalHashArtifactNames` 常量（AgentPromptInputEvidence、AgentPromptOutputEvidence、AgentPromptTemplate）；新增 `CanonicalHashContractVersions.AgentPromptHash = "canonical-hash-v1"`；8 个 `AgentPromptDiagnosticCodes` 常量；依赖边界：Prompting.Abstractions 不引用 Core.Abstractions/Framework/Web/Platform/Persistence；Authoring runtime 引用 Prompting.Abstractions（不引用 Prompting runtime）。
+
 核心交付物：
-- **34 个 Tool DTO** — 统一的密封 record 类型，代替所有领域类型（新增 2 个：BuildDescriptorReviewReport、RenderDescriptorReviewReport）
+- **32 个 Tool DTO** — 统一的密封 record 类型，代替所有领域类型（30 个 facade + 2 个 manifest query）
 - **Source-Generated JSON Contract** — `AgentControlPlaneToolJsonSerializerContext`，AoT 兼容
 - **Source-Generated Payload DTOs (New in #42)** — `AgentDraftPayloadDto` 和 6 个子 record 由 `AgentDraftContractGenerator` 在 `CrestCreates.CodeGenerator` 中生成
 - **Source-Generated Patch DTOs (New in #42)** — `AgentDraftPayloadPatchDto` 和 `Agent{Kind}DraftChangedField` 枚举用于 Update 操作的字段级合并
@@ -42,6 +44,9 @@ Phase 7g 实现了 LLM-backed Descriptor Authoring Adapter——将 Phase 7f 的
 - **Authoring Abstractions (Phase 7g)** — 20 个 public types：IDescriptorAuthoringAgent、DescriptorAuthoringResult、DescriptorDraftSet、DescriptorAuthoringPlan、DescriptorAuthoringDiagnostic、DescriptorAuthoringStatus（6 值）、DescriptorAuthoringProviderFailureKind（8 值）、prompt 模型（DescriptorAuthoringModelProfile/Request/Response/ProviderProfile）、prompt 投影（DescriptorAuthoringPromptInput/Output/MemoryProjection/MemoryItemProjection/DescriptorProjection/MetadataContextProjection）、DescriptorAuthoringDiagnosticCodes（12 个诊断码）、DescriptorAuthoringJsonSerializerContext
 - **Authoring Runtime (Phase 7g)** — 18 个 public types：LlmDescriptorAuthoringAgent + Options、JsonDescriptorAuthoringOutputParser + ParseContext、RecordedDescriptorAuthoringModelClient、FakeDescriptorAuthoringModelClient、DefaultDescriptorAuthoringPromptBuilder、DefaultDescriptorAuthoringPromptInputFactory、DefaultDescriptorAuthoringPromptInputHashService、DescriptorAuthoringParserJsonSerializerContext、DI（AddDescriptorAuthoring）
 - **OpenAI-Compatible Provider (Phase 7g)** — 9 个 public types：OpenAICompatibleDescriptorAuthoringModelClient、chat request/response DTOs（5 个）、DefaultDescriptorAuthoringCredentialProvider、OpenAICompatibleAuthoringJsonSerializerContext、DI（AddOpenAICompatibleAuthoringProvider）
+- **Prompting Abstractions (Phase 7h)** — 11 个 public types：IAgentPromptEvidenceFactory、IAgentPromptHashService、IAgentPromptCanonicalPayloadProjector&lt;T&gt;、AgentPromptInputEvidence、AgentPromptOutputEvidence、AgentPromptEvidenceSummary、AgentPromptTemplateDescriptor、AgentPromptTemplateId、AgentPromptVersion、AgentPromptContractVersion、AgentPromptPurpose（5 值 enum）、AgentPromptDiagnostic（record）、AgentPromptDiagnosticCodes（8 个常量）
+- **Prompting Runtime (Phase 7h)** — 5 个 public types：DefaultAgentPromptEvidenceFactory、DefaultAgentPromptHashService、InMemoryAgentPromptTemplateRegistry、AgentPromptingServiceCollectionExtensions、2 个 CanonicalHash 常量扩展（ArtifactNames + ContractVersions）
+- **Authoring Prompting Integration (Phase 7h)** — DescriptorAuthoringPromptInputProjector、DescriptorAuthoringModelResponseEvidenceProjector（output 排除 ResponseText）、LlmDescriptorAuthoringAgent 携带 AgentPromptEvidenceSummary
 
 ### 1.1 目标
 
@@ -67,7 +72,7 @@ Protocol Adapters (MCP / HTTP / SignalR)
 │   └───────────────────────────────────────┘  │
 │   ┌───────────────────────────────────────┐  │
 │   │ Tool Request/Result DTOs              │  │
-│   │ (34 sealed records)                   │  │
+│   │ (32 sealed records)                   │  │
 │   └───────────────────────────────────────┘  │
 └─────────────────────────────────────────────┘
          ↓
@@ -101,6 +106,9 @@ Protocol Adapters (MCP / HTTP / SignalR)
 | `CrestCreates.Agent.Authoring` | Authoring runtime（LlmDescriptorAuthoringAgent、Parser、PromptBuilder、PromptInputFactory、PromptInputHashService、RecordedClient、FakeClient、ParserJsonSerializerContext、DI） |
 | `CrestCreates.Agent.Authoring.Http` | OpenAI-compatible provider client（OpenAICompatibleDescriptorAuthoringModelClient、chat DTOs、CredentialProvider、JsonSerializerContext、DI） |
 | `CrestCreates.Agent.Authoring.Tests` | 46 个 Authoring 测试（Parser、Boundary、GoldenScenario、ProviderBoundary、Contract、Agent、PromptHash） |
+| `CrestCreates.Agent.Prompting.Abstractions` | Prompt 合约（11 个 sealed record/enum/interface + DiagnosticCodes + CanonicalHashArtifactNames/ContractVersions 常量）；不引用 Core.Abstractions/Framework/Web/Platform/Persistence |
+| `CrestCreates.Agent.Prompting` | Prompt runtime（DefaultAgentPromptEvidenceFactory、DefaultAgentPromptHashService、InMemoryAgentPromptTemplateRegistry、AgentPromptingServiceCollectionExtensions） |
+| `CrestCreates.Agent.Prompting.Tests` | 15 个 Prompting 测试（Hash、Registry、Contract） |
 | `CrestCreates.Agent.ControlPlane.Tests` | 469 个 ControlPlane 测试（含 DraftContracts + Generator + Activation）+ 边界测试 |
 
 ---
@@ -117,7 +125,7 @@ Protocol Adapters (MCP / HTTP / SignalR)
 │  │  AgentControlPlaneToolJsonSerializerContext ([JsonCtx])   │    │
 │  │  ┌──────────────┐ ┌────────────────┐ ┌──────────────┐    │    │
 │  │  │ Root DTOs    │ │ Stable VOs     │ │ Base Types   │    │    │
-│  │  │ (34 tools)   │ │ (DescriptorRef,│ │ (AgentTool-  │    │    │
+│  │  │ (32 tools)   │ │ (DescriptorRef,│ │ (AgentTool-  │    │    │
 │  │  │              │ │  DescriptorKind,│ │  Result<T>,   │    │    │
 │  │  │              │ │  ...)          │ │  Diagnostic)  │    │    │
 │  │  └──────────────┘ └────────────────┘ └──────────────┘    │    │
@@ -223,13 +231,13 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `AgentControlPlaneToolJsonSerializerOptions` | Abstractions/Json | `CreateDefault()` 工厂方法 | **Implemented** |
 | `AgentControlPlaneContractVersion` | Abstractions/Json | `Current = "7e.v1"` | **Implemented** |
 | `AgentToolDescriptor.ContractVersion` | Abstractions | 工具描述符上的契约版本字段 | **Implemented** |
-| `AgentToolName` | Abstractions | 34 个工具名称常量 | **Implemented** |
+| `AgentToolName` | Abstractions | 32 个工具名称常量 | **Implemented** |
 | `AgentToolCategory` | Abstractions | 8 个工具分类枚举 | **Implemented** |
 | `AgentToolResult<T>` | Abstractions | 泛型工具结果包装（Success/Denied/Failed/InvalidRequest/NotFound） | **Implemented** |
 | `DescriptorSummaryDtoProjection` | ControlPlane/Projections | `FromDescriptor(IDescriptor)` | **Implemented** |
 | `AgentDescriptorDraftDtoProjection` | ControlPlane/Projections | `FromDraft` / 委托 `AgentDraftPayloadProjection` 处理 payload 操作 | **Implemented** |
 | `AgentReviewResultDtoProjection` | ControlPlane/Projections | `Project`（含可见性过滤） | **Implemented** |
-| `StaticAgentToolManifestProvider` | ControlPlane | 静态工具描述符声明（34 个工具） | **Implemented** |
+| `StaticAgentToolManifestProvider` | ControlPlane | 静态工具描述符声明（32 个工具） | **Implemented** |
 | `DescriptorReviewReportDto` | Abstractions/ToolDtos | 13 固定 Section 审查报告 DTO，含 Recommendations、源绑定字段 | **Implemented (Phase 7d)** |
 | `DescriptorReviewReportSectionDto` | Abstractions/ToolDtos | 审查报告 Section DTO，含 Kind、SectionId、IsEmpty、Items | **Implemented (Phase 7d)** |
 | `DescriptorReviewReportItemDto` | Abstractions/ToolDtos | 审查报告条目 DTO，含 ReasonCode、Message、Severity、Parameters | **Implemented (Phase 7d)** |
@@ -281,7 +289,7 @@ Protocol Adapter → JSON deserialize → `AgentToolResult<T>` DTO
 | `DefaultDescriptorActivationAuditor` | ControlPlane/Activation | 默认审计实现 | **Implemented (Phase 7e)** |
 | `DescriptorActivationReviewHumanTaskEventHandler` | ControlPlane/Activation | EventBus 事件处理程序：处理 HumanTaskCompletedEvent，将决策路由到 RequestService | **Implemented (Phase 7e)** |
 
-### 4.1 工具覆盖 (34 Tools)
+### 4.1 工具覆盖 (32 Tools)
 
 | Wave | 分类 | 工具数 | 范围 |
 |------|------|--------|------|
@@ -583,6 +591,7 @@ public sealed record AgentToolDescriptor
 | **7e+** | Agent Memory & Context Compression Runtime（对话/任务历史→压缩→提取→晋升→召回→AuthoringContext） | **Implemented (#43)** |
 | **7f** | AI-assisted Descriptor Authoring Golden Scenario（意图→创作→审查→激活→运行时证明完整链路） | **Implemented (#32)** |
 | **7g** | LLM-backed Descriptor Authoring Adapter（框架级 authoring 合约 + LLM provider 适配 + source-generated JSON + canonical hash prompt hash + 结构化 failure diagnostics） | **Implemented (#48)** |
+| **7h** | Agent Prompt Contracts & Prompt Versioning（Prompt evidence factory、AoT-safe canonical hash projector、output evidence 排除 ResponseText、template registry、Authoring 集成） | **Implemented (#52)** |
 | 7a | Descriptor Draft Runtime（存储、验证、物化、审查） | Implemented |
 
 ### 10.1 Phase 7e — Safe Activation Workflow (#17)
@@ -610,7 +619,33 @@ Phase 7e 实现了从已审查的描述符草稿到运行时激活的完整工�
 
 **测试覆盖**：431 个 ControlPlane 测试 + 8 个 Boundary 测试，包括完整的激活请求生命周期、证据重校验、HumanTask 回调、策略快照和审计追踪覆盖。
 
-### 10.2 Phase 7b — LLM Bootstrap Plane
+### 10.2 Phase 7h — Agent Prompt Contracts and Prompt Versioning (#52)
+
+Phase 7h 为 LLM-backed Descriptor Authoring 引入结构化 prompt 证据链路，使 Agent 的每次 prompt 调用都产生可审计的 input/output evidence 和 hash 摘要。
+
+**关键架构决策**：
+
+1. **Prompt evidence 是 hash 身份输入** — InputEvidenceHash 和 OutputEvidenceHash 参与 canonical hash 计算，确保 prompt 调用的完整性可验证
+2. **Output evidence 排除 ResponseText** — `DescriptorAuthoringModelResponseEvidenceProjector` 只投影 ProviderName、ModelName、PromptInputHash、FailureKind、FailureDetail，不投影 LLM 原始输出文本
+3. **Projector 写完整 JSON 值** — `IAgentPromptCanonicalPayloadProjector&lt;T&gt;.Write()` 必须写一个完整的 JSON 值（如 `WriteStartObject()`/`WriteEndObject()` 包裹），而非裸属性序列
+4. **Template registry 返回防御性拷贝** — `InMemoryAgentPromptTemplateRegistry.Find()` 和 `List()` 返回 descriptor 的 `with { Metadata = new Dictionary&lt;&gt;(...) }` 拷贝，防止外部 mutation 泄漏
+5. **依赖边界** — Prompting.Abstractions 不引用 Core.Abstractions/Framework/Web/Platform/Persistence；Authoring runtime 引用 Prompting.Abstractions（不引用 Prompting runtime）
+
+**新增 2 个项目 + 1 个测试项目**：
+- `CrestCreates.Agent.Prompting.Abstractions`（11 个 public types）
+- `CrestCreates.Agent.Prompting`（5 个 public types）
+- `CrestCreates.Agent.Prompting.Tests`（15 个测试）
+
+**Authoring 集成变更**：
+- `LlmDescriptorAuthoringAgent` 新增 `IAgentPromptEvidenceFactory` 构造函数依赖
+- `DescriptorAuthoringResult` 新增 `AgentPromptEvidenceSummary? PromptEvidence` 字段
+- `DefaultDescriptorAuthoringPromptInputHashService` 改为 `IAgentPromptHashService` adapter
+- 2 个新 projector：`DescriptorAuthoringPromptInputProjector`、`DescriptorAuthoringModelResponseEvidenceProjector`
+- DI 注册更新：`AddDescriptorAuthoring` 新增 Prompting 服务注册
+
+**测试覆盖**：15 个 Prompting 测试 + 50 个 Authoring 测试 + 19 个 Boundary 测试 = 84 个测试
+
+### 10.3 Phase 7b — LLM Bootstrap Plane
 
 Phase 7b 的核心能力已由 Phase 7g 实现。`ILLMProvider` 对应 `IDescriptorAuthoringModelClient`，`DescriptorDraftBuilder` 对应 `JsonDescriptorAuthoringOutputParser`，`PromptTemplate` 对应 `DefaultDescriptorAuthoringPromptBuilder`。Phase 7g 产出的 draft 经过与人工草稿相同的审查/治理/激活管线。
 

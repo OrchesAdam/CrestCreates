@@ -184,6 +184,61 @@ public class DependencyBoundaryTests
             });
     }
 
+    [Fact]
+    public void AgentPromptingAbstractions_DoesNotReferenceControlPlaneDraftContractsAuthoringHttpOrPlatform()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.Prompting.Abstractions",
+            "Prompting abstractions must remain prompt evidence contracts only.",
+            new[]
+            {
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.DraftContracts",
+                "src/Runtime/Agent/CrestCreates.Agent.Authoring.Http",
+                "src/Platform"
+            });
+    }
+
+    [Fact]
+    public void AgentPromptingRuntime_DoesNotReferenceControlPlaneDraftContractsAuthoringHttpOrPlatform()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.Prompting",
+            "Prompting runtime must not own model execution, provider integration, governance, or activation.",
+            new[]
+            {
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.DraftContracts",
+                "src/Runtime/Agent/CrestCreates.Agent.Authoring.Http",
+                "src/Platform"
+            });
+    }
+
+    [Fact]
+    public void AgentPrompting_DoesNotExposePromptExecutorModelClientOrCompletionService()
+    {
+        var repoRoot = FindRepoRoot();
+        var files = Directory.EnumerateFiles(
+            Path.Combine(repoRoot.FullName, "src/Runtime/Agent"),
+            "*.cs",
+            SearchOption.AllDirectories)
+            .Where(path => path.Contains("CrestCreates.Agent.Prompting", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        var forbidden = files
+            .SelectMany(file => File.ReadAllLines(file).Select((line, index) => new { file, line, index }))
+            .Where(x =>
+                x.line.Contains("IAgentPromptExecutor", StringComparison.Ordinal) ||
+                x.line.Contains("IAgentPromptModelClient", StringComparison.Ordinal) ||
+                x.line.Contains("IAgentPromptCompletionService", StringComparison.Ordinal))
+            .Select(x => $"{Path.GetRelativePath(repoRoot.FullName, x.file)}:{x.index + 1}: {x.line.Trim()}")
+            .ToArray();
+
+        Assert.True(forbidden.Length == 0, "Prompting must not expose executor/model client/completion service interfaces." + Environment.NewLine + string.Join(Environment.NewLine, forbidden));
+    }
+
     private static void AssertNoDirectProjectReferences(
         string projectRootRelativePath,
         string reason,

@@ -1,6 +1,6 @@
 # Tool DTO, JSON Contract & Review Report — Usage Guide
 
-> **Date:** 2026-07-02 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow) + Phase 7e+ (#43 Agent Memory & Context Compression Runtime) + Phase 7f (#32 AI-assisted Descriptor Authoring Golden Scenario) + Phase 7g (#48 LLM-backed Descriptor Authoring Adapter)**
+> **Date:** 2026-07-02 | **Status:** Implemented | **Phase 7c (#41 DTO Design + #42 Source Generator) + Phase 7d (#16 Review Report & Fix Proposal) + Phase 7e (#17 Safe Activation Workflow) + Phase 7e+ (#43 Agent Memory & Context Compression Runtime) + Phase 7f (#32 AI-assisted Descriptor Authoring Golden Scenario) + Phase 7g (#48 LLM-backed Descriptor Authoring Adapter) + Phase 7h (#52 Agent Prompt Contracts and Prompt Versioning)**
 
 ## 1. 快速开始 (Quick Start)
 
@@ -796,14 +796,14 @@ public void denied_kinds_are_filtered_from_review_result()
 
 ### 9.4 契约覆盖测试
 
-确保所有 34 个工具在 Manifest 和 JSON Context 中都已注册：
+确保所有 32 个工具在 Manifest 和 JSON Context 中都已注册：
 
 ```csharp
 [Fact]
-public void all_34_tools_are_registered_in_manifest()
+public void all_32_tools_are_registered_in_manifest()
 {
     var manifest = new StaticAgentToolManifestProvider();
-    manifest.GetAllTools().Should().HaveCount(34);
+    manifest.GetAllTools().Should().HaveCount(32);
 }
 
 [Fact]
@@ -815,7 +815,7 @@ public void all_tool_request_types_are_in_json_context()
     serializables.Select(a => a.Type)
         .Should().Contain(typeof(CreateDescriptorDraftRequest))
         .And.Contain(typeof(UpdateDescriptorDraftRequest))
-        // ... 验证所有 34 个工具的类型
+        // ... 验证所有 32 个工具的类型
         ;
 }
 ```
@@ -2268,3 +2268,191 @@ var options = new JsonSerializerOptions
 | **依赖边界** | Authoring 不引用 ControlPlane/DraftContracts/Http |
 | **ParserSupportedKinds** | 只暴露 Parser 支持的 DescriptorKind（HumanTask、Workflow） |
 | **PlanId 稳定** | 使用 prompt input hash 前 16 字符作为 fallback，不用 GetHashCode() |
+
+---
+
+## 19. Agent Prompt Contracts & Prompt Versioning 使用 (Phase 7h)
+
+> **Phase 7h (#52)** 为 LLM-backed Descriptor Authoring 引入结构化 prompt 证据链路。每次 prompt 调用产生可审计的 input/output evidence 和 hash 摘要，output evidence 排除 LLM 原始输出文本。
+
+### 19.1 DI 注册
+
+```csharp
+// 注册 Prompting 服务
+services.AddAgentPrompting();
+
+// 等价于注册：
+// - IAgentPromptEvidenceFactory → DefaultAgentPromptEvidenceFactory
+// - IAgentPromptHashService → DefaultAgentPromptHashService
+// - InMemoryAgentPromptTemplateRegistry（空 registry）
+
+// 添加 prompt templates
+services.Configure<AgentPromptingOptions>(options =>
+{
+    options.Templates = new List<AgentPromptTemplateDescriptor>
+    {
+        new()
+        {
+            TemplateId = new AgentPromptTemplateId("descriptor-authoring-default"),
+            Version = new AgentPromptVersion("v1"),
+            Purpose = AgentPromptPurpose.DescriptorAuthoring,
+            ContractVersion = new AgentPromptContractVersion("7g.v1"),
+            Metadata = new Dictionary<string, string>
+            {
+                ["Description"] = "Default descriptor authoring prompt template"
+            }
+        }
+    };
+});
+```
+
+### 19.2 创建 Prompt Evidence
+
+```csharp
+using CrestCreates.Agent.Prompting.Abstractions;
+
+var evidenceFactory = services.GetRequiredService<IAgentPromptEvidenceFactory>();
+
+// 创建 input evidence（包含 prompt input hash）
+var inputEvidence = evidenceFactory.CreateInputEvidence(
+    templateId: new AgentPromptTemplateId("descriptor-authoring-default"),
+    templateVersion: new AgentPromptVersion("v1"),
+    contractVersion: new AgentPromptContractVersion("7g.v1"),
+    payload: promptInput,  // DescriptorAuthoringPromptInput
+    purpose: AgentPromptPurpose.DescriptorAuthoring);
+
+// inputEvidence.Hash — CanonicalHash（input evidence hash）
+// inputEvidence.TemplateId, TemplateVersion, ContractVersion, Purpose
+
+// 创建 output evidence（排除 ResponseText，仅投影 ProviderName、ModelName、PromptInputHash、FailureKind、FailureDetail）
+var outputEvidence = evidenceFactory.CreateOutputEvidence(
+    payload: modelResponse,  // DescriptorAuthoringModelResponse
+    purpose: AgentPromptPurpose.DescriptorAuthoring);
+
+// outputEvidence.Hash — CanonicalHash（output evidence hash，不含 ResponseText）
+```
+
+### 19.3 Prompt Hash 服务
+
+```csharp
+var hashService = services.GetRequiredService<IAgentPromptHashService>();
+
+// 计算 prompt input hash
+var inputHash = hashService.ComputeInputHash(
+    templateId: templateId,
+    templateVersion: templateVersion,
+    contractVersion: contractVersion,
+    payload: promptInput);
+
+// 计算 prompt output evidence hash
+var outputHash = hashService.ComputeOutputHash(
+    payload: modelResponse);
+```
+
+**AoT-safe 实现**：`DefaultAgentPromptHashService` 使用 `IAgentPromptCanonicalPayloadProjector<T>` 注册 projector，不使用反射。每个 payload 类型有对应的 projector 实现。
+
+### 19.4 Prompt Template Registry
+
+```csharp
+var registry = services.GetRequiredService<InMemoryAgentPromptTemplateRegistry>();
+
+// 查找 template
+var template = registry.Find(
+    new AgentPromptTemplateId("descriptor-authoring-default"),
+    new AgentPromptVersion("v1"));
+
+// 列出所有 templates
+var allTemplates = registry.List();
+```
+
+**关键约束**：`Find()` 和 `List()` 返回防御性拷贝（`with { Metadata = new Dictionary<>() }`），防止外部 mutation 泄漏到 registry 内部状态。
+
+### 19.5 Authoring 集成
+
+Phase 7h 在 `LlmDescriptorAuthoringAgent` 中集成 prompt evidence：
+
+```csharp
+// LlmDescriptorAuthoringAgent 构造函数新增 IAgentPromptEvidenceFactory 依赖
+public LlmDescriptorAuthoringAgent(
+    IDescriptorAuthoringModelClient modelClient,
+    IDefaultDescriptorAuthoringPromptBuilder promptBuilder,
+    IDefaultDescriptorAuthoringPromptInputFactory promptInputFactory,
+    IAgentPromptHashService promptHashService,
+    JsonDescriptorAuthoringOutputParser parser,
+    IAgentPromptEvidenceFactory evidenceFactory,  // NEW
+    IOptions<LlmDescriptorAuthoringAgentOptions> options)
+
+// DescriptorAuthoringResult 新增 PromptEvidence 字段
+public sealed record DescriptorAuthoringResult
+{
+    // ... existing fields ...
+    public AgentPromptEvidenceSummary? PromptEvidence { get; init; }  // NEW
+}
+```
+
+**AgentPromptEvidenceSummary** 包含：
+- `InputEvidence` — `AgentPromptInputEvidence`（hash + template 信息）
+- `OutputEvidence` — `AgentPromptOutputEvidence`（hash，不含 ResponseText）
+
+### 19.6 Projector 规范
+
+每个 projector 必须写一个**完整的 JSON 值**（如 `WriteStartObject()` / `WriteEndObject()` 包裹）：
+
+```csharp
+// ✅ 正确：完整 JSON 对象
+public void Write(Utf8JsonWriter writer, T payload)
+{
+    writer.WriteStartObject();
+    writer.WriteString("PropertyName", payload.PropertyName);
+    // ... other properties
+    writer.WriteEndObject();
+}
+
+// ❌ 错误：裸属性序列（无对象边界）
+public void Write(Utf8JsonWriter writer, T payload)
+{
+    writer.WriteString("PropertyName", payload.PropertyName);
+    // Missing WriteStartObject/WriteEndObject!
+}
+```
+
+这是因为 `DefaultAgentPromptHashService` 在写完 `"payload"` 属性名后调用 projector，projector 必须产出一个完整的 JSON 值。由于 `SkipValidation = true`，畸形 JSON 不会抛异常但会产出错误的 canonical hash。
+
+### 19.7 Canonical Hash 常量扩展
+
+Phase 7h 新增 3 个 `CanonicalHashArtifactNames` 常量和 1 个 `CanonicalHashContractVersions` 常量：
+
+```csharp
+// CanonicalHashArtifactNames 新增
+public const string AgentPromptInputEvidence = "AgentPromptInputEvidence";
+public const string AgentPromptOutputEvidence = "AgentPromptOutputEvidence";
+public const string AgentPromptTemplate = "AgentPromptTemplate";
+
+// CanonicalHashContractVersions 新增
+public const string AgentPromptHash = "canonical-hash-v1";
+```
+
+### 19.8 Prompt 诊断码
+
+| 诊断码 | 说明 |
+|--------|------|
+| `PROMPT_INPUT_HASH_COMPUTE_FAILED` | Input evidence hash 计算失败 |
+| `PROMPT_OUTPUT_HASH_COMPUTE_FAILED` | Output evidence hash 计算失败 |
+| `PROMPT_INPUT_PROJECTOR_NOT_REGISTERED` | Input projector 未注册 |
+| `PROMPT_OUTPUT_PROJECTOR_NOT_REGISTERED` | Output projector 未注册 |
+| `PROMPT_TEMPLATE_NOT_FOUND` | Prompt template 未找到 |
+| `PROMPT_EVIDENCE_FACTORY_FAILED` | Evidence factory 创建失败 |
+| `PROMPT_CONTRACT_VERSION_MISMATCH` | Prompt contract version 不匹配 |
+| `PROMPT_INVALID_PAYLOAD` | Prompt payload 验证失败 |
+
+### 19.9 关键使用约束
+
+| 约束 | 说明 |
+|------|------|
+| **Output evidence 排除 ResponseText** | LLM 原始输出不参与 hash 计算，防止输出变化导致 evidence hash 不稳定 |
+| **Projector 写完整 JSON 值** | 必须用 WriteStartObject/WriteEndObject 包裹，SkipValidation=true 不阻止畸形 JSON |
+| **Template registry 返回防御性拷贝** | Find/List 返回 descriptor + copied Metadata，防止外部 mutation 泄漏 |
+| **依赖边界** | Prompting.Abstractions 不引用 Core.Abstractions/Framework/Web/Platform/Persistence |
+| **Authoring 引用 Prompting.Abstractions** | Authoring runtime 不引用 Prompting runtime（仅引用 Abstractions） |
+| **AgentPromptDiagnostic.Code 是 string** | 与 AgentToolDiagnostic.Code 保持一致，Prompting.Abstractions 不引用 Core.Abstractions |
+| **AgentPromptDiagnostic.Severity 是 string** | 与 SeverityLevel 枚举解耦，Prompting.Abstractions 不引用 Core.Abstractions |

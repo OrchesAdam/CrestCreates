@@ -11,6 +11,8 @@ using CrestCreates.Agent.Authoring.Clients;
 using CrestCreates.Agent.Authoring.Parsing;
 using CrestCreates.Agent.Authoring.Prompting;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Prompting;
+using CrestCreates.Agent.Prompting.Abstractions;
 using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -467,11 +469,19 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
         var context = await authoringContextBuilder.BuildAsync(authoringRequest, metadataContextPack, memoryPack);
 
         // 3. Compute the real prompt input hash from the context
-        var hashComputer = new DefaultCanonicalHashComputer();
-        var hashService = new DefaultDescriptorAuthoringPromptInputHashService(hashComputer);
-        var factory = new DefaultDescriptorAuthoringPromptInputFactory(hashService);
-        var promptInput = factory.Create(context);
-        var hashValue = promptInput.PromptInputHash!.Value;
+        var services = new ServiceCollection();
+        services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
+        services.AddAgentPrompting();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringPromptInput>, DescriptorAuthoringPromptInputProjector>();
+        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringModelResponseEvidenceProjection>, DescriptorAuthoringModelResponseEvidenceProjector>();
+        var provider = services.BuildServiceProvider();
+        var promptHashService = provider.GetRequiredService<IAgentPromptHashService>();
+        var promptEvidenceFactory = provider.GetRequiredService<IAgentPromptEvidenceFactory>();
+
+        var factory = new DefaultDescriptorAuthoringPromptInputFactory();
+        var rawPromptInput = factory.Create(context);
+        var hashService = new DefaultDescriptorAuthoringPromptInputHashService(promptHashService);
+        var hashValue = hashService.ComputeHash(rawPromptInput).Value;
 
         // 4. Build the recorded model client pre-keyed with the real hash
         var fixtureJson = BuildCompanyCertificationFixtureJson(hashValue);
@@ -482,7 +492,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
         var builder = new DefaultDescriptorAuthoringPromptBuilder();
         var parser = new JsonDescriptorAuthoringOutputParser();
         var options = Options.Create(new LlmDescriptorAuthoringAgentOptions());
-        var agent = new LlmDescriptorAuthoringAgent(factory, builder, modelClient, parser, options, TimeProvider.System);
+        var agent = new LlmDescriptorAuthoringAgent(factory, builder, modelClient, parser, promptEvidenceFactory, options, TimeProvider.System);
 
         // 6. Create runner with injected LLM agent and run through the review/governance pipeline.
         //    The agent's options default AuthorId to "llm-descriptor-authoring-agent" so

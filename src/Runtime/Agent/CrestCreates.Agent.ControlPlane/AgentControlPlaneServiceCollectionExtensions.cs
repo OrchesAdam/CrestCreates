@@ -1,6 +1,8 @@
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Activation;
+using CrestCreates.EventBus.Abstractions;
+using CrestCreates.HumanTask.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -29,6 +31,13 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
         services.TryAddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
         services.TryAddSingleton<ActivationBindingHashValidator>();
+        services.TryAddSingleton<IDescriptorActivationPolicyProvider, DefaultDescriptorActivationPolicyProvider>();
+        services.TryAddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
+        services.TryAddSingleton<IRuntimeActivationGate, InMemoryRuntimeActivationGate>();
+        services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
+        services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
+        services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
+        services.TryAddSingleton<ILocalEventHandler<HumanTaskCompletedEvent>, DescriptorActivationReviewHumanTaskEventHandler>();
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
         return services;
@@ -52,6 +61,13 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
         services.TryAddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
         services.TryAddSingleton<ActivationBindingHashValidator>();
+        services.TryAddSingleton<IDescriptorActivationPolicyProvider, DefaultDescriptorActivationPolicyProvider>();
+        services.TryAddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
+        services.TryAddSingleton<IRuntimeActivationGate, InMemoryRuntimeActivationGate>();
+        services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
+        services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
+        services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
+        services.TryAddSingleton<ILocalEventHandler<HumanTaskCompletedEvent>, DescriptorActivationReviewHumanTaskEventHandler>();
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
         return services;
@@ -83,6 +99,13 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
         services.TryAddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
         services.TryAddSingleton<ActivationBindingHashValidator>();
+        services.TryAddSingleton<IDescriptorActivationPolicyProvider, DefaultDescriptorActivationPolicyProvider>();
+        services.TryAddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
+        services.TryAddSingleton<IRuntimeActivationGate, InMemoryRuntimeActivationGate>();
+        services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
+        services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
+        services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
+        services.TryAddSingleton<ILocalEventHandler<HumanTaskCompletedEvent>, DescriptorActivationReviewHumanTaskEventHandler>();
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
         return services;

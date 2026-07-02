@@ -2,6 +2,8 @@ using System.Text.Json.Serialization;
 using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.Agent.Authoring.Abstractions.Model;
 using CrestCreates.Agent.Authoring.Abstractions.Prompting;
+using CrestCreates.Agent.Prompting.Abstractions;
+using CrestCreates.Agent.Prompting.Abstractions.Json;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace CrestCreates.Agent.Authoring.Abstractions.Json;
@@ -25,4 +27,9 @@ namespace CrestCreates.Agent.Authoring.Abstractions.Json;
 [JsonSerializable(typeof(CanonicalHash))]
 [JsonSerializable(typeof(DescriptorAuthoringProviderFailureKind))]
 [JsonSerializable(typeof(CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft))]
+[JsonSerializable(typeof(AgentPromptInputEvidenceSummary))]
+[JsonSerializable(typeof(AgentPromptOutputEvidenceSummary))]
+[JsonSerializable(typeof(AgentPromptProviderObservation))]
+[JsonSerializable(typeof(AgentPromptDiagnostic))]
+[JsonSerializable(typeof(AgentPromptPurpose))]
 public sealed partial class DescriptorAuthoringJsonSerializerContext : JsonSerializerContext;

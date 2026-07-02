@@ -1,8 +1,10 @@
+using CrestCreates.Agent.Authoring.Abstractions.Prompting;
 using CrestCreates.Agent.Authoring.Authoring;
 using CrestCreates.Agent.Authoring.Parsing;
 using CrestCreates.Agent.Authoring.Prompting;
+using CrestCreates.Agent.Prompting;
+using CrestCreates.Agent.Prompting.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
-using CrestCreates.Metadata.CanonicalHashing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -12,11 +14,15 @@ public static class AgentAuthoringServiceCollectionExtensions
 {
     public static IServiceCollection AddDescriptorAuthoring(this IServiceCollection services)
     {
-        services.TryAddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
+        services.AddAgentPrompting();
+
         services.TryAddSingleton<IDescriptorAuthoringPromptInputHashService, DefaultDescriptorAuthoringPromptInputHashService>();
         services.TryAddSingleton<IDescriptorAuthoringPromptInputFactory, DefaultDescriptorAuthoringPromptInputFactory>();
         services.TryAddSingleton<IDescriptorAuthoringPromptBuilder, DefaultDescriptorAuthoringPromptBuilder>();
         services.TryAddSingleton<IDescriptorAuthoringOutputParser, JsonDescriptorAuthoringOutputParser>();
+
+        services.TryAddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringPromptInput>, DescriptorAuthoringPromptInputProjector>();
+        services.TryAddSingleton<IAgentPromptCanonicalPayloadProjector<DescriptorAuthoringModelResponseEvidenceProjection>, DescriptorAuthoringModelResponseEvidenceProjector>();
 
         // TimeProvider for deterministic time in the authoring pipeline
         services.TryAddSingleton(TimeProvider.System);
