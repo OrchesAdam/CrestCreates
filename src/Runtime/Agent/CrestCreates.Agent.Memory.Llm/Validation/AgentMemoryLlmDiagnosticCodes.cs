@@ -51,4 +51,22 @@ public static class AgentMemoryLlmDiagnosticCodes
 
     private const string ContentRejectedValue = "AGENT_MEMORY_LLM_CONTENT_REJECTED";
     public static DiagnosticCode ContentRejected { get; } = new(ContentRejectedValue);
+
+    private const string SourceRefMissingValue = "AGENT_MEMORY_LLM_SOURCE_REF_MISSING";
+    public static DiagnosticCode SourceRefMissing { get; } = new(SourceRefMissingValue);
+
+    private const string RedactionOccurredValue = "AGENT_MEMORY_LLM_REDACTION_OCCURRED";
+    public static DiagnosticCode RedactionOccurred { get; } = new(RedactionOccurredValue);
+
+    private const string BlockTruncatedValue = "AGENT_MEMORY_LLM_BLOCK_TRUNCATED";
+    public static DiagnosticCode BlockTruncated { get; } = new(BlockTruncatedValue);
+
+    private const string CandidateTruncatedValue = "AGENT_MEMORY_LLM_CANDIDATE_TRUNCATED";
+    public static DiagnosticCode CandidateTruncated { get; } = new(CandidateTruncatedValue);
+
+    private const string BlockCountTruncatedValue = "AGENT_MEMORY_LLM_BLOCK_COUNT_TRUNCATED";
+    public static DiagnosticCode BlockCountTruncated { get; } = new(BlockCountTruncatedValue);
+
+    private const string CandidateCountTruncatedValue = "AGENT_MEMORY_LLM_CANDIDATE_COUNT_TRUNCATED";
+    public static DiagnosticCode CandidateCountTruncated { get; } = new(CandidateCountTruncatedValue);
 }

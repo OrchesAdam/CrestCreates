@@ -22,7 +22,6 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
     private readonly IAgentMemoryLlmModelClient _modelClient;
     private readonly IAgentMemoryExtractionOutputParser _parser;
     private readonly IAgentPromptEvidenceFactory _evidenceFactory;
-    private readonly IAgentPromptHashService _hashService;
     private readonly AgentMemoryLlmAdapterOptions _options;
 
     public LlmAgentMemoryExtractor(
@@ -32,7 +31,6 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
         IAgentMemoryLlmModelClient modelClient,
         IAgentMemoryExtractionOutputParser parser,
         IAgentPromptEvidenceFactory evidenceFactory,
-        IAgentPromptHashService hashService,
         AgentMemoryLlmAdapterOptions options)
     {
         _sanitizer = sanitizer;
@@ -41,7 +39,6 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
         _modelClient = modelClient;
         _parser = parser;
         _evidenceFactory = evidenceFactory;
-        _hashService = hashService;
         _options = options;
     }
 
@@ -50,17 +47,28 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
         CancellationToken cancellationToken = default)
     {
         var promptInput = BuildExtractionPromptInput(context);
+        var inputEvidence = _evidenceFactory.CreateInputEvidence(new AgentPromptEvidenceCreationRequest<AgentMemoryExtractionPromptInput>
+        {
+            Purpose = AgentPromptPurpose.MemoryExtraction,
+            TemplateId = AgentMemoryLlmContractVersions.ExtractionTemplateId,
+            TemplateVersion = AgentMemoryLlmContractVersions.ExtractionTemplateVersion,
+            ContractVersion = AgentMemoryLlmContractVersions.PromptContractVersion,
+            ModelProfileRef = AgentMemoryLlmContractVersions.DefaultModelProfileRef,
+            ProviderProfileRef = AgentMemoryLlmContractVersions.DefaultProviderProfileRef,
+            Payload = promptInput
+        });
+        var inputSummary = AgentPromptEvidenceSummaryFactory.CreateInputSummary(inputEvidence);
 
         if (_options.EnableDeterministicFallback)
         {
             try
             {
-                var result = await AttemptLlmExtractionAsync(promptInput, context, cancellationToken);
-                if (result.Count > 0)
-                    return result;
+                var result = await AttemptLlmExtractionAsync(promptInput, context, inputEvidence, inputSummary, cancellationToken);
+                if (result.Candidates.Count > 0)
+                    return result.Candidates;
 
-                // Empty result from LLM — fallback, carry LLM diagnostics from context
-                return await FallbackWithDiagnosticAsync(context, cancellationToken);
+                // Empty result from LLM — fallback, carry LLM diagnostics
+                return await FallbackWithDiagnosticAsync(context, cancellationToken, inputSummary, result.Diagnostics);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -72,11 +80,12 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
                     AgentMemoryLlmDiagnosticCodes.ExtractionParseError,
                     $"LLM extraction threw: {ex.Message}", SeverityLevel.Warning);
 
-                return await FallbackWithDiagnosticAsync(context, cancellationToken, [errorDiagnostic]);
+                return await FallbackWithDiagnosticAsync(context, cancellationToken, inputSummary, [errorDiagnostic]);
             }
         }
 
-        return await AttemptLlmExtractionAsync(promptInput, context, cancellationToken);
+        var noFallbackResult = await AttemptLlmExtractionAsync(promptInput, context, inputEvidence, inputSummary, cancellationToken);
+        return noFallbackResult.Candidates;
     }
 
     private AgentMemoryExtractionPromptInput BuildExtractionPromptInput(AgentCompressedContext context)
@@ -89,31 +98,21 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
         };
     }
 
-    private async ValueTask<IReadOnlyList<AgentMemoryCandidate>> AttemptLlmExtractionAsync(
+    private async ValueTask<ExtractionAttemptResult> AttemptLlmExtractionAsync(
         AgentMemoryExtractionPromptInput promptInput,
         AgentCompressedContext context,
+        AgentPromptInputEvidence<AgentMemoryExtractionPromptInput> inputEvidence,
+        AgentPromptInputEvidenceSummary inputSummary,
         CancellationToken cancellationToken)
     {
         // Build prompt
         var promptText = _promptBuilder.Build(promptInput);
 
-        // Create prompt input evidence
-        var inputEvidence = _evidenceFactory.CreateInputEvidence(new AgentPromptEvidenceCreationRequest<AgentMemoryExtractionPromptInput>
-        {
-            Purpose = AgentPromptPurpose.MemoryExtraction,
-            TemplateId = _options.ExtractionTemplateId,
-            TemplateVersion = _options.ExtractionTemplateVersion,
-            ContractVersion = _options.PromptContractVersion,
-            ModelProfileRef = _options.ModelProfileRef,
-            ProviderProfileRef = _options.ProviderProfileRef,
-            Payload = promptInput
-        });
-
         // Call model
         var modelRequest = new AgentMemoryLlmModelRequest
         {
             PromptText = promptText,
-            PromptInputEvidence = AgentPromptEvidenceSummaryFactory.CreateInputSummary(inputEvidence)
+            PromptInputEvidence = inputSummary
         };
 
         var modelResponse = await _modelClient.CompleteAsync(modelRequest, cancellationToken);
@@ -132,25 +131,27 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
                 SeverityLevel.Warning);
             var allDiagnostics = providerDiagnostics.Concat([fallbackDiagnostic]).ToArray();
 
-            return fallbackResult.Select(c => c with
-            {
-                SanitizationDiagnostics = c.SanitizationDiagnostics.Concat(allDiagnostics).ToArray()
-            }).ToArray();
+            return new ExtractionAttemptResult(
+                fallbackResult.Select(c => c with
+                {
+                    SanitizationDiagnostics = c.SanitizationDiagnostics.Concat(allDiagnostics).ToArray()
+                }).ToArray(),
+                allDiagnostics);
         }
 
         // Parse response — collect allowed source ref IDs from context blocks
-        var sourceRefMap = new Dictionary<string, AgentContextSourceRef>();
+        var sourceRefMap = new Dictionary<string, IReadOnlyList<AgentContextSourceRef>>();
         foreach (var block in context.Blocks)
         {
-            // Use block's existing source refs (which should have correct SourceKind from compression)
+            // Preserve all source refs from compressed context blocks
             sourceRefMap[block.BlockId] = block.SourceRefs.Count > 0
-                ? block.SourceRefs[0]
-                : new AgentContextSourceRef
+                ? block.SourceRefs
+                : [new AgentContextSourceRef
                 {
                     SourceKind = AgentSourceKind.CompressedContextBlock,
                     TenantId = context.TenantId,
                     SourceId = block.BlockId
-                };
+                }];
         }
 
         var allowedSourceRefIds = sourceRefMap.Keys.ToArray();
@@ -158,32 +159,42 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
 
         if (!parseResult.IsValid || parseResult.Candidates.Count == 0)
         {
-            // Return empty with parse diagnostics attached — caller (CompressWithFallbackAsync) will fallback
-            // But we need to carry these diagnostics. Since we can't attach them to an empty list,
-            // we throw so the catch block handles fallback with diagnostics.
-            if (parseResult.Diagnostics.Count > 0)
-            {
-                throw new InvalidOperationException(
-                    $"LLM extraction parse failed: {string.Join("; ", parseResult.Diagnostics.Select(d => d.Message))}");
-            }
-            return [];
+            // Return empty with parse diagnostics — caller checks candidate count and falls back
+            return new ExtractionAttemptResult([], parseResult.Diagnostics);
         }
 
         // Convert parsed candidates to domain candidates with lifecycle guards
+        var truncationDiagnostics = new List<AgentMemoryDiagnostic>();
+        var candidateDtos = parseResult.Candidates;
+        if (candidateDtos.Count > _options.MaxCandidateCount)
+        {
+            truncationDiagnostics.Add(AgentMemoryLlmDiagnostics.Create(
+                AgentMemoryLlmDiagnosticCodes.CandidateCountTruncated,
+                $"Truncated from {candidateDtos.Count} to {_options.MaxCandidateCount} candidates",
+                SeverityLevel.Warning));
+            candidateDtos = candidateDtos.Take(_options.MaxCandidateCount).ToList();
+        }
+
         var candidates = new List<AgentMemoryCandidate>();
-        foreach (var dto in parseResult.Candidates)
+        foreach (var dto in candidateDtos)
         {
             // Enforce MaxCandidateCharacters from options
             var content = dto.Content ?? "";
             if (content.Length > _options.MaxCandidateCharacters)
+            {
+                truncationDiagnostics.Add(AgentMemoryLlmDiagnostics.Create(
+                    AgentMemoryLlmDiagnosticCodes.CandidateTruncated,
+                    $"Candidate content truncated from {content.Length} to {_options.MaxCandidateCharacters} characters",
+                    SeverityLevel.Warning));
                 content = content[.._options.MaxCandidateCharacters];
+            }
 
             var sanitized = _sanitizer.Sanitize(context.TenantId, content, Array.Empty<AgentContextSourceRef>());
 
-            // Use original source ref semantics from compressed context blocks
+            // Use original source ref semantics from compressed context blocks — preserve all refs
             var sourceRefs = (dto.SourceRefIds ?? [])
                 .Where(id => sourceRefMap.ContainsKey(id))
-                .Select(id => sourceRefMap[id])
+                .SelectMany(id => sourceRefMap[id])
                 .ToArray();
 
             var kind = ParseMemoryKind(dto.Kind);
@@ -203,13 +214,14 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
                 Confidence = confidence,
                 SourceRefs = sourceRefs,
                 Status = AgentMemoryStatus.Candidate, // Always Candidate — never Active from LLM
+                RedactionKinds = sanitized.RedactionKinds.ToArray(),
                 SanitizationDiagnostics = sanitizationDiagnostics.ToArray()
             };
 
             candidates.Add(candidate);
         }
 
-        // Create output evidence with provider observation
+        // Create output evidence — domain payload with SourceIdentity purpose
         var providerObservation = new AgentPromptProviderObservation
         {
             ProviderName = modelResponse.ProviderName,
@@ -220,11 +232,11 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
             new AgentPromptEvidenceCreationRequest<IReadOnlyList<AgentMemoryCandidate>>
             {
                 Purpose = AgentPromptPurpose.MemoryExtraction,
-                TemplateId = _options.ExtractionTemplateId,
-                TemplateVersion = _options.ExtractionTemplateVersion,
-                ContractVersion = _options.PromptContractVersion,
-                ModelProfileRef = _options.ModelProfileRef,
-                ProviderProfileRef = _options.ProviderProfileRef,
+                TemplateId = AgentMemoryLlmContractVersions.ExtractionTemplateId,
+                TemplateVersion = AgentMemoryLlmContractVersions.ExtractionTemplateVersion,
+                ContractVersion = AgentMemoryLlmContractVersions.PromptContractVersion,
+                ModelProfileRef = AgentMemoryLlmContractVersions.DefaultModelProfileRef,
+                ProviderProfileRef = AgentMemoryLlmContractVersions.DefaultProviderProfileRef,
                 Payload = candidates.ToArray()
             },
             inputEvidence.InputHash,
@@ -235,16 +247,25 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
 
         var outputSummary = AgentPromptEvidenceSummaryFactory.CreateOutputSummary(outputEvidence);
 
-        // Attach output evidence summary to each candidate
-        return candidates.Select(c => c with
-        {
-            PromptOutputEvidence = outputSummary
-        }).ToArray();
+        // Attach evidence summaries and truncation diagnostics to each candidate
+        return new ExtractionAttemptResult(
+            candidates.Select(c => c with
+            {
+                PromptInputEvidence = inputSummary,
+                PromptOutputEvidence = outputSummary,
+                SanitizationDiagnostics = c.SanitizationDiagnostics.Concat(truncationDiagnostics).ToArray()
+            }).ToArray(),
+            []);
     }
+
+    private sealed record ExtractionAttemptResult(
+        IReadOnlyList<AgentMemoryCandidate> Candidates,
+        IReadOnlyList<AgentMemoryDiagnostic> Diagnostics);
 
     private async ValueTask<IReadOnlyList<AgentMemoryCandidate>> FallbackWithDiagnosticAsync(
         AgentCompressedContext context,
         CancellationToken cancellationToken,
+        AgentPromptInputEvidenceSummary? inputEvidenceSummary = null,
         IReadOnlyList<AgentMemoryDiagnostic>? llmDiagnostics = null)
     {
         var fallbackResult = await _fallback.ExtractCandidatesAsync(context, cancellationToken);
@@ -259,7 +280,8 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
 
         return fallbackResult.Select(c => c with
         {
-            SanitizationDiagnostics = c.SanitizationDiagnostics.Concat(extraDiagnostics).ToArray()
+            SanitizationDiagnostics = c.SanitizationDiagnostics.Concat(extraDiagnostics).ToArray(),
+            PromptInputEvidence = inputEvidenceSummary ?? c.PromptInputEvidence
         }).ToArray();
     }
 

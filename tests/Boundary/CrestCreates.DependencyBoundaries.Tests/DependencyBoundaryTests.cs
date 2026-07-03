@@ -122,6 +122,26 @@ public class DependencyBoundaryTests
     }
 
     [Fact]
+    public void AgentMemoryLlm_DoesNotReferenceControlPlaneOrPlatform()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.Memory.Llm",
+            "Memory.Llm adapter must not depend on ControlPlane, DraftContracts, Authoring.Http, Framework Api/Web, Platform, or persistence providers.",
+            new[]
+            {
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane",
+                "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions",
+                "src/Runtime/Agent/CrestCreates.Agent.DraftContracts",
+                "src/Runtime/Agent/CrestCreates.Agent.Authoring.Http",
+                "src/Framework/Api",
+                "src/Framework/Web",
+                "src/Platform",
+                "src/Persistence/CrestCreates.Data.FreeSql",
+                "src/Persistence/CrestCreates.Data.SqlSugar"
+            });
+    }
+
+    [Fact]
     public void ControlPlaneAbstractions_MayReferenceHumanTaskAbstractions_ButNotFrameworkOrWeb()
     {
         AssertNoDirectProjectReferences(

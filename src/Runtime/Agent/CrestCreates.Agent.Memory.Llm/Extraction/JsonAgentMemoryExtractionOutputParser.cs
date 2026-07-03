@@ -68,15 +68,22 @@ public sealed class JsonAgentMemoryExtractionOutputParser : IAgentMemoryExtracti
                 isValid = false;
             }
 
-            // Validate source refs
-            if (candidate.SourceRefIds is { Count: > 0 })
+            // Source refs are mandatory — every candidate must trace to its source
+            if (candidate.SourceRefIds is null || candidate.SourceRefIds.Count == 0)
             {
-                AgentMemoryLlmOutputValidators.ValidateSourceRefs(candidate.SourceRefIds, allowedSet, diagnostics);
+                diagnostics.Add(AgentMemoryLlmDiagnostics.Create(
+                    AgentMemoryLlmDiagnosticCodes.SourceRefMissing,
+                    $"Candidate '{candidate.CandidateId}' has no source refs. Every memory candidate must reference its source.",
+                    SeverityLevel.Error));
+                isValid = false;
+                continue;
+            }
 
-                if (candidate.SourceRefIds.Any(id => !allowedSet.Contains(id)))
-                {
-                    isValid = false;
-                }
+            AgentMemoryLlmOutputValidators.ValidateSourceRefs(candidate.SourceRefIds, allowedSet, diagnostics);
+
+            if (candidate.SourceRefIds.Any(id => !allowedSet.Contains(id)))
+            {
+                isValid = false;
             }
 
             validCandidates.Add(candidate);

@@ -7,9 +7,8 @@ namespace CrestCreates.Agent.Memory.Llm.Compression;
 
 /// <summary>
 /// Canonical hash projector for compression output.
-/// Hashes the structural identity and content hash of compressed blocks
-/// (BlockId, TenantId, CanonicalContentHash, SourceRefIds)
-/// without including Content or Diagnostics (which are variable/computable).
+/// Hashes stable identity fields (canonicalContentHash, tenantId, source ref full identity)
+/// without including provider/random IDs (BlockId), Content, or Diagnostics.
 /// </summary>
 public sealed class AgentMemoryCompressionOutputProjector : IAgentPromptCanonicalPayloadProjector<IReadOnlyList<AgentCompressedContextBlock>>
 {
@@ -19,18 +18,26 @@ public sealed class AgentMemoryCompressionOutputProjector : IAgentPromptCanonica
         writer.WritePropertyName("blocks");
         writer.WriteStartArray();
 
-        foreach (var block in blocks.OrderBy(b => b.BlockId, StringComparer.Ordinal))
+        // Sort by canonicalContentHash for deterministic ordering (BlockId is provider/random, not stable)
+        foreach (var block in blocks.OrderBy(b => b.CanonicalContentHash.Value, StringComparer.Ordinal))
         {
             writer.WriteStartObject();
-            writer.WriteString("blockId", block.BlockId);
             writer.WriteString("canonicalContentHash", block.CanonicalContentHash.Value);
             writer.WriteString("tenantId", block.TenantId);
 
-            writer.WritePropertyName("sourceRefIds");
+            writer.WritePropertyName("sourceRefs");
             writer.WriteStartArray();
-            foreach (var refId in block.SourceRefs.Select(s => s.SourceId).OrderBy(id => id, StringComparer.Ordinal))
+            foreach (var sourceRef in block.SourceRefs.OrderBy(s => s.SourceId, StringComparer.Ordinal))
             {
-                writer.WriteStringValue(refId);
+                writer.WriteStartObject();
+                writer.WriteString("sourceKind", sourceRef.SourceKind.ToString());
+                writer.WriteString("sourceId", sourceRef.SourceId);
+                writer.WriteString("tenantId", sourceRef.TenantId);
+                if (sourceRef.RangeStart is not null)
+                    writer.WriteNumber("rangeStart", sourceRef.RangeStart.Value);
+                if (sourceRef.RangeEnd is not null)
+                    writer.WriteNumber("rangeEnd", sourceRef.RangeEnd.Value);
+                writer.WriteEndObject();
             }
             writer.WriteEndArray();
 

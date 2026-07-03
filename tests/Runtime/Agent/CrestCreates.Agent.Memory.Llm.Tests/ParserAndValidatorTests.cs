@@ -143,6 +143,32 @@ public class ParserAndValidatorTests
     }
 
     [Fact]
+    public void CompressionParser_MissingSourceRefs_IsInvalid()
+    {
+        var parser = new JsonAgentMemoryCompressionOutputParser();
+        var json = """{"blocks":[{"blockId":"b1","content":"summary","sourceRefIds":[]}]}""";
+
+        var result = parser.Parse(json, ["s1"]);
+
+        result.IsValid.Should().BeFalse();
+        result.Blocks.Should().BeEmpty();
+        result.Diagnostics.Should().Contain(d => d.Code == AgentMemoryLlmDiagnosticCodes.SourceRefMissing);
+    }
+
+    [Fact]
+    public void ExtractionParser_MissingSourceRefs_IsInvalid()
+    {
+        var parser = new JsonAgentMemoryExtractionOutputParser();
+        var json = """{"candidates":[{"candidateId":"c1","content":"fact","sourceRefIds":[],"kind":"Fact","confidence":"Medium"}]}""";
+
+        var result = parser.Parse(json, ["s1"]);
+
+        result.IsValid.Should().BeFalse();
+        result.Candidates.Should().BeEmpty();
+        result.Diagnostics.Should().Contain(d => d.Code == AgentMemoryLlmDiagnosticCodes.SourceRefMissing);
+    }
+
+    [Fact]
     public void PromptBuilder_Extraction_ProducesNonNullPrompt()
     {
         var builder = new DefaultAgentMemoryExtractionPromptBuilder();

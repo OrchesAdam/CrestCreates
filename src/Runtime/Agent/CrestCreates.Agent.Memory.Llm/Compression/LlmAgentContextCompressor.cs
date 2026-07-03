@@ -21,7 +21,6 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
     private readonly IAgentMemoryLlmModelClient _modelClient;
     private readonly IAgentMemoryCompressionOutputParser _parser;
     private readonly IAgentPromptEvidenceFactory _evidenceFactory;
-    private readonly IAgentPromptHashService _hashService;
     private readonly AgentMemoryLlmAdapterOptions _options;
 
     public LlmAgentContextCompressor(
@@ -31,7 +30,6 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
         IAgentMemoryLlmModelClient modelClient,
         IAgentMemoryCompressionOutputParser parser,
         IAgentPromptEvidenceFactory evidenceFactory,
-        IAgentPromptHashService hashService,
         AgentMemoryLlmAdapterOptions options)
     {
         _sanitizer = sanitizer;
@@ -40,7 +38,6 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
         _modelClient = modelClient;
         _parser = parser;
         _evidenceFactory = evidenceFactory;
-        _hashService = hashService;
         _options = options;
     }
 
@@ -48,13 +45,14 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
         AgentConversationRecord conversation,
         CancellationToken cancellationToken = default)
     {
-        var (promptInput, sourceRefMap) = BuildConversationPromptInput(conversation);
+        var (promptInput, sourceRefMap, buildDiagnostics) = BuildConversationPromptInput(conversation);
         return await CompressWithFallbackAsync(
             promptInput,
             sourceRefMap,
             () => _fallback.CompressConversationAsync(conversation, cancellationToken),
             AgentMemoryLlmDiagnosticCodes.FallbackToDeterministicCompressor,
-            cancellationToken);
+            cancellationToken,
+            buildDiagnostics);
     }
 
     public async ValueTask<AgentCompressedContext> CompressTaskAsync(
@@ -70,7 +68,7 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
             cancellationToken);
     }
 
-    private (AgentMemoryCompressionPromptInput PromptInput, Dictionary<string, IReadOnlyList<AgentContextSourceRef>> SourceRefMap) BuildConversationPromptInput(
+    private (AgentMemoryCompressionPromptInput PromptInput, Dictionary<string, IReadOnlyList<AgentContextSourceRef>> SourceRefMap, IReadOnlyList<AgentMemoryDiagnostic> Diagnostics) BuildConversationPromptInput(
         AgentConversationRecord conversation)
     {
         var sources = new List<AgentMemoryCompressionPromptSource>();
@@ -126,9 +124,7 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
             Purpose = null
         };
 
-        // Store diagnostics on prompt input for later use — but prompt input doesn't have Diagnostics.
-        // We'll carry them through the result instead.
-        return (promptInput, sourceRefMap);
+        return (promptInput, sourceRefMap, diagnostics);
     }
 
     private (AgentMemoryCompressionPromptInput PromptInput, Dictionary<string, IReadOnlyList<AgentContextSourceRef>> SourceRefMap) BuildTaskPromptInput(
@@ -207,24 +203,29 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
         Dictionary<string, IReadOnlyList<AgentContextSourceRef>> sourceRefMap,
         Func<ValueTask<AgentCompressedContext>> fallbackFunc,
         DiagnosticCode fallbackDiagnosticCode,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<AgentMemoryDiagnostic>? buildDiagnostics = null)
     {
         if (!_options.EnableDeterministicFallback)
         {
-            return await AttemptLlmCompressionAsync(promptInput, sourceRefMap, cancellationToken);
+            var noFallbackResult = await AttemptLlmCompressionAsync(promptInput, sourceRefMap, cancellationToken);
+            return AppendBuildDiagnostics(noFallbackResult, buildDiagnostics);
         }
 
         try
         {
             var result = await AttemptLlmCompressionAsync(promptInput, sourceRefMap, cancellationToken);
             if (result.Blocks.Count > 0)
-                return result;
+                return AppendBuildDiagnostics(result, buildDiagnostics);
 
             // Empty result from LLM — fallback, carry LLM diagnostics
             var llmDiagnostics = result.Diagnostics;
-            return await FallbackWithDiagnosticAsync(fallbackFunc, fallbackDiagnosticCode,
-                "LLM compression returned empty result, falling back to deterministic compressor.",
-                llmDiagnostics);
+            var inputSummary = result.PromptInputEvidence;
+            return AppendBuildDiagnostics(
+                await FallbackWithDiagnosticAsync(fallbackFunc, fallbackDiagnosticCode,
+                    "LLM compression returned empty result, falling back to deterministic compressor.",
+                    inputSummary, llmDiagnostics),
+                buildDiagnostics);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -236,10 +237,24 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
                 AgentMemoryLlmDiagnosticCodes.CompressionParseError,
                 $"LLM compression threw: {ex.Message}", SeverityLevel.Warning);
 
-            return await FallbackWithDiagnosticAsync(fallbackFunc, fallbackDiagnosticCode,
-                "LLM compression failed, falling back to deterministic compressor.",
-                [errorDiagnostic]);
+            return AppendBuildDiagnostics(
+                await FallbackWithDiagnosticAsync(fallbackFunc, fallbackDiagnosticCode,
+                    "LLM compression failed, falling back to deterministic compressor.",
+                    null, [errorDiagnostic]),
+                buildDiagnostics);
         }
+    }
+
+    private static AgentCompressedContext AppendBuildDiagnostics(
+        AgentCompressedContext result,
+        IReadOnlyList<AgentMemoryDiagnostic>? buildDiagnostics)
+    {
+        if (buildDiagnostics is null or { Count: 0 })
+            return result;
+        return result with
+        {
+            Diagnostics = result.Diagnostics.Concat(buildDiagnostics).ToArray()
+        };
     }
 
     private async ValueTask<AgentCompressedContext> AttemptLlmCompressionAsync(
@@ -254,11 +269,11 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
         var inputEvidence = _evidenceFactory.CreateInputEvidence(new AgentPromptEvidenceCreationRequest<AgentMemoryCompressionPromptInput>
         {
             Purpose = AgentPromptPurpose.MemoryCompression,
-            TemplateId = _options.CompressionTemplateId,
-            TemplateVersion = _options.CompressionTemplateVersion,
-            ContractVersion = _options.PromptContractVersion,
-            ModelProfileRef = _options.ModelProfileRef,
-            ProviderProfileRef = _options.ProviderProfileRef,
+            TemplateId = AgentMemoryLlmContractVersions.CompressionTemplateId,
+            TemplateVersion = AgentMemoryLlmContractVersions.CompressionTemplateVersion,
+            ContractVersion = AgentMemoryLlmContractVersions.PromptContractVersion,
+            ModelProfileRef = AgentMemoryLlmContractVersions.DefaultModelProfileRef,
+            ProviderProfileRef = AgentMemoryLlmContractVersions.DefaultProviderProfileRef,
             Payload = promptInput
         });
 
@@ -304,14 +319,29 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
 
         // Enforce MaxCompressedBlockCount from options
         var blockDtos = parseResult.Blocks;
+        var truncationDiagnostics = new List<AgentMemoryDiagnostic>();
         if (blockDtos.Count > _options.MaxCompressedBlockCount)
+        {
+            truncationDiagnostics.Add(AgentMemoryLlmDiagnostics.Create(
+                AgentMemoryLlmDiagnosticCodes.BlockCountTruncated,
+                $"Truncated from {blockDtos.Count} to {_options.MaxCompressedBlockCount} blocks",
+                SeverityLevel.Warning));
             blockDtos = blockDtos.Take(_options.MaxCompressedBlockCount).ToList();
+        }
 
         // Convert parsed blocks to domain blocks
         var blocks = new List<AgentCompressedContextBlock>();
         foreach (var dto in blockDtos)
         {
             var content = dto.Content ?? "";
+            if (content.Length > _options.MaxCompressedBlockCharacters)
+            {
+                truncationDiagnostics.Add(AgentMemoryLlmDiagnostics.Create(
+                    AgentMemoryLlmDiagnosticCodes.BlockTruncated,
+                    $"Block content truncated from {content.Length} to {_options.MaxCompressedBlockCharacters} characters",
+                    SeverityLevel.Warning));
+                content = content[.._options.MaxCompressedBlockCharacters];
+            }
             var sanitized = _sanitizer.Sanitize(promptInput.TenantId, content, Array.Empty<AgentContextSourceRef>());
 
             // Use original source ref semantics — look up from map, flatten all refs per source
@@ -327,11 +357,15 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
                 Content = sanitized.SanitizedContent,
                 CanonicalContentHash = sanitized.CanonicalContentHash,
                 SourceRefs = sourceRefs,
-                Diagnostics = sanitized.Diagnostics.ToArray()
+                Diagnostics = sanitized.Diagnostics.Concat(
+                    sanitized.RedactionKinds.Count > 0
+                        ? [AgentMemoryLlmDiagnostics.Create(AgentMemoryLlmDiagnosticCodes.RedactionOccurred, $"Block content was redacted: {string.Join(",", sanitized.RedactionKinds)}", SeverityLevel.Info)]
+                        : Array.Empty<AgentMemoryDiagnostic>())
+                    .ToArray()
             });
         }
 
-        // Create output evidence with provider observation
+        // Create output evidence — domain payload with SourceIdentity purpose
         var providerObservation = new AgentPromptProviderObservation
         {
             ProviderName = modelResponse.ProviderName,
@@ -342,11 +376,11 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
             new AgentPromptEvidenceCreationRequest<IReadOnlyList<AgentCompressedContextBlock>>
             {
                 Purpose = AgentPromptPurpose.MemoryCompression,
-                TemplateId = _options.CompressionTemplateId,
-                TemplateVersion = _options.CompressionTemplateVersion,
-                ContractVersion = _options.PromptContractVersion,
-                ModelProfileRef = _options.ModelProfileRef,
-                ProviderProfileRef = _options.ProviderProfileRef,
+                TemplateId = AgentMemoryLlmContractVersions.CompressionTemplateId,
+                TemplateVersion = AgentMemoryLlmContractVersions.CompressionTemplateVersion,
+                ContractVersion = AgentMemoryLlmContractVersions.PromptContractVersion,
+                ModelProfileRef = AgentMemoryLlmContractVersions.DefaultModelProfileRef,
+                ProviderProfileRef = AgentMemoryLlmContractVersions.DefaultProviderProfileRef,
                 Payload = blocks.ToArray()
             },
             inputEvidence.InputHash,
@@ -362,7 +396,8 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
             ContextId = promptInput.TenantId,
             TenantId = promptInput.TenantId,
             Blocks = blocks.ToArray(),
-            Diagnostics = parseResult.Diagnostics,
+            Diagnostics = parseResult.Diagnostics.Concat(truncationDiagnostics).ToArray(),
+            PromptInputEvidence = inputSummary,
             PromptOutputEvidence = outputSummary
         };
     }
@@ -371,6 +406,7 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
         Func<ValueTask<AgentCompressedContext>> fallbackFunc,
         DiagnosticCode fallbackDiagnosticCode,
         string message,
+        AgentPromptInputEvidenceSummary? inputEvidenceSummary = null,
         IReadOnlyList<AgentMemoryDiagnostic>? llmDiagnostics = null)
     {
         var fallbackResult = await fallbackFunc();
@@ -382,7 +418,8 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
 
         return fallbackResult with
         {
-            Diagnostics = allDiagnostics
+            Diagnostics = allDiagnostics,
+            PromptInputEvidence = inputEvidenceSummary ?? fallbackResult.PromptInputEvidence
         };
     }
 }

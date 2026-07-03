@@ -5,7 +5,6 @@ using CrestCreates.Agent.Memory.Llm.Clients;
 using CrestCreates.Agent.Memory.Llm.Compression;
 using CrestCreates.Agent.Memory.Llm.Extraction;
 using CrestCreates.Agent.Memory.Llm.Model;
-using CrestCreates.Agent.Memory.Llm.Prompting;
 using CrestCreates.Agent.Prompting.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
@@ -14,6 +13,7 @@ namespace CrestCreates.Agent.Memory.Llm.Tests;
 public static class AgentMemoryLlmTestData
 {
     public static AgentMemoryLlmAdapterOptions DefaultOptions => new();
+    public static IAgentPromptEvidenceFactory DefaultTestEvidenceFactory => new TestPromptEvidenceFactory();
 
     public static LlmAgentContextCompressor Compressor(
         IAgentMemoryLlmModelClient? client = null,
@@ -24,7 +24,6 @@ public static class AgentMemoryLlmTestData
         var promptBuilder = new DefaultAgentMemoryCompressionPromptBuilder();
         var parser = new JsonAgentMemoryCompressionOutputParser();
         var evidenceFactory = new TestPromptEvidenceFactory();
-        var hashService = new TestPromptHashService();
 
         return new LlmAgentContextCompressor(
             sanitizer,
@@ -36,7 +35,6 @@ public static class AgentMemoryLlmTestData
             }),
             parser,
             evidenceFactory,
-            hashService,
             options ?? DefaultOptions);
     }
 
@@ -49,7 +47,6 @@ public static class AgentMemoryLlmTestData
         var promptBuilder = new DefaultAgentMemoryExtractionPromptBuilder();
         var parser = new JsonAgentMemoryExtractionOutputParser();
         var evidenceFactory = new TestPromptEvidenceFactory();
-        var hashService = new TestPromptHashService();
 
         return new LlmAgentMemoryExtractor(
             sanitizer,
@@ -61,7 +58,6 @@ public static class AgentMemoryLlmTestData
             }),
             parser,
             evidenceFactory,
-            hashService,
             options ?? DefaultOptions);
     }
 
@@ -193,45 +189,6 @@ public static class AgentMemoryLlmTestData
                     CanonicalShapeVersion = "test-shape-v1"
                 },
                 CreatedAt = DateTimeOffset.UtcNow
-            };
-        }
-    }
-
-    private sealed class TestPromptHashService : IAgentPromptHashService
-    {
-        public CanonicalHash ComputeInputHash<TPayload>(AgentPromptEvidenceCreationRequest<TPayload> request)
-        {
-            return new CanonicalHash
-            {
-                Value = "test-input-hash",
-                Algorithm = "SHA-256",
-                AlgorithmVersion = "sha256-canonical-json-v1",
-                ArtifactKind = CanonicalHashArtifactNames.AgentPromptInputEvidence,
-                Purpose = CanonicalHashPurposeNames.SourceIdentity,
-                Scope = CanonicalHashScopeNames.InternalFull,
-                ContractVersion = "test-v1",
-                CanonicalShapeVersion = "test-shape-v1"
-            };
-        }
-
-        public CanonicalHash? ComputeOutputHash<TOutput>(
-            AgentPromptEvidenceCreationRequest<TOutput> request,
-            CanonicalHash inputHash,
-            AgentPromptProviderObservation? providerObservation,
-            string? artifactKind = null,
-            string? canonicalShapeVersion = null,
-            string? purpose = null)
-        {
-            return new CanonicalHash
-            {
-                Value = "test-output-hash",
-                Algorithm = "SHA-256",
-                AlgorithmVersion = "sha256-canonical-json-v1",
-                ArtifactKind = CanonicalHashArtifactNames.AgentPromptOutputEvidence,
-                Purpose = CanonicalHashPurposeNames.SourceIdentity,
-                Scope = CanonicalHashScopeNames.InternalFull,
-                ContractVersion = "test-v1",
-                CanonicalShapeVersion = "test-shape-v1"
             };
         }
     }

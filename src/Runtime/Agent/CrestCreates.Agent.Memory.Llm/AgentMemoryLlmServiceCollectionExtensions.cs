@@ -49,13 +49,17 @@ public static class AgentMemoryLlmServiceCollectionExtensions
         this IServiceCollection services,
         Action<AgentMemoryLlmAdapterOptions>? configure = null)
     {
+        GuardDoubleRegistration(services, "AgentMemoryLlmCompressor");
         EnsureOptions(services, configure);
 
         // Compression-specific services
         services.TryAddSingleton<IAgentMemoryCompressionPromptBuilder, DefaultAgentMemoryCompressionPromptBuilder>();
         services.TryAddSingleton<IAgentMemoryCompressionOutputParser, JsonAgentMemoryCompressionOutputParser>();
 
-        // Output hash projector for compression
+        // Input and output hash projectors for compression
+        services.TryAddSingleton<AgentMemoryCompressionPromptInputProjector>();
+        services.TryAddSingleton<IAgentPromptCanonicalPayloadProjector<AgentMemoryCompressionPromptInput>>(
+            sp => sp.GetRequiredService<AgentMemoryCompressionPromptInputProjector>());
         services.TryAddSingleton<AgentMemoryCompressionOutputProjector>();
         services.TryAddSingleton<IAgentPromptCanonicalPayloadProjector<IReadOnlyList<AgentCompressedContextBlock>>>(
             sp => sp.GetRequiredService<AgentMemoryCompressionOutputProjector>());
@@ -76,7 +80,6 @@ public static class AgentMemoryLlmServiceCollectionExtensions
                 sp.GetRequiredService<IAgentMemoryLlmModelClient>(),
                 sp.GetRequiredService<IAgentMemoryCompressionOutputParser>(),
                 sp.GetRequiredService<IAgentPromptEvidenceFactory>(),
-                sp.GetRequiredService<IAgentPromptHashService>(),
                 sp.GetRequiredService<AgentMemoryLlmAdapterOptions>());
         });
 
@@ -94,13 +97,17 @@ public static class AgentMemoryLlmServiceCollectionExtensions
         this IServiceCollection services,
         Action<AgentMemoryLlmAdapterOptions>? configure = null)
     {
+        GuardDoubleRegistration(services, "AgentMemoryLlmExtractor");
         EnsureOptions(services, configure);
 
         // Extraction-specific services
         services.TryAddSingleton<IAgentMemoryExtractionPromptBuilder, DefaultAgentMemoryExtractionPromptBuilder>();
         services.TryAddSingleton<IAgentMemoryExtractionOutputParser, JsonAgentMemoryExtractionOutputParser>();
 
-        // Output hash projector for extraction
+        // Input and output hash projectors for extraction
+        services.TryAddSingleton<AgentMemoryExtractionPromptInputProjector>();
+        services.TryAddSingleton<IAgentPromptCanonicalPayloadProjector<AgentMemoryExtractionPromptInput>>(
+            sp => sp.GetRequiredService<AgentMemoryExtractionPromptInputProjector>());
         services.TryAddSingleton<AgentMemoryExtractionOutputProjector>();
         services.TryAddSingleton<IAgentPromptCanonicalPayloadProjector<IReadOnlyList<AgentMemoryCandidate>>>(
             sp => sp.GetRequiredService<AgentMemoryExtractionOutputProjector>());
@@ -121,13 +128,22 @@ public static class AgentMemoryLlmServiceCollectionExtensions
                 sp.GetRequiredService<IAgentMemoryLlmModelClient>(),
                 sp.GetRequiredService<IAgentMemoryExtractionOutputParser>(),
                 sp.GetRequiredService<IAgentPromptEvidenceFactory>(),
-                sp.GetRequiredService<IAgentPromptHashService>(),
                 sp.GetRequiredService<AgentMemoryLlmAdapterOptions>());
         });
 
         services.TryAddSingleton<IAgentMemoryExtractor>(sp => sp.GetRequiredService<LlmAgentMemoryExtractor>());
 
         return services;
+    }
+
+    private static void GuardDoubleRegistration(IServiceCollection services, string registrationKey)
+    {
+        var guardKey = $"__CrestCreates_Guard_{registrationKey}";
+        if (services.Any(sd => sd.ServiceType == typeof(string) && sd.ServiceKey as string == guardKey))
+            throw new InvalidOperationException(
+                $"{registrationKey} has already been registered. Do not call AddAgentMemoryLlmCompressor/AddAgentMemoryLlmExtractor twice.");
+
+        services.AddKeyedSingleton<string>(guardKey, (_, _) => guardKey);
     }
 
     private static void EnsureOptions(IServiceCollection services, Action<AgentMemoryLlmAdapterOptions>? configure)

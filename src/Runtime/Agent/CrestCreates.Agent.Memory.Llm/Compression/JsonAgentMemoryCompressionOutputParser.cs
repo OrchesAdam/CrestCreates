@@ -61,14 +61,21 @@ public sealed class JsonAgentMemoryCompressionOutputParser : IAgentMemoryCompres
                 continue;
             }
 
-            if (block.SourceRefIds is { Count: > 0 })
+            if (block.SourceRefIds is null || block.SourceRefIds.Count == 0)
             {
-                AgentMemoryLlmOutputValidators.ValidateSourceRefs(block.SourceRefIds, allowedSet, diagnostics);
+                diagnostics.Add(AgentMemoryLlmDiagnostics.Create(
+                    AgentMemoryLlmDiagnosticCodes.SourceRefMissing,
+                    $"Block '{block.BlockId}' has no source refs. Every compressed block must reference its source.",
+                    SeverityLevel.Error));
+                isValid = false;
+                continue;
+            }
 
-                if (block.SourceRefIds.Any(id => !allowedSet.Contains(id)))
-                {
-                    isValid = false;
-                }
+            AgentMemoryLlmOutputValidators.ValidateSourceRefs(block.SourceRefIds, allowedSet, diagnostics);
+
+            if (block.SourceRefIds.Any(id => !allowedSet.Contains(id)))
+            {
+                isValid = false;
             }
 
             validBlocks.Add(block);

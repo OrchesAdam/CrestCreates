@@ -7,9 +7,8 @@ namespace CrestCreates.Agent.Memory.Llm.Extraction;
 
 /// <summary>
 /// Canonical hash projector for extraction output.
-/// Hashes the structural identity and content hash of candidates
-/// (CandidateId, TenantId, Kind, Confidence, CanonicalContentHash, SourceRefIds)
-/// without including Content or Diagnostics.
+/// Hashes stable identity fields (canonicalContentHash, tenantId, kind, confidence, source ref full identity)
+/// without including provider/random IDs (CandidateId), Content, or Diagnostics.
 /// </summary>
 public sealed class AgentMemoryExtractionOutputProjector : IAgentPromptCanonicalPayloadProjector<IReadOnlyList<AgentMemoryCandidate>>
 {
@@ -19,20 +18,28 @@ public sealed class AgentMemoryExtractionOutputProjector : IAgentPromptCanonical
         writer.WritePropertyName("candidates");
         writer.WriteStartArray();
 
-        foreach (var candidate in candidates.OrderBy(c => c.CandidateId, StringComparer.Ordinal))
+        // Sort by canonicalContentHash for deterministic ordering (CandidateId is provider/random, not stable)
+        foreach (var candidate in candidates.OrderBy(c => c.CanonicalContentHash.Value, StringComparer.Ordinal))
         {
             writer.WriteStartObject();
-            writer.WriteString("candidateId", candidate.CandidateId);
+            writer.WriteString("canonicalContentHash", candidate.CanonicalContentHash.Value);
             writer.WriteString("tenantId", candidate.TenantId);
             writer.WriteString("kind", candidate.Kind.ToString());
             writer.WriteString("confidence", candidate.Confidence.ToString());
-            writer.WriteString("canonicalContentHash", candidate.CanonicalContentHash.Value);
 
-            writer.WritePropertyName("sourceRefIds");
+            writer.WritePropertyName("sourceRefs");
             writer.WriteStartArray();
-            foreach (var refId in candidate.SourceRefs.Select(s => s.SourceId).OrderBy(id => id, StringComparer.Ordinal))
+            foreach (var sourceRef in candidate.SourceRefs.OrderBy(s => s.SourceId, StringComparer.Ordinal))
             {
-                writer.WriteStringValue(refId);
+                writer.WriteStartObject();
+                writer.WriteString("sourceKind", sourceRef.SourceKind.ToString());
+                writer.WriteString("sourceId", sourceRef.SourceId);
+                writer.WriteString("tenantId", sourceRef.TenantId);
+                if (sourceRef.RangeStart is not null)
+                    writer.WriteNumber("rangeStart", sourceRef.RangeStart.Value);
+                if (sourceRef.RangeEnd is not null)
+                    writer.WriteNumber("rangeEnd", sourceRef.RangeEnd.Value);
+                writer.WriteEndObject();
             }
             writer.WriteEndArray();
 

@@ -1,11 +1,10 @@
 using System.Text.Json;
-using CrestCreates.Agent.Memory.Llm.Prompting;
-using CrestCreates.Agent.Prompting;
+using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Llm.Compression;
+using CrestCreates.Agent.Memory.Llm.Extraction;
 using CrestCreates.Agent.Prompting.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
-using CrestCreates.Metadata.CanonicalHashing;
 using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace CrestCreates.Agent.Memory.Llm.Tests;
@@ -13,60 +12,111 @@ namespace CrestCreates.Agent.Memory.Llm.Tests;
 public sealed class PromptEvidenceTests
 {
     [Fact]
-    public void OutputEvidenceHash_ExcludesRawProviderResponseText()
+    public void CompressionOutputHash_DoesNotChange_WhenProviderBlockIdChanges()
     {
-        typeof(AgentMemoryLlmModelResponseEvidenceProjection)
-            .GetProperties()
-            .Select(property => property.Name)
-            .Should()
-            .NotContain("ResponseText");
+        var projector = new AgentMemoryCompressionOutputProjector();
+        var contentHash = Hash("content-hash-1");
+        var sourceRef = new AgentContextSourceRef { SourceKind = AgentSourceKind.ConversationTurn, TenantId = "t1", SourceId = "s1" };
 
-        var services = new ServiceCollection();
-        services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
-        services.AddAgentPrompting();
-        services.AddSingleton<IAgentPromptCanonicalPayloadProjector<AgentMemoryLlmModelResponseEvidenceProjection>, AgentMemoryLlmModelResponseEvidenceProjector>();
-        using var provider = services.BuildServiceProvider();
-
-        var hashService = provider.GetRequiredService<IAgentPromptHashService>();
-        var inputHash = Hash("input-hash");
-
-        var safeA = new AgentMemoryLlmModelResponseEvidenceProjection
+        var blocksA = new List<AgentCompressedContextBlock>
         {
-            ProviderName = "provider",
-            ModelName = "model",
-            PromptInputHash = inputHash.Value,
-            FailureKind = null,
-            FailureDetail = null
+            new() { BlockId = "provider-id-A", TenantId = "t1", Content = "same", CanonicalContentHash = contentHash, SourceRefs = [sourceRef] }
+        };
+        var blocksB = new List<AgentCompressedContextBlock>
+        {
+            new() { BlockId = "provider-id-B", TenantId = "t1", Content = "same", CanonicalContentHash = contentHash, SourceRefs = [sourceRef] }
         };
 
-        var hashA = hashService.ComputeOutputHash(Request(safeA), inputHash, new AgentPromptProviderObservation { ProviderName = "provider", ModelName = "model" });
-        var hashB = hashService.ComputeOutputHash(Request(safeA), inputHash, new AgentPromptProviderObservation { ProviderName = "provider", ModelName = "model" });
+        var jsonA = ProjectToJson(projector, blocksA);
+        var jsonB = ProjectToJson(projector, blocksB);
 
-        hashA.Should().NotBeNull();
-        hashA!.Value.Should().Be(hashB!.Value);
-        hashA.Purpose.Should().Be(CanonicalHashPurposeNames.AuditEvidence);
+        jsonA.Should().Be(jsonB);
     }
 
-    private static AgentPromptEvidenceCreationRequest<AgentMemoryLlmModelResponseEvidenceProjection> Request(AgentMemoryLlmModelResponseEvidenceProjection payload) => new()
+    [Fact]
+    public void CompressionOutputHash_DoesNotChange_WhenProviderOmitsBlockId()
     {
-        TemplateId = new AgentPromptTemplateId("agent-memory.compression.default"),
-        TemplateVersion = new AgentPromptVersion("7gplus.v1"),
-        Purpose = AgentPromptPurpose.MemoryCompression,
-        ContractVersion = new AgentPromptContractVersion("agent-memory-llm.v1"),
-        ModelProfileRef = new AgentPromptModelProfileRef("model-a"),
-        ProviderProfileRef = new AgentPromptProviderProfileRef("provider-a"),
-        Payload = payload
-    };
+        var projector = new AgentMemoryCompressionOutputProjector();
+        var contentHash = Hash("content-hash-2");
+        var sourceRef = new AgentContextSourceRef { SourceKind = AgentSourceKind.ConversationTurn, TenantId = "t1", SourceId = "s1" };
+
+        var blocksWithId = new List<AgentCompressedContextBlock>
+        {
+            new() { BlockId = "explicit-id", TenantId = "t1", Content = "same", CanonicalContentHash = contentHash, SourceRefs = [sourceRef] }
+        };
+        var blocksWithoutId = new List<AgentCompressedContextBlock>
+        {
+            new() { BlockId = Guid.NewGuid().ToString("N"), TenantId = "t1", Content = "same", CanonicalContentHash = contentHash, SourceRefs = [sourceRef] }
+        };
+
+        var jsonWithId = ProjectToJson(projector, blocksWithId);
+        var jsonWithoutId = ProjectToJson(projector, blocksWithoutId);
+
+        jsonWithId.Should().Be(jsonWithoutId);
+    }
+
+    [Fact]
+    public void CandidateOutputHash_DoesNotChange_WhenProviderCandidateIdChanges()
+    {
+        var projector = new AgentMemoryExtractionOutputProjector();
+        var contentHash = Hash("content-hash-3");
+        var sourceRef = new AgentContextSourceRef { SourceKind = AgentSourceKind.ConversationTurn, TenantId = "t1", SourceId = "s1" };
+
+        var candidatesA = new List<AgentMemoryCandidate>
+        {
+            new() { CandidateId = "provider-id-A", TenantId = "t1", Kind = AgentMemoryKind.ProjectFact, Content = "same", CanonicalContentHash = contentHash, Confidence = AgentMemoryConfidence.Medium, SourceRefs = [sourceRef], Status = AgentMemoryStatus.Candidate }
+        };
+        var candidatesB = new List<AgentMemoryCandidate>
+        {
+            new() { CandidateId = "provider-id-B", TenantId = "t1", Kind = AgentMemoryKind.ProjectFact, Content = "same", CanonicalContentHash = contentHash, Confidence = AgentMemoryConfidence.Medium, SourceRefs = [sourceRef], Status = AgentMemoryStatus.Candidate }
+        };
+
+        var jsonA = ProjectToJson(projector, candidatesA);
+        var jsonB = ProjectToJson(projector, candidatesB);
+
+        jsonA.Should().Be(jsonB);
+    }
+
+    [Fact]
+    public void CandidateOutputHash_DoesNotChange_WhenProviderOmitsCandidateId()
+    {
+        var projector = new AgentMemoryExtractionOutputProjector();
+        var contentHash = Hash("content-hash-4");
+        var sourceRef = new AgentContextSourceRef { SourceKind = AgentSourceKind.ConversationTurn, TenantId = "t1", SourceId = "s1" };
+
+        var candidatesWithId = new List<AgentMemoryCandidate>
+        {
+            new() { CandidateId = "explicit-id", TenantId = "t1", Kind = AgentMemoryKind.ProjectFact, Content = "same", CanonicalContentHash = contentHash, Confidence = AgentMemoryConfidence.Medium, SourceRefs = [sourceRef], Status = AgentMemoryStatus.Candidate }
+        };
+        var candidatesWithoutId = new List<AgentMemoryCandidate>
+        {
+            new() { CandidateId = Guid.NewGuid().ToString("N"), TenantId = "t1", Kind = AgentMemoryKind.ProjectFact, Content = "same", CanonicalContentHash = contentHash, Confidence = AgentMemoryConfidence.Medium, SourceRefs = [sourceRef], Status = AgentMemoryStatus.Candidate }
+        };
+
+        var jsonWithId = ProjectToJson(projector, candidatesWithId);
+        var jsonWithoutId = ProjectToJson(projector, candidatesWithoutId);
+
+        jsonWithId.Should().Be(jsonWithoutId);
+    }
 
     private static CanonicalHash Hash(string value) => new()
     {
         Value = value,
         Algorithm = "SHA-256",
         AlgorithmVersion = "sha256-canonical-json-v1",
-        ArtifactKind = CanonicalHashArtifactNames.AgentPromptInputEvidence,
+        ArtifactKind = CanonicalHashArtifactNames.AgentMemoryContent,
         Purpose = CanonicalHashPurposeNames.SourceIdentity,
         Scope = CanonicalHashScopeNames.InternalFull,
-        ContractVersion = "descriptor-hash-v1",
-        CanonicalShapeVersion = "agent-prompt-input-evidence-v1"
+        ContractVersion = "test-v1",
+        CanonicalShapeVersion = "test-shape-v1"
     };
+
+    private static string ProjectToJson<T>(IAgentPromptCanonicalPayloadProjector<T> projector, T payload)
+    {
+        var buffer = new System.Buffers.ArrayBufferWriter<byte>();
+        using var writer = new Utf8JsonWriter(buffer);
+        projector.Write(writer, payload);
+        writer.Flush();
+        return System.Text.Encoding.UTF8.GetString(buffer.WrittenSpan);
+    }
 }

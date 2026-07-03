@@ -943,18 +943,18 @@ Status: Completed.
 **Status**: ✅ Complete
 
 **New projects**:
-- `CrestCreates.Agent.Memory.Llm` — LLM-backed memory compression and extraction runtime (20+ files)
-- `CrestCreates.Agent.Memory.Llm.Tests` — 36 tests
+- `CrestCreates.Agent.Memory.Llm` — LLM-backed memory compression and extraction runtime
+- `CrestCreates.Agent.Memory.Llm.Tests` — 48 tests
 
 **Memory.Llm project structure**:
-- `Model/` — `AgentMemoryLlmAdapterOptions`, `AgentMemoryLlmModelRequest`, `AgentMemoryLlmModelResponse`, `AgentMemoryLlmProviderFailureKind`
+- `Model/` — `AgentMemoryLlmAdapterOptions`, `AgentMemoryLlmContractVersions`, `AgentMemoryLlmModelRequest`, `AgentMemoryLlmModelResponse`, `AgentMemoryLlmProviderFailureKind`
 - `Clients/` — `IAgentMemoryLlmModelClient`, `RecordedAgentMemoryLlmModelClient`, `FakeAgentMemoryLlmModelClient`
 - `Prompting/` — `AgentMemoryCompressionPromptInput`, `AgentMemoryExtractionPromptInput`, `IAgentMemoryCompressionPromptBuilder`, `IAgentMemoryExtractionPromptBuilder`, `DefaultAgentMemoryCompressionPromptBuilder`, `DefaultAgentMemoryExtractionPromptBuilder`
 - `Compression/` — `LlmAgentContextCompressor`, `IAgentMemoryCompressionOutputParser`, `JsonAgentMemoryCompressionOutputParser`, `AgentMemoryCompressionParseResult`, `AgentMemoryCompressedBlockDto`
 - `Extraction/` — `LlmAgentMemoryExtractor`, `IAgentMemoryExtractionOutputParser`, `JsonAgentMemoryExtractionOutputParser`, `AgentMemoryExtractionParseResult`, `AgentMemoryCandidateDto`
-- `Validation/` — `AgentMemoryLlmDiagnosticCodes`, `AgentMemoryLlmDiagnostics`
-- `CanonicalHashing/` — `AgentMemoryCompressionPromptInputProjector`, `AgentMemoryExtractionPromptInputProjector`, `AgentMemoryCompressionOutputProjector`, `AgentMemoryExtractionOutputProjector`, `AgentMemoryLlmModelResponseEvidenceProjection`, `AgentMemoryLlmModelResponseEvidenceProjector`
-- `AgentMemoryLlmServiceCollectionExtensions` — `AddAgentMemoryLlmCompressor()`, `AddAgentMemoryLlmExtractor()`, `AddAgentMemoryLlm()` opt-in DI
+- `Validation/` — `AgentMemoryLlmDiagnosticCodes`, `AgentMemoryLlmDiagnostics`, `AgentMemoryLlmOutputValidators`
+- `CanonicalHashing/` — `AgentMemoryCompressionPromptInputProjector`, `AgentMemoryExtractionPromptInputProjector`, `AgentMemoryCompressionOutputProjector`, `AgentMemoryExtractionOutputProjector`
+- `AgentMemoryLlmServiceCollectionExtensions` — `AddAgentMemoryLlmCompressor()`, `AddAgentMemoryLlmExtractor()`, `AddAgentMemoryLlm()` opt-in DI with double-registration guard
 
 **DI registration pattern**:
 - `AddAgentMemoryLlmCompressor()` / `AddAgentMemoryLlmExtractor()` are per-adapter opt-in — each replaces only its own interface
@@ -962,27 +962,37 @@ Status: Completed.
 - All require `AddAgentMemoryRuntime()` and `AddAgentPrompting()` first
 - LLM adapters inject `IAgentContextCompressor`/`IAgentMemoryExtractor` as fallback (resolved from prior DI registration)
 - `IAgentMemoryLlmModelClient` must be registered separately (no default client)
-- LLM adapters wrap deterministic defaults as fallback
+- Double-registration guard throws `InvalidOperationException` if called twice
+- Input/output projectors registered for both compression and extraction
 
 **Key invariants**:
 - LLM extraction always produces `Status = AgentMemoryStatus.Candidate` — never Active/Authoritative from LLM output
 - Unknown `Kind` defaults to `ProjectFact` (safest); unknown `Confidence` defaults to `Unknown`
 - Content is sanitized before prompting and before storage — LLM never sees raw content
-- Provider failure (rate limit, timeout, etc.) triggers fallback to deterministic extractor with diagnostic
-- Parse failure triggers fallback to deterministic extractor with `FallbackToDeterministicExtractor` diagnostic
+- Provider failure (rate limit, timeout, etc.) triggers fallback to deterministic extractor with per-failure-kind diagnostics
+- Parse failure triggers fallback with `FallbackToDeterministicCompressor`/`FallbackToDeterministicExtractor` diagnostic
+- Fallback path preserves input evidence summary and LLM-phase diagnostics
+- Rejected content skipped with `ContentRejected` diagnostic (consistent with DefaultAgentContextCompressor)
+- `MaxCompressedBlockCount`, `MaxCompressedBlockCharacters`, `MaxCandidateCount`, `MaxCandidateCharacters` all enforced post-parse with truncation diagnostics
+- `MaxCandidateConfidence` enforced via `CapConfidence` validator (default: Medium)
+- Extraction uses `ExtractionAttemptResult` (candidates + diagnostics) — no exception-based control flow
 - `CanonicalHashArtifactNames` adds `AgentMemoryCompressedOutput` and `AgentMemoryCandidateOutput`
 - `AgentPromptCanonicalShapeVersions` adds `MemoryCompressionOutput` and `MemoryExtractionOutput`
-- Memory output hash uses `Purpose = SourceIdentity` (not `AuditEvidence`); prompt output evidence defaults to `AuditEvidence`
-- `IAgentPromptHashService.ComputeOutputHash` / `IAgentPromptEvidenceFactory.CreateOutputEvidence` accept optional `artifactKind`, `canonicalShapeVersion`, `purpose` parameters for memory-specific hash semantics
+- Memory output hash uses `Purpose = SourceIdentity` with domain payload (not AuditEvidence)
+- `IAgentPromptHashService.ComputeOutputHash` / `IAgentPromptEvidenceFactory.CreateOutputEvidence` accept optional `artifactKind`, `canonicalShapeVersion`, `purpose` parameters
+- `AgentCompressedContext` and `AgentMemoryCandidate` carry `PromptInputEvidence` + `PromptOutputEvidence` summaries
+- Template/Version/Contract constants in `AgentMemoryLlmContractVersions` (not options) — no over-configurable surface
 - No `IAgentPromptExecutor`, `ModelClient` (non-memory), or `CompletionService` in the project
 - No `DateTimeOffset.UtcNow` in production code
 - No reflection (`Enum.IsDefined`, `GetTypeInfo`, `Assembly.Load`) — AoT/Trim safe
+- AOT: `AgentMemoryLlmJsonSerializerContext` includes `IReadOnlyList<>` variants for all DTO types
 
-**Boundary tests** (2 new):
-- `AgentMemoryLlmRuntime_DoesNotReferenceControlPlaneAuthoringHttpOrPlatform`
-- `AgentMemoryLlm_DoesNotExposePromptExecutorOrCompletionService`
+**Boundary tests** (3):
+- `AgentMemoryAbstractions_DoesNotReferenceControlPlaneAbstractions`
+- `AgentMemoryProjects_DoNotReferenceForbiddenRuntimeOrPlatformLayers`
+- `AgentMemoryLlm_DoesNotReferenceControlPlaneOrPlatform`
 
-**Test counts**: 36 Memory.Llm + 15 Prompting + 50 Authoring + 20 Boundary — all passing. Full solution build 0 errors.
+**Test counts**: 48 Memory.Llm + 15 Prompting + 50 Authoring + 21 Boundary — all passing. Full solution build 0 errors.
 
 ---
 

@@ -132,6 +132,68 @@ public class ExtractionAdapterTests
             d.Code == AgentMemoryLlmDiagnosticCodes.CandidateConfidenceCapped);
     }
 
+    [Fact]
+    public async Task LlmExtractor_ProviderOutputWithoutSourceRefs_FallsBack()
+    {
+        var client = new FakeAgentMemoryLlmModelClient(new AgentMemoryLlmModelResponse
+        {
+            ResponseText = """{"candidates":[{"candidateId":"c1","kind":"ProjectFact","content":"Some content","confidence":"Medium","sourceRefIds":[]}]}"""
+        });
+        var extractor = CreateExtractor(client);
+
+        var result = await extractor.ExtractCandidatesAsync(TestCompressedContext());
+
+        result.Should().NotBeEmpty();
+        result.Should().Contain(c => c.SanitizationDiagnostics.Any(d =>
+            d.Code == AgentMemoryLlmDiagnosticCodes.FallbackToDeterministicExtractor));
+    }
+
+    [Fact]
+    public async Task LlmExtractor_CandidatePreservesAllSourceRefsFromReferencedBlock()
+    {
+        var client = new FakeAgentMemoryLlmModelClient(new AgentMemoryLlmModelResponse
+        {
+            ResponseText = """{"candidates":[{"candidateId":"c1","kind":"ProjectFact","content":"fact from multiple sources","confidence":"Medium","sourceRefIds":["b1"]}]}"""
+        });
+        var extractor = CreateExtractor(client);
+
+        var context = new AgentCompressedContext
+        {
+            ContextId = "ctx-1",
+            TenantId = "tenant-1",
+            Blocks = [
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "b1",
+                    TenantId = "tenant-1",
+                    Content = "content",
+                    CanonicalContentHash = new CanonicalHash
+                    {
+                        Value = "test-hash-2",
+                        Algorithm = "SHA-256",
+                        AlgorithmVersion = "sha256-canonical-json-v1",
+                        ArtifactKind = CanonicalHashArtifactNames.AgentMemoryContent,
+                        Purpose = CanonicalHashPurposeNames.SourceIdentity,
+                        Scope = CanonicalHashScopeNames.InternalFull,
+                        ContractVersion = "memory-hash-v1",
+                        CanonicalShapeVersion = "memory-content-hash-v1"
+                    },
+                    SourceRefs = [
+                        new AgentContextSourceRef { SourceKind = AgentSourceKind.ConversationTurn, TenantId = "tenant-1", SourceId = "turn-1" },
+                        new AgentContextSourceRef { SourceKind = AgentSourceKind.TaskEvent, TenantId = "tenant-1", SourceId = "evt-1" }
+                    ]
+                }
+            ]
+        };
+
+        var result = await extractor.ExtractCandidatesAsync(context);
+
+        result.Should().HaveCount(1);
+        result[0].SourceRefs.Should().HaveCount(2);
+        result[0].SourceRefs.Should().Contain(r => r.SourceId == "turn-1");
+        result[0].SourceRefs.Should().Contain(r => r.SourceId == "evt-1");
+    }
+
     private static LlmAgentMemoryExtractor CreateExtractor(
         IAgentMemoryLlmModelClient client,
         AgentMemoryLlmAdapterOptions? options = null)
@@ -173,5 +235,89 @@ public class ExtractionAdapterTests
                 }
             ]
         };
+    }
+
+    [Fact]
+    public async Task LlmExtractor_PromptOutputEvidence_UsesAuditEvidence()
+    {
+        var client = new FakeAgentMemoryLlmModelClient(new AgentMemoryLlmModelResponse
+        {
+            ResponseText = """{"candidates":[{"candidateId":"c1","kind":"ProjectFact","content":"fact","confidence":"Medium","sourceRefIds":["b1"]}]}"""
+        });
+        var extractor = AgentMemoryLlmTestData.CreateExtractor(client);
+
+        var context = new AgentCompressedContext
+        {
+            ContextId = "ctx-1",
+            TenantId = "tenant-1",
+            Blocks = [
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "b1",
+                    TenantId = "tenant-1",
+                    Content = "compressed content",
+                    CanonicalContentHash = new CanonicalHash
+                    {
+                        Value = "sha256:abc",
+                        Algorithm = "sha256",
+                        AlgorithmVersion = "v1",
+                        ArtifactKind = CanonicalHashArtifactNames.AgentMemoryCompressedOutput,
+                        Scope = CanonicalHashScopeNames.InternalFull,
+                        Purpose = CanonicalHashPurposeNames.SourceIdentity,
+                        ContractVersion = "v1",
+                        CanonicalShapeVersion = "v1"
+                    },
+                    SourceRefs = [new AgentContextSourceRef { SourceKind = AgentSourceKind.ConversationTurn, TenantId = "tenant-1", SourceId = "turn-1" }]
+                }
+            ]
+        };
+
+        var result = await extractor.ExtractCandidatesAsync(context);
+
+        result.Should().ContainSingle();
+        result[0].PromptOutputEvidence.Should().NotBeNull();
+        // Prompt output evidence uses default AuditEvidence purpose
+    }
+
+    [Fact]
+    public async Task LlmExtractor_DomainOutputHash_UsesSourceIdentity()
+    {
+        var client = new FakeAgentMemoryLlmModelClient(new AgentMemoryLlmModelResponse
+        {
+            ResponseText = """{"candidates":[{"candidateId":"c1","kind":"ProjectFact","content":"fact","confidence":"Medium","sourceRefIds":["b1"]}]}"""
+        });
+        var extractor = AgentMemoryLlmTestData.CreateExtractor(client);
+
+        var context = new AgentCompressedContext
+        {
+            ContextId = "ctx-1",
+            TenantId = "tenant-1",
+            Blocks = [
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "b1",
+                    TenantId = "tenant-1",
+                    Content = "compressed content",
+                    CanonicalContentHash = new CanonicalHash
+                    {
+                        Value = "sha256:abc",
+                        Algorithm = "sha256",
+                        AlgorithmVersion = "v1",
+                        ArtifactKind = CanonicalHashArtifactNames.AgentMemoryCompressedOutput,
+                        Scope = CanonicalHashScopeNames.InternalFull,
+                        Purpose = CanonicalHashPurposeNames.SourceIdentity,
+                        ContractVersion = "v1",
+                        CanonicalShapeVersion = "v1"
+                    },
+                    SourceRefs = [new AgentContextSourceRef { SourceKind = AgentSourceKind.ConversationTurn, TenantId = "tenant-1", SourceId = "turn-1" }]
+                }
+            ]
+        };
+
+        var result = await extractor.ExtractCandidatesAsync(context);
+
+        result.Should().ContainSingle();
+        result[0].PromptOutputEvidence.Should().NotBeNull();
+        // Output evidence uses SourceIdentity purpose with AgentMemoryCandidateOutput artifact
     }
 }

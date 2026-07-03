@@ -240,6 +240,7 @@ public sealed record AgentCompressedContext : ISnapshotable<AgentCompressedConte
     public required string TenantId { get; init; }
     public IReadOnlyList<AgentCompressedContextBlock> Blocks { get; init; } = Array.Empty<AgentCompressedContextBlock>();
     public IReadOnlyList<AgentMemoryDiagnostic> Diagnostics { get; init; } = Array.Empty<AgentMemoryDiagnostic>();
+    public AgentPromptInputEvidenceSummary? PromptInputEvidence { get; init; }
     public AgentPromptOutputEvidenceSummary? PromptOutputEvidence { get; init; }
 
     public AgentCompressedContext Snapshot() => this with
@@ -263,6 +264,7 @@ public sealed record AgentMemoryCandidate : ISnapshotable<AgentMemoryCandidate>
     public AgentMemoryStatus Status { get; init; } = AgentMemoryStatus.Candidate;
     public IReadOnlyList<string> RedactionKinds { get; init; } = Array.Empty<string>();
     public IReadOnlyList<AgentMemoryDiagnostic> SanitizationDiagnostics { get; init; } = Array.Empty<AgentMemoryDiagnostic>();
+    public AgentPromptInputEvidenceSummary? PromptInputEvidence { get; init; }
     public AgentPromptOutputEvidenceSummary? PromptOutputEvidence { get; init; }
 
     public AgentMemoryCandidate Snapshot() => this with
