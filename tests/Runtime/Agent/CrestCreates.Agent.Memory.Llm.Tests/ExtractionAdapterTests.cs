@@ -85,6 +85,22 @@ public class ExtractionAdapterTests
     }
 
     [Fact]
+    public async Task LlmExtractor_ProviderFailure_FallbackDisabled_ReturnsEmptyCandidates()
+    {
+        var client = new FakeAgentMemoryLlmModelClient(new AgentMemoryLlmModelResponse
+        {
+            FailureKind = AgentMemoryLlmProviderFailureKind.RateLimited,
+            FailureDetail = "Rate limited"
+        });
+        var options = new AgentMemoryLlmAdapterOptions { EnableDeterministicFallback = false };
+        var extractor = CreateExtractor(client, options);
+
+        var result = await extractor.ExtractCandidatesAsync(TestCompressedContext());
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task LlmExtractor_UnknownKind_DefaultsToProjectFact()
     {
         var client = new FakeAgentMemoryLlmModelClient(new AgentMemoryLlmModelResponse

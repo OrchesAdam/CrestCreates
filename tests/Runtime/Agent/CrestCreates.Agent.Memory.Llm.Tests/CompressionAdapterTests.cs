@@ -108,6 +108,25 @@ public class CompressionAdapterTests
 
         result.Blocks.Should().NotBeEmpty();
         result.Diagnostics.Should().Contain(d => d.Code == AgentMemoryLlmDiagnosticCodes.FallbackToDeterministicCompressor);
+        result.PromptInputEvidence.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task LlmCompressor_ProviderFailure_FallbackDisabled_ReturnsEmptyBlocks()
+    {
+        var client = new FakeAgentMemoryLlmModelClient(new AgentMemoryLlmModelResponse
+        {
+            FailureKind = AgentMemoryLlmProviderFailureKind.ProviderUnavailable,
+            FailureDetail = "No provider available"
+        });
+        var options = new AgentMemoryLlmAdapterOptions { EnableDeterministicFallback = false };
+        var compressor = AgentMemoryLlmTestData.Compressor(client, options);
+
+        var result = await compressor.CompressConversationAsync(
+            AgentMemoryLlmTestData.Conversation("conv-1", "tenant-1", "hello"));
+
+        result.Blocks.Should().BeEmpty();
+        result.PromptInputEvidence.Should().NotBeNull();
     }
 
     [Fact]

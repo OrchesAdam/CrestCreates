@@ -301,7 +301,8 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
                 ContextId = promptInput.TenantId,
                 TenantId = promptInput.TenantId,
                 Blocks = [],
-                Diagnostics = diagnostics.ToArray()
+                Diagnostics = diagnostics.ToArray(),
+                PromptInputEvidence = inputSummary
             };
         }
 

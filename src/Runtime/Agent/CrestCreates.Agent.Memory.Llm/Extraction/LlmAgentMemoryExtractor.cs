@@ -126,7 +126,11 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
             var providerDiagnostics = new List<AgentMemoryDiagnostic>();
             AgentMemoryLlmOutputValidators.AddProviderFailureDiagnostics(modelResponse, providerDiagnostics);
 
-            // Provider failure triggers fallback with provider diagnostics attached
+            if (!_options.EnableDeterministicFallback)
+            {
+                return new ExtractionAttemptResult([], providerDiagnostics);
+            }
+
             var fallbackResult = await _fallback.ExtractCandidatesAsync(context, cancellationToken);
             var fallbackDiagnostic = AgentMemoryLlmDiagnostics.Create(
                 AgentMemoryLlmDiagnosticCodes.FallbackToDeterministicExtractor,
@@ -137,7 +141,8 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
             return new ExtractionAttemptResult(
                 fallbackResult.Select(c => c with
                 {
-                    SanitizationDiagnostics = c.SanitizationDiagnostics.Concat(allDiagnostics).ToArray()
+                    SanitizationDiagnostics = c.SanitizationDiagnostics.Concat(allDiagnostics).ToArray(),
+                    PromptInputEvidence = inputSummary
                 }).ToArray(),
                 allDiagnostics);
         }
