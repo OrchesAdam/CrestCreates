@@ -22,6 +22,7 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
     private readonly IAgentMemoryLlmModelClient _modelClient;
     private readonly IAgentMemoryExtractionOutputParser _parser;
     private readonly IAgentPromptEvidenceFactory _evidenceFactory;
+    private readonly IAgentPromptHashService _hashService;
     private readonly AgentMemoryLlmAdapterOptions _options;
 
     public LlmAgentMemoryExtractor(
@@ -31,6 +32,7 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
         IAgentMemoryLlmModelClient modelClient,
         IAgentMemoryExtractionOutputParser parser,
         IAgentPromptEvidenceFactory evidenceFactory,
+        IAgentPromptHashService hashService,
         AgentMemoryLlmAdapterOptions options)
     {
         _sanitizer = sanitizer;
@@ -39,6 +41,7 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
         _modelClient = modelClient;
         _parser = parser;
         _evidenceFactory = evidenceFactory;
+        _hashService = hashService;
         _options = options;
     }
 
@@ -221,14 +224,36 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
             candidates.Add(candidate);
         }
 
-        // Create output evidence — domain payload with SourceIdentity purpose
+        // Step 1: Prompt output evidence — safe provider projection (AuditEvidence)
         var providerObservation = new AgentPromptProviderObservation
         {
             ProviderName = modelResponse.ProviderName,
             ModelName = modelResponse.ModelName
         };
 
-        var outputEvidence = _evidenceFactory.CreateOutputEvidence(
+        var promptOutputEvidence = _evidenceFactory.CreateOutputEvidence(
+            new AgentPromptEvidenceCreationRequest<AgentMemoryLlmModelResponseEvidenceProjection>
+            {
+                Purpose = AgentPromptPurpose.MemoryExtraction,
+                TemplateId = AgentMemoryLlmContractVersions.ExtractionTemplateId,
+                TemplateVersion = AgentMemoryLlmContractVersions.ExtractionTemplateVersion,
+                ContractVersion = AgentMemoryLlmContractVersions.PromptContractVersion,
+                ModelProfileRef = AgentMemoryLlmContractVersions.DefaultModelProfileRef,
+                ProviderProfileRef = AgentMemoryLlmContractVersions.DefaultProviderProfileRef,
+                Payload = new AgentMemoryLlmModelResponseEvidenceProjection
+                {
+                    ProviderName = modelResponse.ProviderName,
+                    ModelName = modelResponse.ModelName,
+                    PromptInputHash = inputEvidence.InputHash.Value
+                }
+            },
+            inputEvidence.InputHash,
+            providerObservation);
+
+        var promptOutputSummary = AgentPromptEvidenceSummaryFactory.CreateOutputSummary(promptOutputEvidence);
+
+        // Step 2: Domain output hash — canonical candidates (SourceIdentity)
+        var domainOutputHash = _hashService.ComputeOutputHash(
             new AgentPromptEvidenceCreationRequest<IReadOnlyList<AgentMemoryCandidate>>
             {
                 Purpose = AgentPromptPurpose.MemoryExtraction,
@@ -245,14 +270,13 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
             canonicalShapeVersion: AgentPromptCanonicalShapeVersions.MemoryExtractionOutput,
             purpose: CanonicalHashPurposeNames.SourceIdentity);
 
-        var outputSummary = AgentPromptEvidenceSummaryFactory.CreateOutputSummary(outputEvidence);
-
-        // Attach evidence summaries and truncation diagnostics to each candidate
+        // Attach evidence summaries, domain output hash, and truncation diagnostics to each candidate
         return new ExtractionAttemptResult(
             candidates.Select(c => c with
             {
                 PromptInputEvidence = inputSummary,
-                PromptOutputEvidence = outputSummary,
+                PromptOutputEvidence = promptOutputSummary,
+                CanonicalOutputHash = domainOutputHash,
                 SanitizationDiagnostics = c.SanitizationDiagnostics.Concat(truncationDiagnostics).ToArray()
             }).ToArray(),
             []);

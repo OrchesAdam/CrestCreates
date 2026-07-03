@@ -30,6 +30,7 @@ public class CompressionAdapterTests
             client,
             new JsonAgentMemoryCompressionOutputParser(),
             AgentMemoryLlmTestData.DefaultTestEvidenceFactory,
+            AgentMemoryLlmTestData.DefaultTestHashService,
             AgentMemoryLlmTestData.DefaultOptions);
 
         var conversation = AgentMemoryLlmTestData.ConversationWithSecret("raw-secret-token");
@@ -186,11 +187,15 @@ public class CompressionAdapterTests
             AgentMemoryLlmTestData.Conversation("conv-1", "tenant-1", "hello"));
 
         result.PromptOutputEvidence.Should().NotBeNull();
-        // Prompt output evidence uses default AuditEvidence purpose
+        result.PromptOutputEvidence!.OutputHash.Should().NotBeNull();
+        result.PromptOutputEvidence.OutputHash!.Purpose
+            .Should().Be(CanonicalHashPurposeNames.AuditEvidence);
+        result.PromptOutputEvidence.OutputHash.ArtifactKind
+            .Should().Be(CanonicalHashArtifactNames.AgentPromptOutputEvidence);
     }
 
     [Fact]
-    public async Task LlmCompressor_OutputEvidence_UsesSourceIdentity()
+    public async Task LlmCompressor_DomainOutputHash_UsesSourceIdentity()
     {
         var client = new FakeAgentMemoryLlmModelClient(new AgentMemoryLlmModelResponse
         {
@@ -201,7 +206,10 @@ public class CompressionAdapterTests
         var result = await compressor.CompressConversationAsync(
             AgentMemoryLlmTestData.Conversation("conv-1", "tenant-1", "hello"));
 
-        result.PromptOutputEvidence.Should().NotBeNull();
-        // Output evidence uses SourceIdentity purpose with AgentMemoryCompressedOutput artifact
+        result.CanonicalOutputHash.Should().NotBeNull();
+        result.CanonicalOutputHash!.Purpose
+            .Should().Be(CanonicalHashPurposeNames.SourceIdentity);
+        result.CanonicalOutputHash.ArtifactKind
+            .Should().Be(CanonicalHashArtifactNames.AgentMemoryCompressedOutput);
     }
 }

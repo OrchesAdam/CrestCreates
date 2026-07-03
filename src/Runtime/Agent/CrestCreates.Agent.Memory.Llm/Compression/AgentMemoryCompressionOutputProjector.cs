@@ -27,7 +27,12 @@ public sealed class AgentMemoryCompressionOutputProjector : IAgentPromptCanonica
 
             writer.WritePropertyName("sourceRefs");
             writer.WriteStartArray();
-            foreach (var sourceRef in block.SourceRefs.OrderBy(s => s.SourceId, StringComparer.Ordinal))
+            foreach (var sourceRef in block.SourceRefs
+                .OrderBy(s => s.SourceKind.ToString(), StringComparer.Ordinal)
+                .ThenBy(s => s.TenantId, StringComparer.Ordinal)
+                .ThenBy(s => s.SourceId, StringComparer.Ordinal)
+                .ThenBy(s => s.RangeStart ?? 0)
+                .ThenBy(s => s.RangeEnd ?? 0))
             {
                 writer.WriteStartObject();
                 writer.WriteString("sourceKind", sourceRef.SourceKind.ToString());

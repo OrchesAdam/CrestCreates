@@ -25,4 +25,5 @@ namespace CrestCreates.Agent.Memory.Llm.Json;
 [JsonSerializable(typeof(IReadOnlyList<AgentMemoryCandidate>))]
 [JsonSerializable(typeof(IReadOnlyList<AgentMemoryCandidateDto>))]
 [JsonSerializable(typeof(IReadOnlyList<AgentMemoryCompressedBlockDto>))]
+[JsonSerializable(typeof(AgentMemoryLlmModelResponseEvidenceProjection))]
 public sealed partial class AgentMemoryLlmJsonSerializerContext : JsonSerializerContext;

@@ -276,7 +276,11 @@ public class ExtractionAdapterTests
 
         result.Should().ContainSingle();
         result[0].PromptOutputEvidence.Should().NotBeNull();
-        // Prompt output evidence uses default AuditEvidence purpose
+        result[0].PromptOutputEvidence!.OutputHash.Should().NotBeNull();
+        result[0].PromptOutputEvidence.OutputHash!.Purpose
+            .Should().Be(CanonicalHashPurposeNames.AuditEvidence);
+        result[0].PromptOutputEvidence.OutputHash.ArtifactKind
+            .Should().Be(CanonicalHashArtifactNames.AgentPromptOutputEvidence);
     }
 
     [Fact]
@@ -317,7 +321,10 @@ public class ExtractionAdapterTests
         var result = await extractor.ExtractCandidatesAsync(context);
 
         result.Should().ContainSingle();
-        result[0].PromptOutputEvidence.Should().NotBeNull();
-        // Output evidence uses SourceIdentity purpose with AgentMemoryCandidateOutput artifact
+        result[0].CanonicalOutputHash.Should().NotBeNull();
+        result[0].CanonicalOutputHash!.Purpose
+            .Should().Be(CanonicalHashPurposeNames.SourceIdentity);
+        result[0].CanonicalOutputHash.ArtifactKind
+            .Should().Be(CanonicalHashArtifactNames.AgentMemoryCandidateOutput);
     }
 }

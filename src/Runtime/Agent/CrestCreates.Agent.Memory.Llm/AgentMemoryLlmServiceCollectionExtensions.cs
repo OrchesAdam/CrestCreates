@@ -64,6 +64,11 @@ public static class AgentMemoryLlmServiceCollectionExtensions
         services.TryAddSingleton<IAgentPromptCanonicalPayloadProjector<IReadOnlyList<AgentCompressedContextBlock>>>(
             sp => sp.GetRequiredService<AgentMemoryCompressionOutputProjector>());
 
+        // Prompt output evidence projector (shared by compressor and extractor)
+        services.TryAddSingleton<AgentMemoryLlmModelResponseEvidenceProjector>();
+        services.TryAddSingleton<IAgentPromptCanonicalPayloadProjector<AgentMemoryLlmModelResponseEvidenceProjection>>(
+            sp => sp.GetRequiredService<AgentMemoryLlmModelResponseEvidenceProjector>());
+
         // Capture the current IAgentContextCompressor registration as fallback
         var capturedCompressorDescriptor = services.LastOrDefault(sd => sd.ServiceType == typeof(IAgentContextCompressor));
 
@@ -80,6 +85,7 @@ public static class AgentMemoryLlmServiceCollectionExtensions
                 sp.GetRequiredService<IAgentMemoryLlmModelClient>(),
                 sp.GetRequiredService<IAgentMemoryCompressionOutputParser>(),
                 sp.GetRequiredService<IAgentPromptEvidenceFactory>(),
+                sp.GetRequiredService<IAgentPromptHashService>(),
                 sp.GetRequiredService<AgentMemoryLlmAdapterOptions>());
         });
 
@@ -112,6 +118,11 @@ public static class AgentMemoryLlmServiceCollectionExtensions
         services.TryAddSingleton<IAgentPromptCanonicalPayloadProjector<IReadOnlyList<AgentMemoryCandidate>>>(
             sp => sp.GetRequiredService<AgentMemoryExtractionOutputProjector>());
 
+        // Prompt output evidence projector (shared by compressor and extractor)
+        services.TryAddSingleton<AgentMemoryLlmModelResponseEvidenceProjector>();
+        services.TryAddSingleton<IAgentPromptCanonicalPayloadProjector<AgentMemoryLlmModelResponseEvidenceProjection>>(
+            sp => sp.GetRequiredService<AgentMemoryLlmModelResponseEvidenceProjector>());
+
         // Capture the current IAgentMemoryExtractor registration as fallback
         var capturedExtractorDescriptor = services.LastOrDefault(sd => sd.ServiceType == typeof(IAgentMemoryExtractor));
 
@@ -128,6 +139,7 @@ public static class AgentMemoryLlmServiceCollectionExtensions
                 sp.GetRequiredService<IAgentMemoryLlmModelClient>(),
                 sp.GetRequiredService<IAgentMemoryExtractionOutputParser>(),
                 sp.GetRequiredService<IAgentPromptEvidenceFactory>(),
+                sp.GetRequiredService<IAgentPromptHashService>(),
                 sp.GetRequiredService<AgentMemoryLlmAdapterOptions>());
         });
 

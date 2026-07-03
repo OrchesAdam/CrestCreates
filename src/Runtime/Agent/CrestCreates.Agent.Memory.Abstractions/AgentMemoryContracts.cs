@@ -242,6 +242,7 @@ public sealed record AgentCompressedContext : ISnapshotable<AgentCompressedConte
     public IReadOnlyList<AgentMemoryDiagnostic> Diagnostics { get; init; } = Array.Empty<AgentMemoryDiagnostic>();
     public AgentPromptInputEvidenceSummary? PromptInputEvidence { get; init; }
     public AgentPromptOutputEvidenceSummary? PromptOutputEvidence { get; init; }
+    public CanonicalHash? CanonicalOutputHash { get; init; }
 
     public AgentCompressedContext Snapshot() => this with
     {
@@ -266,6 +267,7 @@ public sealed record AgentMemoryCandidate : ISnapshotable<AgentMemoryCandidate>
     public IReadOnlyList<AgentMemoryDiagnostic> SanitizationDiagnostics { get; init; } = Array.Empty<AgentMemoryDiagnostic>();
     public AgentPromptInputEvidenceSummary? PromptInputEvidence { get; init; }
     public AgentPromptOutputEvidenceSummary? PromptOutputEvidence { get; init; }
+    public CanonicalHash? CanonicalOutputHash { get; init; }
 
     public AgentMemoryCandidate Snapshot() => this with
     {
