@@ -42,9 +42,12 @@ public sealed class DefaultAgentPromptEvidenceFactory : IAgentPromptEvidenceFact
     public AgentPromptOutputEvidence<TOutput> CreateOutputEvidence<TOutput>(
         AgentPromptEvidenceCreationRequest<TOutput> request,
         CanonicalHash inputHash,
-        AgentPromptProviderObservation? providerObservation = null)
+        AgentPromptProviderObservation? providerObservation = null,
+        string? artifactKind = null,
+        string? canonicalShapeVersion = null,
+        string? purpose = null)
     {
-        var outputHash = _hashService.ComputeOutputHash(request, inputHash, providerObservation);
+        var outputHash = _hashService.ComputeOutputHash(request, inputHash, providerObservation, artifactKind, canonicalShapeVersion, purpose);
         var now = _timeProvider.GetUtcNow();
 
         var diagnostics = new List<AgentPromptDiagnostic>();

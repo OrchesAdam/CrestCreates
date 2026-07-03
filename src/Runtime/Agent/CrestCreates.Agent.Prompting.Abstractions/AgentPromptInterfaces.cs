@@ -14,7 +14,10 @@ public interface IAgentPromptHashService
     CanonicalHash? ComputeOutputHash<TOutput>(
         AgentPromptEvidenceCreationRequest<TOutput> request,
         CanonicalHash inputHash,
-        AgentPromptProviderObservation? providerObservation);
+        AgentPromptProviderObservation? providerObservation,
+        string? artifactKind = null,
+        string? canonicalShapeVersion = null,
+        string? purpose = null);
 }
 
 public interface IAgentPromptEvidenceFactory
@@ -25,7 +28,10 @@ public interface IAgentPromptEvidenceFactory
     AgentPromptOutputEvidence<TOutput> CreateOutputEvidence<TOutput>(
         AgentPromptEvidenceCreationRequest<TOutput> request,
         CanonicalHash inputHash,
-        AgentPromptProviderObservation? providerObservation = null);
+        AgentPromptProviderObservation? providerObservation = null,
+        string? artifactKind = null,
+        string? canonicalShapeVersion = null,
+        string? purpose = null);
 }
 
 public interface IAgentPromptTemplateRegistry

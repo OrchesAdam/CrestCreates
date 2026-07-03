@@ -938,6 +938,54 @@ Status: Completed.
 
 ---
 
+### Phase 7g+ — LLM-backed Agent Memory Compression and Extraction Adapter (2026-07-02)
+
+**Status**: ✅ Complete
+
+**New projects**:
+- `CrestCreates.Agent.Memory.Llm` — LLM-backed memory compression and extraction runtime (20+ files)
+- `CrestCreates.Agent.Memory.Llm.Tests` — 36 tests
+
+**Memory.Llm project structure**:
+- `Model/` — `AgentMemoryLlmAdapterOptions`, `AgentMemoryLlmModelRequest`, `AgentMemoryLlmModelResponse`, `AgentMemoryLlmProviderFailureKind`
+- `Clients/` — `IAgentMemoryLlmModelClient`, `RecordedAgentMemoryLlmModelClient`, `FakeAgentMemoryLlmModelClient`
+- `Prompting/` — `AgentMemoryCompressionPromptInput`, `AgentMemoryExtractionPromptInput`, `IAgentMemoryCompressionPromptBuilder`, `IAgentMemoryExtractionPromptBuilder`, `DefaultAgentMemoryCompressionPromptBuilder`, `DefaultAgentMemoryExtractionPromptBuilder`
+- `Compression/` — `LlmAgentContextCompressor`, `IAgentMemoryCompressionOutputParser`, `JsonAgentMemoryCompressionOutputParser`, `AgentMemoryCompressionParseResult`, `AgentMemoryCompressedBlockDto`
+- `Extraction/` — `LlmAgentMemoryExtractor`, `IAgentMemoryExtractionOutputParser`, `JsonAgentMemoryExtractionOutputParser`, `AgentMemoryExtractionParseResult`, `AgentMemoryCandidateDto`
+- `Validation/` — `AgentMemoryLlmDiagnosticCodes`, `AgentMemoryLlmDiagnostics`
+- `CanonicalHashing/` — `AgentMemoryCompressionPromptInputProjector`, `AgentMemoryExtractionPromptInputProjector`, `AgentMemoryCompressionOutputProjector`, `AgentMemoryExtractionOutputProjector`, `AgentMemoryLlmModelResponseEvidenceProjection`, `AgentMemoryLlmModelResponseEvidenceProjector`
+- `AgentMemoryLlmServiceCollectionExtensions` — `AddAgentMemoryLlmCompressor()`, `AddAgentMemoryLlmExtractor()`, `AddAgentMemoryLlm()` opt-in DI
+
+**DI registration pattern**:
+- `AddAgentMemoryLlmCompressor()` / `AddAgentMemoryLlmExtractor()` are per-adapter opt-in — each replaces only its own interface
+- `AddAgentMemoryLlm()` is a convenience method that calls both
+- All require `AddAgentMemoryRuntime()` and `AddAgentPrompting()` first
+- LLM adapters inject `IAgentContextCompressor`/`IAgentMemoryExtractor` as fallback (resolved from prior DI registration)
+- `IAgentMemoryLlmModelClient` must be registered separately (no default client)
+- LLM adapters wrap deterministic defaults as fallback
+
+**Key invariants**:
+- LLM extraction always produces `Status = AgentMemoryStatus.Candidate` — never Active/Authoritative from LLM output
+- Unknown `Kind` defaults to `ProjectFact` (safest); unknown `Confidence` defaults to `Unknown`
+- Content is sanitized before prompting and before storage — LLM never sees raw content
+- Provider failure (rate limit, timeout, etc.) triggers fallback to deterministic extractor with diagnostic
+- Parse failure triggers fallback to deterministic extractor with `FallbackToDeterministicExtractor` diagnostic
+- `CanonicalHashArtifactNames` adds `AgentMemoryCompressedOutput` and `AgentMemoryCandidateOutput`
+- `AgentPromptCanonicalShapeVersions` adds `MemoryCompressionOutput` and `MemoryExtractionOutput`
+- Memory output hash uses `Purpose = SourceIdentity` (not `AuditEvidence`); prompt output evidence defaults to `AuditEvidence`
+- `IAgentPromptHashService.ComputeOutputHash` / `IAgentPromptEvidenceFactory.CreateOutputEvidence` accept optional `artifactKind`, `canonicalShapeVersion`, `purpose` parameters for memory-specific hash semantics
+- No `IAgentPromptExecutor`, `ModelClient` (non-memory), or `CompletionService` in the project
+- No `DateTimeOffset.UtcNow` in production code
+- No reflection (`Enum.IsDefined`, `GetTypeInfo`, `Assembly.Load`) — AoT/Trim safe
+
+**Boundary tests** (2 new):
+- `AgentMemoryLlmRuntime_DoesNotReferenceControlPlaneAuthoringHttpOrPlatform`
+- `AgentMemoryLlm_DoesNotExposePromptExecutorOrCompletionService`
+
+**Test counts**: 36 Memory.Llm + 15 Prompting + 50 Authoring + 20 Boundary — all passing. Full solution build 0 errors.
+
+---
+
 ## Recommended Next Thread Entry Prompt
 
 If a future thread should resume from this state, use a prompt like:

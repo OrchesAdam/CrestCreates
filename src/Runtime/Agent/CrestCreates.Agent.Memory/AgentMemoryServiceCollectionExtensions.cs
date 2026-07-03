@@ -40,10 +40,14 @@ public static class AgentMemoryServiceCollectionExtensions
 
         // Sanitization & Compression
         services.TryAddSingleton<IAgentMemoryContentSanitizer, DefaultAgentMemoryContentSanitizer>();
-        services.TryAddSingleton<IAgentContextCompressor, DefaultAgentContextCompressor>();
+        services.TryAddSingleton<DefaultAgentContextCompressor>();
+        services.TryAddSingleton<IAgentContextCompressor>(sp =>
+            sp.GetRequiredService<DefaultAgentContextCompressor>());
 
         // Extraction & Promotion
-        services.TryAddSingleton<IAgentMemoryExtractor, DefaultAgentMemoryExtractor>();
+        services.TryAddSingleton<DefaultAgentMemoryExtractor>();
+        services.TryAddSingleton<IAgentMemoryExtractor>(sp =>
+            sp.GetRequiredService<DefaultAgentMemoryExtractor>());
         services.TryAddSingleton<IAgentMemoryPromotionService, DefaultAgentMemoryPromotionService>();
 
         // Recall & Expansion

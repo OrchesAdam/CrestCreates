@@ -8,4 +8,6 @@ public static class AgentPromptCanonicalShapeVersions
 {
     public const string InputEvidence = "agent-prompt-input-evidence-shape-v1";
     public const string OutputEvidence = "agent-prompt-output-evidence-shape-v1";
+    public const string MemoryCompressionOutput = "agent-memory-compression-output-shape-v1";
+    public const string MemoryExtractionOutput = "agent-memory-extraction-output-shape-v1";
 }

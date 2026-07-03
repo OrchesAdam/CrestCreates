@@ -61,7 +61,10 @@ public sealed class DefaultAgentPromptHashService : IAgentPromptHashService
     public CanonicalHash? ComputeOutputHash<TOutput>(
         AgentPromptEvidenceCreationRequest<TOutput> request,
         CanonicalHash inputHash,
-        AgentPromptProviderObservation? providerObservation)
+        AgentPromptProviderObservation? providerObservation,
+        string? artifactKind = null,
+        string? canonicalShapeVersion = null,
+        string? purpose = null)
     {
         var projector = _serviceProvider.GetService<IAgentPromptCanonicalPayloadProjector<TOutput>>();
         if (projector is null)
@@ -69,15 +72,19 @@ public sealed class DefaultAgentPromptHashService : IAgentPromptHashService
             return null;
         }
 
+        var effectiveArtifactKind = artifactKind ?? CanonicalHashArtifactNames.AgentPromptOutputEvidence;
+        var effectiveShapeVersion = canonicalShapeVersion ?? AgentPromptCanonicalShapeVersions.OutputEvidence;
+        var effectivePurpose = purpose ?? CanonicalHashPurposeNames.AuditEvidence;
+
         var projection = CanonicalHashProjectionResult.Create(
             new CanonicalHashMetadata
             {
-                ArtifactKind = CanonicalHashArtifactNames.AgentPromptOutputEvidence,
-                Purpose = CanonicalHashPurposeNames.AuditEvidence,
+                ArtifactKind = effectiveArtifactKind,
+                Purpose = effectivePurpose,
                 Scope = CanonicalHashScopeNames.InternalFull,
                 AlgorithmVersion = DefaultCanonicalHashComputer.AlgorithmVersion,
                 ContractVersion = CanonicalHashContractVersions.DescriptorHash,
-                CanonicalShapeVersion = AgentPromptCanonicalShapeVersions.OutputEvidence
+                CanonicalShapeVersion = effectiveShapeVersion
             },
             writer =>
             {
