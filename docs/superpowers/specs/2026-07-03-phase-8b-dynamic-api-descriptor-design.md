@@ -139,7 +139,7 @@ public sealed class CapabilityEndpointDescriptor : IDescriptor, IVersionedDescri
     public DescriptorState State { get; init; } = DescriptorState.Active;
     public string? SupersededById { get; init; }
 
-    public VersionedDescriptorRef<CapabilityDescriptor> Capability { get; init; }
+    public required VersionedDescriptorRef<CapabilityDescriptor> Capability { get; init; }
 
     public CapabilityEndpointHttpMethod HttpMethod { get; init; }
     public string RoutePattern { get; init; } = string.Empty;
@@ -157,6 +157,10 @@ public sealed class CapabilityEndpointDescriptor : IDescriptor, IVersionedDescri
 
 Important constraints:
 
+- `Capability` is required where the project language level allows `required`.
+  If a target context cannot use `required`, validation must reject the default
+  `VersionedDescriptorRef<CapabilityDescriptor>` value by checking for empty
+  `Id` and a non-positive `Version`.
 - No endpoint-level `InputSchema`.
 - No endpoint-level `OutputSchema`.
 - No endpoint-level `Permissions`.
@@ -193,6 +197,9 @@ public enum CapabilityEndpointAuthorizationMode
 
 > AllowAnonymous is a projection request, not an authority override.
 > Validation must reject it when it weakens the referenced Capability.
+
+At minimum, `AllowAnonymous` must fail when the referenced capability has
+permissions or high-risk semantics.
 
 Parameter source:
 
@@ -264,6 +271,16 @@ descriptor top level:
 - `InputBindings`
 - `OutputMapping`
 
+Route convention decision:
+
+- `RoutePattern` is a normalized external HTTP path and must start with `/`.
+- This is intentionally stricter than existing generated Dynamic API internals
+  such as `RoutePrefix` / `RelativeRoute`, which may use `"api"`-style
+  fragments.
+- Future runtime binding may translate descriptor route patterns into the
+  runtime route registration shape, but Phase 8b stores the normalized metadata
+  form only.
+
 ## 7. Provider and Registry
 
 Add provider contract:
@@ -275,7 +292,7 @@ public interface ICapabilityEndpointDescriptorProvider
 }
 ```
 
-Add a registry only if implementation needs typed lookup during this phase:
+Add a registry as the default Phase 8b integration path:
 
 ```csharp
 public interface ICapabilityEndpointRegistry
@@ -287,7 +304,7 @@ public interface ICapabilityEndpointRegistry
 }
 ```
 
-Registry behavior, if added:
+Registry behavior:
 
 - Build from `ICapabilityEndpointDescriptorProvider`.
 - Inherit the existing `RegistryBase<TDescriptor>` pattern.
@@ -295,10 +312,13 @@ Registry behavior, if added:
 - Do not map endpoints.
 - Do not execute capabilities.
 - Do not query service methods.
+- Provide capability-based lookup for diagnostics, tooling, and future exposure
+  projection phases.
 
-Implementation may defer registry creation if relationship tests and topology
-tests use caller-provided descriptor inventories directly. The topology builder
-already supports this pattern.
+Provider-only integration is acceptable only if implementing
+`CapabilityEndpointRegistry` expands this phase beyond the existing
+`RegistryBase<TDescriptor>` pattern. Such a deviation must be explicit in the
+implementation plan.
 
 ## 8. Relationship Coverage
 
@@ -366,15 +386,16 @@ Validation rules:
 
 1. `Id`, `Name`, and `RoutePattern` must be non-empty.
 2. `Version` must be greater than zero.
-3. `Capability.Id` must be non-empty and `Capability.Version` must be greater
-   than zero.
+3. `Capability` must not be the default
+   `VersionedDescriptorRef<CapabilityDescriptor>` value. `Capability.Id` must
+   be non-empty and `Capability.Version` must be greater than zero.
 4. The referenced `CapabilityDescriptor` must exist when a capability registry
    is available to the validator.
 5. `AllowAnonymous` must be rejected when it weakens the referenced capability.
-   At minimum, reject it when the referenced capability has one or more
-   permissions.
-6. `RoutePattern` must start with `/` or follow the project's selected Dynamic
-   API route convention consistently. Pick one convention and test it.
+   Reject it when the referenced capability has one or more permissions or when
+   the referenced capability has high-risk semantics, such as
+   `CapabilityRiskLevel.High` or stronger.
+6. `RoutePattern` must start with `/`.
 7. Route tokens in `RoutePattern` must have matching route input bindings.
 8. Route input bindings must refer to route tokens present in `RoutePattern`.
 9. Body input binding count must not exceed one.
@@ -406,10 +427,16 @@ Contract hash fields:
 - `AuthorizationMode`
 - `InputBindings`
 - `OutputMapping`
+- `Projection.OperationId`
 
 Definition-only fields:
 
-- `Projection`
+- `Projection.GroupName`
+- `Projection.Tags`
+- `Projection.Summary`
+- `Projection.Description`
+- `Projection.Deprecated`
+- `Projection.Visibility`
 
 Excluded fields:
 
@@ -423,9 +450,15 @@ dynamic-api-endpoint-contract-hash-v1
 dynamic-api-endpoint-definition-hash-v1
 ```
 
+`Projection.OperationId` is treated as contract hash material because it is a
+stable external operation identity. Changing it can break generated clients,
+OpenAPI consumers, audit correlation, and external automation.
+
 The canonical hash profile must use explicit value profiles for nested record
-types if the generator requires them. Do not rely on reflection-based JSON
-serialization.
+types if the generator requires them. The `CapabilityEndpointProjectionMetadata`
+value profile must classify `OperationId` as contract and classify the remaining
+projection display/governance fields as definition-only. Do not rely on
+reflection-based JSON serialization.
 
 ## 11. Control Plane and Descriptor Kind Impact
 
@@ -497,16 +530,20 @@ Validation tests:
 
 - Missing route fails.
 - Missing capability ref fails.
+- Default `VersionedDescriptorRef<CapabilityDescriptor>` fails.
 - `AllowAnonymous` with capability permissions fails.
+- `AllowAnonymous` with high-risk capability fails.
 - One body binding is accepted.
 - Two body bindings fail.
 - Route token without matching binding fails.
 - Route binding without route token fails.
+- Route pattern without leading `/` fails.
 
 Hash tests:
 
 - Changing route pattern changes contract hash.
 - Changing referenced capability version changes contract hash.
+- Changing projection operation id changes contract hash.
 - Changing projection summary changes definition hash but not contract hash.
 
 Control-plane kind tests:
@@ -537,7 +574,10 @@ Phase 8b is complete when:
    referenced capabilities.
 7. Stable hash computation supports endpoint descriptors.
 8. Validation prevents endpoint metadata from weakening capability authority.
-9. Dynamic API runtime execution and endpoint binding remain untouched.
+9. `CapabilityEndpointRegistry` follows the existing `RegistryBase<TDescriptor>`
+   pattern unless explicitly deferred in the implementation plan due to phase
+   expansion.
+10. Dynamic API runtime execution and endpoint binding remain untouched.
 
 ## 15. Out of Scope
 
@@ -562,12 +602,13 @@ Recommended implementation order:
 
 1. Add descriptor kind and canonical kind name.
 2. Refine `CapabilityEndpointDescriptor` and supporting metadata types.
-3. Add relationship extractor and tests.
-4. Add canonical hash profiles and hash tests.
-5. Add validation.
-6. Add topology tests.
-7. Update control-plane descriptor kind validation.
-8. Add DI registration for the relationship extractor.
+3. Add `ICapabilityEndpointDescriptorProvider` and `CapabilityEndpointRegistry`.
+4. Add relationship extractor and tests.
+5. Add canonical hash profiles and hash tests.
+6. Add validation.
+7. Add topology tests.
+8. Update control-plane descriptor kind validation.
+9. Add DI registration for the registry and relationship extractor.
 
 Do not start from route binding or generated endpoint code. This phase is a
 metadata projection phase.
