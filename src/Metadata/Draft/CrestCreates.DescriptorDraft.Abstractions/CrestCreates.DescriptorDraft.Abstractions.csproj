@@ -9,12 +9,6 @@
     <InternalsVisibleTo Include="CrestCreates.DescriptorDraft" />
     <InternalsVisibleTo Include="CrestCreates.DescriptorDraft.Tests" />
     <ProjectReference Include="../../CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
-    <ProjectReference Include="../../CrestCreates.Schema.Abstractions/CrestCreates.Schema.Abstractions.csproj" />
-    <ProjectReference Include="../../../Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
-    <ProjectReference Include="../../../Framework/Modules/CrestCreates.Form.Abstractions/CrestCreates.Form.Abstractions.csproj" />
-    <ProjectReference Include="../../../Runtime/Eventing/CrestCreates.Event.Abstractions/CrestCreates.Event.Abstractions.csproj" />
-    <ProjectReference Include="../../../Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
-    <ProjectReference Include="../../../Runtime/Workflow/CrestCreates.Workflow.Abstractions/CrestCreates.Workflow.Abstractions.csproj" />
     <ProjectReference Include="..\..\CrestCreates.Snapshot.Abstractions\CrestCreates.Snapshot.Abstractions.csproj" />
   </ItemGroup>
 </Project>

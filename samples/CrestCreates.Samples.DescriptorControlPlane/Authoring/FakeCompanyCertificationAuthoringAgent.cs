@@ -1,5 +1,6 @@
 using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;

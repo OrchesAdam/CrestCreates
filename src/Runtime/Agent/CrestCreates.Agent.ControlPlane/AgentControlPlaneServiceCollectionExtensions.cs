@@ -11,11 +11,11 @@ namespace CrestCreates.Agent.ControlPlane;
 public static class AgentControlPlaneServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers Agent Control Plane services with production-safe default authorization.
-    /// Read-only/context tools are allowed by default; mutating and activation handoff
-    /// tools require explicit permission grants via <see cref="AgentToolAuthorizationOptions"/>.
-    /// For development/testing, use <see cref="AddAgentControlPlane(IServiceCollection, AgentToolAuthorizationOptions)"/>
-    /// with <see cref="AgentToolAuthorizationOptions.DevelopmentDefaults"/>.
+    /// Registers Agent Control Plane core services. Read-only/context tools are allowed by
+    /// default; mutating and activation handoff tools require explicit permission grants via
+    /// <see cref="AgentToolAuthorizationOptions"/>. InMemory stubs are NOT included — call
+    /// <see cref="AddAgentControlPlaneInMemoryStubs"/> for development/testing, or register
+    /// real implementations for production.
     /// </summary>
     public static IServiceCollection AddAgentControlPlane(this IServiceCollection services)
     {
@@ -24,16 +24,12 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton(options);
         services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
             new DefaultAgentToolAuthorizationService(options));
-        services.TryAddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
         services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
         services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
-        services.TryAddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
         services.TryAddSingleton<ActivationBindingHashValidator>();
         services.TryAddSingleton<IDescriptorActivationPolicyProvider, DefaultDescriptorActivationPolicyProvider>();
-        services.TryAddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
-        services.TryAddSingleton<IRuntimeActivationGate, InMemoryRuntimeActivationGate>();
         services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
         services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
         services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
@@ -44,7 +40,9 @@ public static class AgentControlPlaneServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers Agent Control Plane services with the specified authorization options.
+    /// Registers Agent Control Plane core services with the specified authorization options.
+    /// InMemory stubs are NOT included — call <see cref="AddAgentControlPlaneInMemoryStubs"/>
+    /// for development/testing, or register real implementations for production.
     /// </summary>
     public static IServiceCollection AddAgentControlPlane(
         this IServiceCollection services,
@@ -54,16 +52,12 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton(options);
         services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
             new DefaultAgentToolAuthorizationService(options));
-        services.TryAddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
         services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
         services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
-        services.TryAddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
         services.TryAddSingleton<ActivationBindingHashValidator>();
         services.TryAddSingleton<IDescriptorActivationPolicyProvider, DefaultDescriptorActivationPolicyProvider>();
-        services.TryAddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
-        services.TryAddSingleton<IRuntimeActivationGate, InMemoryRuntimeActivationGate>();
         services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
         services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
         services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
@@ -79,6 +73,8 @@ public static class AgentControlPlaneServiceCollectionExtensions
     /// The converted options are registered as the single policy truth source for both
     /// the coarse authorization service and the descriptor kind visibility scope.
     /// Prefer using <see cref="AddAgentControlPlane(IServiceCollection, AgentToolAuthorizationOptions)"/> for new code.
+    /// InMemory stubs are NOT included — call <see cref="AddAgentControlPlaneInMemoryStubs"/>
+    /// for development/testing, or register real implementations for production.
     /// </summary>
     public static IServiceCollection AddAgentControlPlane(
         this IServiceCollection services,
@@ -92,22 +88,38 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton(options);
         services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
             new DefaultAgentToolAuthorizationService(options));
-        services.TryAddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
         services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
         services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
-        services.TryAddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
         services.TryAddSingleton<ActivationBindingHashValidator>();
         services.TryAddSingleton<IDescriptorActivationPolicyProvider, DefaultDescriptorActivationPolicyProvider>();
-        services.TryAddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
-        services.TryAddSingleton<IRuntimeActivationGate, InMemoryRuntimeActivationGate>();
         services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
         services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
         services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
         services.TryAddSingleton<ILocalEventHandler<HumanTaskCompletedEvent>, DescriptorActivationReviewHumanTaskEventHandler>();
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
+        return services;
+    }
+
+    /// <summary>
+    /// Registers InMemory stub implementations for services that require persistent storage
+    /// in production. These stubs are suitable for development and testing only — data is
+    /// lost on process restart and the activation gate does not perform real runtime activation.
+    /// </summary>
+    /// <remarks>
+    /// Call this after <see cref="AddAgentControlPlane"/> to override the default stubs
+    /// with InMemory implementations. Production deployments should register real implementations
+    /// for <see cref="IAgentToolInvocationAuditor"/>, <see cref="IActivationBindingArtifactResolver"/>,
+    /// <see cref="IDescriptorActivationAuditor"/>, and <see cref="IRuntimeActivationGate"/>.
+    /// </remarks>
+    public static IServiceCollection AddAgentControlPlaneInMemoryStubs(this IServiceCollection services)
+    {
+        services.TryAddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
+        services.TryAddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
+        services.TryAddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
+        services.TryAddSingleton<IRuntimeActivationGate, InMemoryRuntimeActivationGate>();
         return services;
     }
 

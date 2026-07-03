@@ -1,12 +1,11 @@
+using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 
-namespace CrestCreates.DescriptorDraft.Abstractions;
+namespace CrestCreates.DescriptorDraft;
 
 /// <summary>
 /// Carries a proposed Capability descriptor.
-/// The descriptor type is hosted in the capability abstraction assembly so this
-/// payload stays on the abstraction side of the boundary.
 /// </summary>
 public sealed record CapabilityDescriptorDraftPayload(
     CapabilityDescriptor Descriptor

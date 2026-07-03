@@ -1,8 +1,21 @@
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
+using CrestCreates.Metadata.Abstractions;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.Agent.ControlPlane.Activation;
+
+/// <summary>
+/// Options for <see cref="InMemoryRuntimeActivationGate"/>.
+/// </summary>
+public sealed record InMemoryRuntimeActivationGateOptions
+{
+    /// <summary>
+    /// When true, the gate rejects all activation requests.
+    /// For testing rejection paths only.
+    /// </summary>
+    public bool RejectAll { get; init; }
+}
 
 /// <summary>
 /// In-memory runtime activation gate for Phase 7e.
@@ -13,20 +26,17 @@ public sealed class InMemoryRuntimeActivationGate : IRuntimeActivationGate
 {
     private readonly ILogger<InMemoryRuntimeActivationGate> _logger;
     private readonly ActivationBindingHashValidator _bindingHashValidator;
+    private readonly InMemoryRuntimeActivationGateOptions _options;
 
     public InMemoryRuntimeActivationGate(
         ILogger<InMemoryRuntimeActivationGate> logger,
-        ActivationBindingHashValidator bindingHashValidator)
+        ActivationBindingHashValidator bindingHashValidator,
+        InMemoryRuntimeActivationGateOptions? options = null)
     {
         _logger = logger;
         _bindingHashValidator = bindingHashValidator;
+        _options = options ?? new InMemoryRuntimeActivationGateOptions();
     }
-
-    /// <summary>
-    /// When true, the gate rejects all activation requests.
-    /// For testing rejection paths only.
-    /// </summary>
-    public bool CanReject { get; set; }
 
     public Task<AgentToolResult<RuntimeActivationGateResult>> ActivateAsync(
         AgentToolInvocationContext context, ActivationRequest request, CancellationToken ct = default)
@@ -54,10 +64,10 @@ public sealed class InMemoryRuntimeActivationGate : IRuntimeActivationGate
             }
         }
 
-        if (CanReject)
+        if (_options.RejectAll)
         {
             _logger.LogInformation(
-                "In-memory activation gate: REJECTING activation for draft {DraftId}, request {RequestId} (CanReject=true)",
+                "In-memory activation gate: REJECTING activation for draft {DraftId}, request {RequestId} (RejectAll=true)",
                 request.DraftId, request.RequestId);
 
             return Task.FromResult(
@@ -66,7 +76,7 @@ public sealed class InMemoryRuntimeActivationGate : IRuntimeActivationGate
                     {
                         Code = AgentToolDiagnosticCodes.RuntimeActivationGateRejected,
                         Severity = SeverityLevel.Error,
-                        Message = "In-memory gate rejection (CanReject=true)."
+                        Message = "In-memory gate rejection (RejectAll=true)."
                     }]));
         }
 
@@ -76,7 +86,7 @@ public sealed class InMemoryRuntimeActivationGate : IRuntimeActivationGate
 
         var result = new RuntimeActivationGateResult
         {
-            ActivatedDescriptorRef = $"activated:{request.DraftId}",
+            ActivatedDescriptorRef = new DescriptorRef("in-memory", request.DraftId).FullId,
             DraftId = request.DraftId,
             TenantId = request.TenantId,
             ActivatedAt = DateTimeOffset.UtcNow

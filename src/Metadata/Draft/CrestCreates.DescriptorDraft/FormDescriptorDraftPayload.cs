@@ -1,7 +1,8 @@
+using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 
-namespace CrestCreates.DescriptorDraft.Abstractions;
+namespace CrestCreates.DescriptorDraft;
 
 public sealed record FormDescriptorDraftPayload(
     FormDescriptor Descriptor

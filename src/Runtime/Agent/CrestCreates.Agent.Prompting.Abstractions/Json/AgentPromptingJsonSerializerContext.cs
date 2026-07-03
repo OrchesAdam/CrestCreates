@@ -13,4 +13,10 @@ namespace CrestCreates.Agent.Prompting.Abstractions.Json;
 [JsonSerializable(typeof(AgentPromptDiagnostic))]
 [JsonSerializable(typeof(AgentPromptPurpose))]
 [JsonSerializable(typeof(CanonicalHash))]
+[JsonSerializable(typeof(AgentPromptContractVersion))]
+[JsonSerializable(typeof(AgentPromptModelProfileRef))]
+[JsonSerializable(typeof(AgentPromptProviderProfileRef))]
+[JsonSerializable(typeof(AgentPromptTemplateDescriptor))]
+[JsonSerializable(typeof(AgentPromptTemplateId))]
+[JsonSerializable(typeof(AgentPromptVersion))]
 public sealed partial class AgentPromptingJsonSerializerContext : JsonSerializerContext;

@@ -18,6 +18,7 @@
     <ProjectReference Include="..\..\..\..\src\Framework\Modules\CrestCreates.Form.Abstractions\CrestCreates.Form.Abstractions.csproj" />
     <ProjectReference Include="..\..\..\..\src\Metadata\CrestCreates.Schema.Abstractions\CrestCreates.Schema.Abstractions.csproj" />
     <ProjectReference Include="..\..\..\..\src\Metadata\Draft\CrestCreates.DescriptorDraft.Abstractions\CrestCreates.DescriptorDraft.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
     <ProjectReference Include="..\..\..\..\src\Metadata\CrestCreates.Metadata.Abstractions\CrestCreates.Metadata.Abstractions.csproj" />
   </ItemGroup>
   <ItemGroup>

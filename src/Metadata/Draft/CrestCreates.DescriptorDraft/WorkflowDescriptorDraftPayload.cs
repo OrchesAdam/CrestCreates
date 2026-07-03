@@ -1,7 +1,8 @@
+using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 
-namespace CrestCreates.DescriptorDraft.Abstractions;
+namespace CrestCreates.DescriptorDraft;
 
 public sealed record WorkflowDescriptorDraftPayload(
     WorkflowDescriptor Descriptor

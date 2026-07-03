@@ -1486,8 +1486,10 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
                 Drifts = Array.Empty<ActivationEvidenceDrift>()
             });
 
-        var gate = new InMemoryRuntimeActivationGate(NullLogger<InMemoryRuntimeActivationGate>.Instance, new ActivationBindingHashValidator());
-        gate.CanReject = true;
+        var gate = new InMemoryRuntimeActivationGate(
+            NullLogger<InMemoryRuntimeActivationGate>.Instance,
+            new ActivationBindingHashValidator(),
+            new InMemoryRuntimeActivationGateOptions { RejectAll = true });
 
         var service = new DefaultDescriptorActivationRequestService(
             policyMock.Object,

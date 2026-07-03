@@ -268,6 +268,56 @@ public class DependencyBoundaryTests
         Assert.True(forbidden.Length == 0, "Prompting must not expose executor/model client/completion service interfaces." + Environment.NewLine + string.Join(Environment.NewLine, forbidden));
     }
 
+    [Fact]
+    public void DescriptorDraftAbstractions_DoesNotReferenceRuntimeOrFramework()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions",
+            "DescriptorDraft.Abstractions must remain draft model contracts only — no Runtime, Framework, or Platform.",
+            new[] { "src/Runtime", "src/Framework", "src/Platform" });
+    }
+
+    [Fact]
+    public void DescriptorDraft_DoesNotReferenceFrameworkApiWebOrPlatform()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Metadata/Draft/CrestCreates.DescriptorDraft",
+            "DescriptorDraft implementation may reference Runtime abstractions but must not reference Framework Api/Web or Platform.",
+            new[]
+            {
+                "src/Framework/Api",
+                "src/Framework/Web",
+                "src/Platform"
+            });
+    }
+
+    [Fact]
+    public void MetadataDraftProjects_DoNotReferencePlatform()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Metadata/Draft",
+            "Metadata Draft projects must not reference Platform.",
+            new[] { "src/Platform" });
+    }
+
+    [Fact]
+    public void MetadataContextPackProjects_DoNotReferenceRuntimeOrFrameworkOrPlatform()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Metadata/CrestCreates.Metadata.ContextPack",
+            "ContextPack projects must remain metadata-only — no Runtime, Framework, or Platform.",
+            new[] { "src/Runtime", "src/Framework", "src/Platform" });
+    }
+
+    [Fact]
+    public void MetadataSnapshotProjects_DoNotReferenceRuntimeOrFrameworkOrPlatform()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Metadata/CrestCreates.Snapshot.Abstractions",
+            "Snapshot.Abstractions must remain snapshot contracts only — no Runtime, Framework, or Platform.",
+            new[] { "src/Runtime", "src/Framework", "src/Platform" });
+    }
+
     private static void AssertNoDirectProjectReferences(
         string projectRootRelativePath,
         string reason,

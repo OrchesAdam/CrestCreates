@@ -1,5 +1,6 @@
 using CrestCreates.Agent.DraftContracts.Dto;
 using CrestCreates.Agent.DraftContracts.Projection;
+using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;

@@ -9,6 +9,7 @@ using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
 using CrestCreates.Agent.DraftContracts.Dto;
+using CrestCreates.DescriptorDraft;
 using AgentDraftContractErrorCodes = CrestCreates.Agent.DraftContracts.Dto.AgentDraftContractErrorCodes;
 
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
@@ -528,7 +529,7 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
                 ChangedFields = global::CrestCreates.Agent.DraftContracts.Dto.AgentCapabilityDraftChangedField.Name
             }
         };
-        var existing = new DraftAbstractions.WorkflowDescriptorDraftPayload(new WorkflowDescriptor { Name = "existing" });
+        var existing = new WorkflowDescriptorDraftPayload(new WorkflowDescriptor { Name = "existing" });
         var result = AgentDraftPayloadProjection.Merge(patch, existing);
         result.IsSuccess.Should().BeFalse();
         result.Errors.Should().Contain(e => e.Code == AgentDraftContractErrorCodes.DiscriminatorMismatch);
@@ -542,7 +543,7 @@ public class Wave2DraftTests : AgentControlPlaneTestBase
             Discriminator = DescriptorKind.Workflow,
             // Workflow patch is null
         };
-        var existing = new DraftAbstractions.WorkflowDescriptorDraftPayload(new WorkflowDescriptor { Name = "existing" });
+        var existing = new WorkflowDescriptorDraftPayload(new WorkflowDescriptor { Name = "existing" });
         var result = AgentDraftPayloadProjection.Merge(patch, existing);
         result.IsSuccess.Should().BeFalse();
         result.Errors.Should().Contain(e => e.Code == AgentDraftContractErrorCodes.DiscriminatorMismatch);

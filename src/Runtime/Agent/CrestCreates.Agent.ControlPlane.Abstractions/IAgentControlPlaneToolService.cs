@@ -5,11 +5,10 @@ using CrestCreates.Metadata.ContextPack.Abstractions;
 namespace CrestCreates.Agent.ControlPlane.Abstractions;
 
 /// <summary>
-/// The main Control Plane tool surface facade.
-/// Every method enforces permission boundary, audit recording,
-/// and runtime mutation boundary invariants.
+/// Read-only Control Plane tools — context building, descriptor lookup, search, relationships, topology.
+/// Aligned with <see cref="AgentToolAuthorizationMode"/>'s read-only tier.
 /// </summary>
-public interface IAgentControlPlaneToolService
+public interface IReadOnlyControlPlaneTools
 {
     // ── Wave 1 — Context / Read ──
 
@@ -41,7 +40,14 @@ public interface IAgentControlPlaneToolService
     Task<AgentToolResult<TopologySummaryResult>> GetTopologySummaryAsync(
         AgentToolInvocationContext context,
         CancellationToken ct = default);
+}
 
+/// <summary>
+/// Mutation Control Plane tools — draft CRUD, review, fix proposals, package previews.
+/// Aligned with <see cref="AgentToolAuthorizationMode"/>'s mutation tier.
+/// </summary>
+public interface IMutationControlPlaneTools
+{
     // ── Wave 2 — Draft ──
 
     Task<AgentToolResult<AgentDescriptorDraftDto>> CreateDescriptorDraftAsync(
@@ -157,7 +163,14 @@ public interface IAgentControlPlaneToolService
         AgentToolInvocationContext context,
         string previewId,
         CancellationToken ct = default);
+}
 
+/// <summary>
+/// Activation handoff Control Plane tools — submit, query, cancel activation requests.
+/// Aligned with <see cref="AgentToolAuthorizationMode"/>'s activation handoff tier.
+/// </summary>
+public interface IActivationControlPlaneTools
+{
     // ── Wave 6 — Activation Handoff ──
 
     Task<AgentToolResult<ActivationRequest>> SubmitActivationRequestAsync(
@@ -174,4 +187,18 @@ public interface IAgentControlPlaneToolService
         AgentToolInvocationContext context,
         string requestId,
         CancellationToken ct = default);
+}
+
+/// <summary>
+/// The main Control Plane tool surface facade.
+/// Composes read, mutation, and activation sub-interfaces aligned with the
+/// three-tier authorization model.
+/// Every method enforces permission boundary, audit recording,
+/// and runtime mutation boundary invariants.
+/// </summary>
+public interface IAgentControlPlaneToolService
+    : IReadOnlyControlPlaneTools,
+      IMutationControlPlaneTools,
+      IActivationControlPlaneTools
+{
 }

@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.Agent.Authoring.Json;
 using CrestCreates.Core.Abstractions.Identity;
+using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
