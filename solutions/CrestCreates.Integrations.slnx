@@ -29,4 +29,10 @@
   <Folder Name="/tests/Boundary/">
     <Project Path="../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/CrestCreates.DependencyBoundaries.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/Framework/Modules/">
+    <Project Path="../tests/Framework/Modules/CrestCreates.Scheduling.IntegrationTests/CrestCreates.Scheduling.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Framework/Web/">
+    <Project Path="../tests/Framework/Web/CrestCreates.IntegrationTests/CrestCreates.IntegrationTests.csproj" />
+  </Folder>
 </Solution>

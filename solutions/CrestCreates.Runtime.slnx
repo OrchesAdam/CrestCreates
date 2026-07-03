@@ -32,9 +32,22 @@
     <Project Path="../src/Metadata/CrestCreates.Schema/CrestCreates.Schema.csproj" />
     <Project Path="../src/Metadata/CrestCreates.Snapshot.Abstractions/CrestCreates.Snapshot.Abstractions.csproj" />
     <Project Path="../src/Metadata/CrestCreates.Snapshot/CrestCreates.Snapshot.csproj" />
+    <Project Path="../src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj" />
+    <Project Path="../src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
   </Folder>
   <Folder Name="/src/Runtime/">
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Abstractions/CrestCreates.Agent.Abstractions.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Authoring.Abstractions/CrestCreates.Agent.Authoring.Abstractions.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Authoring/CrestCreates.Agent.Authoring.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Authoring.Http/CrestCreates.Agent.Authoring.Http.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.DraftContracts/CrestCreates.Agent.DraftContracts.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Memory.Abstractions/CrestCreates.Agent.Memory.Abstractions.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Memory/CrestCreates.Agent.Memory.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Memory.Llm/CrestCreates.Agent.Memory.Llm.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Prompting.Abstractions/CrestCreates.Agent.Prompting.Abstractions.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Prompting/CrestCreates.Agent.Prompting.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Runtime/CrestCreates.Agent.Runtime.csproj" />
     <Project Path="../src/Runtime/Audit/CrestCreates.AuditLogging.Abstractions/CrestCreates.AuditLogging.Abstractions.csproj" />
     <Project Path="../src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
@@ -60,6 +73,9 @@
     <Project Path="../src/Runtime/Workflow/CrestCreates.Workflow.Abstractions/CrestCreates.Workflow.Abstractions.csproj" />
     <Project Path="../src/Runtime/Workflow/CrestCreates.Workflow/CrestCreates.Workflow.csproj" />
   </Folder>
+  <Folder Name="/src/Tooling/">
+    <Project Path="../src/Tooling/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj" />
+  </Folder>
   <Folder Name="/tests/Boundary/">
     <Project Path="../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/CrestCreates.DependencyBoundaries.Tests.csproj" />
   </Folder>
@@ -78,5 +94,11 @@
     <Project Path="../tests/Runtime/Eventing/CrestCreates.EventBus.Tests/CrestCreates.EventBus.Tests.csproj" />
     <Project Path="../tests/Runtime/HumanTask/CrestCreates.HumanTask.Tests/CrestCreates.HumanTask.Tests.csproj" />
     <Project Path="../tests/Runtime/Workflow/CrestCreates.Workflow.Tests/CrestCreates.Workflow.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests/CrestCreates.Agent.Authoring.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.DraftContracts.Tests/CrestCreates.Agent.DraftContracts.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Memory.Llm.Tests/CrestCreates.Agent.Memory.Llm.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Memory.Tests/CrestCreates.Agent.Memory.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Prompting.Tests/CrestCreates.Agent.Prompting.Tests.csproj" />
   </Folder>
 </Solution>

@@ -36,6 +36,8 @@
   <Folder Name="/src/Metadata/Draft/">
     <Project Path="../src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj" />
     <Project Path="../src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
+    <Project Path="../src/Metadata/Draft/CrestCreates.Draft.Abstractions/CrestCreates.Draft.Abstractions.csproj" />
+    <Project Path="../src/Metadata/Draft/CrestCreates.Draft/CrestCreates.Draft.csproj" />
   </Folder>
   <Folder Name="/src/Tooling/">
     <Project Path="../src/Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj" />
@@ -61,6 +63,7 @@
   </Folder>
   <Folder Name="/tests/Metadata/Draft/">
     <Project Path="../tests/Metadata/Draft/CrestCreates.DescriptorDraft.Tests/CrestCreates.DescriptorDraft.Tests.csproj" />
+    <Project Path="../tests/Metadata/Draft/CrestCreates.Draft.Tests/CrestCreates.Draft.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Runtime/Agent/">
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj" />

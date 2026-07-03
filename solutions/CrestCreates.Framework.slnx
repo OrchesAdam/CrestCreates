@@ -70,6 +70,9 @@
   <Folder Name="/src/Persistence/">
     <Project Path="../src/Persistence/CrestCreates.Data.Abstractions/CrestCreates.Data.Abstractions.csproj" />
   </Folder>
+  <Folder Name="/tests/Core/">
+    <Project Path="../tests/Core/CrestCreates.Core.Abstractions.Tests/CrestCreates.Core.Abstractions.Tests.csproj" />
+  </Folder>
   <Folder Name="/tests/Boundary/">
     <Project Path="../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/CrestCreates.DependencyBoundaries.Tests.csproj" />
   </Folder>
