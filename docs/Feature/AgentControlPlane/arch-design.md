@@ -592,6 +592,7 @@ public sealed record AgentToolDescriptor
 | **7f** | AI-assisted Descriptor Authoring Golden Scenario（意图→创作→审查→激活→运行时证明完整链路） | **Implemented (#32)** |
 | **7g** | LLM-backed Descriptor Authoring Adapter（框架级 authoring 合约 + LLM provider 适配 + source-generated JSON + canonical hash prompt hash + 结构化 failure diagnostics） | **Implemented (#48)** |
 | **7h** | Agent Prompt Contracts & Prompt Versioning（Prompt evidence factory、AoT-safe canonical hash projector、output evidence 排除 ResponseText、template registry、Authoring 集成） | **Implemented (#52)** |
+| **7g+** | LLM-backed Memory Compression & Extraction Adapter（LLM provider 适配 + sanitize→prompt→LLM→parse→fallback 链路 + dual evidence chain + canonical output hash） | **Implemented (#49)** |
 | 7a | Descriptor Draft Runtime（存储、验证、物化、审查） | Implemented |
 
 ### 10.1 Phase 7e — Safe Activation Workflow (#17)
@@ -630,6 +631,8 @@ Phase 7h 为 LLM-backed Descriptor Authoring 引入结构化 prompt 证据链路
 3. **Projector 写完整 JSON 值** — `IAgentPromptCanonicalPayloadProjector&lt;T&gt;.Write()` 必须写一个完整的 JSON 值（如 `WriteStartObject()`/`WriteEndObject()` 包裹），而非裸属性序列
 4. **Template registry 返回防御性拷贝** — `InMemoryAgentPromptTemplateRegistry.Find()` 和 `List()` 返回 descriptor 的 `with { Metadata = new Dictionary&lt;&gt;(...) }` 拷贝，防止外部 mutation 泄漏
 5. **依赖边界** — Prompting.Abstractions 不引用 Core.Abstractions/Framework/Web/Platform/Persistence；Authoring runtime 引用 Prompting.Abstractions（不引用 Prompting runtime）
+
+6. **`ComputeOutputHash`/`CreateOutputEvidence` 支持显式 purpose 参数** — 可选 `string? purpose` 参数允许 Memory.Llm adapter 传递 `CanonicalHashPurposeNames.SourceIdentity` 给 domain output hash，同时 `CreateOutputEvidence` 使用默认 `AuditEvidence`。同样 `string? artifactKind` 和 `string? canonicalShapeVersion` 允许覆盖默认的 `AgentPromptOutputEvidence` / `OutputEvidence` 值。
 
 **新增 2 个项目 + 1 个测试项目**：
 - `CrestCreates.Agent.Prompting.Abstractions`（11 个 public types）
@@ -1774,3 +1777,213 @@ services.AddOpenAICompatibleAuthoringProvider(
 | PromptInputHashTests | 5 | Same input → same hash、changed intent → different hash、canonical hash infra、factory produces hash、order independence |
 
 加上 Sample 测试中的 LLM fixture golden scenario 测试（1 个），总计 46 个 Authoring 测试。
+
+---
+
+## 16. LLM-backed Memory Compression & Extraction Adapter (Phase 7g+)
+
+> **Phase 7g+ (#49)** 实现了 LLM-backed Memory Compression & Extraction Adapter——为 Agent Memory 系统提供 LLM 增强的上下文压缩和记忆候选提取能力。核心不变量：LLM adapter 只压缩和提取——不直接晋升、不变异记忆状态、不绕过 Memory Runtime 的生命周期管理。
+
+### 16.1 架构概览
+
+```
+AgentConversationRecord / AgentTaskRecord
+    → IAgentMemoryContentSanitizer.Sanitize(content, sourceRefs)
+    → SanitizedAgentContent (脱敏后内容)
+    ↓
+[Compression path]
+IAgentContextCompressor.CompressConversationAsync / CompressTaskAsync
+    → DefaultAgentContextCompressor (deterministic fallback)
+    or → LlmAgentContextCompressor (LLM-backed)
+        → Build prompt input (sanitized content + source refs)
+        → IAgentPromptEvidenceFactory.CreateInputEvidence
+        → IAgentMemoryLlmModelClient.CompleteAsync
+        → IAgentMemoryCompressionOutputParser.Parse
+        → IAgentPromptEvidenceFactory.CreateOutputEvidence<AgentMemoryLlmModelResponseEvidenceProjection>
+        → IAgentPromptHashService.ComputeOutputHash<IReadOnlyList<AgentCompressedContextBlock>>
+        → AgentCompressedContext (with PromptOutputEvidence + CanonicalOutputHash)
+        → [on failure] → Fallback to deterministic compressor
+
+[Extraction path]
+IAgentMemoryExtractor.ExtractCandidatesAsync
+    → DefaultAgentMemoryExtractor (deterministic fallback)
+    or → LlmAgentMemoryExtractor (LLM-backed)
+        → Build prompt input (compressed blocks + source refs)
+        → IAgentPromptEvidenceFactory.CreateInputEvidence
+        → IAgentMemoryLlmModelClient.CompleteAsync
+        → IAgentMemoryExtractionOutputParser.Parse
+        → IAgentPromptEvidenceFactory.CreateOutputEvidence<AgentMemoryLlmModelResponseEvidenceProjection>
+        → IAgentPromptHashService.ComputeOutputHash<IReadOnlyList<AgentMemoryCandidate>>
+        → AgentMemoryCandidate[] (each with PromptOutputEvidence + CanonicalOutputHash, Status=Candidate)
+        → [on failure] → Fallback to deterministic extractor
+```
+
+### 16.2 项目结构
+
+| 项目 | 目标框架 | 内容 |
+|------|---------|------|
+| `CrestCreates.Agent.Memory.Llm` | net10.0 | 27 个 production types：compressor、extractor、prompt builders/parsers、output projectors、model client contracts、validation、DI |
+
+### 16.3 核心合约类型
+
+| Type | Kind | Description |
+|------|------|-------------|
+| `IAgentMemoryLlmModelClient` | interface | `CompleteAsync(AgentMemoryLlmModelRequest, CancellationToken) → AgentMemoryLlmModelResponse` |
+| `AgentMemoryLlmModelRequest` | sealed record | PromptText + PromptInputEvidence + Metadata |
+| `AgentMemoryLlmModelResponse` | sealed record | ResponseText + ProviderName + ModelName + FailureKind + FailureDetail + Metadata |
+| `AgentMemoryLlmProviderFailureKind` | enum (8) | ProviderUnavailable=1, CredentialUnavailable=2, Unauthorized=3, RateLimited=4, Timeout=5, NetworkError=6, ParseFailed=7, ValidationFailed=8 |
+| `AgentMemoryLlmAdapterOptions` | sealed class | EnableDeterministicFallback, MaxCompressedBlockCount, MaxCompressedBlockCharacters, MaxCandidateCount, MaxCandidateCharacters, MaxCandidateConfidence |
+| `AgentMemoryLlmContractVersions` | static class | CompressionTemplateId, CompressionTemplateVersion, ExtractionTemplateId, ExtractionTemplateVersion, PromptContractVersion, DefaultModelProfileRef, DefaultProviderProfileRef |
+| `LlmAgentContextCompressor` | sealed class | 实现 IAgentContextCompressor；sanitize→prompt→LLM→parse→deterministic fallback chain |
+| `LlmAgentMemoryExtractor` | sealed class | 实现 IAgentMemoryExtractor；相同链路；enforces Candidate-only status, confidence cap, unknown→ProjectFact/Unknown defaults |
+
+### 16.4 Dual Evidence Chain
+
+Phase 7g+ Memory.Llm adapter 在每次 LLM 调用中产生两层 evidence：
+
+**1. Prompt Output Evidence（AuditEvidence purpose）**
+
+记录 provider 观察信息，用于审计追踪：
+
+```csharp
+var promptOutputEvidence = evidenceFactory.CreateOutputEvidence<AgentMemoryLlmModelResponseEvidenceProjection>(
+    payload: projection,  // ProviderName, ModelName, PromptInputHash, FailureKind, FailureDetail
+    artifactKind: CanonicalHashArtifactNames.AgentPromptOutputEvidence,
+    purpose: CanonicalHashPurposeNames.AuditEvidence);
+```
+
+`AgentMemoryLlmModelResponseEvidenceProjection` 排除 ResponseText，仅投影 ProviderName、ModelName、PromptInputHash、FailureKind、FailureDetail。
+
+**2. Domain Output Hash（SourceIdentity purpose）**
+
+记录 compressed blocks / memory candidates 的 canonical domain output identity：
+
+```csharp
+var canonicalOutputHash = hashService.ComputeOutputHash<IReadOnlyList<AgentCompressedContextBlock>>(
+    payload: blocks,
+    artifactKind: CanonicalHashArtifactNames.AgentMemoryCompressedOutput,
+    canonicalShapeVersion: AgentPromptCanonicalShapeVersions.MemoryCompressionOutput,
+    purpose: CanonicalHashPurposeNames.SourceIdentity);
+```
+
+**承载方式**：`AgentCompressedContext` 和 `AgentMemoryCandidate` 合约新增三个 nullable 字段：
+
+| 字段 | 类型 | 语义 |
+|------|------|------|
+| `PromptInputEvidence` | `AgentPromptInputEvidenceSummary?` | LLM 调用的 input evidence 摘要 |
+| `PromptOutputEvidence` | `AgentPromptOutputEvidenceSummary?` | LLM 调用的 provider observation 摘要（AuditEvidence purpose） |
+| `CanonicalOutputHash` | `CanonicalHash?` | domain output 的 SourceIdentity hash |
+
+### 16.5 输出 Projector 规范
+
+**Compression Output Projector**：写入 `canonicalContentHash`、`tenantId`、完整 `sourceRefs` identity（sourceKind, sourceId, tenantId, rangeStart, rangeEnd），按 `CanonicalContentHash.Value` ordinal 排序 blocks，按 `SourceKind → TenantId → SourceId → RangeStart → RangeEnd` 稳定排序 source refs。排除 BlockId（provider-controlled ID）、Content、Diagnostics。
+
+**Extraction Output Projector**：写入 `canonicalContentHash`、`tenantId`、`kind`、`confidence`、完整 `sourceRefs` identity，相同排序策略。排除 CandidateId。
+
+### 16.6 关键架构决策
+
+1. **LLM adapter 只压缩和提取** — 不直接晋升记忆、不变异记忆状态、不绕过 Memory Runtime 的生命周期管理。提取的 candidates 永远 `Status=Candidate`，必须经过 `IAgentMemoryPromotionService.PromoteAsync` 才能成为正式记忆。
+
+2. **Deterministic fallback** — 当 `EnableDeterministicFallback=true`（默认）时，LLM 失败自动 fallback 到 `DefaultAgentContextCompressor`/`DefaultAgentMemoryExtractor`。Fallback 保留 LLM-phase diagnostics + fallback diagnostic。当 `EnableDeterministicFallback=false` 时，返回空 safe result + diagnostics。
+
+3. **Cancellation 不被 swallowed** — `catch (Exception)` 之前检查 `OperationCanceledException when (cancellationToken.IsCancellationRequested)` 并 rethrow，确保 caller 的 cancellation contract 不被破坏。
+
+4. **Rejected content 跳过** — Compressor 检查 `sanitized.Rejected`，跳过被脱敏拒绝的内容，附 `ContentRejected` diagnostic。
+
+5. **Source ref traceability** — Compressor/Extractor 使用 `Dictionary<string, IReadOnlyList<AgentContextSourceRef>>` 保留所有 source refs（不只取第一个），确保多源 provenance 不丢失。Block 构建使用 `.SelectMany` 展平所有匹配的 source refs。
+
+6. **Prompt output evidence 与 domain output hash 分离** — Prompt output evidence 使用 `AgentMemoryLlmModelResponseEvidenceProjection`，purpose=AuditEvidence，artifactKind=AgentPromptOutputEvidence。Domain output hash 使用 blocks/candidates payload，purpose=SourceIdentity，artifactKind=AgentMemoryCompressedOutput/CandidateOutput。两层语义清晰分离。
+
+7. **Per-adapter DI opt-in** — `AddAgentMemoryLlmCompressor()` 仅替换 `IAgentContextCompressor`，`AddAgentMemoryLlmExtractor()` 仅替换 `IAgentMemoryExtractor`，`AddAgentMemoryLlm()` 同时替换两者。双次注册 guard 防止递归 fallback。
+
+8. **Options enforcement** — `MaxCompressedBlockCount` 在 prompt input 中传递并在 post-parse 时 `Take()` 截断；`MaxCompressedBlockCharacters` 截断 block content；`MaxCandidateCount` 截断 excess candidates；`MaxCandidateCharacters` 截断 candidate content。所有截断操作附 diagnostic。
+
+9. **依赖边界** — Memory.Llm 不引用 ControlPlane.Abstractions、DraftContracts、Authoring.Http、Platform。由 DependencyBoundaryTests 强制执行。
+
+### 16.7 诊断码
+
+| 诊断码 | 说明 |
+|--------|------|
+| `AGENT_MEMORY_LLM_PROVIDER_UNAVAILABLE` | Provider 不可用 |
+| `AGENT_MEMORY_LLM_CREDENTIAL_UNAVAILABLE` | Credential 配置缺失 |
+| `AGENT_MEMORY_LLM_UNAUTHORIZED` | HTTP 401 |
+| `AGENT_MEMORY_LLM_RATE_LIMITED` | HTTP 429 |
+| `AGENT_MEMORY_LLM_TIMEOUT` | 请求超时 |
+| `AGENT_MEMORY_LLM_NETWORK_ERROR` | 网络错误 |
+| `AGENT_MEMORY_LLM_PROVIDER_RETURNED_EMPTY_OUTPUT` | Provider 返回空输出 |
+| `AGENT_MEMORY_LLM_PARSE_FAILED` | JSON 解析失败 |
+| `AGENT_MEMORY_LLM_INVALID_SOURCE_REF` | Source ref 无效 |
+| `AGENT_MEMORY_LLM_SOURCE_REF_MISSING` | Source ref 缺失（parser 必需验证） |
+| `AGENT_MEMORY_LLM_FALLBACK_TO_DETERMINISTIC_COMPRESSOR` | Compressor fallback |
+| `AGENT_MEMORY_LLM_FALLBACK_TO_DETERMINISTIC_EXTRACTOR` | Extractor fallback |
+| `AGENT_MEMORY_LLM_NON_AUTHORITATIVE_OUTPUT_ENFORCED` | 非权威输出强制 |
+| `AGENT_MEMORY_LLM_CANDIDATE_CONFIDENCE_CAPPED` | 候选置信度上限 |
+| `AGENT_MEMORY_LLM_COMPRESSION_PARSE_ERROR` | 压缩解析错误 |
+| `AGENT_MEMORY_LLM_EXTRACTION_PARSE_ERROR` | 提取解析错误 |
+| `AGENT_MEMORY_LLM_CONTENT_REJECTED` | 内容被脱敏拒绝 |
+| `AGENT_MEMORY_LLM_REDACTION_OCCURRED` | 发生脱敏操作 |
+| `AGENT_MEMORY_LLM_BLOCK_TRUNCATED` | Block 内容截断 |
+| `AGENT_MEMORY_LLM_CANDIDATE_TRUNCATED` | Candidate 内容截断 |
+| `AGENT_MEMORY_LLM_BLOCK_COUNT_TRUNCATED` | Block 数量截断 |
+| `AGENT_MEMORY_LLM_CANDIDATE_COUNT_TRUNCATED` | Candidate 数量截断 |
+
+### 16.8 DI 注册
+
+```csharp
+// 前置依赖
+services.AddAgentMemoryRuntime();    // 注册 Memory 基础服务
+services.AddAgentPrompting();        // 注册 Prompting 服务
+
+// 注册 IAgentMemoryLlmModelClient（必需）
+services.AddSingleton<IAgentMemoryLlmModelClient, MyModelClient>();
+
+// Per-adapter opt-in
+services.AddAgentMemoryLlmCompressor();  // 仅替换 IAgentContextCompressor
+services.AddAgentMemoryLlmExtractor();   // 仅替换 IAgentMemoryExtractor
+
+// 或者同时注册两者
+services.AddAgentMemoryLlm();
+
+// 可选配置
+services.AddAgentMemoryLlm(options =>
+{
+    options.EnableDeterministicFallback = true;
+    options.MaxCompressedBlockCount = 16;
+    options.MaxCandidateCount = 8;
+});
+```
+
+**双次注册 guard**：`AddAgentMemoryLlmCompressor` / `AddAgentMemoryLlmExtractor` 不可重复调用，否则抛出 `InvalidOperationException`。这防止递归 fallback（第一次 RemoveAll 移除了 LLM 注册，第二次 factory 捕获的 fallback 指向第一次的 LLM compressor）。
+
+### 16.9 测试覆盖
+
+- **Memory.Llm 测试**：50 个
+  - CompressionAdapterTests: 8 个（sanitization, provider failure→fallback, valid response, task compression, fallback-disabled, sanitized content）
+  - ExtractionAdapterTests: 7 个（valid extraction, provider failure, no source refs→fallback, full source ref preservation, fallback-disabled）
+  - ParserAndValidatorTests: 17 个（compression/extraction parser happy path, missing source refs, confidence cap, non-authoritative enforcement, invalid source ref）
+  - PromptEvidenceTests: 6 个（output hash stability with/without provider IDs, purpose/artifactKind assertions）
+  - LifecycleRecallTests: 3 个（compress→extract→save→promote→recall lifecycle）
+  - ServiceCollectionTests: 6 个（per-adapter DI, double registration guard, independent replacement）
+  - RecordedClientTests: 3 个（hash matching, hash mismatch→failure, response metadata）
+  - BoundaryTests: 2 个（dependency boundary checks）
+- **Boundary 测试**：21 个（含 Memory.Llm 依赖边界检查）
+
+### 16.10 Canonical Hash 扩展
+
+Phase 7g+ 新增 2 个 `CanonicalHashArtifactNames` 常量和 2 个 `AgentPromptCanonicalShapeVersions` 常量：
+
+```csharp
+// CanonicalHashArtifactNames 新增
+public const string AgentMemoryCompressedOutput = "AgentMemoryCompressedOutput";
+public const string AgentMemoryCandidateOutput = "AgentMemoryCandidateOutput";
+
+// AgentPromptCanonicalShapeVersions 新增
+public const string MemoryCompressionOutput = "agent-memory-compression-output-shape-v1";
+public const string MemoryExtractionOutput = "agent-memory-extraction-output-shape-v1";
+```
+
+### 16.11 依赖边界
+
+| 项目 | 禁止引用 |
+|------|---------|
+| Memory.Llm | ControlPlane.Abstractions, DraftContracts, Authoring.Http, Platform |
