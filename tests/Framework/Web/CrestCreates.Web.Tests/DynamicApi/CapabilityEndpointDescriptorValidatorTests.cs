@@ -253,6 +253,201 @@ public class CapabilityEndpointDescriptorValidatorTests
         report.Issues.Should().Contain(i => i.Message.Contains("status code", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Validate_Duplicate_Method_And_Route_Fails()
+    {
+        var validator = CreateValidator();
+        var endpoint1 = ValidEndpoint("books.create");
+        var endpoint2 = ValidEndpoint("books.update");
+        // Same method + same route pattern → conflict
+        endpoint2 = CopyEndpoint(endpoint2, routePattern: endpoint1.RoutePattern);
+
+        var report = validator.Validate(new[] { endpoint1, endpoint2 });
+
+        report.HasErrors.Should().BeTrue();
+        report.Issues.Should().Contain(i => i.Message.Contains("Duplicate", StringComparison.OrdinalIgnoreCase)
+                                            && i.Message.Contains("POST", StringComparison.OrdinalIgnoreCase)
+                                            && i.Message.Contains("/api/books", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_Same_Route_Different_Method_Passes()
+    {
+        var listCap = new CapabilityDescriptor
+        {
+            Id = "books.list", Name = "List Books", Version = 1, RiskLevel = CapabilityRiskLevel.Low
+        };
+        var createCap = new CapabilityDescriptor
+        {
+            Id = "books.create", Name = "Create Book", Version = 1, RiskLevel = CapabilityRiskLevel.Medium
+        };
+        var validator = CreateValidator(listCap, createCap);
+        var getEndpoint = new CapabilityEndpointDescriptor
+        {
+            Id = "books.list.http",
+            Name = "List Books",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("books.list", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Get,
+            RoutePattern = "/api/books",
+            OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 }
+        };
+        var postEndpoint = ValidEndpoint("books.create");
+
+        var report = validator.Validate(new[] { getEndpoint, postEndpoint });
+
+        report.HasErrors.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_Same_Method_Different_Route_Passes()
+    {
+        var createCap = new CapabilityDescriptor
+        {
+            Id = "books.create", Name = "Create Book", Version = 1, RiskLevel = CapabilityRiskLevel.Medium
+        };
+        var updateCap = new CapabilityDescriptor
+        {
+            Id = "books.update", Name = "Update Book", Version = 1, RiskLevel = CapabilityRiskLevel.Medium
+        };
+        var validator = CreateValidator(createCap, updateCap);
+        var endpoint1 = ValidEndpoint("books.create");
+        var endpoint2 = new CapabilityEndpointDescriptor
+        {
+            Id = "books.update.http",
+            Name = "Update Book Endpoint",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("books.update", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Post,
+            RoutePattern = "/api/books/{id}",
+            InputBindings = new[] { new CapabilityEndpointInputBinding { Name = "id", Source = CapabilityEndpointParameterSource.Route } },
+            OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 }
+        };
+
+        var report = validator.Validate(new[] { endpoint1, endpoint2 });
+
+        report.HasErrors.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_Duplicate_Route_With_Constraint_Normalized_Fails()
+    {
+        // /api/books/{id:int} and /api/books/{id} should be treated as the same route
+        var getCap = new CapabilityDescriptor
+        {
+            Id = "books.get", Name = "Get Book", Version = 1, RiskLevel = CapabilityRiskLevel.Low
+        };
+        var validator = CreateValidator(getCap);
+        var endpoint1 = ValidEndpoint("books.get");
+        endpoint1 = new CapabilityEndpointDescriptor
+        {
+            Id = "books.get.http",
+            Name = "Get Book",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("books.get", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Get,
+            RoutePattern = "/api/books/{id:int}",
+            InputBindings = new[] { new CapabilityEndpointInputBinding { Name = "id", Source = CapabilityEndpointParameterSource.Route } },
+            OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 }
+        };
+        var endpoint2 = new CapabilityEndpointDescriptor
+        {
+            Id = "books.get2.http",
+            Name = "Get Book Alt",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("books.get", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Get,
+            RoutePattern = "/api/books/{id}",
+            InputBindings = new[] { new CapabilityEndpointInputBinding { Name = "id", Source = CapabilityEndpointParameterSource.Route } },
+            OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 }
+        };
+
+        var report = validator.Validate(new[] { endpoint1, endpoint2 });
+
+        report.HasErrors.Should().BeTrue();
+        report.Issues.Should().Contain(i => i.Message.Contains("Duplicate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_Null_InputBindings_Fails()
+    {
+        var validator = CreateValidator();
+        var descriptor = new CapabilityEndpointDescriptor
+        {
+            Id = "test.http",
+            Name = "Test",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("books.create", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Post,
+            RoutePattern = "/api/test",
+            InputBindings = null!,
+            OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 }
+        };
+
+        var report = validator.Validate(new[] { descriptor });
+
+        report.HasErrors.Should().BeTrue();
+        report.Issues.Should().Contain(i => i.Message.Contains("InputBindings", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_Null_OutputMapping_Fails()
+    {
+        var validator = CreateValidator();
+        var descriptor = new CapabilityEndpointDescriptor
+        {
+            Id = "test.http",
+            Name = "Test",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("books.create", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Post,
+            RoutePattern = "/api/test",
+            OutputMapping = null!
+        };
+
+        var report = validator.Validate(new[] { descriptor });
+
+        report.HasErrors.Should().BeTrue();
+        report.Issues.Should().Contain(i => i.Message.Contains("OutputMapping", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_Null_Projection_Fails()
+    {
+        var validator = CreateValidator();
+        var descriptor = new CapabilityEndpointDescriptor
+        {
+            Id = "test.http",
+            Name = "Test",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("books.create", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Post,
+            RoutePattern = "/api/test",
+            OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 },
+            Projection = null!
+        };
+
+        var report = validator.Validate(new[] { descriptor });
+
+        report.HasErrors.Should().BeTrue();
+        report.Issues.Should().Contain(i => i.Message.Contains("Projection", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_Empty_InputBinding_Name_Fails()
+    {
+        var validator = CreateValidator();
+        var descriptor = CopyEndpoint(ValidEndpoint(), inputBindings: new[]
+        {
+            new CapabilityEndpointInputBinding { Name = "", Source = CapabilityEndpointParameterSource.Route }
+        });
+
+        var report = validator.Validate(new[] { descriptor });
+
+        report.HasErrors.Should().BeTrue();
+        report.Issues.Should().Contain(i => i.Message.Contains("Name must not be empty", StringComparison.Ordinal));
+    }
+
     private static CapabilityEndpointDescriptor ValidEndpoint(string capabilityId = "books.create")
         => new()
         {
@@ -301,6 +496,19 @@ public class CapabilityEndpointDescriptorValidatorTests
         registry
             .Setup(r => r.GetByVersion(capability.Id, capability.Version))
             .Returns(capability);
+
+        return new CapabilityEndpointDescriptorValidator(registry.Object);
+    }
+
+    private static CapabilityEndpointDescriptorValidator CreateValidator(
+        params CapabilityDescriptor[] capabilities)
+    {
+        var registry = new Mock<ICapabilityRegistry>();
+        foreach (var cap in capabilities)
+        {
+            var c = cap;
+            registry.Setup(r => r.GetByVersion(c.Id, c.Version)).Returns(c);
+        }
 
         return new CapabilityEndpointDescriptorValidator(registry.Object);
     }

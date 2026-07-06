@@ -1,3 +1,4 @@
+using System.Linq;
 using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
@@ -32,6 +33,8 @@ public sealed class CapabilityEndpointDescriptorValidator
             ValidateCapabilityAuthority(descriptor, issues);
             ValidateProjection(descriptor, issues);
         }
+
+        ValidateUniqueMethodRoute(descriptors, issues);
 
         return new ValidationReport(issues);
     }
@@ -70,6 +73,18 @@ public sealed class CapabilityEndpointDescriptorValidator
         CapabilityEndpointDescriptor descriptor,
         List<ValidationIssue> issues)
     {
+        if (descriptor.InputBindings is null)
+        {
+            AddError(issues, $"Capability endpoint '{descriptor.Id}' InputBindings must not be null.");
+            return;
+        }
+
+        foreach (var binding in descriptor.InputBindings)
+        {
+            if (string.IsNullOrWhiteSpace(binding.Name))
+                AddError(issues, $"Capability endpoint '{descriptor.Id}' input binding Name must not be empty.");
+        }
+
         var bodyCount = descriptor.InputBindings.Count(b => b.Source == CapabilityEndpointParameterSource.Body);
         if (bodyCount > 1)
             AddError(issues, $"Capability endpoint '{descriptor.Id}' may have at most one body input binding.");
@@ -93,6 +108,12 @@ public sealed class CapabilityEndpointDescriptorValidator
         CapabilityEndpointDescriptor descriptor,
         List<ValidationIssue> issues)
     {
+        if (descriptor.OutputMapping is null)
+        {
+            AddError(issues, $"Capability endpoint '{descriptor.Id}' OutputMapping must not be null.");
+            return;
+        }
+
         if (descriptor.OutputMapping.SuccessStatusCode is < 200 or > 299)
             AddError(issues, $"Capability endpoint '{descriptor.Id}' success status code must be between 200 and 299.");
     }
@@ -129,11 +150,78 @@ public sealed class CapabilityEndpointDescriptorValidator
         CapabilityEndpointDescriptor descriptor,
         List<ValidationIssue> issues)
     {
+        if (descriptor.Projection is null)
+        {
+            AddError(issues, $"Capability endpoint '{descriptor.Id}' Projection must not be null.");
+            return;
+        }
+
         if (descriptor.Projection.OperationId is not null
             && string.IsNullOrWhiteSpace(descriptor.Projection.OperationId))
         {
             AddError(issues, $"Capability endpoint '{descriptor.Id}' Projection.OperationId must be stable and non-empty when specified.");
         }
+    }
+
+    private static void ValidateUniqueMethodRoute(
+        IReadOnlyList<CapabilityEndpointDescriptor> descriptors,
+        List<ValidationIssue> issues)
+    {
+        var validEndpoints = descriptors
+            .Where(d => d.HttpMethod != CapabilityEndpointHttpMethod.None
+                        && !string.IsNullOrWhiteSpace(d.RoutePattern))
+            .GroupBy(d => (HttpMethod: d.HttpMethod, RoutePattern: NormalizeRoutePattern(d.RoutePattern!)))
+            .Where(g => g.Count() > 1);
+
+        foreach (var group in validEndpoints)
+        {
+            var ids = string.Join(", ", group.Select(d => d.Id));
+            AddError(issues,
+                $"Duplicate capability endpoint route: {group.Key.HttpMethod} {group.Key.RoutePattern}. Endpoint IDs: {ids}");
+        }
+    }
+
+    private static string NormalizeRoutePattern(string routePattern)
+    {
+        // Normalize route parameters: strip constraints, catch-all markers, and optional markers
+        // so that /api/books/{id:int} and /api/books/{id} are treated as the same route.
+        var result = new System.Text.StringBuilder(routePattern.Length);
+        var i = 0;
+        while (i < routePattern.Length)
+        {
+            if (routePattern[i] == '{')
+            {
+                result.Append('{');
+                i++;
+                // Skip optional marker
+                if (i < routePattern.Length && routePattern[i] == '*')
+                {
+                    i++;
+                    if (i < routePattern.Length && routePattern[i] == '*')
+                        i++;
+                }
+                // Read parameter name until ':', '}', or '?'
+                var nameStart = i;
+                while (i < routePattern.Length && routePattern[i] != ':' && routePattern[i] != '}' && routePattern[i] != '?')
+                    i++;
+                result.Append(routePattern[nameStart..i]);
+                // Skip constraint and optional marker until '}'
+                while (i < routePattern.Length && routePattern[i] != '}')
+                    i++;
+                if (i < routePattern.Length)
+                {
+                    result.Append('}');
+                    i++;
+                }
+            }
+            else
+            {
+                result.Append(routePattern[i]);
+                i++;
+            }
+        }
+
+        return result.ToString();
     }
 
     private static void AddError(List<ValidationIssue> issues, string message)
