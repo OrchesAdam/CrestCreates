@@ -132,17 +132,30 @@ public sealed class CapabilityEndpointDescriptorValidator
             return;
         }
 
-        if (descriptor.AuthorizationMode != CapabilityEndpointAuthorizationMode.AllowAnonymous || capability is null)
-            return;
-
-        if (capability.Permissions.Count > 0)
+        switch (descriptor.AuthorizationMode)
         {
-            AddError(issues, $"Capability endpoint '{descriptor.Id}' AllowAnonymous would weaken Capability '{capability.Id}' permissions.");
-        }
+            case CapabilityEndpointAuthorizationMode.AllowAnonymous:
+                // AllowAnonymous weakens any capability that has permissions or is high-risk
+                if (capability.Permissions.Count > 0)
+                    AddError(issues, $"Capability endpoint '{descriptor.Id}' AllowAnonymous would weaken Capability '{capability.Id}' permissions.");
+                if (capability.RiskLevel >= CapabilityRiskLevel.High)
+                    AddError(issues, $"Capability endpoint '{descriptor.Id}' AllowAnonymous would weaken high-risk Capability '{capability.Id}'.");
+                break;
 
-        if (capability.RiskLevel >= CapabilityRiskLevel.High)
-        {
-            AddError(issues, $"Capability endpoint '{descriptor.Id}' AllowAnonymous would weaken high-risk Capability '{capability.Id}'.");
+            case CapabilityEndpointAuthorizationMode.InheritCapability:
+                // InheritCapability defers to the capability's authority model — if the capability
+                // has no permissions and is high-risk, the endpoint is effectively unguarded
+                if (capability.Permissions.Count == 0 && capability.RiskLevel >= CapabilityRiskLevel.High)
+                    AddError(issues, $"Capability endpoint '{descriptor.Id}' InheritCapability on high-risk Capability '{capability.Id}' with no permissions leaves the endpoint unguarded.");
+                break;
+
+            case CapabilityEndpointAuthorizationMode.RequireAuthenticated:
+                // RequireAuthenticated is the most restrictive mode — no authority validation needed
+                break;
+
+            default:
+                AddError(issues, $"Capability endpoint '{descriptor.Id}' has unrecognized AuthorizationMode '{descriptor.AuthorizationMode}'.");
+                break;
         }
     }
 
@@ -221,7 +234,7 @@ public sealed class CapabilityEndpointDescriptorValidator
             }
         }
 
-        return result.ToString();
+        return result.ToString().TrimEnd('/');
     }
 
     private static void AddError(List<ValidationIssue> issues, string message)

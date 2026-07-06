@@ -512,4 +512,147 @@ public class CapabilityEndpointDescriptorValidatorTests
 
         return new CapabilityEndpointDescriptorValidator(registry.Object);
     }
+
+    [Fact]
+    public void Validate_InheritCapability_HighRisk_NoPermissions_Fails()
+    {
+        var highRiskCap = new CapabilityDescriptor
+        {
+            Id = "dangerous.op", Name = "Dangerous Op", Version = 1,
+            RiskLevel = CapabilityRiskLevel.High, Permissions = []
+        };
+        var validator = CreateValidator(highRiskCap);
+        var descriptor = new CapabilityEndpointDescriptor
+        {
+            Id = "dangerous.http",
+            Name = "Dangerous Op Endpoint",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("dangerous.op", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Post,
+            RoutePattern = "/api/dangerous",
+            AuthorizationMode = CapabilityEndpointAuthorizationMode.InheritCapability,
+            OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 }
+        };
+
+        var report = validator.Validate(new[] { descriptor });
+
+        report.HasErrors.Should().BeTrue();
+        report.Issues.Should().Contain(i =>
+            i.Message.Contains("InheritCapability", StringComparison.Ordinal)
+            && i.Message.Contains("unguarded", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_InheritCapability_HighRisk_WithPermissions_Passes()
+    {
+        var highRiskCap = new CapabilityDescriptor
+        {
+            Id = "dangerous.op", Name = "Dangerous Op", Version = 1,
+            RiskLevel = CapabilityRiskLevel.High,
+            Permissions = ["dangerous.op.execute"]
+        };
+        var validator = CreateValidator(highRiskCap);
+        var descriptor = new CapabilityEndpointDescriptor
+        {
+            Id = "dangerous.http",
+            Name = "Dangerous Op Endpoint",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("dangerous.op", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Post,
+            RoutePattern = "/api/dangerous",
+            AuthorizationMode = CapabilityEndpointAuthorizationMode.InheritCapability,
+            OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 }
+        };
+
+        var report = validator.Validate(new[] { descriptor });
+
+        report.HasErrors.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_InheritCapability_LowRisk_NoPermissions_Passes()
+    {
+        var lowRiskCap = new CapabilityDescriptor
+        {
+            Id = "safe.op", Name = "Safe Op", Version = 1,
+            RiskLevel = CapabilityRiskLevel.Low, Permissions = []
+        };
+        var validator = CreateValidator(lowRiskCap);
+        var descriptor = new CapabilityEndpointDescriptor
+        {
+            Id = "safe.http",
+            Name = "Safe Op Endpoint",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("safe.op", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Get,
+            RoutePattern = "/api/safe",
+            AuthorizationMode = CapabilityEndpointAuthorizationMode.InheritCapability,
+            OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 }
+        };
+
+        var report = validator.Validate(new[] { descriptor });
+
+        report.HasErrors.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_Duplicate_Route_Trailing_Slash_Normalized_Fails()
+    {
+        var cap = new CapabilityDescriptor
+        {
+            Id = "books.list", Name = "List Books", Version = 1, RiskLevel = CapabilityRiskLevel.Low
+        };
+        var validator = CreateValidator(cap);
+        var endpoint1 = new CapabilityEndpointDescriptor
+        {
+            Id = "books.list.http",
+            Name = "List Books",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("books.list", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Get,
+            RoutePattern = "/api/books",
+            OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 }
+        };
+        var endpoint2 = new CapabilityEndpointDescriptor
+        {
+            Id = "books.list2.http",
+            Name = "List Books Alt",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("books.list", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Get,
+            RoutePattern = "/api/books/",
+            OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 }
+        };
+
+        var report = validator.Validate(new[] { endpoint1, endpoint2 });
+
+        report.HasErrors.Should().BeTrue();
+        report.Issues.Should().Contain(i => i.Message.Contains("Duplicate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Validate_RequireAuthenticated_HighRisk_Passes()
+    {
+        var highRiskCap = new CapabilityDescriptor
+        {
+            Id = "dangerous.op", Name = "Dangerous Op", Version = 1,
+            RiskLevel = CapabilityRiskLevel.High, Permissions = []
+        };
+        var validator = CreateValidator(highRiskCap);
+        var descriptor = new CapabilityEndpointDescriptor
+        {
+            Id = "dangerous.http",
+            Name = "Dangerous Op Endpoint",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("dangerous.op", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Post,
+            RoutePattern = "/api/dangerous",
+            AuthorizationMode = CapabilityEndpointAuthorizationMode.RequireAuthenticated,
+            OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 }
+        };
+
+        var report = validator.Validate(new[] { descriptor });
+
+        report.HasErrors.Should().BeFalse();
+    }
 }

@@ -104,6 +104,21 @@ public class DependencyBoundaryTests
     }
 
     [Fact]
+    public void MetadataProjects_DoNotReferenceFrameworkApiImplementations()
+    {
+        // Metadata may reference Framework/Api Abstractions for canonical hash profiles,
+        // but must not depend on Framework/Api implementation projects.
+        AssertNoDirectProjectReferences(
+            "src/Metadata",
+            "Metadata may reference Framework/Api Abstractions for hash profiles but must not depend on Framework/Api implementation projects.",
+            new[]
+            {
+                "src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj",
+                "src/Framework/Api/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj"
+            });
+    }
+
+    [Fact]
     public void AgentMemoryProjects_DoNotReferenceForbiddenRuntimeOrPlatformLayers()
     {
         AssertNoDirectProjectReferences(

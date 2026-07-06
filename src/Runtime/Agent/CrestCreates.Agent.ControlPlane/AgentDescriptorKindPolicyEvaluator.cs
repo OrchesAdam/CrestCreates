@@ -57,7 +57,7 @@ internal sealed class AgentDescriptorKindPolicyEvaluator
     {
         if (!IsValidDescriptorKind(kind)) return AgentDescriptorKindDecision.Invalid;
 
-        var canonical = kind.ToString();
+        var canonical = DescriptorKindNames.ToCanonicalString(kind);
         if (_denied.Contains(canonical)) return AgentDescriptorKindDecision.Denied;
 
         return _openWorld || _allowed.Contains(canonical)
