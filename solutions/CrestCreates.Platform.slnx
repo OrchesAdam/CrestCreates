@@ -50,6 +50,7 @@
     <Project Path="../src/Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
     <Project Path="../src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
     <Project Path="../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
+    <Project Path="../src/Framework/Api/CrestCreates.DynamicApi.Abstractions/CrestCreates.DynamicApi.Abstractions.csproj" />
     <Project Path="../src/Framework/Modules/CrestCreates.FileManagement/CrestCreates.FileManagement.csproj" />
     <Project Path="../src/Framework/Modules/CrestCreates.Form.Abstractions/CrestCreates.Form.Abstractions.csproj" />
     <Project Path="../src/Framework/Modules/CrestCreates.Form/CrestCreates.Form.csproj" />

@@ -25,6 +25,8 @@
     <ProjectReference Include="../../Infrastructure/CrestCreates.Validation/CrestCreates.Validation.csproj" />
     <ProjectReference Include="../../../Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.DynamicApi.Abstractions\CrestCreates.DynamicApi.Abstractions.csproj" />
+    <ProjectReference Include="../../../Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
   </ItemGroup>
 
 </Project>

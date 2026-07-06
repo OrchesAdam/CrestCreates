@@ -42,6 +42,7 @@
   </Folder>
   <Folder Name="/src/Framework/Api/">
     <Project Path="../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
+    <Project Path="../src/Framework/Api/CrestCreates.DynamicApi.Abstractions/CrestCreates.DynamicApi.Abstractions.csproj" />
     <Project Path="../src/Framework/Api/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
   </Folder>
   <Folder Name="/src/Framework/Web/">

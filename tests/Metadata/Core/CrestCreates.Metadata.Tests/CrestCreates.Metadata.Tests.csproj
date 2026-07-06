@@ -38,6 +38,8 @@
     <ProjectReference Include="../../../../src/Runtime/Workflow/CrestCreates.Workflow/CrestCreates.Workflow.csproj" />
     <ProjectReference Include="../../../../src/Runtime/HumanTask/CrestCreates.HumanTask/CrestCreates.HumanTask.csproj" />
     <ProjectReference Include="../../../../src/Metadata/CrestCreates.Snapshot.Abstractions/CrestCreates.Snapshot.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.DynamicApi.Abstractions/CrestCreates.DynamicApi.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
     <ProjectReference Include="../../../Framework/Testing/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
   </ItemGroup>
 </Project>

@@ -8,5 +8,6 @@ public enum DescriptorKind
     Event = 3,
     Workflow = 4,
     Form = 5,
-    HumanTask = 6
+    HumanTask = 6,
+    DynamicApiEndpoint = 7
 }

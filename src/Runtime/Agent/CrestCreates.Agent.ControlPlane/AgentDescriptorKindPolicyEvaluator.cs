@@ -72,7 +72,12 @@ internal sealed class AgentDescriptorKindPolicyEvaluator
     /// </summary>
     internal static bool IsValidDescriptorKind(DescriptorKind kind)
     {
-        // DescriptorKind: Schema=0, Capability=1, Event=2, Workflow=3, Form=4, HumanTask=5
-        return kind >= DescriptorKind.Schema && kind <= DescriptorKind.HumanTask;
+        return kind is DescriptorKind.Schema
+            or DescriptorKind.Capability
+            or DescriptorKind.Event
+            or DescriptorKind.Workflow
+            or DescriptorKind.Form
+            or DescriptorKind.HumanTask
+            or DescriptorKind.DynamicApiEndpoint;
     }
 }
