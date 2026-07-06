@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-01 (Phase 7g: LLM-backed Descriptor Authoring Adapter — complete)
+Last Updated: 2026-07-06 (Phase 8b: Dynamic API Descriptor — complete)
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -153,6 +153,18 @@ Expected final standard:
 
 ## Not Yet Started or Not Yet Closed as Formal Platform Work
 
+### Phase 8a — Dynamic API Runtime Binding
+
+Status: Not started.
+
+Expected scope:
+- Minimal API / HTTP endpoint binding from CapabilityEndpointDescriptor
+- Request parsing (route/query/body/header binding)
+- CapabilityInvocationContext construction
+- ICapabilityDispatcher invocation
+- Response mapping
+- Authorization / tenant / data-permission runtime context injection
+
 ### Localization
 
 Status: Not closed.
@@ -236,7 +248,8 @@ This thread achieved the following:
     - Second review (9 findings: 5 P1, 4 P2) — 2026-06-20: all 9 resolved (nested projection, readiness, draft-kind deny, comparison validation, package projector new-descriptor fix, evidence filtering, audit contract, TOCTOU single-snapshot, memory.md accuracy)
     - Third review (7 findings: 4 P1, 3 P2) — 2026-06-20: resolved with recursive nested projection, (Ns,Id) identity model, namespace-aware comparison, invalid vs denied error code split, and 8 regression tests (226 total)
     - Fourth review (8 findings: 4 P1, 4 P2) — 2026-06-20: derived summaries leaking through MaxSeverity/MaxLevel/MaxDecision/evidence maxima, version-ignoring identity (v1 visible makes denied v2 visible), BaseVersion ignored in draft comparison, projection failure silently persisted as mutation success, package bare-ID contract limitation (deferred), empty paths leaking traversal existence, test coverage gaps, memory.md test count inconsistency. All resolved except P2 package contract (deferred as type-design issue beyond projector scope).
-    - 226 ControlPlane + 7 Boundary tests pass, full solution build 0 errors
+     - 226 ControlPlane + 7 Boundary tests pass, full solution build 0 errors
+ 15. Phase 8b Dynamic API Descriptor (Issue #20) — CapabilityEndpointDescriptor as projection metadata over CapabilityDescriptor, with registry, validator (route conflict, null guards, InheritCapability fail-closed), relationship extractor, canonical hash profiles, AoT-safe kind naming, boundary test. 4 review rounds, 15 findings fixed. 37 Web.Tests + 6 Metadata.Tests + 27 Boundary tests.
 
 ---
 
@@ -273,6 +286,15 @@ This thread achieved the following:
 - Redaction chain is accepted.
 - Query capability is accepted.
 - Cleanup/governance is not fully closed yet.
+
+### Dynamic API Descriptor (Phase 8b)
+
+- `CapabilityEndpointDescriptor` is a projection descriptor over `CapabilityDescriptor` — describes HTTP exposure metadata, not business logic or runtime execution
+- `CapabilityEndpointAuthorizationMode.InheritCapability` is the default — endpoint defers to capability's authority model; high-risk capability with no permissions is a validation error (fail-closed)
+- `ICapabilityRegistry` is required in validator DI — fail-closed (InvalidOperationException on missing registry), not fail-open with optional DI
+- `DescriptorKind.DynamicApiEndpoint = 7` — new descriptor kind for governance/topology coverage
+- `Metadata → DynamicApi.Abstractions` dependency accepted for canonical hash profiles — Metadata is the aggregation layer for all descriptor family profiles; boundary test prevents Metadata from referencing Framework/Api implementation projects
+- Route conflict validation: same HttpMethod + normalized RoutePattern (trailing slash removed, `{id}`/`{id?}`/`{**path}` normalized) cannot coexist
 
 ### Organization Identity Kernel (Phase 5c, 2026-06-11)
 
@@ -996,10 +1018,77 @@ Status: Completed.
 
 ---
 
+### Phase 8b — Dynamic API Descriptor (2026-07-06)
+
+**Status**: ✅ Complete
+
+**Spec**: `docs/superpowers/specs/2026-07-03-phase-8b-dynamic-api-descriptor-design.md`
+**Plan**: `docs/superpowers/plans/2026-07-03-phase-8b-dynamic-api-descriptor.md`
+
+**New project**:
+- `CrestCreates.DynamicApi.Abstractions` — endpoint descriptor model types (10 files)
+
+**DynamicApi.Abstractions** (10 files):
+- `CapabilityEndpointDescriptor` — sealed class, implements IDescriptor + IVersionedDescriptor, references CapabilityDescriptor via `VersionedDescriptorRef<CapabilityDescriptor>`
+- `CapabilityEndpointHttpMethod` — enum (None=0, Get=1, Post=2, Put=3, Patch=4, Delete=5)
+- `CapabilityEndpointParameterDescriptor` — sealed record (Name, Source, IsRequired, DataType, DefaultValue)
+- `CapabilityEndpointRouteTemplate` — sealed record value object
+- `CapabilityEndpointRelationship` — sealed record (Endpoint → Capability relationship edge)
+- `CapabilityEndpointAuthorizationMode` — enum (InheritCapability=0, RequireAuthenticated=1, AllowAnonymous=2)
+- `CapabilityEndpointParameterSource` — enum (Body=0, Query=1, Route=2, Header=3)
+- `CapabilityEndpointOutputMapping` — sealed record (SuccessStatusCode, ErrorStatusCode, ResponseType)
+- `CapabilityEndpointInputBinding` — sealed record (Name, Source, IsRequired, DataType, DefaultValue)
+- `DescriptorKind/DynamicApiEndpointDescriptorKind.cs` + `DynamicApiEndpointDescriptorKindNames.cs` — DescriptorKind.DynamicApiEndpoint = 7
+
+**DynamicApi** (3 new files):
+- `CapabilityEndpointRegistry` — Registry + ByCapabilityIdIndex (FrozenDictionary O(1) lookup by CapabilityId)
+- `CapabilityEndpointDescriptorValidator` — validates identity/route/bindings/output/capability authority/projection + cross-descriptor HttpMethod+RoutePattern uniqueness + null nested metadata fail-closed + InheritCapability authority check (high-risk + no-permissions → error) + trailing slash normalization
+- `CapabilityEndpointRelationshipExtractor` — Endpoint → Capability relationship extraction
+
+**Metadata** (5 canonical hash profiles):
+- `CapabilityEndpointDescriptorCanonicalHashProfile`, `CapabilityEndpointHttpMethodCanonicalHashProfile`, `CapabilityEndpointParameterDescriptorCanonicalHashProfile`, `CapabilityEndpointRouteTemplateCanonicalHashProfile`, `CapabilityEndpointRelationshipCanonicalHashProfile`
+- CCHASH009 suppressed per-file via `#pragma warning disable` in CapabilityEndpointDescriptorCanonicalHashProfile.cs (governance-layer naming: CapabilityEndpoint describes "capability endpoints", not Dynamic API endpoints)
+
+**ControlPlane** (1 modified file):
+- `AgentDescriptorKindPolicyEvaluator.IsValidDescriptorKind` — added DescriptorKind.DynamicApiEndpoint range; `kind.ToString()` replaced with `DescriptorKindNames.ToCanonicalString(kind)` (AoT-safe)
+
+**Modified files** (6):
+- `DescriptorKind.cs` — DynamicApiEndpoint = 7
+- `DescriptorKindNames.cs` — DynamicApiEndpoint canonical string + ToCanonicalString switch arm
+- `DynamicApi.csproj` — DynamicApi.Abstractions reference
+- `Metadata.csproj` — DynamicApi.Abstractions reference
+- `DynamicApiModule.cs` — DI registration (AddSingleton for registry/validator/extractor, ICapabilityRegistry required/fail-closed)
+- `CrestCreates.slnx` + `CrestCreates.All.slnx` + `CrestCreates.Framework.slnx` + `CrestCreates.Platform.slnx`
+
+**Review iterations** (4 rounds, 15 findings fixed):
+1. AllowAnonymous fail-open → ICapabilityRegistry required (fail-closed)
+2. DI mixed Add/TryAdd → IRegistryValidator uses AddSingleton (multi-registration)
+3. DescriptorKindNames switch missing default → ArgumentOutOfRangeException
+4. ExtractRouteTokens missing {**path} and {id?} → catch-all/optional handling
+5. CapabilityEndpointHttpMethod missing None=0 → sentinel + validator check
+6. GetByCapability O(n) linear scan → ByCapabilityIdIndex O(1)
+7. CCHASH009 project-wide NoWarn → per-file #pragma
+8. CrestCreatesCodeGeneration=false project-wide → removed, per-file #pragma CC1001
+9. DynamicApi.Abstractions missing from solution files → added to All/Framework/Platform slnx
+10. Missing HttpMethod+RoutePattern conflict validation → ValidateUniqueMethodRoute + NormalizeRoutePattern
+11. Null nested metadata not fail-closed → InputBindings/OutputMapping/Projection null guards
+12. kind.ToString() not AoT-safe → DescriptorKindNames.ToCanonicalString()
+13. InheritCapability fail-open → switch over AuthorizationMode, high-risk+no-permissions → error
+14. NormalizeRoutePattern missing trailing slash → TrimEnd('/')
+15. Missing Metadata → Framework/Api boundary test → MetadataProjects_DoNotReferenceFrameworkApiImplementations
+
+**Test counts**: 37 Web.Tests + 6 Metadata.Tests + 27 Boundary — all passing. Full solution build 0 errors in Phase 8b-affected projects.
+
+**Follow-up items** (not blocking):
+- Metadata → DynamicApi.Abstractions dependency direction: Metadata is aggregation layer with 6+ existing Abstractions references; boundary test protects against implementation references. Future: consider moving hash profiles to DynamicApi side or multi-assembly registration
+- ByCapabilityIdIndex is public → can be internal
+- ExtractRouteTokens / NormalizeRoutePattern parsing logic sync → shared RouteTemplateParser
+- GetByCapability sorting stability → add when context pack / graph display needs it
+
 ## Recommended Next Thread Entry Prompt
 
 If a future thread should resume from this state, use a prompt like:
 
-> Read `/memory.md` first. Continue from the current CrestCreates platform status. Treat completed items as closed unless you find contradictory code. Focus on unresolved work only.
+> Read `/memory.md` first. Continue from the current CrestCreates platform status. Treat completed items as closed unless you find contradictory code. Focus on unresolved work only. Next phase entry point: Phase 8a (Dynamic API Runtime Binding) — consumes CapabilityEndpointDescriptor from Phase 8b to bind HTTP endpoints.
 
 ---
