@@ -21,12 +21,13 @@ public class DynamicApiModule : ModuleBase
         services.TryAddSingleton<IRegistryValidationEngine<CapabilityEndpointDescriptor>,
             RegistryValidationEngine<CapabilityEndpointDescriptor>>();
 
-        // AddSingleton: multi-registration contract — IRegistryValidator<T> accumulates across modules
-        services.AddSingleton<IRegistryValidator<CapabilityEndpointDescriptor>,
-            CapabilityEndpointDescriptorValidator>();
+        // TryAddEnumerable: idempotent — safe regardless of call order with AddCrestCapabilityEndpoints()
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IRegistryValidator<CapabilityEndpointDescriptor>,
+            CapabilityEndpointDescriptorValidator>());
 
-        // AddSingleton: multi-registration interface — multiple extractors accumulate
-        services.AddSingleton<IDescriptorRelationshipExtractor,
-            CapabilityEndpointRelationshipExtractor>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IDescriptorRelationshipExtractor,
+            CapabilityEndpointRelationshipExtractor>());
     }
 }
