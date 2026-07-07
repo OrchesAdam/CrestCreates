@@ -21,11 +21,15 @@ public static class CapabilityEndpointExtensions
             RegistryValidationEngine<CapabilityEndpointDescriptor>>();
         services.TryAddSingleton<CapabilityEndpointRegistryBootstrapper>();
 
-        // Multi-registration interfaces — validators and extractors accumulate across modules
-        services.AddSingleton<IRegistryValidator<CapabilityEndpointDescriptor>,
-            CapabilityEndpointDescriptorValidator>();
-        services.AddSingleton<IDescriptorRelationshipExtractor,
-            CapabilityEndpointRelationshipExtractor>();
+        // Multi-registration interfaces — validators and extractors accumulate across modules.
+        // TryAddEnumerable ensures idempotent single registration even if both
+        // DynamicApiModule.OnConfigureServices and AddCrestCapabilityEndpoints are called.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IRegistryValidator<CapabilityEndpointDescriptor>,
+            CapabilityEndpointDescriptorValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IDescriptorRelationshipExtractor,
+            CapabilityEndpointRelationshipExtractor>());
 
         var options = new CapabilityEndpointOptions();
         configure?.Invoke(options);

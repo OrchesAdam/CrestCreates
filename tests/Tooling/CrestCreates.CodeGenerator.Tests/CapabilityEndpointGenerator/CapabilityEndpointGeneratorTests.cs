@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using CrestCreates.CodeGenerator.CapabilityEndpointGenerator;
 using CrestCreates.CodeGenerator.Tests.TestHelpers;
+using FluentAssertions;
 using Xunit;
 
 namespace CrestCreates.CodeGenerator.Tests.CapabilityEndpointGenerator;
@@ -379,7 +380,7 @@ namespace TestNs
         var bindingFile = result.GetSourceByFileName("ItemEndpoints_Bindings.g.cs");
         Assert.NotNull(bindingFile);
         Assert.Contains("DateTime.Parse", bindingFile!.SourceText);
-        Assert.Contains("context.Request.Query[\"from\"]?.ToString()", bindingFile.SourceText);
+        Assert.Contains("context.Request.Query[\"from\"].ToString()", bindingFile.SourceText);
     }
 
     [Fact]
@@ -410,7 +411,7 @@ namespace TestNs
         var bindingFile = result.GetSourceByFileName("ItemEndpoints_Bindings.g.cs");
         Assert.NotNull(bindingFile);
         Assert.Contains("Guid.Parse", bindingFile!.SourceText);
-        Assert.Contains("context.Request.Headers[\"X-Request-Id\"]?.ToString()", bindingFile.SourceText);
+        Assert.Contains("context.Request.Headers[\"X-Request-Id\"].ToString()", bindingFile.SourceText);
     }
 
     [Fact]
@@ -454,5 +455,86 @@ namespace TestNs
         Assert.DoesNotContain("RouteValues", bindingFile.SourceText);
         Assert.DoesNotContain("Query[\"", bindingFile.SourceText);
         Assert.DoesNotContain("Headers[\"", bindingFile.SourceText);
+    }
+
+    [Fact]
+    public void QueryBinding_Generates_StringValues_ToString()
+    {
+        // Test that Query binding generates .ToString() on StringValues (struct, non-nullable)
+        // NOT ?.ToString() (null-conditional, which is used only for Route values)
+        var source = @"
+using System;
+using CrestCreates.DynamicApi;
+
+[CapabilityEndpointSpecs]
+public static partial class TestEndpoints
+{
+    [CapabilityEndpointSpec(""test.query"", CapabilityEndpointHttpMethod.Get, ""/api/test"")]
+    [CapabilityEndpointInput(typeof(DateTime), Name = ""q"", Source = CapabilityEndpointParameterSource.Query)]
+    public sealed class QueryTest { }
+}
+";
+
+        var result = Run(source);
+        var bindingFile = result.GetSourceByFileName("TestEndpoints_Bindings.g.cs");
+        Assert.NotNull(bindingFile);
+        // Query returns StringValues (struct), so binding uses .ToString() directly
+        Assert.Contains(@"context.Request.Query[""q""].ToString()", bindingFile!.SourceText);
+        // Query should NOT use null-conditional ?.ToString()
+        Assert.DoesNotContain(@"context.Request.Query[""q""]?.ToString()", bindingFile.SourceText);
+    }
+
+    [Fact]
+    public void HeaderBinding_Generates_StringValues_ToString()
+    {
+        // Test that Header binding generates .ToString() on StringValues (struct, non-nullable)
+        var source = @"
+using System;
+using CrestCreates.DynamicApi;
+
+[CapabilityEndpointSpecs]
+public static partial class TestEndpoints
+{
+    [CapabilityEndpointSpec(""test.header"", CapabilityEndpointHttpMethod.Get, ""/api/test"")]
+    [CapabilityEndpointInput(typeof(Guid), Name = ""X-Request-Id"", Source = CapabilityEndpointParameterSource.Header)]
+    public sealed class HeaderTest { }
+}
+";
+
+        var result = Run(source);
+        var bindingFile = result.GetSourceByFileName("TestEndpoints_Bindings.g.cs");
+        Assert.NotNull(bindingFile);
+        Assert.Contains(@"context.Request.Headers[""X-Request-Id""].ToString()", bindingFile!.SourceText);
+        Assert.DoesNotContain(@"context.Request.Headers[""X-Request-Id""]?.ToString()", bindingFile.SourceText);
+    }
+
+    [Fact]
+    public void Dedup_AllowsSameCapabilityIdDifferentEndpointVersion()
+    {
+        // Two specs with same CapabilityId but different versions should both be emitted
+        var source = @"
+using CrestCreates.DynamicApi;
+
+[CapabilityEndpointSpecs]
+public static partial class TestEndpoints
+{
+    [CapabilityEndpointSpec(""test.versioned"", CapabilityEndpointHttpMethod.Get, ""/api/v1/test"", CapabilityVersion = 1)]
+    public sealed class GetV1 { }
+
+    [CapabilityEndpointSpec(""test.versioned"", CapabilityEndpointHttpMethod.Get, ""/api/v2/test"", CapabilityVersion = 2)]
+    public sealed class GetV2 { }
+}
+";
+
+        var result = Run(source);
+        Assert.NotEmpty(result.GeneratedSources);
+
+        var providerFile = result.GetSourceByFileName("TestEndpoints_Provider.g.cs");
+        Assert.NotNull(providerFile);
+
+        // Both versioned descriptors should appear in the provider
+        // Count = 1 array init + N descriptors = 1 + 2 = 3
+        var descriptorCount = CountOccurrences(providerFile!.SourceText, "new CapabilityEndpointDescriptor");
+        Assert.Equal(3, descriptorCount);
     }
 }

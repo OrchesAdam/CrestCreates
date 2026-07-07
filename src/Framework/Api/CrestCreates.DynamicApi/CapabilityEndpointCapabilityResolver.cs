@@ -15,12 +15,15 @@ internal static class CapabilityEndpointCapabilityResolver
         ICapabilityRegistry registry,
         VersionedDescriptorRef<CapabilityDescriptor> capabilityRef)
     {
-        // 1. Exact version resolution (Version > 0)
+        // 1. Exact version resolution (Version > 0) — fail-closed, no fallback
         if (capabilityRef.Version > 0)
         {
             var exact = registry.GetByVersion(capabilityRef.Id, capabilityRef.Version);
             if (exact is not null)
                 return exact;
+
+            throw new InvalidOperationException(
+                $"Capability descriptor not found for id='{capabilityRef.Id}', version={capabilityRef.Version}. Exact version resolution must not fallback.");
         }
 
         // 2. Latest active by Id

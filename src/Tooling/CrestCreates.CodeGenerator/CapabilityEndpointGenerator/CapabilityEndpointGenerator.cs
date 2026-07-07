@@ -280,9 +280,10 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
         }
 
         // CEP003: No methods or constructors with parameters
+        // Exclude implicitly declared constructors (compiler-generated default ctor)
         var hasMethods = classSymbol.GetMembers().OfType<IMethodSymbol>()
             .Any(m => m.MethodKind == MethodKind.Ordinary ||
-                       m.MethodKind == MethodKind.Constructor);
+                       (m.MethodKind == MethodKind.Constructor && !m.IsImplicitlyDeclared));
         if (hasMethods)
         {
             builder.Add(Diagnostic.Create(
@@ -328,6 +329,7 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
         // CEP014: Scalar input names must be valid C# identifiers for body+scalar binding.
         // For Level 1 specs, the Body is defined by a [CapabilityEndpointInput] with Source=Body.
         var hasBody = false;
+        var bodyTypeName = string.Empty;
         foreach (var attr in classSymbol.GetAttributes())
         {
             if (attr.AttributeClass is null)
@@ -345,6 +347,11 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
             if (sourceValue == 3) // Body
             {
                 hasBody = true;
+                if (attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is INamedTypeSymbol bodyTypeSymbol)
+                {
+                    bodyTypeName = bodyTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                }
                 break;
             }
         }
@@ -389,6 +396,16 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
             }
         }
 
+        // CEP015: Body binding uses generic ReadBodyAsync — not fully AOT-safe
+        if (hasBody)
+        {
+            builder.Add(Diagnostic.Create(
+                CapabilityEndpointDiagnostics.BodyBindingNotAotSafe,
+                location,
+                classSymbol.Name,
+                bodyTypeName));
+        }
+
         return builder.ToImmutable();
     }
 
@@ -416,6 +433,21 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                 CapabilityEndpointDiagnostics.HttpMethodAttributeMustBeSealedPartialNested,
                 location,
                 classSymbol.Name));
+        }
+
+        // CEP016: Level 2 HTTP method attributes must be nested inside a [CapabilityEndpointSet] container
+        if (isNested && classSymbol.ContainingType is not null)
+        {
+            var hasSetAttr = classSymbol.ContainingType.GetAttributes().Any(a =>
+                a.AttributeClass?.ToDisplayString() == SetAttributeMetadataName);
+            if (!hasSetAttr)
+            {
+                builder.Add(Diagnostic.Create(
+                    CapabilityEndpointDiagnostics.HttpMethodAttributeMustBeInsideCapabilityEndpointSet,
+                    location,
+                    classSymbol.Name,
+                    classSymbol.ContainingType.Name));
+            }
         }
 
         // CEP011: [Post]/[Put]/[Patch] without Body (warning)
@@ -459,6 +491,22 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
             var bindingTypeDiagnostics = ValidateRouteBindingTypes(classSymbol, attr, location);
             if (bindingTypeDiagnostics.Length > 0)
                 builder.AddRange(bindingTypeDiagnostics);
+
+            // CEP015: Body binding uses generic ReadBodyAsync — not fully AOT-safe
+            foreach (var kvp in attr.NamedArguments)
+            {
+                if (kvp.Key == "Body" && !kvp.Value.IsNull &&
+                    kvp.Value.Kind == TypedConstantKind.Type &&
+                    kvp.Value.Value is INamedTypeSymbol bodyTypeSym)
+                {
+                    builder.Add(Diagnostic.Create(
+                        CapabilityEndpointDiagnostics.BodyBindingNotAotSafe,
+                        location,
+                        classSymbol.Name,
+                        bodyTypeSym.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
+                    break;
+                }
+            }
         }
 
         return builder.ToImmutable();
@@ -809,7 +857,8 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
 
         foreach (var spec in specs)
         {
-            var key = $"endpoint:{spec.CapabilityId}";
+            var version = spec.CapabilityVersion > 0 ? spec.CapabilityVersion : 1;
+            var key = $"endpoint:{spec.CapabilityId}:{version}";
             if (seen.Add(key))
             {
                 deduped.Add(spec);

@@ -120,6 +120,9 @@ internal static class CapabilityEndpointBindingEmitter
 
     private static void EmitBodyOnlyBinding(StringBuilder sb, CapabilityEndpointInputRecord bodyInput)
     {
+        // AOT Debt (P1-6): Generic ReadBodyAsync<T> relies on reflection-based JsonSerializer.
+        // For full AOT safety, consumers should provide a JsonSerializerContext and the SG should
+        // emit ReadBodyAsync<T>(context, jsonTypeInfo, optional, ct) instead.
         var typeName = bodyInput.TypeName;
         var optional = !bodyInput.Required;
 
@@ -135,6 +138,9 @@ internal static class CapabilityEndpointBindingEmitter
         ImmutableArray<CapabilityEndpointInputRecord> queryInputs,
         ImmutableArray<CapabilityEndpointInputRecord> headerInputs)
     {
+        // AOT Debt (P1-6): Generic ReadBodyAsync<T> relies on reflection-based JsonSerializer.
+        // For full AOT safety, consumers should provide a JsonSerializerContext and the SG should
+        // emit ReadBodyAsync<T>(context, jsonTypeInfo, optional, ct) instead.
         var typeName = bodyInput.TypeName;
         var optional = !bodyInput.Required;
 
@@ -144,15 +150,15 @@ internal static class CapabilityEndpointBindingEmitter
 
         // Assign route values to model properties
         foreach (var input in routeInputs)
-            EmitScalarPropertyAssignment(sb, input, "RouteValues");
+            EmitScalarPropertyAssignment(sb, input, 0);
 
         // Assign query values to model properties
         foreach (var input in queryInputs)
-            EmitScalarPropertyAssignment(sb, input, "Query");
+            EmitScalarPropertyAssignment(sb, input, 1);
 
         // Assign header values to model properties
         foreach (var input in headerInputs)
-            EmitScalarPropertyAssignment(sb, input, "Headers");
+            EmitScalarPropertyAssignment(sb, input, 2);
 
         sb.AppendLine("        return model;");
     }
@@ -160,13 +166,24 @@ internal static class CapabilityEndpointBindingEmitter
     /// <summary>
     /// Emits a property assignment for a scalar input (Route/Query/Header) onto the model DTO.
     /// </summary>
-    /// <param name="sourceCollection">One of "RouteValues", "Query", or "Headers" — the
-    /// <c>context.Request.{sourceCollection}</c> member name.</param>
+    /// <param name="sourceValue">
+    /// 0=Route → <c>context.Request.RouteValues</c>,
+    /// 1=Query → <c>context.Request.Query</c>,
+    /// 2=Header → <c>context.Request.Headers</c>.
+    /// </param>
     private static void EmitScalarPropertyAssignment(
         StringBuilder sb,
         CapabilityEndpointInputRecord input,
-        string sourceCollection)
+        int sourceValue)
     {
+        var sourceCollection = sourceValue switch
+        {
+            0 => "RouteValues",
+            1 => "Query",
+            2 => "Headers",
+            _ => "RouteValues"
+        };
+
         var sourceKey = input.Name;
         var propAssignmentName = !string.IsNullOrEmpty(input.CapabilityInputPath)
             ? input.CapabilityInputPath
@@ -174,11 +191,29 @@ internal static class CapabilityEndpointBindingEmitter
                 ? char.ToUpperInvariant(sourceKey[0]) + sourceKey.Substring(1)
                 : sourceKey;
         var varName = SanitizeVarName(sourceKey);
-        var parseCode = GetScalarParseCode(input, $"context.Request.{sourceCollection}[\"{sourceKey}\"]?.ToString()");
+
+        // Route returns string?, so use ?.ToString(). Query and Header return StringValues (struct),
+        // so use .ToString() directly (no null-conditional).
+        string valueExpr;
+        string tryGetValueExpr;
+        if (sourceValue == 0)
+        {
+            // Route: TryGetValue returns out string?, parse with ?.ToString()
+            tryGetValueExpr = $"context.Request.{sourceCollection}.TryGetValue(\"{sourceKey}\", out var {varName})";
+            valueExpr = $"{varName}?.ToString()";
+        }
+        else
+        {
+            // Query or Header: TryGetValue returns out StringValues, parse with .ToString()
+            tryGetValueExpr = $"context.Request.{sourceCollection}.TryGetValue(\"{sourceKey}\", out var {varName})";
+            valueExpr = $"{varName}.ToString()";
+        }
+
+        var parseCode = GetScalarParseCode(input, valueExpr);
 
         if (parseCode is not null)
         {
-            sb.AppendLine($"        if (model is not null && context.Request.{sourceCollection}.TryGetValue(\"{sourceKey}\", out var {varName}))");
+            sb.AppendLine($"        if (model is not null && {tryGetValueExpr})");
             sb.AppendLine("        {");
             sb.AppendLine($"            model.{propAssignmentName} = {parseCode};");
             sb.AppendLine("        }");
@@ -296,6 +331,8 @@ internal static class CapabilityEndpointBindingEmitter
     /// <summary>
     /// Returns the C# expression that reads the raw string value from the HTTP source
     /// for a scalar input (Route, Query, or Header).
+    /// Route values return string? so use ?.ToString().
+    /// Query and Header return StringValues (struct) so use .ToString() directly.
     /// </summary>
     private static string GetSourceReadExpression(CapabilityEndpointInputRecord input)
     {
@@ -306,7 +343,10 @@ internal static class CapabilityEndpointBindingEmitter
             2 => "Headers",
             _ => "RouteValues"
         };
-        return $"context.Request.{sourceCollection}[\"{input.Name}\"]?.ToString()";
+
+        // Route returns string?, use null-conditional. Query/Header return StringValues (struct).
+        var toStringOperator = input.SourceValue == 0 ? "?.ToString()" : ".ToString()";
+        return $"context.Request.{sourceCollection}[\"{input.Name}\"]{toStringOperator}";
     }
 
     /// <summary>

@@ -33,7 +33,7 @@ public sealed class ValidationMiddleware : ICapabilityPipelineMiddleware
         if (_validator == null || _schemaRegistry == null)
             return next(context);
 
-        var capDescriptor = _capabilityRegistry.GetByName(context.CapabilityName);
+        var capDescriptor = _capabilityRegistry.GetByVersion(context.CapabilityId, context.CapabilityVersion);
         if (capDescriptor == null)
             return next(context);
 

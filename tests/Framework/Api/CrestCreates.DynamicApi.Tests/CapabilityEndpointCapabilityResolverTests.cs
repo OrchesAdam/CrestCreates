@@ -76,4 +76,30 @@ public sealed class CapabilityEndpointCapabilityResolverTests
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*nonexistent*0*");
     }
+
+    [Fact]
+    public void ExactVersion_Missing_DoesNotFallbackToLatestActive()
+    {
+        // Arrange
+        var registry = new Mock<ICapabilityRegistry>();
+        var v1Descriptor = new CapabilityDescriptor
+        {
+            Id = "bk_create",
+            Name = "Books Create",
+            Version = 1,
+            State = DescriptorState.Active
+        };
+
+        registry.Setup(r => r.GetByVersion("bk_create", 2)).Returns((CapabilityDescriptor?)null);
+        registry.Setup(r => r.GetById("bk_create")).Returns(v1Descriptor);
+
+        var capabilityRef = new VersionedDescriptorRef<CapabilityDescriptor>("bk_create", 2);
+
+        // Act
+        var act = () => CapabilityEndpointCapabilityResolver.Resolve(registry.Object, capabilityRef);
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*version=2*");
+    }
 }

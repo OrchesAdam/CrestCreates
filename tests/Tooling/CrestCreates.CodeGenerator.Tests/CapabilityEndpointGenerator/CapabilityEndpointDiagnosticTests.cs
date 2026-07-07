@@ -1,6 +1,7 @@
 using System.Linq;
 using CrestCreates.CodeGenerator.CapabilityEndpointGenerator;
 using CrestCreates.CodeGenerator.Tests.TestHelpers;
+using FluentAssertions;
 using Microsoft.CodeAnalysis;
 using Xunit;
 
@@ -474,5 +475,57 @@ namespace TestNs
         var warnings = result.GetWarnings().ToList();
 
         Assert.Contains(warnings, w => w.Id == "CEP011");
+    }
+
+    // ================================================================
+    // Valid specs do not emit specific errors
+    // ================================================================
+
+    [Fact]
+    public void Valid_Level1_EmptySpec_DoesNotEmit_CEP003()
+    {
+        // An empty sealed nested class (with only implicit default constructor)
+        // should NOT trigger CEP003
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSpecs]
+    public static partial class TestEndpoints
+    {
+        [CapabilityEndpointSpec(""test.empty"", CapabilityEndpointHttpMethod.Get, ""/api/test"")]
+        public sealed class EmptySpec { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP003");
+    }
+
+    // ================================================================
+    // CEP016: Level 2 HTTP method attribute without [CapabilityEndpointSet]
+    // ================================================================
+
+    [Fact]
+    public void Level2HttpMethod_WithoutCapabilityEndpointSet_Emits_CEP016()
+    {
+        // [Get] on a class nested in a container WITHOUT [CapabilityEndpointSet] should emit CEP016
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    public static partial class SomeContainer
+    {
+        [Get(""test.get"", ""{id}"", Input = typeof(string))]
+        public sealed partial class GetTest { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP016");
     }
 }
