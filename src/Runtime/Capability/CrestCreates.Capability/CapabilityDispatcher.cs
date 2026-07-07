@@ -31,7 +31,7 @@ internal sealed class CapabilityDispatcher : ICapabilityDispatcher
         Action<CapabilityExecutionContext>? configureContext = null,
         CancellationToken ct = default)
     {
-        return await _pipeline.ExecuteAsync(descriptor.Id, input, ctx =>
+        return await _pipeline.ExecuteAsync(descriptor, input, ctx =>
         {
             ctx.InvocationSource = source;
             ctx.TenantId = _tenantContext?.CurrentTenantId;

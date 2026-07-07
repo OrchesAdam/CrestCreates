@@ -74,6 +74,12 @@ public class WorkflowEngineTests
             Action<CapabilityExecutionContext>? configureContext = null,
             CancellationToken ct = default)
             => Task.FromResult(_result);
+
+        public Task<CapabilityExecutionResult> ExecuteAsync(
+            CapabilityDescriptor descriptor, object? input = null,
+            Action<CapabilityExecutionContext>? configureContext = null,
+            CancellationToken ct = default)
+            => ExecuteAsync(descriptor.Id, input, configureContext, ct);
     }
 
     [Fact]

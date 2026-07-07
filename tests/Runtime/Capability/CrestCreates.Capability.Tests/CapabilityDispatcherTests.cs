@@ -29,9 +29,9 @@ public class CapabilityDispatcherTests
 
         InvocationSource? capturedSource = null;
         var pipelineMock = new Mock<ICapabilityPipeline>();
-        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<string>(), It.IsAny<object?>(),
+        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<CapabilityDescriptor>(), It.IsAny<object?>(),
                 It.IsAny<Action<CapabilityExecutionContext>?>(), It.IsAny<CancellationToken>()))
-            .Callback<string, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
+            .Callback<CapabilityDescriptor, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
                 (name, input, configure, ct) =>
                 {
                     var ctx = new CapabilityExecutionContext();
@@ -60,9 +60,9 @@ public class CapabilityDispatcherTests
 
         string? capturedTenantId = null;
         var pipelineMock = new Mock<ICapabilityPipeline>();
-        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<string>(), It.IsAny<object?>(),
+        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<CapabilityDescriptor>(), It.IsAny<object?>(),
                 It.IsAny<Action<CapabilityExecutionContext>?>(), It.IsAny<CancellationToken>()))
-            .Callback<string, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
+            .Callback<CapabilityDescriptor, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
                 (name, input, configure, ct) =>
                 {
                     var ctx = new CapabilityExecutionContext();
@@ -95,9 +95,9 @@ public class CapabilityDispatcherTests
 
         string? capturedUserId = null;
         var pipelineMock = new Mock<ICapabilityPipeline>();
-        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<string>(), It.IsAny<object?>(),
+        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<CapabilityDescriptor>(), It.IsAny<object?>(),
                 It.IsAny<Action<CapabilityExecutionContext>?>(), It.IsAny<CancellationToken>()))
-            .Callback<string, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
+            .Callback<CapabilityDescriptor, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
                 (name, input, configure, ct) =>
                 {
                     var ctx = new CapabilityExecutionContext();
@@ -133,10 +133,10 @@ public class CapabilityDispatcherTests
 
         string? calledWithName = null;
         var pipelineMock = new Mock<ICapabilityPipeline>();
-        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<string>(), It.IsAny<object?>(),
+        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<CapabilityDescriptor>(), It.IsAny<object?>(),
                 It.IsAny<Action<CapabilityExecutionContext>?>(), It.IsAny<CancellationToken>()))
-            .Callback<string, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
-                (name, input, configure, ct) => { calledWithName = name; })
+            .Callback<CapabilityDescriptor, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
+                (desc, input, configure, ct) => { calledWithName = desc.Id; })
             .ReturnsAsync(CapabilityExecutionResult.Success(null, TimeSpan.Zero));
 
         var dispatcher = new CapabilityDispatcher(
@@ -163,7 +163,7 @@ public class CapabilityDispatcherTests
             .Throws(new CapabilityNotFoundException("missing.cap"));
 
         var pipelineMock = new Mock<ICapabilityPipeline>();
-        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<string>(), It.IsAny<object?>(),
+        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<CapabilityDescriptor>(), It.IsAny<object?>(),
                 It.IsAny<Action<CapabilityExecutionContext>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CapabilityExecutionResult.Success(null, TimeSpan.Zero));
 
@@ -188,9 +188,9 @@ public class CapabilityDispatcherTests
         string? capturedTenantId = null;
         string? capturedUserId = null;
         var pipelineMock = new Mock<ICapabilityPipeline>();
-        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<string>(), It.IsAny<object?>(),
+        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<CapabilityDescriptor>(), It.IsAny<object?>(),
                 It.IsAny<Action<CapabilityExecutionContext>?>(), It.IsAny<CancellationToken>()))
-            .Callback<string, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
+            .Callback<CapabilityDescriptor, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
                 (name, input, configure, ct) =>
                 {
                     var ctx = new CapabilityExecutionContext();
@@ -224,9 +224,9 @@ public class CapabilityDispatcherTests
 
         string? capturedTenantId = null;
         var pipelineMock = new Mock<ICapabilityPipeline>();
-        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<string>(), It.IsAny<object?>(),
+        pipelineMock.Setup(p => p.ExecuteAsync(It.IsAny<CapabilityDescriptor>(), It.IsAny<object?>(),
                 It.IsAny<Action<CapabilityExecutionContext>?>(), It.IsAny<CancellationToken>()))
-            .Callback<string, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
+            .Callback<CapabilityDescriptor, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
                 (name, input, configure, ct) =>
                 {
                     var ctx = new CapabilityExecutionContext();

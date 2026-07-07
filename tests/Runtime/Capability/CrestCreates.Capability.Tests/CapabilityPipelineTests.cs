@@ -1,8 +1,10 @@
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Xunit;
 
 namespace CrestCreates.Capability.Tests;
@@ -16,18 +18,54 @@ public class CapabilityPipelineTests
         public IReadOnlyList<CapabilityDescriptor> GetDescriptors() => _descriptors;
     }
 
+    private static IServiceProvider BuildPipelineServiceProvider(
+        ICapabilityRegistry registry,
+        ICapabilityHandlerResolver resolver)
+    {
+        var hashBuilderMock = new Mock<IDescriptorStableHashBuilder>();
+        hashBuilderMock.Setup(h => h.Build(It.IsAny<IDescriptor>()))
+            .Returns(new DescriptorStableHashes
+            {
+                ContractHash = new CanonicalHash
+                {
+                    Value = "abc123",
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "v1",
+                    ArtifactKind = "Descriptor",
+                    Scope = "InternalFull",
+                    Purpose = "Contract",
+                    ContractVersion = "v1",
+                    CanonicalShapeVersion = "v1"
+                },
+                DefinitionHash = new CanonicalHash
+                {
+                    Value = "def456",
+                    Algorithm = "SHA-256",
+                    AlgorithmVersion = "v1",
+                    ArtifactKind = "Descriptor",
+                    Scope = "InternalFull",
+                    Purpose = "Definition",
+                    ContractVersion = "v1",
+                    CanonicalShapeVersion = "v1"
+                }
+            });
+
+        var services = new ServiceCollection();
+        services.AddSingleton(registry);
+        services.AddSingleton(resolver);
+        services.AddSingleton(new CapabilityPipelineBuilder());
+        services.AddSingleton(hashBuilderMock.Object);
+        services.AddSingleton<ICapabilityPipeline, CapabilityPipeline>();
+        return services.BuildServiceProvider();
+    }
+
     [Fact]
     public async Task ExecuteAsync_CapabilityNotFound_ReturnsFailure()
     {
-        var services = new ServiceCollection();
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
         var registry = new CapabilityRegistry(engine);
         var resolver = new CapabilityHandlerResolver();
-        services.AddSingleton<ICapabilityRegistry>(registry);
-        services.AddSingleton<ICapabilityHandlerResolver>(resolver);
-        services.AddSingleton(new CapabilityPipelineBuilder());
-        services.AddSingleton<ICapabilityPipeline, CapabilityPipeline>();
-        var sp = services.BuildServiceProvider();
+        var sp = BuildPipelineServiceProvider(registry, resolver);
 
         var pipeline = sp.GetRequiredService<ICapabilityPipeline>();
         var result = await pipeline.ExecuteAsync("nonexistent.cap");
@@ -39,7 +77,6 @@ public class CapabilityPipelineTests
     [Fact]
     public async Task ExecuteAsync_CapabilityFound_ButHandlerNotFound_ReturnsFailure()
     {
-        var services = new ServiceCollection();
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
         var registry = new CapabilityRegistry(engine);
         var resolver = new CapabilityHandlerResolver();
@@ -53,11 +90,7 @@ public class CapabilityPipelineTests
                 State = DescriptorState.Active
             }
         ])]);
-        services.AddSingleton<ICapabilityRegistry>(registry);
-        services.AddSingleton<ICapabilityHandlerResolver>(resolver);
-        services.AddSingleton(new CapabilityPipelineBuilder());
-        services.AddSingleton<ICapabilityPipeline, CapabilityPipeline>();
-        var sp = services.BuildServiceProvider();
+        var sp = BuildPipelineServiceProvider(registry, resolver);
 
         var pipeline = sp.GetRequiredService<ICapabilityPipeline>();
         var result = await pipeline.ExecuteAsync("test.echo");
@@ -69,7 +102,6 @@ public class CapabilityPipelineTests
     [Fact]
     public async Task ExecuteAsync_ConfigureContext_Overrides_Context_Values()
     {
-        var services = new ServiceCollection();
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
         var registry = new CapabilityRegistry(engine);
         var resolver = new CapabilityHandlerResolver();
@@ -83,11 +115,7 @@ public class CapabilityPipelineTests
                 State = DescriptorState.Active
             }
         ])]);
-        services.AddSingleton<ICapabilityRegistry>(registry);
-        services.AddSingleton<ICapabilityHandlerResolver>(resolver);
-        services.AddSingleton(new CapabilityPipelineBuilder());
-        services.AddSingleton<ICapabilityPipeline, CapabilityPipeline>();
-        var sp = services.BuildServiceProvider();
+        var sp = BuildPipelineServiceProvider(registry, resolver);
 
         var pipeline = sp.GetRequiredService<ICapabilityPipeline>();
         var result = await pipeline.ExecuteAsync("test.echo", configureContext: ctx =>
@@ -103,7 +131,6 @@ public class CapabilityPipelineTests
     public async Task ExecuteAsync_HandlerRegistered_InvokesSuccessfully()
     {
         // Arrange: register a capability and a simple echo handler
-        var services = new ServiceCollection();
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
         var registry = new CapabilityRegistry(engine);
         var resolver = new CapabilityHandlerResolver();
@@ -122,12 +149,7 @@ public class CapabilityPipelineTests
         // Register handler invoker — zero reflection, AOT-safe
         resolver.Register("cap_01", new EchoHandlerInvoker());
 
-        services.AddSingleton<ICapabilityRegistry>(registry);
-        services.AddSingleton<ICapabilityHandlerResolver>(resolver);
-        services.AddSingleton(new CapabilityPipelineBuilder());
-        services.AddSingleton<ICapabilityPipeline, CapabilityPipeline>();
-        var sp = services.BuildServiceProvider();
-
+        var sp = BuildPipelineServiceProvider(registry, resolver);
         var pipeline = sp.GetRequiredService<ICapabilityPipeline>();
 
         // Act
@@ -143,7 +165,6 @@ public class CapabilityPipelineTests
     [Fact]
     public async Task ExecuteAsync_HandlerRegistered_WithContext_InvokesSuccessfully()
     {
-        var services = new ServiceCollection();
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
         var registry = new CapabilityRegistry(engine);
         var resolver = new CapabilityHandlerResolver();
@@ -161,12 +182,7 @@ public class CapabilityPipelineTests
 
         resolver.Register("cap_02", new UpperHandlerInvoker());
 
-        services.AddSingleton<ICapabilityRegistry>(registry);
-        services.AddSingleton<ICapabilityHandlerResolver>(resolver);
-        services.AddSingleton(new CapabilityPipelineBuilder());
-        services.AddSingleton<ICapabilityPipeline, CapabilityPipeline>();
-        var sp = services.BuildServiceProvider();
-
+        var sp = BuildPipelineServiceProvider(registry, resolver);
         var pipeline = sp.GetRequiredService<ICapabilityPipeline>();
         var result = await pipeline.ExecuteAsync("test.upper", input: "hello world",
             configureContext: ctx =>
@@ -182,7 +198,6 @@ public class CapabilityPipelineTests
     [Fact]
     public async Task ExecuteAsync_PipelineError_ReturnsFailure()
     {
-        var services = new ServiceCollection();
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
         var registry = new CapabilityRegistry(engine);
         var resolver = new CapabilityHandlerResolver();
@@ -200,12 +215,7 @@ public class CapabilityPipelineTests
 
         resolver.Register("cap_03", new ThrowingHandlerInvoker());
 
-        services.AddSingleton<ICapabilityRegistry>(registry);
-        services.AddSingleton<ICapabilityHandlerResolver>(resolver);
-        services.AddSingleton(new CapabilityPipelineBuilder());
-        services.AddSingleton<ICapabilityPipeline, CapabilityPipeline>();
-        var sp = services.BuildServiceProvider();
-
+        var sp = BuildPipelineServiceProvider(registry, resolver);
         var pipeline = sp.GetRequiredService<ICapabilityPipeline>();
         var result = await pipeline.ExecuteAsync("test.broken");
 

@@ -63,6 +63,12 @@ public class WorkflowRuntimeTests
             Action<CapabilityExecutionContext>? configureContext = null,
             CancellationToken ct = default)
             => Task.FromResult(_result);
+
+        public Task<CapabilityExecutionResult> ExecuteAsync(
+            CapabilityDescriptor descriptor, object? input = null,
+            Action<CapabilityExecutionContext>? configureContext = null,
+            CancellationToken ct = default)
+            => ExecuteAsync(descriptor.Id, input, configureContext, ct);
     }
 
     [Fact]
@@ -233,6 +239,12 @@ public class WorkflowRuntimeTests
             ct.ThrowIfCancellationRequested();
             return Task.FromResult(CapabilityExecutionResult.Success(null, TimeSpan.Zero));
         }
+
+        public Task<CapabilityExecutionResult> ExecuteAsync(
+            CapabilityDescriptor descriptor, object? input = null,
+            Action<CapabilityExecutionContext>? configureContext = null,
+            CancellationToken ct = default)
+            => ExecuteAsync(descriptor.Id, input, configureContext, ct);
     }
 
     private class MockThrowingPipeline : ICapabilityPipeline
@@ -242,5 +254,11 @@ public class WorkflowRuntimeTests
             Action<CapabilityExecutionContext>? configureContext = null,
             CancellationToken ct = default)
             => throw new InvalidOperationException("infrastructure boom");
+
+        public Task<CapabilityExecutionResult> ExecuteAsync(
+            CapabilityDescriptor descriptor, object? input = null,
+            Action<CapabilityExecutionContext>? configureContext = null,
+            CancellationToken ct = default)
+            => ExecuteAsync(descriptor.Id, input, configureContext, ct);
     }
 }

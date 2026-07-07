@@ -51,7 +51,7 @@ public sealed class CapabilityEndpointDescriptorValidator
             AddError(issues, $"Capability endpoint '{descriptor.Id}' Version must be greater than zero.");
         if (descriptor.HttpMethod == CapabilityEndpointHttpMethod.None)
             AddError(issues, $"Capability endpoint '{descriptor.Id}' HttpMethod must not be None.");
-        if (string.IsNullOrWhiteSpace(descriptor.Capability.Id) || descriptor.Capability.Version <= 0)
+        if (string.IsNullOrWhiteSpace(descriptor.Capability.Id) || (descriptor.Capability.Version <= 0 && descriptor.Capability.SelectionMode == VersionSelectionMode.Exact))
             AddError(issues, $"Capability endpoint '{descriptor.Id}' Capability reference must specify Id and Version.");
     }
 
@@ -122,10 +122,25 @@ public sealed class CapabilityEndpointDescriptorValidator
         CapabilityEndpointDescriptor descriptor,
         List<ValidationIssue> issues)
     {
-        if (string.IsNullOrWhiteSpace(descriptor.Capability.Id) || descriptor.Capability.Version <= 0)
+        if (string.IsNullOrWhiteSpace(descriptor.Capability.Id))
             return;
 
-        var capability = _capabilityRegistry.GetByVersion(descriptor.Capability.Id, descriptor.Capability.Version);
+        CapabilityDescriptor? capability;
+
+        if (descriptor.Capability.Version <= 0)
+        {
+            // Resolve latest active capability for authority validation.
+            // Version=0 with SelectionMode=Latest/Compatible means the resolver
+            // picks the latest active at map time — validate against that.
+            capability = ResolveLatestActiveCapability(descriptor.Capability.Id);
+            if (capability is null)
+                return; // Will fail-closed at map time
+        }
+        else
+        {
+            capability = _capabilityRegistry.GetByVersion(descriptor.Capability.Id, descriptor.Capability.Version);
+        }
+
         if (capability is null)
         {
             AddError(issues, $"Capability endpoint '{descriptor.Id}' references missing Capability '{descriptor.Capability.Id}' v{descriptor.Capability.Version}.");
@@ -235,6 +250,21 @@ public sealed class CapabilityEndpointDescriptorValidator
         }
 
         return result.ToString().TrimEnd('/');
+    }
+
+    private CapabilityDescriptor? ResolveLatestActiveCapability(string capabilityId)
+    {
+        // Try GetById first (may return latest active by Id)
+        var byId = _capabilityRegistry.GetById(capabilityId);
+        if (byId is not null && byId.State == DescriptorState.Active)
+            return byId;
+
+        // Scan all and find latest active
+        var active = _capabilityRegistry.GetAll()
+            .Where(d => d.Id == capabilityId && d.State == DescriptorState.Active)
+            .MaxBy(d => d.Version);
+
+        return active;
     }
 
     private static void AddError(List<ValidationIssue> issues, string message)

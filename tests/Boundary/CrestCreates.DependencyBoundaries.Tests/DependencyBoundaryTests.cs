@@ -333,6 +333,107 @@ public class DependencyBoundaryTests
             new[] { "src/Runtime", "src/Framework", "src/Platform" });
     }
 
+    [Fact]
+    public void DynamicApi_DoesNotReferenceCapabilityImplementation()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Framework/Api/CrestCreates.DynamicApi",
+            "CrestCreates.DynamicApi may reference Capability.Abstractions but must not reference CrestCreates.Capability (runtime implementation).",
+            new[] { "Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" });
+    }
+
+    [Fact]
+    public void DynamicApi_DoesNotReferencePlatform()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Framework/Api/CrestCreates.DynamicApi",
+            "CrestCreates.DynamicApi must not reference Platform projects.",
+            new[] { "src/Platform" });
+    }
+
+    [Fact]
+    public void DynamicApi_DoesNotReferenceRuntimeBeyondCapabilityAbstractions()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Framework/Api/CrestCreates.DynamicApi",
+            "CrestCreates.DynamicApi may only reference Capability.Abstractions from Runtime; all other Runtime implementations are forbidden.",
+            new[]
+            {
+                "src/Runtime/Capability/CrestCreates.Capability/",
+                "src/Runtime/Workflow/",
+                "src/Runtime/Agent/",
+                "src/Runtime/HumanTask/",
+                "src/Runtime/Eventing/",
+                "src/Runtime/Audit/",
+                "src/Runtime/DistributedTransaction/"
+            });
+    }
+
+    [Fact]
+    public void DynamicApiAbstractions_DoesNotReferenceCapabilityImplementation()
+    {
+        // DynamicApi.Abstractions may reference Capability.Abstractions because
+        // CapabilityEndpointDescriptor.Capability uses VersionedDescriptorRef<CapabilityDescriptor>,
+        // and CapabilityDescriptor lives in the Capability.Abstractions assembly (Metadata namespace).
+        // This is an assembly-level colocation — Capability.Abstractions contains only descriptor types.
+        AssertNoDirectProjectReferences(
+            "src/Framework/Api/CrestCreates.DynamicApi.Abstractions",
+            "CrestCreates.DynamicApi.Abstractions may only reference Capability.Abstractions; Capability runtime implementation is forbidden.",
+            new[] { "Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" });
+    }
+
+    [Fact]
+    public void DynamicApiAbstractions_DoesNotReferenceRuntimeBeyondCapabilityAbstractions()
+    {
+        // Same rationale as above: Capability.Abstractions is the only allowed Runtime reference.
+        AssertNoDirectProjectReferences(
+            "src/Framework/Api/CrestCreates.DynamicApi.Abstractions",
+            "CrestCreates.DynamicApi.Abstractions may only reference Capability.Abstractions from Runtime; all other Runtime projects are forbidden.",
+            new[]
+            {
+                "src/Runtime/Capability/CrestCreates.Capability/",
+                "src/Runtime/Workflow/",
+                "src/Runtime/Agent/",
+                "src/Runtime/HumanTask/",
+                "src/Runtime/Eventing/",
+                "src/Runtime/Audit/",
+                "src/Runtime/DistributedTransaction/"
+            });
+    }
+
+    [Fact]
+    public void DynamicApiAbstractions_DoesNotReferenceAspNetCoreMvc()
+    {
+        var repoRoot = FindRepoRoot();
+        var csprojPath = repoRoot.Combine("src/Framework/Api/CrestCreates.DynamicApi.Abstractions/CrestCreates.DynamicApi.Abstractions.csproj").FullName;
+
+        Assert.True(File.Exists(csprojPath), $"Csproj not found: {csprojPath}");
+
+        var document = XDocument.Load(csprojPath);
+
+        var frameworkRefs = document
+            .Descendants("FrameworkReference")
+            .Select(e => e.Attribute("Include")?.Value)
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .ToArray();
+
+        var mvcFrameworkRef = frameworkRefs
+            .FirstOrDefault(f => f!.Contains("Microsoft.AspNetCore.App", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Null(mvcFrameworkRef);
+
+        var mvcPackageRefs = document
+            .Descendants("PackageReference")
+            .Select(e => e.Attribute("Include")?.Value)
+            .Where(v => !string.IsNullOrWhiteSpace(v) && v!.Contains("Microsoft.AspNetCore.Mvc", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        Assert.True(
+            mvcPackageRefs.Length == 0,
+            "CrestCreates.DynamicApi.Abstractions must not reference ASP.NET Core MVC packages. " +
+            "Found: " + string.Join(", ", mvcPackageRefs));
+    }
+
     private static void AssertNoDirectProjectReferences(
         string projectRootRelativePath,
         string reason,

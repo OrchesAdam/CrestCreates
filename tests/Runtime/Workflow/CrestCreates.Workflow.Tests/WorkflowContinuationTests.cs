@@ -42,6 +42,12 @@ public class WorkflowContinuationTests
             Action<CapabilityExecutionContext>? configureContext = null,
             CancellationToken ct = default)
             => Task.FromResult(_result);
+
+        public Task<CapabilityExecutionResult> ExecuteAsync(
+            CapabilityDescriptor descriptor, object? input = null,
+            Action<CapabilityExecutionContext>? configureContext = null,
+            CancellationToken ct = default)
+            => ExecuteAsync(descriptor.Id, input, configureContext, ct);
     }
 
     private sealed class CapturingCapabilityPipeline : ICapabilityPipeline
@@ -56,6 +62,12 @@ public class WorkflowContinuationTests
             CapabilityIds.Add(capabilityIdOrName);
             return Task.FromResult(CapabilityExecutionResult.Success(null, TimeSpan.Zero));
         }
+
+        public Task<CapabilityExecutionResult> ExecuteAsync(
+            CapabilityDescriptor descriptor, object? input = null,
+            Action<CapabilityExecutionContext>? configureContext = null,
+            CancellationToken ct = default)
+            => ExecuteAsync(descriptor.Id, input, configureContext, ct);
     }
 
     private sealed class WorkflowTestServices : IDisposable

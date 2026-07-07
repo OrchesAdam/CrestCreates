@@ -45,6 +45,15 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
                 TimeSpan.Zero);
         }
 
+        return await ExecuteAsync(descriptor, input, configureContext, ct).ConfigureAwait(false);
+    }
+
+    public async Task<CapabilityExecutionResult> ExecuteAsync(
+        CapabilityDescriptor descriptor,
+        object? input = null,
+        Action<CapabilityExecutionContext>? configureContext = null,
+        CancellationToken ct = default)
+    {
         var context = new CapabilityExecutionContext
         {
             CapabilityId = descriptor.Id,
