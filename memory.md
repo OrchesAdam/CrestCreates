@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-06 (Phase 8b: Dynamic API Descriptor — complete)
+Last Updated: 2026-07-08 (Phase 8a: Capability Endpoint Projection — complete)
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -153,17 +153,78 @@ Expected final standard:
 
 ## Not Yet Started or Not Yet Closed as Formal Platform Work
 
-### Phase 8a — Dynamic API Runtime Binding
+### Phase 8a — Capability Endpoint Projection
 
-Status: Not started.
+Status: ✅ Complete
 
-Expected scope:
-- Minimal API / HTTP endpoint binding from CapabilityEndpointDescriptor
-- Request parsing (route/query/body/header binding)
-- CapabilityInvocationContext construction
-- ICapabilityDispatcher invocation
-- Response mapping
-- Authorization / tenant / data-permission runtime context injection
+**Spec**: `docs/superpowers/specs/2026-07-06-phase-8a-capability-endpoint-projection-design.md`
+**Plan**: `docs/superpowers/plans/2026-07-07-phase-8a-capability-endpoint-projection.md`
+
+Core chain: `[CapabilityEndpointSpec]` → SG → DescriptorProvider + BindingContract → `MapCrestCapabilityEndpoints()` → `ICapabilityDispatcher.DispatchAsync(CapabilityDescriptor, ...)`
+
+**Positioning**: Capability→HTTP without AppService. Zero DynamicApi bridge. Phase 8a is the new mainline; old DynamicApiAotSourceGenerator is legacy AppService HTTP exposure.
+
+**Phase roadmap**: 8a (new mainline) → 8c (legacy deprecation) → 8d (AppService→Capability compatibility generator)
+
+**DX Layering**:
+- Level 0: Runtime canonical model (CapabilityEndpointDescriptor, BindingContract, Registry, MapCrestCapabilityEndpoints)
+- Level 1: Explicit `[CapabilityEndpointSpec]` with full control
+- Level 2: Sugar attributes (`[CapabilityEndpointSet]` + `[Post]`/`[Get]`/`[Put]`/`[Delete]`/`[Patch]`) — SG normalizes to Level 1 internally
+
+**Four concern separation**:
+1. `CapabilityEndpointDescriptor` = projection metadata (no CLR details)
+2. `CapabilityEndpointBindingContract` = SG-produced `BindInputAsync` delegate (public + `[EditorBrowsable(Never)]` for cross-assembly SG output)
+3. `ICapabilityDispatcher` = unified facade with `CapabilityDescriptor` overload
+4. `CapabilityEndpointResultMapper` = fixed mapping table (internal)
+
+**Attributes** (Level 1): `[CapabilityEndpointSpecs]` container, `[CapabilityEndpointSpec(capabilityId, httpMethod, routePattern)]`, `[CapabilityEndpointInput(Type, Name, Source, Required, CapabilityInputPath)]`, `[CapabilityEndpointOutput]`
+**Attributes** (Level 2): `[CapabilityEndpointSet(RoutePrefix, GroupName, Tags)]`, `[Post(capabilityId, route)]`, `[Get]`, `[Put]`, `[Delete]`, `[Patch]`
+
+**SG outputs** (CapabilityEndpointGenerator):
+- `{Container}_Provider.g.cs` — `ICapabilityEndpointDescriptorProvider` with ModuleInitializer registration
+- `{Container}_Bindings.g.cs` — `BindInputAsync` functions registered via ModuleInitializer into `CapabilityEndpointBindingRegistry`
+- SG does NOT generate MapAll() or direct MapMethods code — registry-driven mapping only
+
+**Runtime components**:
+- `CapabilityEndpointBindingContract` (sealed record, 3 fields)
+- `CapabilityEndpointBindingRegistry` (static ConcurrentDictionary, fail-fast on duplicate `(EndpointId, Version)`, `internal static void Reset()` for test isolation)
+- `CapabilityEndpointJsonRuntime` (two ReadBodyAsync overloads: generic + `JsonTypeInfo<T>` AOT-safe, resolves `IOptions<JsonOptions>` from DI, cached options)
+- `CapabilityEndpointRegistryBootstrapper` (Interlocked build-once)
+- `CapabilityEndpointCapabilityResolver` (Id-based: exact version → latest active → fail-closed; exact version miss throws InvalidOperationException)
+- `CapabilityEndpointResultMapper` (error code → HTTP status mapping)
+- `CapabilityEndpointMapper` (MapMethods with delegate closure capturing capability descriptor + binding contract)
+- `AddCrestCapabilityEndpoints()` (permissive, no throw) + `MapCrestCapabilityEndpoints()` (fail-closed)
+
+**Prerequisite**: `ICapabilityPipeline.ExecuteAsync(CapabilityDescriptor, ...)` overload — skips registry resolution, sets context Id/Name/Version/ContractHash from descriptor directly. String overload resolves then delegates to descriptor overload.
+
+**Input materialization**:
+- Body-only: `ReadBodyAsync<T>` → TInput
+- Body + Route/Query/Header scalar: route values assigned to TInput writable properties by PascalCase name match; Query/Header scalars via `context.Request.Query["name"].ToString()` / `context.Request.Headers["name"].ToString()`
+- Single scalar-only: parse from route/query/header
+- Multi-scalar without body: CEP013 Error (not supported in 8a)
+
+**Authorization 3-mode**: InheritCapability (pipeline checks), RequireAuthenticated (`RequireAuthorization()` + pipeline), AllowAnonymous (`AllowAnonymous()` + pipeline; Error if capability has permissions or is high risk)
+
+**Analyzer diagnostics**: CEP001-CEP005 (Level 1 structural), CEP008 (Route+Body DTO writable property), CEP009-CEP011 (Level 2 misuse), CEP012 (non-enum non-scalar type in route binding), CEP013 (multi-scalar without body), CEP014 (non-C#-identifier Name without CapabilityInputPath), CEP015 (generic ReadBodyAsync AOT debt warning), CEP016 (Level 2 without [CapabilityEndpointSet] container)
+
+**Route token handling**: Normalizer strips constraints (`{id:int}` → `id`), catch-all (`{**path}` → `path`), optional (`{id?}` → `id`) — aligned with validator behavior
+
+**Clean boundary with old DynamicApi**: 6 explicit "not reusable" items. Shared: `DescriptorKind.DynamicApiEndpoint` (value=7) + `GenerateParseExpression` (CodeGenerator internal helper). `MapCrestDynamicApi()` (legacy) and `MapCrestCapabilityEndpoints()` (new) coexist without wrapping each other.
+
+**Review iterations** (4 rounds, 30+ findings fixed):
+- Round 1 (self-audit): 5 P1 — FindPropertyTypeOnType inheritance, JsonRuntime deep copy, Enum fallback crash, multi-scalar Dictionary, EndpointId prefix
+- Round 2 (external): 5 findings — AllowAnonymous+Version=0 bypass, EndpointId from CapabilityId, Route+Body convention, Query/Header, RouteToBody
+- Round 3 (external): 4 findings — Route token type inference, EndpointId cross-container collision, RouteToBody removal, Query/Header
+- Round 4 (external): 8 findings — Exact version fallback, StringValues binding, CEP003 implicit constructor, ValidationMiddleware re-resolve, de-dup key missing version, AOT-safe body binding debt, Level 2 container check, duplicate validator registration
+
+**Test counts**: 29 SG + 35 DynamicApi + 10 Capability + 33 Boundary — all passing. Full solution build 0 errors in 8a-affected projects.
+
+**Known architectural items for 8c/8d** (not blocking 8a closure):
+- EndpointId/EndpointVersion should have independent attribute properties (currently defaults from CapabilityId/CapabilityVersion)
+- CapabilityInputPath used for both descriptor metadata and CLR property assignment — should introduce SG-only TargetProperty
+- VersionSelectionMode.Latest in code vs LatestActive in spec — naming to unify
+- BindingRegistry is process-wide generated registry — no runtime unload/reload/hot projection (by design for 8a)
+- SG generates generic ReadBodyAsync, not AOT-safe JsonTypeInfo overload — CEP015 marks as debt
 
 ### Localization
 
@@ -180,13 +241,22 @@ Still expected in future:
 
 Status: Not closed until Task 4 reliability issues are resolved.
 
-### Further Dynamic API Legacy Cleanup
+### Further Dynamic API Legacy Cleanup (Phase 8c)
 
-Status: Not closed.
+Status: Not started.
 
-Still expected:
-- Further downgrade or remove legacy runtime reflection code/tests
-- Avoid keeping legacy runtime scanner/executor as actively maintained mainline assets
+Expected scope:
+- Label old DynamicApiAotSourceGenerator as legacy AppService HTTP exposure
+- Do not extend it with topology, activation, agent authoring, MCP projection
+- Address architectural items from 8a: independent EndpointId/EndpointVersion, TargetProperty separation, Latest naming unification
+
+### Phase 8d — AppService→Capability Compatibility Generator
+
+Status: Not started.
+
+Expected scope:
+- AppService method → Generated CapabilityDescriptor → Generated CapabilityHandler calling service.Method → CapabilityEndpointDescriptor
+- Unifies runtime on Capability while preserving old developer experience
 
 ### Blob / File Platformization
 
@@ -250,6 +320,7 @@ This thread achieved the following:
     - Fourth review (8 findings: 4 P1, 4 P2) — 2026-06-20: derived summaries leaking through MaxSeverity/MaxLevel/MaxDecision/evidence maxima, version-ignoring identity (v1 visible makes denied v2 visible), BaseVersion ignored in draft comparison, projection failure silently persisted as mutation success, package bare-ID contract limitation (deferred), empty paths leaking traversal existence, test coverage gaps, memory.md test count inconsistency. All resolved except P2 package contract (deferred as type-design issue beyond projector scope).
      - 226 ControlPlane + 7 Boundary tests pass, full solution build 0 errors
  15. Phase 8b Dynamic API Descriptor (Issue #20) — CapabilityEndpointDescriptor as projection metadata over CapabilityDescriptor, with registry, validator (route conflict, null guards, InheritCapability fail-closed), relationship extractor, canonical hash profiles, AoT-safe kind naming, boundary test. 4 review rounds, 15 findings fixed. 37 Web.Tests + 6 Metadata.Tests + 27 Boundary tests.
+ 16. Phase 8a Capability Endpoint Projection (Issue #19) — Capability→HTTP without AppService, zero DynamicApi bridge. SG produces DescriptorProvider + BindingContract; registry-driven mapping via MapCrestCapabilityEndpoints(); ICapabilityPipeline descriptor overload; DX Layering (Level 0/1/2); 4 review rounds, 30+ findings fixed. 29 SG + 35 DynamicApi + 10 Capability + 33 Boundary tests.
 
 ---
 
@@ -266,6 +337,9 @@ This thread achieved the following:
 
 - Generated path is the official long-term mainline.
 - Runtime reflection scanner/executor should not be treated as first-class ongoing maintenance targets.
+- Phase 8a Capability Endpoint Projection is the new mainline for HTTP exposure — Capability→HTTP without AppService.
+- Old DynamicApiAotSourceGenerator is legacy AppService HTTP exposure; do not extend with topology/activation/MCP.
+- `MapCrestDynamicApi()` (legacy) and `MapCrestCapabilityEndpoints()` (new) coexist without wrapping each other.
 
 ### Multi-Tenancy
 
@@ -287,14 +361,18 @@ This thread achieved the following:
 - Query capability is accepted.
 - Cleanup/governance is not fully closed yet.
 
-### Dynamic API Descriptor (Phase 8b)
+### Capability Endpoint Projection (Phase 8a)
 
 - `CapabilityEndpointDescriptor` is a projection descriptor over `CapabilityDescriptor` — describes HTTP exposure metadata, not business logic or runtime execution
-- `CapabilityEndpointAuthorizationMode.InheritCapability` is the default — endpoint defers to capability's authority model; high-risk capability with no permissions is a validation error (fail-closed)
-- `ICapabilityRegistry` is required in validator DI — fail-closed (InvalidOperationException on missing registry), not fail-open with optional DI
-- `DescriptorKind.DynamicApiEndpoint = 7` — new descriptor kind for governance/topology coverage
-- `Metadata → DynamicApi.Abstractions` dependency accepted for canonical hash profiles — Metadata is the aggregation layer for all descriptor family profiles; boundary test prevents Metadata from referencing Framework/Api implementation projects
-- Route conflict validation: same HttpMethod + normalized RoutePattern (trailing slash removed, `{id}`/`{id?}`/`{**path}` normalized) cannot coexist
+- Four concern separation: Descriptor (projection metadata) / BindingContract (SG-produced CLR binding) / Dispatcher (unified facade) / ResultMapper (fixed mapping)
+- EndpointId defaults to `endpoint:{CapabilityId}` — DX shortcut; independent EndpointId/EndpointVersion deferred to 8c
+- Exact version resolution is fail-closed — `Version > 0` with `SelectionMode.Exact` throws on miss, no fallback to latest active
+- `ICapabilityPipeline.ExecuteAsync(CapabilityDescriptor, ...)` overload skips registry resolution — descriptor overload is the authoritative path
+- `ValidationMiddleware` uses `GetByVersion(id, version)` not `GetByName(name)` — respects captured descriptor version
+- BindingRegistry is process-wide generated registry — no runtime unload/reload/hot projection (by design for 8a)
+- SG generates generic `ReadBodyAsync<T>` — AOT-safe `JsonTypeInfo<T>` overload exists but not yet used by SG (CEP015 debt)
+- Level 2 sugar attributes require `[CapabilityEndpointSet]` container (CEP016)
+- Route token extraction strips constraints/catch-all/optional — aligned with validator behavior
 
 ### Organization Identity Kernel (Phase 5c, 2026-06-11)
 
@@ -1089,6 +1167,6 @@ Status: Completed.
 
 If a future thread should resume from this state, use a prompt like:
 
-> Read `/memory.md` first. Continue from the current CrestCreates platform status. Treat completed items as closed unless you find contradictory code. Focus on unresolved work only. Next phase entry point: Phase 8a (Dynamic API Runtime Binding) — consumes CapabilityEndpointDescriptor from Phase 8b to bind HTTP endpoints.
+> Read `/memory.md` first. Continue from the current CrestCreates platform status. Treat completed items as closed unless you find contradictory code. Focus on unresolved work only. Next phase entry point: Phase 8c (Legacy Dynamic API Boundary, Issue #21) — label old DynamicApiAotSourceGenerator as legacy, address architectural items from 8a (independent EndpointId/EndpointVersion, TargetProperty separation, Latest naming unification).
 
 ---
