@@ -63,7 +63,8 @@ public class CapabilityEndpointBoundaryTests
         {
             "CapabilityEndpointExtensions.cs",
             "CapabilityEndpointDescriptorValidator.cs",
-            "CapabilityEndpointCapabilityResolver.cs"
+            "CapabilityEndpointCapabilityResolver.cs",
+            "CapabilityEndpointMapper.cs"
         };
 
         var forbidden = new[]
