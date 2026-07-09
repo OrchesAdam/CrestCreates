@@ -45,6 +45,8 @@ public sealed class CapabilityEndpointDescriptorValidator
     {
         if (string.IsNullOrWhiteSpace(descriptor.Id))
             AddError(issues, "Capability endpoint Id is required.");
+        if (!string.IsNullOrWhiteSpace(descriptor.Id) && descriptor.Id.Any(char.IsWhiteSpace))
+            AddError(issues, $"Capability endpoint '{descriptor.Id}' Id must not contain whitespace characters.");
         if (string.IsNullOrWhiteSpace(descriptor.Name))
             AddError(issues, $"Capability endpoint '{descriptor.Id}' Name is required.");
         if (descriptor.Version <= 0)

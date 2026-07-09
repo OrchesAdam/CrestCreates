@@ -3,6 +3,10 @@ using Microsoft.AspNetCore.Http;
 
 namespace CrestCreates.DynamicApi;
 
+/// <summary>
+/// Legacy action descriptor for AppService-oriented Dynamic API.
+/// New Capability Endpoint projection uses its own input binding type.
+/// </summary>
 public sealed class DynamicApiActionDescriptor
 {
     public string ActionName { get; init; } = string.Empty;

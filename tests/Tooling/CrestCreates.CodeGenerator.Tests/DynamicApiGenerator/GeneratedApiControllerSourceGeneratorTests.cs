@@ -34,7 +34,7 @@ public class GeneratedApiControllerSourceGeneratorTests
 
         var result = await SourceGeneratorTestHelper.RunGeneratorAsync<DynamicApiAotSourceGenerator>(
             source,
-            additionalSources: new[] { DynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs(), BuildGeneratedApiControllerStubs() });
+            additionalSources: new[] { LegacyDynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs(), BuildGeneratedApiControllerStubs() });
 
         result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
 
@@ -72,7 +72,7 @@ public class GeneratedApiControllerSourceGeneratorTests
 
         var result = await SourceGeneratorTestHelper.RunGeneratorAsync<DynamicApiAotSourceGenerator>(
             source,
-            additionalSources: new[] { DynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs(), BuildGeneratedApiControllerStubs() });
+            additionalSources: new[] { LegacyDynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs(), BuildGeneratedApiControllerStubs() });
 
         result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
 
@@ -128,7 +128,7 @@ public class GeneratedApiControllerSourceGeneratorTests
 
         var result = await SourceGeneratorTestHelper.RunGeneratorAsync<DynamicApiAotSourceGenerator>(
             source,
-            additionalSources: new[] { DynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs(), BuildGeneratedApiControllerStubs() });
+            additionalSources: new[] { LegacyDynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs(), BuildGeneratedApiControllerStubs() });
 
         result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
         var endpointsSource = result.GetSourceByContent("MapMethods");
@@ -181,7 +181,7 @@ public class GeneratedApiControllerSourceGeneratorTests
 
         var result = await SourceGeneratorTestHelper.RunGeneratorAsync<DynamicApiAotSourceGenerator>(
             source,
-            additionalSources: new[] { DynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs(), BuildGeneratedApiControllerStubs() });
+            additionalSources: new[] { LegacyDynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs(), BuildGeneratedApiControllerStubs() });
 
         result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
 
@@ -219,7 +219,7 @@ public class GeneratedApiControllerSourceGeneratorTests
 
         var result = await SourceGeneratorTestHelper.RunGeneratorAsync<DynamicApiAotSourceGenerator>(
             source,
-            additionalSources: new[] { DynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs(), BuildGeneratedApiControllerStubs() });
+            additionalSources: new[] { LegacyDynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs(), BuildGeneratedApiControllerStubs() });
 
         result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
 

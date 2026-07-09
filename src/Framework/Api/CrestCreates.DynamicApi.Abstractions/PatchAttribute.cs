@@ -20,6 +20,8 @@ public sealed class PatchAttribute : Attribute
     public Type? Input { get; init; }
     public string? InputName { get; init; }
     public int CapabilityVersion { get; init; }
+    public string? EndpointId { get; init; }
+    public int EndpointVersion { get; init; }
     public CapabilityEndpointAuthorizationMode Auth { get; init; }
         = CapabilityEndpointAuthorizationMode.InheritCapability;
     public int SuccessStatusCode { get; init; }

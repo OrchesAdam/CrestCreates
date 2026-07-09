@@ -10,7 +10,7 @@ using Xunit;
 
 namespace CrestCreates.Web.Tests.DynamicApi;
 
-public class DynamicApiExtensionsTests
+public class LegacyDynamicApiExtensionsTests
 {
     [Fact]
     public void AddCrestDynamicApi_WithoutGeneratedProvider_ThrowsWhenResolvingRegistry()

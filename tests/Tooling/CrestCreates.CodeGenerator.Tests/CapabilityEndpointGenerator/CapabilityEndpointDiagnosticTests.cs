@@ -66,6 +66,8 @@ namespace CrestCreates.DynamicApi
         public string RoutePattern { get; }
 
         public int CapabilityVersion { get; init; }
+        public string? EndpointId { get; init; }
+        public int EndpointVersion { get; init; }
         public CapabilityEndpointAuthorizationMode AuthorizationMode { get; init; }
             = CapabilityEndpointAuthorizationMode.InheritCapability;
         public int SuccessStatusCode { get; init; }
@@ -97,6 +99,7 @@ namespace CrestCreates.DynamicApi
             = CapabilityEndpointParameterSource.Body;
         public bool Required { get; init; } = true;
         public string? CapabilityInputPath { get; init; }
+        public string? TargetProperty { get; init; }
     }
 
     [AttributeUsage(AttributeTargets.Class)]
@@ -122,6 +125,8 @@ namespace CrestCreates.DynamicApi
 
         public Type? Body { get; init; }
         public int CapabilityVersion { get; init; }
+        public string? EndpointId { get; init; }
+        public int EndpointVersion { get; init; }
         public CapabilityEndpointAuthorizationMode Auth { get; init; }
             = CapabilityEndpointAuthorizationMode.InheritCapability;
         public int SuccessStatusCode { get; init; }
@@ -146,6 +151,8 @@ namespace CrestCreates.DynamicApi
         public Type? Input { get; init; }
         public string? InputName { get; init; }
         public int CapabilityVersion { get; init; }
+        public string? EndpointId { get; init; }
+        public int EndpointVersion { get; init; }
         public CapabilityEndpointAuthorizationMode Auth { get; init; }
             = CapabilityEndpointAuthorizationMode.InheritCapability;
         public string? OperationId { get; init; }
@@ -170,6 +177,8 @@ namespace CrestCreates.DynamicApi
         public Type? Input { get; init; }
         public string? InputName { get; init; }
         public int CapabilityVersion { get; init; }
+        public string? EndpointId { get; init; }
+        public int EndpointVersion { get; init; }
         public CapabilityEndpointAuthorizationMode Auth { get; init; }
             = CapabilityEndpointAuthorizationMode.InheritCapability;
         public int SuccessStatusCode { get; init; }
@@ -527,5 +536,384 @@ namespace TestNs
 
         var result = Run(source);
         result.Diagnostics.Should().Contain(d => d.Id == "CEP016");
+    }
+
+    // ================================================================
+    // CEP017: EndpointId contains whitespace
+    // ================================================================
+
+    [Fact]
+    public void CEP017_Fires_When_EndpointId_Contains_Whitespace()
+    {
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSpecs]
+    public static partial class TestEndpoints
+    {
+        [CapabilityEndpointSpec(""books"", CapabilityEndpointHttpMethod.Get, ""/books"", EndpointId = ""my endpoint"")]
+        public sealed class BooksSpec { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP017");
+    }
+
+    [Fact]
+    public void CEP020_Fires_When_EndpointVersion_Is_Negative()
+    {
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSpecs]
+    public static partial class TestEndpoints
+    {
+        [CapabilityEndpointSpec(""books"", CapabilityEndpointHttpMethod.Get, ""/books"", EndpointVersion = -1)]
+        public sealed class BooksSpec { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP020");
+    }
+
+    [Fact]
+    public void EndpointId_NoWhitespace_NoDiagnostic()
+    {
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSpecs]
+    public static partial class TestEndpoints
+    {
+        [CapabilityEndpointSpec(""books"", CapabilityEndpointHttpMethod.Get, ""/books"", EndpointId = ""admin-books"")]
+        public sealed class BooksSpec { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP017");
+    }
+
+    [Fact]
+    public void EndpointVersion_Zero_FallsBack_To_CapabilityVersion()
+    {
+        // EndpointVersion = 0 uses CapabilityVersion fallback — no error
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSpecs]
+    public static partial class TestEndpoints
+    {
+        [CapabilityEndpointSpec(""books"", CapabilityEndpointHttpMethod.Get, ""/books"", EndpointVersion = 0)]
+        public sealed class BooksSpec { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP020");
+    }
+
+    // ================================================================
+    // CEP018: TargetProperty does not exist on body type
+    // ================================================================
+
+    [Fact]
+    public void CEP018_Fires_When_TargetProperty_Missing_On_Body()
+    {
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    public sealed class SomeDto
+    {
+        public string ValidProp { get; set; } = string.Empty;
+    }
+
+    [CapabilityEndpointSpecs]
+    public static partial class TestEndpoints
+    {
+        [CapabilityEndpointSpec(""test.spec"", CapabilityEndpointHttpMethod.Get, ""items/{id}"")]
+        [CapabilityEndpointInput(typeof(SomeDto), Name = ""body"", Source = CapabilityEndpointParameterSource.Body)]
+        [CapabilityEndpointInput(typeof(int), Name = ""id"", Source = CapabilityEndpointParameterSource.Route, TargetProperty = ""NonExistentProp"")]
+        public sealed class MySpec { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP018");
+    }
+
+    // ================================================================
+    // CEP019: TargetProperty is not a valid C# identifier
+    // ================================================================
+
+    [Fact]
+    public void CEP019_Fires_When_TargetProperty_Contains_Dot()
+    {
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSpecs]
+    public static partial class TestEndpoints
+    {
+        [CapabilityEndpointSpec(""test.spec"", CapabilityEndpointHttpMethod.Get, ""items/{id}"")]
+        [CapabilityEndpointInput(typeof(int), Name = ""id"", Source = CapabilityEndpointParameterSource.Route, TargetProperty = ""Address.City"")]
+        public sealed class MySpec { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP019");
+    }
+
+    [Fact]
+    public void CEP019_Fires_When_TargetProperty_Contains_Dash()
+    {
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSpecs]
+    public static partial class TestEndpoints
+    {
+        [CapabilityEndpointSpec(""test.spec"", CapabilityEndpointHttpMethod.Get, ""items/{id}"")]
+        [CapabilityEndpointInput(typeof(int), Name = ""id"", Source = CapabilityEndpointParameterSource.Route, TargetProperty = ""my-prop"")]
+        public sealed class MySpec { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP019");
+    }
+
+    [Fact]
+    public void TargetProperty_Valid_NoDiagnostic()
+    {
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    public sealed class SomeDto
+    {
+        public string ValidProp { get; set; } = string.Empty;
+    }
+
+    [CapabilityEndpointSpecs]
+    public static partial class TestEndpoints
+    {
+        [CapabilityEndpointSpec(""test.spec"", CapabilityEndpointHttpMethod.Get, ""items/{id}"")]
+        [CapabilityEndpointInput(typeof(SomeDto), Name = ""body"", Source = CapabilityEndpointParameterSource.Body)]
+        [CapabilityEndpointInput(typeof(int), Name = ""id"", Source = CapabilityEndpointParameterSource.Route, TargetProperty = ""ValidProp"")]
+        public sealed class MySpec { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP018");
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP019");
+    }
+
+    // ================================================================
+    // CEP013: Multiple scalar inputs without body → Error
+    // ================================================================
+
+    [Fact]
+    public void CEP013_Is_Error_Not_Warning()
+    {
+        var descriptor = CapabilityEndpointDiagnostics.MultipleRouteParamsWithoutBody;
+        descriptor.DefaultSeverity.Should().Be(DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void CEP013_Fires_For_Route_Plus_Route_Without_Body()
+    {
+        // Two route tokens, no Body → CEP013 Error
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSet]
+    public static partial class TestApi
+    {
+        [Get(""test.get"", ""items/{id}/{subId}"")]
+        public sealed partial class GetItem { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP013"
+            && d.Severity == DiagnosticSeverity.Error);
+    }
+
+    // Note: Route+Query, Query+Header, Header+Header CEP013 tests removed for Level 2.
+    // Level 2 does not read class-level [CapabilityEndpointInput] for binding generation,
+    // so these combinations are not diagnosed. Level 1 covers these cases.
+
+    [Fact]
+    public void CEP013_DoesNotFire_For_Single_Scalar_Route()
+    {
+        // Single route token, no Body → no CEP013
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSet]
+    public static partial class TestApi
+    {
+        [Get(""test.get"", ""items/{id}"")]
+        public sealed partial class GetItem { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP013");
+    }
+
+    [Fact]
+    public void CEP013_DoesNotFire_For_Single_Scalar_Query()
+    {
+        // Single Query input, no Body → no CEP013
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSet]
+    public static partial class TestApi
+    {
+        [Get(""test.get"", ""items"")]
+        [CapabilityEndpointInput(typeof(int), Name = ""q"", Source = CapabilityEndpointParameterSource.Query)]
+        public sealed partial class GetItem { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP013");
+    }
+
+    [Fact]
+    public void CEP013_DoesNotFire_For_Body_Plus_Multiple_Scalars()
+    {
+        // Body + multiple Route/Query/Header → no CEP013
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    public sealed class CreateDto
+    {
+        public string Name { get; set; } = string.Empty;
+        public int Id { get; set; }
+    }
+
+    [CapabilityEndpointSet]
+    public static partial class TestApi
+    {
+        [Post(""test.post"", ""items/{id}"", Body = typeof(CreateDto))]
+        [CapabilityEndpointInput(typeof(int), Name = ""q"", Source = CapabilityEndpointParameterSource.Query)]
+        public sealed partial class CreateItem { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP013");
+    }
+
+    [Fact]
+    public void CEP013_Fires_For_Route_Plus_Explicit_Input_Without_Body()
+    {
+        // One route token + explicit Input on the HTTP method attribute, no Body → CEP013 Error
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSet]
+    public static partial class TestApi
+    {
+        [Get(""test.get"", ""items/{id}"", Input = typeof(string))]
+        public sealed partial class GetItem { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP013"
+            && d.Severity == DiagnosticSeverity.Error);
+    }
+
+    // ================================================================
+    // BindingEmitter: Multi-scalar no body generates throw, not Dictionary
+    // ================================================================
+
+    [Fact]
+    public void BindingEmitter_MultiScalar_NoBody_Generates_Throw_Not_Dictionary()
+    {
+        // Multi scalar inputs without body should generate a throw, not a Dictionary.
+        // Uses Level 1 [CapabilityEndpointSpec] + [CapabilityEndpointInput] since Level 2
+        // normalization only extracts inputs from HTTP method attributes (not class-level inputs).
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSpecs]
+    public static partial class TestEndpoints
+    {
+        [CapabilityEndpointSpec(""test.get"", CapabilityEndpointHttpMethod.Get, ""{id}"")]
+        [CapabilityEndpointInput(typeof(int), Name = ""id"", Source = CapabilityEndpointParameterSource.Route)]
+        [CapabilityEndpointInput(typeof(int), Name = ""q"", Source = CapabilityEndpointParameterSource.Query)]
+        public sealed class GetItem { }
+    }
+}
+";
+
+        var result = Run(source);
+
+        // Get the binding source
+        var bindingSource = result.GeneratedSources
+            .FirstOrDefault(s => s.FileName.EndsWith("_Bindings.g.cs"));
+        bindingSource.Should().NotBeNull("binding source should be generated");
+
+        var code = bindingSource!.SourceText;
+
+        // Must contain throw with CEP013
+        code.Should().Contain("throw new InvalidOperationException");
+        code.Should().Contain("CEP013");
+
+        // Must NOT contain Dictionary
+        code.Should().NotContain("Dictionary<string, object?>");
+        code.Should().NotContain("Dictionary<string,object?>");
+        code.Should().NotContain("new System.Collections.Generic.Dictionary");
+        code.Should().NotContain("dict[");
     }
 }

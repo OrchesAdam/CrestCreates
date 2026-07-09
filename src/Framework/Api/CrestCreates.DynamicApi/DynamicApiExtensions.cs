@@ -7,6 +7,13 @@ namespace CrestCreates.DynamicApi;
 
 public static class DynamicApiExtensions
 {
+    /// <summary>
+    /// Legacy AppService-oriented HTTP exposure path.
+    /// This API is kept for AppService compatibility.
+    /// New HTTP exposure should use the Capability-first endpoint projection path.
+    /// Do not extend this path with Capability runtime, topology, activation,
+    /// agent authoring, or MCP projection semantics.
+    /// </summary>
     public static IServiceCollection AddCrestDynamicApi(
         this IServiceCollection services,
         Action<DynamicApiOptions>? configure = null)
@@ -36,6 +43,13 @@ public static class DynamicApiExtensions
         return services;
     }
 
+    /// <summary>
+    /// Legacy AppService-oriented HTTP endpoint mapping.
+    /// This API is kept for AppService compatibility.
+    /// New HTTP endpoint mapping should use the Capability-first endpoint projection path.
+    /// Do not extend this path with Capability runtime, topology, activation,
+    /// agent authoring, or MCP projection semantics.
+    /// </summary>
     public static IEndpointRouteBuilder MapCrestDynamicApi(this IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);

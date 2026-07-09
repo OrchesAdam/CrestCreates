@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-08 (Phase 8a: Capability Endpoint Projection — complete)
+Last Updated: 2026-07-09 (Phase 8c: Legacy Dynamic API Boundary — complete)
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -164,7 +164,7 @@ Core chain: `[CapabilityEndpointSpec]` → SG → DescriptorProvider + BindingCo
 
 **Positioning**: Capability→HTTP without AppService. Zero DynamicApi bridge. Phase 8a is the new mainline; old DynamicApiAotSourceGenerator is legacy AppService HTTP exposure.
 
-**Phase roadmap**: 8a (new mainline) → 8c (legacy deprecation) → 8d (AppService→Capability compatibility generator)
+**Phase roadmap**: 8a (new mainline) → 8c (legacy deprecation, ✅ complete) → 8d (AppService→Capability compatibility generator)
 
 **DX Layering**:
 - Level 0: Runtime canonical model (CapabilityEndpointDescriptor, BindingContract, Registry, MapCrestCapabilityEndpoints)
@@ -219,11 +219,8 @@ Core chain: `[CapabilityEndpointSpec]` → SG → DescriptorProvider + BindingCo
 
 **Test counts**: 29 SG + 35 DynamicApi + 10 Capability + 33 Boundary — all passing. Full solution build 0 errors in 8a-affected projects.
 
-**Known architectural items for 8c/8d** (not blocking 8a closure):
-- EndpointId/EndpointVersion should have independent attribute properties (currently defaults from CapabilityId/CapabilityVersion)
-- CapabilityInputPath used for both descriptor metadata and CLR property assignment — should introduce SG-only TargetProperty
-- VersionSelectionMode.Latest in code vs LatestActive in spec — naming to unify
-- BindingRegistry is process-wide generated registry — no runtime unload/reload/hot projection (by design for 8a)
+**Known architectural items for 8d** (not blocking 8a/8c):
+- AppService→Capability compatibility generator (8d scope)
 - SG generates generic ReadBodyAsync, not AOT-safe JsonTypeInfo overload — CEP015 marks as debt
 
 ### Localization
@@ -243,12 +240,35 @@ Status: Not closed until Task 4 reliability issues are resolved.
 
 ### Further Dynamic API Legacy Cleanup (Phase 8c)
 
-Status: Not started.
+Status: ✅ Complete
 
-Expected scope:
-- Label old DynamicApiAotSourceGenerator as legacy AppService HTTP exposure
-- Do not extend it with topology, activation, agent authoring, MCP projection
-- Address architectural items from 8a: independent EndpointId/EndpointVersion, TargetProperty separation, Latest naming unification
+**Spec**: `docs/superpowers/specs/2026-07-08-phase-8c-legacy-dynamic-api-boundary-design.md`
+**Plan**: `docs/superpowers/plans/2026-07-08-phase-8c-legacy-dynamic-api-boundary.md`
+**Architecture Note**: `docs/superpowers/specs/2026-07-08-phase-8c-legacy-dynamic-api-boundary-architecture-note.md`
+
+8c resolves identity ambiguity between legacy and Capability-first paths — not physical elimination of dual-track coexistence.
+
+**Deliverables** (7 PRs, 28 AC):
+1. **Legacy XML docs + architecture note** — 8 legacy files annotated with compatibility-only conceptual descriptions (no forbidden CapabilityEndpoint symbol names, no cross-assembly `<see cref>`). Architecture note with 10 sections including BindingRegistry lifecycle declaration.
+2. **Boundary tests** (6 tests): assembly reference boundary, project reference boundary, legacy source symbol boundary, CapabilityEndpoint mapping boundary, CapabilityEndpoint emitter boundary, Abstractions type definition boundary.
+3. **EndpointId/EndpointVersion independent properties** — `[CapabilityEndpointSpec]` + 5 HTTP method attributes each gain `EndpointId` (string, default null → `endpoint:{CapabilityId}`) and `EndpointVersion` (int, default 0 → CapabilityVersion). SG resolves identity at generation time. CEP017 (whitespace EndpointId Error), CEP020 (negative EndpointVersion Error). Validator checks Id whitespace.
+4. **TargetProperty separation** — `[CapabilityEndpointInput]` gains `TargetProperty` (string, SG-only). BindingEmitter uses TargetProperty→PascalCase(Name) for CLR assignment (no CapabilityInputPath fallback chain). ProviderEmitter only emits CapabilityInputPath. CEP018 (missing TargetProperty on body Error), CEP019 (invalid TargetProperty identifier Error). Simple public settable property names only (no nested paths).
+5. **CEP013 Error + Dictionary fallback deletion** — CEP013 upgraded from Warning to Error. Level 1 covers Route/Query/Header scalar-only combinations; Level 2 covers route tokens + explicit Input only (Level 2 does not read class-level `[CapabilityEndpointInput]`). Dictionary<string, object?> fallback deleted from BindingEmitter. Fail-closed `throw new InvalidOperationException` for multi-scalar-no-body path. Even if CEP013 is suppressed, emitter must not silently fall back to Dictionary.
+6. **DynamicApiSourceGenerator recycled** — moved to `99_RecycleBin/` (not deleted per AGENTS.md rule). `DynamicApiAotSourceGenerator.cs` remains as legacy generated path.
+7. **Legacy test rename** — 6 test files renamed with `Legacy` prefix (4 Web.Tests + 2 CodeGenerator.Tests). Tests still run but file/class naming marks them as compatibility-only. `AddCrestDynamicApi`/`MapCrestDynamicApi` documented as legacy in XML docs but NOT marked `[Obsolete]`.
+
+**Key architectural decisions**:
+- Level 2 does not read class-level `[CapabilityEndpointInput]` — all inputs come from HTTP method attribute Body/Input/route tokens. CEP013/CEP018/CEP019 diagnostics only apply to Level 1 for class-level inputs.
+- CEP014 suppression condition changed from `capabilityInputPath` to `targetProperty` — TargetProperty is the authoritative CLR assignment override.
+- BindingEmitter TargetProperty fallback: TargetProperty → PascalCase(Name) — no CapabilityInputPath intermediate layer.
+- EndpointId prefix `endpoint:{CapabilityId}` is SHOULD (not MUST) — explicit EndpointId must be non-empty with no whitespace; only conflicts with reserved legacy prefixes produce errors.
+
+**Review iterations** (3 rounds):
+- Round 1 (self-audit): 4 findings — DynamicApiSourceGenerator deleted not recycled (P0), legacy tests deleted not renamed (P1), Web.Tests legacy test not renamed (P1), Level 1 ExtractInputRecords missing IsEnum (P1). All fixed.
+- Round 2 (oracle): 4 P1 findings — BindingEmitter CapabilityInputPath fallback chain, CEP014 suppression condition, Section 5.2 boundary test missing, Section 5.1 type definition test missing. All fixed.
+- Round 3 (external): 2 findings — Level 2 CEP018/019/013 reading class-level `[CapabilityEndpointInput]` but Normalizer not processing them (diagnostics/generation asymmetry), XML doc TargetProperty fallback description incorrect. Fixed by removing Level 2 class-level attribute diagnostics and correcting XML doc.
+
+**Test counts**: 45 CapabilityEndpoint SG + 6 Boundary + 22 Legacy Web + 7 Legacy CodeGenerator — all passing. Full solution build 0 errors in 8c-affected projects.
 
 ### Phase 8d — AppService→Capability Compatibility Generator
 
@@ -340,6 +360,8 @@ This thread achieved the following:
 - Phase 8a Capability Endpoint Projection is the new mainline for HTTP exposure — Capability→HTTP without AppService.
 - Old DynamicApiAotSourceGenerator is legacy AppService HTTP exposure; do not extend with topology/activation/MCP.
 - `MapCrestDynamicApi()` (legacy) and `MapCrestCapabilityEndpoints()` (new) coexist without wrapping each other.
+- Phase 8c completed: legacy path labeled compatibility-only, boundary tests guard against cross-path contamination, EndpointId/EndpointVersion/TargetProperty independent properties, CEP013 Error + Dictionary fallback deleted, DynamicApiSourceGenerator recycled to 99_RecycleBin.
+- Level 2 does not read class-level `[CapabilityEndpointInput]` — all inputs from HTTP method attribute only.
 
 ### Multi-Tenancy
 
@@ -365,13 +387,16 @@ This thread achieved the following:
 
 - `CapabilityEndpointDescriptor` is a projection descriptor over `CapabilityDescriptor` — describes HTTP exposure metadata, not business logic or runtime execution
 - Four concern separation: Descriptor (projection metadata) / BindingContract (SG-produced CLR binding) / Dispatcher (unified facade) / ResultMapper (fixed mapping)
-- EndpointId defaults to `endpoint:{CapabilityId}` — DX shortcut; independent EndpointId/EndpointVersion deferred to 8c
+- EndpointId defaults to `endpoint:{CapabilityId}` — DX shortcut; independent EndpointId/EndpointVersion resolved in 8c
+- TargetProperty on `[CapabilityEndpointInput]` controls CLR property assignment (SG-only, not in descriptor); fallback to PascalCase(Name)
+- CEP013 is Error (not Warning) after 8c; Level 1 covers Route/Query/Header, Level 2 covers route tokens only
 - Exact version resolution is fail-closed — `Version > 0` with `SelectionMode.Exact` throws on miss, no fallback to latest active
 - `ICapabilityPipeline.ExecuteAsync(CapabilityDescriptor, ...)` overload skips registry resolution — descriptor overload is the authoritative path
 - `ValidationMiddleware` uses `GetByVersion(id, version)` not `GetByName(name)` — respects captured descriptor version
 - BindingRegistry is process-wide generated registry — no runtime unload/reload/hot projection (by design for 8a)
 - SG generates generic `ReadBodyAsync<T>` — AOT-safe `JsonTypeInfo<T>` overload exists but not yet used by SG (CEP015 debt)
 - Level 2 sugar attributes require `[CapabilityEndpointSet]` container (CEP016)
+- Level 2 does not read class-level `[CapabilityEndpointInput]` — all inputs from HTTP method attribute Body/Input/route tokens
 - Route token extraction strips constraints/catch-all/optional — aligned with validator behavior
 
 ### Organization Identity Kernel (Phase 5c, 2026-06-11)
@@ -1167,6 +1192,6 @@ Status: Completed.
 
 If a future thread should resume from this state, use a prompt like:
 
-> Read `/memory.md` first. Continue from the current CrestCreates platform status. Treat completed items as closed unless you find contradictory code. Focus on unresolved work only. Next phase entry point: Phase 8c (Legacy Dynamic API Boundary, Issue #21) — label old DynamicApiAotSourceGenerator as legacy, address architectural items from 8a (independent EndpointId/EndpointVersion, TargetProperty separation, Latest naming unification).
+> Read `/memory.md` first. Continue from the current CrestCreates platform status. Treat completed items as closed unless you find contradictory code. Focus on unresolved work only. Next phase entry point: Phase 8d (AppService→Capability Compatibility Generator) — generate CapabilityDescriptor + CapabilityHandler from AppService methods, unifying runtime on Capability while preserving old developer experience.
 
 ---

@@ -57,6 +57,8 @@ internal static class CapabilityEndpointSpecNormalizer
 
         // --- Common named arguments ---
         var capabilityVersion = GetNamedIntArg(namedArgs, "CapabilityVersion");
+        var endpointId = GetNamedStringArg(namedArgs, "EndpointId");
+        var endpointVersion = GetNamedIntArg(namedArgs, "EndpointVersion");
         var authValue = GetNamedIntArg(namedArgs, "Auth");
         var successStatusCode = GetNamedIntArg(namedArgs, "SuccessStatusCode");
         var operationId = GetNamedStringArg(namedArgs, "OperationId");
@@ -124,6 +126,8 @@ internal static class CapabilityEndpointSpecNormalizer
             HttpMethodValue = httpMethodValue,
             RoutePattern = routePattern,
             CapabilityVersion = capabilityVersion,
+            EndpointId = endpointId,
+            EndpointVersion = endpointVersion,
             AuthorizationModeValue = authValue,
             SuccessStatusCode = successStatusCode,
             OperationId = operationId,

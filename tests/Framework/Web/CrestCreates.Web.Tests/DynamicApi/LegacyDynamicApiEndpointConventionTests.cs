@@ -8,7 +8,7 @@ using Xunit;
 
 namespace CrestCreates.Web.Tests.DynamicApi;
 
-public class DynamicApiEndpointConventionTests
+public class LegacyDynamicApiEndpointConventionTests
 {
     [Fact]
     public void DynamicApiOptions_ShouldRegisterEndpointConvention()

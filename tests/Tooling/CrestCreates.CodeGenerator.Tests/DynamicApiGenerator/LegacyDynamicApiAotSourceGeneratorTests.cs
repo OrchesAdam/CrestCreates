@@ -8,7 +8,7 @@ using Xunit;
 
 namespace CrestCreates.CodeGenerator.Tests.DynamicApiGenerator;
 
-public class DynamicApiAotSourceGeneratorTests
+public class LegacyDynamicApiAotSourceGeneratorTests
 {
     [Fact]
     public void RunGenerator_WithCrestServiceAppService_GeneratesRegistryAndEndpoints()

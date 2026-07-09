@@ -96,6 +96,7 @@ namespace CrestCreates.DynamicApi
             = CapabilityEndpointParameterSource.Body;
         public bool Required { get; init; } = true;
         public string? CapabilityInputPath { get; init; }
+        public string? TargetProperty { get; init; }
     }
 }
 ";
@@ -536,5 +537,46 @@ public static partial class TestEndpoints
         // Count = 1 array init + N descriptors = 1 + 2 = 3
         var descriptorCount = CountOccurrences(providerFile!.SourceText, "new CapabilityEndpointDescriptor");
         Assert.Equal(3, descriptorCount);
+    }
+
+    [Fact]
+    public void BindingEmitter_Uses_TargetProperty_For_ClrAssignment()
+    {
+        // When TargetProperty = "BookId" and Name = "id",
+        // generated code should contain "model.BookId = ..." not "model.Id = ..."
+        var source = @"
+using System;
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    public sealed class BookDto
+    {
+        public string Title { get; set; } = string.Empty;
+        public Guid BookId { get; set; }
+    }
+
+    [CapabilityEndpointSpecs]
+    public static partial class BookEndpoints
+    {
+        [CapabilityEndpointSpec(""update-book"", CapabilityEndpointHttpMethod.Put, ""books/{id}"")]
+        [CapabilityEndpointInput(typeof(BookDto), Source = CapabilityEndpointParameterSource.Body, Name = ""body"")]
+        [CapabilityEndpointInput(typeof(Guid), Name = ""id"", Source = CapabilityEndpointParameterSource.Route, TargetProperty = ""BookId"")]
+        public sealed class UpdateBookSpec { }
+    }
+}
+";
+
+        var result = Run(source);
+        Assert.NotEmpty(result.GeneratedSources);
+
+        var bindingFile = result.GetSourceByFileName("BookEndpoints_Bindings.g.cs");
+        Assert.NotNull(bindingFile);
+
+        // TargetProperty "BookId" should be used for CLR assignment
+        Assert.Contains("model.BookId = Guid.Parse(", bindingFile!.SourceText);
+
+        // The route parameter name "id" should NOT be PascalCased to "Id" for property assignment
+        Assert.DoesNotContain("model.Id =", bindingFile.SourceText);
     }
 }

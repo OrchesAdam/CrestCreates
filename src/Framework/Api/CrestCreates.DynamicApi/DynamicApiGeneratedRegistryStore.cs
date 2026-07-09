@@ -4,6 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.DynamicApi;
 
+/// <summary>
+/// Legacy static registry for AppService-oriented Dynamic API generated providers.
+/// New Capability Endpoint projection uses its own generated binding registry.
+/// </summary>
 public static class DynamicApiGeneratedRegistryStore
 {
     private static readonly ConcurrentDictionary<string, IDynamicApiGeneratedProvider> Providers = new(StringComparer.Ordinal);

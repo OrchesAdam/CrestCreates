@@ -18,6 +18,8 @@ public sealed class CapabilityEndpointSpecAttribute : Attribute
     public string RoutePattern { get; }
 
     public int CapabilityVersion { get; init; }
+    public string? EndpointId { get; init; }
+    public int EndpointVersion { get; init; }
     public CapabilityEndpointAuthorizationMode AuthorizationMode { get; init; }
         = CapabilityEndpointAuthorizationMode.InheritCapability;
     public int SuccessStatusCode { get; init; }

@@ -6,7 +6,7 @@ using Xunit;
 
 namespace CrestCreates.CodeGenerator.Tests.DynamicApiGenerator;
 
-public sealed class DynamicApiCrudMainlineTests
+public sealed class LegacyDynamicApiCrudMainlineTests
 {
     [Fact]
     public void GeneratedDynamicApi_DeleteExpectedStamp_ShouldBindFromIfMatchHeader()
@@ -48,7 +48,7 @@ public sealed class ProductListRequestDto { }
 
         var result = SourceGeneratorTestHelper.RunGenerator<DynamicApiAotSourceGenerator>(
             source,
-            additionalSources: new[] { DynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs() });
+            additionalSources: new[] { LegacyDynamicApiAotSourceGeneratorTests.BuildDynamicApiStubs() });
 
         Assert.True(result.ContainsFile("GeneratedDynamicApiEndpoints.g.cs"),
             "Endpoints file not generated. Diagnostics: " +

@@ -15,6 +15,8 @@ internal sealed class CapabilityEndpointSpecRecord
 
     // --- Named arguments ---
     public int CapabilityVersion { get; init; }
+    public string? EndpointId { get; init; }
+    public int EndpointVersion { get; init; }
     public int AuthorizationModeValue { get; init; }
     public int SuccessStatusCode { get; init; }
     public string? OperationId { get; init; }
@@ -49,6 +51,8 @@ internal sealed class CapabilityEndpointInputRecord
     public int SourceValue { get; init; } = 3; // Body = 3
     public bool Required { get; init; } = true;
     public string? CapabilityInputPath { get; init; }
+
+    public string? TargetProperty { get; init; }
 
     /// <summary>
     /// True when the type is a C# enum. Used by the binding emitter to decide

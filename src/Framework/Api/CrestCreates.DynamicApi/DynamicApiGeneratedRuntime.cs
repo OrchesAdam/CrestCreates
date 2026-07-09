@@ -13,6 +13,10 @@ using Microsoft.Extensions.Options;
 
 namespace CrestCreates.DynamicApi;
 
+/// <summary>
+/// Legacy runtime helpers for AppService-oriented Dynamic API endpoints.
+/// New Capability Endpoint projection uses its own endpoint JSON binding runtime.
+/// </summary>
 public static class DynamicApiGeneratedRuntime
 {
     public static JsonSerializerOptions ResolveJsonSerializerOptions(IServiceProvider serviceProvider)

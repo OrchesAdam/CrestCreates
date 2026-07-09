@@ -326,10 +326,40 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                 classSymbol.Name));
         }
 
+        // CEP017: EndpointId contains whitespace
+        var specAttrForDiag = FindMatchingAttribute(ctx.Attributes, SpecAttributeMetadataName);
+        if (specAttrForDiag is not null)
+        {
+            var endpointId = GetNamedStringArg(specAttrForDiag.NamedArguments, "EndpointId");
+            if (!string.IsNullOrEmpty(endpointId) && endpointId.Any(char.IsWhiteSpace))
+            {
+                builder.Add(Diagnostic.Create(
+                    CapabilityEndpointDiagnostics.EndpointIdContainsWhitespace,
+                    location,
+                    endpointId,
+                    classSymbol.Name));
+            }
+        }
+
+        // CEP020: EndpointVersion is negative
+        if (specAttrForDiag is not null)
+        {
+            var endpointVersion = GetNamedIntArg(specAttrForDiag.NamedArguments, "EndpointVersion");
+            if (endpointVersion < 0)
+            {
+                builder.Add(Diagnostic.Create(
+                    CapabilityEndpointDiagnostics.EndpointVersionNegative,
+                    location,
+                    endpointVersion,
+                    classSymbol.Name));
+            }
+        }
+
         // CEP014: Scalar input names must be valid C# identifiers for body+scalar binding.
         // For Level 1 specs, the Body is defined by a [CapabilityEndpointInput] with Source=Body.
         var hasBody = false;
         var bodyTypeName = string.Empty;
+        INamedTypeSymbol? bodyTypeSymbol = null;
         foreach (var attr in classSymbol.GetAttributes())
         {
             if (attr.AttributeClass is null)
@@ -348,9 +378,10 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
             {
                 hasBody = true;
                 if (attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is INamedTypeSymbol bodyTypeSymbol)
+                    && attr.ConstructorArguments[0].Value is INamedTypeSymbol bts)
                 {
-                    bodyTypeName = bodyTypeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                    bodyTypeSymbol = bts;
+                    bodyTypeName = bts.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
                 }
                 break;
             }
@@ -368,6 +399,7 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                 var sourceValue = 0;
                 var name = string.Empty;
                 var capabilityInputPath = (string?)null;
+                var targetProperty = (string?)null;
 
                 foreach (var kvp in inputAttr.NamedArguments)
                 {
@@ -377,13 +409,17 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                         sourceValue = sv;
                     if (kvp.Key == "CapabilityInputPath" && !kvp.Value.IsNull)
                         capabilityInputPath = kvp.Value.Value as string;
+                    if (kvp.Key == "TargetProperty" && !kvp.Value.IsNull)
+                        targetProperty = kvp.Value.Value as string;
                 }
 
                 // Body inputs are not assigned via EmitScalarPropertyAssignment
                 if (sourceValue == 3)
                     continue;
 
-                if (string.IsNullOrEmpty(capabilityInputPath) && !string.IsNullOrEmpty(name)
+                // CEP014: suppress when TargetProperty is set (it controls CLR assignment),
+                // not when CapabilityInputPath is set (it only controls descriptor metadata).
+                if (string.IsNullOrEmpty(targetProperty) && !string.IsNullOrEmpty(name)
                     && !CapabilityEndpointBindingEmitter.IsValidCSharpIdentifier(name))
                 {
                     builder.Add(Diagnostic.Create(
@@ -404,6 +440,61 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                 location,
                 classSymbol.Name,
                 bodyTypeName));
+        }
+
+        // CEP018/CEP019: TargetProperty validation on [CapabilityEndpointInput] attributes
+        foreach (var inputAttr in classSymbol.GetAttributes())
+        {
+            if (inputAttr.AttributeClass is null)
+                continue;
+            if (inputAttr.AttributeClass.ToDisplayString() != InputAttributeMetadataName)
+                continue;
+
+            var inputSourceValue = 0;
+            var inputName = string.Empty;
+            var targetProperty = (string?)null;
+
+            foreach (var kvp in inputAttr.NamedArguments)
+            {
+                if (kvp.Key == "Name" && !kvp.Value.IsNull)
+                    inputName = kvp.Value.Value as string ?? string.Empty;
+                if (kvp.Key == "Source" && !kvp.Value.IsNull && kvp.Value.Value is int sv)
+                    inputSourceValue = sv;
+                if (kvp.Key == "TargetProperty" && !kvp.Value.IsNull)
+                    targetProperty = kvp.Value.Value as string;
+            }
+
+            // Skip body inputs and inputs without TargetProperty
+            if (inputSourceValue == 3 || string.IsNullOrEmpty(targetProperty))
+                continue;
+
+            // CEP019: TargetProperty must be a valid C# identifier
+            if (!CapabilityEndpointBindingEmitter.IsValidCSharpIdentifier(targetProperty))
+            {
+                builder.Add(Diagnostic.Create(
+                    CapabilityEndpointDiagnostics.TargetPropertyInvalidIdentifier,
+                    location,
+                    targetProperty,
+                    classSymbol.Name));
+                continue; // Don't check CEP018 if identifier is invalid
+            }
+
+            // CEP018: TargetProperty must exist as a public settable property on the body type
+            if (hasBody && bodyTypeSymbol is not null)
+            {
+                var settableProps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                CollectSettableProperties(bodyTypeSymbol, settableProps);
+
+                if (!settableProps.Contains(targetProperty))
+                {
+                    builder.Add(Diagnostic.Create(
+                        CapabilityEndpointDiagnostics.TargetPropertyMissingOnBody,
+                        location,
+                        targetProperty,
+                        classSymbol.Name,
+                        bodyTypeName));
+                }
+            }
         }
 
         return builder.ToImmutable();
@@ -492,6 +583,48 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
             if (bindingTypeDiagnostics.Length > 0)
                 builder.AddRange(bindingTypeDiagnostics);
 
+            // CEP013 Level 2 expansion: also count the explicit Input on the HTTP method attribute.
+            // ValidateRouteBindingTypes handles the case when Input is null (via route tokens + class
+            // attributes); this handles the case when Input IS specified on the HTTP method attribute
+            // but there are also route tokens or Query/Header inputs — creating multiple scalar inputs.
+            {
+                INamedTypeSymbol? bodyTypeL2 = null;
+                bool hasExplicitInput = false;
+                foreach (var kvp in attr.NamedArguments)
+                {
+                    if (kvp.Key == "Body" && !kvp.Value.IsNull &&
+                        kvp.Value.Kind == TypedConstantKind.Type)
+                        bodyTypeL2 = kvp.Value.Value as INamedTypeSymbol;
+                    if (kvp.Key == "Input" && !kvp.Value.IsNull &&
+                        kvp.Value.Kind == TypedConstantKind.Type)
+                        hasExplicitInput = true;
+                }
+
+                if (bodyTypeL2 is null && hasExplicitInput)
+                {
+                    var routeL2 = string.Empty;
+                    var ctorArgsL2 = attr.ConstructorArguments;
+                    if (ctorArgsL2.Length > 1)
+                        routeL2 = (ctorArgsL2[1].Value as string) ?? string.Empty;
+
+                    var routeTokensL2 = CapabilityEndpointSpecNormalizer.ExtractAllRouteTokenNames(routeL2);
+                    var allScalarCountL2 = routeTokensL2.Length + 1; // +1 for the explicit Input
+
+                    // Note: Level 2 does not read class-level [CapabilityEndpointInput] for
+                    // binding generation, so we do not count them here. Only route tokens
+                    // and the HTTP method attribute's explicit Input are counted.
+
+                    if (allScalarCountL2 > 1)
+                    {
+                        builder.Add(Diagnostic.Create(
+                            CapabilityEndpointDiagnostics.MultipleRouteParamsWithoutBody,
+                            location,
+                            classSymbol.Name,
+                            allScalarCountL2));
+                    }
+                }
+            }
+
             // CEP015: Body binding uses generic ReadBodyAsync — not fully AOT-safe
             foreach (var kvp in attr.NamedArguments)
             {
@@ -508,6 +641,42 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                 }
             }
         }
+
+        // CEP017: EndpointId contains whitespace
+        if (!ctx.Attributes.IsDefaultOrEmpty && ctx.Attributes.Length > 0)
+        {
+            var l2Attr = ctx.Attributes[0];
+            var endpointId = GetNamedStringArg(l2Attr.NamedArguments, "EndpointId");
+            if (!string.IsNullOrEmpty(endpointId) && endpointId.Any(char.IsWhiteSpace))
+            {
+                builder.Add(Diagnostic.Create(
+                    CapabilityEndpointDiagnostics.EndpointIdContainsWhitespace,
+                    location,
+                    endpointId,
+                    classSymbol.Name));
+            }
+        }
+
+        // CEP020: EndpointVersion is negative
+        if (!ctx.Attributes.IsDefaultOrEmpty && ctx.Attributes.Length > 0)
+        {
+            var l2Attr = ctx.Attributes[0];
+            var endpointVersion = GetNamedIntArg(l2Attr.NamedArguments, "EndpointVersion");
+            if (endpointVersion < 0)
+            {
+                builder.Add(Diagnostic.Create(
+                    CapabilityEndpointDiagnostics.EndpointVersionNegative,
+                    location,
+                    endpointVersion,
+                    classSymbol.Name));
+            }
+        }
+
+        // Note: CEP018/CEP019 TargetProperty validation is only applicable in Level 1
+        // (class-level [CapabilityEndpointInput] attributes). Level 2 does not read
+        // class-level [CapabilityEndpointInput] for binding generation — all inputs
+        // come from HTTP method attribute Body/Input/route tokens. Diagnosing
+        // TargetProperty on attributes that won't generate bindings would be misleading.
 
         return builder.ToImmutable();
     }
@@ -701,20 +870,28 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
             }
         }
 
-        // CEP013: Multiple route tokens without body or explicit input
-        if (bodyType is null && inputType is null && routeTokens.Length > 1)
+        // CEP013: Multiple scalar inputs without body or explicit input
+        // Level 2 only counts route tokens — class-level [CapabilityEndpointInput]
+        // attributes are not processed by the Level 2 normalizer and should not
+        // be counted as inputs for diagnostic purposes.
+        if (bodyType is null && inputType is null)
         {
-            builder.Add(Diagnostic.Create(
-                CapabilityEndpointDiagnostics.MultipleRouteParamsWithoutBody,
-                location,
-                classSymbol.Name,
-                routeTokens.Length));
+            var allScalarCount = routeTokens.Length;
+
+            if (allScalarCount > 1)
+            {
+                builder.Add(Diagnostic.Create(
+                    CapabilityEndpointDiagnostics.MultipleRouteParamsWithoutBody,
+                    location,
+                    classSymbol.Name,
+                    allScalarCount));
+            }
         }
 
         // CEP014: Scalar input names must be valid C# identifiers for body+scalar binding.
         // When a Body type exists, scalar inputs (Route/Query/Header) get assigned to model
         // properties — if the input Name is not a valid C# identifier (e.g. "X-Request-Id"),
-        // the generated C# code will be invalid. CapabilityInputPath provides a workaround.
+        // the generated C# code will be invalid. TargetProperty provides a workaround.
         if (bodyType is not null)
         {
             // Check route tokens
@@ -744,7 +921,7 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                 var inputNamedArgs = inputAttr.NamedArguments;
                 var sourceValue = 0;
                 var name = string.Empty;
-                var capabilityInputPath = (string?)null;
+                var targetProperty = (string?)null;
 
                 foreach (var kvp in inputNamedArgs)
                 {
@@ -752,15 +929,17 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                         name = kvp.Value.Value as string ?? string.Empty;
                     if (kvp.Key == "Source" && !kvp.Value.IsNull && kvp.Value.Value is int sv)
                         sourceValue = sv;
-                    if (kvp.Key == "CapabilityInputPath" && !kvp.Value.IsNull)
-                        capabilityInputPath = kvp.Value.Value as string;
+                    if (kvp.Key == "TargetProperty" && !kvp.Value.IsNull)
+                        targetProperty = kvp.Value.Value as string;
                 }
 
                 // Body inputs (sourceValue==3) are not assigned as properties via EmitScalarPropertyAssignment
                 if (sourceValue == 3)
                     continue;
 
-                if (string.IsNullOrEmpty(capabilityInputPath) && !string.IsNullOrEmpty(name)
+                // CEP014: suppress when TargetProperty is set (it controls CLR assignment),
+                // not when CapabilityInputPath is set (it only controls descriptor metadata).
+                if (string.IsNullOrEmpty(targetProperty) && !string.IsNullOrEmpty(name)
                     && !CapabilityEndpointBindingEmitter.IsValidCSharpIdentifier(name))
                 {
                     builder.Add(Diagnostic.Create(
@@ -857,8 +1036,10 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
 
         foreach (var spec in specs)
         {
-            var version = spec.CapabilityVersion > 0 ? spec.CapabilityVersion : 1;
-            var key = $"endpoint:{spec.CapabilityId}:{version}";
+            var endpointId = !string.IsNullOrEmpty(spec.EndpointId) ? spec.EndpointId : $"endpoint:{spec.CapabilityId}";
+            var version = spec.EndpointVersion > 0 ? spec.EndpointVersion
+                : (spec.CapabilityVersion > 0 ? spec.CapabilityVersion : 1);
+            var key = $"{endpointId}:{version}";
             if (seen.Add(key))
             {
                 deduped.Add(spec);
@@ -891,6 +1072,8 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
 
         var namedArgs = specAttr.NamedArguments;
         var capabilityVersion = GetNamedIntArg(namedArgs, "CapabilityVersion");
+        var endpointId = GetNamedStringArg(namedArgs, "EndpointId");
+        var endpointVersion = GetNamedIntArg(namedArgs, "EndpointVersion");
         var authorizationModeValue = GetNamedIntArg(namedArgs, "AuthorizationMode");
         var successStatusCode = GetNamedIntArg(namedArgs, "SuccessStatusCode");
         var operationId = GetNamedStringArg(namedArgs, "OperationId");
@@ -927,6 +1110,8 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
             HttpMethodValue = httpMethodValue,
             RoutePattern = routePattern,
             CapabilityVersion = capabilityVersion,
+            EndpointId = endpointId,
+            EndpointVersion = endpointVersion,
             AuthorizationModeValue = authorizationModeValue,
             SuccessStatusCode = successStatusCode,
             OperationId = operationId,
@@ -970,6 +1155,7 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
             var sourceValue = GetNamedIntArg(namedArgs, "Source", defaultValue: 3);
             var required = GetNamedBoolArg(namedArgs, "Required", defaultValue: true);
             var capabilityInputPath = GetNamedStringArg(namedArgs, "CapabilityInputPath");
+            var targetProperty = GetNamedStringArg(namedArgs, "TargetProperty");
 
             builder.Add(new CapabilityEndpointInputRecord
             {
@@ -977,7 +1163,9 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                 Name = name,
                 SourceValue = sourceValue,
                 Required = required,
-                CapabilityInputPath = capabilityInputPath
+                CapabilityInputPath = capabilityInputPath,
+                TargetProperty = targetProperty,
+                IsEnum = typeSymbol?.TypeKind == TypeKind.Enum
             });
         }
 

@@ -1,5 +1,9 @@
 namespace CrestCreates.DynamicApi;
 
+/// <summary>
+/// Legacy service descriptor for AppService-oriented Dynamic API.
+/// New Capability Endpoint projection uses its own endpoint descriptor type.
+/// </summary>
 public sealed class DynamicApiServiceDescriptor
 {
     public string ServiceName { get; init; } = string.Empty;

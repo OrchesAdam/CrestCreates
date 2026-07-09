@@ -28,6 +28,10 @@ namespace CrestCreates.AspNetCore
             return services;
         }
 
+        /// <summary>
+        /// Legacy AppService-oriented Dynamic API service registration.
+        /// Delegates to AddCrestDynamicApi which is a compatibility-only path.
+        /// </summary>
         public static IServiceCollection AddCrestAspNetCoreDynamicApi(
             this IServiceCollection services,
             Action<DynamicApiOptions>? configure = null)
@@ -35,6 +39,10 @@ namespace CrestCreates.AspNetCore
             return services.AddCrestDynamicApi(configure);
         }
 
+        /// <summary>
+        /// Legacy AppService-oriented Dynamic API endpoint mapping.
+        /// Delegates to MapCrestDynamicApi which is a compatibility-only path.
+        /// </summary>
         public static IEndpointRouteBuilder MapCrestAspNetCoreDynamicApi(this IEndpointRouteBuilder endpoints)
         {
             return endpoints.MapCrestDynamicApi();

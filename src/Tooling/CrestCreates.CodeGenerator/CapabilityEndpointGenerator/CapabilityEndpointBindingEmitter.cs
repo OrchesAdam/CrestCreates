@@ -64,8 +64,9 @@ internal static class CapabilityEndpointBindingEmitter
 
         foreach (var spec in group.Specs)
         {
-            var endpointId = $"endpoint:{spec.CapabilityId}";
-            var version = spec.CapabilityVersion > 0 ? spec.CapabilityVersion : 1;
+            var endpointId = !string.IsNullOrEmpty(spec.EndpointId) ? spec.EndpointId : $"endpoint:{spec.CapabilityId}";
+            var version = spec.EndpointVersion > 0 ? spec.EndpointVersion
+                : (spec.CapabilityVersion > 0 ? spec.CapabilityVersion : 1);
             var methodName = $"Bind_{SanitizeClassName(spec.SpecClassName)}_Async";
 
             sb.AppendLine($"        CapabilityEndpointBindingRegistry.Register(");
@@ -185,8 +186,8 @@ internal static class CapabilityEndpointBindingEmitter
         };
 
         var sourceKey = input.Name;
-        var propAssignmentName = !string.IsNullOrEmpty(input.CapabilityInputPath)
-            ? input.CapabilityInputPath
+        var propAssignmentName = !string.IsNullOrEmpty(input.TargetProperty)
+            ? input.TargetProperty
             : !string.IsNullOrEmpty(sourceKey)
                 ? char.ToUpperInvariant(sourceKey[0]) + sourceKey.Substring(1)
                 : sourceKey;
@@ -256,24 +257,9 @@ internal static class CapabilityEndpointBindingEmitter
         }
         else
         {
-            // Multiple scalar params (any mix of Route/Query/Header), or
-            // single non-scalar/non-enum — generate a dictionary<string, object?> binding
-            sb.AppendLine("        var dict = new System.Collections.Generic.Dictionary<string, object?>();");
-            foreach (var input in allInputs)
-            {
-                var inputName = input.Name;
-                var sourceExpr = GetSourceReadExpression(input);
-                var parseCode = GetScalarParseCode(input, sourceExpr);
-                if (parseCode is not null)
-                {
-                    sb.AppendLine($"        dict[\"{inputName}\"] = {parseCode};");
-                }
-                else
-                {
-                    sb.AppendLine($"        // CEP012: Cannot bind '{inputName}' — unsupported type '{input.TypeName}'");
-                }
-            }
-            sb.AppendLine("        return dict;");
+            // Multiple scalar params without body — fail-closed (CEP013 prevents this at compile time)
+            sb.AppendLine("        throw new InvalidOperationException(");
+            sb.AppendLine("            \"CEP013: Multiple scalar inputs without a body/input DTO are not supported.\");");
         }
     }
 

@@ -71,8 +71,9 @@ internal static class CapabilityEndpointProviderEmitter
 
     private static void EmitDescriptor(StringBuilder sb, CapabilityEndpointSpecRecord spec)
     {
-        var endpointId = $"endpoint:{spec.CapabilityId}";
-        var version = spec.CapabilityVersion > 0 ? spec.CapabilityVersion : 1;
+        var endpointId = !string.IsNullOrEmpty(spec.EndpointId) ? spec.EndpointId : $"endpoint:{spec.CapabilityId}";
+        var version = spec.EndpointVersion > 0 ? spec.EndpointVersion
+            : (spec.CapabilityVersion > 0 ? spec.CapabilityVersion : 1);
         var httpMethodName = ResolveHttpMethodName(spec.HttpMethodValue);
         var authModeName = ResolveAuthModeName(spec.AuthorizationModeValue);
         var successStatusCode = ResolveSuccessStatusCode(spec.SuccessStatusCode, spec.HttpMethodValue);

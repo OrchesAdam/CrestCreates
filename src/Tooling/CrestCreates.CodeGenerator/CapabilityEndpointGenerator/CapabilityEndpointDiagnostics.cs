@@ -130,15 +130,15 @@ internal static class CapabilityEndpointDiagnostics
         isEnabledByDefault: true);
 
     /// <summary>
-    /// CEP013: Multiple route tokens detected without a body or input type.
-    /// In 8a the generator creates a dictionary binding, but a Body/Input type is preferred.
+    /// CEP013: Multiple scalar inputs detected without a body or input type.
+    /// Dictionary fallback is not supported — fail-closed.
     /// </summary>
     public static readonly DiagnosticDescriptor MultipleRouteParamsWithoutBody = new(
         id: CapabilityEndpointDiagnosticCodes.MultipleRouteParamsWithoutBodyValue,
-        title: "Multiple route parameters without a body type",
-        messageFormat: "Endpoint spec '{0}' declares {1} route tokens but no Body or Input type. Route-only binding with multiple parameters generates a Dictionary<string, object?> in 8a. Consider adding a Body or Input type for strong-typed binding.",
+        title: "Multiple scalar inputs without a body type",
+        messageFormat: "Endpoint spec '{0}' declares {1} scalar inputs (Route/Query/Header) without a Body or Input type. Define a Body type with settable properties for these inputs. Dictionary<string, object?> binding is not supported.",
         category: Category,
-        defaultSeverity: DiagnosticSeverity.Warning,
+        defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
     /// <summary>
@@ -171,6 +171,51 @@ internal static class CapabilityEndpointDiagnostics
         id: CapabilityEndpointDiagnosticCodes.HttpMethodAttributeMustBeInsideCapabilityEndpointSetValue,
         title: "HTTP method attribute must be inside a [CapabilityEndpointSet] container",
         messageFormat: "[{0}] on class '{1}' must be nested inside a [CapabilityEndpointSet]-marked container class. Level 2 HTTP method attributes require a [CapabilityEndpointSet] container to provide default RoutePrefix, GroupName, and Tags.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    /// <summary>
+    /// CEP018: TargetProperty does not exist as a public settable property on the body type.
+    /// </summary>
+    public static readonly DiagnosticDescriptor TargetPropertyMissingOnBody = new(
+        id: CapabilityEndpointDiagnosticCodes.TargetPropertyMissingOnBodyValue,
+        title: "TargetProperty not found on body type",
+        messageFormat: "TargetProperty '{0}' on endpoint spec '{1}' does not exist as a public settable property on body type '{2}'.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    /// <summary>
+    /// CEP019: TargetProperty is not a valid simple C# property identifier.
+    /// Nested paths like "Address.City" are not supported.
+    /// </summary>
+    public static readonly DiagnosticDescriptor TargetPropertyInvalidIdentifier = new(
+        id: CapabilityEndpointDiagnosticCodes.TargetPropertyInvalidIdentifierValue,
+        title: "TargetProperty is not a valid C# identifier",
+        messageFormat: "TargetProperty '{0}' on endpoint spec '{1}' is not a valid simple C# property name. Only alphanumeric names with no dots or special characters are supported.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    /// <summary>
+    /// CEP017: EndpointId contains whitespace characters.
+    /// </summary>
+    public static readonly DiagnosticDescriptor EndpointIdContainsWhitespace = new(
+        id: CapabilityEndpointDiagnosticCodes.EndpointIdContainsWhitespaceValue,
+        title: "EndpointId contains whitespace",
+        messageFormat: "EndpointId '{0}' on endpoint spec '{1}' contains whitespace characters. EndpointId must be a compact identifier without spaces.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    /// <summary>
+    /// CEP020: EndpointVersion must not be negative.
+    /// </summary>
+    public static readonly DiagnosticDescriptor EndpointVersionNegative = new(
+        id: CapabilityEndpointDiagnosticCodes.EndpointVersionNegativeValue,
+        title: "EndpointVersion must not be negative",
+        messageFormat: "EndpointVersion '{0}' on endpoint spec '{1}' is negative. EndpointVersion must be zero (use CapabilityVersion) or a positive integer.",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);

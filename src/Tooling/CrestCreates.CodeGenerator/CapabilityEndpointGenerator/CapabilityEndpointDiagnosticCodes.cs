@@ -35,4 +35,8 @@ public static class CapabilityEndpointDiagnosticCodes
     public const string InvalidScalarPropertyNameValue = "CEP014";
     public const string BodyBindingNotAotSafeValue = "CEP015";
     public const string HttpMethodAttributeMustBeInsideCapabilityEndpointSetValue = "CEP016";
+    public const string EndpointIdContainsWhitespaceValue = "CEP017";
+    public const string TargetPropertyMissingOnBodyValue = "CEP018";
+    public const string TargetPropertyInvalidIdentifierValue = "CEP019";
+    public const string EndpointVersionNegativeValue = "CEP020";
 }

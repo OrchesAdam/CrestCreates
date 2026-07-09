@@ -19,7 +19,7 @@ using Xunit;
 
 namespace CrestCreates.Web.Tests.DynamicApi;
 
-public class GeneratedDynamicApiRuntimeTests
+public class LegacyGeneratedDynamicApiRuntimeTests
 {
     [Fact]
     public async Task ReadBodyAsync_WithCamelCaseJson_BindsPascalCaseDto()

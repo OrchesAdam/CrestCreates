@@ -7,7 +7,7 @@ using Xunit;
 
 namespace CrestCreates.Web.Tests.DynamicApi;
 
-public class GeneratedApiControllerAbstractionsTests
+public class LegacyGeneratedApiControllerAbstractionsTests
 {
     [Fact]
     public void CrestApiController_ShouldNotInheritMvcControllerBase()
