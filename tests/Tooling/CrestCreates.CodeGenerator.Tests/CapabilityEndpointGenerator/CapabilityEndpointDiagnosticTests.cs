@@ -849,9 +849,10 @@ namespace TestNs
     }
 
     [Fact]
-    public void CEP013_Fires_For_Route_Plus_Explicit_Input_Without_Body()
+    public void CEP013_DoesNotFire_For_Single_RouteToken_Plus_Explicit_Input()
     {
-        // One route token + explicit Input on the HTTP method attribute, no Body → CEP013 Error
+        // One route token + explicit Input on the HTTP method attribute, no Body → no CEP013.
+        // Level 2 Input binds the route token's type — it is not an additional scalar input.
         var source = @"
 using CrestCreates.DynamicApi;
 
@@ -867,7 +868,54 @@ namespace TestNs
 ";
 
         var result = Run(source);
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP013");
+    }
+
+    [Fact]
+    public void CEP013_Fires_For_Multiple_RouteTokens_Plus_Explicit_Input()
+    {
+        // Two route tokens + explicit Input, no Body → CEP013 Error.
+        // Input cannot unambiguously bind to one of multiple route tokens.
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSet]
+    public static partial class TestApi
+    {
+        [Get(""test.get"", ""items/{id}/sub/{subId}"", Input = typeof(string))]
+        public sealed partial class GetItem { }
+    }
+}
+";
+
+        var result = Run(source);
         result.Diagnostics.Should().Contain(d => d.Id == "CEP013"
+            && d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
+    public void CEP021_Fires_For_Input_Without_RouteToken()
+    {
+        // Input with no route tokens → CEP021 Error.
+        // Level 2 Input requires at least one route token to bind to.
+        var source = @"
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    [CapabilityEndpointSet]
+    public static partial class TestApi
+    {
+        [Get(""test.get"", ""items"", Input = typeof(string))]
+        public sealed partial class GetItem { }
+    }
+}
+";
+
+        var result = Run(source);
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP021"
             && d.Severity == DiagnosticSeverity.Error);
     }
 

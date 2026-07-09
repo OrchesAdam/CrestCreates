@@ -148,7 +148,7 @@ internal static class CapabilityEndpointDiagnostics
     public static readonly DiagnosticDescriptor InvalidScalarPropertyName = new(
         id: CapabilityEndpointDiagnosticCodes.InvalidScalarPropertyNameValue,
         title: "Invalid property name for scalar-to-body binding",
-        messageFormat: "Input '{0}' on endpoint spec '{1}' has Name '{2}' which is not a valid C# identifier. Specify CapabilityInputPath to provide the target property name.",
+        messageFormat: "Input '{0}' on endpoint spec '{1}' has Name '{2}' which is not a valid C# identifier. Specify TargetProperty to provide the CLR property name for assignment. CapabilityInputPath is descriptor metadata and does not control CLR assignment.",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -216,6 +216,18 @@ internal static class CapabilityEndpointDiagnostics
         id: CapabilityEndpointDiagnosticCodes.EndpointVersionNegativeValue,
         title: "EndpointVersion must not be negative",
         messageFormat: "EndpointVersion '{0}' on endpoint spec '{1}' is negative. EndpointVersion must be zero (use CapabilityVersion) or a positive integer.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    /// <summary>
+    /// CEP021: Level 2 explicit Input requires at least one route token to bind to.
+    /// Without a route token, the Input has no binding target.
+    /// </summary>
+    public static readonly DiagnosticDescriptor InputWithoutRouteToken = new(
+        id: CapabilityEndpointDiagnosticCodes.InputWithoutRouteTokenValue,
+        title: "Input requires a route token",
+        messageFormat: "Endpoint spec '{0}' specifies Input but the route has no tokens. Level 2 Input binds a route token's type — add a route parameter (e.g. \"books/{{id}}\") or use Body instead.",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);

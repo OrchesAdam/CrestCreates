@@ -1,3 +1,7 @@
+// Legacy compatibility test — proves the AppService-oriented Dynamic API path still works.
+// Do not extend these tests with Capability Endpoint, topology, activation, or governance semantics.
+// New endpoint projection tests belong in CapabilityEndpoint* test classes.
+
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;

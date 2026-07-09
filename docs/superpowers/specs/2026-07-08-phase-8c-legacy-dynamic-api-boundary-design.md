@@ -573,7 +573,7 @@ Single route token → allowed
 
 Level 2 的 Query/Header 输入应通过 HTTP method attribute 的 `Input` named arg 声明，不是 class-level `[CapabilityEndpointInput]`。
 
-**SG 触发条件变更**：Level 1 从 `routeTokens.Length > 1` 改为 `allScalarInputs.Length > 1`，其中 `allScalarInputs` = route + query + header inputs 的并集。Level 2 只计数 route tokens + HTTP method attribute explicit Input。
+**SG 触发条件变更**：Level 1 从 `routeTokens.Length > 1` 改为 `allScalarInputs.Length > 1`，其中 `allScalarInputs` = route + query + header inputs 的并集。Level 2 只计数 route tokens — explicit Input 绑定 route token 的类型，不是额外 scalar input。Level 2 规则：`routeTokens.Length > 1 && Input != null && Body == null` → CEP013；`routeTokens.Length == 1 && Input != null` → allowed；`routeTokens.Length == 0 && Input != null` → CEP021。
 
 **删除 `EmitScalarOnlyBinding` 中的 Dictionary fallback 代码：**
 
@@ -725,11 +725,12 @@ Web.Tests 下 9 个 DynamicApi 测试文件，其中部分测试 legacy path，�
 
 | Code | Severity | 规则 | 来源 |
 |------|----------|------|------|
-| CEP013 | **Error** (was Warning) | Level 1: 多 scalar input（Route/Query/Header 任意组合）无 Body；Level 2: 多 route token 无 Body | 8c 升级 |
+| CEP013 | **Error** (was Warning) | Level 1: 多 scalar input（Route/Query/Header 任意组合）无 Body；Level 2: 多 route token 无 Body（Input 绑定 route token 类型，不是额外 scalar） | 8c 升级 |
 | CEP017 | Error | `EndpointId` 非空时包含空白字符 | 8c 新增 |
 | CEP018 | Error | `TargetProperty` 非空时，body DTO 上不存在对应 public settable property | 8c 新增 |
 | CEP019 | Error | `TargetProperty` 非空但不是合法 C# simple property name（不支持 nested path） | 8c 新增 |
 | CEP020 | Error | `EndpointVersion` < 0 不合法 | 8c 新增 |
+| CEP021 | Error | Level 2 explicit Input 无 route token 可绑定 | 8c 新增 |
 
 ## 14. 实现步骤
 
@@ -779,3 +780,5 @@ Step 1-6 无依赖，可并行。Step 7-8 可并行。Step 9 依赖全部完成�
 26. BindingRegistry 生命周期边界已声明：process-wide generated registry，不支持 runtime unload/reload/hot projection
 27. CEP020 诊断验证 EndpointVersion 不能为负数
 28. Emitter 中不存在任何 `Dictionary<string, object?>` fallback 分支；multi-scalar 无 body 路径生成 `throw new InvalidOperationException`
+29. CEP021 诊断验证 Level 2 explicit Input 必须有至少一个 route token 可绑定
+30. Level 2 `routeTokens.Length == 1 && Input != null` 不触发 CEP013（Input 绑定 route token 类型，不是额外 scalar）

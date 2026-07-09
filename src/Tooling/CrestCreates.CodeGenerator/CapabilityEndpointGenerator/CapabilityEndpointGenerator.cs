@@ -608,19 +608,25 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                         routeL2 = (ctorArgsL2[1].Value as string) ?? string.Empty;
 
                     var routeTokensL2 = CapabilityEndpointSpecNormalizer.ExtractAllRouteTokenNames(routeL2);
-                    var allScalarCountL2 = routeTokensL2.Length + 1; // +1 for the explicit Input
 
-                    // Note: Level 2 does not read class-level [CapabilityEndpointInput] for
-                    // binding generation, so we do not count them here. Only route tokens
-                    // and the HTTP method attribute's explicit Input are counted.
-
-                    if (allScalarCountL2 > 1)
+                    // Level 2 explicit Input binds a route token's type — it is not an additional
+                    // scalar input. CEP013 fires only when there are multiple route tokens that
+                    // Input cannot unambiguously bind to.
+                    if (routeTokensL2.Length > 1)
                     {
                         builder.Add(Diagnostic.Create(
                             CapabilityEndpointDiagnostics.MultipleRouteParamsWithoutBody,
                             location,
                             classSymbol.Name,
-                            allScalarCountL2));
+                            routeTokensL2.Length));
+                    }
+                    else if (routeTokensL2.Length == 0)
+                    {
+                        // CEP021: Input requires at least one route token to bind to.
+                        builder.Add(Diagnostic.Create(
+                            CapabilityEndpointDiagnostics.InputWithoutRouteToken,
+                            location,
+                            classSymbol.Name));
                     }
                 }
             }

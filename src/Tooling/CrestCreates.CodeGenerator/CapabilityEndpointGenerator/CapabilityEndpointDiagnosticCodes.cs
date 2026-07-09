@@ -39,4 +39,5 @@ public static class CapabilityEndpointDiagnosticCodes
     public const string TargetPropertyMissingOnBodyValue = "CEP018";
     public const string TargetPropertyInvalidIdentifierValue = "CEP019";
     public const string EndpointVersionNegativeValue = "CEP020";
+    public const string InputWithoutRouteTokenValue = "CEP021";
 }

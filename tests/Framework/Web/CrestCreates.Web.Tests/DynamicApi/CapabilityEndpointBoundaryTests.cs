@@ -138,7 +138,11 @@ public class CapabilityEndpointBoundaryTests
             "DynamicApiEndpointDescriptor",
             "DynamicApiServiceDescriptor",
             "DynamicApiActionDescriptor",
-            "IDynamicApiGeneratedProvider"
+            "IDynamicApiGeneratedProvider",
+            "ServiceType =",
+            ".ServiceType",
+            "ActionName =",
+            ".ActionName"
         };
 
         foreach (var file in emitterFiles)
