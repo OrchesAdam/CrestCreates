@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-09 (Phase 8c: Legacy Dynamic API Boundary — complete)
+Last Updated: 2026-07-09 (Phase 8c: Legacy Dynamic API Boundary — complete, 4 review rounds)
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -259,16 +259,19 @@ Status: ✅ Complete
 
 **Key architectural decisions**:
 - Level 2 does not read class-level `[CapabilityEndpointInput]` — all inputs come from HTTP method attribute Body/Input/route tokens. CEP013/CEP018/CEP019 diagnostics only apply to Level 1 for class-level inputs.
-- CEP014 suppression condition changed from `capabilityInputPath` to `targetProperty` — TargetProperty is the authoritative CLR assignment override.
+- CEP014 diagnostic message references TargetProperty for CLR assignment (not CapabilityInputPath).
 - BindingEmitter TargetProperty fallback: TargetProperty → PascalCase(Name) — no CapabilityInputPath intermediate layer.
 - EndpointId prefix `endpoint:{CapabilityId}` is SHOULD (not MUST) — explicit EndpointId must be non-empty with no whitespace; only conflicts with reserved legacy prefixes produce errors.
 
-**Review iterations** (3 rounds):
+**Review iterations** (4 rounds):
 - Round 1 (self-audit): 4 findings — DynamicApiSourceGenerator deleted not recycled (P0), legacy tests deleted not renamed (P1), Web.Tests legacy test not renamed (P1), Level 1 ExtractInputRecords missing IsEnum (P1). All fixed.
 - Round 2 (oracle): 4 P1 findings — BindingEmitter CapabilityInputPath fallback chain, CEP014 suppression condition, Section 5.2 boundary test missing, Section 5.1 type definition test missing. All fixed.
 - Round 3 (external): 2 findings — Level 2 CEP018/019/013 reading class-level `[CapabilityEndpointInput]` but Normalizer not processing them (diagnostics/generation asymmetry), XML doc TargetProperty fallback description incorrect. Fixed by removing Level 2 class-level attribute diagnostics and correcting XML doc.
+- Round 4 (external): 6 findings — Level 2 Input + route token CEP013 self-contradiction (P0: Input counted as extra scalar → CEP013 fires on valid single-route-token+Input; no route token → descriptor validation fails), CEP014 diagnostic message still references CapabilityInputPath (P2), legacy test files missing compatibility-only comments (P2), boundary test missing ServiceType/ActionName patterns (P2), boundary test missing CapabilityEndpointMapper.cs in scan (P1). All fixed. CEP021 added (Level 2 Input without route token Error).
 
 **Test counts**: 45 CapabilityEndpoint SG + 6 Boundary + 22 Legacy Web + 7 Legacy CodeGenerator — all passing. Full solution build 0 errors in 8c-affected projects.
+
+**Boundary test coverage**: assembly reference, project reference, legacy source symbol (DynamicApiEndpointDescriptor/ServiceDescriptor/ActionDescriptor/IDynamicApiGeneratedProvider + ServiceType/ActionName patterns), CapabilityEndpoint mapping (Extensions + DescriptorValidator + CapabilityResolver + Mapper), CapabilityEndpoint emitter, Abstractions type definition.
 
 ### Phase 8d — AppService→Capability Compatibility Generator
 
@@ -340,7 +343,8 @@ This thread achieved the following:
     - Fourth review (8 findings: 4 P1, 4 P2) — 2026-06-20: derived summaries leaking through MaxSeverity/MaxLevel/MaxDecision/evidence maxima, version-ignoring identity (v1 visible makes denied v2 visible), BaseVersion ignored in draft comparison, projection failure silently persisted as mutation success, package bare-ID contract limitation (deferred), empty paths leaking traversal existence, test coverage gaps, memory.md test count inconsistency. All resolved except P2 package contract (deferred as type-design issue beyond projector scope).
      - 226 ControlPlane + 7 Boundary tests pass, full solution build 0 errors
  15. Phase 8b Dynamic API Descriptor (Issue #20) — CapabilityEndpointDescriptor as projection metadata over CapabilityDescriptor, with registry, validator (route conflict, null guards, InheritCapability fail-closed), relationship extractor, canonical hash profiles, AoT-safe kind naming, boundary test. 4 review rounds, 15 findings fixed. 37 Web.Tests + 6 Metadata.Tests + 27 Boundary tests.
- 16. Phase 8a Capability Endpoint Projection (Issue #19) — Capability→HTTP without AppService, zero DynamicApi bridge. SG produces DescriptorProvider + BindingContract; registry-driven mapping via MapCrestCapabilityEndpoints(); ICapabilityPipeline descriptor overload; DX Layering (Level 0/1/2); 4 review rounds, 30+ findings fixed. 29 SG + 35 DynamicApi + 10 Capability + 33 Boundary tests.
+  16. Phase 8a Capability Endpoint Projection (Issue #19) — Capability→HTTP without AppService, zero DynamicApi bridge. SG produces DescriptorProvider + BindingContract; registry-driven mapping via MapCrestCapabilityEndpoints(); ICapabilityPipeline descriptor overload; DX Layering (Level 0/1/2); 4 review rounds, 30+ findings fixed. 29 SG + 35 DynamicApi + 10 Capability + 33 Boundary tests.
+  17. Phase 8c Legacy Dynamic API Boundary (Issue #21) — legacy deprecation labeling + boundary tests + 8a debt fixes. 7 PRs, 30 ACs, 4 review rounds (16 findings total). EndpointId/EndpointVersion/TargetProperty independent properties, CEP013 Error + Dictionary fallback deletion, CEP017-021 diagnostics, DynamicApiSourceGenerator recycled to 99_RecycleBin, legacy test rename with compatibility-only annotations, boundary tests (6 tests covering assembly/project/source/emitter/mapping/Abstractions). 45 SG + 6 Boundary + 22 Legacy Web + 7 Legacy CodeGenerator tests.
 
 ---
 
@@ -361,7 +365,7 @@ This thread achieved the following:
 - Old DynamicApiAotSourceGenerator is legacy AppService HTTP exposure; do not extend with topology/activation/MCP.
 - `MapCrestDynamicApi()` (legacy) and `MapCrestCapabilityEndpoints()` (new) coexist without wrapping each other.
 - Phase 8c completed: legacy path labeled compatibility-only, boundary tests guard against cross-path contamination, EndpointId/EndpointVersion/TargetProperty independent properties, CEP013 Error + Dictionary fallback deleted, DynamicApiSourceGenerator recycled to 99_RecycleBin.
-- Level 2 does not read class-level `[CapabilityEndpointInput]` — all inputs from HTTP method attribute only.
+- Level 2 does not read class-level `[CapabilityEndpointInput]` — all inputs from HTTP method attribute only. Level 2 explicit Input binds a route token's type (not an additional scalar input). CEP021 fires when Input has no route token to bind to.
 
 ### Multi-Tenancy
 
