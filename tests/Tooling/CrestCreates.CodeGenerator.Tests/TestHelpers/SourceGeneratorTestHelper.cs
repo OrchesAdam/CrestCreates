@@ -88,6 +88,7 @@ namespace CrestCreates.CodeGenerator.Tests.TestHelpers
             "System.Runtime",
             "netstandard",
             "System.Collections",
+            "System.Collections.Concurrent",
             "System.Linq",
             "System.Linq.Expressions",
             "System.Threading.Tasks",
@@ -344,6 +345,8 @@ namespace CrestCreates.Domain.Shared.Attributes
             TryAddReference(references, "CrestCreates.Web");
             TryAddReference(references, "Microsoft.AspNetCore.Routing");
             TryAddReference(references, "Microsoft.AspNetCore.Http.Abstractions");
+            TryAddReference(references, "Microsoft.AspNetCore.Http.Features");
+            TryAddReference(references, "Microsoft.Extensions.Primitives");
             TryAddReference(references, "Microsoft.Extensions.DependencyInjection");
             TryAddReference(references, "Microsoft.Extensions.DependencyInjection.Abstractions");
             TryAddReference(references, "Microsoft.Extensions.Hosting");

@@ -13,6 +13,7 @@ public class MetricsMiddlewareTests
         var middleware = new MetricsMiddleware(null);
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = "test", CapabilityVersion = 1, CapabilityContractHash = "abc"
         };
 
@@ -29,6 +30,7 @@ public class MetricsMiddlewareTests
         var middleware = new MetricsMiddleware(metrics);
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = "test.cap", CapabilityVersion = 1, CapabilityContractHash = "abc"
         };
 
@@ -47,6 +49,7 @@ public class MetricsMiddlewareTests
         var middleware = new MetricsMiddleware(metrics);
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = "test.cap", CapabilityVersion = 1, CapabilityContractHash = "abc"
         };
 

@@ -11,6 +11,7 @@ public class RateLimitMiddlewareTests
     {
         return new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = name, CapabilityVersion = 1, CapabilityContractHash = "abc"
         };
     }

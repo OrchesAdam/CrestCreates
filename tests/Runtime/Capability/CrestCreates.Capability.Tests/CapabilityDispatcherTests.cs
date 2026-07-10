@@ -34,7 +34,7 @@ public class CapabilityDispatcherTests
             .Callback<CapabilityDescriptor, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
                 (name, input, configure, ct) =>
                 {
-                    var ctx = new CapabilityExecutionContext();
+                    var ctx = new CapabilityExecutionContext { ServiceProvider = null! };
                     configure?.Invoke(ctx);
                     capturedSource = ctx.InvocationSource;
                 })
@@ -65,7 +65,7 @@ public class CapabilityDispatcherTests
             .Callback<CapabilityDescriptor, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
                 (name, input, configure, ct) =>
                 {
-                    var ctx = new CapabilityExecutionContext();
+                    var ctx = new CapabilityExecutionContext { ServiceProvider = null! };
                     configure?.Invoke(ctx);
                     capturedTenantId = ctx.TenantId;
                 })
@@ -100,7 +100,7 @@ public class CapabilityDispatcherTests
             .Callback<CapabilityDescriptor, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
                 (name, input, configure, ct) =>
                 {
-                    var ctx = new CapabilityExecutionContext();
+                    var ctx = new CapabilityExecutionContext { ServiceProvider = null! };
                     configure?.Invoke(ctx);
                     capturedUserId = ctx.UserId;
                 })
@@ -193,7 +193,7 @@ public class CapabilityDispatcherTests
             .Callback<CapabilityDescriptor, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
                 (name, input, configure, ct) =>
                 {
-                    var ctx = new CapabilityExecutionContext();
+                    var ctx = new CapabilityExecutionContext { ServiceProvider = null! };
                     configure?.Invoke(ctx);
                     capturedTenantId = ctx.TenantId;
                     capturedUserId = ctx.UserId;
@@ -229,7 +229,7 @@ public class CapabilityDispatcherTests
             .Callback<CapabilityDescriptor, object?, Action<CapabilityExecutionContext>?, CancellationToken>(
                 (name, input, configure, ct) =>
                 {
-                    var ctx = new CapabilityExecutionContext();
+                    var ctx = new CapabilityExecutionContext { ServiceProvider = null! };
                     configure?.Invoke(ctx);
                     capturedTenantId = ctx.TenantId;
                 })

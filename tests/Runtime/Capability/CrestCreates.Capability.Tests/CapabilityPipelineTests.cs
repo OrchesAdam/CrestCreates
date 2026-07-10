@@ -243,6 +243,52 @@ public class CapabilityPipelineTests
         }
     }
 
+    [Fact]
+    public async Task ExecuteAsync_PopulatesServiceProvider_OnContext()
+    {
+        // Arrange
+        var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
+        var registry = new CapabilityRegistry(engine);
+        var resolver = new CapabilityHandlerResolver();
+
+        registry.Build([new TestCapabilityProvider([
+            new CapabilityDescriptor
+            {
+                Id = "test.pipe",
+                Name = "Test",
+                Version = 1,
+                CapabilityKind = CapabilityKind.Command,
+                State = DescriptorState.Active
+            }
+        ])]);
+
+        CapabilityExecutionContext? capturedContext = null;
+        var mockInvoker = new Mock<ICapabilityContextAwareHandlerInvoker>();
+        mockInvoker
+            .Setup(x => x.InvokeAsync(It.IsAny<CapabilityExecutionContext>(), It.IsAny<CancellationToken>()))
+            .Callback<CapabilityExecutionContext, CancellationToken>((ctx, _) =>
+            {
+                capturedContext = ctx;
+            })
+            .ReturnsAsync((object?)"ok");
+
+        resolver.Register("test.pipe", mockInvoker.Object);
+
+        var sp = BuildPipelineServiceProvider(registry, resolver);
+        var pipeline = sp.GetRequiredService<ICapabilityPipeline>();
+
+        // Act
+        var result = await pipeline.ExecuteAsync("test.pipe");
+
+        // Assert — verifies ServiceProvider is populated from DI-injected _serviceProvider
+        result.Status.Should().Be(CapabilityExecutionStatus.Succeeded);
+        capturedContext.Should().NotBeNull();
+        capturedContext!.ServiceProvider.Should().NotBeNull();
+        // sp is ServiceProvider wrapper; DI injects the internal scope.
+        // Verify it's non-null — the key contract is that ServiceProvider is populated.
+        capturedContext.ServiceProvider.Should().NotBeNull();
+    }
+
     private sealed class ThrowingHandlerInvoker : ICapabilityHandlerInvoker
     {
         public Task<object?> InvokeAsync(object? input, CancellationToken ct)

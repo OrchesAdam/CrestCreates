@@ -17,4 +17,5 @@ public sealed class CapabilityExecutionContext
     public IDictionary<string, object?> Items { get; init; } = new Dictionary<string, object?>();
     public IReadOnlyList<string> RequiredPermissions { get; set; } = Array.Empty<string>();
     public CancellationToken CancellationToken { get; init; }
+    public required IServiceProvider ServiceProvider { get; init; }
 }

@@ -29,6 +29,12 @@ public sealed class CapabilityDescriptor : IDescriptor, IVersionedDescriptor
     public VersionedDescriptorRef<SchemaDescriptor>? OutputSchema { get; init; }
     public IReadOnlyList<string> Permissions { get; init; } = Array.Empty<string>();
     public CapabilityRiskLevel RiskLevel { get; init; } = CapabilityRiskLevel.Medium;
+
+    /// <summary>
+    /// Marks the origin of this capability.
+    /// Compatibility projections are migration artifacts with an exit path to native capabilities.
+    /// </summary>
+    public CapabilityProjectionKind ProjectionKind { get; init; } = CapabilityProjectionKind.Native;
 }
 
 /// <summary>

@@ -19,6 +19,7 @@ public class AuditMiddlewareTests
 
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityId = "test.cap",
             CapabilityName = "Test Cap",
             CapabilityVersion = 1,
@@ -45,6 +46,7 @@ public class AuditMiddlewareTests
 
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityId = "test.cap",
             CapabilityName = "Test Cap",
             CapabilityVersion = 1,
@@ -71,6 +73,7 @@ public class AuditMiddlewareTests
 
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityId = "test.cap",
             CapabilityName = "Test Cap",
             CapabilityVersion = 1,
@@ -103,6 +106,7 @@ public class AuditMiddlewareTests
 
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityId = "test.cap",
             CapabilityName = "Test Cap",
             CapabilityVersion = 1,
@@ -136,6 +140,7 @@ public class AuditMiddlewareTests
 
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityId = "test.cap",
             CapabilityName = "Test Cap",
             CapabilityVersion = 1,

@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
-using CrestCreates.Capability.Abstractions;
 
-namespace CrestCreates.Capability;
+namespace CrestCreates.Capability.Abstractions;
 
 public sealed class CapabilityHandlerResolver : ICapabilityHandlerResolver
 {
@@ -9,7 +8,10 @@ public sealed class CapabilityHandlerResolver : ICapabilityHandlerResolver
 
     public void Register(string capabilityId, ICapabilityHandlerInvoker invoker)
     {
-        _invokers[capabilityId] = invoker;
+        if (!_invokers.TryAdd(capabilityId, invoker))
+            throw new InvalidOperationException(
+                $"Duplicate handler registration for capability '{capabilityId}'. " +
+                "Each capability must have exactly one handler invoker.");
     }
 
     public ICapabilityHandlerInvoker? Resolve(string capabilityId)

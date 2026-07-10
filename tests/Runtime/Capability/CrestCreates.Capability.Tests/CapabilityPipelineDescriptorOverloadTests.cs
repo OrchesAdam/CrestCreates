@@ -213,6 +213,7 @@ public class CapabilityPipelineDescriptorOverloadTests
 
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityId = "cap_test",
             CapabilityName = "test",
             CapabilityVersion = 1,

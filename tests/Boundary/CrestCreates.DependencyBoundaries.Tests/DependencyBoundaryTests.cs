@@ -434,6 +434,19 @@ public class DependencyBoundaryTests
             "Found: " + string.Join(", ", mvcPackageRefs));
     }
 
+    [Fact]
+    public void DynamicApiAbstractions_DoesNotReferenceDomainShared()
+    {
+        // Compatibility projection attributes live in Domain.Shared and are consumed
+        // by the Source Generator at compile time. DynamicApi.Abstractions must not
+        // take a runtime dependency on Domain.Shared — it only uses Metadata types
+        // (CapabilityProjectionKind, CapabilityDescriptor) for descriptor contracts.
+        AssertNoDirectProjectReferences(
+            "src/Framework/Api/CrestCreates.DynamicApi.Abstractions",
+            "CrestCreates.DynamicApi.Abstractions must not reference Domain.Shared; projection attributes are compile-time only.",
+            new[] { "CrestCreates.Domain.Shared" });
+    }
+
     private static void AssertNoDirectProjectReferences(
         string projectRootRelativePath,
         string reason,

@@ -38,6 +38,19 @@ public static class CapabilityEndpointExtensions
         return services;
     }
 
+    /// <summary>
+    /// Registers compatibility projection services.
+    /// Ensures Capability endpoint infrastructure is available.
+    /// Callers must also register Capability runtime (e.g., AddCapabilityRuntime())
+    /// and ensure compatibility handler invokers are auto-registered via generated [ModuleInitializer].
+    /// </summary>
+    public static IServiceCollection AddCrestCompatibilityProjection(
+        this IServiceCollection services)
+    {
+        services.AddCrestCapabilityEndpoints();
+        return services;
+    }
+
     public static IEndpointRouteBuilder MapCrestCapabilityEndpoints(
         this IEndpointRouteBuilder endpoints)
     {

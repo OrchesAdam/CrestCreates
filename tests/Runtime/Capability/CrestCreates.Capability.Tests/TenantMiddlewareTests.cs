@@ -20,6 +20,7 @@ public class TenantMiddlewareTests
         var middleware = new TenantMiddleware(tenantCtx);
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = "test", CapabilityVersion = 1, CapabilityContractHash = "abc"
         };
 
@@ -35,6 +36,7 @@ public class TenantMiddlewareTests
         var middleware = new TenantMiddleware(null);
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = "test", CapabilityVersion = 1, CapabilityContractHash = "abc"
         };
 

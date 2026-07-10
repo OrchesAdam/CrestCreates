@@ -61,7 +61,8 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
             CapabilityVersion = descriptor.Version,
             CapabilityContractHash = _hashBuilder.Build(descriptor).ContractHash.Value,
             Input = input,
-            CancellationToken = ct
+            CancellationToken = ct,
+            ServiceProvider = _serviceProvider
         };
         configureContext?.Invoke(context);
 

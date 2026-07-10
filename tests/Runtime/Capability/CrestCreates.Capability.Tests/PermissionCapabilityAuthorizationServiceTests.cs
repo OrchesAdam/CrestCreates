@@ -110,6 +110,7 @@ public class PermissionCapabilityAuthorizationServiceTests
 
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityId = "test.echo",
             CapabilityName = "Echo",
             UserId = "user1",

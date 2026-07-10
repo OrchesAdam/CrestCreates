@@ -11,6 +11,7 @@ public class IdempotencyMiddlewareTests
     {
         return new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = "test.cap",
             CapabilityVersion = 1,
             CapabilityContractHash = "abc",

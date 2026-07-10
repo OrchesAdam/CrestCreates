@@ -37,6 +37,11 @@ internal sealed class CapabilityDescriptorCanonicalHashProfile
         CollectionOrderMode = CanonicalHashCollectionOrderMode.OrdinalByValue)]
     [CanonicalHashField(nameof(CapabilityDescriptor.RiskLevel), CanonicalHashFieldClassification.Contract, Order = 30)]
 
+    [CanonicalHashField(
+        nameof(CapabilityDescriptor.ProjectionKind),
+        CanonicalHashFieldClassification.DefinitionOnly,
+        Order = 100)]
+
     // ── DefinitionOnly fields (only in DefinitionHash) ──
 
     [CanonicalHashField(nameof(CapabilityDescriptor.SemanticTags), CanonicalHashFieldClassification.DefinitionOnly, Order = 110,

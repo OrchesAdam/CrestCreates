@@ -199,6 +199,78 @@ public class LegacyDynamicApiAotSourceGeneratorTests
             .And.Contain("new global::CrestCreates.DynamicApi.DynamicApiEndpointConventionContext(");
     }
 
+    [Fact]
+    public void ClassLevel_CapabilityCompatibilityProjection_SkipsEntireService()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            public interface IBookAppService
+            {
+                Task<string> CreateAsync(string input, CancellationToken ct = default);
+            }
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService : IBookAppService
+            {
+                public Task<string> CreateAsync(string input, CancellationToken ct) => Task.FromResult(input);
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<DynamicApiAotSourceGenerator>(
+            source,
+            additionalSources: new[] { BuildDynamicApiStubs() });
+
+        result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
+        // Legacy generator should NOT produce any endpoint for this service
+        result.GeneratedSources.Should().NotContain(s => s.FileName.Contains("DynamicApi"));
+    }
+
+    [Fact]
+    public void MethodLevel_CapabilityCompatibilityProjection_SkipsOnlyThatMethod()
+    {
+        var source = """
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            public interface IBookAppService
+            {
+                [CapabilityCompatibilityProjection]
+                Task<string> CreateAsync(string input, CancellationToken ct = default);
+
+                Task<string> GetAllAsync(CancellationToken ct = default);
+            }
+
+            [CrestService]
+            public class BookAppService : IBookAppService
+            {
+                public Task<string> CreateAsync(string input, CancellationToken ct) => Task.FromResult(input);
+                public Task<string> GetAllAsync(CancellationToken ct) => Task.FromResult("all");
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<DynamicApiAotSourceGenerator>(
+            source,
+            additionalSources: new[] { BuildDynamicApiStubs() });
+
+        result.HasNoErrors().Should().BeTrue(string.Join(Environment.NewLine, result.GetErrors()));
+        // Legacy generator should produce endpoint for GetAllAsync but NOT CreateAsync
+        var registrySource = result.GetSourceByFileName("GeneratedDynamicApiRegistry.g.cs");
+        registrySource.Should().NotBeNull();
+        registrySource!.SourceText.Should().Contain("ActionName = \"GetAll\"");
+        registrySource.SourceText.Should().NotContain("ActionName = \"Create\"");
+    }
+
     private static string BuildDynamicApiSource()
     {
         return """

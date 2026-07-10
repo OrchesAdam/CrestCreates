@@ -89,12 +89,10 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddSingleton<IRegistryValidationEngine<CapabilityDescriptor>,
             RegistryValidationEngine<CapabilityDescriptor>>();
 
-        // Custom ICapabilityHandlerResolver registrations must go after AddCapabilityRuntime().
+        // Generated handler registrations are additive via CapabilityHandlerResolverProvider.Register().
+        // The static resolver is always non-null; replace the DI singleton with it.
         var generatedResolver = CapabilityHandlerResolverProvider.GetResolver();
-        if (generatedResolver != null)
-        {
-            services.Replace(ServiceDescriptor.Singleton<ICapabilityHandlerResolver>(_ => generatedResolver));
-        }
+        services.Replace(ServiceDescriptor.Singleton<ICapabilityHandlerResolver>(_ => generatedResolver));
 
         // Binding Status Contributor
         services.AddSingleton<IDescriptorBindingStatusContributor, CapabilityBindingStatusContributor>();

@@ -27,6 +27,7 @@ public class EventPublisherTests
         var middleware = new Middleware.EventPublishingMiddleware(null);
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = "test", CapabilityVersion = 1, CapabilityContractHash = "abc"
         };
 
@@ -42,6 +43,7 @@ public class EventPublisherTests
         var middleware = new Middleware.EventPublishingMiddleware(null);
         var context = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = "test", CapabilityVersion = 1, CapabilityContractHash = "abc"
         };
 

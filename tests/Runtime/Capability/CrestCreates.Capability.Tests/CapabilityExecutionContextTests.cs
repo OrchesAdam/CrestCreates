@@ -1,5 +1,6 @@
 using CrestCreates.Capability.Abstractions;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace CrestCreates.Capability.Tests;
@@ -11,6 +12,7 @@ public class CapabilityExecutionContextTests
     {
         var ctx = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = "test.cap",
             CapabilityVersion = 1,
             CapabilityContractHash = "abc123"
@@ -25,6 +27,7 @@ public class CapabilityExecutionContextTests
     {
         var ctx = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = "test.cap",
             CapabilityVersion = 1,
             CapabilityContractHash = "abc123"
@@ -38,6 +41,7 @@ public class CapabilityExecutionContextTests
     {
         var ctx = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = "test.cap",
             CapabilityVersion = 1,
             CapabilityContractHash = "abc123"
@@ -52,6 +56,7 @@ public class CapabilityExecutionContextTests
     {
         var ctx = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = "test.cap",
             CapabilityVersion = 1,
             CapabilityContractHash = "abc123"
@@ -75,6 +80,7 @@ public class CapabilityExecutionContextTests
     {
         var ctx = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityId = "customer.create",
             CapabilityName = "Create Customer",
             InvocationSource = InvocationSource.Workflow
@@ -90,6 +96,7 @@ public class CapabilityExecutionContextTests
         var before = DateTimeOffset.UtcNow;
         var ctx = new CapabilityExecutionContext
         {
+            ServiceProvider = null!,
             CapabilityName = "test.cap",
             CapabilityVersion = 1,
             CapabilityContractHash = "abc123"
@@ -98,5 +105,21 @@ public class CapabilityExecutionContextTests
 
         ctx.StartedAt.Should().BeOnOrAfter(before);
         ctx.StartedAt.Should().BeOnOrBefore(after);
+    }
+
+    [Fact]
+    public void ServiceProvider_CanBeSetAndRetrieved()
+    {
+        var services = new ServiceCollection().BuildServiceProvider();
+        var context = new CapabilityExecutionContext
+        {
+            CapabilityId = "test",
+            CapabilityName = "Test",
+            CapabilityVersion = 1,
+            CapabilityContractHash = "hash",
+            ServiceProvider = services
+        };
+
+        context.ServiceProvider.Should().BeSameAs(services);
     }
 }
