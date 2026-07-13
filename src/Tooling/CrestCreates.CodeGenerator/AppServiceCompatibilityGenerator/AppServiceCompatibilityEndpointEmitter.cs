@@ -134,8 +134,8 @@ internal static class AppServiceCompatibilityEndpointEmitter
         sb.AppendLine("namespace CrestCreates.Generated;");
         sb.AppendLine();
 
-        // Envelope types for multi-parameter methods
-        foreach (var action in service.Actions.Where(a => !a.IsSingleParam))
+        // Envelope types for multi-parameter methods (must have a non-null EnvelopeTypeName)
+        foreach (var action in service.Actions.Where(a => a.EnvelopeTypeName is not null))
         {
             sb.AppendLine($"internal sealed class {action.EnvelopeTypeName}");
             sb.AppendLine("{");
@@ -221,14 +221,16 @@ internal static class AppServiceCompatibilityEndpointEmitter
         {
             // Single body parameter — use generic ReadBodyAsync (no JsonSerializerContext)
             // P0-1: Roslyn SGs cannot see each other's output, so we use the non-JsonTypeInfo overload.
+            var bodyOptional = bodyParam.IsOptional.ToString().ToLowerInvariant();
             sb.AppendLine($"        return await CapabilityEndpointJsonRuntime.ReadBodyAsync<{bodyParam.TypeName}>(");
-            sb.AppendLine($"            context, optional: false, ct);");
+            sb.AppendLine($"            context, optional: {bodyOptional}, ct);");
         }
         else if (bodyParam is not null && (routeParams.Length > 0 || queryParams.Length > 0 || headerParams.Length > 0))
         {
             // Body + route/query/header params
+            var bodyOptional = bodyParam.IsOptional.ToString().ToLowerInvariant();
             sb.AppendLine($"        var body = await CapabilityEndpointJsonRuntime.ReadBodyAsync<{bodyParam.TypeName}>(");
-            sb.AppendLine($"            context, optional: false, ct);");
+            sb.AppendLine($"            context, optional: {bodyOptional}, ct);");
             sb.AppendLine();
 
             // Two-phase: pre-declare query locals outside initializer, then construct envelope

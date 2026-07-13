@@ -588,7 +588,9 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                     continue;
                 }
 
-                if (compatibilityProjectionAttribute is not null && HasAttribute(method, compatibilityProjectionAttribute))
+                // P0-2 fix: unified check for [CapabilityCompatibilityProjection] on method
+                // Checks both interface and implementation method regardless of which one we're iterating
+                if (HasCompatibilityProjectionOnMethod(method, implementationType, compatibilityProjectionAttribute))
                 {
                     continue;
                 }
@@ -707,6 +709,52 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
     private static bool HasAttribute(ISymbol symbol, INamedTypeSymbol attributeSymbol)
     {
         return symbol.GetAttributes().Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, attributeSymbol));
+    }
+
+    /// <summary>
+    /// P0-2 fix: unified check for [CapabilityCompatibilityProjection] on a method.
+    /// Checks both the current method symbol AND the corresponding interface/implementation method.
+    /// This handles the case where the attribute is on the interface method but the current
+    /// iteration is over the class method (via EnumerateContractTypes yielding serviceType first).
+    /// </summary>
+    private static bool HasCompatibilityProjectionOnMethod(
+        IMethodSymbol method,
+        INamedTypeSymbol serviceType,
+        INamedTypeSymbol? compatibilityProjectionAttribute)
+    {
+        if (compatibilityProjectionAttribute is null)
+            return false;
+
+        // Check the method itself
+        if (HasAttribute(method, compatibilityProjectionAttribute))
+            return true;
+
+        // If method is on the class (implementation), check the interface methods
+        if (method.ContainingType.TypeKind == TypeKind.Class)
+        {
+            foreach (var iface in serviceType.AllInterfaces)
+            {
+                foreach (var ifaceMethod in iface.GetMembers().OfType<IMethodSymbol>())
+                {
+                    if (ifaceMethod.Name == method.Name &&
+                        ifaceMethod.Parameters.Length == method.Parameters.Length)
+                    {
+                        if (HasAttribute(ifaceMethod, compatibilityProjectionAttribute))
+                            return true;
+                    }
+                }
+            }
+        }
+
+        // If method is on an interface, check the implementation method
+        if (method.ContainingType.TypeKind == TypeKind.Interface)
+        {
+            var implMethod = serviceType.FindImplementationForInterfaceMember(method) as IMethodSymbol;
+            if (implMethod is not null && HasAttribute(implMethod, compatibilityProjectionAttribute))
+                return true;
+        }
+
+        return false;
     }
 
     private static AttributeData? GetAttribute(ISymbol? symbol, INamedTypeSymbol attributeSymbol)

@@ -34,6 +34,12 @@ public sealed class AppServiceCompatibilityGeneratorTests
         generated.SourceText.Should().Contain("CapabilityProjectionKind.AppServiceCompatibility");
         generated.SourceText.Should().Contain("DescriptorProviderRegistry.Register");
 
+        // Result contracts should also be generated
+        var contracts = result.GetSourceByFileName("GeneratedAppServiceCompatibilityResultContracts_Book.g.cs");
+        contracts.Should().NotBeNull();
+        contracts!.SourceText.Should().Contain("CapabilityEndpointResultContractRegistration.Register");
+        contracts.SourceText.Should().Contain("DynamicApiGeneratedRuntime.WrapResult");
+
         result.CompilationSuccess.Should().BeTrue("generated code must compile successfully");
     }
 
@@ -125,6 +131,9 @@ public sealed class AppServiceCompatibilityGeneratorTests
         manifest!.SourceText.Should().Contain("AppServiceCompatibilityProjectionEntry");
         manifest.SourceText.Should().Contain("compat.appservice.book.create");
         manifest.SourceText.Should().Contain("CapabilityProjectionKind.AppServiceCompatibility");
+        manifest.SourceText.Should().Contain("[ModuleInitializer]");
+        manifest.SourceText.Should().Contain("AppServiceCompatibilityProjectionManifestRegistry.Register");
+        manifest.SourceText.Should().Contain("System.Runtime.CompilerServices");
 
         result.CompilationSuccess.Should().BeTrue("generated code must compile successfully");
     }
@@ -372,9 +381,14 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         foreach (var generated in result.GeneratedSources)
         {
+            // Result contracts legitimately reference DynamicApiGeneratedRuntime for
+            // WrapResult / WrapVoidResult / WrapGetResult envelope wrapping.
+            if (generated.FileName.Contains("ResultContracts"))
+                continue;
+
+            generated.SourceText.Should().NotContain("DynamicApiGeneratedRuntime");
             generated.SourceText.Should().NotContain("DynamicApiGeneratedRegistryStore");
             generated.SourceText.Should().NotContain("IDynamicApiGeneratedProvider");
-            generated.SourceText.Should().NotContain("DynamicApiGeneratedRuntime");
         }
 
         result.CompilationSuccess.Should().BeTrue("generated code must compile successfully");
@@ -754,6 +768,23 @@ public sealed class AppServiceCompatibilityGeneratorTests
                     }
                 }
 
+                public static class CapabilityEndpointResultContractRegistration
+                {
+                    public static void Register(string endpointId, int version, System.Func<EndpointExecutionContext, object> mapResult) { }
+                }
+
+                public sealed class EndpointExecutionContext
+                {
+                    public object? Output { get; init; }
+                }
+
+                public static class DynamicApiGeneratedRuntime
+                {
+                    public static object WrapResult(object? value) => null!;
+                    public static object WrapGetResult(object? value) => null!;
+                    public static object WrapVoidResult() => null!;
+                }
+
                 public static class CapabilityEndpointJsonRuntime
                 {
                     public static async System.Threading.Tasks.ValueTask<T?> ReadBodyAsync<T>(
@@ -799,6 +830,25 @@ public sealed class AppServiceCompatibilityGeneratorTests
                 public interface IAppServiceCompatibilityProjectionManifestProvider
                 {
                     IReadOnlyList<AppServiceCompatibilityProjectionEntry> GetEntries();
+                }
+            }
+            """,
+            // AppServiceCompatibilityProjectionManifestRegistry stub
+            """
+            using System.Collections.Generic;
+
+            namespace CrestCreates.DynamicApi.Abstractions
+            {
+                public static class AppServiceCompatibilityProjectionManifestRegistry
+                {
+                    private static readonly List<IAppServiceCompatibilityProjectionManifestProvider> _providers = new();
+
+                    public static void Register(IAppServiceCompatibilityProjectionManifestProvider provider)
+                    {
+                        _providers.Add(provider);
+                    }
+
+                    public static IReadOnlyList<IAppServiceCompatibilityProjectionManifestProvider> GetProviders() => _providers;
                 }
             }
             """,
@@ -867,6 +917,331 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
             source, additionalSources: BuildCompatibilityStubs());
+
+        result.CompilationSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public void DynamicApiRouteOnInterface_ResolvedByCompatibilityGenerator()
+    {
+        // P1-1: [DynamicApiRoute] on the interface should be picked up by the
+        // compatibility generator via ResolveServiceRoute fallback.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [DynamicApiRoute("custom-books-route")]
+            public interface ICustomRouteAppService
+            {
+                System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct);
+            }
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class CustomRouteAppService : ICustomRouteAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.CompilationSuccess.Should().BeTrue();
+
+        var endpoints = result.GetSourceByFileName("GeneratedAppServiceCompatibilityEndpoints_CustomRoute.g.cs");
+        endpoints.Should().NotBeNull();
+        endpoints!.SourceText.Should().Contain("custom-books-route",
+            "route from interface [DynamicApiRoute] should be used instead of default api/");
+        endpoints.SourceText.Should().NotContain("api/custom-route",
+            "should not use default 'api/' prefix when custom route is on interface");
+    }
+
+    [Fact]
+    public void CEP035_DefaultRoutePrefix_EmitsWarning()
+    {
+        // P1-1: When no explicit RoutePrefix is set and no [DynamicApiRoute] attribute
+        // is present, the generator uses the default "api/" prefix. CEP035 should warn
+        // that this may not match a custom DynamicApiOptions.DefaultRoutePrefix.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class SimpleAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().Contain(d =>
+            d.Id == "CEP035" &&
+            d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Warning,
+            "CEP035 should be emitted when default 'api/' prefix is used");
+
+        result.CompilationSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public void CEP035_NotEmittedWhenRoutePrefixExplicit()
+    {
+        // CEP035 should NOT be emitted when RoutePrefix is explicitly set.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection(RoutePrefix = "v2/books")]
+            public class ExplicitRouteAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP035",
+            "CEP035 should not be emitted when RoutePrefix is explicitly set");
+        result.CompilationSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public void CEP035_NotEmittedWhenDynamicApiRoutePresent()
+    {
+        // CEP035 should NOT be emitted when [DynamicApiRoute] is on the class.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            [DynamicApiRoute("custom-prefix")]
+            public class CustomPrefixAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP035",
+            "CEP035 should not be emitted when [DynamicApiRoute] provides custom prefix");
+        result.CompilationSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public void CEP034_OverloadedMethods_ReportsError()
+    {
+        // Overloaded methods create duplicate CapabilityId, EndpointId,
+        // binding method names, and invoker class names. The generator must
+        // detect this and report CEP034 errors, suppressing generation.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(string name, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(name);
+
+                public System.Threading.Tasks.Task<string> CreateAsync(CreateBookDto input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("created");
+            }
+
+            public class CreateBookDto
+            {
+                public string Title { get; set; } = "";
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        // Should produce CEP034 errors — at least 2 (one per overloaded method)
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP034");
+        result.Diagnostics.Count(d => d.Id == "CEP034").Should().BeGreaterThanOrEqualTo(2);
+
+        // Compilation should succeed (no broken code generated)
+        if (!result.CompilationSuccess)
+        {
+            var errors = result.GetErrors().ToList();
+            throw new System.Exception($"CEP034 Compilation failed with {errors.Count} errors. Errors:\n{string.Join("\n", errors.Select(e => $"{e.Id}: {e.GetMessage()} at {e.Location}"))}");
+        }
+        result.CompilationSuccess.Should().BeTrue("generated code must compile successfully");
+    }
+
+    [Fact]
+    public void NoParamMethod_DoesNotGenerateEnvelopeClass()
+    {
+        // Regression: methods with only a CancellationToken parameter should not
+        // produce empty envelope class declarations (CS1001).
+        // The filter in the endpoint emitter must use EnvelopeTypeName is not null.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> ListAsync(System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("ok");
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.CompilationSuccess.Should().BeTrue("generated code must compile successfully");
+
+        var bindings = result.GetSourceByFileName("GeneratedAppServiceCompatibilityBindings_Book.g.cs");
+        bindings.Should().NotBeNull();
+        // Must not contain empty class declaration: "internal sealed class" would be
+        // followed by the class name if there was one. A no-name class is the bug.
+        bindings!.SourceText.Should().NotContain("internal sealed class ");
+
+        // Result contracts should still be generated for no-param methods
+        var contracts = result.GetSourceByFileName("GeneratedAppServiceCompatibilityResultContracts_Book.g.cs");
+        contracts.Should().NotBeNull();
+        contracts!.SourceText.Should().Contain("CapabilityEndpointResultContractRegistration.Register");
+    }
+
+    [Fact]
+    public void ResultContracts_GeneratedForAllActionTypes()
+    {
+        // Verify that result contract registration is generated for all action types:
+        // POST non-void, GET non-void, void return.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+
+                public System.Threading.Tasks.Task<string> GetAsync(string name, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(name);
+
+                public System.Threading.Tasks.Task DeleteAsync(string name, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.CompletedTask;
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.CompilationSuccess.Should().BeTrue();
+
+        var contracts = result.GetSourceByFileName("GeneratedAppServiceCompatibilityResultContracts_Book.g.cs");
+        contracts.Should().NotBeNull();
+        contracts!.SourceText.Should().Contain("DynamicApiGeneratedRuntime.WrapResult(ctx.Output)",
+            "POST non-void actions should use WrapResult");
+        contracts.SourceText.Should().Contain("DynamicApiGeneratedRuntime.WrapGetResult(ctx.Output)",
+            "GET non-void actions should use WrapGetResult");
+        contracts.SourceText.Should().Contain("DynamicApiGeneratedRuntime.WrapVoidResult()",
+            "void-return actions should use WrapVoidResult");
+    }
+
+    [Fact]
+    public void MethodLevelProjection_OnInterfaceMethod_ProjectsAction()
+    {
+        // P0-2 fix: [CapabilityCompatibilityProjection] on interface method should be discovered
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            public interface IBookAppService
+            {
+                [CapabilityCompatibilityProjection]
+                System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct);
+
+                System.Threading.Tasks.Task<string> GetAsync(string name, System.Threading.CancellationToken ct);
+            }
+
+            [CrestService]
+            public class BookAppService : IBookAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+
+                public System.Threading.Tasks.Task<string> GetAsync(string name, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(name);
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        // Create should be projected (attribute on interface method), Get should not
+        var capabilities = result.GetSourceByFileName("GeneratedAppServiceCompatibilityCapabilities_Book.g.cs");
+        capabilities.Should().NotBeNull();
+        capabilities!.SourceText.Should().Contain("compat.appservice.book.create",
+            "attribute on interface method should be discovered");
+        capabilities.SourceText.Should().NotContain("compat.appservice.book.get");
+
+        result.CompilationSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public void MethodLevelProjection_OnImplementationMethod_ProjectsAction()
+    {
+        // P0-2 fix: [CapabilityCompatibilityProjection] on implementation method should be discovered
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            public interface IBookAppService
+            {
+                System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct);
+
+                System.Threading.Tasks.Task<string> GetAsync(string name, System.Threading.CancellationToken ct);
+            }
+
+            [CrestService]
+            public class BookAppService : IBookAppService
+            {
+                [CapabilityCompatibilityProjection]
+                public System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+
+                public System.Threading.Tasks.Task<string> GetAsync(string name, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(name);
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        // Create should be projected (attribute on implementation method), Get should not
+        var capabilities = result.GetSourceByFileName("GeneratedAppServiceCompatibilityCapabilities_Book.g.cs");
+        capabilities.Should().NotBeNull();
+        capabilities!.SourceText.Should().Contain("compat.appservice.book.create",
+            "attribute on implementation method should be discovered");
+        capabilities.SourceText.Should().NotContain("compat.appservice.book.get");
 
         result.CompilationSuccess.Should().BeTrue();
     }

@@ -11,6 +11,16 @@ public static class CapabilityHandlerResolverProvider
 
     public static ICapabilityHandlerResolver GetResolver() => Resolver;
 
+    public static CapabilityHandlerResolver GetConcreteResolver() => Resolver;
+
+    /// <summary>
+    /// Clears all registered invokers. Internal for test isolation.
+    /// </summary>
+    internal static void Reset()
+    {
+        Resolver.Reset();
+    }
+
     [Obsolete("Use Register() for additive registration.")]
     public static void SetResolver(ICapabilityHandlerResolver resolver)
     {

@@ -18,7 +18,7 @@ namespace CrestCreates.Metadata.CanonicalHashing.Profiles;
     DescriptorKind = DescriptorKind.Capability,
     TargetType = typeof(CapabilityDescriptor),
     ContractShapeVersion = "capability-contract-hash-v1",
-    DefinitionShapeVersion = "capability-definition-hash-v1")]
+    DefinitionShapeVersion = "capability-definition-hash-v2")]
 internal sealed class CapabilityDescriptorCanonicalHashProfile
 {
     // ── Contract fields (common to both ContractHash and DefinitionHash) ──

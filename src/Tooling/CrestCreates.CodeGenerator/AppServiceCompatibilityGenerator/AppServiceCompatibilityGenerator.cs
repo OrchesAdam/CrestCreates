@@ -57,7 +57,8 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
             {
                 if (m.MethodKind != MethodKind.Ordinary) continue;
                 var implMethod = symbol.FindImplementationForInterfaceMember(m) as IMethodSymbol ?? m;
-                if (implMethod.GetAttributes().Any(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute"))
+                if (m.GetAttributes().Any(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute")
+                    || implMethod.GetAttributes().Any(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute"))
                     methodsWithProjection.Add(m);
             }
         }
@@ -117,6 +118,7 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
 
         // Resolve route prefix
         string routePrefix;
+        var usingDefaultPrefix = false;
         var explicitRoutePrefix = GetNamedArgValue(classProjectionAttr, "RoutePrefix");
         if (explicitRoutePrefix is not null)
         {
@@ -124,14 +126,27 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
         }
         else
         {
+            // Find DynamicApiRouteAttribute on class first, then primary interface
             var dynamicApiRouteAttr = symbol.GetAttributes()
                 .FirstOrDefault(a => a.AttributeClass?.Name == "DynamicApiRouteAttribute");
+            if (dynamicApiRouteAttr is null)
+            {
+                var primaryInterface = symbol.AllInterfaces
+                    .FirstOrDefault(i => i.Name == $"I{symbol.Name}");
+                if (primaryInterface is not null)
+                {
+                    dynamicApiRouteAttr = primaryInterface.GetAttributes()
+                        .FirstOrDefault(a => a.AttributeClass?.Name == "DynamicApiRouteAttribute");
+                }
+            }
+
             var routeModel = DynamicApiConventionAnalyzer.ResolveServiceRoute(
                 symbol, serviceName,
                 dynamicApiRouteAttr?.AttributeClass as INamedTypeSymbol);
             routePrefix = routeModel.IsCustom
                 ? routeModel.Template
                 : $"api/{routeModel.Template}";
+            usingDefaultPrefix = !routeModel.IsCustom;
         }
 
         // Determine which methods to project using contract-type-based discovery
@@ -139,6 +154,9 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
         // the original symbol.GetMembers() missed.
         var actions = new List<CompatibilityActionModel>();
         var seenMethodKeys = new HashSet<string>(System.StringComparer.Ordinal);
+        // Overload detection: track first method symbol per action name
+        var firstMethodByActionName = new Dictionary<string, IMethodSymbol>(System.StringComparer.Ordinal);
+        bool hasOverloadError = false;
 
         foreach (var contractType in DynamicApiConventionAnalyzer.EnumerateContractTypes(symbol))
         {
@@ -173,7 +191,9 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
                 else
                 {
                     // For method-level projection: only include methods with [CapabilityCompatibilityProjection]
-                    if (!implMethod.GetAttributes().Any(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute"))
+                    // Check both contract method and implementation method (P0-2 fix)
+                    if (!contractMethod.GetAttributes().Any(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute")
+                        && !implMethod.GetAttributes().Any(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute"))
                         continue;
                 }
 
@@ -186,30 +206,43 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
                 var method = implMethod;
 
         var httpMethod = DynamicApiConventionAnalyzer.ResolveHttpMethod(method.Name);
-                if (string.IsNullOrEmpty(httpMethod))
-                {
-                    // CEP032 — cannot derive HTTP method
-                    var syntaxRef = method.DeclaringSyntaxReferences.FirstOrDefault();
-                    var location = syntaxRef?.GetSyntax().GetLocation() ?? Location.None;
-                    diagnostics.Add(new DiagnosticDescriptorAndLocation(
-                        AppServiceCompatibilityDiagnostics.CEP032, location,
-                        new object?[] { method.Name }));
-                    continue;
-                }
 
                 var permission = DynamicApiConventionAnalyzer.ResolvePermission(serviceName, method.Name);
-                if (string.IsNullOrEmpty(permission))
+
+                // CEP035 — default route prefix warning
+                if (usingDefaultPrefix && explicitRoutePrefix is null)
                 {
-                    // CEP033 — cannot derive permission (warning only, proceed anyway)
                     var syntaxRef = method.DeclaringSyntaxReferences.FirstOrDefault();
                     var location = syntaxRef?.GetSyntax().GetLocation() ?? Location.None;
                     diagnostics.Add(new DiagnosticDescriptorAndLocation(
-                        AppServiceCompatibilityDiagnostics.CEP033, location,
+                        AppServiceCompatibilityDiagnostics.CEP035, location,
                         new object?[] { method.Name }));
                 }
 
                 var actionRoute = DynamicApiConventionAnalyzer.ResolveActionRoute(method);
                 var methodStripped = DynamicApiConventionAnalyzer.TrimAsyncSuffix(method.Name);
+
+                // Check for overloads — same action name from different methods
+                if (firstMethodByActionName.TryGetValue(methodStripped, out var previousMethod))
+                {
+                    if (!hasOverloadError)
+                    {
+                        hasOverloadError = true;
+                        var prevSyntaxRef = previousMethod.DeclaringSyntaxReferences.FirstOrDefault();
+                        var prevLocation = prevSyntaxRef?.GetSyntax().GetLocation() ?? Location.None;
+                        diagnostics.Add(new DiagnosticDescriptorAndLocation(
+                            AppServiceCompatibilityDiagnostics.CEP034, prevLocation,
+                            new object?[] { previousMethod.Name, symbol.Name }));
+                    }
+                    var overloadSyntaxRef = method.DeclaringSyntaxReferences.FirstOrDefault();
+                    var overloadLocation = overloadSyntaxRef?.GetSyntax().GetLocation() ?? Location.None;
+                    diagnostics.Add(new DiagnosticDescriptorAndLocation(
+                        AppServiceCompatibilityDiagnostics.CEP034, overloadLocation,
+                        new object?[] { method.Name, symbol.Name }));
+                    continue;
+                }
+                firstMethodByActionName[methodStripped] = method;
+
                 var methodKebab = DynamicApiConventionAnalyzer.ToKebabCase(methodStripped);
                 var capabilityId = $"{capabilityIdPrefix}.{methodKebab}";
                 var endpointId = $"endpoint:{capabilityId}";
@@ -339,6 +372,21 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
             }
         }
 
+        // If overload errors were detected, return only diagnostics (no actions) to prevent broken generation
+        if (hasOverloadError)
+        {
+            return new CompatibilityServiceModel(
+                ServiceName: serviceName,
+                StrippedName: kebabName,
+                SanitizedIdentifier: sanitizedId,
+                RoutePrefix: routePrefix,
+                CapabilityIdPrefix: capabilityIdPrefix,
+                ServiceTypeName: symbol.ToDisplayString(FullyQualifiedFormat),
+                InterfaceTypeName: symbol.ToDisplayString(FullyQualifiedFormat),
+                Actions: System.Array.Empty<CompatibilityActionModel>(),
+                Diagnostics: diagnostics.ToArray());
+        }
+
         if (actions.Count == 0 && diagnostics.Count == 0) return null;
 
         // If there are diagnostics but no actions, return a model with empty actions
@@ -410,6 +458,10 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
             // 4. Manifest
             var manifestSource = AppServiceCompatibilityManifestEmitter.Emit(service);
             spc.AddSource($"GeneratedAppServiceCompatibilityManifest_{service.SanitizedIdentifier}.g.cs", manifestSource);
+
+            // 5. Result contracts
+            var resultContractsSource = AppServiceCompatibilityResultContractEmitter.Emit(service);
+            spc.AddSource($"GeneratedAppServiceCompatibilityResultContracts_{service.SanitizedIdentifier}.g.cs", resultContractsSource);
         }
     }
 

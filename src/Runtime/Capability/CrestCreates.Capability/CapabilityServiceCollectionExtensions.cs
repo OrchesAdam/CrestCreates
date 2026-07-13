@@ -31,8 +31,6 @@ public static class CapabilityServiceCollectionExtensions
         configure?.Invoke(builder);
 
         services.TryAddSingleton(builder);
-        services.TryAddSingleton<CapabilityHandlerResolver>();
-        services.TryAddSingleton<ICapabilityHandlerResolver>(sp => sp.GetRequiredService<CapabilityHandlerResolver>());
         services.TryAddScoped<ICapabilityPipeline, CapabilityPipeline>();
         services.TryAddScoped<ICapabilityAuthorizationService, PermissionCapabilityAuthorizationService>();
         services.TryAddTransient<AuditMiddleware>();       // New
@@ -90,9 +88,13 @@ public static class CapabilityServiceCollectionExtensions
             RegistryValidationEngine<CapabilityDescriptor>>();
 
         // Generated handler registrations are additive via CapabilityHandlerResolverProvider.Register().
-        // The static resolver is always non-null; replace the DI singleton with it.
-        var generatedResolver = CapabilityHandlerResolverProvider.GetResolver();
-        services.Replace(ServiceDescriptor.Singleton<ICapabilityHandlerResolver>(_ => generatedResolver));
+        // The static resolver is the single source of truth.
+        // Register both the concrete type and the interface to point to the same static instance,
+        // so DI resolution via CapabilityHandlerResolver and ICapabilityHandlerResolver returns the same object.
+        var concreteResolver = CapabilityHandlerResolverProvider.GetConcreteResolver();
+        var interfaceResolver = CapabilityHandlerResolverProvider.GetResolver();
+        services.TryAddSingleton<CapabilityHandlerResolver>(_ => concreteResolver);
+        services.TryAddSingleton<ICapabilityHandlerResolver>(_ => interfaceResolver);
 
         // Binding Status Contributor
         services.AddSingleton<IDescriptorBindingStatusContributor, CapabilityBindingStatusContributor>();

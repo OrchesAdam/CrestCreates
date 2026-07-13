@@ -6,6 +6,9 @@
     <RootNamespace>CrestCreates.Capability.Abstractions</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.DynamicApi.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Schema.Abstractions/CrestCreates.Schema.Abstractions.csproj" />
   </ItemGroup>

@@ -18,6 +18,7 @@ internal static class DynamicApiConventionAnalyzer
     {
         if (dynamicApiRouteAttribute is not null)
         {
+            // Check implementation class first
             var routeAttribute = serviceType.GetAttributes()
                 .FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, dynamicApiRouteAttribute));
             if (routeAttribute is not null &&
@@ -26,6 +27,22 @@ internal static class DynamicApiConventionAnalyzer
                 !string.IsNullOrWhiteSpace(template))
             {
                 return new ServiceRouteModel(template.Trim('/'), true);
+            }
+
+            // Fallback: check primary service interface
+            var primaryInterface = serviceType.AllInterfaces
+                .FirstOrDefault(i => i.Name == $"I{serviceType.Name}");
+            if (primaryInterface is not null)
+            {
+                var interfaceRouteAttr = primaryInterface.GetAttributes()
+                    .FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, dynamicApiRouteAttribute));
+                if (interfaceRouteAttr is not null &&
+                    interfaceRouteAttr.ConstructorArguments.Length == 1 &&
+                    interfaceRouteAttr.ConstructorArguments[0].Value is string interfaceTemplate &&
+                    !string.IsNullOrWhiteSpace(interfaceTemplate))
+                {
+                    return new ServiceRouteModel(interfaceTemplate.Trim('/'), true);
+                }
             }
         }
 

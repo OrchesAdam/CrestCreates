@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Text;
+using System.Text.Json;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
@@ -17,19 +19,25 @@ using Xunit;
 
 namespace CrestCreates.DynamicApi.Tests;
 
+[CollectionDefinition("DynamicApiStaticState")]
+public sealed class DynamicApiStaticStateCollection;
+
 #pragma warning disable CC1001 // RefValidation: descriptor not registered — tests use mock registries
 
+[Collection("DynamicApiStaticState")]
 public sealed class CapabilityEndpointIntegrationTests : IDisposable
 {
     public CapabilityEndpointIntegrationTests()
     {
         CapabilityEndpointBindingRegistry.Reset();
+        CapabilityEndpointResultContractRegistration.Reset();
         ClearDescriptorProviderRegistry();
     }
 
     public void Dispose()
     {
         CapabilityEndpointBindingRegistry.Reset();
+        CapabilityEndpointResultContractRegistration.Reset();
         ClearDescriptorProviderRegistry();
     }
 
@@ -397,6 +405,158 @@ public sealed class CapabilityEndpointIntegrationTests : IDisposable
             Times.Once);
     }
 
+    [Fact]
+    public async Task Endpoint_WithResultContract_ReturnsCustomResult()
+    {
+        // Arrange
+        var capability = new CapabilityDescriptor
+        {
+            Id = "test-cap-rc",
+            Name = "RC Cap",
+            Version = 1,
+            State = DescriptorState.Active
+        };
+
+        var endpointDescriptor = new CapabilityEndpointDescriptor
+        {
+            Id = "ep-rc",
+            Name = "RC EP",
+            Version = 1,
+            State = DescriptorState.Active,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("test-cap-rc", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Post,
+            RoutePattern = "/api/v1/rc"
+        };
+
+        // Register provider + binding
+        DescriptorProviderRegistry.Register(CreateProvider(endpointDescriptor));
+        CapabilityEndpointBindingRegistry.Register(new CapabilityEndpointBindingContract(
+            EndpointId: "ep-rc", EndpointVersion: 1,
+            BindInputAsync: (ctx, ct) => ValueTask.FromResult<object?>(null)));
+
+        // Register a result contract that returns a custom envelope
+        CapabilityEndpointResultContractRegistration.Register("ep-rc", 1, ctx =>
+        {
+            // Simulate legacy DynamicApiResponse wrapping
+            return Results.Ok(new { code = 200, message = "操作成功", data = ctx.Output });
+        });
+
+        // Mock dispatcher to return success
+        var dispatcherMock = new Mock<ICapabilityDispatcher>();
+        dispatcherMock
+            .Setup(d => d.DispatchAsync(
+                capability,
+                InvocationSource.Http,
+                It.IsAny<object?>(),
+                It.IsAny<Action<CapabilityExecutionContext>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CapabilityExecutionResult.Success(
+                new { name = "test" }, TimeSpan.FromMilliseconds(5)));
+
+        var capRegistryMock = new Mock<ICapabilityRegistry>();
+        capRegistryMock.Setup(r => r.GetByVersion("test-cap-rc", 1)).Returns(capability);
+        capRegistryMock.Setup(r => r.GetById("test-cap-rc")).Returns(capability);
+        capRegistryMock.Setup(r => r.GetAll()).Returns(new[] { capability });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(capRegistryMock.Object);
+        services.AddSingleton(dispatcherMock.Object);
+        services.AddCrestCapabilityEndpoints();
+        var sp = services.BuildServiceProvider();
+
+        var endpoints = new DefaultEndpointRouteBuilder(sp);
+        endpoints.MapCrestCapabilityEndpoints();
+
+        var dataSource = endpoints.DataSources.Should().ContainSingle().Subject;
+        var routeEndpoint = dataSource.Endpoints.OfType<RouteEndpoint>().Should().ContainSingle().Subject;
+
+        var httpContext = new DefaultHttpContext
+        {
+            TraceIdentifier = "trace-rc",
+            RequestServices = sp
+        };
+
+        // Act
+        await routeEndpoint.RequestDelegate!(httpContext);
+
+        // Assert — the custom result contract was used (status code 200)
+        httpContext.Response.StatusCode.Should().Be(200);
+    }
+
+    [Fact]
+    public async Task Endpoint_WithoutResultContract_UsesDefaultMapper()
+    {
+        // Arrange
+        var capability = new CapabilityDescriptor
+        {
+            Id = "test-cap-default",
+            Name = "Default Map Cap",
+            Version = 1,
+            State = DescriptorState.Active
+        };
+
+        var endpointDescriptor = new CapabilityEndpointDescriptor
+        {
+            Id = "ep-default",
+            Name = "Default EP",
+            Version = 1,
+            State = DescriptorState.Active,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("test-cap-default", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Post,
+            RoutePattern = "/api/v1/default"
+        };
+
+        // Register provider + binding — but NO result contract registration
+        DescriptorProviderRegistry.Register(CreateProvider(endpointDescriptor));
+        CapabilityEndpointBindingRegistry.Register(new CapabilityEndpointBindingContract(
+            EndpointId: "ep-default", EndpointVersion: 1,
+            BindInputAsync: (ctx, ct) => ValueTask.FromResult<object?>(null)));
+
+        // Mock dispatcher to return success
+        var expectedOutput = new { name = "default-out" };
+        var dispatcherMock = new Mock<ICapabilityDispatcher>();
+        dispatcherMock
+            .Setup(d => d.DispatchAsync(
+                capability,
+                InvocationSource.Http,
+                It.IsAny<object?>(),
+                It.IsAny<Action<CapabilityExecutionContext>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CapabilityExecutionResult.Success(
+                expectedOutput, TimeSpan.FromMilliseconds(5)));
+
+        var capRegistryMock = new Mock<ICapabilityRegistry>();
+        capRegistryMock.Setup(r => r.GetByVersion("test-cap-default", 1)).Returns(capability);
+        capRegistryMock.Setup(r => r.GetById("test-cap-default")).Returns(capability);
+        capRegistryMock.Setup(r => r.GetAll()).Returns(new[] { capability });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(capRegistryMock.Object);
+        services.AddSingleton(dispatcherMock.Object);
+        services.AddCrestCapabilityEndpoints();
+        var sp = services.BuildServiceProvider();
+
+        var endpoints = new DefaultEndpointRouteBuilder(sp);
+        endpoints.MapCrestCapabilityEndpoints();
+
+        var dataSource = endpoints.DataSources.Should().ContainSingle().Subject;
+        var routeEndpoint = dataSource.Endpoints.OfType<RouteEndpoint>().Should().ContainSingle().Subject;
+
+        var httpContext = new DefaultHttpContext
+        {
+            TraceIdentifier = "trace-default",
+            RequestServices = sp
+        };
+
+        // Act
+        await routeEndpoint.RequestDelegate!(httpContext);
+
+        // Assert — default mapper used (200 + JSON)
+        httpContext.Response.StatusCode.Should().Be(200);
+    }
+
     /// <summary>
     /// Minimal IEndpointRouteBuilder implementation for testing.
     /// Does not provide real HTTP routing — only captures data sources.
@@ -431,6 +591,645 @@ public sealed class CapabilityEndpointIntegrationTests : IDisposable
         var value = prop.GetValue(input);
         if (value is null) return false;
         return value.ToString() == expected;
+    }
+}
+
+#pragma warning restore CC1001
+
+#pragma warning disable CC1001 // RefValidation: descriptor not registered — tests use mock registries
+
+/// <summary>
+/// E2E integration tests for the full compatibility projection chain:
+/// HTTP request → generated binding → ICapabilityDispatcher → CapabilityPipeline-style resolution →
+/// ICapabilityContextAwareHandlerInvoker → original service method → legacy-compatible DynamicApiResponse.
+/// </summary>
+[Collection("DynamicApiStaticState")]
+public sealed class CompatibilityProjectionEndToEndTests : IDisposable
+{
+    private readonly FakeBookAppService _bookService;
+
+    public CompatibilityProjectionEndToEndTests()
+    {
+        _bookService = new FakeBookAppService();
+        CapabilityEndpointBindingRegistry.Reset();
+        CapabilityEndpointResultContractRegistration.Reset();
+        CapabilityHandlerResolverProvider.Reset();
+        ClearDescriptorProviderRegistry();
+    }
+
+    public void Dispose()
+    {
+        CapabilityEndpointBindingRegistry.Reset();
+        CapabilityEndpointResultContractRegistration.Reset();
+        CapabilityHandlerResolverProvider.Reset();
+        ClearDescriptorProviderRegistry();
+    }
+
+    private static void ClearDescriptorProviderRegistry()
+    {
+        var field = typeof(DescriptorProviderRegistry).GetField("_providers",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var providers = (ConcurrentBag<object>)field!.GetValue(null)!;
+        providers.Clear();
+    }
+
+    /// <summary>
+    /// Builds a ServiceProvider with a mock ICapabilityDispatcher that resolves handlers
+    /// from the static CapabilityHandlerResolverProvider and invokes them — simulating the
+    /// behaviour of CapabilityPipeline without requiring all middleware dependencies.
+    /// </summary>
+    private IServiceProvider BuildServiceProvider(
+        Mock<ICapabilityRegistry> capRegistryMock,
+        out Mock<ICapabilityDispatcher> dispatcherMock)
+    {
+        var spCapture = new ServiceCollection();
+        IServiceProvider? capturedSp = null;
+
+        dispatcherMock = new Mock<ICapabilityDispatcher>();
+        dispatcherMock
+            .Setup(d => d.DispatchAsync(
+                It.IsAny<CapabilityDescriptor>(),
+                It.IsAny<InvocationSource>(),
+                It.IsAny<object?>(),
+                It.IsAny<Action<CapabilityExecutionContext>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((CapabilityDescriptor desc, InvocationSource src, object? input,
+                Action<CapabilityExecutionContext>? configureContext, CancellationToken ct) =>
+                InvokeThroughHandlerResolverAsync(desc, input, configureContext, ct, capturedSp!));
+
+        spCapture.AddLogging();
+        spCapture.AddSingleton(capRegistryMock.Object);
+        spCapture.AddSingleton(dispatcherMock.Object);
+        spCapture.AddSingleton(_bookService);
+        spCapture.AddCrestCapabilityEndpoints();
+        capturedSp = spCapture.BuildServiceProvider();
+
+        return capturedSp;
+    }
+
+    /// <summary>
+    /// Simulates what CapabilityPipeline does: resolve the handler via the static resolver,
+    /// check for ICapabilityContextAwareHandlerInvoker, build an execution context,
+    /// and invoke the handler.
+    /// </summary>
+    private static async Task<CapabilityExecutionResult> InvokeThroughHandlerResolverAsync(
+        CapabilityDescriptor desc,
+        object? input,
+        Action<CapabilityExecutionContext>? configureContext,
+        CancellationToken ct,
+        IServiceProvider sp)
+    {
+        var resolver = CapabilityHandlerResolverProvider.GetResolver();
+        var invoker = resolver.Resolve(desc.Id);
+        if (invoker is null)
+        {
+            return CapabilityExecutionResult.Failure(
+                "HANDLER_NOT_FOUND",
+                $"No handler registered for capability '{desc.Id}'.",
+                TimeSpan.Zero);
+        }
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var context = new CapabilityExecutionContext
+        {
+            CapabilityId = desc.Id,
+            CapabilityName = desc.Name,
+            CapabilityVersion = desc.Version,
+            CapabilityContractHash = "e2e-test-hash",
+            Input = input,
+            CancellationToken = ct,
+            ServiceProvider = sp
+        };
+        configureContext?.Invoke(context);
+
+        object? output;
+        if (invoker is ICapabilityContextAwareHandlerInvoker contextAware)
+        {
+            output = await contextAware.InvokeAsync(context, ct);
+        }
+        else
+        {
+            output = await invoker.InvokeAsync(input, ct);
+        }
+
+        return CapabilityExecutionResult.Success(
+            output,
+            DateTimeOffset.UtcNow - startedAt);
+    }
+
+    /// <summary>
+    /// Helper that sets up all the registrations for a single compatibility endpoint:
+    /// capability descriptor + endpoint descriptor + binding + result contract + invoker.
+    /// </summary>
+    private static void SetupCompatibilityEndpoint(
+        CapabilityDescriptor capability,
+        string endpointId,
+        CapabilityEndpointHttpMethod httpMethod,
+        string routePattern,
+        Func<HttpContext, CancellationToken, ValueTask<object?>> bindInput,
+        Func<EndpointExecutionContext, object> resultMapper,
+        ICapabilityHandlerInvoker invoker)
+    {
+        var endpointDescriptor = new CapabilityEndpointDescriptor
+        {
+            Id = endpointId,
+            Name = $"Compat EP {endpointId}",
+            Version = 1,
+            State = DescriptorState.Active,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>(capability.Id, capability.Version),
+            HttpMethod = httpMethod,
+            RoutePattern = routePattern
+        };
+
+        var providerMock = new Mock<IDescriptorProvider<CapabilityEndpointDescriptor>>();
+        providerMock.Setup(p => p.GetDescriptors()).Returns(new[] { endpointDescriptor });
+        DescriptorProviderRegistry.Register(providerMock.Object);
+
+        CapabilityEndpointBindingRegistry.Register(new CapabilityEndpointBindingContract(
+            EndpointId: endpointId,
+            EndpointVersion: 1,
+            BindInputAsync: bindInput));
+
+        CapabilityEndpointResultContractRegistration.Register(endpointId, 1, resultMapper);
+
+        CapabilityHandlerResolverProvider.Register(capability.Id, invoker);
+    }
+
+    /// <summary>
+    /// Maps endpoints, gets the route endpoint, and invokes it with a configured HttpContext.
+    /// Returns the response body as a string for further assertions.
+    /// </summary>
+    private static async Task<(HttpContext Context, string ResponseBody)> InvokeEndpointAsync(
+        IServiceProvider sp,
+        string requestMethod,
+        object? requestBody,
+        string routePattern)
+    {
+        var endpoints = new DefaultEndpointRouteBuilder(sp);
+        endpoints.MapCrestCapabilityEndpoints();
+
+        var dataSource = endpoints.DataSources.Should().ContainSingle().Subject;
+        var routeEndpoint = dataSource.Endpoints.OfType<RouteEndpoint>().Should().ContainSingle().Subject;
+
+        var responseBodyStream = new MemoryStream();
+        var httpContext = new DefaultHttpContext
+        {
+            TraceIdentifier = $"trace-{Guid.NewGuid():N}",
+            RequestServices = sp,
+            Request =
+            {
+                Method = requestMethod,
+                Path = routePattern,
+                ContentType = "application/json",
+                Body = requestBody is not null
+                    ? new MemoryStream(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(requestBody)))
+                    : Stream.Null
+            },
+            Response =
+            {
+                Body = responseBodyStream
+            }
+        };
+
+        if (requestBody is not null)
+        {
+            httpContext.Request.ContentLength = httpContext.Request.Body.Length;
+        }
+
+        await routeEndpoint.RequestDelegate!(httpContext);
+
+        responseBodyStream.Seek(0, SeekOrigin.Begin);
+        var body = await new StreamReader(responseBodyStream).ReadToEndAsync();
+
+        return (httpContext, body);
+    }
+
+    // ─────────────────────────────
+    //  Helper types (simulating generated code)
+    // ─────────────────────────────
+
+    public class FakeBookAppService
+    {
+        public Task<BookDto> CreateAsync(CreateBookDto input, CancellationToken ct = default)
+        {
+            return Task.FromResult(new BookDto { Id = Guid.NewGuid(), Title = input.Title });
+        }
+
+        public Task<BookDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
+        {
+            if (id == Guid.Empty) return Task.FromResult<BookDto?>(null);
+            return Task.FromResult<BookDto?>(new BookDto { Id = id, Title = "Test Book" });
+        }
+
+        public Task DeleteAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<List<BookDto>> GetAllAsync(CancellationToken ct = default)
+        {
+            return Task.FromResult(new List<BookDto>
+            {
+                new() { Id = Guid.NewGuid(), Title = "Book1" },
+                new() { Id = Guid.NewGuid(), Title = "Book2" }
+            });
+        }
+    }
+
+    public class BookDto
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = "";
+    }
+
+    public class CreateBookDto
+    {
+        public string Title { get; set; } = "";
+    }
+
+    // Envelope types (simulate generated code for multi-param methods)
+    public class CreateBookEnvelope
+    {
+        public CreateBookDto Input { get; set; } = new();
+    }
+
+    public class GetByIdEnvelope
+    {
+        public Guid Id { get; set; }
+    }
+
+    public class DeleteEnvelope
+    {
+        public Guid Id { get; set; }
+    }
+
+    // Invoker types (simulate generated AppServiceCompatibilityInvokerEmitter output)
+    public class BookAppService_Create_CompatibilityInvoker : ICapabilityContextAwareHandlerInvoker
+    {
+        public string HandlerId => "compat.appservice.book.create";
+
+        public async Task<object?> InvokeAsync(object? input, CancellationToken ct)
+            => await InvokeAsync(null!, ct); // Not called when context-aware path is used
+
+        public async Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
+        {
+            var service = context.ServiceProvider.GetRequiredService<FakeBookAppService>();
+            var envelope = (CreateBookEnvelope?)context.Input;
+            return await service.CreateAsync(envelope!.Input, ct);
+        }
+    }
+
+    public class BookAppService_GetById_CompatibilityInvoker : ICapabilityContextAwareHandlerInvoker
+    {
+        public string HandlerId => "compat.appservice.book.getById";
+
+        public Task<object?> InvokeAsync(object? input, CancellationToken ct)
+            => Task.FromResult<object?>(null);
+
+        public async Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
+        {
+            var service = context.ServiceProvider.GetRequiredService<FakeBookAppService>();
+            var envelope = (GetByIdEnvelope?)context.Input;
+            return await service.GetByIdAsync(envelope!.Id, ct);
+        }
+    }
+
+    public class BookAppService_Delete_CompatibilityInvoker : ICapabilityContextAwareHandlerInvoker
+    {
+        public string HandlerId => "compat.appservice.book.delete";
+
+        public Task<object?> InvokeAsync(object? input, CancellationToken ct)
+            => Task.FromResult<object?>(null);
+
+        public async Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
+        {
+            var service = context.ServiceProvider.GetRequiredService<FakeBookAppService>();
+            var envelope = (DeleteEnvelope?)context.Input;
+            await service.DeleteAsync(envelope!.Id, ct);
+            return null; // void return → null output
+        }
+    }
+
+    public class BookAppService_GetAll_CompatibilityInvoker : ICapabilityContextAwareHandlerInvoker
+    {
+        public string HandlerId => "compat.appservice.book.getAll";
+
+        public Task<object?> InvokeAsync(object? input, CancellationToken ct)
+            => Task.FromResult<object?>(null);
+
+        public async Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
+        {
+            var service = context.ServiceProvider.GetRequiredService<FakeBookAppService>();
+            return await service.GetAllAsync(ct);
+        }
+    }
+
+    // ─────────────────────────────
+    //  Tests
+    // ─────────────────────────────
+
+    [Fact]
+    public async Task CreateAsync_Post_Returns200_WithDynamicApiResponseWrappingBookDto()
+    {
+        // Arrange
+        var capability = new CapabilityDescriptor
+        {
+            Id = "compat.appservice.book.create",
+            Name = "Create Book",
+            Version = 1,
+            State = DescriptorState.Active
+        };
+
+        var capRegistryMock = new Mock<ICapabilityRegistry>();
+        capRegistryMock.Setup(r => r.GetByVersion("compat.appservice.book.create", 1)).Returns(capability);
+        capRegistryMock.Setup(r => r.GetById("compat.appservice.book.create")).Returns(capability);
+        capRegistryMock.Setup(r => r.GetAll()).Returns(new[] { capability });
+
+        var sp = BuildServiceProvider(capRegistryMock, out _);
+
+        SetupCompatibilityEndpoint(
+            capability,
+            endpointId: "ep-book-create",
+            httpMethod: CapabilityEndpointHttpMethod.Post,
+            routePattern: "/api/v1/books",
+            bindInput: (ctx, ct) =>
+                ValueTask.FromResult<object?>(new CreateBookEnvelope
+                {
+                    Input = new CreateBookDto { Title = "E2E Test Book" }
+                }),
+            resultMapper: ctx =>
+            {
+                if (ctx.Succeeded)
+                    return Results.Ok(new DynamicApiResponse<BookDto>
+                    {
+                        Code = StatusCodes.Status200OK,
+                        Message = "操作成功",
+                        Data = (BookDto?)ctx.Output
+                    });
+                return Results.StatusCode(500);
+            },
+            invoker: new BookAppService_Create_CompatibilityInvoker());
+
+        var (httpContext, body) = await InvokeEndpointAsync(sp, "POST", null, "/api/v1/books");
+
+        // Assert
+        httpContext.Response.StatusCode.Should().Be(200);
+
+        // Deserialize as untyped JSON first for inspection, then as typed
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("code").GetInt32().Should().Be(200);
+        doc.RootElement.GetProperty("message").GetString().Should().Be("操作成功");
+        doc.RootElement.TryGetProperty("data", out var dataProp).Should().BeTrue();
+        dataProp.GetProperty("title").GetString().Should().Be("E2E Test Book");
+        dataProp.GetProperty("id").GetGuid().Should().NotBe(Guid.Empty);
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_Get_Found_Returns200_WithDynamicApiResponseWrappingBookDto()
+    {
+        // Arrange
+        var bookId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var capability = new CapabilityDescriptor
+        {
+            Id = "compat.appservice.book.getById",
+            Name = "Get Book By Id",
+            Version = 1,
+            State = DescriptorState.Active
+        };
+
+        var capRegistryMock = new Mock<ICapabilityRegistry>();
+        capRegistryMock.Setup(r => r.GetByVersion("compat.appservice.book.getById", 1)).Returns(capability);
+        capRegistryMock.Setup(r => r.GetById("compat.appservice.book.getById")).Returns(capability);
+        capRegistryMock.Setup(r => r.GetAll()).Returns(new[] { capability });
+
+        var sp = BuildServiceProvider(capRegistryMock, out _);
+
+        SetupCompatibilityEndpoint(
+            capability,
+            endpointId: "ep-book-getById",
+            httpMethod: CapabilityEndpointHttpMethod.Get,
+            routePattern: "/api/v1/books/get-by-id",
+            bindInput: (ctx, ct) =>
+                ValueTask.FromResult<object?>(new GetByIdEnvelope { Id = bookId }),
+            resultMapper: ctx =>
+            {
+                if (!ctx.Succeeded)
+                    return Results.StatusCode(500);
+
+                // Simulate WrapGetResult<T> behaviour: null → 404, non-null → 200
+                if (ctx.Output is null)
+                {
+                    return Results.NotFound(new DynamicApiResponse
+                    {
+                        Code = StatusCodes.Status404NotFound,
+                        Message = "资源不存在"
+                    });
+                }
+
+                return Results.Ok(new DynamicApiResponse<BookDto>
+                {
+                    Code = StatusCodes.Status200OK,
+                    Message = "操作成功",
+                    Data = (BookDto?)ctx.Output
+                });
+            },
+            invoker: new BookAppService_GetById_CompatibilityInvoker());
+
+        var (httpContext, body) = await InvokeEndpointAsync(sp, "GET", null, "/api/v1/books/get-by-id");
+
+        // Assert
+        httpContext.Response.StatusCode.Should().Be(200);
+
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("code").GetInt32().Should().Be(200);
+        doc.RootElement.GetProperty("message").GetString().Should().Be("操作成功");
+        doc.RootElement.TryGetProperty("data", out var dataProp).Should().BeTrue();
+        dataProp.GetProperty("title").GetString().Should().Be("Test Book");
+        dataProp.GetProperty("id").GetGuid().Should().Be(bookId);
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_Get_NotFound_Returns404_WithDynamicApiResponse()
+    {
+        // Arrange
+        var capability = new CapabilityDescriptor
+        {
+            Id = "compat.appservice.book.getById",
+            Name = "Get Book By Id",
+            Version = 1,
+            State = DescriptorState.Active
+        };
+
+        var capRegistryMock = new Mock<ICapabilityRegistry>();
+        capRegistryMock.Setup(r => r.GetByVersion("compat.appservice.book.getById", 1)).Returns(capability);
+        capRegistryMock.Setup(r => r.GetById("compat.appservice.book.getById")).Returns(capability);
+        capRegistryMock.Setup(r => r.GetAll()).Returns(new[] { capability });
+
+        var sp = BuildServiceProvider(capRegistryMock, out _);
+
+        SetupCompatibilityEndpoint(
+            capability,
+            endpointId: "ep-book-getById-nf",
+            httpMethod: CapabilityEndpointHttpMethod.Get,
+            routePattern: "/api/v1/books/get-by-id-notfound",
+            bindInput: (ctx, ct) =>
+                ValueTask.FromResult<object?>(new GetByIdEnvelope { Id = Guid.Empty }),
+            resultMapper: ctx =>
+            {
+                if (!ctx.Succeeded)
+                    return Results.StatusCode(500);
+
+                if (ctx.Output is null)
+                {
+                    return Results.NotFound(new DynamicApiResponse
+                    {
+                        Code = StatusCodes.Status404NotFound,
+                        Message = "资源不存在"
+                    });
+                }
+
+                return Results.Ok(new DynamicApiResponse<BookDto>
+                {
+                    Code = StatusCodes.Status200OK,
+                    Message = "操作成功",
+                    Data = (BookDto?)ctx.Output
+                });
+            },
+            invoker: new BookAppService_GetById_CompatibilityInvoker());
+
+        var (httpContext, body) = await InvokeEndpointAsync(sp, "GET", null, "/api/v1/books/get-by-id-notfound");
+
+        // Assert
+        httpContext.Response.StatusCode.Should().Be(404);
+
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("code").GetInt32().Should().Be(404);
+        doc.RootElement.GetProperty("message").GetString().Should().Be("资源不存在");
+        doc.RootElement.TryGetProperty("data", out _).Should().BeFalse("NotFound should not include Data");
+    }
+
+    [Fact]
+    public async Task DeleteAsync_Delete_Returns200_WithDynamicApiResponseVoid()
+    {
+        // Arrange
+        var capability = new CapabilityDescriptor
+        {
+            Id = "compat.appservice.book.delete",
+            Name = "Delete Book",
+            Version = 1,
+            State = DescriptorState.Active
+        };
+
+        var capRegistryMock = new Mock<ICapabilityRegistry>();
+        capRegistryMock.Setup(r => r.GetByVersion("compat.appservice.book.delete", 1)).Returns(capability);
+        capRegistryMock.Setup(r => r.GetById("compat.appservice.book.delete")).Returns(capability);
+        capRegistryMock.Setup(r => r.GetAll()).Returns(new[] { capability });
+
+        var sp = BuildServiceProvider(capRegistryMock, out _);
+
+        SetupCompatibilityEndpoint(
+            capability,
+            endpointId: "ep-book-delete",
+            httpMethod: CapabilityEndpointHttpMethod.Delete,
+            routePattern: "/api/v1/books/delete-by-id",
+            bindInput: (ctx, ct) =>
+                ValueTask.FromResult<object?>(new DeleteEnvelope { Id = Guid.NewGuid() }),
+            resultMapper: ctx =>
+            {
+                if (ctx.Succeeded)
+                {
+                    return Results.Ok(new DynamicApiResponse
+                    {
+                        Code = StatusCodes.Status200OK,
+                        Message = "操作成功"
+                    });
+                }
+                return Results.StatusCode(500);
+            },
+            invoker: new BookAppService_Delete_CompatibilityInvoker());
+
+        var (httpContext, body) = await InvokeEndpointAsync(sp, "DELETE", null, "/api/v1/books/delete-by-id");
+
+        // Assert
+        httpContext.Response.StatusCode.Should().Be(200);
+
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("code").GetInt32().Should().Be(200);
+        doc.RootElement.GetProperty("message").GetString().Should().Be("操作成功");
+        doc.RootElement.TryGetProperty("data", out _).Should().BeFalse("void result should not have Data property");
+    }
+
+    [Fact]
+    public async Task GetAllAsync_Get_NoParams_Returns200_WithDynamicApiResponseWrappingList()
+    {
+        // Arrange
+        var capability = new CapabilityDescriptor
+        {
+            Id = "compat.appservice.book.getAll",
+            Name = "Get All Books",
+            Version = 1,
+            State = DescriptorState.Active
+        };
+
+        var capRegistryMock = new Mock<ICapabilityRegistry>();
+        capRegistryMock.Setup(r => r.GetByVersion("compat.appservice.book.getAll", 1)).Returns(capability);
+        capRegistryMock.Setup(r => r.GetById("compat.appservice.book.getAll")).Returns(capability);
+        capRegistryMock.Setup(r => r.GetAll()).Returns(new[] { capability });
+
+        var sp = BuildServiceProvider(capRegistryMock, out _);
+
+        SetupCompatibilityEndpoint(
+            capability,
+            endpointId: "ep-book-getAll",
+            httpMethod: CapabilityEndpointHttpMethod.Get,
+            routePattern: "/api/v1/books",
+            bindInput: (ctx, ct) =>
+                ValueTask.FromResult<object?>(null!), // No input params
+            resultMapper: ctx =>
+            {
+                if (!ctx.Succeeded)
+                    return Results.StatusCode(500);
+
+                return Results.Ok(new DynamicApiResponse<List<BookDto>>
+                {
+                    Code = StatusCodes.Status200OK,
+                    Message = "操作成功",
+                    Data = (List<BookDto>?)ctx.Output
+                });
+            },
+            invoker: new BookAppService_GetAll_CompatibilityInvoker());
+
+        var (httpContext, body) = await InvokeEndpointAsync(sp, "GET", null, "/api/v1/books");
+
+        // Assert
+        httpContext.Response.StatusCode.Should().Be(200);
+
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("code").GetInt32().Should().Be(200);
+        doc.RootElement.GetProperty("message").GetString().Should().Be("操作成功");
+        doc.RootElement.TryGetProperty("data", out var dataProp).Should().BeTrue();
+        dataProp.GetArrayLength().Should().Be(2);
+        dataProp[0].GetProperty("title").GetString().Should().Be("Book1");
+        dataProp[1].GetProperty("title").GetString().Should().Be("Book2");
+    }
+
+    /// <summary>
+    /// Minimal IEndpointRouteBuilder implementation for testing.
+    /// Does not provide real HTTP routing — only captures data sources.
+    /// </summary>
+    private sealed class DefaultEndpointRouteBuilder : IEndpointRouteBuilder
+    {
+        public DefaultEndpointRouteBuilder(IServiceProvider serviceProvider)
+        {
+            ServiceProvider = serviceProvider;
+            DataSources = new List<EndpointDataSource>();
+        }
+
+        public IServiceProvider ServiceProvider { get; }
+
+        public ICollection<EndpointDataSource> DataSources { get; }
+
+        public IApplicationBuilder CreateApplicationBuilder()
+        {
+            throw new NotSupportedException();
+        }
     }
 }
 

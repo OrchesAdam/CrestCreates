@@ -20,6 +20,7 @@ public class DynamicApiModule : ModuleBase
         services.TryAddSingleton<ICapabilityEndpointRegistry, CapabilityEndpointRegistry>();
         services.TryAddSingleton<IRegistryValidationEngine<CapabilityEndpointDescriptor>,
             RegistryValidationEngine<CapabilityEndpointDescriptor>>();
+        services.TryAddSingleton<ICapabilityEndpointResultContractRegistry, CapabilityEndpointResultContractRegistry>();
 
         // TryAddEnumerable: idempotent — safe regardless of call order with AddCrestCapabilityEndpoints()
         services.TryAddEnumerable(ServiceDescriptor.Singleton<

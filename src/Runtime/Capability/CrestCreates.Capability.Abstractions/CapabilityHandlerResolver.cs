@@ -19,4 +19,12 @@ public sealed class CapabilityHandlerResolver : ICapabilityHandlerResolver
         _invokers.TryGetValue(capabilityId, out var invoker);
         return invoker;
     }
+
+    /// <summary>
+    /// Clears all registered invokers. Internal for test isolation.
+    /// </summary>
+    internal void Reset()
+    {
+        _invokers.Clear();
+    }
 }

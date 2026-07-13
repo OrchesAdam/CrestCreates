@@ -6,6 +6,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using CrestCreates.CodeGenerator.DynamicApiGenerator;
+using CrestCreates.CodeGenerator.AppServiceCompatibilityGenerator;
 using CrestCreates.CodeGenerator.Tests.TestHelpers;
 using FluentAssertions;
 using Xunit;
@@ -687,11 +688,21 @@ public class LegacyDynamicApiAotSourceGeneratorTests
                    }
                }
 
-               namespace CrestCreates.Domain.Shared.Attributes
-               {
-                   [AttributeUsage(AttributeTargets.Class)]
-                   public sealed class CrestServiceAttribute : Attribute { }
-               }
+                namespace CrestCreates.Domain.Shared.Attributes
+                {
+                    [AttributeUsage(AttributeTargets.Class)]
+                    public sealed class CrestServiceAttribute : Attribute { }
+
+                    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method | AttributeTargets.Interface)]
+                    public class CapabilityCompatibilityProjectionAttribute : Attribute
+                    {
+                        public string? RoutePrefix { get; set; }
+                        public string? CapabilityIdPrefix { get; set; }
+                    }
+
+                    [AttributeUsage(AttributeTargets.Method | AttributeTargets.Interface)]
+                    public class CapabilityCompatibilityIgnoreAttribute : Attribute { }
+                }
 
                namespace CrestCreates.Aop.Interceptors
                {
@@ -726,10 +737,152 @@ public class LegacyDynamicApiAotSourceGeneratorTests
                    }
                }
 
-               public class ServiceProviderStub : IServiceProvider
-               {
-                   public object? GetService(Type serviceType) => null;
-               }
-               """;
+                 public class ServiceProviderStub : IServiceProvider
+                 {
+                     public object? GetService(Type serviceType) => null;
+                 }
+    """;
     }
+
+    /// <summary>
+    /// P0-2 combination test: both generators run on the same compilation.
+    /// Verifies that each action appears in exactly one generator's output.
+    /// </summary>
+    [Fact]
+    public void BothGenerators_MethodLevelProjectionOnInterface_NoDuplicateNoGap()
+    {
+        // [CapabilityCompatibilityProjection] on interface method CreateAsync
+        // → compatibility generator should project Create, legacy generator should skip Create
+        // → legacy generator should still generate Get
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            public interface IBookAppService
+            {
+                [CapabilityCompatibilityProjection]
+                System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct);
+
+                System.Threading.Tasks.Task<string> GetAsync(string name, System.Threading.CancellationToken ct);
+            }
+
+            [CrestService]
+            public class BookAppService : IBookAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+
+                public System.Threading.Tasks.Task<string> GetAsync(string name, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(name);
+            }
+            """;
+
+        var allStubs = new[] { BuildDynamicApiStubs() }.Concat(BuildCompatibilityStubs()).ToArray();
+
+        // Run legacy generator
+        var legacyResult = SourceGeneratorTestHelper.RunGenerator<DynamicApiAotSourceGenerator>(
+            source, additionalSources: allStubs);
+
+        // Verify compilation succeeded (attribute must be resolvable)
+        legacyResult.CompilationSuccess.Should().BeTrue(
+            "compilation must succeed for suppression to work");
+
+        // Run compatibility generator
+        var compatResult = SourceGeneratorTestHelper.RunGenerator<CrestCreates.CodeGenerator.AppServiceCompatibilityGenerator.AppServiceCompatibilityGenerator>(
+            source, additionalSources: allStubs);
+
+        // Legacy should NOT contain Create endpoint (suppressed by interface attribute)
+        var legacyEndpoints = legacyResult.GetSourceByFileName("GeneratedDynamicApiEndpoints.g.cs");
+        if (legacyEndpoints is not null)
+        {
+            var hasCreateEndpoint = legacyEndpoints.SourceText.Contains("CreateAsync") ||
+                                    legacyEndpoints.SourceText.Contains("\"Create\"");
+            hasCreateEndpoint.Should().BeFalse(
+                "legacy generator should skip CreateAsync when [CapabilityCompatibilityProjection] is on interface method");
+        }
+
+        // Legacy should still contain Get
+        legacyEndpoints.Should().NotBeNull("legacy generator should still generate GetAsync");
+        legacyEndpoints!.SourceText.Should().Contain("Get",
+            "legacy generator should generate GetAsync (no projection attribute)");
+
+        // Compatibility should contain Create
+        var compatCapabilities = compatResult.GetSourceByFileName("GeneratedAppServiceCompatibilityCapabilities_Book.g.cs");
+        compatCapabilities.Should().NotBeNull();
+        compatCapabilities!.SourceText.Should().Contain("compat.appservice.book.create",
+            "compatibility generator should project CreateAsync when attribute is on interface method");
+
+        // Compatibility should NOT contain Get
+        compatCapabilities.SourceText.Should().NotContain("compat.appservice.book.get",
+            "compatibility generator should not project GetAsync (no attribute)");
+    }
+
+    [Fact]
+    public void BothGenerators_MethodLevelProjectionOnImplementation_NoDuplicateNoGap()
+    {
+        // [CapabilityCompatibilityProjection] on implementation method CreateAsync
+        // → compatibility generator should project Create, legacy generator should skip Create
+        // → legacy generator should still generate Get
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            public interface IBookAppService
+            {
+                System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct);
+
+                System.Threading.Tasks.Task<string> GetAsync(string name, System.Threading.CancellationToken ct);
+            }
+
+            [CrestService]
+            public class BookAppService : IBookAppService
+            {
+                [CapabilityCompatibilityProjection]
+                public System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+
+                public System.Threading.Tasks.Task<string> GetAsync(string name, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(name);
+            }
+            """;
+
+        var allStubs = new[] { BuildDynamicApiStubs() }.Concat(BuildCompatibilityStubs()).ToArray();
+
+        // Run legacy generator
+        var legacyResult = SourceGeneratorTestHelper.RunGenerator<DynamicApiAotSourceGenerator>(
+            source, additionalSources: allStubs);
+
+        // Run compatibility generator
+        var compatResult = SourceGeneratorTestHelper.RunGenerator<CrestCreates.CodeGenerator.AppServiceCompatibilityGenerator.AppServiceCompatibilityGenerator>(
+            source, additionalSources: allStubs);
+
+        // Legacy should NOT contain Create endpoint (suppressed by implementation attribute)
+        var legacyEndpoints = legacyResult.GetSourceByFileName("GeneratedDynamicApiEndpoints.g.cs");
+        if (legacyEndpoints is not null)
+        {
+            var hasCreateEndpoint = legacyEndpoints.SourceText.Contains("CreateAsync") ||
+                                    legacyEndpoints.SourceText.Contains("\"Create\"");
+            hasCreateEndpoint.Should().BeFalse(
+                "legacy generator should skip CreateAsync when [CapabilityCompatibilityProjection] is on implementation method");
+        }
+
+        // Legacy should still contain Get
+        legacyEndpoints.Should().NotBeNull("legacy generator should still generate GetAsync");
+        legacyEndpoints!.SourceText.Should().Contain("Get",
+            "legacy generator should generate GetAsync (no projection attribute)");
+
+        // Compatibility should contain Create
+        var compatCapabilities = compatResult.GetSourceByFileName("GeneratedAppServiceCompatibilityCapabilities_Book.g.cs");
+        compatCapabilities.Should().NotBeNull();
+        compatCapabilities!.SourceText.Should().Contain("compat.appservice.book.create",
+            "compatibility generator should project CreateAsync when attribute is on implementation method");
+
+        // Compatibility should NOT contain Get
+        compatCapabilities.SourceText.Should().NotContain("compat.appservice.book.get",
+            "compatibility generator should not project GetAsync (no attribute)");
+    }
+
+    private string[] BuildCompatibilityStubs() => Array.Empty<string>();
 }

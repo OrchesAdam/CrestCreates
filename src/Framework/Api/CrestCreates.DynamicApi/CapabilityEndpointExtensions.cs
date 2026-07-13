@@ -20,6 +20,7 @@ public static class CapabilityEndpointExtensions
         services.TryAddSingleton<IRegistryValidationEngine<CapabilityEndpointDescriptor>,
             RegistryValidationEngine<CapabilityEndpointDescriptor>>();
         services.TryAddSingleton<CapabilityEndpointRegistryBootstrapper>();
+        services.TryAddSingleton<ICapabilityEndpointResultContractRegistry, CapabilityEndpointResultContractRegistry>();
 
         // Multi-registration interfaces — validators and extractors accumulate across modules.
         // TryAddEnumerable ensures idempotent single registration even if both
@@ -62,6 +63,11 @@ public static class CapabilityEndpointExtensions
             .GetRequiredService<ICapabilityEndpointRegistry>();
         var capabilityRegistry = endpoints.ServiceProvider
             .GetRequiredService<ICapabilityRegistry>();
+        var resultContractRegistry = endpoints.ServiceProvider
+            .GetRequiredService<ICapabilityEndpointResultContractRegistry>();
+
+        // Flush any pending result contract registrations from generated code
+        CapabilityEndpointResultContractRegistration.ApplyTo(resultContractRegistry);
 
         foreach (var descriptor in registry.GetAll()
             .Where(x => x.State == DescriptorState.Active))
@@ -73,7 +79,7 @@ public static class CapabilityEndpointExtensions
                 .Resolve(capabilityRegistry, descriptor.Capability);
 
             CapabilityEndpointMapper.MapEndpoint(
-                endpoints, descriptor, capability, binding);
+                endpoints, descriptor, capability, binding, resultContractRegistry);
         }
 
         return endpoints;

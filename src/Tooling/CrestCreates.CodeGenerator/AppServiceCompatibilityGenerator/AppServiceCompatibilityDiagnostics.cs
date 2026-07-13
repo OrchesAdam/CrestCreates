@@ -29,24 +29,29 @@ internal static class AppServiceCompatibilityDiagnostics
         isEnabledByDefault: true);
 
     /// <summary>
-    /// CEP032: Cannot derive HTTP method from method name convention.
+    /// CEP034: Projected methods overload the same action name.
+    /// Compatibility projection does not support method overloads because
+    /// CapabilityId, EndpointId, binding method, and invoker class all use
+    /// only the method name.
     /// </summary>
-    public static readonly DiagnosticDescriptor CEP032 = new(
-        id: "CEP032",
-        title: "Cannot derive HTTP method for compatibility projection",
-        messageFormat: "Cannot derive HTTP method from method name '{0}'; method will be excluded from compatibility projection",
-        category: Category,
-        defaultSeverity: DiagnosticSeverity.Warning,
+    public static readonly DiagnosticDescriptor CEP034 = new(
+        id: "CEP034",
+        title: "Projected AppService method overloads are not supported",
+        messageFormat: "Method '{0}' on '{1}' overloads the same action name as another projected method. Compatibility projection does not support method overloads. Use [CapabilityCompatibilityIgnore] to exclude one overload, or provide distinct method names.",
+        category: "CrestCreates.Compatibility",
+        defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
     /// <summary>
-    /// CEP033: Cannot derive permission from method name convention (warning).
+    /// CEP035: Compatibility projection uses default route prefix 'api/'.
+    /// If DynamicApiOptions.DefaultRoutePrefix is configured differently at runtime,
+    /// the route will not match the legacy endpoint.
     /// </summary>
-    public static readonly DiagnosticDescriptor CEP033 = new(
-        id: "CEP033",
-        title: "Cannot derive permission for compatibility projection",
-        messageFormat: "Cannot derive permission from method name '{0}'; endpoint will be generated without permission enforcement",
-        category: Category,
+    public static readonly DiagnosticDescriptor CEP035 = new(
+        id: "CEP035",
+        title: "Compatibility projection uses default route prefix",
+        messageFormat: "Method '{0}' uses the default route prefix 'api/'. If DynamicApiOptions.DefaultRoutePrefix is configured differently at runtime, the route will not match the legacy endpoint. Set RoutePrefix on [CapabilityCompatibilityProjection] to ensure contract fidelity.",
+        category: "CrestCreates.Compatibility",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 }

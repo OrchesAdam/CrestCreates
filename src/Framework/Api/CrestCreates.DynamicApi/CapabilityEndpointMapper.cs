@@ -13,9 +13,14 @@ internal static class CapabilityEndpointMapper
         IEndpointRouteBuilder endpoints,
         CapabilityEndpointDescriptor descriptor,
         CapabilityDescriptor capability,
-        CapabilityEndpointBindingContract binding)
+        CapabilityEndpointBindingContract binding,
+        ICapabilityEndpointResultContractRegistry? resultContractRegistry = null)
     {
         var httpMethod = descriptor.HttpMethod.ToString().ToUpperInvariant();
+
+        // Capture the result mapper at endpoint registration time so the
+        // lambda does not need to resolve it from DI on every request.
+        var resultMapper = resultContractRegistry?.TryGetResultMapper(descriptor.Id, descriptor.Version);
 
         var routeHandler = endpoints.MapMethods(
             descriptor.RoutePattern,
@@ -37,7 +42,7 @@ internal static class CapabilityEndpointMapper
                     },
                     context.RequestAborted);
 
-                return CapabilityEndpointResultMapper.Map(result, descriptor.OutputMapping);
+                return MapResult(result, descriptor.OutputMapping, resultMapper);
             });
 
         // Apply endpoint metadata
@@ -65,5 +70,34 @@ internal static class CapabilityEndpointMapper
             && !string.IsNullOrWhiteSpace(key))
             return key!;
         return Guid.NewGuid().ToString("N");
+    }
+
+    /// <summary>
+    /// Maps a <see cref="CapabilityExecutionResult"/> to an ASP.NET Core <see cref="IResult"/>.
+    /// If a custom result mapper is registered for the endpoint, it takes precedence;
+    /// otherwise the default <see cref="CapabilityEndpointResultMapper.Map"/> is used.
+    /// </summary>
+    private static IResult MapResult(
+        CapabilityExecutionResult result,
+        CapabilityEndpointOutputMapping outputMapping,
+        Func<EndpointExecutionContext, object>? resultMapper)
+    {
+        if (resultMapper is not null)
+        {
+            var ctx = new EndpointExecutionContext
+            {
+                Output = result.Output,
+                Succeeded = result.IsSuccess,
+                ErrorCode = result.ErrorCode,
+                ErrorMessage = result.ErrorMessage
+            };
+
+            var mapped = resultMapper(ctx);
+            // The mapper returns object to avoid AspNetCore dependency in
+            // Abstractions, but the concrete implementation always returns IResult.
+            return (IResult)mapped;
+        }
+
+        return CapabilityEndpointResultMapper.Map(result, outputMapping);
     }
 }
