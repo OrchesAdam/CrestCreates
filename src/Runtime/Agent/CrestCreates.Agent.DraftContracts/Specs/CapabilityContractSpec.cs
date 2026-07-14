@@ -42,6 +42,9 @@ internal sealed class CapabilityContractSpec
     [AgentDraftPreserve(Reason = "SupersededById is managed by the descriptor lifecycle, not by agent draft editing.", CreateStrategy = PreserveCreateStrategy.CreateDefault)]
     public string? SupersededById { get; init; }
 
+    [AgentDraftPreserve(Reason = "ProjectionKind is a compatibility migration marker managed by the projection infrastructure, not by agent draft editing.", CreateStrategy = PreserveCreateStrategy.CreateDefault)]
+    public CapabilityProjectionKind ProjectionKind { get; init; }
+
     // ── Unsupported ──
     [AgentDraftUnsupported(Reason = "Categories is a classification tag collection that requires dedicated tooling for structured editing.")]
     public IReadOnlyList<string> Categories { get; init; } = [];

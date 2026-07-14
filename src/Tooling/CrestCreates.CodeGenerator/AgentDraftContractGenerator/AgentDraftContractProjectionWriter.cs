@@ -37,6 +37,7 @@ internal sealed class AgentDraftContractProjectionWriter
         sb.AppendLine("using CrestCreates.Metadata;");
         sb.AppendLine("using CrestCreates.Metadata.Abstractions;");
         sb.AppendLine("using CrestCreates.DescriptorDraft.Abstractions;");
+        sb.AppendLine("using CrestCreates.DescriptorDraft;");
         sb.AppendLine("using CrestCreates.Agent.DraftContracts.Dto;");
         sb.AppendLine();
         sb.AppendLine("namespace CrestCreates.Agent.DraftContracts.Projection;");

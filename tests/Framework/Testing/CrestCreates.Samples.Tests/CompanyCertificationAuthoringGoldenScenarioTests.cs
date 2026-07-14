@@ -14,6 +14,7 @@ using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Prompting;
 using CrestCreates.Agent.Prompting.Abstractions;
 using CrestCreates.Core.Abstractions.Identity;
+using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;

@@ -108,9 +108,9 @@ internal sealed class ContractModelBuilder
             $"CrestCreates.Metadata.{descriptorTypeName}");
 
         // Resolve payload type from compilation.
-        // Pattern: CrestCreates.DescriptorDraft.Abstractions.{KindName}DescriptorDraftPayload
+        // Pattern: CrestCreates.DescriptorDraft.{KindName}DescriptorDraftPayload
         var payloadType = _compilation.GetTypeByMetadataName(
-            $"CrestCreates.DescriptorDraft.Abstractions.{payloadTypeName}");
+            $"CrestCreates.DescriptorDraft.{payloadTypeName}");
 
         if (descriptorType is null || payloadType is null) return null;
 
