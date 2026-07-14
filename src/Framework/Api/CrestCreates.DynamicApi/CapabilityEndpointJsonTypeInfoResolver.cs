@@ -11,7 +11,7 @@ namespace CrestCreates.DynamicApi;
 /// <summary>
 /// Resolves JsonTypeInfo&lt;T&gt; from the application's configured
 /// JsonSerializerOptions. This is the single point of truth for how
-/// generated binding code obtains AOT-safe JSON metadata.
+/// generated binding code obtains source-generated JSON metadata.
 /// </summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static class CapabilityEndpointJsonTypeInfoResolver
@@ -60,7 +60,7 @@ public static class CapabilityEndpointJsonTypeInfoResolver
     private static JsonSerializerOptions ResolveOptions(IServiceProvider serviceProvider)
     {
         // Fail-closed: application MUST configure JsonOptions with a JsonSerializerContext.
-        // Fallback to reflection-based options would silently break AOT safety.
+        // Fallback to reflection-based options would silently break trimming safety.
         var jsonOptions = serviceProvider.GetRequiredService<IOptions<JsonOptions>>();
         return jsonOptions.Value.SerializerOptions;
     }

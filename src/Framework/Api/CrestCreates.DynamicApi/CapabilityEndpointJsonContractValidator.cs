@@ -37,11 +37,21 @@ internal sealed class CapabilityEndpointJsonContractValidator
 
         foreach (var type in bodyTypes)
         {
-            var typeInfo = CapabilityEndpointJsonTypeInfoResolver
-                .Resolve(_serviceProvider, type);
+            try
+            {
+                var typeInfo = CapabilityEndpointJsonTypeInfoResolver
+                    .Resolve(_serviceProvider, type);
 
-            if (typeInfo is null)
+                if (typeInfo is null)
+                    missing.Add(type);
+            }
+            catch (NotSupportedException)
+            {
+                // STJ throws NotSupportedException when a type has no JsonTypeInfo
+                // in the configured resolver chain (e.g., source-generated context
+                // that doesn't include the type). Treat as missing metadata.
                 missing.Add(type);
+            }
         }
 
         if (missing.Count > 0)

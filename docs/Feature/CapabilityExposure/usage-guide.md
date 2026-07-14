@@ -419,11 +419,10 @@ Follow these steps to migrate an existing `[CrestService]` AppService from legac
 ```text
 Phase 8 deployment target:
 - JIT runtime
-- PublishTrimmed support
-- Trimming-safe generated HTTP input binding
-- No unexpected runtime reflection in the new mainline
+- Trimming-safe by construction (no runtime reflection in new mainline input binding)
+- PublishTrimmed E2E validation pending (blocked by CodeGenerator netstandard2.0 target)
 - NativeAOT-ready architecture where practical
-- NativeAOT publish is future validation, not current acceptance gate
+- NativeAOT publish is future target, not current acceptance gate
 ```
 
 ### Trimming-Safe Input Binding Status

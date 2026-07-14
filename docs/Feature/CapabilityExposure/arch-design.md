@@ -862,11 +862,10 @@ The `ProjectionKind` property on `CapabilityDescriptor` is `DefinitionOnly` (Ord
 ```text
 Phase 8 deployment guarantee:
 - JIT runtime
-- PublishTrimmed support
-- Trimming-safe generated HTTP input binding
-- No unexpected runtime reflection in the new mainline
+- Trimming-safe by construction (no runtime reflection in new mainline input binding)
+- PublishTrimmed E2E validation pending (blocked by CodeGenerator netstandard2.0 target)
 - NativeAOT-ready architecture where practical
-- NativeAOT publish is future validation, not current acceptance gate
+- NativeAOT publish is future target, not current acceptance gate
 ```
 
 Full NativeAOT publish-and-run is a **future target**, not a current acceptance gate. EF Core NativeAOT is still experimental, and response serialization has not been migrated. The architecture is designed to not block future NativeAOT adoption.
@@ -879,7 +878,7 @@ Full NativeAOT publish-and-run is a **future target**, not a current acceptance 
 - `CapabilityEndpointJsonTypeInfoResolver` resolves `JsonTypeInfo<T>` from the application's `IOptions<JsonOptions>` at runtime — fail-closed, no fallback to reflection-based options.
 - `CapabilityEndpointBodyReader` provides two entry points:
   - `ReadNativeBodyAsync<T>` — for native capability endpoints (8a). Empty body → 400 BAD_REQUEST. No `new()` constraint.
-  - `ReadCompatibilityBodyAsync<T>` — for compatibility projection endpoints (8d). Preserves legacy `CompatibilityBodyReader` semantics exactly (empty/whitespace/null body → optional: default, required: factory).
+  - `ReadCompatibilityBodyAsync<T>` — for compatibility projection endpoints (8d). Preserves legacy `CompatibilityBodyReader` empty/whitespace/null/optional semantics. One intentional difference: required invalid JSON throws `BadHttpRequestException` (HTTP 400) instead of raw `JsonException`, which is more appropriate for HTTP projection endpoints.
 - `CapabilityEndpointJsonContractValidator` validates at startup that all registered body types have `JsonTypeInfo` available (fail-closed).
 - `CapabilityHandlerResolverProvider` uses static `ConcurrentDictionary` with additive `Register()` API.
 - `DescriptorProviderRegistry` uses static `ConcurrentBag<object>`.
@@ -902,14 +901,19 @@ The CrudService generator is NOT trimming-safe — its generated DTO types (`Cre
 
 ### 16.4 Trimming Fixture
 
-The `CrestCreates.CapabilityEndpoint.TrimmingFixture` test project validates real STJ Source Generator integration with the CrestCreates CodeGenerator in the same compilation round. It is **not** a full NativeAOT binary acceptance test — it validates:
+The `CrestCreates.CapabilityEndpoint.TrimmingFixture` project is split into two parts:
+
+- **Host project** (`CrestCreates.CapabilityEndpoint.TrimmingFixture`): A publishable ASP.NET Core web application with `WarningsAsErrors` for IL2026/IL2070/IL2072/IL2075/IL3050/SYSLIB1034. This is the project intended for `dotnet publish -p:PublishTrimmed=true` validation.
+- **Test project** (`CrestCreates.CapabilityEndpoint.TrimmingFixture.Tests`): xUnit tests using `WebApplicationFactory<Program>` to exercise the host.
+
+The fixture validates real STJ Source Generator integration with the CrestCreates CodeGenerator in the same compilation round:
 
 1. Build succeeds with both generators active
 2. STJ produces `JsonTypeInfo` for body types declared in the application's `JsonSerializerContext`
-3. Real POST request body binding exercises the full chain: `JsonTypeInfoResolver → ReadCompatibilityBodyAsync → JsonSerializer.DeserializeAsync(JsonTypeInfo<T>)`
+3. Real POST request body binding exercises the full chain: `JsonTypeInfoResolver → ReadCompatibilityBodyAsync → JsonSerializer.Deserialize(JsonTypeInfo<T>)`
 4. HTTP endpoints return correct responses
 
-Future validation: `dotnet publish -p:PublishTrimmed=true -p:TrimMode=full` with IL2026/IL2070/IL2072/IL2075/IL3050/SYSLIB1034 as errors.
+**PublishTrimmed E2E validation is currently blocked** by a pre-existing framework issue: the `CrestCreates.CodeGenerator` project targets `netstandard2.0` (required for Roslyn analyzer hosting), and `dotnet publish -p:PublishTrimmed=true` fails with `NETSDK1124` because the CodeGenerator project is in the dependency graph via `Directory.Build.Aot.props` global `ProjectReference`. This affects all projects in the solution, not just the fixture. Resolution requires either multi-targeting the CodeGenerator or restructuring the global analyzer reference.
 
 ### 16.5 Known Trimming Debt
 
@@ -924,7 +928,7 @@ Future validation: `dotnet publish -p:PublishTrimmed=true -p:TrimMode=full` with
 2. `CapabilityEndpointGenerator` — `IIncrementalGenerator`, detects `[CapabilityEndpointSpec]` attributes
 3. `DynamicApiAotSourceGenerator` — `IIncrementalGenerator`, legacy AppService exposure; skips types with `[CapabilityCompatibilityProjection]`
 
-All three run in the same compilation round. Generated types from one generator are visible to others in the same round when their execution order is correct (Roslyn incrementally merges source outputs).
+All three run against the same original input compilation. They cannot observe source emitted by another generator in the same compilation round. No execution-order dependency is permitted.
 
 ## 17. Security and Governance Boundaries
 

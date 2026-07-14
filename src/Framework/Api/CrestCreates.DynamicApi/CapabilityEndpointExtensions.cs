@@ -67,7 +67,7 @@ public static class CapabilityEndpointExtensions
         var resultContractRegistry = endpoints.ServiceProvider
             .GetRequiredService<ICapabilityEndpointResultContractRegistry>();
 
-        // Validate AOT JSON contract metadata before serving requests
+        // Validate source-generated JSON contract metadata before serving requests
         var contractValidator = endpoints.ServiceProvider
             .GetRequiredService<CapabilityEndpointJsonContractValidator>();
         contractValidator.Validate();

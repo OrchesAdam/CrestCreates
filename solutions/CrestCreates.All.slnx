@@ -273,4 +273,5 @@
     <Project Path="../tests/Tooling/CrestCreates.Agent.DraftContractGenerator.Tests/CrestCreates.Agent.DraftContractGenerator.Tests.csproj" />
   </Folder>
   <Project Path="../tests/Framework/Api/CrestCreates.CapabilityEndpoint.TrimmingFixture/CrestCreates.CapabilityEndpoint.TrimmingFixture.csproj" />
+  <Project Path="../tests/Framework/Api/CrestCreates.CapabilityEndpoint.TrimmingFixture.Tests/CrestCreates.CapabilityEndpoint.TrimmingFixture.Tests.csproj" />
 </Solution>

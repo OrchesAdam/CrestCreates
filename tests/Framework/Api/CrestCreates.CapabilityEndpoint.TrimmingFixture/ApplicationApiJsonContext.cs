@@ -11,4 +11,4 @@ namespace CrestCreates.CapabilityEndpoint.TrimmingFixture;
 /// </summary>
 [JsonSerializable(typeof(GreetingRequest))]
 [JsonSerializable(typeof(GreetingResponse))]
-internal sealed partial class ApplicationApiJsonContext : JsonSerializerContext;
+public sealed partial class ApplicationApiJsonContext : JsonSerializerContext;

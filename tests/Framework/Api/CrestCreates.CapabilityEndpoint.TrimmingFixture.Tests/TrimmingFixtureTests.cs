@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
 using CrestCreates.CapabilityEndpoint.TrimmingFixture;
@@ -25,7 +26,7 @@ public class TrimmingFixtureTests : IClassFixture<TrimmingFixtureTestFactory>
     public async Task ProcessGreetingEndpoint_PostBody_ReturnsSuccess()
     {
         // ProcessGreetingAsync maps to POST by convention ("Process" prefix → POST).
-        // This is the key AOT body binding test — the full chain:
+        // This is the key trimming-safe body binding test — the full chain:
         //   HTTP POST → generated binding → CapabilityEndpointJsonTypeInfoResolver.Resolve<GreetingRequest>()
         //   → CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync()
         //   → generated invoker → GreetingAppService.ProcessGreetingAsync()
@@ -54,7 +55,7 @@ public class TrimmingFixtureTests : IClassFixture<TrimmingFixtureTestFactory>
     {
         // Verify that the application's JsonSerializerContext provides
         // JsonTypeInfo for the body types used by generated binding code.
-        // This is the core AOT-safety validation — no stubs, no mocks.
+        // This is the core trimming-safety validation — no stubs, no mocks.
         var jsonTypeInfo = ApplicationApiJsonContext.Default.GreetingRequest;
         jsonTypeInfo.Should().NotBeNull(
             "STJ source generator should produce JsonTypeInfo for GreetingRequest");
@@ -69,11 +70,28 @@ public class TrimmingFixtureTestFactory : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        var projectDir = Path.GetDirectoryName(
-            Path.GetDirectoryName(
-                Path.GetDirectoryName(
-                    Assembly.GetExecutingAssembly().Location)!))!;
+        var projectDir = GetProjectDirectory();
         builder.UseContentRoot(projectDir);
         builder.UseEnvironment("Testing");
+    }
+
+    private static string GetProjectDirectory()
+    {
+        // Walk up from test assembly location to find the host project directory.
+        // Test bin: .../TrimmingFixture.Tests/bin/Debug/net10.0/
+        // Host:     .../TrimmingFixture/
+        var assemblyLocation = Assembly.GetExecutingAssembly().Location;
+        var dir = Path.GetDirectoryName(assemblyLocation)!;
+        for (int i = 0; i < 5; i++)
+        {
+            var candidate = Path.Combine(dir, "CrestCreates.CapabilityEndpoint.TrimmingFixture");
+            if (Directory.Exists(candidate))
+                return candidate;
+            var parent = Path.GetDirectoryName(dir);
+            if (parent is null) break;
+            dir = parent;
+        }
+        throw new DirectoryNotFoundException(
+            $"Could not find TrimmingFixture host project directory from {assemblyLocation}");
     }
 }
