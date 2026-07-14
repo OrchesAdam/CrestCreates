@@ -30,9 +30,6 @@ builder.Services.AddSingleton<TestMarkerMiddleware>();
 builder.Services.AddSingleton(new CapabilityPipelineBuilder()
     .Use<TestMarkerMiddleware>());
 
-// Stable hash (required by CapabilityPipeline)
-builder.Services.AddDescriptorStableHash();
-
 // Register compatibility projection (endpoint infrastructure + result contract)
 builder.Services.AddCrestCompatibilityProjection();
 

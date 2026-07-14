@@ -1,3 +1,4 @@
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
@@ -287,6 +288,23 @@ public class CapabilityPipelineTests
         // sp is ServiceProvider wrapper; DI injects the internal scope.
         // Verify it's non-null — the key contract is that ServiceProvider is populated.
         capturedContext.ServiceProvider.Should().NotBeNull();
+    }
+
+    // === Composition: AddCapabilityPipeline() registers IDescriptorStableHashBuilder ===
+    [Fact]
+    public void AddCapabilityPipeline_RegistersDescriptorStableHash()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddSingleton<IPermissionChecker>(Mock.Of<IPermissionChecker>());
+
+        // Act — only AddCapabilityPipeline, no manual AddDescriptorStableHash
+        services.AddCapabilityPipeline();
+
+        // Assert — the stable hash dependency is registered
+        services.Should().Contain(
+            x => x.ServiceType == typeof(IDescriptorStableHashBuilder),
+            "AddCapabilityPipeline must register IDescriptorStableHashBuilder since CapabilityPipeline depends on it");
     }
 
     private sealed class ThrowingHandlerInvoker : ICapabilityHandlerInvoker
