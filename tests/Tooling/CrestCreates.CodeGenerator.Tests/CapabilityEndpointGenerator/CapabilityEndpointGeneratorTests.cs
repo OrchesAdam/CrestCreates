@@ -447,10 +447,10 @@ namespace TestNs
         Assert.NotNull(bindingFile);
 
         // Should use ReadBodyAsync (Body source, not route parsing)
-        Assert.Contains("ReadBodyAsync<global::TestNs.CreateDto>", bindingFile!.SourceText);
+        Assert.Contains("CapabilityEndpointBodyReader.ReadBodyAsync<global::TestNs.CreateDto>", bindingFile!.SourceText);
 
         // Required=true → optional=false in generated binding
-        Assert.Contains("context, false, ct", bindingFile.SourceText);
+        Assert.Contains("emptyBodyFactory: null, false, ct)", bindingFile.SourceText);
 
         // Should NOT contain route-related parsing (no Guid/DateTime/Enum.Parse)
         Assert.DoesNotContain("RouteValues", bindingFile.SourceText);

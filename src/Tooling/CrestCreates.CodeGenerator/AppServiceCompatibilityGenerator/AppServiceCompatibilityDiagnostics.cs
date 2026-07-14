@@ -69,14 +69,14 @@ internal static class AppServiceCompatibilityDiagnostics
         isEnabledByDefault: true);
 
     /// <summary>
-    /// CEP037: Body parameter type does not satisfy the new() constraint required by
-    /// CompatibilityBodyReader.ReadBodyAsync&lt;T&gt;. The type must be a non-abstract
-    /// concrete type with an accessible parameterless constructor.
+    /// CEP037: Body parameter type cannot be used as a compatibility body type.
+    /// The type must be a non-abstract concrete type with an accessible parameterless
+    /// constructor, or an array type.
     /// </summary>
     public static readonly DiagnosticDescriptor CEP037 = new(
         id: "CEP037",
-        title: "Compatibility body type must have a parameterless constructor",
-        messageFormat: "Method '{0}' has body parameter type '{1}' which does not satisfy the new() constraint. CompatibilityBodyReader.ReadBodyAsync<T> requires T to be a non-abstract concrete type with an accessible parameterless constructor. Add a parameterless constructor or use [CapabilityCompatibilityIgnore] to exclude this method.",
+        title: "Compatibility body type must be constructible",
+        messageFormat: "Method '{0}' has body parameter type '{1}' which cannot be used as a compatibility body type. The type must be a non-abstract concrete type with an accessible parameterless constructor, or an array type. Add a parameterless constructor or use [CapabilityCompatibilityIgnore] to exclude this method.",
         category: "CrestCreates.Compatibility",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);

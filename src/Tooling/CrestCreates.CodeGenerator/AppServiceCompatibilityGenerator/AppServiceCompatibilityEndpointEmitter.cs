@@ -16,11 +16,8 @@ namespace CrestCreates.CodeGenerator.AppServiceCompatibilityGenerator;
 ///   2. GeneratedAppServiceCompatibilityBindings_{name}.g.cs
 ///       — input envelopes + bind delegates + binding registration
 ///
-/// All generated code is AoT-safe: typed parse calls per parameter (no reflection).
-/// P0-1 NOTE: JsonSerializerContext generation was removed because Roslyn SGs
-/// cannot see each other's output. Use the generic ReadBodyAsync&lt;T&gt; overload instead.
-/// When STJ adds a companion incremental generator for JsonSerializerContext, we can
-/// restore the type-safe JsonTypeInfo path.
+/// AOT-safe: uses CapabilityEndpointBodyReader with JsonTypeInfo from
+/// GeneratedCompatibilityEndpointJsonContext for compile-time JSON metadata.
 /// </summary>
 internal static class AppServiceCompatibilityEndpointEmitter
 {
@@ -129,6 +126,7 @@ internal static class AppServiceCompatibilityEndpointEmitter
         sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine("using Microsoft.AspNetCore.Http;");
         sb.AppendLine("using CrestCreates.DynamicApi;");
+        sb.AppendLine("using System.Text.Json.Serialization.Metadata;");
         sb.AppendLine("using System.Runtime.CompilerServices;");
         sb.AppendLine();
         sb.AppendLine("namespace CrestCreates.Generated;");
@@ -219,19 +217,25 @@ internal static class AppServiceCompatibilityEndpointEmitter
 
         if (action.IsSingleParam && bodyParam is not null)
         {
-            // Single body parameter — use CompatibilityBodyReader for legacy-compatible semantics.
-            // CompatibilityBodyReader matches legacy DynamicApi body behavior (empty body → new T(),
-            // invalid JSON + optional → default) instead of throwing BadHttpRequestException.
+            // Single body parameter — use CapabilityEndpointBodyReader with JsonTypeInfo
+            // for AOT-safe binding. Compatibility path: emptyBodyFactory ensures legacy
+            // behavior (empty body → default instance) instead of throwing BadHttpRequestException.
             var bodyOptional = bodyParam.IsOptional.ToString().ToLowerInvariant();
-            sb.AppendLine($"        return await CompatibilityBodyReader.ReadBodyAsync<{bodyParam.TypeName}>(");
-            sb.AppendLine($"            context, optional: {bodyOptional});");
+            var typeInfoAccessor = AppServiceCompatibilityJsonContextEmitter.GetTypeInfoAccessor(bodyParam.TypeName);
+            var factoryExpr = GenerateEmptyBodyFactory(bodyParam.TypeName);
+            sb.AppendLine($"        return await CapabilityEndpointBodyReader.ReadBodyAsync<{bodyParam.TypeName}>(");
+            sb.AppendLine($"            context, {typeInfoAccessor},");
+            sb.AppendLine($"            {factoryExpr}, {bodyOptional}, ct);");
         }
         else if (bodyParam is not null && (routeParams.Length > 0 || queryParams.Length > 0 || headerParams.Length > 0))
         {
             // Body + route/query/header params
             var bodyOptional = bodyParam.IsOptional.ToString().ToLowerInvariant();
-            sb.AppendLine($"        var body = await CompatibilityBodyReader.ReadBodyAsync<{bodyParam.TypeName}>(");
-            sb.AppendLine($"            context, optional: {bodyOptional});");
+            var typeInfoAccessor = AppServiceCompatibilityJsonContextEmitter.GetTypeInfoAccessor(bodyParam.TypeName);
+            var factoryExpr = GenerateEmptyBodyFactory(bodyParam.TypeName);
+            sb.AppendLine($"        var body = await CapabilityEndpointBodyReader.ReadBodyAsync<{bodyParam.TypeName}>(");
+            sb.AppendLine($"            context, {typeInfoAccessor},");
+            sb.AppendLine($"            {factoryExpr}, {bodyOptional}, ct);");
             sb.AppendLine();
 
             // Two-phase: pre-declare query locals outside initializer, then construct envelope
@@ -683,6 +687,27 @@ internal static class AppServiceCompatibilityEndpointEmitter
         var core = typeName.EndsWith("?") ? typeName.Substring(0, typeName.Length - 1) : typeName;
         if (core.StartsWith("global::")) core = core.Substring(8);
         return core.Replace(".", "_").Replace("[", "_").Replace("]", "_").Replace("+", "_");
+    }
+
+    /// <summary>
+    /// Generates the emptyBodyFactory expression for CapabilityEndpointBodyReader.
+    /// Compatibility path: empty required body → default instance (legacy semantics).
+    /// For types with parameterless constructors: "static () => new TypeName()"
+    /// For arrays: "static () => Array.Empty&lt;ElementTypeName&gt;()"
+    /// For types without parameterless constructors: "null" (will cause CEP037 to fire before reaching here)
+    /// </summary>
+    private static string GenerateEmptyBodyFactory(string typeName)
+    {
+        // Check for array type: TypeName[] or TypeName[]
+        var cleanType = typeName.EndsWith("?") ? typeName.Substring(0, typeName.Length - 1) : typeName;
+        if (cleanType.EndsWith("[]"))
+        {
+            var elementType = cleanType.Substring(0, cleanType.Length - 2);
+            return $"static () => Array.Empty<{elementType}>()";
+        }
+
+        // Default: construct with parameterless ctor
+        return $"static () => new {typeName}()";
     }
 
     private static string MapHttpMethodEnum(string httpMethod) => httpMethod switch

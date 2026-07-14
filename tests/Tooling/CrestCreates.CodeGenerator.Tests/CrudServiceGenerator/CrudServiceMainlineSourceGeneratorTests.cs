@@ -614,6 +614,56 @@ namespace TestNamespace.Mappings
         "Rougamo"
     };
 
+
+    [Fact]
+    public void JsonContext_GeneratedForCrudService()
+    {
+        var result = RunProductGenerator();
+
+        // JsonContext file is only emitted when DynamicApi support is available (IDynamicApiGeneratedProvider)
+        if (!result.ContainsFile("GeneratedCrudServiceJsonContext_Product.g.cs"))
+            return;
+
+        var contextSource = result.GetSourceByFileName("GeneratedCrudServiceJsonContext_Product.g.cs")!.SourceText;
+
+        // Verify it's a [JsonSerializable] partial class
+        Assert.Contains("[JsonSerializable(typeof(CreateProductDto))", contextSource);
+        Assert.Contains("[JsonSerializable(typeof(ProductListRequestDto))", contextSource);
+        Assert.Contains("[JsonSerializable(typeof(UpdateProductDto))", contextSource);
+        Assert.Contains("internal sealed partial class GeneratedCrudServiceEndpointJsonContext : JsonSerializerContext", contextSource);
+        Assert.Contains("namespace CrestCreates.Generated;", contextSource);
+    }
+
+    [Fact]
+    public void GeneratedBodyBinding_UsesAotSafeReader()
+    {
+        var result = RunProductGenerator();
+
+        // Dynamic API file is only generated when IDynamicApiGeneratedProvider is available
+        if (!result.ContainsFile("ProductCrudDynamicApi.g.cs"))
+            return;
+
+        var dynamicApiSource = result.GetSourceByFileName("ProductCrudDynamicApi.g.cs")!.SourceText;
+
+        // Should use CapabilityEndpointBodyReader (AOT-safe), not legacy DynamicApiGeneratedRuntime for body reading
+        Assert.Contains("CapabilityEndpointBodyReader.ReadBodyAsync<CreateProductDto>", dynamicApiSource);
+        Assert.Contains("CapabilityEndpointBodyReader.ReadBodyAsync<ProductListRequestDto>", dynamicApiSource);
+        Assert.Contains("CapabilityEndpointBodyReader.ReadBodyAsync<UpdateProductDto>", dynamicApiSource);
+
+        // Should still use DynamicApiGeneratedRuntime for non-body operations (EnsurePermission, Validate, Execute, Wrap)
+        Assert.Contains("DynamicApiGeneratedRuntime.EnsurePermissionAsync", dynamicApiSource);
+        Assert.Contains("DynamicApiGeneratedRuntime.WrapResult", dynamicApiSource);
+
+        // Verify body reading uses GetCrudJsonTypeInfoAccessor pattern with JsonTypeInfo
+        Assert.Contains("GeneratedCrudServiceEndpointJsonContext.Default.GetTypeInfo(typeof(CreateProductDto))", dynamicApiSource);
+        Assert.Contains("GeneratedCrudServiceEndpointJsonContext.Default.GetTypeInfo(typeof(ProductListRequestDto))", dynamicApiSource);
+        Assert.Contains("GeneratedCrudServiceEndpointJsonContext.Default.GetTypeInfo(typeof(UpdateProductDto))", dynamicApiSource);
+
+        // Should include using for CrestCreates.Generated namespace
+        Assert.Contains("using CrestCreates.Generated;", dynamicApiSource);
+        Assert.Contains("using System.Text.Json.Serialization.Metadata;", dynamicApiSource);
+    }
+
     private static SourceGeneratorResult RunProductGenerator()
     {
         return SourceGeneratorTestHelper.RunGenerator<CrudServiceSourceGenerator>(

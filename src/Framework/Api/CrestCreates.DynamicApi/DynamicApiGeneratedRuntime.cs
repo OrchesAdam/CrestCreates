@@ -28,6 +28,7 @@ public static class DynamicApiGeneratedRuntime
         };
     }
 
+    [Obsolete("Use CapabilityEndpointBodyReader.ReadBodyAsync with JsonTypeInfo<T> and emptyBodyFactory instead. This method uses reflection-based JSON deserialization which is not AOT-safe.")]
     public static Task<T?> ReadBodyAsync<T>(HttpContext context, bool optional)
         where T : new()
         => CompatibilityBodyReader.ReadBodyAsync<T>(context, optional);

@@ -154,14 +154,16 @@ internal static class CapabilityEndpointDiagnostics
         isEnabledByDefault: true);
 
     /// <summary>
-    /// CEP015: Body binding uses generic ReadBodyAsync which is not fully AOT-safe.
+    /// CEP015: Body binding uses generic ReadBodyAsync — AOT-safe path now available via CapabilityEndpointBodyReader.
+    /// Info severity — the source generator now emits AOT-safe binding by default.
+    /// This diagnostic remains as documentation for consumers using older generated code.
     /// </summary>
     public static readonly DiagnosticDescriptor BodyBindingNotAotSafe = new(
         id: CapabilityEndpointDiagnosticCodes.BodyBindingNotAotSafeValue,
         title: "Body binding uses generic ReadBodyAsync — not fully AOT-safe",
         messageFormat: "Endpoint spec '{0}' uses body binding via generic ReadBodyAsync<{1}>. For full AOT safety, provide a JsonSerializerContext with [JsonSerializable] for the body type.",
         category: Category,
-        defaultSeverity: DiagnosticSeverity.Warning,
+        defaultSeverity: DiagnosticSeverity.Info,
         isEnabledByDefault: true);
 
     /// <summary>
