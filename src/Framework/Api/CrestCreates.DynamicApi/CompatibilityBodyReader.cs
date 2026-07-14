@@ -16,12 +16,7 @@ namespace CrestCreates.DynamicApi;
 /// as the legacy Dynamic API, rather than using ASP.NET Core's stricter
 /// <see cref="HttpRequestReadExtensions.ReadFromJsonAsync{T}"/> which throws
 /// <see cref="BadHttpRequestException"/> on empty bodies.
-///
-/// <para><b>Obsolete:</b> Use <see cref="CapabilityEndpointBodyReader"/> instead,
-/// which provides AOT-safe body reading with <c>JsonTypeInfo&lt;T&gt;</c> and
-/// <c>Func&lt;T&gt;? emptyBodyFactory</c> for compatibility semantics.</para>
 /// </summary>
-[Obsolete("Use CapabilityEndpointBodyReader.ReadBodyAsync with JsonTypeInfo<T> and emptyBodyFactory instead. This class uses reflection-based JSON deserialization which is not AOT-safe.")]
 public static class CompatibilityBodyReader
 {
     public static async Task<T?> ReadBodyAsync<T>(HttpContext context, bool optional)

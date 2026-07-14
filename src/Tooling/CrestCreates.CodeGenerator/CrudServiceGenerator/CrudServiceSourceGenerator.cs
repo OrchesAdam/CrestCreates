@@ -208,13 +208,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     // enters the HTTP main chain without depending on DynamicApiAotSourceGenerator
                     // discovering it (cross-generator visibility is not guaranteed in Roslyn).
                     if (hasDynamicApi)
-                    {
                         GenerateCrudDynamicApiRegistration(context, entityClass, entityName, namespaceName, idType, generateAsBaseClass);
-
-                        // JsonContext for AOT-safe body binding
-                        var jsonContextSource = GenerateCrudServiceJsonContext(entityName);
-                        context.AddSource($"GeneratedCrudServiceJsonContext_{entityName}.g.cs", SourceText.From(jsonContextSource, Encoding.UTF8));
-                    }
                 }
                 catch (Exception ex)
                 {
@@ -974,8 +968,6 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("using CrestCreates.Authorization.Abstractions;");
             builder.AppendLine("using CrestCreates.DynamicApi;");
             builder.AppendLine("using CrestCreates.Validation.Modules;");
-            builder.AppendLine("using CrestCreates.Generated;");
-            builder.AppendLine("using System.Text.Json.Serialization.Metadata;");
             builder.AppendLine("using Microsoft.AspNetCore.Builder;");
             builder.AppendLine("using Microsoft.AspNetCore.Http;");
             builder.AppendLine("using Microsoft.AspNetCore.Mvc;");
@@ -1150,7 +1142,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine($"                async (HttpContext context, [FromServices] {contractTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
             builder.AppendLine("                {");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, perm_{s}_create.Permissions);");
-            builder.AppendLine($"                    var input = await CapabilityEndpointBodyReader.ReadBodyAsync<Create{serviceName}Dto>(context, {GetCrudJsonTypeInfoAccessor($"Create{serviceName}Dto")}, static () => new Create{serviceName}Dto(), false, context.RequestAborted);");
+            builder.AppendLine($"                    var input = await DynamicApiGeneratedRuntime.ReadBodyAsync<Create{serviceName}Dto>(context, false);");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, input);");
             builder.AppendLine($"                    var result = await DynamicApiGeneratedRuntime.ExecuteAsync(context, true, () => service.CreateAsync(input, context.RequestAborted));");
             builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapResult(result);");
@@ -1175,7 +1167,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine($"                async (HttpContext context, [FromServices] {contractTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
             builder.AppendLine("                {");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, perm_{s}_search.Permissions);");
-            builder.AppendLine($"                    var input = await CapabilityEndpointBodyReader.ReadBodyAsync<{serviceName}ListRequestDto>(context, {GetCrudJsonTypeInfoAccessor($"{serviceName}ListRequestDto")}, static () => new {serviceName}ListRequestDto(), false, context.RequestAborted);");
+            builder.AppendLine($"                    var input = await DynamicApiGeneratedRuntime.ReadBodyAsync<{serviceName}ListRequestDto>(context, false);");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, input);");
             builder.AppendLine($"                    var result = await service.GetListAsync(input, context.RequestAborted);");
             builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapResult(result);");
@@ -1189,7 +1181,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("                {");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, perm_{s}_update.Permissions);");
             builder.AppendLine($"                    var id = {GenerateRouteParamParse(idType)};");
-            builder.AppendLine($"                    var input = await CapabilityEndpointBodyReader.ReadBodyAsync<Update{serviceName}Dto>(context, {GetCrudJsonTypeInfoAccessor($"Update{serviceName}Dto")}, static () => new Update{serviceName}Dto(), false, context.RequestAborted);");
+            builder.AppendLine($"                    var input = await DynamicApiGeneratedRuntime.ReadBodyAsync<Update{serviceName}Dto>(context, false);");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, input);");
             builder.AppendLine($"                    var result = await DynamicApiGeneratedRuntime.ExecuteAsync(context, true, () => service.UpdateAsync(id, input, context.RequestAborted));");
             builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapResult(result);");
@@ -1247,42 +1239,6 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             foreach (var c in value)
                 builder.Append(char.IsLetterOrDigit(c) || c == '_' ? c : '_');
             return builder.ToString();
-        }
-
-        private static string GenerateCrudServiceJsonContext(string serviceName)
-        {
-            // Body types used by CRUD endpoints: CreateDto, ListRequestDto, UpdateDto
-            var bodyTypes = new[]
-            {
-                $"Create{serviceName}Dto",
-                $"{serviceName}ListRequestDto",
-                $"Update{serviceName}Dto"
-            };
-
-            var sb = new StringBuilder();
-            sb.AppendLine("// <auto-generated />");
-            sb.AppendLine("#nullable enable");
-            sb.AppendLine("using System.Text.Json.Serialization;");
-            sb.AppendLine();
-            sb.AppendLine("namespace CrestCreates.Generated;");
-            sb.AppendLine();
-
-            sb.AppendLine($"[JsonSerializable(typeof({bodyTypes[0]}))");
-            for (int i = 1; i < bodyTypes.Length; i++)
-            {
-                sb.AppendLine($"   ,JsonSerializable(typeof({bodyTypes[i]}))");
-            }
-            sb.AppendLine("   ]");
-            sb.AppendLine($"internal sealed partial class GeneratedCrudServiceEndpointJsonContext : JsonSerializerContext");
-            sb.AppendLine("{");
-            sb.AppendLine("}");
-
-            return sb.ToString();
-        }
-
-        private static string GetCrudJsonTypeInfoAccessor(string typeName)
-        {
-            return $"(System.Text.Json.Serialization.Metadata.JsonTypeInfo<{typeName}>)GeneratedCrudServiceEndpointJsonContext.Default.GetTypeInfo(typeof({typeName}))!";
         }
     }
 }

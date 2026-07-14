@@ -165,15 +165,6 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                     spc.AddSource(
                         $"{group.ContainerClassName}_Bindings.g.cs",
                         Microsoft.CodeAnalysis.Text.SourceText.From(bindingSource, System.Text.Encoding.UTF8));
-
-                    // Emit JsonContext if there are body types
-                    var jsonContextSource = CapabilityEndpointJsonContextEmitter.EmitJsonContext(group);
-                    if (!string.IsNullOrEmpty(jsonContextSource))
-                    {
-                        spc.AddSource(
-                            $"{group.ContainerClassName}_JsonContext.g.cs",
-                            Microsoft.CodeAnalysis.Text.SourceText.From(jsonContextSource, System.Text.Encoding.UTF8));
-                    }
                 }
             });
 

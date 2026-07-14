@@ -521,13 +521,6 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
             // 5. Result contracts
             var resultContractsSource = AppServiceCompatibilityResultContractEmitter.Emit(service);
             spc.AddSource($"GeneratedAppServiceCompatibilityResultContracts_{service.SanitizedIdentifier}.g.cs", resultContractsSource);
-
-            // 6. JsonContext for AOT-safe body binding
-            var jsonContextSource = AppServiceCompatibilityJsonContextEmitter.Emit(service);
-            if (!string.IsNullOrEmpty(jsonContextSource))
-            {
-                spc.AddSource($"GeneratedAppServiceCompatibilityJsonContext_{service.SanitizedIdentifier}.g.cs", jsonContextSource);
-            }
         }
     }
 
@@ -576,19 +569,18 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Checks whether a type can be used as a compatibility body type.
-    /// Must be constructible: non-abstract, non-interface, non-open-generic,
-    /// with an accessible parameterless constructor. Arrays are allowed —
-    /// the generator emits Array.Empty&lt;T&gt;() as the emptyBodyFactory.
+    /// Checks whether a type satisfies the new() constraint required by
+    /// CompatibilityBodyReader.ReadBodyAsync&lt;T&gt;: non-abstract, non-interface,
+    /// non-array, non-open-generic, and has an accessible parameterless constructor.
+    /// Closed generic types (e.g., List&lt;BookDto&gt;) are allowed if they have
+    /// a public parameterless constructor. Arrays are rejected because they
+    /// cannot satisfy new().
     /// </summary>
     private static bool SatisfiesNewConstraint(ITypeSymbol type)
     {
-        // Arrays are allowed for compatibility path — generator emits Array.Empty<T>()
-        // as the emptyBodyFactory. Only reject if element type is open generic.
-        if (type is IArrayTypeSymbol arrayType)
-        {
-            return !ContainsTypeParameter(arrayType.ElementType);
-        }
+        // Arrays cannot satisfy new() constraint
+        if (type is IArrayTypeSymbol)
+            return false;
 
         // Only named types (classes, structs, records, interfaces) can be checked
         if (type is not INamedTypeSymbol named)

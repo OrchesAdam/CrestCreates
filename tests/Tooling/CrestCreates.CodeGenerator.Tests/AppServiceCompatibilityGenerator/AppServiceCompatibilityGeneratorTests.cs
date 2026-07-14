@@ -351,12 +351,11 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         var bindings = result.GetSourceByFileName("GeneratedAppServiceCompatibilityBindings_Book.g.cs");
         bindings.Should().NotBeNull();
-        // Phase 2: Compatibility binding uses CapabilityEndpointBodyReader with JsonTypeInfo
-        // for AOT-safe body binding, instead of CompatibilityBodyReader.
-        bindings!.SourceText.Should().Contain("CapabilityEndpointBodyReader.ReadBodyAsync");
-        bindings.SourceText.Should().Contain("GetTypeInfo(typeof(global::MyApp.CreateBookDto))");
-        bindings.SourceText.Should().NotContain("CompatibilityBodyReader");
+        // P1-4: Compatibility binding uses CompatibilityBodyReader for legacy-compatible body semantics.
+        bindings!.SourceText.Should().Contain("CompatibilityBodyReader.ReadBodyAsync");
         bindings.SourceText.Should().NotContain("CapabilityEndpointJsonRuntime");
+        bindings.SourceText.Should().NotContain("CompatibilityJsonContext");
+        bindings.SourceText.Should().NotContain("JsonSerializable");
 
         result.CompilationSuccess.Should().BeTrue("generated code must compile successfully");
     }
@@ -383,9 +382,8 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         foreach (var generated in result.GeneratedSources)
         {
-            // All generated code must reference only the neutral CompatibilityHttpResultMapper,
-            // CapabilityEndpointBodyReader, and GeneratedCompatibilityEndpointJsonContext,
-            // never the legacy DynamicApiGeneratedRuntime.
+            // All generated code must reference only the neutral CompatibilityHttpResultMapper
+            // and CompatibilityBodyReader, never the legacy DynamicApiGeneratedRuntime.
             generated.SourceText.Should().NotContain("DynamicApiGeneratedRuntime");
             generated.SourceText.Should().NotContain("DynamicApiGeneratedRegistryStore");
             generated.SourceText.Should().NotContain("IDynamicApiGeneratedProvider");
@@ -795,19 +793,6 @@ public sealed class AppServiceCompatibilityGeneratorTests
                     }
                 }
 
-                public static class CapabilityEndpointBodyReader
-                {
-                    public static async System.Threading.Tasks.ValueTask<T?> ReadBodyAsync<T>(
-                        Microsoft.AspNetCore.Http.HttpContext context,
-                        System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> jsonTypeInfo,
-                        System.Func<T>? emptyBodyFactory,
-                        bool optional,
-                        System.Threading.CancellationToken ct = default)
-                    {
-                        return default;
-                    }
-                }
-
                 public static class CapabilityEndpointJsonRuntime
                 {
                     public static async System.Threading.Tasks.ValueTask<T?> ReadBodyAsync<T>(
@@ -906,18 +891,6 @@ public sealed class AppServiceCompatibilityGeneratorTests
             {
                 public class JsonTypeInfo { }
                 public sealed class JsonTypeInfo<T> : JsonTypeInfo { }
-            }
-            """,
-            // GeneratedCompatibilityEndpointJsonContext stub (STJ generator doesn't run in tests)
-            """
-            using System.Text.Json.Serialization;
-
-            namespace CrestCreates.Generated
-            {
-                internal sealed partial class GeneratedCompatibilityEndpointJsonContext : System.Text.Json.Serialization.JsonSerializerContext
-                {
-                    public static GeneratedCompatibilityEndpointJsonContext Default { get; } = null!;
-                }
             }
             """,
         };
@@ -1337,7 +1310,7 @@ public sealed class AppServiceCompatibilityGeneratorTests
     public void CEP037_RecordWithPrimaryConstructor_ReportsError()
     {
         // Records with primary constructors have no implicit parameterless constructor,
-        // so they cannot be used as compatibility body types.
+        // so they don't satisfy the new() constraint required by CompatibilityBodyReader.
         var source = """
             using CrestCreates.Domain.Shared.Attributes;
 
@@ -1500,9 +1473,9 @@ public sealed class AppServiceCompatibilityGeneratorTests
     }
 
     [Fact]
-    public void CEP037_ArrayBodyType_NoDiagnostic()
+    public void CEP037_ArrayBodyType_ReportsError()
     {
-        // Arrays are now allowed — generator emits Array.Empty<T>() as emptyBodyFactory.
+        // Arrays cannot satisfy the new() constraint.
         // Use a POST method so the parameter is recognized as Body source.
         var source = """
             using CrestCreates.Domain.Shared.Attributes;
@@ -1526,12 +1499,12 @@ public sealed class AppServiceCompatibilityGeneratorTests
         var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
             source, additionalSources: BuildCompatibilityStubs());
 
-        result.Diagnostics.Should().NotContain(d => d.Id == "CEP037",
-            "CEP037 should not fire for array body type (arrays are now allowed)");
-        // Arrays should generate code with Array.Empty<T>() as emptyBodyFactory
-        result.GeneratedSources.Should().Contain(x =>
-            x.SourceText.Contains("ReadBodyAsync<global::MyApp.BookDto[]>"),
-            "Array body type should generate ReadBodyAsync calls");
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP037",
+            "CEP037 should fire for array body type");
+        // Fail-closed: no code should be generated for actions with CEP037
+        result.GeneratedSources.Should().NotContain(x =>
+            x.SourceText.Contains("ReadBodyAsync<BookDto[]>"),
+            "CEP037 actions should not generate ReadBodyAsync calls");
     }
 
     [Fact]
@@ -1764,50 +1737,5 @@ public sealed class AppServiceCompatibilityGeneratorTests
         capabilities.SourceText.Should().NotContain("compat.appservice.book.get");
 
         result.CompilationSuccess.Should().BeTrue();
-    }
-
-    [Fact]
-    public void JsonContext_GeneratedForBodyTypes()
-    {
-        var source = """
-            using CrestCreates.Domain.Shared.Attributes;
-
-            namespace MyApp;
-
-            [CrestService]
-            [CapabilityCompatibilityProjection]
-            public class BookAppService
-            {
-                public System.Threading.Tasks.Task<string> CreateAsync(CreateBookDto input, System.Threading.CancellationToken ct)
-                    => System.Threading.Tasks.Task.FromResult("created");
-
-                public System.Threading.Tasks.Task<string> UpdateAsync(string id, UpdateBookDto input, System.Threading.CancellationToken ct)
-                    => System.Threading.Tasks.Task.FromResult("updated");
-            }
-
-            public class CreateBookDto
-            {
-                public string Title { get; set; } = "";
-            }
-
-            public class UpdateBookDto
-            {
-                public string Title { get; set; } = "";
-            }
-            """;
-
-        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
-            source, additionalSources: BuildCompatibilityStubs());
-
-        var jsonContextFile = result.GetSourceByFileName("GeneratedAppServiceCompatibilityJsonContext_Book.g.cs");
-        jsonContextFile.Should().NotBeNull("JsonContext should be generated when body types exist");
-        jsonContextFile!.SourceText.Should().Contain("[JsonSerializable",
-            "JsonContext should contain JsonSerializable attributes");
-        jsonContextFile.SourceText.Should().Contain("GeneratedCompatibilityEndpointJsonContext",
-            "JsonContext should define the partial context class");
-        jsonContextFile.SourceText.Should().Contain("global::MyApp.CreateBookDto",
-            "JsonContext should include CreateBookDto body type");
-        jsonContextFile.SourceText.Should().Contain("global::MyApp.UpdateBookDto",
-            "JsonContext should include UpdateBookDto body type");
     }
 }
