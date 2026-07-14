@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using CrestCreates.CodeGenerator.DynamicApiGenerator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -178,6 +179,7 @@ internal static class CapabilityEndpointSpecNormalizer
             builder.Add(new CapabilityEndpointInputRecord
             {
                 TypeName = bodyType.ToDisplayString(FullyQualifiedFormat),
+                TypeOfExpression = DynamicApiConventionAnalyzer.ToTypeOfExpression(bodyType),
                 Name = "body",
                 SourceValue = 3, // Body
                 Required = true
@@ -196,6 +198,7 @@ internal static class CapabilityEndpointSpecNormalizer
             builder.Add(new CapabilityEndpointInputRecord
             {
                 TypeName = inputType.ToDisplayString(FullyQualifiedFormat),
+                TypeOfExpression = DynamicApiConventionAnalyzer.ToTypeOfExpression(inputType),
                 Name = name,
                 SourceValue = 0, // Route
                 Required = true,
@@ -222,10 +225,14 @@ internal static class CapabilityEndpointSpecNormalizer
                 var propertyType = FindPropertyTypeOnType(bodyType, pascalName);
                 var typeName = propertyType?.ToDisplayString(FullyQualifiedFormat)
                     ?? "global::System.String"; // fallback to string if property not found
+                var typeOfExpr = propertyType is not null
+                    ? DynamicApiConventionAnalyzer.ToTypeOfExpression(propertyType)
+                    : "global::System.String";
 
                 builder.Add(new CapabilityEndpointInputRecord
                 {
                     TypeName = typeName,
+                    TypeOfExpression = typeOfExpr,
                     Name = token,
                     SourceValue = 0, // Route
                     Required = true,

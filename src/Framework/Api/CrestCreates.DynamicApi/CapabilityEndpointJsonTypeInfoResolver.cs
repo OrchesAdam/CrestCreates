@@ -59,12 +59,9 @@ public static class CapabilityEndpointJsonTypeInfoResolver
 
     private static JsonSerializerOptions ResolveOptions(IServiceProvider serviceProvider)
     {
-        // Try ASP.NET Core's JsonOptions first (which includes configured JsonSerializerContext)
-        var jsonOptions = serviceProvider.GetService<IOptions<JsonOptions>>();
-        if (jsonOptions is not null)
-            return jsonOptions.Value.SerializerOptions;
-
-        // Fallback: create default options (NOT AOT-safe, but preserves backward compat)
-        return new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        // Fail-closed: application MUST configure JsonOptions with a JsonSerializerContext.
+        // Fallback to reflection-based options would silently break AOT safety.
+        var jsonOptions = serviceProvider.GetRequiredService<IOptions<JsonOptions>>();
+        return jsonOptions.Value.SerializerOptions;
     }
 }

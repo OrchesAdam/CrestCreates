@@ -870,9 +870,9 @@ The `ProjectionKind` property on `CapabilityDescriptor` is `DefinitionOnly` (Ord
 
 ### 16.2 AOT Safety Scope
 
-**Input binding is AOT-safe.** All three generators (CapabilityEndpoint 8a, AppServiceCompatibility 8d, CrudService) emit `CapabilityEndpointBodyReader.ReadBodyAsync<T>` calls with `JsonTypeInfo<T>` resolved from the application's `JsonSerializerOptions`. The application owns the `[JsonSerializable]`-decorated `JsonSerializerContext` and registers it in ASP.NET Core's `JsonOptions.TypeInfoResolverChain`.
+**Input binding is AOT-safe for 8a and 8d only.** The CapabilityEndpoint (8a) and AppServiceCompatibility (8d) generators emit `CapabilityEndpointBodyReader.ReadNativeBodyAsync<T>` and `ReadCompatibilityBodyAsync<T>` calls respectively, with `JsonTypeInfo<T>` resolved from the application's `JsonSerializerOptions`. The application owns the `[JsonSerializable]`-decorated `JsonSerializerContext` and registers it in ASP.NET Core's `JsonOptions.TypeInfoResolverChain`. The CrudService generator is NOT AOT-safe — its generated DTO types are invisible to the application's `JsonSerializerContext` because Roslyn source generators cannot see each other's output in the same compilation round. CRUD continues using the legacy `DynamicApiGeneratedRuntime.ReadBodyAsync<T>` reflection path.
 
-**Response serialization is NOT yet AOT-safe.** The pipeline currently uses `JsonSerializer.Serialize<object?>` for response bodies, which relies on runtime reflection. Full AOT safety requires migrating response serialization to `JsonTypeInfo<T>`-based writes. This is tracked as future work.
+**Response serialization is NOT yet AOT-safe.** The pipeline currently uses `Results.Json(object?)` for response bodies, which relies on runtime reflection. Full AOT safety requires migrating response serialization to `JsonTypeInfo<T>`-based writes. This is tracked as future work.
 
 **Key architectural constraint:** Roslyn Source Generators cannot see each other's `RegisterSourceOutput` output in the same compilation round. Therefore, CrestCreates generators must NOT emit `[JsonSerializable]` partial classes expecting the STJ source generator to process them. The application owns the `JsonSerializerContext` as a regular source file, and CrestCreates accesses `JsonTypeInfo<T>` from it at runtime.
 
@@ -990,7 +990,9 @@ Analogous to MCP but for Agent-invoked capabilities. Requires agent tool specifi
 
 ### 20.3 AOT Response Serialization
 
-Input body binding is now AOT-safe via `CapabilityEndpointBodyReader` + application-owned `JsonSerializerContext`. Response serialization still uses `JsonSerializer.Serialize<object?>` (runtime reflection). Full AOT safety requires migrating response serialization to `JsonTypeInfo<T>`-based writes, which requires the pipeline to carry type information through to the response mapper.
+Input body binding is now AOT-safe via `CapabilityEndpointBodyReader` + application-owned `JsonSerializerContext`. Response serialization still uses `Results.Json(object?)` (runtime reflection). Full AOT safety requires migrating response serialization to `JsonTypeInfo<T>`-based writes, which requires the pipeline to carry type information through to the response mapper.
+
+**CRUD generator body binding is NOT AOT-safe.** Generated CRUD DTO types (`CreateBookDto`, `UpdateBookDto`, `BookListRequestDto`) are produced by the same source generator in the same compilation round, making them invisible to the application's `[JsonSerializable]`-decorated `JsonSerializerContext`. Roslyn source generators cannot see each other's `RegisterSourceOutput` output. CRUD endpoints continue using the legacy `DynamicApiGeneratedRuntime.ReadBodyAsync<T>` path (reflection-based). A separate design (BuildTask pre-generation, upstream DTO project, or CrestCreates-owned TypeInfo generation) is required. This is tracked as future work — do not claim CRUD as AOT-safe.
 
 ### 20.4 Compatibility Projection Sunset
 

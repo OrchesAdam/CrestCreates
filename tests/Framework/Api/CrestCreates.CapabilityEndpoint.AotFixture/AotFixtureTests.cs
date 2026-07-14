@@ -22,12 +22,23 @@ public class AotFixtureTests : IClassFixture<AotFixtureTestFactory>
     }
 
     [Fact]
-    public async Task GreetEndpoint_ReturnsSuccess()
+    public async Task ProcessGreetingEndpoint_PostBody_ReturnsSuccess()
     {
-        // GreetAsync is mapped as GET by convention analyzer (verb prefix "Greet" → GET)
-        var response = await _client.GetAsync("/api/greeting/greet?Name=World");
+        // ProcessGreetingAsync maps to POST by convention ("Process" prefix → POST).
+        // This is the key AOT body binding test — the full chain:
+        //   HTTP POST → generated binding → CapabilityEndpointJsonTypeInfoResolver.Resolve<GreetingRequest>()
+        //   → CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync()
+        //   → generated invoker → GreetingAppService.ProcessGreetingAsync()
+        //   → result contract → DynamicApiResponse envelope
+        var response = await _client.PostAsJsonAsync(
+            "/api/greeting/process-greeting",
+            new GreetingRequest { Name = "World" },
+            ApplicationApiJsonContext.Default.GreetingRequest);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("Hello, World!",
+            "POST body binding should deserialize GreetingRequest and invoke the service method");
     }
 
     [Fact]
@@ -39,7 +50,7 @@ public class AotFixtureTests : IClassFixture<AotFixtureTestFactory>
     }
 
     [Fact]
-    public void JsonTypeInfo_ResolvesSuccessfully()
+    public void JsonTypeInfo_ResolvesFromApplicationOptions()
     {
         // Verify that the application's JsonSerializerContext provides
         // JsonTypeInfo for the body types used by generated binding code.

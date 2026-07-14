@@ -340,4 +340,32 @@ internal static class DynamicApiConventionAnalyzer
                namedType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T &&
                namedType.TypeArguments.Length == 1;
     }
+
+    /// <summary>
+    /// Produces a type expression suitable for typeof() and generic type arguments.
+    /// - Nullable value types (int?): uses Nullable&lt;T&gt; form → global::System.Nullable&lt;global::System.Int32&gt;
+    /// - Nullable reference types (BookDto?): strips ? suffix → global::MyApp.BookDto
+    /// - Non-nullable types: uses the fully-qualified name as-is
+    /// </summary>
+    internal static string ToTypeOfExpression(ITypeSymbol type, SymbolDisplayFormat? format = null)
+    {
+        format ??= SymbolDisplayFormat.FullyQualifiedFormat;
+
+        // Nullable value type: int? → Nullable<int>
+        if (type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T
+            && type is INamedTypeSymbol namedType
+            && namedType.TypeArguments.Length == 1)
+        {
+            var underlyingType = namedType.TypeArguments[0];
+            var underlyingFq = underlyingType.ToDisplayString(format);
+            return $"global::System.Nullable<{underlyingFq}>";
+        }
+
+        // Nullable reference type: BookDto? → BookDto (strip ?)
+        var displayString = type.ToDisplayString(format);
+        if (displayString.EndsWith("?"))
+            return displayString.Substring(0, displayString.Length - 1);
+
+        return displayString;
+    }
 }

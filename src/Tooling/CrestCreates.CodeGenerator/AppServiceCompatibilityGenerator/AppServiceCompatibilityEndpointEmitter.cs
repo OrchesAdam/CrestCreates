@@ -171,11 +171,9 @@ internal static class AppServiceCompatibilityEndpointEmitter
             var bodyParam = action.Parameters.FirstOrDefault(p => p.Source == "Body");
             if (bodyParam is not null)
             {
-                // Strip nullable reference type suffix — typeof(T?) is illegal for reference types
-                var typeofName = bodyParam.TypeName.EndsWith("?")
-                    ? bodyParam.TypeName.Substring(0, bodyParam.TypeName.Length - 1)
-                    : bodyParam.TypeName;
-                sb.AppendLine($"        CapabilityEndpointJsonContractRegistry.RegisterBodyType(typeof({typeofName}));");
+                // Use TypeOfExpression which correctly handles nullable value types (int? → Nullable<int>)
+                // and nullable reference types (BookDto? → BookDto)
+                sb.AppendLine($"        CapabilityEndpointJsonContractRegistry.RegisterBodyType(typeof({bodyParam.TypeOfExpression}));");
             }
         }
 
@@ -234,26 +232,26 @@ internal static class AppServiceCompatibilityEndpointEmitter
 
         if (action.IsSingleParam && bodyParam is not null)
         {
-            // Single body parameter — use CapabilityEndpointBodyReader with
-            // emptyBodyFactory for legacy-compatible body behavior (empty body → new T()).
+            // Single body parameter — use ReadCompatibilityBodyAsync for legacy-compatible
+            // body behavior (empty body → new T(), whitespace → new T(), null → new T()).
             var bodyOptional = bodyParam.IsOptional.ToString().ToLowerInvariant();
-            var emptyFactory = GetEmptyBodyFactoryExpr(bodyParam.TypeName);
-            sb.AppendLine($"        var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve<{bodyParam.TypeName}>(context)");
+            var emptyFactory = GetEmptyBodyFactoryExpr(bodyParam.TypeOfExpression);
+            sb.AppendLine($"        var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve<{bodyParam.TypeOfExpression}>(context)");
             sb.AppendLine($"            ?? throw new InvalidOperationException(");
-            sb.AppendLine($"                \"No JsonTypeInfo registered for {bodyParam.TypeName}. Add [JsonSerializable(typeof({bodyParam.TypeName}))] to your JsonSerializerContext.\");");
-            sb.AppendLine($"        return await CapabilityEndpointBodyReader.ReadBodyAsync<{bodyParam.TypeName}>(");
-            sb.AppendLine($"            context, jsonTypeInfo, {emptyFactory}, {bodyOptional});");
+            sb.AppendLine($"                \"No JsonTypeInfo registered for {bodyParam.TypeOfExpression}. Add [JsonSerializable(typeof({bodyParam.TypeOfExpression}))] to your JsonSerializerContext.\");");
+            sb.AppendLine($"        return await CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync<{bodyParam.TypeOfExpression}>(");
+            sb.AppendLine($"            context, jsonTypeInfo, {emptyFactory}, {bodyOptional}, context.RequestAborted);");
         }
         else if (bodyParam is not null && (routeParams.Length > 0 || queryParams.Length > 0 || headerParams.Length > 0))
         {
             // Body + route/query/header params
             var bodyOptional = bodyParam.IsOptional.ToString().ToLowerInvariant();
-            var emptyFactory = GetEmptyBodyFactoryExpr(bodyParam.TypeName);
-            sb.AppendLine($"        var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve<{bodyParam.TypeName}>(context)");
+            var emptyFactory = GetEmptyBodyFactoryExpr(bodyParam.TypeOfExpression);
+            sb.AppendLine($"        var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve<{bodyParam.TypeOfExpression}>(context)");
             sb.AppendLine($"            ?? throw new InvalidOperationException(");
-            sb.AppendLine($"                \"No JsonTypeInfo registered for {bodyParam.TypeName}. Add [JsonSerializable(typeof({bodyParam.TypeName}))] to your JsonSerializerContext.\");");
-            sb.AppendLine($"        var body = await CapabilityEndpointBodyReader.ReadBodyAsync<{bodyParam.TypeName}>(");
-            sb.AppendLine($"            context, jsonTypeInfo, {emptyFactory}, {bodyOptional});");
+            sb.AppendLine($"                \"No JsonTypeInfo registered for {bodyParam.TypeOfExpression}. Add [JsonSerializable(typeof({bodyParam.TypeOfExpression}))] to your JsonSerializerContext.\");");
+            sb.AppendLine($"        var body = await CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync<{bodyParam.TypeOfExpression}>(");
+            sb.AppendLine($"            context, jsonTypeInfo, {emptyFactory}, {bodyOptional}, context.RequestAborted);");
             sb.AppendLine();
 
             // Two-phase: pre-declare query locals outside initializer, then construct envelope
@@ -520,22 +518,27 @@ internal static class AppServiceCompatibilityEndpointEmitter
     /// <summary>
     /// Returns the emptyBodyFactory expression for a body type.
     /// Arrays use Array.Empty&lt;T&gt;(), other types use new T().
-    /// Nullable reference types (e.g., CreateBookDto?) strip the ? suffix
-    /// since <c>new T?()</c> is not valid C# — the factory creates a non-null instance.
+    /// The typeName parameter is already a TypeOfExpression (nullable value types use Nullable&lt;T&gt;,
+    /// nullable reference types have ? stripped). Nullable value types use default(T) as factory
+    /// since new Nullable&lt;T&gt;() is equivalent to default but more explicit.
     /// </summary>
     private static string GetEmptyBodyFactoryExpr(string typeName)
     {
-        // Strip nullable reference type suffix — new T?() is illegal C#
-        var cleanType = typeName.EndsWith("?")
-            ? typeName.Substring(0, typeName.Length - 1)
-            : typeName;
-
-        if (cleanType.EndsWith("[]"))
+        // Nullable value types: Nullable<T> → default(Nullable<T>) which is null
+        if (typeName.StartsWith("global::System.Nullable<"))
         {
-            var elementType = cleanType.Substring(0, cleanType.Length - 2);
+            return $"static () => default({typeName})";
+        }
+
+        // Arrays: T[] → Array.Empty<T>()
+        if (typeName.EndsWith("[]"))
+        {
+            var elementType = typeName.Substring(0, typeName.Length - 2);
             return $"static () => System.Array.Empty<{elementType}>()";
         }
-        return $"static () => new {cleanType}()";
+
+        // Regular types: new T()
+        return $"static () => new {typeName}()";
     }
 
     /// <summary>

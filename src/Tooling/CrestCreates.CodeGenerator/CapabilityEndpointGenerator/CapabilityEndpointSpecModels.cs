@@ -47,6 +47,14 @@ internal sealed class CapabilityEndpointInputRecord
     /// </summary>
     public string TypeName { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Type expression for typeof() and generic type arguments.
+    /// - Nullable value types (int?): uses Nullable&lt;int&gt; form
+    /// - Nullable reference types (BookDto?): strips ? suffix
+    /// - Non-nullable types: same as TypeName
+    /// </summary>
+    public string TypeOfExpression { get; init; } = string.Empty;
+
     public string Name { get; init; } = string.Empty;
     public int SourceValue { get; init; } = 3; // Body = 3
     public bool Required { get; init; } = true;

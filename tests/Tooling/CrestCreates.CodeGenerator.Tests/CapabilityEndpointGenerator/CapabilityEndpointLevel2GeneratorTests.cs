@@ -156,7 +156,7 @@ namespace CrestCreates.DynamicApi
 
     public static class CapabilityEndpointBodyReader
     {
-        public static ValueTask<T?> ReadBodyAsync<T>(object context, object? jsonTypeInfo, object? factory, bool optional, object ct = null) => default;
+        public static ValueTask<T?> ReadNativeBodyAsync<T>(object context, object? jsonTypeInfo, bool optional, object ct = null) => default;
     }
 
     public static class CapabilityEndpointJsonContractRegistry
@@ -219,7 +219,7 @@ namespace TestNs
 
         var bindingFile = result.GetSourceByFileName("ItemApi_Bindings.g.cs");
         Assert.NotNull(bindingFile);
-        Assert.Contains("CapabilityEndpointBodyReader.ReadBodyAsync<global::TestNs.CreateItemBody>", bindingFile!.SourceText);
+        Assert.Contains("CapabilityEndpointBodyReader.ReadNativeBodyAsync<global::TestNs.CreateItemBody>", bindingFile!.SourceText);
     }
 
     [Fact]
@@ -325,7 +325,7 @@ namespace TestNs
         var text = bindingFile!.SourceText;
 
         // Should read body
-        Assert.Contains("CapabilityEndpointBodyReader.ReadBodyAsync<global::TestNs.UpdateBody>", text);
+        Assert.Contains("CapabilityEndpointBodyReader.ReadNativeBodyAsync<global::TestNs.UpdateBody>", text);
 
         // Should assign route value to model property (InputName="Id" → "model.Id = ...")
         Assert.Contains("model.Id = Guid.Parse(", text);

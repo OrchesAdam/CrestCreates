@@ -81,11 +81,9 @@ internal static class CapabilityEndpointBindingEmitter
             var bodyInput = FindBodyInput(spec.Inputs);
             if (bodyInput is not null)
             {
-                // Strip nullable reference type suffix — typeof(T?) is illegal for reference types
-                var typeofName = bodyInput.TypeName.EndsWith("?")
-                    ? bodyInput.TypeName.Substring(0, bodyInput.TypeName.Length - 1)
-                    : bodyInput.TypeName;
-                sb.AppendLine($"        CapabilityEndpointJsonContractRegistry.RegisterBodyType(typeof({typeofName}));");
+                // Use TypeOfExpression which correctly handles nullable value types (int? → Nullable<int>)
+                // and nullable reference types (BookDto? → BookDto)
+                sb.AppendLine($"        CapabilityEndpointJsonContractRegistry.RegisterBodyType(typeof({bodyInput.TypeOfExpression}));");
             }
         }
 
@@ -134,14 +132,14 @@ internal static class CapabilityEndpointBindingEmitter
 
     private static void EmitBodyOnlyBinding(StringBuilder sb, CapabilityEndpointInputRecord bodyInput)
     {
-        var typeName = bodyInput.TypeName;
+        var typeOfExpr = bodyInput.TypeOfExpression;
         var optional = !bodyInput.Required;
 
-        sb.AppendLine($"        var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve<{typeName}>(context)");
+        sb.AppendLine($"        var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve<{typeOfExpr}>(context)");
         sb.AppendLine($"            ?? throw new InvalidOperationException(");
-        sb.AppendLine($"                \"No JsonTypeInfo registered for {typeName}. Add [JsonSerializable(typeof({typeName}))] to your JsonSerializerContext.\");");
-        sb.AppendLine($"        var result = await CapabilityEndpointBodyReader.ReadBodyAsync<{typeName}>(");
-        sb.AppendLine($"            context, jsonTypeInfo, null, {optional.ToString().ToLowerInvariant()}, ct);");
+        sb.AppendLine($"                \"No JsonTypeInfo registered for {typeOfExpr}. Add [JsonSerializable(typeof({typeOfExpr}))] to your JsonSerializerContext.\");");
+        sb.AppendLine($"        var result = await CapabilityEndpointBodyReader.ReadNativeBodyAsync<{typeOfExpr}>(");
+        sb.AppendLine($"            context, jsonTypeInfo, {optional.ToString().ToLowerInvariant()}, ct);");
         sb.AppendLine("        return result;");
     }
 
@@ -152,14 +150,14 @@ internal static class CapabilityEndpointBindingEmitter
         ImmutableArray<CapabilityEndpointInputRecord> queryInputs,
         ImmutableArray<CapabilityEndpointInputRecord> headerInputs)
     {
-        var typeName = bodyInput.TypeName;
+        var typeOfExpr = bodyInput.TypeOfExpression;
         var optional = !bodyInput.Required;
 
-        sb.AppendLine($"        var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve<{typeName}>(context)");
+        sb.AppendLine($"        var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve<{typeOfExpr}>(context)");
         sb.AppendLine($"            ?? throw new InvalidOperationException(");
-        sb.AppendLine($"                \"No JsonTypeInfo registered for {typeName}. Add [JsonSerializable(typeof({typeName}))] to your JsonSerializerContext.\");");
-        sb.AppendLine($"        var model = await CapabilityEndpointBodyReader.ReadBodyAsync<{typeName}>(");
-        sb.AppendLine($"            context, jsonTypeInfo, null, {optional.ToString().ToLowerInvariant()}, ct);");
+        sb.AppendLine($"                \"No JsonTypeInfo registered for {typeOfExpr}. Add [JsonSerializable(typeof({typeOfExpr}))] to your JsonSerializerContext.\");");
+        sb.AppendLine($"        var model = await CapabilityEndpointBodyReader.ReadNativeBodyAsync<{typeOfExpr}>(");
+        sb.AppendLine($"            context, jsonTypeInfo, {optional.ToString().ToLowerInvariant()}, ct);");
         sb.AppendLine();
 
         // Assign route values to model properties

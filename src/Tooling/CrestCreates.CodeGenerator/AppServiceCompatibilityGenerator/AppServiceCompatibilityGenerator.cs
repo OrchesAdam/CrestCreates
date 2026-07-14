@@ -305,6 +305,7 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
                         paramModels.Add(new CompatibilityParameterModel(
                             Name: param.Name,
                             TypeName: param.Type.ToDisplayString(FullyQualifiedFormat),
+                            TypeOfExpression: DynamicApiConventionAnalyzer.ToTypeOfExpression(param.Type),
                             Source: sourceStr,
                             PascalName: CapitalizeFirst(param.Name),
                             IsOptional: true,
@@ -333,6 +334,7 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
                         paramModels.Add(new CompatibilityParameterModel(
                             Name: param.Name,
                             TypeName: param.Type.ToDisplayString(FullyQualifiedFormat),
+                            TypeOfExpression: DynamicApiConventionAnalyzer.ToTypeOfExpression(param.Type),
                             Source: sourceStr,
                             PascalName: CapitalizeFirst(param.Name),
                             IsOptional: isOptional,

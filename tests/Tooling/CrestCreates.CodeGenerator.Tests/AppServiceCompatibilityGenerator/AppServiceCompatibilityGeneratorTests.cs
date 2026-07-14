@@ -351,8 +351,8 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         var bindings = result.GetSourceByFileName("GeneratedAppServiceCompatibilityBindings_Book.g.cs");
         bindings.Should().NotBeNull();
-        // P1-4: Compatibility binding uses CapabilityEndpointBodyReader for AOT-safe body binding.
-        bindings!.SourceText.Should().Contain("CapabilityEndpointBodyReader.ReadBodyAsync");
+        // P1-4: Compatibility binding uses CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync for AOT-safe body binding.
+        bindings!.SourceText.Should().Contain("CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync");
         bindings.SourceText.Should().NotContain("CompatibilityBodyReader.ReadBodyAsync");
         bindings.SourceText.Should().NotContain("CapabilityEndpointJsonRuntime");
         bindings.SourceText.Should().NotContain("CompatibilityJsonContext");
@@ -803,10 +803,19 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
                 public static class CapabilityEndpointBodyReader
                 {
-                    public static async System.Threading.Tasks.ValueTask<T?> ReadBodyAsync<T>(
+                    public static async System.Threading.Tasks.ValueTask<T?> ReadNativeBodyAsync<T>(
                         Microsoft.AspNetCore.Http.HttpContext context,
                         System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> jsonTypeInfo,
-                        System.Func<T>? emptyBodyFactory,
+                        bool optional,
+                        System.Threading.CancellationToken ct = default)
+                    {
+                        return default;
+                    }
+
+                    public static async System.Threading.Tasks.ValueTask<T?> ReadCompatibilityBodyAsync<T>(
+                        Microsoft.AspNetCore.Http.HttpContext context,
+                        System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> jsonTypeInfo,
+                        System.Func<T> emptyBodyFactory,
                         bool optional,
                         System.Threading.CancellationToken ct = default)
                     {
@@ -1361,8 +1370,8 @@ public sealed class AppServiceCompatibilityGeneratorTests
             "CEP037 should fire for record with primary constructor (no parameterless ctor)");
         // Fail-closed: no code should be generated for actions with CEP037
         result.GeneratedSources.Should().NotContain(x =>
-            x.SourceText.Contains("ReadBodyAsync<CreateBookRequest>"),
-            "CEP037 actions should not generate ReadBodyAsync calls");
+            x.SourceText.Contains("ReadCompatibilityBodyAsync<CreateBookRequest>"),
+            "CEP037 actions should not generate ReadCompatibilityBodyAsync calls");
     }
 
     [Fact]
@@ -1392,8 +1401,8 @@ public sealed class AppServiceCompatibilityGeneratorTests
             "CEP037 should fire for abstract body type");
         // Fail-closed: no code should be generated for actions with CEP037
         result.GeneratedSources.Should().NotContain(x =>
-            x.SourceText.Contains("ReadBodyAsync<AbstractRequest>"),
-            "CEP037 actions should not generate ReadBodyAsync calls");
+            x.SourceText.Contains("ReadCompatibilityBodyAsync<AbstractRequest>"),
+            "CEP037 actions should not generate ReadCompatibilityBodyAsync calls");
     }
 
     [Fact]
@@ -1562,8 +1571,8 @@ public sealed class AppServiceCompatibilityGeneratorTests
             "CEP037 should fire for interface body type");
         // Fail-closed: no code should be generated for actions with CEP037
         result.GeneratedSources.Should().NotContain(x =>
-            x.SourceText.Contains("ReadBodyAsync<IBookRequest>"),
-            "CEP037 actions should not generate ReadBodyAsync calls");
+            x.SourceText.Contains("ReadCompatibilityBodyAsync<IBookRequest>"),
+            "CEP037 actions should not generate ReadCompatibilityBodyAsync calls");
     }
 
     [Fact]

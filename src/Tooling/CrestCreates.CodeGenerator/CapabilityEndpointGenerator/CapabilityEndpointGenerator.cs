@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using CrestCreates.CodeGenerator.DynamicApiGenerator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -1140,6 +1141,9 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
             builder.Add(new CapabilityEndpointInputRecord
             {
                 TypeName = typeName,
+                TypeOfExpression = typeSymbol is not null
+                    ? DynamicApiConventionAnalyzer.ToTypeOfExpression(typeSymbol)
+                    : typeName,
                 Name = name,
                 SourceValue = sourceValue,
                 Required = required,

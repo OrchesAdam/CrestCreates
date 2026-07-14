@@ -13,10 +13,11 @@ public class GreetingAppService
 {
     /// <summary>
     /// POST endpoint with body parameter — the key AOT test case.
+    /// "Process" prefix maps to POST by convention analyzer.
     /// Generated code calls CapabilityEndpointJsonTypeInfoResolver.Resolve&lt;GreetingRequest&gt;()
-    /// + CapabilityEndpointBodyReader.ReadBodyAsync().
+    /// + CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync().
     /// </summary>
-    public Task<GreetingResponse> GreetAsync(GreetingRequest input, CancellationToken cancellationToken = default)
+    public Task<GreetingResponse> ProcessGreetingAsync(GreetingRequest input, CancellationToken cancellationToken = default)
     {
         return Task.FromResult(new GreetingResponse { Message = $"Hello, {input.Name}!" });
     }

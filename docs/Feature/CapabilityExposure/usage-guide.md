@@ -132,7 +132,7 @@ The binding pipeline at endpoint registration time:
 
 **Binding modes:**
 
-- **Body only** — a single `[CapabilityEndpointInput]` with `Source = Body`; SG emits `CapabilityEndpointBodyReader.ReadBodyAsync<T>(context, jsonTypeInfo, emptyBodyFactory, optional, ct)` with `JsonTypeInfo<T>` resolved from the application's `JsonSerializerOptions`.
+- **Body only** — a single `[CapabilityEndpointInput]` with `Source = Body`; SG emits `CapabilityEndpointBodyReader.ReadNativeBodyAsync<T>(context, jsonTypeInfo, optional, ct)` with `JsonTypeInfo<T>` resolved from the application's `JsonSerializerOptions`.
 - **Body + route/query/header scalars** — body deserialized, then scalars assigned to body DTO properties via `TargetProperty` or PascalCase convention.
 - **Single scalar** (one route/query param, no body) — directly passed as capability input.
 - **Multiple scalars without body** — compile-time error (CEP013).
@@ -273,7 +273,8 @@ These are implemented by:
 - `CompatibilityHttpResultMapper.WrapResult<T>()` — non-void, non-GET-null
 - `CompatibilityHttpResultMapper.WrapVoidResult()` — void return
 - `CompatibilityHttpResultMapper.WrapGetResult<T>()` — GET with null check
-- `CapabilityEndpointBodyReader.ReadBodyAsync<T>()` — AOT-safe body reading with `JsonTypeInfo<T>` from application's `JsonSerializerOptions`. Compatibility path uses non-null `emptyBodyFactory` (empty body → default instance); native path uses null `emptyBodyFactory` (empty body → 400 BAD_REQUEST).
+- `CapabilityEndpointBodyReader.ReadNativeBodyAsync<T>()` — AOT-safe body reading for native capability endpoints. Empty body → 400 BAD_REQUEST. No `emptyBodyFactory` parameter.
+- `CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync<T>()` — AOT-safe body reading for compatibility projection endpoints. Preserves legacy `CompatibilityBodyReader` semantics: empty body + optional → default, empty body + required → `emptyBodyFactory()`, invalid JSON + optional → default, invalid JSON + required → exception.
 
 ### Pipeline Failure Responses
 

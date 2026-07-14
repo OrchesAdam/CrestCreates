@@ -38,6 +38,7 @@ internal sealed record CompatibilityActionModel(
 internal sealed record CompatibilityParameterModel(
     string Name,
     string TypeName,
+    string TypeOfExpression, // Expression for typeof() and Resolve<T> — strips ? for nullable ref types, uses Nullable<T> for nullable value types
     string Source, // "Route", "Query", "Body", "Header", "CancellationToken"
     string? PascalName, // PascalCase name for envelope property access
     bool IsOptional, // true when parameter is optional or has default value
