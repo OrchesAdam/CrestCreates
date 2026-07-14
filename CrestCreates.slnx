@@ -199,7 +199,7 @@
   <Folder Name="/tests/Framework/" />
   <Folder Name="/tests/Framework/Api/">
     <Project Path="tests/Framework/Api/CrestCreates.DynamicApi.Tests/CrestCreates.DynamicApi.Tests.csproj" />
-    <Project Path="tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture/CrestCreates.CapabilityEndpoint.AotFixture.csproj" />
+    <Project Path="tests/Framework/Api/CrestCreates.CapabilityEndpoint.TrimmingFixture/CrestCreates.CapabilityEndpoint.TrimmingFixture.csproj" />
     <Project Path="tests/Framework/Api/CrestCreates.CompatibilityProjection.E2E.Tests/CrestCreates.CompatibilityProjection.E2E.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Framework/Web/">

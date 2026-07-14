@@ -17,7 +17,7 @@ Phase 8 establishes a direct projection model. `CapabilityDescriptor` becomes th
 2. **Projection separation.** HTTP binding details (route pattern, HTTP method, input binding, result envelope) live in projection descriptors and binding contracts — never in the core `CapabilityDescriptor`.
 3. **Compile-time generation.** Source generators produce descriptor providers and binding delegates at build time. Runtime reflection scanning is legacy; generated code is the mainline.
 4. **Compatibility as a bridge, not a second path.** Existing `[CrestService]` AppServices can opt into the capability pipeline via a one-way compatibility projection. The legacy Dynamic API output is suppressed for projected services so that capability and legacy paths never dual-serve the same method.
-5. **AOT and Trim friendliness.** Static registries, generated delegates, and `JsonTypeInfo<T>` overloads replace runtime reflection. The pipeline resolves handlers from compile-time registrations.
+5. **Trimming-safe, NativeAOT-oriented.** Static registries, generated delegates, and `JsonTypeInfo<T>` overloads replace runtime reflection. The pipeline resolves handlers from compile-time registrations. Current deployment guarantee is `PublishTrimmed`; full NativeAOT is a future target.
 6. **Fail-closed by default.** Missing bindings, missing capabilities, diagnostic errors, and invalid states all cause startup failure or per-service generation suppression — never a silent fallback.
 
 ## 3. Core Principles
@@ -855,34 +855,70 @@ The `ProjectionKind` property on `CapabilityDescriptor` is `DefinitionOnly` (Ord
 - Handler not found → `CapabilityExecutionResult.Failure("HANDLER_NOT_FOUND", ...)`
 - Unhandled exception → `CapabilityExecutionResult.Failure("PIPELINE_ERROR", ...)`
 
-## 16. AOT and Source Generator Constraints
+## 16. Trimming and NativeAOT
 
-### 16.1 Current State
+### 16.1 Deployment Target
+
+```text
+Phase 8 deployment guarantee:
+- JIT runtime
+- PublishTrimmed support
+- Trimming-safe generated HTTP input binding
+- No unexpected runtime reflection in the new mainline
+- NativeAOT-ready architecture where practical
+- NativeAOT publish is future validation, not current acceptance gate
+```
+
+Full NativeAOT publish-and-run is a **future target**, not a current acceptance gate. EF Core NativeAOT is still experimental, and response serialization has not been migrated. The architecture is designed to not block future NativeAOT adoption.
+
+### 16.2 Current State
 
 - All descriptor providers and binding delegates are produced by source generators at compile time.
 - `CapabilityEndpointBindingRegistry` and `CapabilityEndpointResultContractRegistration` use static `ConcurrentDictionary`/`List` + `[ModuleInitializer]` — zero dynamic assembly loading.
 - `CapabilityEndpointJsonContractRegistry` stores body types at startup via `[ModuleInitializer]` `RegisterBodyType(typeof(T))` calls.
-- `CapabilityEndpointJsonTypeInfoResolver` resolves `JsonTypeInfo<T>` from the application's `IOptions<JsonOptions>` at runtime.
-- `CapabilityEndpointBodyReader.ReadBodyAsync<T>(context, jsonTypeInfo, emptyBodyFactory, optional, ct)` accepts `JsonTypeInfo<T>` directly — AOT-safe for request body deserialization.
+- `CapabilityEndpointJsonTypeInfoResolver` resolves `JsonTypeInfo<T>` from the application's `IOptions<JsonOptions>` at runtime — fail-closed, no fallback to reflection-based options.
+- `CapabilityEndpointBodyReader` provides two entry points:
+  - `ReadNativeBodyAsync<T>` — for native capability endpoints (8a). Empty body → 400 BAD_REQUEST. No `new()` constraint.
+  - `ReadCompatibilityBodyAsync<T>` — for compatibility projection endpoints (8d). Preserves legacy `CompatibilityBodyReader` semantics exactly (empty/whitespace/null body → optional: default, required: factory).
 - `CapabilityEndpointJsonContractValidator` validates at startup that all registered body types have `JsonTypeInfo` available (fail-closed).
 - `CapabilityHandlerResolverProvider` uses static `ConcurrentDictionary` with additive `Register()` API.
 - `DescriptorProviderRegistry` uses static `ConcurrentBag<object>`.
 
-### 16.2 AOT Safety Scope
+### 16.3 Trimming-Safe Input Binding Scope
 
-**Input binding is AOT-safe for 8a and 8d only.** The CapabilityEndpoint (8a) and AppServiceCompatibility (8d) generators emit `CapabilityEndpointBodyReader.ReadNativeBodyAsync<T>` and `ReadCompatibilityBodyAsync<T>` calls respectively, with `JsonTypeInfo<T>` resolved from the application's `JsonSerializerOptions`. The application owns the `[JsonSerializable]`-decorated `JsonSerializerContext` and registers it in ASP.NET Core's `JsonOptions.TypeInfoResolverChain`. The CrudService generator is NOT AOT-safe — its generated DTO types are invisible to the application's `JsonSerializerContext` because Roslyn source generators cannot see each other's output in the same compilation round. CRUD continues using the legacy `DynamicApiGeneratedRuntime.ReadBodyAsync<T>` reflection path.
+**Trimming-safe input binding is complete for 8a and 8d only.**
 
-**Response serialization is NOT yet AOT-safe.** The pipeline currently uses `Results.Json(object?)` for response bodies, which relies on runtime reflection. Full AOT safety requires migrating response serialization to `JsonTypeInfo<T>`-based writes. This is tracked as future work.
+| Generator | Input Binding | Status |
+|---|---|---|
+| CapabilityEndpoint (8a) | `ReadNativeBodyAsync<T>` + `JsonTypeInfo<T>` from application options | ✅ Trimming-safe |
+| AppServiceCompatibility (8d) | `ReadCompatibilityBodyAsync<T>` + `JsonTypeInfo<T>` from application options | ✅ Trimming-safe |
+| CrudService | `DynamicApiGeneratedRuntime.ReadBodyAsync<T>` (reflection-based) | ❌ Unresolved |
+
+The CrudService generator is NOT trimming-safe — its generated DTO types (`CreateBookDto`, `UpdateBookDto`, `BookListRequestDto`) are produced by the same source generator in the same compilation round, making them invisible to the application's `[JsonSerializable]`-decorated `JsonSerializerContext`. Roslyn source generators cannot see each other's `RegisterSourceOutput` output. CRUD endpoints continue using the legacy `DynamicApiGeneratedRuntime.ReadBodyAsync<T>` path (reflection-based). A separate design (BuildTask pre-generation, upstream DTO project, or CrestCreates-owned TypeInfo generation) is required. This is tracked as future work — do not claim CRUD as trimming-safe.
+
+**Response serialization is NOT yet trimming-safe.** The pipeline currently uses `Results.Json(object?)` for response bodies, which relies on runtime reflection. Full trimming safety requires migrating response serialization to `JsonTypeInfo<T>`-based writes. This is tracked as future work.
 
 **Key architectural constraint:** Roslyn Source Generators cannot see each other's `RegisterSourceOutput` output in the same compilation round. Therefore, CrestCreates generators must NOT emit `[JsonSerializable]` partial classes expecting the STJ source generator to process them. The application owns the `JsonSerializerContext` as a regular source file, and CrestCreates accesses `JsonTypeInfo<T>` from it at runtime.
 
-### 16.3 Known AOT Debt
+### 16.4 Trimming Fixture
 
-- **Response serialization**: Uses `JsonSerializer.Serialize<object?>` — not `JsonTypeInfo<T>`-based. Requires migration to AOT-safe response writing.
+The `CrestCreates.CapabilityEndpoint.TrimmingFixture` test project validates real STJ Source Generator integration with the CrestCreates CodeGenerator in the same compilation round. It is **not** a full NativeAOT binary acceptance test — it validates:
+
+1. Build succeeds with both generators active
+2. STJ produces `JsonTypeInfo` for body types declared in the application's `JsonSerializerContext`
+3. Real POST request body binding exercises the full chain: `JsonTypeInfoResolver → ReadCompatibilityBodyAsync → JsonSerializer.DeserializeAsync(JsonTypeInfo<T>)`
+4. HTTP endpoints return correct responses
+
+Future validation: `dotnet publish -p:PublishTrimmed=true -p:TrimMode=full` with IL2026/IL2070/IL2072/IL2075/IL3050/SYSLIB1034 as errors.
+
+### 16.5 Known Trimming Debt
+
+- **Response serialization**: Uses `Results.Json(object?)` — not `JsonTypeInfo<T>`-based. Requires migration to trimming-safe response writing.
+- **CRUD body binding**: Uses `DynamicApiGeneratedRuntime.ReadBodyAsync<T>` — reflection-based. Requires separate design for generated DTO type visibility.
 - **`CompatibilityBodyReader`** and **`CapabilityEndpointJsonRuntime`**: Marked `[Obsolete]` — replaced by `CapabilityEndpointBodyReader`. Still present for backward compatibility.
 - **`DynamicApiGeneratedRuntime.ReadBodyAsync`**: Marked `[Obsolete]` — replaced by `CapabilityEndpointBodyReader`. Legacy `DynamicApiAotSourceGenerator` still uses it (out of CEP015 scope).
 
-### 16.4 Source Generator Pipeline
+### 16.6 Source Generator Pipeline
 
 1. `AppServiceCompatibilityGenerator` — `IIncrementalGenerator`, detects `[CapabilityCompatibilityProjection]` attributes
 2. `CapabilityEndpointGenerator` — `IIncrementalGenerator`, detects `[CapabilityEndpointSpec]` attributes
@@ -988,11 +1024,11 @@ Implementation requires:
 
 Analogous to MCP but for Agent-invoked capabilities. Requires agent tool specification format and agent runtime bridge.
 
-### 20.3 AOT Response Serialization
+### 20.3 Trimming-Safe Response Serialization
 
-Input body binding is now AOT-safe via `CapabilityEndpointBodyReader` + application-owned `JsonSerializerContext`. Response serialization still uses `Results.Json(object?)` (runtime reflection). Full AOT safety requires migrating response serialization to `JsonTypeInfo<T>`-based writes, which requires the pipeline to carry type information through to the response mapper.
+Input body binding is now trimming-safe via `CapabilityEndpointBodyReader` + application-owned `JsonSerializerContext`. Response serialization still uses `Results.Json(object?)` (runtime reflection). Full trimming safety requires migrating response serialization to `JsonTypeInfo<T>`-based writes, which requires the pipeline to carry type information through to the response mapper.
 
-**CRUD generator body binding is NOT AOT-safe.** Generated CRUD DTO types (`CreateBookDto`, `UpdateBookDto`, `BookListRequestDto`) are produced by the same source generator in the same compilation round, making them invisible to the application's `[JsonSerializable]`-decorated `JsonSerializerContext`. Roslyn source generators cannot see each other's `RegisterSourceOutput` output. CRUD endpoints continue using the legacy `DynamicApiGeneratedRuntime.ReadBodyAsync<T>` path (reflection-based). A separate design (BuildTask pre-generation, upstream DTO project, or CrestCreates-owned TypeInfo generation) is required. This is tracked as future work — do not claim CRUD as AOT-safe.
+**CRUD generator body binding is NOT trimming-safe.** Generated CRUD DTO types (`CreateBookDto`, `UpdateBookDto`, `BookListRequestDto`) are produced by the same source generator in the same compilation round, making them invisible to the application's `[JsonSerializable]`-decorated `JsonSerializerContext`. Roslyn source generators cannot see each other's `RegisterSourceOutput` output. CRUD endpoints continue using the legacy `DynamicApiGeneratedRuntime.ReadBodyAsync<T>` path (reflection-based). A separate design (BuildTask pre-generation, upstream DTO project, or CrestCreates-owned TypeInfo generation) is required. This is tracked as future work — do not claim CRUD as trimming-safe.
 
 ### 20.4 Compatibility Projection Sunset
 

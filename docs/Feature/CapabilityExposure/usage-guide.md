@@ -273,8 +273,8 @@ These are implemented by:
 - `CompatibilityHttpResultMapper.WrapResult<T>()` — non-void, non-GET-null
 - `CompatibilityHttpResultMapper.WrapVoidResult()` — void return
 - `CompatibilityHttpResultMapper.WrapGetResult<T>()` — GET with null check
-- `CapabilityEndpointBodyReader.ReadNativeBodyAsync<T>()` — AOT-safe body reading for native capability endpoints. Empty body → 400 BAD_REQUEST. No `emptyBodyFactory` parameter.
-- `CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync<T>()` — AOT-safe body reading for compatibility projection endpoints. Preserves legacy `CompatibilityBodyReader` semantics: empty body + optional → default, empty body + required → `emptyBodyFactory()`, invalid JSON + optional → default, invalid JSON + required → exception.
+- `CapabilityEndpointBodyReader.ReadNativeBodyAsync<T>()` — Trimming-safe body reading for native capability endpoints. Empty body → 400 BAD_REQUEST. No `emptyBodyFactory` parameter.
+- `CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync<T>()` — Trimming-safe body reading for compatibility projection endpoints. Preserves legacy `CompatibilityBodyReader` semantics: empty/whitespace/null body + optional → default, empty/whitespace/null body + required → `emptyBodyFactory()`, invalid JSON + optional → default, invalid JSON + required → exception.
 
 ### Pipeline Failure Responses
 
@@ -409,3 +409,31 @@ Follow these steps to migrate an existing `[CrestService]` AppService from legac
     // app.MapCrestDynamicApi();  ← remove when no longer needed
     ```
     The legacy mapping can be removed once no `[CrestService]` without `[CapabilityCompatibilityProjection]` remains in the application.
+
+---
+
+## 15. Deployment Guarantee
+
+### Current Phase 8 Guarantee
+
+```text
+Phase 8 deployment target:
+- JIT runtime
+- PublishTrimmed support
+- Trimming-safe generated HTTP input binding
+- No unexpected runtime reflection in the new mainline
+- NativeAOT-ready architecture where practical
+- NativeAOT publish is future validation, not current acceptance gate
+```
+
+### Trimming-Safe Input Binding Status
+
+| Generator | Input Binding | Status |
+|---|---|---|
+| CapabilityEndpoint (8a) | `ReadNativeBodyAsync<T>` + `JsonTypeInfo<T>` from application options | ✅ Trimming-safe |
+| AppServiceCompatibility (8d) | `ReadCompatibilityBodyAsync<T>` + `JsonTypeInfo<T>` from application options | ✅ Trimming-safe |
+| CrudService | `DynamicApiGeneratedRuntime.ReadBodyAsync<T>` (reflection-based) | ❌ Unresolved |
+
+### Future Target
+
+Full NativeAOT support after EF Core NativeAOT stabilizes. Response serialization and generated CRUD JSON contracts must also be completed before NativeAOT can become an acceptance gate.

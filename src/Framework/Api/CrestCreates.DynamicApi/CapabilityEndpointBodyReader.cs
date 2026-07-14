@@ -151,6 +151,25 @@ public static class CapabilityEndpointBodyReader
         if (context.Request.Body.CanSeek)
             context.Request.Body.Seek(0, SeekOrigin.Begin);
 
+        // Check for whitespace body (legacy CompatibilityBodyReader treated
+        // whitespace-only body the same as empty body)
+        using var peekReader = new StreamReader(context.Request.Body, Encoding.UTF8,
+            detectEncodingFromByteOrderMarks: true, leaveOpen: true);
+        var peekBuffer = new char[1];
+        var bytesRead = await peekReader.ReadAsync(peekBuffer.AsMemory(0, 1), ct);
+        if (bytesRead == 0 || char.IsWhiteSpace(peekBuffer[0]))
+        {
+            // Rewind for potential re-reading
+            if (context.Request.Body.CanSeek)
+                context.Request.Body.Seek(0, SeekOrigin.Begin);
+
+            return optional ? default : emptyBodyFactory();
+        }
+
+        // Rewind and deserialize
+        if (context.Request.Body.CanSeek)
+            context.Request.Body.Seek(0, SeekOrigin.Begin);
+
         try
         {
             var result = await JsonSerializer.DeserializeAsync(

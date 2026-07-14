@@ -8,6 +8,8 @@
     <IsTestProject>true</IsTestProject>
     <!-- Enable source generator output for inspection -->
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <!-- Trimming validation: treat IL-link warnings as errors for new mainline code -->
+    <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL3050;SYSLIB1034</WarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,7 +1,7 @@
 using System.Net;
 using System.Reflection;
 using System.Text.Json;
-using CrestCreates.CapabilityEndpoint.AotFixture;
+using CrestCreates.CapabilityEndpoint.TrimmingFixture;
 using CrestCreates.DynamicApi;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
@@ -10,13 +10,13 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 using FluentAssertions;
 
-namespace CrestCreates.CapabilityEndpoint.AotFixture.Tests;
+namespace CrestCreates.CapabilityEndpoint.TrimmingFixture.Tests;
 
-public class AotFixtureTests : IClassFixture<AotFixtureTestFactory>
+public class TrimmingFixtureTests : IClassFixture<TrimmingFixtureTestFactory>
 {
     private readonly HttpClient _client;
 
-    public AotFixtureTests(AotFixtureTestFactory factory)
+    public TrimmingFixtureTests(TrimmingFixtureTestFactory factory)
     {
         _client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
     }
@@ -65,7 +65,7 @@ public class AotFixtureTests : IClassFixture<AotFixtureTestFactory>
     }
 }
 
-public class AotFixtureTestFactory : WebApplicationFactory<Program>
+public class TrimmingFixtureTestFactory : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
