@@ -8,6 +8,14 @@
   <ItemGroup>
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
     <ProjectReference Include="../../../Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj" />
+    <!--
+      KNOWN LAYERING COMPROMISE: DraftContracts references the concrete CrestCreates.DescriptorDraft
+      assembly because the generated Projection source code (from CodeGenerator) needs concrete payload
+      types to materialize projection mappings. The ControlPlane.Abstractions assembly references
+      DraftContracts, so DescriptorDraft concrete types are transitively available.
+      IMPORTANT: ControlPlane.Abstractions must NOT expose these concrete types in its public API surface.
+      This is enforced by the boundary test ControlPlaneAbstractionsPublicApiGuardTests.
+    -->
     <ProjectReference Include="../../../Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
     <ProjectReference Include="../../Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
     <ProjectReference Include="../../Workflow/CrestCreates.Workflow.Abstractions/CrestCreates.Workflow.Abstractions.csproj" />
