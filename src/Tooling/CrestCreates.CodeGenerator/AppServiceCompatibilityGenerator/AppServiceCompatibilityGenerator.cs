@@ -599,11 +599,9 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
             return false;
 
         // Reject types that still contain type parameters (open generics)
-        // e.g., MyGeneric<T> where T is still a type parameter
-        // IsUnboundGenericType catches List<> (no type args), but closed types like List<BookDto>
-        // are fine. We need to check if any type argument is still a type parameter.
-        if (named.TypeArguments.Any(ta => ta.TypeKind == TypeKind.TypeParameter || 
-            (ta is INamedTypeSymbol nestedNamed && nestedNamed.TypeArguments.Any(n => n.TypeKind == TypeKind.TypeParameter))))
+        // e.g., MyGeneric<T> where T is still a type parameter.
+        // Uses recursive check to handle nested open generics like Wrapper<Outer<List<T>>>.
+        if (ContainsTypeParameter(named))
             return false;
 
         // Closed generic types (e.g., List<BookDto>) are allowed —
@@ -613,6 +611,23 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
         return named.InstanceConstructors.Any(c =>
             c.Parameters.IsEmpty &&
             c.DeclaredAccessibility == Accessibility.Public);
+    }
+
+    /// <summary>
+    /// Recursively checks whether a type symbol contains any type parameters
+    /// (i.e., is an open generic type). Handles nested generics like
+    /// Wrapper&lt;Outer&lt;List&lt;T&gt;&gt;&gt; by recursing through type arguments
+    /// and array element types.
+    /// </summary>
+    private static bool ContainsTypeParameter(ITypeSymbol type)
+    {
+        return type switch
+        {
+            ITypeParameterSymbol => true,
+            IArrayTypeSymbol array => ContainsTypeParameter(array.ElementType),
+            INamedTypeSymbol named => named.TypeArguments.Any(ContainsTypeParameter),
+            _ => false
+        };
     }
 
     private static string? GetNamedArgValue(AttributeData? attr, string name)

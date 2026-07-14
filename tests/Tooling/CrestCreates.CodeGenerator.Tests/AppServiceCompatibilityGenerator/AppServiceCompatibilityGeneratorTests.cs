@@ -1430,6 +1430,8 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         result.Diagnostics.Should().NotContain(d => d.Id == "CEP037",
             "CEP037 should not be emitted for closed generic body type (List<BookDto>)");
+        result.CompilationSuccess.Should().BeTrue(
+            "closed generic body type should produce compilable generated code");
     }
 
     [Fact]
@@ -1466,6 +1468,8 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         result.Diagnostics.Should().NotContain(d => d.Id == "CEP037",
             "CEP037 should not be emitted for closed generic DTO body type (CreateRequest<BookDto>)");
+        result.CompilationSuccess.Should().BeTrue(
+            "closed generic DTO body type should produce compilable generated code");
     }
 
     [Fact]
@@ -1536,6 +1540,44 @@ public sealed class AppServiceCompatibilityGeneratorTests
         result.GeneratedSources.Should().NotContain(x =>
             x.SourceText.Contains("ReadBodyAsync<IBookRequest>"),
             "CEP037 actions should not generate ReadBodyAsync calls");
+    }
+
+    [Fact]
+    public void ServiceLevelFailClosed_ErrorDiagnosticSkipsEntireService()
+    {
+        // When a service has one method with CEP037 (Error-level) and one valid method,
+        // the entire service's code generation should be skipped (fail-closed).
+        // This freezes the current behavior: service-level fail-closed, not per-action.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> GetAsync(string name, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(name);
+
+                public System.Threading.Tasks.Task<string> AddAsync(AbstractRequest input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("ok");
+            }
+
+            public abstract class AbstractRequest { }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP037",
+            "CEP037 should fire for the abstract body type method");
+        // Service-level fail-closed: no generated code for the entire service
+        result.GeneratedSources.Should().NotContain(x =>
+            x.SourceText.Contains("BookAppService") ||
+            x.SourceText.Contains("GetAsync") ||
+            x.SourceText.Contains("AddAsync"),
+            "entire service should be skipped when any Error diagnostic exists");
     }
 
     [Fact]
