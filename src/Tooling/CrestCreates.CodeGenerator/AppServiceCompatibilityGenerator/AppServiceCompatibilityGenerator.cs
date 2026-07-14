@@ -93,13 +93,14 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
 
         var diagnostics = new List<DiagnosticDescriptorAndLocation>();
 
-        // Validate CEP031 — DynamicApiIgnore conflict (check on implementation methods)
+        // Validate CEP031 — DynamicApiIgnore conflict (check both contract and implementation methods)
         foreach (var contractMethod in methodsWithProjection)
         {
             var implMethod = symbol.FindImplementationForInterfaceMember(contractMethod) as IMethodSymbol ?? contractMethod;
-            if (implMethod.GetAttributes().Any(a => a.AttributeClass?.Name == "DynamicApiIgnoreAttribute"))
+                    if (HasAttributeOnContractOrImplementation(contractMethod, implMethod, symbol, "DynamicApiIgnoreAttribute"))
             {
-                var syntaxRef = implMethod.DeclaringSyntaxReferences.FirstOrDefault();
+                var syntaxRef = (contractMethod.DeclaringSyntaxReferences.FirstOrDefault()
+                    ?? implMethod.DeclaringSyntaxReferences.FirstOrDefault());
                 var location = syntaxRef?.GetSyntax().GetLocation() ?? Location.None;
                 diagnostics.Add(new DiagnosticDescriptorAndLocation(
                     AppServiceCompatibilityDiagnostics.CEP031, location,
@@ -180,29 +181,34 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
                 if (implMethod.DeclaredAccessibility != Accessibility.Public) continue;
                 if (implMethod.IsStatic) continue;
 
-                // For class-level projection: check ignore attributes on implementation
+                // For class-level projection: check ignore attributes on both contract and implementation
                 if (classProjectionAttr != null)
                 {
-                    if (implMethod.GetAttributes().Any(a => a.AttributeClass?.Name == "CapabilityCompatibilityIgnoreAttribute"))
+                    if (HasAttributeOnContractOrImplementation(contractMethod, implMethod, symbol, "CapabilityCompatibilityIgnoreAttribute"))
                         continue;
-                    if (implMethod.GetAttributes().Any(a => a.AttributeClass?.Name == "DynamicApiIgnoreAttribute"))
+            if (HasAttributeOnContractOrImplementation(contractMethod, implMethod, symbol, "DynamicApiIgnoreAttribute"))
                         continue;
                 }
                 else
                 {
                     // For method-level projection: only include methods with [CapabilityCompatibilityProjection]
                     // Check both contract method and implementation method (P0-2 fix)
-                    var methodAttr = contractMethod.GetAttributes()
-                        .FirstOrDefault(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute")
-                        ?? implMethod.GetAttributes()
-                            .FirstOrDefault(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute");
-
-                    if (methodAttr == null)
+                    if (!HasAttributeOnContractOrImplementation(contractMethod, implMethod, symbol, "CapabilityCompatibilityProjectionAttribute"))
                         continue;
+                }
 
-                    // CEP036: method-level CapabilityIdPrefix/RoutePrefix override is not supported
-                    var methodCapabilityIdPrefix = GetNamedArgValue(methodAttr, "CapabilityIdPrefix");
-                    var methodRoutePrefix = GetNamedArgValue(methodAttr, "RoutePrefix");
+                // CEP036: method-level CapabilityIdPrefix/RoutePrefix override is not supported.
+                // Check ALL method-level projection attributes (both pure method-level opt-in
+                // and redundant method-level attributes on class-projected services).
+                var methodProjectionAttr = contractMethod.GetAttributes()
+                    .FirstOrDefault(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute")
+                    ?? implMethod.GetAttributes()
+                        .FirstOrDefault(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute");
+
+                if (methodProjectionAttr is not null)
+                {
+                    var methodCapabilityIdPrefix = GetNamedArgValue(methodProjectionAttr, "CapabilityIdPrefix");
+                    var methodRoutePrefix = GetNamedArgValue(methodProjectionAttr, "RoutePrefix");
                     if (methodCapabilityIdPrefix is not null)
                     {
                         var syntaxRef = (contractMethod.DeclaringSyntaxReferences.FirstOrDefault()
@@ -379,6 +385,24 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
                         ? namedReturn.TypeArguments[0].ToDisplayString(FullyQualifiedFormat)
                         : returnType.ToDisplayString(FullyQualifiedFormat);
 
+                // CEP037: Body parameter type must satisfy new() constraint for CompatibilityBodyReader.ReadBodyAsync<T>
+                var bodyParamModel = paramModels.FirstOrDefault(p => p.Source == "Body");
+                if (bodyParamModel is not null)
+                {
+                    var bodyTypeSymbol = implMethod.Parameters
+                        .FirstOrDefault(p => p.Type.ToDisplayString(FullyQualifiedFormat) == bodyParamModel.TypeName
+                            || p.Name == bodyParamModel.Name)?.Type;
+
+                    if (bodyTypeSymbol is INamedTypeSymbol bodyNamedType && !SatisfiesNewConstraint(bodyNamedType))
+                    {
+                        var syntaxRef = method.DeclaringSyntaxReferences.FirstOrDefault();
+                        var location = syntaxRef?.GetSyntax().GetLocation() ?? Location.None;
+                        diagnostics.Add(new DiagnosticDescriptorAndLocation(
+                            AppServiceCompatibilityDiagnostics.CEP037, location,
+                            new object?[] { implMethod.Name, bodyParamModel.TypeName }));
+                    }
+                }
+
                 actions.Add(new CompatibilityActionModel(
                     ActionName: methodStripped,
                     HttpMethod: httpMethod,
@@ -489,6 +513,83 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
             var resultContractsSource = AppServiceCompatibilityResultContractEmitter.Emit(service);
             spc.AddSource($"GeneratedAppServiceCompatibilityResultContracts_{service.SanitizedIdentifier}.g.cs", resultContractsSource);
         }
+    }
+
+    /// <summary>
+    /// Checks whether an attribute with the given name exists on the method,
+    /// considering both the contract (interface) method and the implementation (class) method.
+    /// C# does not propagate interface method attributes to implementing class methods,
+    /// so both must be checked explicitly.
+    /// When the method being processed is a class method (contractType == serviceType),
+    /// this also searches all interfaces of the service type for matching interface methods
+    /// and checks their attributes.
+    /// </summary>
+    private static bool HasAttributeOnContractOrImplementation(
+        IMethodSymbol contractMethod,
+        IMethodSymbol implementationMethod,
+        INamedTypeSymbol serviceType,
+        string attributeName)
+    {
+        // Check the method we're currently iterating (could be interface or class method)
+        if (contractMethod.GetAttributes().Any(a => a.AttributeClass?.Name == attributeName))
+            return true;
+        if (implementationMethod.GetAttributes().Any(a => a.AttributeClass?.Name == attributeName))
+            return true;
+
+        // When processing a class method directly (contractType == serviceType),
+        // the interface method attributes won't be on the class method.
+        // Search all interfaces for matching methods.
+        if (SymbolEqualityComparer.Default.Equals(contractMethod.ContainingType, serviceType))
+        {
+            foreach (var iface in serviceType.AllInterfaces)
+            {
+                foreach (var ifaceMethod in iface.GetMembers().OfType<IMethodSymbol>())
+                {
+                    if (ifaceMethod.Name == contractMethod.Name &&
+                        ifaceMethod.Parameters.Length == contractMethod.Parameters.Length)
+                    {
+                        // Rough signature match — check parameter types
+                        bool paramsMatch = true;
+                        for (int i = 0; i < ifaceMethod.Parameters.Length; i++)
+                        {
+                            if (!SymbolEqualityComparer.Default.Equals(ifaceMethod.Parameters[i].Type, contractMethod.Parameters[i].Type))
+                            {
+                                paramsMatch = false;
+                                break;
+                            }
+                        }
+                        if (paramsMatch && ifaceMethod.GetAttributes().Any(a => a.AttributeClass?.Name == attributeName))
+                            return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether a type satisfies the new() constraint required by
+    /// CompatibilityBodyReader.ReadBodyAsync&lt;T&gt;: non-abstract, non-interface,
+    /// non-open-generic, and has an accessible parameterless constructor.
+    /// </summary>
+    private static bool SatisfiesNewConstraint(INamedTypeSymbol type)
+    {
+        if (type.IsAbstract || type.IsStatic || type.TypeKind == TypeKind.Interface)
+            return false;
+
+        if (type.IsUnboundGenericType || type.IsGenericType)
+            return false;
+
+        // Records with primary constructors have no implicit parameterless constructor
+        // unless they explicitly define one. Check for any parameterless instance constructor.
+        if (type.TypeKind == TypeKind.Struct || type.TypeKind == TypeKind.Structure)
+            return true; // structs always satisfy new()
+
+        // For classes and records, check for parameterless constructor
+        return type.InstanceConstructors.Any(c =>
+            c.Parameters.IsEmpty &&
+            c.DeclaredAccessibility == Accessibility.Public);
     }
 
     private static string? GetNamedArgValue(AttributeData? attr, string name)

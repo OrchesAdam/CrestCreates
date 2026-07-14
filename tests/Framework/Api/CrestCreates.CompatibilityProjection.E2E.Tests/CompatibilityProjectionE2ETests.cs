@@ -193,7 +193,7 @@ public class CompatibilityProjectionE2ETests : IClassFixture<CompatibilityProjec
     }
 
     [Fact]
-    public async Task PipelineMiddleware_IsExecuted()
+    public async Task PipelineMiddleware_IsExecuted_WithHttpInvocationSource()
     {
         // Arrange — reset marker before test
         TestMarkerMiddleware.Reset();
@@ -201,10 +201,12 @@ public class CompatibilityProjectionE2ETests : IClassFixture<CompatibilityProjec
         // Act
         var response = await _client.GetAsync("/api/greeting/list-greetings");
 
-        // Assert — middleware was executed
+        // Assert — middleware was executed with InvocationSource.Http
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         TestMarkerMiddleware.LastInvocationSeen.Should().BeTrue(
             "TestMarkerMiddleware should be executed in the pipeline");
+        TestMarkerMiddleware.LastInvocationSource.Should().Be(InvocationSource.Http,
+            "HTTP request must set InvocationSource.Http on the capability execution context");
     }
 }
 

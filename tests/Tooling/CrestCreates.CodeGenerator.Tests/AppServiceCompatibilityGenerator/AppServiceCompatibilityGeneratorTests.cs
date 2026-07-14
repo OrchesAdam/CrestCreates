@@ -382,12 +382,8 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         foreach (var generated in result.GeneratedSources)
         {
-            // Result contracts reference CompatibilityHttpResultMapper for
-            // WrapResult / WrapVoidResult / WrapGetResult envelope wrapping.
-            // This is the neutral class, not the legacy DynamicApiGeneratedRuntime.
-            if (generated.FileName.Contains("ResultContracts"))
-                continue;
-
+            // All generated code must reference only the neutral CompatibilityHttpResultMapper
+            // and CompatibilityBodyReader, never the legacy DynamicApiGeneratedRuntime.
             generated.SourceText.Should().NotContain("DynamicApiGeneratedRuntime");
             generated.SourceText.Should().NotContain("DynamicApiGeneratedRegistryStore");
             generated.SourceText.Should().NotContain("IDynamicApiGeneratedProvider");
@@ -1175,6 +1171,225 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         result.Diagnostics.Should().NotContain(d => d.Id == "CEP036",
             "CEP036 should not be emitted for class-level CapabilityIdPrefix/RoutePrefix");
+    }
+
+    [Fact]
+    public void CEP036_ClassAndMethodLevel_Coexist_EmitsWarning()
+    {
+        // When class-level projection exists and a method also has [CapabilityCompatibilityProjection]
+        // with RoutePrefix/CapabilityIdPrefix, CEP036 should still fire.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                [CapabilityCompatibilityProjection(RoutePrefix = "v2/books")]
+                public System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources:BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP036"
+            && d.GetMessage().Contains("RoutePrefix"),
+            "CEP036 should fire even when class-level projection also exists");
+    }
+
+    [Fact]
+    public void ClassProjection_InterfaceCapabilityCompatibilityIgnore_SkipsMethod()
+    {
+        // [CapabilityCompatibilityIgnore] on an interface method should be respected
+        // by the compatibility generator, even when the implementation method has no attribute.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            public interface IBookAppService
+            {
+                [CapabilityCompatibilityIgnore]
+                System.Threading.Tasks.Task<string> InternalSyncAsync(System.Threading.CancellationToken ct);
+            }
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService : IBookAppService
+            {
+                public System.Threading.Tasks.Task<string> InternalSyncAsync(System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("sync");
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.CompilationSuccess.Should().BeTrue();
+        // InternalSyncAsync should NOT appear in generated code
+        foreach (var generated in result.GeneratedSources)
+        {
+            generated.SourceText.Should().NotContain("InternalSync",
+                "Interface [CapabilityCompatibilityIgnore] should suppress generation");
+        }
+    }
+
+    [Fact]
+    public void ClassProjection_InterfaceDynamicApiIgnore_SkipsMethod()
+    {
+        // [DynamicApiIgnore] on an interface method should be respected
+        // by the compatibility generator, even when the implementation method has no attribute.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            public interface IBookAppService
+            {
+                [DynamicApiIgnore]
+                System.Threading.Tasks.Task<string> RebuildIndexAsync(System.Threading.CancellationToken ct);
+            }
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService : IBookAppService
+            {
+                public System.Threading.Tasks.Task<string> RebuildIndexAsync(System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("rebuilt");
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.CompilationSuccess.Should().BeTrue();
+        foreach (var generated in result.GeneratedSources)
+        {
+            generated.SourceText.Should().NotContain("RebuildIndex",
+                "Interface [DynamicApiIgnore] should suppress generation");
+        }
+    }
+
+    [Fact]
+    public void CEP031_InterfaceProjectionWithDynamicApiIgnore_ReportsConflict()
+    {
+        // When a method has both [CapabilityCompatibilityProjection] and [DynamicApiIgnore]
+        // on the interface, CEP031 should be reported.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            public interface IBookAppService
+            {
+                [CapabilityCompatibilityProjection]
+                [DynamicApiIgnore]
+                System.Threading.Tasks.Task<string> ConflictedAsync(System.Threading.CancellationToken ct);
+            }
+
+            [CrestService]
+            public class BookAppService : IBookAppService
+            {
+                public System.Threading.Tasks.Task<string> ConflictedAsync(System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("conflict");
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP031",
+            "CEP031 should fire when interface method has both [CapabilityCompatibilityProjection] and [DynamicApiIgnore]");
+    }
+
+    [Fact]
+    public void CEP037_RecordWithPrimaryConstructor_ReportsError()
+    {
+        // Records with primary constructors have no implicit parameterless constructor,
+        // so they don't satisfy the new() constraint required by CompatibilityBodyReader.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(CreateBookRequest input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input.Title);
+            }
+
+            public sealed record CreateBookRequest(string Title);
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP037"
+            && d.GetMessage().Contains("CreateBookRequest"),
+            "CEP037 should fire for record with primary constructor (no parameterless ctor)");
+    }
+
+    [Fact]
+    public void CEP037_AbstractBodyType_ReportsError()
+    {
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(AbstractRequest input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("ok");
+            }
+
+            public abstract class AbstractRequest { }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP037"
+            && d.GetMessage().Contains("AbstractRequest"),
+            "CEP037 should fire for abstract body type");
+    }
+
+    [Fact]
+    public void CEP037_NotEmittedForValidBodyType()
+    {
+        // A class with a parameterless constructor should NOT produce CEP037.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(CreateBookDto input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input.Title);
+            }
+
+            public class CreateBookDto
+            {
+                public string Title { get; set; } = "";
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP037",
+            "CEP037 should not be emitted for body type with parameterless constructor");
     }
 
     [Fact]

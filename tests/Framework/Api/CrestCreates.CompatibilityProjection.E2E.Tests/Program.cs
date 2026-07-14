@@ -61,14 +61,14 @@ app.Run();
 public sealed class TestMarkerMiddleware : ICapabilityPipelineMiddleware
 {
     public static bool LastInvocationSeen { get; set; }
-    public static string? LastInvocationSource { get; set; }
+    public static InvocationSource? LastInvocationSource { get; set; }
 
     public Task<CapabilityExecutionResult> InvokeAsync(
         CapabilityExecutionContext context,
         CapabilityPipelineDelegate next)
     {
         LastInvocationSeen = true;
-        LastInvocationSource = context.Input?.ToString();
+        LastInvocationSource = context.InvocationSource;
         return next(context);
     }
 
