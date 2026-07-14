@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-09 (Phase 8c: Legacy Dynamic API Boundary — complete, 4 review rounds)
+Last Updated: 2026-07-14 (Phase 8d: AppService→Capability Compatibility Projection — complete, 5 review rounds)
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -273,13 +273,106 @@ Status: ✅ Complete
 
 **Boundary test coverage**: assembly reference, project reference, legacy source symbol (DynamicApiEndpointDescriptor/ServiceDescriptor/ActionDescriptor/IDynamicApiGeneratedProvider + ServiceType/ActionName patterns), CapabilityEndpoint mapping (Extensions + DescriptorValidator + CapabilityResolver + Mapper), CapabilityEndpoint emitter, Abstractions type definition.
 
-### Phase 8d — AppService→Capability Compatibility Generator
+### Phase 8d — AppService→Capability Compatibility Projection
 
-Status: Not started.
+Status: ✅ Complete
 
-Expected scope:
-- AppService method → Generated CapabilityDescriptor → Generated CapabilityHandler calling service.Method → CapabilityEndpointDescriptor
-- Unifies runtime on Capability while preserving old developer experience
+**Spec**: `docs/superpowers/specs/2026-07-09-phase-8d-appservice-compatibility-projection-design.md`
+**Plan**: `docs/superpowers/plans/2026-07-09-phase-8d-appservice-compatibility-projection.md`
+**Issue**: #22 (comments from #4921433901 onward reflect current design)
+
+Core concept: Let existing `[CrestService]` AppService methods opt-in to run on the Capability Pipeline while preserving external HTTP contract. One-way migration bridge: AppService → Capability, not reverse.
+
+**Attributes**:
+- `[CapabilityCompatibilityProjection]` — class or method level opt-in (namespace: `CrestCreates.Domain.Shared.Attributes`)
+- `[CapabilityCompatibilityIgnore]` — method level exclusion from projection
+- `[DynamicApiIgnore]` — method level exclusion from legacy Dynamic API (existing, now also checked by compatibility generator)
+
+**Capability ID namespace**: `compat.appservice.{kebab-case-stripped-service-name}` prefix isolates from native capabilities. Default prefix derived from service name (stripped AppService/Service suffix).
+
+**SG outputs** (AppServiceCompatibilityGenerator, 5 files per service):
+1. `GeneratedAppServiceCompatibilityCapabilities_{Name}.g.cs` — `IDescriptorProvider<CapabilityDescriptor>` with one CapabilityDescriptor per action, `ProjectionKind = AppServiceCompatibility`
+2. `GeneratedAppServiceCompatibilityEndpoints_{Name}.g.cs` — `IDescriptorProvider<CapabilityEndpointDescriptor>` with endpoint descriptors + AoT-safe typed parse helpers
+3. `GeneratedAppServiceCompatibilityBindings_{Name}.g.cs` — `BindInputAsync` delegates registered via ModuleInitializer into `CapabilityEndpointBindingRegistry`
+4. `GeneratedAppServiceCompatibilityInvokers_{Name}.g.cs` — `ICapabilityContextAwareHandlerInvoker` per action, resolving service from DI via `context.ServiceProvider.GetRequiredService`
+5. `GeneratedAppServiceCompatibilityManifest_{Name}.g.cs` — `IAppServiceCompatibilityProjectionManifestProvider` listing all projections
+6. `GeneratedAppServiceCompatibilityResultContracts_{Name}.g.cs` — `[ModuleInitializer]`-registered `CapabilityEndpointResultContractRegistration.Register()` calls per endpoint
+
+**Runtime components**:
+- `ICapabilityEndpointResultContractRegistry` + `CapabilityEndpointResultContractRegistry` — per-endpoint result mapping registry keyed by `(EndpointId, Version)`, storing `Func<CapabilityExecutionResult, IResult>`. Compatibility endpoints register legacy `DynamicApiResponse` envelope semantics; native endpoints use default `CapabilityEndpointResultMapper.Map()` unchanged.
+- `CapabilityEndpointResultContractRegistration` — deferred registration pattern (static Register + ApplyTo), matching `CapabilityEndpointBindingRegistry` pattern.
+- `EndpointExecutionContext` — result contract context in `CrestCreates.DynamicApi` namespace (no Capability dependency).
+- `CompatibilityHttpResultMapper` — neutral response envelope helper in `CrestCreates.DynamicApi`. Both legacy `DynamicApiGeneratedRuntime` and compatibility generated code call it for WrapResult/WrapGetResult/WrapVoidResult. Decouples compatibility generated code from legacy runtime.
+- `CompatibilityBodyReader` — legacy-compatible body reading for compatibility projections. Matches legacy `DynamicApiGeneratedRuntime.ReadBodyAsync` semantics: ContentLength==0 → optional?default:new T(), empty/whitespace → optional?default:new T(), invalid JSON+optional → default, invalid JSON+required → JsonException. `where T : new()` constraint.
+- `AppServiceCompatibilityProjectionManifestRegistry` — static registry for manifest entries, ModuleInitializer registration.
+- `AddCrestCompatibilityProjection()` — DI extension method.
+
+**HTTP contract preservation** (P0-1, the core promise):
+- `CapabilityEndpointMapper.MapResult` checks `!result.IsSuccess` FIRST — pipeline failures always use unified `CapabilityEndpointResultMapper.Map()`, never custom result contracts. Prevents compatibility projections from swallowing authorization/validation/rate-limit failures as 200 OK.
+- Success responses: custom result contracts reproduce legacy `DynamicApiResponse` envelope (200+value, 200+void, 404+null for GET).
+- Wrapper selection: `WrapVoidResult()` for void, `WrapGetResult(ctx.Output)` for GET non-void, `WrapResult(ctx.Output)` for other non-void.
+
+**Symbol unification** (P0-2):
+- Both `DynamicApiAotSourceGenerator` (legacy) and `AppServiceCompatibilityGenerator` (8d) check BOTH contract interface methods AND implementation methods for `[CapabilityCompatibilityProjection]`/`[CapabilityCompatibilityIgnore]`/`[DynamicApiIgnore]`.
+- `HasAttributeOnContractOrImplementation` uses `FindImplementationForInterfaceMember` reverse lookup for exact symbol matching — avoids approximate signature matching that could mis-identify overloaded methods with different RefKind or generic arity.
+- `EnumerateContractTypes` yields `serviceType` (class) before interfaces; C# does not propagate interface method attributes to implementing class methods, so the helper must explicitly search `serviceType.AllInterfaces`.
+
+**No-param method handling** (P0-3):
+- Envelope filter uses `a.EnvelopeTypeName is not null` (not `!a.IsSingleParam`). No-param methods return null from binding method, no empty class declaration.
+
+**Fail-closed generation**:
+- CEP037 actions are skipped (`continue`) from the actions list — no `ReadBodyAsync<T>` call emitted.
+- `GenerateAll` skips ALL code generation for services with any Error-level diagnostic (CEP030/031/034/037) — service-level fail-closed, not per-action.
+- `ServiceLevelFailClosed_ErrorDiagnosticSkipsEntireService` test freezes this behavior.
+
+**Diagnostics**:
+- CEP030: Class-level projection + class-level ignore conflict (Error)
+- CEP031: Method-level projection + method-level ignore conflict (Error)
+- CEP034: Method overload collision on CapabilityId/EndpointId (Error, fail-closed: returns empty actions model)
+- CEP035: Default route prefix warning (Warning)
+- CEP036: Method-level CapabilityIdPrefix/RoutePrefix on projection attribute (Warning)
+- CEP037: Body parameter type does not satisfy `new()` constraint (Error) — rejects abstract, interface, array, open generic types; allows closed generic types with public parameterless constructors. Recursive `ContainsTypeParameter` helper for nested open generics.
+
+**CapabilityDescriptor changes**:
+- `ProjectionKind` property (DefinitionOnly in canonical hash, Order=100) — governance/origin metadata, not runtime contract.
+- `CapabilityProjectionKind` enum: Native (0), AppServiceCompatibility (1)
+- `DefinitionShapeVersion` bumped to v2 (ProjectionKind changed hash shape).
+
+**DynamicApiConventionAnalyzer extraction**:
+- 8 methods + 8 model types moved from private (in `DynamicApiAotSourceGenerator`) to internal static (in `DynamicApiConventionAnalyzer`) — shared convention derivation logic between legacy and 8d generators.
+
+**DI unification** (P1-2):
+- `AddCapabilityPipeline()` registers both `CapabilityHandlerResolver` concrete and `ICapabilityHandlerResolver` interface from the same static instance via `CapabilityHandlerResolverProvider.GetConcreteResolver()`.
+- `AddCapabilityRuntime()` no longer re-registers.
+- `CapabilityHandlerResolverProvider.SetResolver` is obsolete no-op; additive `Register()` is the new API.
+
+**E2E test project**:
+- `tests/Framework/Api/CrestCreates.CompatibilityProjection.E2E.Tests/` — source-generator-backed WebApplicationFactory E2E.
+- `GreetingAppService` with 4 methods: GreetAsync (query-binding multi-param), GetGreetingAsync (route-binding single-param), ListGreetingsAsync (no-param, tests P0-3), DeleteGreetingAsync (void return).
+- 7 success tests + 2 authorization failure tests (pipeline failure → 403/429, not 200 OK).
+- `TestMarkerMiddleware` records `InvocationSource.Http` for pipeline verification.
+- Added to both `CrestCreates.slnx` and `solutions/CrestCreates.All.slnx`.
+
+**Review iterations** (5 rounds, 20+ findings fixed):
+- Round 1 (external, 3 P0 + 5 P1 + 3 secondary): P0-1 HTTP contract violation (ResultContractRegistry), P0-2 method-level symbol unification, P0-3 no-param envelope CS1001, P1-1 route contract interface fallback, P1-2 DI singleton unification, P1-3 overload CEP034, P1-4 optional body descriptor, P1-5 hash version bump. All fixed.
+- Round 2 (external, 1 P0 + 5 P1 + 1 P2): P0 pipeline failure swallowing (MapResult checks IsSuccess first), P1-3 CompatibilityHttpResultMapper decoupling, P1-5 AddCapabilityPipeline API stability, P1-1 CI integration (slnx), P1-2 E2E middleware, P1-4 CompatibilityBodyReader, P2 CEP036 method-level prefix warning. All fixed.
+- Round 3 (1 P0 + 1 P1 + 3 P2): P0 interface method Ignore attributes not checked (HasAttributeOnContractOrImplementation), P1 CEP037 body new() constraint, P2 CEP036 class+method mix, P2 TestMarkerMiddleware InvocationSource, P2 ResultContracts skip removal. All fixed.
+- Round 4 (2 P1 + 1 P2): P1-1 CEP037 SatisfiesNewConstraint rejects closed generics (fixed: accept ITypeSymbol, allow closed generics, reject arrays/open generics), P1-2 CEP037 reported but action still generated (fail-closed: skip action + service-level skip on Error diagnostics), P2 HasAttributeOnContractOrImplementation approximate signature → FindImplementationForInterfaceMember reverse lookup. All fixed.
+- Round 5 (3 P2): Closed generic tests add CompilationSuccess assertions, open generic detection uses recursive ContainsTypeParameter helper, service-level fail-closed test freezes behavior. All fixed.
+
+**Test counts**: 248 CodeGenerator + 45 DynamicApi + 9 E2E + 34 Boundary = 336 tests, all passing.
+
+**File stats**: 17 modified + 11 new files (6 runtime/abstractions + 1 generator emitter + 4 E2E test project files), +2084/-53 lines (initial commit) + incremental review fixes.
+
+**Key architectural decisions**:
+- Compatibility projection is a one-way bridge: AppService → Capability, not reverse.
+- `compat.appservice.` prefix isolates compatibility capabilities from native namespace.
+- Custom result contracts only govern success responses; pipeline failures always use unified mapper.
+- `CompatibilityHttpResultMapper` decouples generated code from legacy `DynamicApiGeneratedRuntime`.
+- `CompatibilityBodyReader` provides legacy-compatible body reading (empty body → new T(), not BadHttpRequestException).
+- Service-level fail-closed: any Error diagnostic skips entire service code generation.
+- `FindImplementationForInterfaceMember` for exact interface method matching (not approximate signature).
+- `ContainsTypeParameter` recursive helper for open generic detection at any nesting depth.
 
 ### Blob / File Platformization
 
@@ -345,6 +438,7 @@ This thread achieved the following:
  15. Phase 8b Dynamic API Descriptor (Issue #20) — CapabilityEndpointDescriptor as projection metadata over CapabilityDescriptor, with registry, validator (route conflict, null guards, InheritCapability fail-closed), relationship extractor, canonical hash profiles, AoT-safe kind naming, boundary test. 4 review rounds, 15 findings fixed. 37 Web.Tests + 6 Metadata.Tests + 27 Boundary tests.
   16. Phase 8a Capability Endpoint Projection (Issue #19) — Capability→HTTP without AppService, zero DynamicApi bridge. SG produces DescriptorProvider + BindingContract; registry-driven mapping via MapCrestCapabilityEndpoints(); ICapabilityPipeline descriptor overload; DX Layering (Level 0/1/2); 4 review rounds, 30+ findings fixed. 29 SG + 35 DynamicApi + 10 Capability + 33 Boundary tests.
   17. Phase 8c Legacy Dynamic API Boundary (Issue #21) — legacy deprecation labeling + boundary tests + 8a debt fixes. 7 PRs, 30 ACs, 4 review rounds (16 findings total). EndpointId/EndpointVersion/TargetProperty independent properties, CEP013 Error + Dictionary fallback deletion, CEP017-021 diagnostics, DynamicApiSourceGenerator recycled to 99_RecycleBin, legacy test rename with compatibility-only annotations, boundary tests (6 tests covering assembly/project/source/emitter/mapping/Abstractions). 45 SG + 6 Boundary + 22 Legacy Web + 7 Legacy CodeGenerator tests.
+  18. Phase 8d AppService→Capability Compatibility Projection (Issue #22) — opt-in migration bridge from [CrestService] AppService to Capability Pipeline preserving HTTP contract. 5 review rounds, 20+ findings fixed. ResultContractRegistry for HTTP envelope preservation, HasAttributeOnContractOrImplementation for symbol unification, CompatibilityHttpResultMapper decoupling, CompatibilityBodyReader legacy body reading, CEP030-037 diagnostics, service-level fail-closed generation, source-generator-backed E2E tests. 248 CodeGenerator + 45 DynamicApi + 9 E2E + 34 Boundary = 336 tests.
 
 ---
 
@@ -402,6 +496,19 @@ This thread achieved the following:
 - Level 2 sugar attributes require `[CapabilityEndpointSet]` container (CEP016)
 - Level 2 does not read class-level `[CapabilityEndpointInput]` — all inputs from HTTP method attribute Body/Input/route tokens
 - Route token extraction strips constraints/catch-all/optional — aligned with validator behavior
+
+### AppService→Capability Compatibility Projection (Phase 8d)
+
+- One-way migration bridge: AppService → Capability Pipeline, not reverse. Opt-in via `[CapabilityCompatibilityProjection]` on `[CrestService]` classes or methods.
+- `compat.appservice.` prefix isolates compatibility capabilities from native namespace.
+- Custom result contracts only govern success responses; pipeline failures always use unified `CapabilityEndpointResultMapper.Map()` — never swallowed as 200 OK.
+- `CompatibilityHttpResultMapper` is the neutral response envelope helper — both legacy and compatibility generated code call it. Decouples from `DynamicApiGeneratedRuntime`.
+- `CompatibilityBodyReader` provides legacy-compatible body reading (empty body → new T(), not BadHttpRequestException). `where T : new()` constraint enforced by CEP037.
+- Service-level fail-closed: any Error diagnostic (CEP030/031/034/037) skips entire service code generation.
+- `HasAttributeOnContractOrImplementation` uses `FindImplementationForInterfaceMember` for exact symbol matching — C# does not propagate interface method attributes to implementing class methods.
+- `CapabilityDescriptor.ProjectionKind` is DefinitionOnly in canonical hash (Order=100) — governance/origin metadata, not runtime contract.
+- `DynamicApiConventionAnalyzer` is the shared convention derivation layer between legacy and 8d generators.
+- `CapabilityHandlerResolverProvider.SetResolver` is obsolete no-op; additive `Register()` is the new API.
 
 ### Organization Identity Kernel (Phase 5c, 2026-06-11)
 
@@ -1196,6 +1303,6 @@ Status: Completed.
 
 If a future thread should resume from this state, use a prompt like:
 
-> Read `/memory.md` first. Continue from the current CrestCreates platform status. Treat completed items as closed unless you find contradictory code. Focus on unresolved work only. Next phase entry point: Phase 8d (AppService→Capability Compatibility Generator) — generate CapabilityDescriptor + CapabilityHandler from AppService methods, unifying runtime on Capability while preserving old developer experience.
+> Read `/memory.md` first. Continue from the current CrestCreates platform status. Treat completed items as closed unless you find contradictory code. Focus on unresolved work only. Open items: Audit Logging Task 4 governance closure, Localization, Blob/File platformization, Background Jobs / Distributed Event reliability. Phase 8d (AppService→Capability Compatibility Projection) is complete.
 
 ---
