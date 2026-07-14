@@ -30,7 +30,8 @@ public sealed record CapabilityDescriptorDraftPayload(
             Consumes = Descriptor.Consumes.ToArray(),
             SemanticTags = Descriptor.SemanticTags.ToArray(),
             Permissions = Descriptor.Permissions.ToArray(),
-            RiskLevel = Descriptor.RiskLevel
+            RiskLevel = Descriptor.RiskLevel,
+            ProjectionKind = Descriptor.ProjectionKind
         }
     };
 }
