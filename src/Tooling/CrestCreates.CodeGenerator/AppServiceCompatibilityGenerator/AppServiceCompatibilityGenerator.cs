@@ -393,13 +393,14 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
                         .FirstOrDefault(p => p.Type.ToDisplayString(FullyQualifiedFormat) == bodyParamModel.TypeName
                             || p.Name == bodyParamModel.Name)?.Type;
 
-                    if (bodyTypeSymbol is INamedTypeSymbol bodyNamedType && !SatisfiesNewConstraint(bodyNamedType))
+                    if (bodyTypeSymbol is not null && !SatisfiesNewConstraint(bodyTypeSymbol))
                     {
                         var syntaxRef = method.DeclaringSyntaxReferences.FirstOrDefault();
                         var location = syntaxRef?.GetSyntax().GetLocation() ?? Location.None;
                         diagnostics.Add(new DiagnosticDescriptorAndLocation(
                             AppServiceCompatibilityDiagnostics.CEP037, location,
                             new object?[] { implMethod.Name, bodyParamModel.TypeName }));
+                        continue; // Fail-closed: skip action to avoid generating code with CS0310
                     }
                 }
 
@@ -492,6 +493,14 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
                     diag.Descriptor, diag.Location, diag.MessageArgs));
             }
 
+            // Fail-closed: skip code generation for services with error-level diagnostics
+            // (CEP030, CEP031, CEP034, CEP037) to avoid generating code that would
+            // produce additional compiler errors (e.g., CS0310 for new() constraint violation)
+            if (service.Diagnostics.Any(d => d.Descriptor.DefaultSeverity == DiagnosticSeverity.Error))
+            {
+                continue;
+            }
+
             // 1. CapabilityDescriptor provider
             var capabilitySource = AppServiceCompatibilityCapabilityEmitter.Emit(service);
             spc.AddSource($"GeneratedAppServiceCompatibilityCapabilities_{service.SanitizedIdentifier}.g.cs", capabilitySource);
@@ -521,8 +530,8 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
     /// C# does not propagate interface method attributes to implementing class methods,
     /// so both must be checked explicitly.
     /// When the method being processed is a class method (contractType == serviceType),
-    /// this also searches all interfaces of the service type for matching interface methods
-    /// and checks their attributes.
+    /// this uses FindImplementationForInterfaceMember reverse lookup to find the exact
+    /// interface method that the class method implements, avoiding approximate signature matching.
     /// </summary>
     private static bool HasAttributeOnContractOrImplementation(
         IMethodSymbol contractMethod,
@@ -538,27 +547,18 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
 
         // When processing a class method directly (contractType == serviceType),
         // the interface method attributes won't be on the class method.
-        // Search all interfaces for matching methods.
+        // Use FindImplementationForInterfaceMember reverse lookup for exact symbol matching.
         if (SymbolEqualityComparer.Default.Equals(contractMethod.ContainingType, serviceType))
         {
             foreach (var iface in serviceType.AllInterfaces)
             {
                 foreach (var ifaceMethod in iface.GetMembers().OfType<IMethodSymbol>())
                 {
-                    if (ifaceMethod.Name == contractMethod.Name &&
-                        ifaceMethod.Parameters.Length == contractMethod.Parameters.Length)
+                    var mappedImpl = serviceType.FindImplementationForInterfaceMember(ifaceMethod) as IMethodSymbol;
+                    if (mappedImpl != null && SymbolEqualityComparer.Default.Equals(mappedImpl, contractMethod))
                     {
-                        // Rough signature match — check parameter types
-                        bool paramsMatch = true;
-                        for (int i = 0; i < ifaceMethod.Parameters.Length; i++)
-                        {
-                            if (!SymbolEqualityComparer.Default.Equals(ifaceMethod.Parameters[i].Type, contractMethod.Parameters[i].Type))
-                            {
-                                paramsMatch = false;
-                                break;
-                            }
-                        }
-                        if (paramsMatch && ifaceMethod.GetAttributes().Any(a => a.AttributeClass?.Name == attributeName))
+                        // ifaceMethod is the exact interface method that contractMethod implements
+                        if (ifaceMethod.GetAttributes().Any(a => a.AttributeClass?.Name == attributeName))
                             return true;
                     }
                 }
@@ -571,23 +571,46 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
     /// <summary>
     /// Checks whether a type satisfies the new() constraint required by
     /// CompatibilityBodyReader.ReadBodyAsync&lt;T&gt;: non-abstract, non-interface,
-    /// non-open-generic, and has an accessible parameterless constructor.
+    /// non-array, non-open-generic, and has an accessible parameterless constructor.
+    /// Closed generic types (e.g., List&lt;BookDto&gt;) are allowed if they have
+    /// a public parameterless constructor. Arrays are rejected because they
+    /// cannot satisfy new().
     /// </summary>
-    private static bool SatisfiesNewConstraint(INamedTypeSymbol type)
+    private static bool SatisfiesNewConstraint(ITypeSymbol type)
     {
-        if (type.IsAbstract || type.IsStatic || type.TypeKind == TypeKind.Interface)
+        // Arrays cannot satisfy new() constraint
+        if (type is IArrayTypeSymbol)
             return false;
 
-        if (type.IsUnboundGenericType || type.IsGenericType)
+        // Only named types (classes, structs, records, interfaces) can be checked
+        if (type is not INamedTypeSymbol named)
             return false;
 
-        // Records with primary constructors have no implicit parameterless constructor
-        // unless they explicitly define one. Check for any parameterless instance constructor.
-        if (type.TypeKind == TypeKind.Struct || type.TypeKind == TypeKind.Structure)
-            return true; // structs always satisfy new()
+        // Structs always satisfy new()
+        if (named.TypeKind == TypeKind.Struct || named.TypeKind == TypeKind.Structure)
+            return true;
+
+        // Reject interfaces, abstract classes, static classes
+        if (named.TypeKind == TypeKind.Interface || named.IsAbstract || named.IsStatic)
+            return false;
+
+        // Reject unbound generic types (e.g., List<> without type arguments)
+        if (named.IsUnboundGenericType)
+            return false;
+
+        // Reject types that still contain type parameters (open generics)
+        // e.g., MyGeneric<T> where T is still a type parameter
+        // IsUnboundGenericType catches List<> (no type args), but closed types like List<BookDto>
+        // are fine. We need to check if any type argument is still a type parameter.
+        if (named.TypeArguments.Any(ta => ta.TypeKind == TypeKind.TypeParameter || 
+            (ta is INamedTypeSymbol nestedNamed && nestedNamed.TypeArguments.Any(n => n.TypeKind == TypeKind.TypeParameter))))
+            return false;
+
+        // Closed generic types (e.g., List<BookDto>) are allowed —
+        // they have public parameterless constructors.
 
         // For classes and records, check for parameterless constructor
-        return type.InstanceConstructors.Any(c =>
+        return named.InstanceConstructors.Any(c =>
             c.Parameters.IsEmpty &&
             c.DeclaredAccessibility == Accessibility.Public);
     }

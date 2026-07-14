@@ -1333,6 +1333,10 @@ public sealed class AppServiceCompatibilityGeneratorTests
         result.Diagnostics.Should().Contain(d => d.Id == "CEP037"
             && d.GetMessage().Contains("CreateBookRequest"),
             "CEP037 should fire for record with primary constructor (no parameterless ctor)");
+        // Fail-closed: no code should be generated for actions with CEP037
+        result.GeneratedSources.Should().NotContain(x =>
+            x.SourceText.Contains("ReadBodyAsync<CreateBookRequest>"),
+            "CEP037 actions should not generate ReadBodyAsync calls");
     }
 
     [Fact]
@@ -1360,6 +1364,10 @@ public sealed class AppServiceCompatibilityGeneratorTests
         result.Diagnostics.Should().Contain(d => d.Id == "CEP037"
             && d.GetMessage().Contains("AbstractRequest"),
             "CEP037 should fire for abstract body type");
+        // Fail-closed: no code should be generated for actions with CEP037
+        result.GeneratedSources.Should().NotContain(x =>
+            x.SourceText.Contains("ReadBodyAsync<AbstractRequest>"),
+            "CEP037 actions should not generate ReadBodyAsync calls");
     }
 
     [Fact]
@@ -1390,6 +1398,144 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         result.Diagnostics.Should().NotContain(d => d.Id == "CEP037",
             "CEP037 should not be emitted for body type with parameterless constructor");
+    }
+
+    [Fact]
+    public void CEP037_ClosedGenericBodyType_NoDiagnostic()
+    {
+        // Closed generic types like List<BookDto> have public parameterless constructors
+        // and satisfy the new() constraint.
+        var source = """
+            using System.Collections.Generic;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> ImportAsync(List<BookDto> input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("ok");
+            }
+
+            public class BookDto
+            {
+                public string Title { get; set; } = "";
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP037",
+            "CEP037 should not be emitted for closed generic body type (List<BookDto>)");
+    }
+
+    [Fact]
+    public void CEP037_ClosedGenericDtoBodyType_NoDiagnostic()
+    {
+        // A custom generic DTO with a concrete type argument and parameterless ctor
+        // should also pass the new() constraint check.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> SaveAsync(CreateRequest<BookDto> input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("ok");
+            }
+
+            public class CreateRequest<T>
+            {
+                public T? Data { get; set; }
+            }
+
+            public class BookDto
+            {
+                public string Title { get; set; } = "";
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP037",
+            "CEP037 should not be emitted for closed generic DTO body type (CreateRequest<BookDto>)");
+    }
+
+    [Fact]
+    public void CEP037_ArrayBodyType_ReportsError()
+    {
+        // Arrays cannot satisfy the new() constraint.
+        // Use a POST method so the parameter is recognized as Body source.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> AddAsync(BookDto[] input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("ok");
+            }
+
+            public class BookDto
+            {
+                public string Title { get; set; } = "";
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP037",
+            "CEP037 should fire for array body type");
+        // Fail-closed: no code should be generated for actions with CEP037
+        result.GeneratedSources.Should().NotContain(x =>
+            x.SourceText.Contains("ReadBodyAsync<BookDto[]>"),
+            "CEP037 actions should not generate ReadBodyAsync calls");
+    }
+
+    [Fact]
+    public void CEP037_InterfaceBodyType_ReportsError()
+    {
+        // Interface types cannot satisfy the new() constraint.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(IBookRequest input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("ok");
+            }
+
+            public interface IBookRequest
+            {
+                string Title { get; set; }
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP037"
+            && d.GetMessage().Contains("IBookRequest"),
+            "CEP037 should fire for interface body type");
+        // Fail-closed: no code should be generated for actions with CEP037
+        result.GeneratedSources.Should().NotContain(x =>
+            x.SourceText.Contains("ReadBodyAsync<IBookRequest>"),
+            "CEP037 actions should not generate ReadBodyAsync calls");
     }
 
     [Fact]
