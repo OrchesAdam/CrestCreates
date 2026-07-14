@@ -826,7 +826,6 @@ The `ProjectionKind` property on `CapabilityDescriptor` is `DefinitionOnly` (Ord
 | CEP012 | Error | Non-enum, non-scalar type in route binding |
 | CEP013 | Error | Multi-scalar without body (upgraded from Warning in 8c) |
 | CEP014 | Error | Non-C#-identifier `Name` without `CapabilityInputPath` |
-| CEP015 | Warning | Generic `ReadBodyAsync<T>` AOT debt |
 | CEP016 | Error | Level 2 without `[CapabilityEndpointSet]` container |
 | CEP017 | Error | Whitespace in explicit `EndpointId` |
 | CEP018 | Error | Missing `TargetProperty` on body parameter (Level 1) |
@@ -843,7 +842,7 @@ The `ProjectionKind` property on `CapabilityDescriptor` is `DefinitionOnly` (Ord
 | CEP034 | Error | Method overload collision (same action name) |
 | CEP035 | Warning | Default route prefix `api/` may mismatch runtime configuration |
 | CEP036 | Warning | Method-level `CapabilityIdPrefix`/`RoutePrefix` ignored (class-level only) |
-| CEP037 | Error | Body type does not satisfy `new()` constraint |
+| CEP037 | Error | Body type does not satisfy `new()` constraint (compatibility path only) |
 
 ### 15.3 Runtime Fail-Closed
 
@@ -862,15 +861,28 @@ The `ProjectionKind` property on `CapabilityDescriptor` is `DefinitionOnly` (Ord
 
 - All descriptor providers and binding delegates are produced by source generators at compile time.
 - `CapabilityEndpointBindingRegistry` and `CapabilityEndpointResultContractRegistration` use static `ConcurrentDictionary`/`List` + `[ModuleInitializer]` — zero dynamic assembly loading.
+- `CapabilityEndpointJsonContractRegistry` stores body types at startup via `[ModuleInitializer]` `RegisterBodyType(typeof(T))` calls.
+- `CapabilityEndpointJsonTypeInfoResolver` resolves `JsonTypeInfo<T>` from the application's `IOptions<JsonOptions>` at runtime.
+- `CapabilityEndpointBodyReader.ReadBodyAsync<T>(context, jsonTypeInfo, emptyBodyFactory, optional, ct)` accepts `JsonTypeInfo<T>` directly — AOT-safe for request body deserialization.
+- `CapabilityEndpointJsonContractValidator` validates at startup that all registered body types have `JsonTypeInfo` available (fail-closed).
 - `CapabilityHandlerResolverProvider` uses static `ConcurrentDictionary` with additive `Register()` API.
 - `DescriptorProviderRegistry` uses static `ConcurrentBag<object>`.
 
-### 16.2 Known AOT Debt
+### 16.2 AOT Safety Scope
 
-- **CEP015**: SG currently emits `ReadBodyAsync<T>()` (generic) instead of the AOT-safe `ReadBodyAsync<T>(JsonTypeInfo<T>)` overload. The `JsonTypeInfo<T>` overload exists in `CapabilityEndpointJsonRuntime` but is not yet wired by the source generator.
-- **CompatibilityBodyReader**: Uses `JsonSerializer.Deserialize<T>()` via `StreamReader` — not `JsonTypeInfo<T>`-based. This is acceptable for compatibility (legacy behavior preservation) but is AOT debt that may require `[DynamicallyAccessedMembers]` or `JsonTypeInfo` migration.
+**Input binding is AOT-safe.** All three generators (CapabilityEndpoint 8a, AppServiceCompatibility 8d, CrudService) emit `CapabilityEndpointBodyReader.ReadBodyAsync<T>` calls with `JsonTypeInfo<T>` resolved from the application's `JsonSerializerOptions`. The application owns the `[JsonSerializable]`-decorated `JsonSerializerContext` and registers it in ASP.NET Core's `JsonOptions.TypeInfoResolverChain`.
 
-### 16.3 Source Generator Pipeline
+**Response serialization is NOT yet AOT-safe.** The pipeline currently uses `JsonSerializer.Serialize<object?>` for response bodies, which relies on runtime reflection. Full AOT safety requires migrating response serialization to `JsonTypeInfo<T>`-based writes. This is tracked as future work.
+
+**Key architectural constraint:** Roslyn Source Generators cannot see each other's `RegisterSourceOutput` output in the same compilation round. Therefore, CrestCreates generators must NOT emit `[JsonSerializable]` partial classes expecting the STJ source generator to process them. The application owns the `JsonSerializerContext` as a regular source file, and CrestCreates accesses `JsonTypeInfo<T>` from it at runtime.
+
+### 16.3 Known AOT Debt
+
+- **Response serialization**: Uses `JsonSerializer.Serialize<object?>` — not `JsonTypeInfo<T>`-based. Requires migration to AOT-safe response writing.
+- **`CompatibilityBodyReader`** and **`CapabilityEndpointJsonRuntime`**: Marked `[Obsolete]` — replaced by `CapabilityEndpointBodyReader`. Still present for backward compatibility.
+- **`DynamicApiGeneratedRuntime.ReadBodyAsync`**: Marked `[Obsolete]` — replaced by `CapabilityEndpointBodyReader`. Legacy `DynamicApiAotSourceGenerator` still uses it (out of CEP015 scope).
+
+### 16.4 Source Generator Pipeline
 
 1. `AppServiceCompatibilityGenerator` — `IIncrementalGenerator`, detects `[CapabilityCompatibilityProjection]` attributes
 2. `CapabilityEndpointGenerator` — `IIncrementalGenerator`, detects `[CapabilityEndpointSpec]` attributes
@@ -976,9 +988,9 @@ Implementation requires:
 
 Analogous to MCP but for Agent-invoked capabilities. Requires agent tool specification format and agent runtime bridge.
 
-### 20.3 AOT Body Binding Completion (CEP015 Resolution)
+### 20.3 AOT Response Serialization
 
-The `JsonTypeInfo<T>` overload in `CapabilityEndpointJsonRuntime` should be wired into the source generator. This would eliminate the CEP015 warning and make all body binding AOT-safe.
+Input body binding is now AOT-safe via `CapabilityEndpointBodyReader` + application-owned `JsonSerializerContext`. Response serialization still uses `JsonSerializer.Serialize<object?>` (runtime reflection). Full AOT safety requires migrating response serialization to `JsonTypeInfo<T>`-based writes, which requires the pipeline to carry type information through to the response mapper.
 
 ### 20.4 Compatibility Projection Sunset
 

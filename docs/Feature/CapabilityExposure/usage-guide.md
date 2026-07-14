@@ -132,7 +132,7 @@ The binding pipeline at endpoint registration time:
 
 **Binding modes:**
 
-- **Body only** — a single `[CapabilityEndpointInput]` with `Source = Body`; SG emits `ReadBodyAsync<T>()`.
+- **Body only** — a single `[CapabilityEndpointInput]` with `Source = Body`; SG emits `CapabilityEndpointBodyReader.ReadBodyAsync<T>(context, jsonTypeInfo, emptyBodyFactory, optional, ct)` with `JsonTypeInfo<T>` resolved from the application's `JsonSerializerOptions`.
 - **Body + route/query/header scalars** — body deserialized, then scalars assigned to body DTO properties via `TargetProperty` or PascalCase convention.
 - **Single scalar** (one route/query param, no body) — directly passed as capability input.
 - **Multiple scalars without body** — compile-time error (CEP013).
@@ -273,7 +273,7 @@ These are implemented by:
 - `CompatibilityHttpResultMapper.WrapResult<T>()` — non-void, non-GET-null
 - `CompatibilityHttpResultMapper.WrapVoidResult()` — void return
 - `CompatibilityHttpResultMapper.WrapGetResult<T>()` — GET with null check
-- `CompatibilityBodyReader.ReadBodyAsync<T>()` — legacy-compatible body reading (empty body → `new T()`, invalid JSON + optional parameter → default)
+- `CapabilityEndpointBodyReader.ReadBodyAsync<T>()` — AOT-safe body reading with `JsonTypeInfo<T>` from application's `JsonSerializerOptions`. Compatibility path uses non-null `emptyBodyFactory` (empty body → default instance); native path uses null `emptyBodyFactory` (empty body → 400 BAD_REQUEST).
 
 ### Pipeline Failure Responses
 
@@ -331,7 +331,6 @@ Not yet implemented. Reserved for Track 3.
 | CEP012 | Error | Unsupported route param type | Route parameter type must be a known scalar or an enum. |
 | CEP013 | Error | Multiple scalars without body | Add a body DTO or explicit input type when binding multiple scalar route/query/header parameters. |
 | CEP014 | Error | Invalid scalar property name | The input `Name` is not a valid C# identifier; rename it or use `TargetProperty`. |
-| CEP015 | Warning | Body binding not AOT-safe | Generic `ReadBodyAsync` uses runtime reflection; consider providing a JSON source generation context. |
 | CEP016 | Error | HTTP method attr outside set | Nest the HTTP method attribute inside a `[CapabilityEndpointSet]` container. |
 | CEP017 | Error | EndpointId contains whitespace | Remove spaces from `EndpointId`. |
 | CEP018 | Error | TargetProperty missing on body | The body DTO type does not have a public settable property with that name. |
