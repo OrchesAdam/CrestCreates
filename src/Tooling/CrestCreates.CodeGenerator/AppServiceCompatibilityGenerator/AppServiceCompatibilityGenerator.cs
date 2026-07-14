@@ -385,7 +385,7 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
                         ? namedReturn.TypeArguments[0].ToDisplayString(FullyQualifiedFormat)
                         : returnType.ToDisplayString(FullyQualifiedFormat);
 
-                // CEP037: Body parameter type must satisfy new() constraint for CompatibilityBodyReader.ReadBodyAsync<T>
+                // CEP037: Body parameter type must be suitable for generated emptyBodyFactory
                 var bodyParamModel = paramModels.FirstOrDefault(p => p.Source == "Body");
                 if (bodyParamModel is not null)
                 {
@@ -569,48 +569,33 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Checks whether a type satisfies the new() constraint required by
-    /// CompatibilityBodyReader.ReadBodyAsync&lt;T&gt;: non-abstract, non-interface,
-    /// non-array, non-open-generic, and has an accessible parameterless constructor.
-    /// Closed generic types (e.g., List&lt;BookDto&gt;) are allowed if they have
-    /// a public parameterless constructor. Arrays are rejected because they
-    /// cannot satisfy new().
+    /// Checks whether a body type is suitable for compatibility body binding.
+    /// Single-dimensional arrays are allowed (the emitter uses Array.Empty&lt;T&gt;()
+    /// instead of new T[]). Multi-dimensional arrays are rejected.
+    /// For classes/records, a public parameterless constructor is required
+    /// because the emitter generates <c>static () =&gt; new T()</c>.
     /// </summary>
     private static bool SatisfiesNewConstraint(ITypeSymbol type)
     {
-        // Arrays cannot satisfy new() constraint
-        if (type is IArrayTypeSymbol)
-            return false;
+        if (type is IArrayTypeSymbol arrayType)
+            return arrayType.Rank == 1 && !ContainsTypeParameter(arrayType.ElementType);
 
-        // Only named types (classes, structs, records, interfaces) can be checked
         if (type is not INamedTypeSymbol named)
             return false;
 
-        // Structs always satisfy new()
-        if (named.TypeKind == TypeKind.Struct || named.TypeKind == TypeKind.Structure)
+        if (named.IsAbstract || named.IsStatic || named.TypeKind == TypeKind.Interface)
+            return false;
+
+        if (named.IsUnboundGenericType || named.TypeArguments.Any(ta => ta.TypeKind == TypeKind.TypeParameter))
+            return false;
+
+        // Structs always have parameterless constructor
+        if (named.TypeKind == TypeKind.Struct)
             return true;
 
-        // Reject interfaces, abstract classes, static classes
-        if (named.TypeKind == TypeKind.Interface || named.IsAbstract || named.IsStatic)
-            return false;
-
-        // Reject unbound generic types (e.g., List<> without type arguments)
-        if (named.IsUnboundGenericType)
-            return false;
-
-        // Reject types that still contain type parameters (open generics)
-        // e.g., MyGeneric<T> where T is still a type parameter.
-        // Uses recursive check to handle nested open generics like Wrapper<Outer<List<T>>>.
-        if (ContainsTypeParameter(named))
-            return false;
-
-        // Closed generic types (e.g., List<BookDto>) are allowed —
-        // they have public parameterless constructors.
-
-        // For classes and records, check for parameterless constructor
+        // Classes need explicit parameterless constructor
         return named.InstanceConstructors.Any(c =>
-            c.Parameters.IsEmpty &&
-            c.DeclaredAccessibility == Accessibility.Public);
+            c.Parameters.IsEmpty && c.DeclaredAccessibility == Accessibility.Public);
     }
 
     /// <summary>

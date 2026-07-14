@@ -20,6 +20,7 @@ public static class CapabilityEndpointExtensions
         services.TryAddSingleton<IRegistryValidationEngine<CapabilityEndpointDescriptor>,
             RegistryValidationEngine<CapabilityEndpointDescriptor>>();
         services.TryAddSingleton<CapabilityEndpointRegistryBootstrapper>();
+        services.TryAddSingleton<CapabilityEndpointJsonContractValidator>();
         services.TryAddSingleton<ICapabilityEndpointResultContractRegistry, CapabilityEndpointResultContractRegistry>();
 
         // Multi-registration interfaces — validators and extractors accumulate across modules.
@@ -65,6 +66,11 @@ public static class CapabilityEndpointExtensions
             .GetRequiredService<ICapabilityRegistry>();
         var resultContractRegistry = endpoints.ServiceProvider
             .GetRequiredService<ICapabilityEndpointResultContractRegistry>();
+
+        // Validate AOT JSON contract metadata before serving requests
+        var contractValidator = endpoints.ServiceProvider
+            .GetRequiredService<CapabilityEndpointJsonContractValidator>();
+        contractValidator.Validate();
 
         // Flush any pending result contract registrations from generated code
         CapabilityEndpointResultContractRegistration.ApplyTo(resultContractRegistry);

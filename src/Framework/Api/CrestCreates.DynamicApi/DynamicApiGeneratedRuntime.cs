@@ -28,6 +28,7 @@ public static class DynamicApiGeneratedRuntime
         };
     }
 
+    [Obsolete("Use CapabilityEndpointBodyReader with JsonTypeInfo<T> from CapabilityEndpointJsonTypeInfoResolver.")]
     public static Task<T?> ReadBodyAsync<T>(HttpContext context, bool optional)
         where T : new()
         => CompatibilityBodyReader.ReadBodyAsync<T>(context, optional);

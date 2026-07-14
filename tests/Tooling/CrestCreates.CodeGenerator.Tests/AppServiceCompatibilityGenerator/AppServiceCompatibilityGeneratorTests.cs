@@ -351,11 +351,11 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         var bindings = result.GetSourceByFileName("GeneratedAppServiceCompatibilityBindings_Book.g.cs");
         bindings.Should().NotBeNull();
-        // P1-4: Compatibility binding uses CompatibilityBodyReader for legacy-compatible body semantics.
-        bindings!.SourceText.Should().Contain("CompatibilityBodyReader.ReadBodyAsync");
+        // P1-4: Compatibility binding uses CapabilityEndpointBodyReader for AOT-safe body binding.
+        bindings!.SourceText.Should().Contain("CapabilityEndpointBodyReader.ReadBodyAsync");
+        bindings.SourceText.Should().NotContain("CompatibilityBodyReader.ReadBodyAsync");
         bindings.SourceText.Should().NotContain("CapabilityEndpointJsonRuntime");
         bindings.SourceText.Should().NotContain("CompatibilityJsonContext");
-        bindings.SourceText.Should().NotContain("JsonSerializable");
 
         result.CompilationSuccess.Should().BeTrue("generated code must compile successfully");
     }
@@ -785,12 +785,38 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
                 public static class CompatibilityBodyReader
                 {
+                    [System.Obsolete("Use CapabilityEndpointBodyReader instead.")]
                     public static async System.Threading.Tasks.Task<T?> ReadBodyAsync<T>(
                         Microsoft.AspNetCore.Http.HttpContext context, bool optional)
                         where T : new()
                     {
                         return default;
                     }
+                }
+
+                // AOT-safe body binding components (8d compatibility)
+                public static class CapabilityEndpointJsonTypeInfoResolver
+                {
+                    public static System.Text.Json.Serialization.Metadata.JsonTypeInfo<T>? Resolve<T>(
+                        Microsoft.AspNetCore.Http.HttpContext context) => null;
+                }
+
+                public static class CapabilityEndpointBodyReader
+                {
+                    public static async System.Threading.Tasks.ValueTask<T?> ReadBodyAsync<T>(
+                        Microsoft.AspNetCore.Http.HttpContext context,
+                        System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> jsonTypeInfo,
+                        System.Func<T>? emptyBodyFactory,
+                        bool optional,
+                        System.Threading.CancellationToken ct = default)
+                    {
+                        return default;
+                    }
+                }
+
+                public static class CapabilityEndpointJsonContractRegistry
+                {
+                    public static void RegisterBodyType(System.Type bodyType) { }
                 }
 
                 public static class CapabilityEndpointJsonRuntime
@@ -1473,10 +1499,10 @@ public sealed class AppServiceCompatibilityGeneratorTests
     }
 
     [Fact]
-    public void CEP037_ArrayBodyType_ReportsError()
+    public void CEP037_ArrayBodyType_NoDiagnostic()
     {
-        // Arrays cannot satisfy the new() constraint.
-        // Use a POST method so the parameter is recognized as Body source.
+        // Single-dimensional arrays now pass because the generator uses
+        // Array.Empty<T>() instead of new T[] for the emptyBodyFactory.
         var source = """
             using CrestCreates.Domain.Shared.Attributes;
 
@@ -1499,12 +1525,10 @@ public sealed class AppServiceCompatibilityGeneratorTests
         var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
             source, additionalSources: BuildCompatibilityStubs());
 
-        result.Diagnostics.Should().Contain(d => d.Id == "CEP037",
-            "CEP037 should fire for array body type");
-        // Fail-closed: no code should be generated for actions with CEP037
-        result.GeneratedSources.Should().NotContain(x =>
-            x.SourceText.Contains("ReadBodyAsync<BookDto[]>"),
-            "CEP037 actions should not generate ReadBodyAsync calls");
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP037",
+            "CEP037 should not fire for single-dimensional array body type");
+        result.CompilationSuccess.Should().BeTrue(
+            "single-dimensional array body type should produce compilable generated code");
     }
 
     [Fact]
@@ -1737,5 +1761,117 @@ public sealed class AppServiceCompatibilityGeneratorTests
         capabilities.SourceText.Should().NotContain("compat.appservice.book.get");
 
         result.CompilationSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public void NullableBodyType_GeneratesValidFactory()
+    {
+        // Nullable reference type body parameter should strip the ? suffix
+        // in the emptyBodyFactory — "new T?()" is illegal C#.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(BookDto? input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("ok");
+            }
+
+            public class BookDto
+            {
+                public string Title { get; set; } = "";
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP037",
+            "nullable reference type body should not trigger CEP037");
+        result.CompilationSuccess.Should().BeTrue(
+            "nullable reference type body should produce compilable generated code");
+        var bindings = result.GetSourceByFileName("GeneratedAppServiceCompatibilityBindings_Book.g.cs");
+        bindings.Should().NotBeNull();
+        bindings!.SourceText.Should().Contain("new global::MyApp.BookDto()",
+            "nullable ? suffix should be stripped in factory expression");
+        bindings.SourceText.Should().NotContain("new global::MyApp.BookDto?()",
+            "new T?() is illegal C# and must not appear in generated code");
+    }
+
+    [Fact]
+    public void NullableClosedGenericBodyType_GeneratesValidFactory()
+    {
+        // Nullable closed generic body parameter — e.g., List<BookDto>?
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+            using System.Collections.Generic;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(List<BookDto>? input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("ok");
+            }
+
+            public class BookDto
+            {
+                public string Title { get; set; } = "";
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP037",
+            "nullable closed generic body should not trigger CEP037");
+        result.CompilationSuccess.Should().BeTrue(
+            "nullable closed generic body should produce compilable generated code");
+        var bindings = result.GetSourceByFileName("GeneratedAppServiceCompatibilityBindings_Book.g.cs");
+        bindings.Should().NotBeNull();
+        bindings!.SourceText.Should().Contain("new global::System.Collections.Generic.List<global::MyApp.BookDto>()",
+            "nullable ? suffix should be stripped in factory expression");
+    }
+
+    [Fact]
+    public void NullableArrayBodyType_GeneratesValidFactory()
+    {
+        // Nullable array body parameter — e.g., BookDto[]?
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> AddAsync(BookDto[]? input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult("ok");
+            }
+
+            public class BookDto
+            {
+                public string Title { get; set; } = "";
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP037",
+            "nullable array body should not trigger CEP037");
+        result.CompilationSuccess.Should().BeTrue(
+            "nullable array body should produce compilable generated code");
+        var bindings = result.GetSourceByFileName("GeneratedAppServiceCompatibilityBindings_Book.g.cs");
+        bindings.Should().NotBeNull();
+        bindings!.SourceText.Should().Contain("System.Array.Empty<global::MyApp.BookDto>()",
+            "nullable array factory should use Array.Empty<T> with stripped ? suffix");
     }
 }

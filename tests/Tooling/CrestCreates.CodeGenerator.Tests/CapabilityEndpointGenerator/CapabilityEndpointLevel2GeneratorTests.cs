@@ -147,6 +147,33 @@ namespace CrestCreates.DynamicApi
         public string? Description { get; init; }
         public bool Deprecated { get; init; }
     }
+
+    // AOT-safe body binding components (8a native)
+    public static class CapabilityEndpointJsonTypeInfoResolver
+    {
+        public static object? Resolve<T>(object context) => null;
+    }
+
+    public static class CapabilityEndpointBodyReader
+    {
+        public static ValueTask<T?> ReadBodyAsync<T>(object context, object? jsonTypeInfo, object? factory, bool optional, object ct = null) => default;
+    }
+
+    public static class CapabilityEndpointJsonContractRegistry
+    {
+        public static void RegisterBodyType(Type bodyType) { }
+    }
+
+    // Binding registry stub
+    public static class CapabilityEndpointBindingRegistry
+    {
+        public static void Register(object contract) { }
+    }
+
+    public sealed class CapabilityEndpointBindingContract
+    {
+        public CapabilityEndpointBindingContract(string id, int version, object handler) { }
+    }
 }
 ";
     }
@@ -192,7 +219,7 @@ namespace TestNs
 
         var bindingFile = result.GetSourceByFileName("ItemApi_Bindings.g.cs");
         Assert.NotNull(bindingFile);
-        Assert.Contains("ReadBodyAsync<global::TestNs.CreateItemBody>", bindingFile!.SourceText);
+        Assert.Contains("CapabilityEndpointBodyReader.ReadBodyAsync<global::TestNs.CreateItemBody>", bindingFile!.SourceText);
     }
 
     [Fact]
@@ -298,7 +325,7 @@ namespace TestNs
         var text = bindingFile!.SourceText;
 
         // Should read body
-        Assert.Contains("ReadBodyAsync<global::TestNs.UpdateBody>", text);
+        Assert.Contains("CapabilityEndpointBodyReader.ReadBodyAsync<global::TestNs.UpdateBody>", text);
 
         // Should assign route value to model property (InputName="Id" → "model.Id = ...")
         Assert.Contains("model.Id = Guid.Parse(", text);

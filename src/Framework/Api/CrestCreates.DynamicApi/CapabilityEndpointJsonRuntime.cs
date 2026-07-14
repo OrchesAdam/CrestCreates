@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 namespace CrestCreates.DynamicApi;
 
 [EditorBrowsable(EditorBrowsableState.Never)]
+[Obsolete("Use CapabilityEndpointBodyReader with JsonTypeInfo<T> from CapabilityEndpointJsonTypeInfoResolver.")]
 public static class CapabilityEndpointJsonRuntime
 {
     public static async ValueTask<T?> ReadBodyAsync<T>(

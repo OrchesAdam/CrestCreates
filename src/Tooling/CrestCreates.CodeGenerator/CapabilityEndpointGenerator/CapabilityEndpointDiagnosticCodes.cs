@@ -33,7 +33,6 @@ public static class CapabilityEndpointDiagnosticCodes
     public const string UnsupportedRouteParamTypeValue = "CEP012";
     public const string MultipleRouteParamsWithoutBodyValue = "CEP013";
     public const string InvalidScalarPropertyNameValue = "CEP014";
-    public const string BodyBindingNotAotSafeValue = "CEP015";
     public const string HttpMethodAttributeMustBeInsideCapabilityEndpointSetValue = "CEP016";
     public const string EndpointIdContainsWhitespaceValue = "CEP017";
     public const string TargetPropertyMissingOnBodyValue = "CEP018";

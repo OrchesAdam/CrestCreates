@@ -98,6 +98,33 @@ namespace CrestCreates.DynamicApi
         public string? CapabilityInputPath { get; init; }
         public string? TargetProperty { get; init; }
     }
+
+    // AOT-safe body binding components (8a native)
+    public static class CapabilityEndpointJsonTypeInfoResolver
+    {
+        public static object? Resolve<T>(object context) => null;
+    }
+
+    public static class CapabilityEndpointBodyReader
+    {
+        public static ValueTask<T?> ReadBodyAsync<T>(object context, object? jsonTypeInfo, object? factory, bool optional, object ct = null) => default;
+    }
+
+    public static class CapabilityEndpointJsonContractRegistry
+    {
+        public static void RegisterBodyType(Type bodyType) { }
+    }
+
+    // Binding registry stub
+    public static class CapabilityEndpointBindingRegistry
+    {
+        public static void Register(object contract) { }
+    }
+
+    public sealed class CapabilityEndpointBindingContract
+    {
+        public CapabilityEndpointBindingContract(string id, int version, object handler) { }
+    }
 }
 ";
     }
@@ -149,7 +176,7 @@ namespace TestNs
 
         var bindingFile = result.GetSourceByFileName("ItemEndpoints_Bindings.g.cs");
         Assert.NotNull(bindingFile);
-        Assert.Contains("ReadBodyAsync<global::TestNs.CreateItemDto>", bindingFile!.SourceText);
+        Assert.Contains("CapabilityEndpointBodyReader.ReadBodyAsync<global::TestNs.CreateItemDto>", bindingFile!.SourceText);
     }
 
     [Fact]
@@ -215,7 +242,7 @@ namespace TestNs
 
         var bindingFile = result.GetSourceByFileName("ItemEndpoints_Bindings.g.cs");
         Assert.NotNull(bindingFile);
-        Assert.Contains("ReadBodyAsync<global::TestNs.UpdateItemDto>", bindingFile!.SourceText);
+        Assert.Contains("CapabilityEndpointBodyReader.ReadBodyAsync<global::TestNs.UpdateItemDto>", bindingFile!.SourceText);
         Assert.Contains("model.Id = Guid.Parse(", bindingFile.SourceText);
     }
 
@@ -446,11 +473,11 @@ namespace TestNs
         var bindingFile = result.GetSourceByFileName("BookEndpoints_Bindings.g.cs");
         Assert.NotNull(bindingFile);
 
-        // Should use ReadBodyAsync (Body source, not route parsing)
-        Assert.Contains("ReadBodyAsync<global::TestNs.CreateDto>", bindingFile!.SourceText);
+        // Should use CapabilityEndpointBodyReader.ReadBodyAsync (Body source, not route parsing)
+        Assert.Contains("CapabilityEndpointBodyReader.ReadBodyAsync<global::TestNs.CreateDto>", bindingFile!.SourceText);
 
         // Required=true → optional=false in generated binding
-        Assert.Contains("context, false, ct", bindingFile.SourceText);
+        Assert.Contains("context, jsonTypeInfo, null, false, ct", bindingFile.SourceText);
 
         // Should NOT contain route-related parsing (no Guid/DateTime/Enum.Parse)
         Assert.DoesNotContain("RouteValues", bindingFile.SourceText);

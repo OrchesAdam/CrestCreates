@@ -964,6 +964,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("using System.Globalization;");
             builder.AppendLine("using System.Linq;");
             builder.AppendLine("using System.Reflection;");
+            builder.AppendLine("using System.Text.Json.Serialization.Metadata;");
             builder.AppendLine("using CrestCreates.Application.Contracts.DTOs.Common;");
             builder.AppendLine("using CrestCreates.Authorization.Abstractions;");
             builder.AppendLine("using CrestCreates.DynamicApi;");
@@ -983,6 +984,9 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("    internal static void Register()");
             builder.AppendLine("    {");
             builder.AppendLine($"        DynamicApiGeneratedRegistryStore.Register(new GeneratedCrudProvider_{ToSafeName(entityName)}());");
+            builder.AppendLine($"        CapabilityEndpointJsonContractRegistry.RegisterBodyType(typeof(Create{entityName}Dto));");
+            builder.AppendLine($"        CapabilityEndpointJsonContractRegistry.RegisterBodyType(typeof({entityName}ListRequestDto));");
+            builder.AppendLine($"        CapabilityEndpointJsonContractRegistry.RegisterBodyType(typeof(Update{entityName}Dto));");
             builder.AppendLine("    }");
             builder.AppendLine();
             builder.AppendLine($"    internal sealed class GeneratedCrudProvider_{ToSafeName(entityName)} : IDynamicApiGeneratedProvider");
@@ -1142,7 +1146,11 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine($"                async (HttpContext context, [FromServices] {contractTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
             builder.AppendLine("                {");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, perm_{s}_create.Permissions);");
-            builder.AppendLine($"                    var input = await DynamicApiGeneratedRuntime.ReadBodyAsync<Create{serviceName}Dto>(context, false);");
+            builder.AppendLine($"                    var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve<Create{serviceName}Dto>(context)");
+            builder.AppendLine($"                        ?? throw new InvalidOperationException(");
+            builder.AppendLine($"                            \"No JsonTypeInfo registered for Create{serviceName}Dto. Add [JsonSerializable(typeof(Create{serviceName}Dto))] to your JsonSerializerContext.\");");
+            builder.AppendLine($"                    var input = await CapabilityEndpointBodyReader.ReadBodyAsync<Create{serviceName}Dto>(");
+            builder.AppendLine($"                        context, jsonTypeInfo, null, false);");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, input);");
             builder.AppendLine($"                    var result = await DynamicApiGeneratedRuntime.ExecuteAsync(context, true, () => service.CreateAsync(input, context.RequestAborted));");
             builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapResult(result);");
@@ -1167,7 +1175,11 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine($"                async (HttpContext context, [FromServices] {contractTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
             builder.AppendLine("                {");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, perm_{s}_search.Permissions);");
-            builder.AppendLine($"                    var input = await DynamicApiGeneratedRuntime.ReadBodyAsync<{serviceName}ListRequestDto>(context, false);");
+            builder.AppendLine($"                    var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve<{serviceName}ListRequestDto>(context)");
+            builder.AppendLine($"                        ?? throw new InvalidOperationException(");
+            builder.AppendLine($"                            \"No JsonTypeInfo registered for {serviceName}ListRequestDto. Add [JsonSerializable(typeof({serviceName}ListRequestDto))] to your JsonSerializerContext.\");");
+            builder.AppendLine($"                    var input = await CapabilityEndpointBodyReader.ReadBodyAsync<{serviceName}ListRequestDto>(");
+            builder.AppendLine($"                        context, jsonTypeInfo, null, false);");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, input);");
             builder.AppendLine($"                    var result = await service.GetListAsync(input, context.RequestAborted);");
             builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapResult(result);");
@@ -1181,7 +1193,11 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             builder.AppendLine("                {");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, perm_{s}_update.Permissions);");
             builder.AppendLine($"                    var id = {GenerateRouteParamParse(idType)};");
-            builder.AppendLine($"                    var input = await DynamicApiGeneratedRuntime.ReadBodyAsync<Update{serviceName}Dto>(context, false);");
+            builder.AppendLine($"                    var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve<Update{serviceName}Dto>(context)");
+            builder.AppendLine($"                        ?? throw new InvalidOperationException(");
+            builder.AppendLine($"                            \"No JsonTypeInfo registered for Update{serviceName}Dto. Add [JsonSerializable(typeof(Update{serviceName}Dto))] to your JsonSerializerContext.\");");
+            builder.AppendLine($"                    var input = await CapabilityEndpointBodyReader.ReadBodyAsync<Update{serviceName}Dto>(");
+            builder.AppendLine($"                        context, jsonTypeInfo, null, false);");
             builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, input);");
             builder.AppendLine($"                    var result = await DynamicApiGeneratedRuntime.ExecuteAsync(context, true, () => service.UpdateAsync(id, input, context.RequestAborted));");
             builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapResult(result);");

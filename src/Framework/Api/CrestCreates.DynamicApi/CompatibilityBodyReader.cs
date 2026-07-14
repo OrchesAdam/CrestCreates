@@ -17,6 +17,7 @@ namespace CrestCreates.DynamicApi;
 /// <see cref="HttpRequestReadExtensions.ReadFromJsonAsync{T}"/> which throws
 /// <see cref="BadHttpRequestException"/> on empty bodies.
 /// </summary>
+[Obsolete("Use CapabilityEndpointBodyReader with JsonTypeInfo<T> from CapabilityEndpointJsonTypeInfoResolver.")]
 public static class CompatibilityBodyReader
 {
     public static async Task<T?> ReadBodyAsync<T>(HttpContext context, bool optional)

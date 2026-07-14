@@ -154,17 +154,6 @@ internal static class CapabilityEndpointDiagnostics
         isEnabledByDefault: true);
 
     /// <summary>
-    /// CEP015: Body binding uses generic ReadBodyAsync which is not fully AOT-safe.
-    /// </summary>
-    public static readonly DiagnosticDescriptor BodyBindingNotAotSafe = new(
-        id: CapabilityEndpointDiagnosticCodes.BodyBindingNotAotSafeValue,
-        title: "Body binding uses generic ReadBodyAsync — not fully AOT-safe",
-        messageFormat: "Endpoint spec '{0}' uses body binding via generic ReadBodyAsync<{1}>. For full AOT safety, provide a JsonSerializerContext with [JsonSerializable] for the body type.",
-        category: Category,
-        defaultSeverity: DiagnosticSeverity.Warning,
-        isEnabledByDefault: true);
-
-    /// <summary>
     /// CEP016: HTTP method attribute must be nested inside a [CapabilityEndpointSet] container.
     /// </summary>
     public static readonly DiagnosticDescriptor HttpMethodAttributeMustBeInsideCapabilityEndpointSet = new(

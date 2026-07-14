@@ -432,16 +432,6 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
             }
         }
 
-        // CEP015: Body binding uses generic ReadBodyAsync — not fully AOT-safe
-        if (hasBody)
-        {
-            builder.Add(Diagnostic.Create(
-                CapabilityEndpointDiagnostics.BodyBindingNotAotSafe,
-                location,
-                classSymbol.Name,
-                bodyTypeName));
-        }
-
         // CEP018/CEP019: TargetProperty validation on [CapabilityEndpointInput] attributes
         foreach (var inputAttr in classSymbol.GetAttributes())
         {
@@ -628,22 +618,6 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                             location,
                             classSymbol.Name));
                     }
-                }
-            }
-
-            // CEP015: Body binding uses generic ReadBodyAsync — not fully AOT-safe
-            foreach (var kvp in attr.NamedArguments)
-            {
-                if (kvp.Key == "Body" && !kvp.Value.IsNull &&
-                    kvp.Value.Kind == TypedConstantKind.Type &&
-                    kvp.Value.Value is INamedTypeSymbol bodyTypeSym)
-                {
-                    builder.Add(Diagnostic.Create(
-                        CapabilityEndpointDiagnostics.BodyBindingNotAotSafe,
-                        location,
-                        classSymbol.Name,
-                        bodyTypeSym.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
-                    break;
                 }
             }
         }

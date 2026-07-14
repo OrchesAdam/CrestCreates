@@ -76,6 +76,19 @@ internal static class CapabilityEndpointBindingEmitter
             sb.AppendLine($"                {safeClassName}_GeneratedCapabilityEndpointBindings.{methodName}));");
         }
 
+        foreach (var spec in group.Specs)
+        {
+            var bodyInput = FindBodyInput(spec.Inputs);
+            if (bodyInput is not null)
+            {
+                // Strip nullable reference type suffix — typeof(T?) is illegal for reference types
+                var typeofName = bodyInput.TypeName.EndsWith("?")
+                    ? bodyInput.TypeName.Substring(0, bodyInput.TypeName.Length - 1)
+                    : bodyInput.TypeName;
+                sb.AppendLine($"        CapabilityEndpointJsonContractRegistry.RegisterBodyType(typeof({typeofName}));");
+            }
+        }
+
         sb.AppendLine("    }");
         sb.AppendLine("}");
 
@@ -121,14 +134,14 @@ internal static class CapabilityEndpointBindingEmitter
 
     private static void EmitBodyOnlyBinding(StringBuilder sb, CapabilityEndpointInputRecord bodyInput)
     {
-        // AOT Debt (P1-6): Generic ReadBodyAsync<T> relies on reflection-based JsonSerializer.
-        // For full AOT safety, consumers should provide a JsonSerializerContext and the SG should
-        // emit ReadBodyAsync<T>(context, jsonTypeInfo, optional, ct) instead.
         var typeName = bodyInput.TypeName;
         var optional = !bodyInput.Required;
 
-        sb.AppendLine($"        var result = await CapabilityEndpointJsonRuntime.ReadBodyAsync<{typeName}>(");
-        sb.AppendLine($"            context, {optional.ToString().ToLowerInvariant()}, ct);");
+        sb.AppendLine($"        var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve<{typeName}>(context)");
+        sb.AppendLine($"            ?? throw new InvalidOperationException(");
+        sb.AppendLine($"                \"No JsonTypeInfo registered for {typeName}. Add [JsonSerializable(typeof({typeName}))] to your JsonSerializerContext.\");");
+        sb.AppendLine($"        var result = await CapabilityEndpointBodyReader.ReadBodyAsync<{typeName}>(");
+        sb.AppendLine($"            context, jsonTypeInfo, null, {optional.ToString().ToLowerInvariant()}, ct);");
         sb.AppendLine("        return result;");
     }
 
@@ -139,14 +152,14 @@ internal static class CapabilityEndpointBindingEmitter
         ImmutableArray<CapabilityEndpointInputRecord> queryInputs,
         ImmutableArray<CapabilityEndpointInputRecord> headerInputs)
     {
-        // AOT Debt (P1-6): Generic ReadBodyAsync<T> relies on reflection-based JsonSerializer.
-        // For full AOT safety, consumers should provide a JsonSerializerContext and the SG should
-        // emit ReadBodyAsync<T>(context, jsonTypeInfo, optional, ct) instead.
         var typeName = bodyInput.TypeName;
         var optional = !bodyInput.Required;
 
-        sb.AppendLine($"        var model = await CapabilityEndpointJsonRuntime.ReadBodyAsync<{typeName}>(");
-        sb.AppendLine($"            context, {optional.ToString().ToLowerInvariant()}, ct);");
+        sb.AppendLine($"        var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve<{typeName}>(context)");
+        sb.AppendLine($"            ?? throw new InvalidOperationException(");
+        sb.AppendLine($"                \"No JsonTypeInfo registered for {typeName}. Add [JsonSerializable(typeof({typeName}))] to your JsonSerializerContext.\");");
+        sb.AppendLine($"        var model = await CapabilityEndpointBodyReader.ReadBodyAsync<{typeName}>(");
+        sb.AppendLine($"            context, jsonTypeInfo, null, {optional.ToString().ToLowerInvariant()}, ct);");
         sb.AppendLine();
 
         // Assign route values to model properties
