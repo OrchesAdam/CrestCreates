@@ -24,6 +24,7 @@
     <Project Path="../samples/SaaSHelpdesk/SaaSHelpdesk.Tests/SaaSHelpdesk.Tests.csproj" />
     <Project Path="../samples/SaaSHelpdesk/SaaSHelpdesk.Web/SaaSHelpdesk.Web.csproj" />
   </Folder>
+  <Folder Name="/src/" />
   <Folder Name="/src/Core/">
     <Project Path="../src/Core/CrestCreates.Core.Abstractions/CrestCreates.Core.Abstractions.csproj" />
     <Project Path="../src/Core/CrestCreates.Core/CrestCreates.Core.csproj" />
@@ -56,6 +57,7 @@
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Validation/CrestCreates.Validation.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.VirtualFileSystem/CrestCreates.VirtualFileSystem.csproj" />
   </Folder>
+  <Folder Name="/src/Framework/" />
   <Folder Name="/src/Framework/Api/">
     <Project Path="../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
     <Project Path="../src/Framework/Api/CrestCreates.DynamicApi.Abstractions/CrestCreates.DynamicApi.Abstractions.csproj" />
@@ -109,6 +111,7 @@
     <Project Path="../src/Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
     <Project Path="../src/Runtime/HumanTask/CrestCreates.HumanTask/CrestCreates.HumanTask.csproj" />
   </Folder>
+  <Folder Name="/src/Runtime/" />
   <Folder Name="/src/Runtime/Agent/">
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Abstractions/CrestCreates.Agent.Abstractions.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Authoring.Abstractions/CrestCreates.Agent.Authoring.Abstractions.csproj" />
@@ -176,6 +179,7 @@
     <Project Path="../src/Integrations/CrestCreates.Integration.LegacyDatabase/CrestCreates.Integration.LegacyDatabase.csproj" />
     <Project Path="../src/Integrations/CrestCreates.PluginSystem/CrestCreates.PluginSystem.csproj" />
   </Folder>
+  <Folder Name="/tests/" />
   <Folder Name="/tests/Boundary/">
     <Project Path="../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/CrestCreates.DependencyBoundaries.Tests.csproj" />
   </Folder>
@@ -192,6 +196,7 @@
     <Project Path="../tests/Framework/Infrastructure/CrestCreates.Logging.Tests/CrestCreates.Logging.Tests.csproj" />
      <Project Path="../tests/Framework/Infrastructure/CrestCreates.VirtualFileSystem.Tests/CrestCreates.VirtualFileSystem.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/Framework/" />
   <Folder Name="/tests/Framework/Api/">
     <Project Path="../tests/Framework/Api/CrestCreates.DynamicApi.Tests/CrestCreates.DynamicApi.Tests.csproj" />
     <Project Path="../tests/Framework/Api/CrestCreates.CompatibilityProjection.E2E.Tests/CrestCreates.CompatibilityProjection.E2E.Tests.csproj" />
@@ -213,6 +218,7 @@
     <Project Path="../tests/Framework/Testing/CrestCreates.TestBase.Tests/CrestCreates.TestBase.Tests.csproj" />
     <Project Path="../tests/Framework/Testing/CrestCreates.Samples.Tests/CrestCreates.Samples.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/Metadata/" />
   <Folder Name="/tests/Metadata/Core/">
     <Project Path="../tests/Metadata/Core/CrestCreates.Metadata.Tests/CrestCreates.Metadata.Tests.csproj" />
     <Project Path="../tests/Metadata/Core/CrestCreates.Metadata.ContextPack.Tests/CrestCreates.Metadata.ContextPack.Tests.csproj" />
@@ -232,6 +238,7 @@
   <Folder Name="/tests/Runtime/HumanTask/">
     <Project Path="../tests/Runtime/HumanTask/CrestCreates.HumanTask.Tests/CrestCreates.HumanTask.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/Runtime/" />
   <Folder Name="/tests/Runtime/Agent/">
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests/CrestCreates.Agent.Authoring.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj" />
@@ -265,4 +272,5 @@
     <Project Path="../tests/Tooling/CrestCreates.CodeGenerator.Tests/CrestCreates.CodeGenerator.Tests.csproj" />
     <Project Path="../tests/Tooling/CrestCreates.Agent.DraftContractGenerator.Tests/CrestCreates.Agent.DraftContractGenerator.Tests.csproj" />
   </Folder>
+  <Project Path="../tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture/CrestCreates.CapabilityEndpoint.AotFixture.csproj" />
 </Solution>
