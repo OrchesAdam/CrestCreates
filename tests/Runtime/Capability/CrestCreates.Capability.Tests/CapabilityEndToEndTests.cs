@@ -4,6 +4,7 @@ using CrestCreates.Capability.Internal;
 using CrestCreates.Capability.Middleware;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Bootstrap;
 using CrestCreates.MultiTenancy.Abstract;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,6 +37,7 @@ public class CapabilityEndToEndTests
         builder.Use<AuditMiddleware>();
 
         var services = new ServiceCollection();
+        services.AddDescriptorStableHash();
         services.AddSingleton<ICapabilityRegistry>(registry);
         services.AddSingleton<ICapabilityHandlerResolver>(resolver);
         services.AddSingleton<ICapabilityAuditStore>(auditStore);
@@ -256,6 +258,7 @@ public class CapabilityEndToEndTests
         builder.Use<AuditMiddleware>();
 
         var services = new ServiceCollection();
+        services.AddDescriptorStableHash();
         services.AddSingleton<ICapabilityRegistry>(registry);
         services.AddSingleton<ICapabilityHandlerResolver>(resolver);
         services.AddSingleton<ICapabilityAuditStore>(throwingStore.Object);

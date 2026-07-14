@@ -5,6 +5,7 @@ using CrestCreates.Capability.Internal;
 using CrestCreates.Capability.Middleware;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Bootstrap;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -29,6 +30,9 @@ public static class CapabilityServiceCollectionExtensions
         builder.Use<EventPublishingMiddleware>();
 
         configure?.Invoke(builder);
+
+        // Stable hash — required by CapabilityPipeline for descriptor hashing
+        services.AddDescriptorStableHash();
 
         services.TryAddSingleton(builder);
         services.TryAddScoped<ICapabilityPipeline, CapabilityPipeline>();
