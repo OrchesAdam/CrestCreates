@@ -28,51 +28,9 @@ public static class DynamicApiGeneratedRuntime
         };
     }
 
-    public static async Task<T?> ReadBodyAsync<T>(HttpContext context, bool optional)
+    public static Task<T?> ReadBodyAsync<T>(HttpContext context, bool optional)
         where T : new()
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        if (context.Request.ContentLength == 0)
-        {
-            return optional ? default : new T();
-        }
-
-        context.Request.EnableBuffering();
-        if (context.Request.Body.CanSeek)
-        {
-            context.Request.Body.Seek(0, SeekOrigin.Begin);
-        }
-
-        try
-        {
-            using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
-            var payload = await reader.ReadToEndAsync();
-            if (string.IsNullOrWhiteSpace(payload))
-            {
-                return optional ? default : new T();
-            }
-
-            var result = JsonSerializer.Deserialize<T>(payload, ResolveJsonSerializerOptions(context.RequestServices));
-            if (result is not null)
-            {
-                return result;
-            }
-
-            return optional ? default : new T();
-        }
-        catch (JsonException) when (optional)
-        {
-            return default;
-        }
-        finally
-        {
-            if (context.Request.Body.CanSeek)
-            {
-                context.Request.Body.Seek(0, SeekOrigin.Begin);
-            }
-        }
-    }
+        => CompatibilityBodyReader.ReadBodyAsync<T>(context, optional);
 
     public static async Task EnsurePermissionAsync(
         HttpContext context,
@@ -111,37 +69,13 @@ public static class DynamicApiGeneratedRuntime
     }
 
     public static IResult WrapResult<T>(T? value)
-    {
-        return Results.Ok(new DynamicApiResponse<T?>
-        {
-            Code = StatusCodes.Status200OK,
-            Message = "操作成功",
-            Data = value
-        });
-    }
+        => CompatibilityHttpResultMapper.WrapResult(value);
 
     public static IResult WrapVoidResult()
-    {
-        return Results.Ok(new DynamicApiResponse
-        {
-            Code = StatusCodes.Status200OK,
-            Message = "操作成功"
-        });
-    }
+        => CompatibilityHttpResultMapper.WrapVoidResult();
 
     public static IResult WrapGetResult<T>(T? value)
-    {
-        if (value is null)
-        {
-            return Results.NotFound(new DynamicApiResponse
-            {
-                Code = StatusCodes.Status404NotFound,
-                Message = "资源不存在"
-            });
-        }
-
-        return WrapResult(value);
-    }
+        => CompatibilityHttpResultMapper.WrapGetResult(value);
 
     public static async Task ExecuteAsync(HttpContext context, bool requiresTransaction, Func<Task> action)
     {

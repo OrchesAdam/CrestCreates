@@ -429,7 +429,9 @@ public sealed class CapabilityEndpointIntegrationTests : IDisposable
         };
 
         // Register provider + binding
-        DescriptorProviderRegistry.Register(CreateProvider(endpointDescriptor));
+        var providerMock = new Mock<IDescriptorProvider<CapabilityEndpointDescriptor>>();
+        providerMock.Setup(p => p.GetDescriptors()).Returns(new[] { endpointDescriptor });
+        DescriptorProviderRegistry.Register(providerMock.Object);
         CapabilityEndpointBindingRegistry.Register(new CapabilityEndpointBindingContract(
             EndpointId: "ep-rc", EndpointVersion: 1,
             BindInputAsync: (ctx, ct) => ValueTask.FromResult<object?>(null)));
@@ -508,7 +510,9 @@ public sealed class CapabilityEndpointIntegrationTests : IDisposable
         };
 
         // Register provider + binding — but NO result contract registration
-        DescriptorProviderRegistry.Register(CreateProvider(endpointDescriptor));
+        var providerMock2 = new Mock<IDescriptorProvider<CapabilityEndpointDescriptor>>();
+        providerMock2.Setup(p => p.GetDescriptors()).Returns(new[] { endpointDescriptor });
+        DescriptorProviderRegistry.Register(providerMock2.Object);
         CapabilityEndpointBindingRegistry.Register(new CapabilityEndpointBindingContract(
             EndpointId: "ep-default", EndpointVersion: 1,
             BindInputAsync: (ctx, ct) => ValueTask.FromResult<object?>(null)));
@@ -1207,7 +1211,267 @@ public sealed class CompatibilityProjectionEndToEndTests : IDisposable
         doc.RootElement.TryGetProperty("data", out var dataProp).Should().BeTrue();
         dataProp.GetArrayLength().Should().Be(2);
         dataProp[0].GetProperty("title").GetString().Should().Be("Book1");
-        dataProp[1].GetProperty("title").GetString().Should().Be("Book2");
+         dataProp[1].GetProperty("title").GetString().Should().Be("Book2");
+     }
+
+    /// <summary>
+    /// Verifies that a compatibility result contract does NOT swallow pipeline failures.
+    /// When the pipeline returns RATE_LIMIT_EXCEEDED, the custom result mapper must be
+    /// bypassed and the default failure mapper must produce 429.
+    /// Uses RATE_LIMIT_EXCEEDED instead of UNAUTHORIZED because Results.Forbid()
+    /// requires authentication middleware which is not available in unit test context.
+    /// </summary>
+    [Fact]
+    public async Task CompatibilityResultContract_PipelineFailure_NotSwallowed()
+    {
+        // Arrange
+        var capability = new CapabilityDescriptor
+        {
+            Id = "test-cap-rl",
+            Name = "RL Cap",
+            Version = 1,
+            State = DescriptorState.Active
+        };
+
+        var endpointDescriptor = new CapabilityEndpointDescriptor
+        {
+            Id = "ep-rl",
+            Name = "RL EP",
+            Version = 1,
+            State = DescriptorState.Active,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("test-cap-rl", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Post,
+            RoutePattern = "/api/v1/rl"
+        };
+
+        var providerMock = new Mock<IDescriptorProvider<CapabilityEndpointDescriptor>>();
+        providerMock.Setup(p => p.GetDescriptors()).Returns(new[] { endpointDescriptor });
+        DescriptorProviderRegistry.Register(providerMock.Object);
+        CapabilityEndpointBindingRegistry.Register(new CapabilityEndpointBindingContract(
+            EndpointId: "ep-rl", EndpointVersion: 1,
+            BindInputAsync: (ctx, ct) => ValueTask.FromResult<object?>(null)));
+
+        // Register a result contract that would wrap as DynamicApiResponse on success
+        CapabilityEndpointResultContractRegistration.Register("ep-rl", 1, ctx =>
+        {
+            // This should NOT be called for failures
+            return Results.Ok(new { code = 200, message = "操作成功", data = ctx.Output });
+        });
+
+        // Mock dispatcher to return RATE_LIMIT_EXCEEDED failure
+        var dispatcherMock = new Mock<ICapabilityDispatcher>();
+        dispatcherMock
+            .Setup(d => d.DispatchAsync(
+                capability,
+                InvocationSource.Http,
+                It.IsAny<object?>(),
+                It.IsAny<Action<CapabilityExecutionContext>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CapabilityExecutionResult.Failure(
+                "RATE_LIMIT_EXCEEDED", "Rate limit exceeded.", TimeSpan.FromMilliseconds(1)));
+
+        var capRegistryMock = new Mock<ICapabilityRegistry>();
+        capRegistryMock.Setup(r => r.GetByVersion("test-cap-rl", 1)).Returns(capability);
+        capRegistryMock.Setup(r => r.GetById("test-cap-rl")).Returns(capability);
+        capRegistryMock.Setup(r => r.GetAll()).Returns(new[] { capability });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(capRegistryMock.Object);
+        services.AddSingleton(dispatcherMock.Object);
+        services.AddCrestCapabilityEndpoints();
+        var sp = services.BuildServiceProvider();
+
+        var endpoints = new DefaultEndpointRouteBuilder(sp);
+        endpoints.MapCrestCapabilityEndpoints();
+
+        var dataSource = endpoints.DataSources.Should().ContainSingle().Subject;
+        var routeEndpoint = dataSource.Endpoints.OfType<RouteEndpoint>().Should().ContainSingle().Subject;
+
+        var httpContext = new DefaultHttpContext
+        {
+            TraceIdentifier = "trace-rl",
+            RequestServices = sp
+        };
+
+        // Act
+        await routeEndpoint.RequestDelegate!(httpContext);
+
+        // Assert — failure must NOT be swallowed by the result contract.
+        // RATE_LIMIT_EXCEEDED maps to 429 via CapabilityEndpointResultMapper.
+        httpContext.Response.StatusCode.Should().Be(429,
+            "RATE_LIMIT_EXCEEDED failure must produce 429, not 200 OK with success envelope");
+    }
+
+    /// <summary>
+    /// Verifies that a compatibility result contract does NOT swallow validation failures.
+    /// When the pipeline returns CAPABILITY_VALIDATION_FAILED, the custom result mapper
+    /// must be bypassed and the default failure mapper must produce 400 Problem.
+    /// </summary>
+    [Fact]
+    public async Task CompatibilityResultContract_ValidationFailure_Returns400()
+    {
+        // Arrange
+        var capability = new CapabilityDescriptor
+        {
+            Id = "test-cap-val",
+            Name = "Val Cap",
+            Version = 1,
+            State = DescriptorState.Active
+        };
+
+        var endpointDescriptor = new CapabilityEndpointDescriptor
+        {
+            Id = "ep-val",
+            Name = "Val EP",
+            Version = 1,
+            State = DescriptorState.Active,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("test-cap-val", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Post,
+            RoutePattern = "/api/v1/val"
+        };
+
+        var providerMock = new Mock<IDescriptorProvider<CapabilityEndpointDescriptor>>();
+        providerMock.Setup(p => p.GetDescriptors()).Returns(new[] { endpointDescriptor });
+        DescriptorProviderRegistry.Register(providerMock.Object);
+        CapabilityEndpointBindingRegistry.Register(new CapabilityEndpointBindingContract(
+            EndpointId: "ep-val", EndpointVersion: 1,
+            BindInputAsync: (ctx, ct) => ValueTask.FromResult<object?>(null)));
+
+        CapabilityEndpointResultContractRegistration.Register("ep-val", 1, ctx =>
+            Results.Ok(new { code = 200, message = "操作成功", data = ctx.Output }));
+
+        // Mock dispatcher to return validation failure
+        var dispatcherMock = new Mock<ICapabilityDispatcher>();
+        dispatcherMock
+            .Setup(d => d.DispatchAsync(
+                capability,
+                InvocationSource.Http,
+                It.IsAny<object?>(),
+                It.IsAny<Action<CapabilityExecutionContext>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CapabilityExecutionResult.Failure(
+                "CAPABILITY_VALIDATION_FAILED", "Input validation failed.", TimeSpan.FromMilliseconds(1)));
+
+        var capRegistryMock = new Mock<ICapabilityRegistry>();
+        capRegistryMock.Setup(r => r.GetByVersion("test-cap-val", 1)).Returns(capability);
+        capRegistryMock.Setup(r => r.GetById("test-cap-val")).Returns(capability);
+        capRegistryMock.Setup(r => r.GetAll()).Returns(new[] { capability });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(capRegistryMock.Object);
+        services.AddSingleton(dispatcherMock.Object);
+        services.AddCrestCapabilityEndpoints();
+        var sp = services.BuildServiceProvider();
+
+        var endpoints = new DefaultEndpointRouteBuilder(sp);
+        endpoints.MapCrestCapabilityEndpoints();
+
+        var dataSource = endpoints.DataSources.Should().ContainSingle().Subject;
+        var routeEndpoint = dataSource.Endpoints.OfType<RouteEndpoint>().Should().ContainSingle().Subject;
+
+        var httpContext = new DefaultHttpContext
+        {
+            TraceIdentifier = "trace-val",
+            RequestServices = sp
+        };
+
+        // Act
+        await routeEndpoint.RequestDelegate!(httpContext);
+
+        // Assert — validation failure must produce 400, not 200 OK
+        httpContext.Response.StatusCode.Should().Be(400,
+            "CAPABILITY_VALIDATION_FAILED must produce 400 Problem, not 200 OK with success envelope");
+    }
+
+    /// <summary>
+    /// Verifies that a compatibility result contract does NOT produce 404 for
+    /// GET + HANDLER_NOT_FOUND. The failure must be mapped by the default mapper
+    /// (500 Problem), not by the compatibility WrapGetResult(null) which would
+    /// incorrectly produce 404 "资源不存在".
+    /// </summary>
+    [Fact]
+    public async Task CompatibilityResultContract_HandlerNotFound_Returns500Not404()
+    {
+        // Arrange
+        var capability = new CapabilityDescriptor
+        {
+            Id = "test-cap-hnf",
+            Name = "HNF Cap",
+            Version = 1,
+            State = DescriptorState.Active
+        };
+
+        var endpointDescriptor = new CapabilityEndpointDescriptor
+        {
+            Id = "ep-hnf",
+            Name = "HNF EP",
+            Version = 1,
+            State = DescriptorState.Active,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("test-cap-hnf", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Get,
+            RoutePattern = "/api/v1/hnf"
+        };
+
+        var providerMock = new Mock<IDescriptorProvider<CapabilityEndpointDescriptor>>();
+        providerMock.Setup(p => p.GetDescriptors()).Returns(new[] { endpointDescriptor });
+        DescriptorProviderRegistry.Register(providerMock.Object);
+        CapabilityEndpointBindingRegistry.Register(new CapabilityEndpointBindingContract(
+            EndpointId: "ep-hnf", EndpointVersion: 1,
+            BindInputAsync: (ctx, ct) => ValueTask.FromResult<object?>(null)));
+
+        // Register a GET result contract that would produce 404 for null output
+        CapabilityEndpointResultContractRegistration.Register("ep-hnf", 1, ctx =>
+        {
+            // This simulates WrapGetResult — would return 404 for null output
+            if (ctx.Output is null)
+                return Results.NotFound(new { code = 404, message = "资源不存在" });
+            return Results.Ok(new { code = 200, message = "操作成功", data = ctx.Output });
+        });
+
+        // Mock dispatcher to return HANDLER_NOT_FOUND failure
+        var dispatcherMock = new Mock<ICapabilityDispatcher>();
+        dispatcherMock
+            .Setup(d => d.DispatchAsync(
+                capability,
+                InvocationSource.Http,
+                It.IsAny<object?>(),
+                It.IsAny<Action<CapabilityExecutionContext>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CapabilityExecutionResult.Failure(
+                "HANDLER_NOT_FOUND", "No handler registered.", TimeSpan.FromMilliseconds(1)));
+
+        var capRegistryMock = new Mock<ICapabilityRegistry>();
+        capRegistryMock.Setup(r => r.GetByVersion("test-cap-hnf", 1)).Returns(capability);
+        capRegistryMock.Setup(r => r.GetById("test-cap-hnf")).Returns(capability);
+        capRegistryMock.Setup(r => r.GetAll()).Returns(new[] { capability });
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(capRegistryMock.Object);
+        services.AddSingleton(dispatcherMock.Object);
+        services.AddCrestCapabilityEndpoints();
+        var sp = services.BuildServiceProvider();
+
+        var endpoints = new DefaultEndpointRouteBuilder(sp);
+        endpoints.MapCrestCapabilityEndpoints();
+
+        var dataSource = endpoints.DataSources.Should().ContainSingle().Subject;
+        var routeEndpoint = dataSource.Endpoints.OfType<RouteEndpoint>().Should().ContainSingle().Subject;
+
+        var httpContext = new DefaultHttpContext
+        {
+            TraceIdentifier = "trace-hnf",
+            RequestServices = sp
+        };
+
+        // Act
+        await routeEndpoint.RequestDelegate!(httpContext);
+
+        // Assert — HANDLER_NOT_FOUND must produce 500 (Problem), NOT 404
+        httpContext.Response.StatusCode.Should().Be(500,
+            "HANDLER_NOT_FOUND must produce 500 Problem, not 404 from WrapGetResult(null)");
     }
 
     /// <summary>

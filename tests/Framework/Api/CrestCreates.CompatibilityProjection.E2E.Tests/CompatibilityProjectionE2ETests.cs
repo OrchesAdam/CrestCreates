@@ -1,10 +1,13 @@
 using System.Net;
 using System.Reflection;
 using System.Text.Json;
+using CrestCreates.Capability;
+using CrestCreates.Capability.Abstractions;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
 
 namespace CrestCreates.CompatibilityProjection.E2E;
@@ -18,12 +21,53 @@ public sealed class CompatibilityProjectionE2ETestFactory : WebApplicationFactor
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        // Set content root to the directory containing the test project
         var projectDir = Path.GetDirectoryName(
             Path.GetDirectoryName(
                 Path.GetDirectoryName(
                     Assembly.GetExecutingAssembly().Location)!))!;
         builder.UseContentRoot(projectDir);
+    }
+}
+
+/// <summary>
+/// Factory that injects an authorization-failure middleware into the pipeline
+/// for testing failure result mapping.
+/// </summary>
+public sealed class AuthorizationFailureE2ETestFactory : WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        var projectDir = Path.GetDirectoryName(
+            Path.GetDirectoryName(
+                Path.GetDirectoryName(
+                    Assembly.GetExecutingAssembly().Location)!))!;
+        builder.UseContentRoot(projectDir);
+
+        builder.ConfigureServices(services =>
+        {
+            // Register the rate-limit failure middleware in DI
+            services.AddSingleton<TestRateLimitFailureMiddleware>();
+            // Replace pipeline with one that always returns RATE_LIMIT_EXCEEDED
+            services.AddSingleton(new CapabilityPipelineBuilder()
+                .Use<TestRateLimitFailureMiddleware>());
+        });
+    }
+}
+
+/// <summary>
+/// Middleware that always returns RATE_LIMIT_EXCEEDED failure, used to test
+/// that compatibility result contracts do not swallow pipeline failures.
+/// Uses RATE_LIMIT_EXCEEDED instead of UNAUTHORIZED because Results.Forbid()
+/// requires authentication middleware which is not available in minimal test setup.
+/// </summary>
+public sealed class TestRateLimitFailureMiddleware : ICapabilityPipelineMiddleware
+{
+    public Task<CapabilityExecutionResult> InvokeAsync(
+        CapabilityExecutionContext context,
+        CapabilityPipelineDelegate next)
+    {
+        return Task.FromResult(CapabilityExecutionResult.Failure(
+            "RATE_LIMIT_EXCEEDED", "Rate limit exceeded for testing.", TimeSpan.FromMilliseconds(1)));
     }
 }
 
@@ -126,7 +170,6 @@ public class CompatibilityProjectionE2ETests : IClassFixture<CompatibilityProjec
     public async Task GreetAsync_Get_MissingQueryParam_Returns200_WithEmptyName()
     {
         // Act — GreetingRequest.Name defaults to empty string when query param is missing.
-        // The TryGetQueryString pattern in generated bindings gracefully handles missing optional params.
         var response = await _client.GetAsync("/api/greeting/greet");
 
         // Assert — returns 200 with greeting containing empty name, wrapped in envelope
@@ -147,5 +190,50 @@ public class CompatibilityProjectionE2ETests : IClassFixture<CompatibilityProjec
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task PipelineMiddleware_IsExecuted()
+    {
+        // Arrange — reset marker before test
+        TestMarkerMiddleware.Reset();
+
+        // Act
+        var response = await _client.GetAsync("/api/greeting/list-greetings");
+
+        // Assert — middleware was executed
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        TestMarkerMiddleware.LastInvocationSeen.Should().BeTrue(
+            "TestMarkerMiddleware should be executed in the pipeline");
+    }
+}
+
+/// <summary>
+/// E2E tests that verify pipeline failure results are NOT swallowed by
+/// compatibility result contracts. Uses a factory that injects an
+/// authorization-failure middleware.
+/// </summary>
+public class AuthorizationFailureE2ETests : IClassFixture<AuthorizationFailureE2ETestFactory>
+{
+    private readonly HttpClient _client;
+
+    public AuthorizationFailureE2ETests(AuthorizationFailureE2ETestFactory factory)
+    {
+        _client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            BaseAddress = new Uri("https://localhost")
+        });
+    }
+
+    [Fact]
+    public async Task CompatibilityEndpoint_PipelineFailure_NotSwallowed()
+    {
+        // Act — any endpoint should return 429 when pipeline returns RATE_LIMIT_EXCEEDED
+        var response = await _client.GetAsync("/api/greeting/list-greetings");
+
+        // Assert — failure must NOT be swallowed as 200 OK with success envelope
+        response.StatusCode.Should().Be((HttpStatusCode)429,
+            "RATE_LIMIT_EXCEEDED pipeline failure must produce 429, not 200 OK with DynamicApiResponse envelope");
     }
 }

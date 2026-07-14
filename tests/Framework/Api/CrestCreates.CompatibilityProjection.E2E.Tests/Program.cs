@@ -1,4 +1,5 @@
 using CrestCreates.Capability;
+using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Middleware;
 using CrestCreates.CompatibilityProjection.E2E;
 using CrestCreates.DynamicApi;
@@ -15,20 +16,19 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 var builder = WebApplication.CreateBuilder(args);
 
 // Register capability runtime (pipeline + dispatcher + resolver)
-// AddCapabilityRuntime also registers internal types like DefaultCapabilityResolver
-// that we cannot register from outside the assembly.
 builder.Services.AddCapabilityRuntime();
 
 // Remove services that have unresolvable dependencies in our minimal test setup.
-// These are not needed for basic endpoint dispatch validation.
 builder.Services.RemoveAll<ValidationMiddleware>();
 builder.Services.RemoveAll<IBootstrapValidator>();
 builder.Services.RemoveAll<IDescriptorBindingStatusContributor>();
 
-// Replace pipeline builder with a clean one (no middleware — direct handler invocation).
-// AddCapabilityRuntime registers a builder with 7 middleware types, but some of those
-// middleware have unresolvable dependencies. We just want pass-through.
-builder.Services.AddSingleton(new CapabilityPipelineBuilder());
+// Replace pipeline builder with one that includes a test marker middleware.
+// This verifies that the pipeline actually executes middleware and that
+// InvocationSource.Http is correctly set.
+builder.Services.AddSingleton<TestMarkerMiddleware>();
+builder.Services.AddSingleton(new CapabilityPipelineBuilder()
+    .Use<TestMarkerMiddleware>());
 
 // Stable hash (required by CapabilityPipeline)
 builder.Services.AddDescriptorStableHash();
@@ -45,7 +45,6 @@ builder.Services.AddLogging();
 var app = builder.Build();
 
 // Build capability registry from generated providers BEFORE endpoint mapping.
-// The endpoint validator checks ICapabilityRegistry for referenced capabilities.
 var capabilityRegistry = (CapabilityRegistry)app.Services.GetRequiredService<ICapabilityRegistry>();
 var capabilityProviders = DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>();
 capabilityRegistry.Build(capabilityProviders);
@@ -54,5 +53,30 @@ capabilityRegistry.Build(capabilityProviders);
 app.MapCrestCapabilityEndpoints();
 
 app.Run();
+
+/// <summary>
+/// Test middleware that records invocation metadata for assertion in tests.
+/// Simply passes through to the next delegate after recording.
+/// </summary>
+public sealed class TestMarkerMiddleware : ICapabilityPipelineMiddleware
+{
+    public static bool LastInvocationSeen { get; set; }
+    public static string? LastInvocationSource { get; set; }
+
+    public Task<CapabilityExecutionResult> InvokeAsync(
+        CapabilityExecutionContext context,
+        CapabilityPipelineDelegate next)
+    {
+        LastInvocationSeen = true;
+        LastInvocationSource = context.Input?.ToString();
+        return next(context);
+    }
+
+    public static void Reset()
+    {
+        LastInvocationSeen = false;
+        LastInvocationSource = null;
+    }
+}
 
 public partial class Program;

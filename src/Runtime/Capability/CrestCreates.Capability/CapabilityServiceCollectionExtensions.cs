@@ -42,6 +42,14 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddTransient<MetricsMiddleware>();
         services.TryAddTransient<EventPublishingMiddleware>();
 
+        // Register the single static resolver instance for both the concrete
+        // type and the interface so that DI resolution always returns the same
+        // object regardless of which service type is requested.
+        var concreteResolver = CapabilityHandlerResolverProvider.GetConcreteResolver();
+        var interfaceResolver = CapabilityHandlerResolverProvider.GetResolver();
+        services.TryAddSingleton<CapabilityHandlerResolver>(_ => concreteResolver);
+        services.TryAddSingleton<ICapabilityHandlerResolver>(_ => interfaceResolver);
+
         return services;
     }
 
@@ -89,12 +97,9 @@ public static class CapabilityServiceCollectionExtensions
 
         // Generated handler registrations are additive via CapabilityHandlerResolverProvider.Register().
         // The static resolver is the single source of truth.
-        // Register both the concrete type and the interface to point to the same static instance,
-        // so DI resolution via CapabilityHandlerResolver and ICapabilityHandlerResolver returns the same object.
-        var concreteResolver = CapabilityHandlerResolverProvider.GetConcreteResolver();
-        var interfaceResolver = CapabilityHandlerResolverProvider.GetResolver();
-        services.TryAddSingleton<CapabilityHandlerResolver>(_ => concreteResolver);
-        services.TryAddSingleton<ICapabilityHandlerResolver>(_ => interfaceResolver);
+        // Resolver registration is already done in AddCapabilityPipeline() so that
+        // AddCapabilityPipeline() remains independently usable.
+        // AddCapabilityRuntime() only adds dispatcher, resolver services, and bootstrap.
 
         // Binding Status Contributor
         services.AddSingleton<IDescriptorBindingStatusContributor, CapabilityBindingStatusContributor>();

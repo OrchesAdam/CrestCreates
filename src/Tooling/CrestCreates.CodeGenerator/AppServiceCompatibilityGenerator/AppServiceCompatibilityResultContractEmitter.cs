@@ -10,9 +10,9 @@ namespace CrestCreates.CodeGenerator.AppServiceCompatibilityGenerator;
 /// envelope matching legacy AppService behavior.
 ///
 /// Wrap method selection:
-///   - Void return  →  DynamicApiGeneratedRuntime.WrapVoidResult()
-///   - GET non-void →  DynamicApiGeneratedRuntime.WrapGetResult(ctx.Output)
-///   - Other non-void → DynamicApiGeneratedRuntime.WrapResult(ctx.Output)
+///   - Void return  →  CompatibilityHttpResultMapper.WrapVoidResult()
+///   - GET non-void →  CompatibilityHttpResultMapper.WrapGetResult(ctx.Output)
+///   - Other non-void → CompatibilityHttpResultMapper.WrapResult(ctx.Output)
 /// </summary>
 internal static class AppServiceCompatibilityResultContractEmitter
 {
@@ -39,15 +39,15 @@ internal static class AppServiceCompatibilityResultContractEmitter
 
             if (action.IsVoidReturn)
             {
-                wrapExpression = "DynamicApiGeneratedRuntime.WrapVoidResult()";
+                wrapExpression = "CompatibilityHttpResultMapper.WrapVoidResult()";
             }
             else if (action.HttpMethod == "GET")
             {
-                wrapExpression = "DynamicApiGeneratedRuntime.WrapGetResult(ctx.Output)";
+                wrapExpression = "CompatibilityHttpResultMapper.WrapGetResult(ctx.Output)";
             }
             else
             {
-                wrapExpression = "DynamicApiGeneratedRuntime.WrapResult(ctx.Output)";
+                wrapExpression = "CompatibilityHttpResultMapper.WrapResult(ctx.Output)";
             }
 
             sb.AppendLine($"        CapabilityEndpointResultContractRegistration.Register(");

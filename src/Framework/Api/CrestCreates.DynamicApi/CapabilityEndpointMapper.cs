@@ -82,14 +82,21 @@ internal static class CapabilityEndpointMapper
         CapabilityEndpointOutputMapping outputMapping,
         Func<EndpointExecutionContext, object>? resultMapper)
     {
+        // Custom result contracts only govern the *success* response envelope.
+        // Pipeline failures (authorization, validation, rate-limit, handler-not-found, etc.)
+        // must always be mapped by the unified CapabilityEndpointResultMapper so that
+        // compatibility projections never swallow a failure as a 200 OK.
+        if (!result.IsSuccess)
+            return CapabilityEndpointResultMapper.Map(result, outputMapping);
+
         if (resultMapper is not null)
         {
             var ctx = new EndpointExecutionContext
             {
                 Output = result.Output,
-                Succeeded = result.IsSuccess,
-                ErrorCode = result.ErrorCode,
-                ErrorMessage = result.ErrorMessage
+                Succeeded = true,
+                ErrorCode = null,
+                ErrorMessage = null
             };
 
             var mapped = resultMapper(ctx);

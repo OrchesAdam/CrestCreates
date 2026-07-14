@@ -192,9 +192,35 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
                 {
                     // For method-level projection: only include methods with [CapabilityCompatibilityProjection]
                     // Check both contract method and implementation method (P0-2 fix)
-                    if (!contractMethod.GetAttributes().Any(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute")
-                        && !implMethod.GetAttributes().Any(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute"))
+                    var methodAttr = contractMethod.GetAttributes()
+                        .FirstOrDefault(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute")
+                        ?? implMethod.GetAttributes()
+                            .FirstOrDefault(a => a.AttributeClass?.Name == "CapabilityCompatibilityProjectionAttribute");
+
+                    if (methodAttr == null)
                         continue;
+
+                    // CEP036: method-level CapabilityIdPrefix/RoutePrefix override is not supported
+                    var methodCapabilityIdPrefix = GetNamedArgValue(methodAttr, "CapabilityIdPrefix");
+                    var methodRoutePrefix = GetNamedArgValue(methodAttr, "RoutePrefix");
+                    if (methodCapabilityIdPrefix is not null)
+                    {
+                        var syntaxRef = (contractMethod.DeclaringSyntaxReferences.FirstOrDefault()
+                            ?? implMethod.DeclaringSyntaxReferences.FirstOrDefault());
+                        var location = syntaxRef?.GetSyntax().GetLocation() ?? Location.None;
+                        diagnostics.Add(new DiagnosticDescriptorAndLocation(
+                            AppServiceCompatibilityDiagnostics.CEP036, location,
+                            new object?[] { implMethod.Name, "CapabilityIdPrefix" }));
+                    }
+                    if (methodRoutePrefix is not null)
+                    {
+                        var syntaxRef = (contractMethod.DeclaringSyntaxReferences.FirstOrDefault()
+                            ?? implMethod.DeclaringSyntaxReferences.FirstOrDefault());
+                        var location = syntaxRef?.GetSyntax().GetLocation() ?? Location.None;
+                        diagnostics.Add(new DiagnosticDescriptorAndLocation(
+                            AppServiceCompatibilityDiagnostics.CEP036, location,
+                            new object?[] { implMethod.Name, "RoutePrefix" }));
+                    }
                 }
 
                 // Deduplicate by method signature

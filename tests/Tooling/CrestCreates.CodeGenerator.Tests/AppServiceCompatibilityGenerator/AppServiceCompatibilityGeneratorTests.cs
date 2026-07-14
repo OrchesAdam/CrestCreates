@@ -38,7 +38,7 @@ public sealed class AppServiceCompatibilityGeneratorTests
         var contracts = result.GetSourceByFileName("GeneratedAppServiceCompatibilityResultContracts_Book.g.cs");
         contracts.Should().NotBeNull();
         contracts!.SourceText.Should().Contain("CapabilityEndpointResultContractRegistration.Register");
-        contracts.SourceText.Should().Contain("DynamicApiGeneratedRuntime.WrapResult");
+        contracts.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapResult");
 
         result.CompilationSuccess.Should().BeTrue("generated code must compile successfully");
     }
@@ -351,8 +351,9 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         var bindings = result.GetSourceByFileName("GeneratedAppServiceCompatibilityBindings_Book.g.cs");
         bindings.Should().NotBeNull();
-        // P0-1: Removed CompatibilityJsonContext; now uses generic ReadBodyAsync<T> overload.
-        bindings!.SourceText.Should().Contain("ReadBodyAsync");
+        // P1-4: Compatibility binding uses CompatibilityBodyReader for legacy-compatible body semantics.
+        bindings!.SourceText.Should().Contain("CompatibilityBodyReader.ReadBodyAsync");
+        bindings.SourceText.Should().NotContain("CapabilityEndpointJsonRuntime");
         bindings.SourceText.Should().NotContain("CompatibilityJsonContext");
         bindings.SourceText.Should().NotContain("JsonSerializable");
 
@@ -381,8 +382,9 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         foreach (var generated in result.GeneratedSources)
         {
-            // Result contracts legitimately reference DynamicApiGeneratedRuntime for
+            // Result contracts reference CompatibilityHttpResultMapper for
             // WrapResult / WrapVoidResult / WrapGetResult envelope wrapping.
+            // This is the neutral class, not the legacy DynamicApiGeneratedRuntime.
             if (generated.FileName.Contains("ResultContracts"))
                 continue;
 
@@ -778,11 +780,21 @@ public sealed class AppServiceCompatibilityGeneratorTests
                     public object? Output { get; init; }
                 }
 
-                public static class DynamicApiGeneratedRuntime
+                public static class CompatibilityHttpResultMapper
                 {
                     public static object WrapResult(object? value) => null!;
                     public static object WrapGetResult(object? value) => null!;
                     public static object WrapVoidResult() => null!;
+                }
+
+                public static class CompatibilityBodyReader
+                {
+                    public static async System.Threading.Tasks.Task<T?> ReadBodyAsync<T>(
+                        Microsoft.AspNetCore.Http.HttpContext context, bool optional)
+                        where T : new()
+                    {
+                        return default;
+                    }
                 }
 
                 public static class CapabilityEndpointJsonRuntime
@@ -1088,6 +1100,84 @@ public sealed class AppServiceCompatibilityGeneratorTests
     }
 
     [Fact]
+    public void CEP036_MethodLevelCapabilityIdPrefix_EmitsWarning()
+    {
+        // CapabilityIdPrefix and RoutePrefix are service-level properties.
+        // Setting them on a method-level [CapabilityCompatibilityProjection] should
+        // produce CEP036 warning, and the value should be ignored.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            public class BookAppService
+            {
+                [CapabilityCompatibilityProjection(CapabilityIdPrefix = "catalog.book")]
+                public System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP036"
+            && d.GetMessage().Contains("CapabilityIdPrefix"),
+            "CEP036 should warn when CapabilityIdPrefix is set on method-level attribute");
+    }
+
+    [Fact]
+    public void CEP036_MethodLevelRoutePrefix_EmitsWarning()
+    {
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            public class BookAppService
+            {
+                [CapabilityCompatibilityProjection(RoutePrefix = "v2/books")]
+                public System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().Contain(d => d.Id == "CEP036"
+            && d.GetMessage().Contains("RoutePrefix"),
+            "CEP036 should warn when RoutePrefix is set on method-level attribute");
+    }
+
+    [Fact]
+    public void CEP036_NotEmittedForClassLevelProperties()
+    {
+        // Class-level CapabilityIdPrefix/RoutePrefix should NOT produce CEP036.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            [CrestService]
+            [CapabilityCompatibilityProjection(CapabilityIdPrefix = "catalog.book", RoutePrefix = "v2/books")]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<string> CreateAsync(string input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        result.Diagnostics.Should().NotContain(d => d.Id == "CEP036",
+            "CEP036 should not be emitted for class-level CapabilityIdPrefix/RoutePrefix");
+    }
+
+    [Fact]
     public void NoParamMethod_DoesNotGenerateEnvelopeClass()
     {
         // Regression: methods with only a CancellationToken parameter should not
@@ -1156,11 +1246,11 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         var contracts = result.GetSourceByFileName("GeneratedAppServiceCompatibilityResultContracts_Book.g.cs");
         contracts.Should().NotBeNull();
-        contracts!.SourceText.Should().Contain("DynamicApiGeneratedRuntime.WrapResult(ctx.Output)",
+        contracts!.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapResult(ctx.Output)",
             "POST non-void actions should use WrapResult");
-        contracts.SourceText.Should().Contain("DynamicApiGeneratedRuntime.WrapGetResult(ctx.Output)",
+        contracts.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapGetResult(ctx.Output)",
             "GET non-void actions should use WrapGetResult");
-        contracts.SourceText.Should().Contain("DynamicApiGeneratedRuntime.WrapVoidResult()",
+        contracts.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapVoidResult()",
             "void-return actions should use WrapVoidResult");
     }
 

@@ -219,18 +219,19 @@ internal static class AppServiceCompatibilityEndpointEmitter
 
         if (action.IsSingleParam && bodyParam is not null)
         {
-            // Single body parameter — use generic ReadBodyAsync (no JsonSerializerContext)
-            // P0-1: Roslyn SGs cannot see each other's output, so we use the non-JsonTypeInfo overload.
+            // Single body parameter — use CompatibilityBodyReader for legacy-compatible semantics.
+            // CompatibilityBodyReader matches legacy DynamicApi body behavior (empty body → new T(),
+            // invalid JSON + optional → default) instead of throwing BadHttpRequestException.
             var bodyOptional = bodyParam.IsOptional.ToString().ToLowerInvariant();
-            sb.AppendLine($"        return await CapabilityEndpointJsonRuntime.ReadBodyAsync<{bodyParam.TypeName}>(");
-            sb.AppendLine($"            context, optional: {bodyOptional}, ct);");
+            sb.AppendLine($"        return await CompatibilityBodyReader.ReadBodyAsync<{bodyParam.TypeName}>(");
+            sb.AppendLine($"            context, optional: {bodyOptional});");
         }
         else if (bodyParam is not null && (routeParams.Length > 0 || queryParams.Length > 0 || headerParams.Length > 0))
         {
             // Body + route/query/header params
             var bodyOptional = bodyParam.IsOptional.ToString().ToLowerInvariant();
-            sb.AppendLine($"        var body = await CapabilityEndpointJsonRuntime.ReadBodyAsync<{bodyParam.TypeName}>(");
-            sb.AppendLine($"            context, optional: {bodyOptional}, ct);");
+            sb.AppendLine($"        var body = await CompatibilityBodyReader.ReadBodyAsync<{bodyParam.TypeName}>(");
+            sb.AppendLine($"            context, optional: {bodyOptional});");
             sb.AppendLine();
 
             // Two-phase: pre-declare query locals outside initializer, then construct envelope

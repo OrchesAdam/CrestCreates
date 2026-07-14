@@ -54,4 +54,17 @@ internal static class AppServiceCompatibilityDiagnostics
         category: "CrestCreates.Compatibility",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
+
+    /// <summary>
+    /// CEP036: [CapabilityCompatibilityProjection] on a method sets CapabilityIdPrefix or RoutePrefix.
+    /// These properties are service-level concepts and should only be set on class-level attributes.
+    /// Method-level override is not supported and will be ignored.
+    /// </summary>
+    public static readonly DiagnosticDescriptor CEP036 = new(
+        id: "CEP036",
+        title: "Method-level CapabilityIdPrefix/RoutePrefix override is not supported",
+        messageFormat: "Method '{0}' sets {1} on [CapabilityCompatibilityProjection], but CapabilityIdPrefix and RoutePrefix are service-level properties that only take effect on class-level attributes. The method-level value will be ignored.",
+        category: "CrestCreates.Compatibility",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
 }

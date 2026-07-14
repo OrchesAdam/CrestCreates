@@ -192,6 +192,10 @@
     <Project Path="tests/Framework/Infrastructure/CrestCreates.Logging.Tests/CrestCreates.Logging.Tests.csproj" />
     <Project Path="tests/Framework/Infrastructure/CrestCreates.VirtualFileSystem.Tests/CrestCreates.VirtualFileSystem.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/Framework/Api/">
+    <Project Path="tests/Framework/Api/CrestCreates.DynamicApi.Tests/CrestCreates.DynamicApi.Tests.csproj" />
+    <Project Path="tests/Framework/Api/CrestCreates.CompatibilityProjection.E2E.Tests/CrestCreates.CompatibilityProjection.E2E.Tests.csproj" />
+  </Folder>
   <Folder Name="/tests/Framework/Web/">
     <Project Path="tests/Framework/Web/CrestCreates.Web.Tests/CrestCreates.Web.Tests.csproj" />
     <Project Path="tests/Framework/Web/CrestCreates.IntegrationTests/CrestCreates.IntegrationTests.csproj" />
