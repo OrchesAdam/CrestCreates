@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-14 (Phase 8d: AppService→Capability Compatibility Projection — complete, 5 review rounds)
+Last Updated: 2026-07-15 (Phase 8 body binding: application-owned JsonTypeInfo architecture, trimming-safe input binding)
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -188,7 +188,7 @@ Core chain: `[CapabilityEndpointSpec]` → SG → DescriptorProvider + BindingCo
 **Runtime components**:
 - `CapabilityEndpointBindingContract` (sealed record, 3 fields)
 - `CapabilityEndpointBindingRegistry` (static ConcurrentDictionary, fail-fast on duplicate `(EndpointId, Version)`, `internal static void Reset()` for test isolation)
-- `CapabilityEndpointJsonRuntime` (two ReadBodyAsync overloads: generic + `JsonTypeInfo<T>` AOT-safe, resolves `IOptions<JsonOptions>` from DI, cached options)
+- `CapabilityEndpointJsonRuntime` (two ReadBodyAsync overloads — **[Obsolete]**, replaced by `CapabilityEndpointBodyReader.ReadNativeBodyAsync`/`ReadCompatibilityBodyAsync`)
 - `CapabilityEndpointRegistryBootstrapper` (Interlocked build-once)
 - `CapabilityEndpointCapabilityResolver` (Id-based: exact version → latest active → fail-closed; exact version miss throws InvalidOperationException)
 - `CapabilityEndpointResultMapper` (error code → HTTP status mapping)
@@ -221,7 +221,7 @@ Core chain: `[CapabilityEndpointSpec]` → SG → DescriptorProvider + BindingCo
 
 **Known architectural items for 8d** (not blocking 8a/8c):
 - AppService→Capability compatibility generator (8d scope)
-- SG generates generic ReadBodyAsync, not AOT-safe JsonTypeInfo overload — CEP015 marks as debt
+- SG generates generic ReadBodyAsync — ~~CEP015 marks as debt~~ **Resolved**: CEP015 deleted, replaced by application-owned `JsonSerializerContext` + `CapabilityEndpointJsonTypeInfoResolver` + startup validation via `CapabilityEndpointJsonContractValidator`
 
 ### Localization
 
@@ -303,7 +303,7 @@ Core concept: Let existing `[CrestService]` AppService methods opt-in to run on 
 - `CapabilityEndpointResultContractRegistration` — deferred registration pattern (static Register + ApplyTo), matching `CapabilityEndpointBindingRegistry` pattern.
 - `EndpointExecutionContext` — result contract context in `CrestCreates.DynamicApi` namespace (no Capability dependency).
 - `CompatibilityHttpResultMapper` — neutral response envelope helper in `CrestCreates.DynamicApi`. Both legacy `DynamicApiGeneratedRuntime` and compatibility generated code call it for WrapResult/WrapGetResult/WrapVoidResult. Decouples compatibility generated code from legacy runtime.
-- `CompatibilityBodyReader` — legacy-compatible body reading for compatibility projections. Matches legacy `DynamicApiGeneratedRuntime.ReadBodyAsync` semantics: ContentLength==0 → optional?default:new T(), empty/whitespace → optional?default:new T(), invalid JSON+optional → default, invalid JSON+required → JsonException. `where T : new()` constraint.
+- `CompatibilityBodyReader` — **[Obsolete]**, replaced by `CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync`. Legacy-compatible body reading for compatibility projections. Matches legacy `DynamicApiGeneratedRuntime.ReadBodyAsync` semantics: ContentLength==0 → optional?default:new T(), empty/whitespace → optional?default:new T(), invalid JSON+optional → default, invalid JSON+required → JsonException. `where T : new()` constraint.
 - `AppServiceCompatibilityProjectionManifestRegistry` — static registry for manifest entries, ModuleInitializer registration.
 - `AddCrestCompatibilityProjection()` — DI extension method.
 
@@ -360,7 +360,7 @@ Core concept: Let existing `[CrestService]` AppService methods opt-in to run on 
 - Round 4 (2 P1 + 1 P2): P1-1 CEP037 SatisfiesNewConstraint rejects closed generics (fixed: accept ITypeSymbol, allow closed generics, reject arrays/open generics), P1-2 CEP037 reported but action still generated (fail-closed: skip action + service-level skip on Error diagnostics), P2 HasAttributeOnContractOrImplementation approximate signature → FindImplementationForInterfaceMember reverse lookup. All fixed.
 - Round 5 (3 P2): Closed generic tests add CompilationSuccess assertions, open generic detection uses recursive ContainsTypeParameter helper, service-level fail-closed test freezes behavior. All fixed.
 
-**Test counts**: 248 CodeGenerator + 45 DynamicApi + 9 E2E + 34 Boundary = 336 tests, all passing.
+**Test counts**: 251 CodeGenerator + 72 DynamicApi + 3 TrimmingFixture + 9 E2E + 35 Boundary + 137 Capability = 507 tests, all passing.
 
 **File stats**: 17 modified + 11 new files (6 runtime/abstractions + 1 generator emitter + 4 E2E test project files), +2084/-53 lines (initial commit) + incremental review fixes.
 
@@ -373,6 +373,47 @@ Core concept: Let existing `[CrestService]` AppService methods opt-in to run on 
 - Service-level fail-closed: any Error diagnostic skips entire service code generation.
 - `FindImplementationForInterfaceMember` for exact interface method matching (not approximate signature).
 - `ContainsTypeParameter` recursive helper for open generic detection at any nesting depth.
+
+### Phase 8 Body Binding — Application-Owned JsonTypeInfo Architecture (2026-07-14/15)
+
+Status: ✅ Complete (input binding only; response serialization and CRUD remain future work)
+
+**Architecture**: The application owns the `[JsonSerializable]`-decorated `JsonSerializerContext` with its own `JsonSerializerOptions`. CrestCreates accesses `JsonTypeInfo<T>` from the application's `IOptions<JsonOptions>` at runtime — not from a framework-declared context or generated partial class. This is the correct replacement for the invalid cross-generator `[JsonSerializable]` emission approach (Roslyn SGs cannot see each other's `RegisterSourceOutput` output in the same compilation round).
+
+**New runtime components**:
+- `CapabilityEndpointJsonContractRegistry` — static type registry populated at startup by generator-emitted `[ModuleInitializer]` `RegisterBodyType(typeof(T))` calls
+- `CapabilityEndpointJsonTypeInfoResolver` — resolves `JsonTypeInfo<T>` from application's `IOptions<JsonOptions>` at runtime. Fail-closed: `GetRequiredService<IOptions<JsonOptions>>()`, no fallback to reflection-based options.
+- `CapabilityEndpointJsonContractValidator` — validates at startup that all registered body types have `JsonTypeInfo` available. Catches `NotSupportedException` from `options.GetTypeInfo()` for types missing from the application's `JsonSerializerContext`.
+- `CapabilityEndpointBodyReader` — two public entry points:
+  - `ReadNativeBodyAsync<T>` — for 8a native endpoints. Empty body → 400 BAD_REQUEST. No `emptyBodyFactory` parameter. Direct `JsonSerializer.DeserializeAsync` (STJ handles leading whitespace naturally).
+  - `ReadCompatibilityBodyAsync<T>` — for 8d compatibility endpoints. Preserves legacy `CompatibilityBodyReader` empty/whitespace/null/optional semantics via `ReadToEndAsync` + `string.IsNullOrWhiteSpace`. One intentional difference: required invalid JSON throws `BadHttpRequestException` (HTTP 400) instead of raw `JsonException`.
+
+**Generator changes**:
+- 8a `CapabilityEndpointBindingEmitter` — emits `CapabilityEndpointJsonTypeInfoResolver.Resolve<T>()` + `CapabilityEndpointBodyReader.ReadNativeBodyAsync<T>()` + `RegisterBodyType(typeof(T))` in `[ModuleInitializer]`
+- 8d `AppServiceCompatibilityEndpointEmitter` — emits `Resolve<T>()` + `ReadCompatibilityBodyAsync<T>()` + `RegisterBodyType(typeof(T))` in `[ModuleInitializer]`
+- `DynamicApiConventionAnalyzer.ToTypeOfExpression(ITypeSymbol)` — shared helper for correct `typeof()` expressions: nullable value types use `Nullable<T>` form, nullable reference types strip `?`
+- `TypeOfExpression` property on `CapabilityEndpointInputRecord` (8a) and `CompatibilityParameterModel` (8d) — replaces string-based `?`-suffix detection
+- CancellationToken propagation: both 8a and 8d generators pass `context.RequestAborted`
+
+**CRUD excluded from trimming-safe scope**: Generated CRUD DTO types are invisible to the application's `JsonSerializerContext` (same-round Roslyn SG limitation). CRUD continues using legacy `DynamicApiGeneratedRuntime.ReadBodyAsync<T>` (reflection-based). Tracked as GitHub issue #61.
+
+**Deprecated/Obsolete components**: `CapabilityEndpointJsonRuntime`, `CompatibilityBodyReader`, three per-generator `JsonContextEmitter` classes.
+
+**Trimming fixture**:
+- `tests/Framework/Api/CrestCreates.CapabilityEndpoint.TrimmingFixture/` — publishable web host with `WarningsAsErrors` for IL2026/IL2070/IL2072/IL2075/IL3050/SYSLIB1034
+- `tests/Framework/Api/CrestCreates.CapabilityEndpoint.TrimmingFixture.Tests/` — WebApplicationFactory tests (3 tests: POST body binding, GET no-param, JsonTypeInfo resolution)
+- PublishTrimmed E2E validation blocked by pre-existing NETSDK1124 (CodeGenerator netstandard2.0 target + global ProjectReference)
+
+**Deployment guarantee**: 8a/8d request input binding is trimming-safe by construction. PublishTrimmed E2E validation is pending. Full NativeAOT is a future target after EF Core NativeAOT stabilizes.
+
+**Response serialization debt**: Uses `Results.Json(object?)` — not `JsonTypeInfo<T>`-based. Requires migration to trimming-safe response writing.
+
+**Review iterations** (3 rounds after initial implementation):
+- Round 1 (external, 2 P0 + 5 P1): P0-1 fixture didn't test POST body, P0-2 CRUD DTOs invisible to STJ, P1-1 shared body reader changed compatibility semantics, P1-2 missing CancellationToken, P1-3 non-AOT fallback, P1-4 nullable value type typeof, P1-5 not real NativeAOT fixture. All fixed.
+- Round 2 (external, 2 P1 + 4 P2): P1 leading whitespace JSON misread (single-char peek), P1 PublishTrimmed unverified (adopted Plan B: narrowed docs), P1 contradictory cross-generator visibility in arch-design.md. P2 validator test coverage, P2 compatibility exception difference documented, P2 AOT-safe terminology unified to trimming-safe/source-generated. All fixed.
+- Round 3 (external, approved with minor items): Application-owned JsonTypeInfo architecture approved. 8a/8d generator wiring approved. CRUD rollback + #61 approved.
+
+**Test counts**: 251 CodeGenerator + 72 DynamicApi + 3 TrimmingFixture + 9 E2E + 35 Boundary + 137 Capability = 507 tests, all passing.
 
 ### Blob / File Platformization
 
@@ -439,6 +480,7 @@ This thread achieved the following:
   16. Phase 8a Capability Endpoint Projection (Issue #19) — Capability→HTTP without AppService, zero DynamicApi bridge. SG produces DescriptorProvider + BindingContract; registry-driven mapping via MapCrestCapabilityEndpoints(); ICapabilityPipeline descriptor overload; DX Layering (Level 0/1/2); 4 review rounds, 30+ findings fixed. 29 SG + 35 DynamicApi + 10 Capability + 33 Boundary tests.
   17. Phase 8c Legacy Dynamic API Boundary (Issue #21) — legacy deprecation labeling + boundary tests + 8a debt fixes. 7 PRs, 30 ACs, 4 review rounds (16 findings total). EndpointId/EndpointVersion/TargetProperty independent properties, CEP013 Error + Dictionary fallback deletion, CEP017-021 diagnostics, DynamicApiSourceGenerator recycled to 99_RecycleBin, legacy test rename with compatibility-only annotations, boundary tests (6 tests covering assembly/project/source/emitter/mapping/Abstractions). 45 SG + 6 Boundary + 22 Legacy Web + 7 Legacy CodeGenerator tests.
   18. Phase 8d AppService→Capability Compatibility Projection (Issue #22) — opt-in migration bridge from [CrestService] AppService to Capability Pipeline preserving HTTP contract. 5 review rounds, 20+ findings fixed. ResultContractRegistry for HTTP envelope preservation, HasAttributeOnContractOrImplementation for symbol unification, CompatibilityHttpResultMapper decoupling, CompatibilityBodyReader legacy body reading, CEP030-037 diagnostics, service-level fail-closed generation, source-generator-backed E2E tests. 248 CodeGenerator + 45 DynamicApi + 9 E2E + 34 Boundary = 336 tests.
+  19. Phase 8 Body Binding — Application-Owned JsonTypeInfo Architecture — replaced invalid cross-generator `[JsonSerializable]` emission with application-owned `JsonSerializerContext` + runtime `JsonTypeInfo` resolution. `CapabilityEndpointBodyReader` split into `ReadNativeBodyAsync` (8a) and `ReadCompatibilityBodyAsync` (8d). CRUD excluded from trimming-safe scope (GitHub #61). 3 review rounds. 251 CodeGenerator + 72 DynamicApi + 3 TrimmingFixture + 9 E2E + 35 Boundary + 137 Capability = 507 tests.
 
 ---
 
@@ -492,7 +534,7 @@ This thread achieved the following:
 - `ICapabilityPipeline.ExecuteAsync(CapabilityDescriptor, ...)` overload skips registry resolution — descriptor overload is the authoritative path
 - `ValidationMiddleware` uses `GetByVersion(id, version)` not `GetByName(name)` — respects captured descriptor version
 - BindingRegistry is process-wide generated registry — no runtime unload/reload/hot projection (by design for 8a)
-- SG generates generic `ReadBodyAsync<T>` — AOT-safe `JsonTypeInfo<T>` overload exists but not yet used by SG (CEP015 debt)
+- ~~SG generates generic `ReadBodyAsync<T>` — AOT-safe `JsonTypeInfo<T>` overload exists but not yet used by SG (CEP015 debt)~~ **Resolved**: CEP015 deleted, replaced by application-owned `JsonSerializerContext` + `CapabilityEndpointJsonTypeInfoResolver` + startup validation
 - Level 2 sugar attributes require `[CapabilityEndpointSet]` container (CEP016)
 - Level 2 does not read class-level `[CapabilityEndpointInput]` — all inputs from HTTP method attribute Body/Input/route tokens
 - Route token extraction strips constraints/catch-all/optional — aligned with validator behavior
@@ -503,12 +545,26 @@ This thread achieved the following:
 - `compat.appservice.` prefix isolates compatibility capabilities from native namespace.
 - Custom result contracts only govern success responses; pipeline failures always use unified `CapabilityEndpointResultMapper.Map()` — never swallowed as 200 OK.
 - `CompatibilityHttpResultMapper` is the neutral response envelope helper — both legacy and compatibility generated code call it. Decouples from `DynamicApiGeneratedRuntime`.
-- `CompatibilityBodyReader` provides legacy-compatible body reading (empty body → new T(), not BadHttpRequestException). `where T : new()` constraint enforced by CEP037.
+- `CompatibilityBodyReader` is **[Obsolete]** — replaced by `CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync`. Legacy body reading semantics preserved: empty/whitespace/null + optional → default, required → factory(). One intentional difference: required invalid JSON → `BadHttpRequestException` (HTTP 400) instead of raw `JsonException`.
 - Service-level fail-closed: any Error diagnostic (CEP030/031/034/037) skips entire service code generation.
 - `HasAttributeOnContractOrImplementation` uses `FindImplementationForInterfaceMember` for exact symbol matching — C# does not propagate interface method attributes to implementing class methods.
 - `CapabilityDescriptor.ProjectionKind` is DefinitionOnly in canonical hash (Order=100) — governance/origin metadata, not runtime contract.
 - `DynamicApiConventionAnalyzer` is the shared convention derivation layer between legacy and 8d generators.
 - `CapabilityHandlerResolverProvider.SetResolver` is obsolete no-op; additive `Register()` is the new API.
+
+### Phase 8 Body Binding — Application-Owned JsonTypeInfo (2026-07-14/15)
+
+- Application owns `[JsonSerializable]`-decorated `JsonSerializerContext` with its own `JsonSerializerOptions`; CrestCreates accesses `JsonTypeInfo<T>` from application's `IOptions<JsonOptions>` at runtime via `CapabilityEndpointJsonTypeInfoResolver`.
+- Roslyn Source Generators cannot see each other's `RegisterSourceOutput` output in the same compilation round. CrestCreates generators must NOT emit `[JsonSerializable]` partial classes expecting STJ to process them.
+- `CapabilityEndpointBodyReader` has two entry points: `ReadNativeBodyAsync<T>` (8a, empty body → 400) and `ReadCompatibilityBodyAsync<T>` (8d, preserves legacy empty/whitespace/null/optional semantics).
+- `CapabilityEndpointJsonTypeInfoResolver` uses `GetRequiredService<IOptions<JsonOptions>>()` — no fallback to reflection-based options. Missing JSON configuration causes explicit startup failure.
+- `CapabilityEndpointJsonContractValidator` validates at startup that all registered body types have `JsonTypeInfo` available — fail-closed replacement for CEP015 compile-time warning.
+- `DynamicApiConventionAnalyzer.ToTypeOfExpression(ITypeSymbol)` — shared helper for correct `typeof()` expressions: nullable value types use `Nullable<T>` form, nullable reference types strip `?`.
+- CEP015 deleted (replaced by startup validation). CEP037 Error-level constructibility check applies only to compatibility path (native path uses null `emptyBodyFactory`, no body construction needed).
+- CRUD body binding is NOT trimming-safe — generated DTO types invisible to application's `JsonSerializerContext`. Tracked as GitHub issue #61.
+- Response serialization uses `Results.Json(object?)` — not yet trimming-safe. Future work.
+- Deployment guarantee: trimming-safe by construction for 8a/8d input binding. PublishTrimmed E2E validation pending. Full NativeAOT is future target.
+- Code terminology: "source-generated JSON metadata", "trimming safety" — not "AOT-safe" (which implies full NativeAOT guarantee).
 
 ### Organization Identity Kernel (Phase 5c, 2026-06-11)
 
@@ -1303,6 +1359,6 @@ Status: Completed.
 
 If a future thread should resume from this state, use a prompt like:
 
-> Read `/memory.md` first. Continue from the current CrestCreates platform status. Treat completed items as closed unless you find contradictory code. Focus on unresolved work only. Open items: Audit Logging Task 4 governance closure, Localization, Blob/File platformization, Background Jobs / Distributed Event reliability. Phase 8d (AppService→Capability Compatibility Projection) is complete.
+> Read `/memory.md` first. Continue from the current CrestCreates platform status. Treat completed items as closed unless you find contradictory code. Focus on unresolved work only. Open items: Audit Logging Task 4 governance closure, Localization, Blob/File platformization, Background Jobs / Distributed Event reliability, Phase 8 response serialization trimming safety, CRUD body binding trimming safety (#61), PublishTrimmed E2E validation. Phase 8d (AppService→Capability Compatibility Projection) and Phase 8 Body Binding (application-owned JsonTypeInfo) are complete.
 
 ---
