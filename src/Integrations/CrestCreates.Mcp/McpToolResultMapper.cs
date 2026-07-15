@@ -58,34 +58,31 @@ public sealed class McpToolResultMapper
     };
 
     private static bool IsSafeValidationCode(string code)
-        => code is "FIELD_REQUIRED"
-            or "NULL_NOT_ALLOWED"
-            or "TYPE_MISMATCH"
-            or "MAX_LENGTH_EXCEEDED"
-            or "MIN_LENGTH_NOT_MET"
-            or "PATTERN_MISMATCH"
-            or "MAX_VALUE_EXCEEDED"
-            or "MIN_VALUE_NOT_MET"
-            or "UNKNOWN_PROPERTY"
-            or "DUPLICATE_PROPERTY";
+        => code == SchemaValidationErrorCodes.FieldRequired.ToString()
+            || code == SchemaValidationErrorCodes.NullNotAllowed.ToString()
+            || code == SchemaValidationErrorCodes.TypeMismatch.ToString()
+            || code == SchemaValidationErrorCodes.MaxLengthExceeded.ToString()
+            || code == SchemaValidationErrorCodes.MinLengthNotMet.ToString()
+            || code == SchemaValidationErrorCodes.PatternMismatch.ToString()
+            || code == SchemaValidationErrorCodes.MaxValueExceeded.ToString()
+            || code == SchemaValidationErrorCodes.MinValueNotMet.ToString()
+            || code == SchemaValidationErrorCodes.UnknownProperty.ToString()
+            || code == SchemaValidationErrorCodes.DuplicateProperty.ToString();
 
     private static string FormatValidationIssue(CapabilityExecutionIssue issue)
     {
         var field = string.IsNullOrWhiteSpace(issue.FieldName) ? "input" : issue.FieldName;
-        var detail = issue.Code switch
-        {
-            "FIELD_REQUIRED" => "required",
-            "NULL_NOT_ALLOWED" => "must not be null",
-            "TYPE_MISMATCH" => "has an invalid type",
-            "MAX_LENGTH_EXCEEDED" => "is too long",
-            "MIN_LENGTH_NOT_MET" => "is too short",
-            "PATTERN_MISMATCH" => "has an invalid format",
-            "MAX_VALUE_EXCEEDED" => "is above the allowed maximum",
-            "MIN_VALUE_NOT_MET" => "is below the allowed minimum",
-            "UNKNOWN_PROPERTY" => "is not recognized",
-            "DUPLICATE_PROPERTY" => "is duplicated",
-            _ => "is invalid"
-        };
+        var detail = issue.Code == SchemaValidationErrorCodes.FieldRequired.ToString() ? "required"
+            : issue.Code == SchemaValidationErrorCodes.NullNotAllowed.ToString() ? "must not be null"
+            : issue.Code == SchemaValidationErrorCodes.TypeMismatch.ToString() ? "has an invalid type"
+            : issue.Code == SchemaValidationErrorCodes.MaxLengthExceeded.ToString() ? "is too long"
+            : issue.Code == SchemaValidationErrorCodes.MinLengthNotMet.ToString() ? "is too short"
+            : issue.Code == SchemaValidationErrorCodes.PatternMismatch.ToString() ? "has an invalid format"
+            : issue.Code == SchemaValidationErrorCodes.MaxValueExceeded.ToString() ? "is above the allowed maximum"
+            : issue.Code == SchemaValidationErrorCodes.MinValueNotMet.ToString() ? "is below the allowed minimum"
+            : issue.Code == SchemaValidationErrorCodes.UnknownProperty.ToString() ? "is not recognized"
+            : issue.Code == SchemaValidationErrorCodes.DuplicateProperty.ToString() ? "is duplicated"
+            : "is invalid";
         return $"Field '{field}': {detail}.";
     }
 }

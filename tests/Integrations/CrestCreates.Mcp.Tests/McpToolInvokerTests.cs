@@ -108,7 +108,7 @@ public sealed class McpToolInvokerTests
                 "CAPABILITY_VALIDATION_FAILED",
                 "internal validation details",
                 TimeSpan.Zero,
-                [new CapabilityExecutionIssue("FIELD_REQUIRED", "Name is required internally.", "name")])),
+                [new CapabilityExecutionIssue(SchemaValidationErrorCodes.FieldRequired.ToString(), "Name is required internally.", "name")])),
             McpToolExposureDecision.Allow);
 
         var result = await invoker.InvokeAsync(entry.Descriptor.ToolName, null, Call());
