@@ -52,7 +52,8 @@ public sealed class McpToolDiscoveryServiceTests
         var action = async () => await service.ListAsync(new McpToolDiscoveryContext(
             new McpToolHostContext("", "test")));
 
-        await action.Should().ThrowAsync<ArgumentException>();
+        var exception = await action.Should().ThrowAsync<McpToolProtocolException>();
+        exception.Which.FailureKind.Should().Be(McpToolProtocolFailureKind.InvalidRequest);
         calls.Should().Be(0);
     }
 

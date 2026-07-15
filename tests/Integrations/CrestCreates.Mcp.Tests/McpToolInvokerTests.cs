@@ -67,6 +67,21 @@ public sealed class McpToolInvokerTests
     }
 
     [Fact]
+    public async Task Duplicate_arguments_are_tool_input_errors()
+    {
+        var entry = Entry();
+        var dispatcher = new CapturingDispatcher(CapabilityExecutionResult.Success(null, TimeSpan.Zero));
+        var invoker = Invoker(entry, dispatcher, McpToolExposureDecision.Allow);
+        using var json = JsonDocument.Parse("{\"name\":\"a\",\"name\":\"b\"}");
+
+        var result = await invoker.InvokeAsync(entry.Descriptor.ToolName, json.RootElement, Call());
+
+        result.IsError.Should().BeTrue();
+        result.ErrorCode.Should().Be("DUPLICATE_ARGUMENT");
+        dispatcher.Descriptor.Should().BeNull();
+    }
+
+    [Fact]
     public async Task Capability_failure_maps_to_safe_tool_error_without_structured_content()
     {
         var entry = Entry();
@@ -81,6 +96,24 @@ public sealed class McpToolInvokerTests
         result.ErrorCode.Should().Be("UNAUTHORIZED");
         result.StructuredContent.Should().BeNull();
         ((McpToolTextContent)result.Content.Single()).Text.Should().NotContain("internal detail");
+    }
+
+    [Fact]
+    public async Task Validation_issues_are_projected_as_safe_field_hints()
+    {
+        var entry = Entry();
+        var invoker = Invoker(
+            entry,
+            new CapturingDispatcher(CapabilityExecutionResult.Failure(
+                "CAPABILITY_VALIDATION_FAILED",
+                "internal validation details",
+                TimeSpan.Zero,
+                [new CapabilityExecutionIssue("FIELD_REQUIRED", "Name is required internally.", "name")])),
+            McpToolExposureDecision.Allow);
+
+        var result = await invoker.InvokeAsync(entry.Descriptor.ToolName, null, Call());
+
+        ((McpToolTextContent)result.Content.Single()).Text.Should().Be("Field 'name': required.");
     }
 
     [Fact]

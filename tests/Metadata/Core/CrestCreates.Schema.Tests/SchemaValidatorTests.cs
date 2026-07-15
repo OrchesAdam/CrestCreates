@@ -133,9 +133,9 @@ public class SchemaValidatorTests
             }
         };
         var result = new SchemaValidator().Validate(schema, "{\"Other\":\"x\"}");
-        result.Errors.Should().Contain(error => error.FieldName == "Other" && error.ErrorCode == SchemaValidationErrorCodes.UnknownProperty);
         result.Errors.Should().Contain(error => error.FieldName == "Name" && error.ErrorCode == SchemaValidationErrorCodes.FieldRequired);
         result.Errors.Should().Contain(error => error.FieldName == "Age" && error.ErrorCode == SchemaValidationErrorCodes.FieldRequired);
+        result.Errors.Should().NotContain(error => error.ErrorCode == SchemaValidationErrorCodes.UnknownProperty);
     }
 
     [Fact]
@@ -194,12 +194,12 @@ public class SchemaValidatorTests
     }
 
     [Fact]
-    public void Validate_JsonElement_rejects_properties_not_declared_by_schema()
+    public void Validate_JsonElement_can_reject_properties_not_declared_by_schema()
     {
         var schema = SchemaWith(new SchemaFieldDescriptor { Name = "name", FieldType = "string" });
         using var json = JsonDocument.Parse("{\"name\":\"valid\",\"undeclared\":true}");
 
-        var result = new SchemaValidator().Validate(schema, json.RootElement);
+        var result = new SchemaValidator().Validate(schema, json.RootElement, rejectUnknownProperties: true);
 
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(error =>

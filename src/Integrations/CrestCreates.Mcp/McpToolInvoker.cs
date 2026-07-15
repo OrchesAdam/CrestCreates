@@ -64,7 +64,16 @@ public sealed class McpToolInvoker : IMcpToolInvoker
 
         var normalized = NormalizeArguments(arguments);
         if (HasDuplicateProperties(normalized))
-            throw new McpInvalidRequestException("MCP_DUPLICATE_ARGUMENT", "Tool arguments contain duplicate properties.");
+            return _results.MapInputError("DUPLICATE_ARGUMENT", "Tool arguments contain duplicate properties.");
+        if (entry.InputSchema is not null)
+        {
+            var inputValidation = _schemaValidator.Validate(
+                entry.InputSchema,
+                normalized,
+                rejectUnknownProperties: true);
+            if (!inputValidation.IsValid)
+                return _results.MapInputValidationError(inputValidation.Errors);
+        }
         if (entry.Binding.Contract.InputType is null && normalized.EnumerateObject().Any())
             return _results.MapInputError("INVALID_ARGUMENTS", "This tool does not accept arguments.");
 
@@ -131,7 +140,7 @@ public sealed class McpToolInvoker : IMcpToolInvoker
                 "MCP_TOOL_MISSING_OUTPUT",
                 "The tool produced an invalid server result.");
 
-        var validation = _schemaValidator.Validate(entry.OutputSchema, serialized.Value);
+        var validation = _schemaValidator.Validate(entry.OutputSchema, serialized.Value, rejectUnknownProperties: true);
         if (!validation.IsValid)
             throw new McpToolContractViolationException(
                 "MCP_TOOL_OUTPUT_SCHEMA_VIOLATION",

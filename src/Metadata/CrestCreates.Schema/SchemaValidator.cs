@@ -15,7 +15,10 @@ public sealed class SchemaValidator : ISchemaValidator
         "Aot",
         "IL3050",
         Justification = "Legacy object validation may require dynamic JSON code. NativeAOT-verified protocol paths must call the JsonElement overload.")]
-    public SchemaValidationResult Validate(SchemaDescriptor schema, object? payload)
+    public SchemaValidationResult Validate(
+        SchemaDescriptor schema,
+        object? payload,
+        bool rejectUnknownProperties = false)
     {
         if (payload == null)
         {
@@ -34,14 +37,17 @@ public sealed class SchemaValidator : ISchemaValidator
         }
 
         if (payload is JsonElement element)
-            return Validate(schema, element);
+            return Validate(schema, element, rejectUnknownProperties);
 
         var json = payload is string s ? s : JsonSerializer.Serialize(payload);
         using var doc = JsonDocument.Parse(json);
-        return Validate(schema, doc.RootElement);
+        return Validate(schema, doc.RootElement, rejectUnknownProperties);
     }
 
-    public SchemaValidationResult Validate(SchemaDescriptor schema, JsonElement payload)
+    public SchemaValidationResult Validate(
+        SchemaDescriptor schema,
+        JsonElement payload,
+        bool rejectUnknownProperties = false)
     {
         var errors = new List<SchemaValidationError>();
 
@@ -61,7 +67,7 @@ public sealed class SchemaValidator : ISchemaValidator
                 errors.Add(Error(property.Name, SchemaValidationErrorCodes.DuplicateProperty,
                     $"Property '{property.Name}' occurs more than once."));
             }
-            else if (!fieldNames.Contains(property.Name))
+            else if (rejectUnknownProperties && !fieldNames.Contains(property.Name))
             {
                 errors.Add(Error(property.Name, SchemaValidationErrorCodes.UnknownProperty,
                     $"Property '{property.Name}' is not declared by the schema."));

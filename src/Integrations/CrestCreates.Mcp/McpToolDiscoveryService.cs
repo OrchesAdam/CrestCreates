@@ -59,8 +59,9 @@ public sealed class McpToolDiscoveryService : IMcpToolDiscoveryService
 
     internal static void ValidateHost(McpToolHostContext host)
     {
-        ArgumentNullException.ThrowIfNull(host);
+        if (host is null)
+            throw new McpInvalidRequestException("MCP_INVALID_HOST_CONTEXT", "MCP host context is required.");
         if (string.IsNullOrWhiteSpace(host.HostId) || string.IsNullOrWhiteSpace(host.EnvironmentName))
-            throw new ArgumentException("MCP HostId and EnvironmentName are required.", nameof(host));
+            throw new McpInvalidRequestException("MCP_INVALID_HOST_CONTEXT", "MCP host context is invalid.");
     }
 }
