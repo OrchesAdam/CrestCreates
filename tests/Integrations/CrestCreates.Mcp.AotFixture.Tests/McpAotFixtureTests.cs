@@ -9,6 +9,11 @@ public sealed class McpAotFixtureTests
     [Fact]
     public async Task Publish_native_aot_fixture_executes_typed_input_and_output_path()
     {
+        if (!OperatingSystem.IsLinux()
+            || System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture
+                != System.Runtime.InteropServices.Architecture.X64)
+            throw Xunit.Sdk.SkipException.ForSkip("The Phase 8e NativeAOT gate is pinned to linux-x64.");
+
         var root = FindRepoRoot();
         var output = Path.Combine(Path.GetTempPath(), "crest-mcp-aot-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(output);
