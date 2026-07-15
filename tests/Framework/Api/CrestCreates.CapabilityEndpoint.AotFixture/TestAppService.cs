@@ -1,6 +1,6 @@
 using CrestCreates.Domain.Shared.Attributes;
 
-namespace CrestCreates.CapabilityEndpoint.TrimmingFixture;
+namespace CrestCreates.CapabilityEndpoint.AotFixture;
 
 /// <summary>
 /// Test service with [CrestService] + [CapabilityCompatibilityProjection] attributes.

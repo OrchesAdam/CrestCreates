@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.AspNetCore.Http;
 
 namespace CrestCreates.DynamicApi;
 
@@ -9,14 +10,14 @@ namespace CrestCreates.DynamicApi;
 /// </summary>
 public sealed class CapabilityEndpointResultContractRegistry : ICapabilityEndpointResultContractRegistry
 {
-    private readonly ConcurrentDictionary<(string EndpointId, int Version), Func<EndpointExecutionContext, object>> _mappers = new();
+    private readonly ConcurrentDictionary<(string EndpointId, int Version), Func<EndpointExecutionContext, HttpContext, object>> _mappers = new();
 
-    public void Register(string endpointId, int version, Func<EndpointExecutionContext, object> mapResult)
+    public void Register(string endpointId, int version, Func<EndpointExecutionContext, HttpContext, object> mapResult)
     {
         _mappers.TryAdd((endpointId, version), mapResult);
     }
 
-    public Func<EndpointExecutionContext, object>? TryGetResultMapper(string endpointId, int version)
+    public Func<EndpointExecutionContext, HttpContext, object>? TryGetResultMapper(string endpointId, int version)
     {
         _mappers.TryGetValue((endpointId, version), out var mapper);
         return mapper;

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -17,6 +18,10 @@ namespace CrestCreates.DynamicApi;
 /// Legacy runtime helpers for AppService-oriented Dynamic API endpoints.
 /// New Capability Endpoint projection uses its own endpoint JSON binding runtime.
 /// </summary>
+[UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode",
+    Justification = "Legacy runtime (Tier 4) — not on the AOT-verified mainline. Use CapabilityEndpointBodyReader for AOT-safe binding.")]
+[UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+    Justification = "Legacy runtime (Tier 4) — not on the AOT-verified mainline.")]
 public static class DynamicApiGeneratedRuntime
 {
     public static JsonSerializerOptions ResolveJsonSerializerOptions(IServiceProvider serviceProvider)

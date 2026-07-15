@@ -39,21 +39,21 @@ internal static class AppServiceCompatibilityResultContractEmitter
 
             if (action.IsVoidReturn)
             {
-                wrapExpression = "CompatibilityHttpResultMapper.WrapVoidResult()";
+                wrapExpression = "CompatibilityHttpResultMapper.WrapVoidResult(httpContext)";
             }
             else if (action.HttpMethod == "GET")
             {
-                wrapExpression = "CompatibilityHttpResultMapper.WrapGetResult(ctx.Output)";
+                wrapExpression = "CompatibilityHttpResultMapper.WrapGetResult(ctx.Output, httpContext)";
             }
             else
             {
-                wrapExpression = "CompatibilityHttpResultMapper.WrapResult(ctx.Output)";
+                wrapExpression = "CompatibilityHttpResultMapper.WrapResult(ctx.Output, httpContext)";
             }
 
             sb.AppendLine($"        CapabilityEndpointResultContractRegistration.Register(");
             sb.AppendLine($"            \"{Escape(action.EndpointId)}\",");
             sb.AppendLine("            1,");
-            sb.AppendLine($"            ctx => {wrapExpression});");
+            sb.AppendLine($"            (ctx, httpContext) => {wrapExpression});");
             sb.AppendLine();
         }
 

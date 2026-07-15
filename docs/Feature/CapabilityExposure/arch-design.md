@@ -899,12 +899,12 @@ The CrudService generator is NOT trimming-safe — its generated DTO types (`Cre
 
 **Key architectural constraint:** Roslyn Source Generators cannot see each other's `RegisterSourceOutput` output in the same compilation round. Therefore, CrestCreates generators must NOT emit `[JsonSerializable]` partial classes expecting the STJ source generator to process them. The application owns the `JsonSerializerContext` as a regular source file, and CrestCreates accesses `JsonTypeInfo<T>` from it at runtime.
 
-### 16.4 Trimming Fixture
+### 16.4 AOT Fixture
 
-The `CrestCreates.CapabilityEndpoint.TrimmingFixture` project is split into two parts:
+The `CrestCreates.CapabilityEndpoint.AotFixture` project is split into two parts:
 
-- **Host project** (`CrestCreates.CapabilityEndpoint.TrimmingFixture`): A publishable ASP.NET Core web application with `WarningsAsErrors` for IL2026/IL2070/IL2072/IL2075/IL3050/SYSLIB1034. This is the project intended for `dotnet publish -p:PublishTrimmed=true` validation.
-- **Test project** (`CrestCreates.CapabilityEndpoint.TrimmingFixture.Tests`): xUnit tests using `WebApplicationFactory<Program>` to exercise the host.
+- **Host project** (`CrestCreates.CapabilityEndpoint.AotFixture`): A publishable ASP.NET Core web application with `IsAotCompatible=true`, `PublishAot=true`, and `WarningsAsErrors` for IL2026/IL2070/IL2072/IL2075/IL3050/SYSLIB1034. This is the project intended for `dotnet publish -p:CrestCreatesPublishMode=aot` NativeAOT validation (Tier 2: first-party runtime, NativeAOT-verified).
+- **Test project** (`CrestCreates.CapabilityEndpoint.AotFixture.Tests`): xUnit tests using `WebApplicationFactory<Program>` to exercise the host.
 
 The fixture validates real STJ Source Generator integration with the CrestCreates CodeGenerator in the same compilation round:
 

@@ -18,8 +18,6 @@ internal static class CapabilityEndpointMapper
     {
         var httpMethod = descriptor.HttpMethod.ToString().ToUpperInvariant();
 
-        // Capture the result mapper at endpoint registration time so the
-        // lambda does not need to resolve it from DI on every request.
         var resultMapper = resultContractRegistry?.TryGetResultMapper(descriptor.Id, descriptor.Version);
 
         var routeHandler = endpoints.MapMethods(
@@ -42,7 +40,7 @@ internal static class CapabilityEndpointMapper
                     },
                     context.RequestAborted);
 
-                return MapResult(result, descriptor.OutputMapping, resultMapper);
+                return MapResult(result, descriptor.OutputMapping, resultMapper, context);
             });
 
         // Apply endpoint metadata
@@ -80,14 +78,15 @@ internal static class CapabilityEndpointMapper
     private static IResult MapResult(
         CapabilityExecutionResult result,
         CapabilityEndpointOutputMapping outputMapping,
-        Func<EndpointExecutionContext, object>? resultMapper)
+        Func<EndpointExecutionContext, HttpContext, object>? resultMapper,
+        HttpContext httpContext)
     {
         // Custom result contracts only govern the *success* response envelope.
         // Pipeline failures (authorization, validation, rate-limit, handler-not-found, etc.)
         // must always be mapped by the unified CapabilityEndpointResultMapper so that
         // compatibility projections never swallow a failure as a 200 OK.
         if (!result.IsSuccess)
-            return CapabilityEndpointResultMapper.Map(result, outputMapping);
+            return CapabilityEndpointResultMapper.Map(result, outputMapping, httpContext);
 
         if (resultMapper is not null)
         {
@@ -99,12 +98,12 @@ internal static class CapabilityEndpointMapper
                 ErrorMessage = null
             };
 
-            var mapped = resultMapper(ctx);
+            var mapped = resultMapper(ctx, httpContext);
             // The mapper returns object to avoid AspNetCore dependency in
             // Abstractions, but the concrete implementation always returns IResult.
             return (IResult)mapped;
         }
 
-        return CapabilityEndpointResultMapper.Map(result, outputMapping);
+        return CapabilityEndpointResultMapper.Map(result, outputMapping, httpContext);
     }
 }

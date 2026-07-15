@@ -1,7 +1,7 @@
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Middleware;
-using CrestCreates.CapabilityEndpoint.TrimmingFixture;
+using CrestCreates.CapabilityEndpoint.AotFixture;
 using CrestCreates.DynamicApi;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;

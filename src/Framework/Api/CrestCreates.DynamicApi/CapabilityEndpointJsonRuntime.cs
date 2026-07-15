@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -11,6 +12,10 @@ namespace CrestCreates.DynamicApi;
 
 [EditorBrowsable(EditorBrowsableState.Never)]
 [Obsolete("Use CapabilityEndpointBodyReader with JsonTypeInfo<T> from CapabilityEndpointJsonTypeInfoResolver.")]
+[UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode",
+    Justification = "Legacy runtime — not on the AOT-verified mainline. Use CapabilityEndpointBodyReader instead.")]
+[UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+    Justification = "Legacy runtime — not on the AOT-verified mainline. Use CapabilityEndpointBodyReader instead.")]
 public static class CapabilityEndpointJsonRuntime
 {
     public static async ValueTask<T?> ReadBodyAsync<T>(

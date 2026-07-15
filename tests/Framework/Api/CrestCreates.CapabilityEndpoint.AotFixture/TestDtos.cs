@@ -1,4 +1,4 @@
-namespace CrestCreates.CapabilityEndpoint.TrimmingFixture;
+namespace CrestCreates.CapabilityEndpoint.AotFixture;
 
 public sealed class GreetingRequest
 {

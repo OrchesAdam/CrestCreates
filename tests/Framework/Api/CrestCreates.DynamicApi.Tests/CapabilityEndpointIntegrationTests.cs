@@ -437,7 +437,7 @@ public sealed class CapabilityEndpointIntegrationTests : IDisposable
             BindInputAsync: (ctx, ct) => ValueTask.FromResult<object?>(null)));
 
         // Register a result contract that returns a custom envelope
-        CapabilityEndpointResultContractRegistration.Register("ep-rc", 1, ctx =>
+        CapabilityEndpointResultContractRegistration.Register("ep-rc", 1, (ctx, httpContext) =>
         {
             // Simulate legacy DynamicApiResponse wrapping
             return Results.Ok(new { code = 200, message = "操作成功", data = ctx.Output });
@@ -731,7 +731,7 @@ public sealed class CompatibilityProjectionEndToEndTests : IDisposable
         CapabilityEndpointHttpMethod httpMethod,
         string routePattern,
         Func<HttpContext, CancellationToken, ValueTask<object?>> bindInput,
-        Func<EndpointExecutionContext, object> resultMapper,
+        Func<EndpointExecutionContext, HttpContext, object> resultMapper,
         ICapabilityHandlerInvoker invoker)
     {
         var endpointDescriptor = new CapabilityEndpointDescriptor
@@ -958,7 +958,7 @@ public sealed class CompatibilityProjectionEndToEndTests : IDisposable
                 {
                     Input = new CreateBookDto { Title = "E2E Test Book" }
                 }),
-            resultMapper: ctx =>
+            resultMapper: (ctx, _) =>
             {
                 if (ctx.Succeeded)
                     return Results.Ok(new DynamicApiResponse<BookDto>
@@ -1012,7 +1012,7 @@ public sealed class CompatibilityProjectionEndToEndTests : IDisposable
             routePattern: "/api/v1/books/get-by-id",
             bindInput: (ctx, ct) =>
                 ValueTask.FromResult<object?>(new GetByIdEnvelope { Id = bookId }),
-            resultMapper: ctx =>
+            resultMapper: (ctx, _) =>
             {
                 if (!ctx.Succeeded)
                     return Results.StatusCode(500);
@@ -1075,7 +1075,7 @@ public sealed class CompatibilityProjectionEndToEndTests : IDisposable
             routePattern: "/api/v1/books/get-by-id-notfound",
             bindInput: (ctx, ct) =>
                 ValueTask.FromResult<object?>(new GetByIdEnvelope { Id = Guid.Empty }),
-            resultMapper: ctx =>
+            resultMapper: (ctx, _) =>
             {
                 if (!ctx.Succeeded)
                     return Results.StatusCode(500);
@@ -1135,7 +1135,7 @@ public sealed class CompatibilityProjectionEndToEndTests : IDisposable
             routePattern: "/api/v1/books/delete-by-id",
             bindInput: (ctx, ct) =>
                 ValueTask.FromResult<object?>(new DeleteEnvelope { Id = Guid.NewGuid() }),
-            resultMapper: ctx =>
+            resultMapper: (ctx, _) =>
             {
                 if (ctx.Succeeded)
                 {
@@ -1186,7 +1186,7 @@ public sealed class CompatibilityProjectionEndToEndTests : IDisposable
             routePattern: "/api/v1/books",
             bindInput: (ctx, ct) =>
                 ValueTask.FromResult<object?>(null!), // No input params
-            resultMapper: ctx =>
+            resultMapper: (ctx, _) =>
             {
                 if (!ctx.Succeeded)
                     return Results.StatusCode(500);
@@ -1252,7 +1252,7 @@ public sealed class CompatibilityProjectionEndToEndTests : IDisposable
             BindInputAsync: (ctx, ct) => ValueTask.FromResult<object?>(null)));
 
         // Register a result contract that would wrap as DynamicApiResponse on success
-        CapabilityEndpointResultContractRegistration.Register("ep-rl", 1, ctx =>
+        CapabilityEndpointResultContractRegistration.Register("ep-rl", 1, (ctx, httpContext) =>
         {
             // This should NOT be called for failures
             return Results.Ok(new { code = 200, message = "操作成功", data = ctx.Output });
@@ -1338,7 +1338,7 @@ public sealed class CompatibilityProjectionEndToEndTests : IDisposable
             EndpointId: "ep-val", EndpointVersion: 1,
             BindInputAsync: (ctx, ct) => ValueTask.FromResult<object?>(null)));
 
-        CapabilityEndpointResultContractRegistration.Register("ep-val", 1, ctx =>
+        CapabilityEndpointResultContractRegistration.Register("ep-val", 1, (ctx, httpContext) =>
             Results.Ok(new { code = 200, message = "操作成功", data = ctx.Output }));
 
         // Mock dispatcher to return validation failure
@@ -1422,7 +1422,7 @@ public sealed class CompatibilityProjectionEndToEndTests : IDisposable
             BindInputAsync: (ctx, ct) => ValueTask.FromResult<object?>(null)));
 
         // Register a GET result contract that would produce 404 for null output
-        CapabilityEndpointResultContractRegistration.Register("ep-hnf", 1, ctx =>
+        CapabilityEndpointResultContractRegistration.Register("ep-hnf", 1, (ctx, httpContext) =>
         {
             // This simulates WrapGetResult — would return 404 for null output
             if (ctx.Output is null)

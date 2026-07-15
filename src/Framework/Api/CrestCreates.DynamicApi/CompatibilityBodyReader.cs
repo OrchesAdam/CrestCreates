@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
@@ -18,6 +19,10 @@ namespace CrestCreates.DynamicApi;
 /// <see cref="BadHttpRequestException"/> on empty bodies.
 /// </summary>
 [Obsolete("Use CapabilityEndpointBodyReader with JsonTypeInfo<T> from CapabilityEndpointJsonTypeInfoResolver.")]
+[UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode",
+    Justification = "Legacy body reader — not on the AOT-verified mainline. Use CapabilityEndpointBodyReader instead.")]
+[UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+    Justification = "Legacy body reader — not on the AOT-verified mainline. Use CapabilityEndpointBodyReader instead.")]
 public static class CompatibilityBodyReader
 {
     public static async Task<T?> ReadBodyAsync<T>(HttpContext context, bool optional)

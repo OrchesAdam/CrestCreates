@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../CrestCreates.CapabilityEndpoint.TrimmingFixture/CrestCreates.CapabilityEndpoint.TrimmingFixture.csproj" />
+    <ProjectReference Include="../CrestCreates.CapabilityEndpoint.AotFixture/CrestCreates.CapabilityEndpoint.AotFixture.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading.Tasks;
 using CrestCreates.Domain.UnitOfWork;
 
@@ -10,6 +11,10 @@ namespace CrestCreates.Data.Abstractions
     /// <remarks>
     /// 提供工作单元工厂的默认实现，通过服务提供者(DI容器)创建具体的工作单元实例
     /// </remarks>
+    [UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode",
+        Justification = "Tier 3 (Data.Abstractions): AOT capability separately declared. Reflection-based type discovery is acceptable for Tier 3 integrations.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+        Justification = "Tier 3 (Data.Abstractions): AOT capability separately declared.")]
     public class UnitOfWorkFactory : IUnitOfWorkFactory
     {
         private readonly IServiceProvider _serviceProvider;

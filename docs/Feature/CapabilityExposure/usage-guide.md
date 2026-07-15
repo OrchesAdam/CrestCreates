@@ -273,9 +273,9 @@ These are implemented by:
 - `CompatibilityHttpResultMapper.WrapResult<T>()` — non-void, non-GET-null
 - `CompatibilityHttpResultMapper.WrapVoidResult()` — void return
 - `CompatibilityHttpResultMapper.WrapGetResult<T>()` — GET with null check
-- `CapabilityEndpointBodyReader.ReadNativeBodyAsync<T>()` — Trimming-safe body reading for native capability endpoints. Empty body → 400 BAD_REQUEST. No `emptyBodyFactory` parameter.
-- `CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync<T>()` — Trimming-safe body reading for compatibility projection endpoints. Preserves legacy `CompatibilityBodyReader` semantics: empty/whitespace/null body + optional → default, empty/whitespace/null body + required → `emptyBodyFactory()`, invalid JSON + optional → default, invalid JSON + required → exception.
+- `CapabilityEndpointBodyReader.ReadNativeBodyAsync<T>()` — AOT-safe body reading for native capability endpoints. Empty body → 400 BAD_REQUEST. No `emptyBodyFactory` parameter.
 
+- `CapabilityEndpointBodyReader.ReadCompatibilityBodyAsync<T>()` — AOT-safe body reading for compatibility projection endpoints. Preserves legacy `CompatibilityBodyReader` semantics: empty/whitespace/null body + optional → default, empty/whitespace/null body + required → `emptyBodyFactory()`, invalid JSON + optional → default, invalid JSON + required → exception.
 ### Pipeline Failure Responses
 
 Custom result contracts **only** govern the success response envelope. Pipeline failures always use the unified `CapabilityEndpointResultMapper`, regardless of whether the endpoint is native or compatibility-projected:
@@ -422,17 +422,22 @@ Phase 8 deployment target:
 - Trimming-safe by construction (no runtime reflection in new mainline input binding)
 - PublishTrimmed E2E validation pending (blocked by CodeGenerator netstandard2.0 target)
 - NativeAOT-ready architecture where practical
-- NativeAOT publish is future target, not current acceptance gate
+- NativeAOT-verified for Tier 2 (HTTP/capability pipeline) via AotFixture
 ```
 
-### Trimming-Safe Input Binding Status
+### AOT-Safe Input Binding Status
 
 | Generator | Input Binding | Status |
 |---|---|---|
-| CapabilityEndpoint (8a) | `ReadNativeBodyAsync<T>` + `JsonTypeInfo<T>` from application options | ✅ Trimming-safe |
-| AppServiceCompatibility (8d) | `ReadCompatibilityBodyAsync<T>` + `JsonTypeInfo<T>` from application options | ✅ Trimming-safe |
-| CrudService | `DynamicApiGeneratedRuntime.ReadBodyAsync<T>` (reflection-based) | ❌ Unresolved |
+| CapabilityEndpoint (8a) | `ReadNativeBodyAsync<T>` + `JsonTypeInfo<T>` from application options | ✅ NativeAOT-verified |
+| AppServiceCompatibility (8d) | `ReadCompatibilityBodyAsync<T>` + `JsonTypeInfo<T>` from application options | ✅ NativeAOT-verified |
+| CrudService | `DynamicApiGeneratedRuntime.ReadBodyAsync<T>` (reflection-based) | ❌ Unresolved (Tier 3) |
 
-### Future Target
+### AOT Tier Model
 
-Full NativeAOT support after EF Core NativeAOT stabilizes. Response serialization and generated CRUD JSON contracts must also be completed before NativeAOT can become an acceptance gate.
+| Tier | Scope | AOT Target |
+|---|---|---|
+| 1 | CrestCreates Core | NativeAOT-first / verified |
+| 2 | HTTP, MCP, Workflow (first-party runtimes) | NativeAOT-verified |
+| 3 | EF Core and integrations | AOT capability separately declared |
+| 4 | Legacy compatibility | Trimming/JIT-only |

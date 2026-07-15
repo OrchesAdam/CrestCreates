@@ -7,8 +7,13 @@
     <IsPackable>false</IsPackable>
     <!-- Enable source generator output for inspection -->
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
-    <!-- Trimming validation: treat IL-link warnings as errors for new mainline code -->
+    <!-- NativeAOT verification: this fixture is Tier 2 (first-party runtime, NativeAOT-verified) -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
+    <!-- AOT/trimming validation: treat IL-link and AOT warnings as errors -->
     <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL3050;SYSLIB1034</WarningsAsErrors>
+    <!-- Suppress third-party assembly trim/AOT warnings (FluentValidation, etc.) — Tier 3/4 dependencies -->
+    <NoWarn>$(NoWarn);IL2104;IL3053</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CrestCreates.Domain.Shared.Attributes;
 
-namespace CrestCreates.CapabilityEndpoint.TrimmingFixture;
+namespace CrestCreates.CapabilityEndpoint.AotFixture;
 
 /// <summary>
 /// Application-owned JsonSerializerContext for AOT-safe JSON serialization.

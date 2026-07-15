@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Data.Abstractions
@@ -31,6 +32,8 @@ namespace CrestCreates.Data.Abstractions
         /// <param name="services">服务集合</param>
         /// <param name="defaultProvider">默认 ORM 提供者</param>
         /// <returns>服务集合</returns>
+        [UnconditionalSuppressMessage("Trimming", "IL2091:RequiresUnreferencedCode",
+            Justification = "Tier 3 (Data.Abstractions): AOT capability separately declared. Generic factory registration requires public constructors.")]
         public static IServiceCollection AddUnitOfWork<TFactory>(
             this IServiceCollection services,
             OrmProvider defaultProvider = OrmProvider.EfCore)

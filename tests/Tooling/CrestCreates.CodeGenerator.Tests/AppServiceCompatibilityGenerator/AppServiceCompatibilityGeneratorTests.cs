@@ -768,7 +768,7 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
                 public static class CapabilityEndpointResultContractRegistration
                 {
-                    public static void Register(string endpointId, int version, System.Func<EndpointExecutionContext, object> mapResult) { }
+                    public static void Register(string endpointId, int version, System.Func<EndpointExecutionContext, Microsoft.AspNetCore.Http.HttpContext, object> mapResult) { }
                 }
 
                 public sealed class EndpointExecutionContext
@@ -778,9 +778,9 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
                 public static class CompatibilityHttpResultMapper
                 {
-                    public static object WrapResult(object? value) => null!;
-                    public static object WrapGetResult(object? value) => null!;
-                    public static object WrapVoidResult() => null!;
+                    public static object WrapResult(object? value, Microsoft.AspNetCore.Http.HttpContext? httpContext = null) => null!;
+                    public static object WrapGetResult(object? value, Microsoft.AspNetCore.Http.HttpContext? httpContext = null) => null!;
+                    public static object WrapVoidResult(Microsoft.AspNetCore.Http.HttpContext? httpContext = null) => null!;
                 }
 
                 public static class CompatibilityBodyReader
@@ -1682,12 +1682,12 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         var contracts = result.GetSourceByFileName("GeneratedAppServiceCompatibilityResultContracts_Book.g.cs");
         contracts.Should().NotBeNull();
-        contracts!.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapResult(ctx.Output)",
-            "POST non-void actions should use WrapResult");
-        contracts.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapGetResult(ctx.Output)",
-            "GET non-void actions should use WrapGetResult");
-        contracts.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapVoidResult()",
-            "void-return actions should use WrapVoidResult");
+        contracts!.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapResult(ctx.Output, httpContext)",
+            "POST non-void actions should use WrapResult with HttpContext");
+        contracts.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapGetResult(ctx.Output, httpContext)",
+            "GET non-void actions should use WrapGetResult with HttpContext");
+        contracts.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapVoidResult(httpContext)",
+            "void-return actions should use WrapVoidResult with HttpContext");
     }
 
     [Fact]
