@@ -131,6 +131,38 @@ public static partial class BadTypeTools
         result.GeneratedSources.Should().BeEmpty();
     }
 
+    [Fact]
+    public void Same_container_name_in_different_namespaces_gets_unique_hint_names()
+    {
+        var result = Run(@"
+namespace Sales
+{
+[CrestCreates.Mcp.McpToolSpecs]
+public static partial class OrderTools
+{
+    [CrestCreates.Mcp.McpToolSpec(""sales.order"", Description = ""Sales order."" )]
+    public sealed class Get { }
+}
+}
+namespace Support
+{
+[CrestCreates.Mcp.McpToolSpecs]
+public static partial class OrderTools
+{
+    [CrestCreates.Mcp.McpToolSpec(""support.order"", Description = ""Support order."" )]
+    public sealed class Get { }
+}
+}
+");
+
+        result.Diagnostics.Should().NotContain(diagnostic => diagnostic.Id.StartsWith("MCP"));
+        result.GeneratedSources.Select(source => source.FileName)
+            .Should().OnlyHaveUniqueItems();
+        result.GeneratedSources.Select(source => source.FileName)
+            .Should().Contain(file => file.EndsWith("Sales.OrderTools_McpToolProvider.g.cs"))
+            .And.Contain(file => file.EndsWith("Support.OrderTools_McpToolProvider.g.cs"));
+    }
+
     private static SourceGeneratorResult Run(string source)
         => SourceGeneratorTestHelper.RunGenerator<CodeGenerator.McpToolGenerator.McpToolGenerator>(
             source,

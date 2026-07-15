@@ -31,12 +31,21 @@ public sealed class McpToolGenerator : IIncrementalGenerator
                 return;
 
             spc.AddSource(
-                container.Name + "_McpToolProvider.g.cs",
+                HintName(container, "Provider"),
                 McpToolProviderEmitter.Emit(container));
             spc.AddSource(
-                container.Name + "_McpToolBindings.g.cs",
+                HintName(container, "Bindings"),
                 McpToolBindingEmitter.Emit(container));
         });
+    }
+
+    private static string HintName(McpToolContainerModel container, string suffix)
+    {
+        var identity = string.IsNullOrEmpty(container.Namespace)
+            ? container.Name
+            : container.Namespace + "." + container.Name;
+        var sanitized = Regex.Replace(identity, "[^A-Za-z0-9_.-]", "_");
+        return sanitized + "_McpTool" + suffix + ".g.cs";
     }
 
     private static McpToolContainerModel Normalize(GeneratorAttributeSyntaxContext context)
