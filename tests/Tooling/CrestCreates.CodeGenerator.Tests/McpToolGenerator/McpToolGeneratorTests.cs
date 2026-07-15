@@ -163,6 +163,49 @@ public static partial class OrderTools
             .And.Contain(file => file.EndsWith("Support.OrderTools_McpToolProvider.g.cs"));
     }
 
+    [Fact]
+    public void Nested_container_is_rejected_to_keep_generated_identity_unambiguous()
+    {
+        var result = Run(@"
+public static class Feature
+{
+    [CrestCreates.Mcp.McpToolSpecs]
+    public static partial class OrderTools
+    {
+        [CrestCreates.Mcp.McpToolSpec(""orders.get"", Description = ""Gets order."" )]
+        public sealed class Get { }
+    }
+}
+");
+
+        result.Diagnostics.Should().Contain(diagnostic => diagnostic.Id == "MCP010");
+        result.GeneratedSources.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Non_object_root_framework_types_are_rejected()
+    {
+        var result = Run(@"
+using System;
+using System.Collections.Generic;
+[CrestCreates.Mcp.McpToolSpecs]
+public static partial class BadRootTools
+{
+    [CrestCreates.Mcp.McpToolSpec(""date-time"", InputType = typeof(DateTime), Description = ""Date-time."" )]
+    public sealed class DateTimeTool { }
+    [CrestCreates.Mcp.McpToolSpec(""offset"", InputType = typeof(DateTimeOffset), Description = ""Offset."" )]
+    public sealed class DateTimeOffsetTool { }
+    [CrestCreates.Mcp.McpToolSpec(""list"", InputType = typeof(List<string>), Description = ""List."" )]
+    public sealed class ListTool { }
+    [CrestCreates.Mcp.McpToolSpec(""read-only-list"", InputType = typeof(IReadOnlyList<string>), Description = ""Read-only list."" )]
+    public sealed class ReadOnlyListTool { }
+}
+");
+
+        result.Diagnostics.Count(diagnostic => diagnostic.Id == "MCP006").Should().Be(4);
+        result.GeneratedSources.Should().BeEmpty();
+    }
+
     private static SourceGeneratorResult Run(string source)
         => SourceGeneratorTestHelper.RunGenerator<CodeGenerator.McpToolGenerator.McpToolGenerator>(
             source,

@@ -57,6 +57,7 @@ public sealed class McpToolGenerator : IIncrementalGenerator
 
         if (!symbol.IsStatic
             || symbol.TypeParameters.Length != 0
+            || symbol.ContainingType is not null
             || !syntax.Modifiers.Any(SyntaxKind.PartialKeyword))
         {
             diagnostics.Add(Diagnostic.Create(McpToolDiagnostics.InvalidContainer, syntax.Identifier.GetLocation()));
@@ -150,6 +151,22 @@ public sealed class McpToolGenerator : IIncrementalGenerator
             return false;
         if (named.TypeKind is TypeKind.Interface or TypeKind.Dynamic or TypeKind.Enum or TypeKind.Delegate
             || named.IsAbstract)
+            return false;
+        var fullyQualifiedName = named.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        if (fullyQualifiedName is "global::System.DateTime"
+            or "global::System.DateTimeOffset"
+            or "global::System.DateOnly"
+            or "global::System.TimeOnly"
+            or "global::System.Guid")
+            return false;
+        if (named.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic"
+            && named.Name is "List"
+                or "HashSet"
+                or "IList"
+                or "ICollection"
+                or "IEnumerable"
+                or "IReadOnlyList"
+                or "IReadOnlyCollection")
             return false;
         if (named.TypeKind == TypeKind.Struct
             && !named.GetMembers().OfType<IPropertySymbol>().Any(property => !property.IsStatic))
