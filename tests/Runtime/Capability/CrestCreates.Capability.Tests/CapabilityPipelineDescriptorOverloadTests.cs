@@ -202,7 +202,7 @@ public class CapabilityPipelineDescriptorOverloadTests
         // Set up GetByName to return v2Descriptor (which should NOT be used)
         capabilityRegistry.Setup(r => r.GetByName("cap_test")).Returns(v2Descriptor);
 
-        schemaRegistry.Setup(s => s.GetById("schema_test")).Returns(schemaDescriptor);
+        schemaRegistry.Setup(s => s.GetByVersion("schema_test", 1)).Returns(schemaDescriptor);
         validator.Setup(v => v.Validate(schemaDescriptor, "payload"))
             .Returns(SchemaValidationResult.Success());
 

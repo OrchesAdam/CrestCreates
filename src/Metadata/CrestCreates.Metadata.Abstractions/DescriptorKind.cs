@@ -9,5 +9,6 @@ public enum DescriptorKind
     Workflow = 4,
     Form = 5,
     HumanTask = 6,
-    DynamicApiEndpoint = 7
+    DynamicApiEndpoint = 7,
+    McpTool = 8
 }

@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-15 (Phase 8 body binding: application-owned JsonTypeInfo architecture, trimming-safe input binding)
+Last Updated: 2026-07-15 (Phase 8e MCP Tool Projection NativeAOT verification)
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
@@ -8,6 +8,39 @@ This file records the current platform status for CrestCreates so future threads
 ---
 
 ## Completed Features
+
+### Phase 8e — MCP Tool Projection
+
+Status: Implemented; MCP transport hosting remains a future adapter concern.
+
+Core chain:
+
+`[McpToolSpec]` → Source Generator → `McpToolDescriptor` + exact typed binding → immutable runtime snapshot → Host-filtered discovery/invocation → `ICapabilityDispatcher` → Capability Pipeline → Handler → runtime OutputSchema validation.
+
+Completed:
+- Metadata-owned MCP descriptor contracts avoid both Metadata-to-Integrations and Metadata-to-Runtime dependency inversions through `McpCapabilityReference`; Runtime resolves it to the captured `CapabilityDescriptor`.
+- Protocol-neutral abstractions and runtime live under `src/Integrations/CrestCreates.Mcp.Abstractions` and `src/Integrations/CrestCreates.Mcp`.
+- Explicit Source Generator authoring emits descriptor providers and input/output bindings without runtime reflection or dictionary fallback.
+- Application-owned source-generated `JsonTypeInfo` (single context or source-generated-only resolver chain) is resolved and frozen during snapshot construction.
+- Runtime snapshots contain only Active, fully validated tools and capture resolved Capability and exact Schema versions; an `IHostedService` idempotently builds Schema → Capability → MCP Tool registries before eagerly publishing the snapshot during Host startup.
+- Discovery and invocation apply trusted Host exposure policy independently from Capability authorization.
+- Invocation uses `InvocationSource.Mcp` and only the descriptor overload of `ICapabilityDispatcher`.
+- Idempotency keys use a versioned canonical SHA-256 shape over Host id, tool contract hash, resolved Capability contract hash, and stable logical InvocationId.
+- Schema execution rejects unknown/duplicate properties, startup parity is bidirectional and type-aware, and actual serialized output is validated against OutputSchema before structured content is returned.
+- Supported Schema subset covers primitive scalars and primitive collections for string, bool, int, long, decimal, double, Guid/UUID, DateOnly/date, and DateTime/date-time. Pattern, ValidationRules, and unsupported References fail MCP snapshot construction.
+- Diagnostics cover MCP001-MCP121 across generator and startup/runtime contract validation.
+- Generator-backed E2E, dependency-boundary, Agent authoring-policy, and NativeAOT publish-and-run fixtures are present.
+
+Focused verification: MCP/Schema/Capability/generator/E2E/boundary suites passed. The former PublishTrimmed fixture was replaced by `CrestCreates.Mcp.AotFixture`, which performs a real linux-x64 NativeAOT publish, clang native link, and native-binary execution. The fixture passed with `MCP_NATIVEAOT_OK`, 0 warnings, and 0 errors on Ubuntu clang 21.1.8.
+
+Non-goals still open:
+- Official MCP Server SDK hosting and stdio/SSE/Streamable HTTP transports
+- MCP authentication/session/Tasks/progress/resources/prompts/sampling
+- automatic Capability exposure, approval workflows, and hot reload
+- Generated CRUD trimming-safe JSON contracts (GitHub issue #61)
+
+Guide: `docs/Feature/mcp-tool-projection.md`
+Spec: `docs/superpowers/specs/2026-07-15-phase-8e-mcp-tool-projection-design.md`
 
 ### Tenant Management
 

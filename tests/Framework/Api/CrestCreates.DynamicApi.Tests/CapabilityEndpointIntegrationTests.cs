@@ -731,7 +731,7 @@ public sealed class CompatibilityProjectionEndToEndTests : IDisposable
         CapabilityEndpointHttpMethod httpMethod,
         string routePattern,
         Func<HttpContext, CancellationToken, ValueTask<object?>> bindInput,
-        Func<EndpointExecutionContext, HttpContext, object> resultMapper,
+        Func<EndpointExecutionContext, IServiceProvider, object> resultMapper,
         ICapabilityHandlerInvoker invoker)
     {
         var endpointDescriptor = new CapabilityEndpointDescriptor

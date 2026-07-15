@@ -4,6 +4,7 @@ namespace CrestCreates.Schema.Abstractions;
 
 public static class SchemaValidationErrorCodes
 {
+    public static readonly DiagnosticCode UnknownProperty = new("UNKNOWN_PROPERTY");
     private const string FieldRequiredValue = "FIELD_REQUIRED";
     public static DiagnosticCode FieldRequired { get; } = new(FieldRequiredValue);
 
@@ -27,4 +28,10 @@ public static class SchemaValidationErrorCodes
 
     private const string MinValueNotMetValue = "MIN_VALUE_NOT_MET";
     public static DiagnosticCode MinValueNotMet { get; } = new(MinValueNotMetValue);
+
+    public static DiagnosticCode InvalidRoot { get; } = new("INVALID_ROOT");
+
+    public static DiagnosticCode DuplicateProperty { get; } = new("DUPLICATE_PROPERTY");
+
+    public static DiagnosticCode UnknownFieldType { get; } = new("UNKNOWN_FIELD_TYPE");
 }

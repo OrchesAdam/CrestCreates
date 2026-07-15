@@ -54,9 +54,8 @@ public class ToolContractCoverageTests
     private static Dictionary<string, Type> BuildFacadeToolResultMap()
     {
         var map = new Dictionary<string, Type>(StringComparer.Ordinal);
-        var serviceType = typeof(IAgentControlPlaneToolService);
 
-        foreach (var method in serviceType.GetMethods())
+        foreach (var method in GetFacadeMethods())
         {
             var toolName = StripAsyncSuffix(method.Name);
             var returnType = method.ReturnType; // Task<AgentToolResult<T>>
@@ -81,9 +80,8 @@ public class ToolContractCoverageTests
     private static Dictionary<string, Type> BuildFacadeToolRequestMap()
     {
         var map = new Dictionary<string, Type>(StringComparer.Ordinal);
-        var serviceType = typeof(IAgentControlPlaneToolService);
 
-        foreach (var method in serviceType.GetMethods())
+        foreach (var method in GetFacadeMethods())
         {
             var toolName = StripAsyncSuffix(method.Name);
             var parameters = method.GetParameters();
@@ -107,6 +105,15 @@ public class ToolContractCoverageTests
         }
 
         return map;
+    }
+
+    private static IEnumerable<MethodInfo> GetFacadeMethods()
+    {
+        var serviceType = typeof(IAgentControlPlaneToolService);
+        return serviceType.GetInterfaces()
+            .Append(serviceType)
+            .SelectMany(type => type.GetMethods())
+            .Distinct();
     }
 
     /// <summary>

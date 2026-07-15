@@ -1,5 +1,6 @@
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
+using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 
 namespace CrestCreates.Capability.Middleware;
@@ -41,18 +42,43 @@ public sealed class ValidationMiddleware : ICapabilityPipelineMiddleware
         if (inputSchema == null)
             return next(context);
 
-        var schemaDescriptor = _schemaRegistry.GetById(inputSchema.Value.Id);
-        if (schemaDescriptor == null)
-            return next(context);
+        if (inputSchema.Value.SelectionMode != VersionSelectionMode.Exact
+            || inputSchema.Value.Version <= 0)
+        {
+            return Task.FromResult(CapabilityExecutionResult.Failure(
+                "CAPABILITY_SCHEMA_REFERENCE_INVALID",
+                "Capability input schema reference must use an exact positive version.",
+                TimeSpan.Zero));
+        }
 
-        var result = _validator.Validate(schemaDescriptor, context.Input);
+        var schemaDescriptor = _schemaRegistry.GetByVersion(
+            inputSchema.Value.Id,
+            inputSchema.Value.Version);
+        if (schemaDescriptor == null)
+        {
+            return Task.FromResult(CapabilityExecutionResult.Failure(
+                "CAPABILITY_SCHEMA_NOT_FOUND",
+                "Capability input schema could not be resolved.",
+                TimeSpan.Zero));
+        }
+
+        var result = context.InputJson.HasValue
+            ? _validator.Validate(schemaDescriptor, context.InputJson.Value)
+            : _validator.Validate(schemaDescriptor, context.Input);
         if (!result.IsValid)
         {
             var errorMessages = string.Join("; ", result.Errors.Select(e => e.Message));
+            var issues = result.Errors
+                .Select(error => new CapabilityExecutionIssue(
+                    error.ErrorCode.ToString(),
+                    error.Message,
+                    error.FieldName))
+                .ToArray();
             return Task.FromResult(CapabilityExecutionResult.Failure(
                 "CAPABILITY_VALIDATION_FAILED",
                 $"Input validation failed: {errorMessages}",
-                TimeSpan.Zero));
+                TimeSpan.Zero,
+                issues));
         }
 
         return next(context);

@@ -85,6 +85,7 @@
   </Folder>
   <Folder Name="/src/Metadata/">
     <Project Path="src/Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
+    <Project Path="src/Metadata/CrestCreates.Metadata.Mcp.Abstractions/CrestCreates.Metadata.Mcp.Abstractions.csproj" />
     <Project Path="src/Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
     <Project Path="src/Metadata/CrestCreates.Metadata.ContextPack.Abstractions/CrestCreates.Metadata.ContextPack.Abstractions.csproj" />
     <Project Path="src/Metadata/CrestCreates.Metadata.ContextPack/CrestCreates.Metadata.ContextPack.csproj" />
@@ -177,6 +178,8 @@
     <Project Path="src/Integrations/CrestCreates.Integration.Abstractions/CrestCreates.Integration.Abstractions.csproj" />
     <Project Path="src/Integrations/CrestCreates.Integration.ExternalApi/CrestCreates.Integration.ExternalApi.csproj" />
     <Project Path="src/Integrations/CrestCreates.Integration.LegacyDatabase/CrestCreates.Integration.LegacyDatabase.csproj" />
+    <Project Path="src/Integrations/CrestCreates.Mcp.Abstractions/CrestCreates.Mcp.Abstractions.csproj" />
+    <Project Path="src/Integrations/CrestCreates.Mcp/CrestCreates.Mcp.csproj" />
     <Project Path="src/Integrations/CrestCreates.PluginSystem/CrestCreates.PluginSystem.csproj" />
   </Folder>
   <Folder Name="/tests/" />
@@ -219,6 +222,12 @@
     <Project Path="tests/Framework/Testing/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
     <Project Path="tests/Framework/Testing/CrestCreates.TestBase.Tests/CrestCreates.TestBase.Tests.csproj" />
     <Project Path="tests/Framework/Testing/CrestCreates.Samples.Tests/CrestCreates.Samples.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Integrations/">
+    <Project Path="tests/Integrations/CrestCreates.Mcp.E2E.Tests/CrestCreates.Mcp.E2E.Tests.csproj" />
+    <Project Path="tests/Integrations/CrestCreates.Mcp.Tests/CrestCreates.Mcp.Tests.csproj" />
+    <Project Path="tests/Integrations/CrestCreates.Mcp.AotFixture.Tests/CrestCreates.Mcp.AotFixture.Tests.csproj" />
+    <Project Path="tests/Integrations/CrestCreates.Mcp.AotFixture/CrestCreates.Mcp.AotFixture.csproj" />
   </Folder>
   <Folder Name="/tests/Metadata/" />
   <Folder Name="/tests/Metadata/Core/">

@@ -119,4 +119,23 @@ public class DescriptorRefTests
         ValidationReport.Empty.HasErrors.Should().BeFalse();
         ValidationReport.Empty.HasWarnings.Should().BeFalse();
     }
+
+    [Fact]
+    public void ValidationIssue_preserves_optional_structured_code()
+    {
+        var issue = new ValidationIssue(SeverityLevel.Error, "Invalid selection")
+        {
+            Code = new DiagnosticCode("MCP117")
+        };
+
+        issue.Code.Should().Be(new DiagnosticCode("MCP117"));
+    }
+
+    [Fact]
+    public void ValidationIssue_two_argument_constructor_leaves_code_absent()
+    {
+        var issue = new ValidationIssue(SeverityLevel.Warning, "Legacy warning");
+
+        issue.Code.Should().BeNull();
+    }
 }

@@ -4,6 +4,7 @@ using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.DescriptorPackage;
 using CrestCreates.Metadata.DescriptorPackage.CanonicalHashing;
+using CrestCreates.Metadata.Mcp;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -107,5 +108,34 @@ public class DescriptorPackageSerializerTests
         entry.ContractHash.Should().HaveLength(64); // SHA-256 hex
         entry.DefinitionHash.Should().NotBeNullOrEmpty();
         entry.DefinitionHash.Should().HaveLength(64); // SHA-256 hex
+    }
+
+    [Fact]
+    public void McpTool_package_entry_round_trips_identity_kind_and_hashes()
+    {
+        var descriptor = new McpToolDescriptor
+        {
+            Id = "mcp-tool:orders.get",
+            Name = "Get order",
+            Version = 1,
+            Capability = new McpCapabilityReference(
+                "orders.get", 1, VersionSelectionMode.Exact),
+            ToolName = "orders.get",
+            Description = "Gets one order."
+        };
+        var package = _builder.Build(new DescriptorPackageBuildRequest
+        {
+            PackageId = "mcp.pkg",
+            PackageVersion = "1.0.0",
+            Descriptors = [descriptor]
+        });
+
+        var roundTripped = _serializer.Deserialize(_serializer.Serialize(package));
+
+        var entry = roundTripped!.SnapshotData.Descriptors.Should().ContainSingle().Subject;
+        entry.Ref.Should().Be(new DescriptorRef("mcp-tool", descriptor.Id, descriptor.Version));
+        entry.Kind.Should().Be(DescriptorKind.McpTool);
+        entry.ContractHash.Should().Be(package.SnapshotData.Descriptors[0].ContractHash);
+        entry.DefinitionHash.Should().Be(package.SnapshotData.Descriptors[0].DefinitionHash);
     }
 }

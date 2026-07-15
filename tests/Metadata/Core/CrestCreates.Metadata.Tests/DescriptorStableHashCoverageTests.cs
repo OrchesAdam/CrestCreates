@@ -4,6 +4,7 @@ using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Mcp;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
@@ -101,6 +102,38 @@ public sealed class DescriptorStableHashCoverageTests
             new(nameof(CapabilityDescriptor.OutputSchema), HashFieldCoverage.Contract, "Output schema defines capability contract"),
             new(nameof(CapabilityDescriptor.Permissions), HashFieldCoverage.Contract, "Permissions gate execution — changes security contract"),
             new(nameof(CapabilityDescriptor.RiskLevel), HashFieldCoverage.Contract, "Risk level affects execution policy and audit"),
+            new(nameof(CapabilityDescriptor.ProjectionKind), HashFieldCoverage.DefinitionOnly, "Projection origin is governance metadata, not execution contract"),
+        },
+
+        [typeof(McpToolDescriptor)] = new FieldCoverage[]
+        {
+            new(nameof(McpToolDescriptor.Namespace), HashFieldCoverage.ExcludedWithReason, "Computed per-kind constant"),
+            new(nameof(McpToolDescriptor.Kind), HashFieldCoverage.ExcludedWithReason, "Computed per-kind constant"),
+            new(nameof(McpToolDescriptor.Id), HashFieldCoverage.Contract, "Stable tool projection identity"),
+            new(nameof(McpToolDescriptor.Name), HashFieldCoverage.Contract, "Descriptor identity"),
+            new(nameof(McpToolDescriptor.Version), HashFieldCoverage.Contract, "Versioned identity"),
+            new(nameof(McpToolDescriptor.State), HashFieldCoverage.Contract, "Lifecycle state affects exposure"),
+            new(nameof(McpToolDescriptor.SupersededById), HashFieldCoverage.Contract, "Affects version resolution"),
+            new(nameof(McpToolDescriptor.Capability), HashFieldCoverage.Contract, "Captured capability authority"),
+            new(nameof(McpToolDescriptor.ToolName), HashFieldCoverage.Contract, "Protocol-visible identity"),
+            new(nameof(McpToolDescriptor.Title), HashFieldCoverage.DefinitionOnly, "Display metadata"),
+            new(nameof(McpToolDescriptor.Description), HashFieldCoverage.Contract, "Model-facing behavior contract"),
+            new(nameof(McpToolDescriptor.AnnotationOverrides), HashFieldCoverage.Contract, "Protocol annotation contract"),
+        },
+
+        [typeof(McpToolAnnotationOverrides)] = new FieldCoverage[]
+        {
+            new(nameof(McpToolAnnotationOverrides.DestructiveHint), HashFieldCoverage.Contract, "Protocol hint override"),
+            new(nameof(McpToolAnnotationOverrides.IdempotentHint), HashFieldCoverage.Contract, "Protocol hint override"),
+            new(nameof(McpToolAnnotationOverrides.OpenWorldHint), HashFieldCoverage.Contract, "Protocol hint override"),
+        },
+
+        [typeof(McpCapabilityReference)] = new FieldCoverage[]
+        {
+            new(nameof(McpCapabilityReference.Id), HashFieldCoverage.Contract, "Referenced capability identity"),
+            new(nameof(McpCapabilityReference.Version), HashFieldCoverage.Contract, "Referenced capability version"),
+            new(nameof(McpCapabilityReference.SelectionMode), HashFieldCoverage.Contract, "Capability resolution semantics"),
+            new(nameof(McpCapabilityReference.ExpectedContractHash), HashFieldCoverage.Contract, "Optional contract guard"),
         },
 
         // ── EventDescriptor ───────────────────────────────────

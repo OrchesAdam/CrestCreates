@@ -38,7 +38,8 @@ public class SchemaValidatorTests
         };
         var result = new SchemaValidator().Validate(schema, "{\"Other\":\"value\"}");
         result.IsValid.Should().BeFalse();
-        result.Errors[0].FieldName.Should().Be("Name");
+        result.Errors.Should().Contain(error =>
+            error.FieldName == "Name" && error.ErrorCode == SchemaValidationErrorCodes.FieldRequired);
     }
 
     [Fact]
@@ -132,7 +133,9 @@ public class SchemaValidatorTests
             }
         };
         var result = new SchemaValidator().Validate(schema, "{\"Other\":\"x\"}");
-        result.Errors.Should().HaveCount(2);
+        result.Errors.Should().Contain(error => error.FieldName == "Other" && error.ErrorCode == SchemaValidationErrorCodes.UnknownProperty);
+        result.Errors.Should().Contain(error => error.FieldName == "Name" && error.ErrorCode == SchemaValidationErrorCodes.FieldRequired);
+        result.Errors.Should().Contain(error => error.FieldName == "Age" && error.ErrorCode == SchemaValidationErrorCodes.FieldRequired);
     }
 
     [Fact]
@@ -167,4 +170,126 @@ public class SchemaValidatorTests
         var tooHigh = new SchemaValidator().Validate(schema, "{\"Score\":101}");
         tooHigh.Errors[0].ErrorCode.Should().Be("MAX_VALUE_EXCEEDED");
     }
+
+    [Fact]
+    public void Validate_JsonElement_requires_object_root()
+    {
+        using var json = JsonDocument.Parse("[]");
+
+        var result = new SchemaValidator().Validate(new SchemaDescriptor(), json.RootElement);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(error => error.ErrorCode == SchemaValidationErrorCodes.InvalidRoot);
+    }
+
+    [Fact]
+    public void Validate_JsonElement_rejects_duplicate_properties_ordinally()
+    {
+        var schema = SchemaWith(new SchemaFieldDescriptor { Name = "name", FieldType = "string" });
+        using var json = JsonDocument.Parse("{\"name\":\"first\",\"name\":\"second\"}");
+
+        var result = new SchemaValidator().Validate(schema, json.RootElement);
+
+        result.IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_JsonElement_rejects_properties_not_declared_by_schema()
+    {
+        var schema = SchemaWith(new SchemaFieldDescriptor { Name = "name", FieldType = "string" });
+        using var json = JsonDocument.Parse("{\"name\":\"valid\",\"undeclared\":true}");
+
+        var result = new SchemaValidator().Validate(schema, json.RootElement);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(error =>
+            error.FieldName == "undeclared"
+            && error.ErrorCode == SchemaValidationErrorCodes.UnknownProperty);
+    }
+
+    [Fact]
+    public void Validate_DateTimeOffset_token_uses_the_same_rfc3339_contract_as_datetime()
+    {
+        var schema = SchemaWith(new SchemaFieldDescriptor { Name = "createdAt", FieldType = "DateTimeOffset" });
+        using var valid = JsonDocument.Parse("{\"createdAt\":\"2026-07-15T10:30:00+08:00\"}");
+
+        new SchemaValidator().Validate(schema, valid.RootElement).IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_large_finite_double_without_constraints_does_not_require_decimal_conversion()
+    {
+        var schema = SchemaWith(new SchemaFieldDescriptor { Name = "value", FieldType = "double" });
+        using var json = JsonDocument.Parse("{\"value\":1e300}");
+
+        var action = () => new SchemaValidator().Validate(schema, json.RootElement);
+
+        action.Should().NotThrow();
+        action().IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_large_finite_double_constraint_does_not_require_decimal_conversion()
+    {
+        var schema = SchemaWith(new SchemaFieldDescriptor
+        {
+            Name = "value",
+            FieldType = "double",
+            MaxValue = 1e300
+        });
+        using var json = JsonDocument.Parse("{\"value\":1}");
+
+        var action = () => new SchemaValidator().Validate(schema, json.RootElement);
+
+        action.Should().NotThrow();
+        action().IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_integer_rejects_fraction_and_int32_overflow()
+    {
+        var schema = SchemaWith(new SchemaFieldDescriptor { Name = "value", FieldType = "int" });
+        using var fractional = JsonDocument.Parse("{\"value\":1.5}");
+        using var overflow = JsonDocument.Parse("{\"value\":2147483648}");
+
+        new SchemaValidator().Validate(schema, fractional.RootElement).IsValid.Should().BeFalse();
+        new SchemaValidator().Validate(schema, overflow.RootElement).IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_collection_uses_collection_element_type()
+    {
+        var schema = SchemaWith(new SchemaFieldDescriptor
+        {
+            Name = "ids",
+            FieldType = "IList<Guid>",
+            IsCollection = true,
+            CollectionElementType = "guid"
+        });
+        using var json = JsonDocument.Parse("{\"ids\":[\"not-a-guid\"]}");
+
+        var result = new SchemaValidator().Validate(schema, json.RootElement);
+
+        result.IsValid.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("550e8400-e29b-41d4-a716-446655440000", true)]
+    [InlineData("550E8400-E29B-41D4-A716-446655440000", true)]
+    [InlineData("{550e8400-e29b-41d4-a716-446655440000}", false)]
+    public void Validate_guid_requires_canonical_D_form(string value, bool expected)
+    {
+        var schema = SchemaWith(new SchemaFieldDescriptor { Name = "id", FieldType = "guid" });
+        using var json = JsonDocument.Parse($"{{\"id\":\"{value}\"}}");
+
+        new SchemaValidator().Validate(schema, json.RootElement).IsValid.Should().Be(expected);
+    }
+
+    private static SchemaDescriptor SchemaWith(SchemaFieldDescriptor field) => new()
+    {
+        Id = "schema.test",
+        Name = "Test",
+        Version = 1,
+        Fields = [field]
+    };
 }

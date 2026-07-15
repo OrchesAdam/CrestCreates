@@ -78,7 +78,7 @@ internal static class CapabilityEndpointMapper
     private static IResult MapResult(
         CapabilityExecutionResult result,
         CapabilityEndpointOutputMapping outputMapping,
-        Func<EndpointExecutionContext, HttpContext, object>? resultMapper,
+        Func<EndpointExecutionContext, IServiceProvider, object>? resultMapper,
         HttpContext httpContext)
     {
         // Custom result contracts only govern the *success* response envelope.
@@ -98,7 +98,7 @@ internal static class CapabilityEndpointMapper
                 ErrorMessage = null
             };
 
-            var mapped = resultMapper(ctx, httpContext);
+            var mapped = resultMapper(ctx, httpContext.RequestServices);
             // The mapper returns object to avoid AspNetCore dependency in
             // Abstractions, but the concrete implementation always returns IResult.
             return (IResult)mapped;

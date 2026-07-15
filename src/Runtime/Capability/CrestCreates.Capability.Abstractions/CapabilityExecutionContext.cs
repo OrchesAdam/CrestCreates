@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace CrestCreates.Capability.Abstractions;
 
 public sealed class CapabilityExecutionContext
@@ -13,6 +15,7 @@ public sealed class CapabilityExecutionContext
     public string? UserId { get; set; }
     public string IdempotencyKey { get; set; } = Guid.NewGuid().ToString("N");
     public object? Input { get; set; }
+    public JsonElement? InputJson { get; set; }
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
     public IDictionary<string, object?> Items { get; init; } = new Dictionary<string, object?>();
     public IReadOnlyList<string> RequiredPermissions { get; set; } = Array.Empty<string>();

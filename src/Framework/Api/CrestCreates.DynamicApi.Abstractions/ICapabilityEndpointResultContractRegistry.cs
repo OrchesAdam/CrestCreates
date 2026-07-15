@@ -1,5 +1,3 @@
-using Microsoft.AspNetCore.Http;
-
 namespace CrestCreates.DynamicApi;
 
 /// <summary>
@@ -10,6 +8,6 @@ namespace CrestCreates.DynamicApi;
 /// </summary>
 public interface ICapabilityEndpointResultContractRegistry
 {
-    void Register(string endpointId, int version, Func<EndpointExecutionContext, HttpContext, object> mapResult);
-    Func<EndpointExecutionContext, HttpContext, object>? TryGetResultMapper(string endpointId, int version);
+    void Register(string endpointId, int version, Func<EndpointExecutionContext, IServiceProvider, object> mapResult);
+    Func<EndpointExecutionContext, IServiceProvider, object>? TryGetResultMapper(string endpointId, int version);
 }

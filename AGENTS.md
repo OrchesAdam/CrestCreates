@@ -2,12 +2,12 @@
 
 ## 项目定位
 
-CrestCreates 是一个类 ABP Framework 的 .NET 10 企业级应用开发框架，基于 DDD、模块化、编译期代码生成和 AoT 友好运行时。
+CrestCreates 是一个类 ABP Framework 的 .NET 10 企业级应用开发框架，基于 DDD、模块化、编译期代码生成和 NativeAOT-first 运行时。
 
 当前阶段的核心目标不是继续堆模块名，而是把框架主链做扎实：
 
 - 优先使用编译期代码生成，减少运行时反射、扫描和动态 fallback。
-- 优先保证 Trim / NativeAOT 友好。
+- 优先保证正式主链具备可执行的 NativeAOT 验证，而不只停留在 trimming-friendly 声明。
 - 优先收口唯一主链，避免双轨实现长期并存。
 - 优先做可复用的平台能力，而不是业务级补丁。
 - 让框架内核承载复杂性，让普通业务开发保持短路径。
@@ -74,6 +74,32 @@ Handler 不应承担治理判断，不应拼字符串协议，不应使用 servi
 
 如果第 1、2、4、5 条答案不理想，先调整设计。
 
+### 6. AOT 能力分层
+
+框架不再使用一个模糊的“AoT 友好”标签覆盖所有项目。能力声明必须匹配实际发布证据：
+
+```text
+CrestCreates Core:
+    NativeAOT-first / verified
+
+HTTP、MCP、Workflow 等第一方 Runtime:
+    NativeAOT-verified
+
+EF Core 和部分 Integrations:
+    AOT capability separately declared
+
+Legacy compatibility:
+    may remain trimming/JIT-only
+```
+
+规则：
+
+- `NativeAOT-verified` 必须有真实 `PublishAot` fixture，完成 native link 并执行原生产物；仅通过 trim analyzer、`PublishTrimmed` 或 source-generated JSON 测试不够。
+- 第一方 Runtime 新增或修改执行主链时，应同步维护其 NativeAOT publish-and-run 门禁。
+- EF Core、ORM Provider、Plugin、消息中间件和外部 SDK 集成必须分别声明支持级别，不能从 Core 或上层 Host 的验证结果推导。
+- Legacy compatibility 可以保留 reflection、trimming/JIT-only 路径，但必须隔离、明确标注且不得成为正式主链 fallback。
+- 文档使用 `NativeAOT-verified`、`trimming-verified`、`JIT-only` 等可验证术语，禁止把“无明显反射”直接写成“NativeAOT-safe”。
+
 ---
 
 ## 构建与命令
@@ -95,7 +121,7 @@ dotnet test --filter "FullyQualifiedName~SomeTestClass.SomeTestMethod"
 dotnet run --project samples/LibraryManagement/LibraryManagement.Web
 dotnet run --project samples/SaaSHelpdesk/SaaSHelpdesk.Web
 
-# 发布：默认 Trim，显式 AoT 需指定 CrestCreatesPublishMode=aot
+# 发布：默认 Trim；NativeAOT-verified 主链和 fixture 必须显式指定 CrestCreatesPublishMode=aot
 dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r win-x64 --self-contained true
 dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r win-x64 --self-contained true -p:CrestCreatesPublishMode=aot
 ```
@@ -106,7 +132,7 @@ dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r win
 - 主解决方案: `CrestCreates.slnx`，是 XML `.slnx`，不是 `.sln`。
 - 分层解决方案在 `solutions/`，`solutions/CrestCreates.All.slnx` 是规范全量方案。
 - 中央包管理: `Directory.Packages.props`。
-- AoT / Trim 配置: `Directory.Build.Aot.props`，默认 `trim`，显式 AoT 使用 `-p:CrestCreatesPublishMode=aot`。
+- AoT / Trim 配置: `Directory.Build.Aot.props`，默认 `trim` 只代表默认发布模式；正式主链的 `NativeAOT-verified` 状态必须来自 `-p:CrestCreatesPublishMode=aot` 的 publish-and-run fixture。
 - 测试项目在 `Directory.Build.targets` 中关闭 Trim / AoT，因为 Moq / DynamicProxy 不兼容。
 - Source Generator 可通过 `-p:CrestCreatesCodeGeneration=false` 全局禁用。
 - Source Generator 输出到 `obj/{config}/{tfm}/source-generators/`。

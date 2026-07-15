@@ -1,0 +1,177 @@
+using System.Text.Json;
+using CrestCreates.Capability.Abstractions;
+using CrestCreates.Metadata;
+using CrestCreates.Schema.Abstractions;
+
+namespace CrestCreates.Mcp;
+
+public sealed class McpToolInvoker : IMcpToolInvoker
+{
+    private readonly McpToolRuntimeSnapshot _snapshot;
+    private readonly IMcpToolExposurePolicy _exposurePolicy;
+    private readonly ICapabilityDispatcher _dispatcher;
+    private readonly IMcpIdempotencyKeyBuilder _idempotencyKeys;
+    private readonly ISchemaValidator _schemaValidator;
+    private readonly McpToolResultMapper _results;
+
+    public McpToolInvoker(
+        McpToolRuntimeSnapshot snapshot,
+        IMcpToolExposurePolicy exposurePolicy,
+        ICapabilityDispatcher dispatcher,
+        IMcpIdempotencyKeyBuilder idempotencyKeys,
+        ISchemaValidator schemaValidator,
+        McpToolResultMapper results)
+    {
+        _snapshot = snapshot;
+        _exposurePolicy = exposurePolicy;
+        _dispatcher = dispatcher;
+        _idempotencyKeys = idempotencyKeys;
+        _schemaValidator = schemaValidator;
+        _results = results;
+    }
+
+    public async ValueTask<McpToolInvocationOutcome> InvokeAsync(
+        string toolName,
+        JsonElement? arguments,
+        McpToolCallContext context,
+        CancellationToken cancellationToken = default)
+    {
+        McpToolDiscoveryService.ValidateHost(context.Host);
+        if (string.IsNullOrWhiteSpace(context.InvocationId) || string.IsNullOrWhiteSpace(context.RequestId))
+            throw new McpInvalidRequestException("MCP_INVALID_CALL_CONTEXT", "Invalid call context.");
+
+        var entry = _snapshot.Find(toolName) ?? throw new McpUnknownToolException();
+        McpToolExposureDecision exposure;
+        try
+        {
+            exposure = await _exposurePolicy.EvaluateAsync(
+                new McpToolExposureContext(
+                    context.Host,
+                    entry.Descriptor,
+                    entry.Capability,
+                    McpToolExposurePhase.Invocation),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new McpToolContractViolationException(
+                "MCP_TOOL_EXPOSURE_POLICY_FAILURE",
+                "The server could not evaluate tool exposure.",
+                exception);
+        }
+        if (!exposure.IsAllowed)
+            throw new McpUnknownToolException();
+
+        var normalized = NormalizeArguments(arguments);
+        if (HasDuplicateProperties(normalized))
+            throw new McpInvalidRequestException("MCP_DUPLICATE_ARGUMENT", "Tool arguments contain duplicate properties.");
+        if (entry.Binding.Contract.InputType is null && normalized.EnumerateObject().Any())
+            return _results.MapInputError("INVALID_ARGUMENTS", "This tool does not accept arguments.");
+
+        object? input;
+        try
+        {
+            input = await entry.Binding.Contract.BindInputAsync(
+                normalized,
+                entry.Binding.InputTypeInfo,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException or InvalidOperationException)
+        {
+            return _results.MapInputError("INVALID_ARGUMENTS", "Tool arguments are invalid.");
+        }
+
+        var execution = await _dispatcher.DispatchAsync(
+            entry.Capability,
+            InvocationSource.Mcp,
+            input,
+            executionContext => ConfigureExecutionContext(executionContext, entry, context, normalized),
+            cancellationToken).ConfigureAwait(false);
+        if (!execution.IsSuccess)
+            return _results.MapFailure(execution);
+
+        return await MapSuccessAsync(entry, execution.Output, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask<McpToolInvocationOutcome> MapSuccessAsync(
+        McpToolRuntimeEntry entry,
+        object? output,
+        CancellationToken cancellationToken)
+    {
+        if (entry.OutputSchema is null)
+        {
+            if (output is not null)
+                throw new McpToolContractViolationException(
+                    "MCP_TOOL_UNEXPECTED_OUTPUT",
+                    "The tool produced an invalid server result.");
+            return _results.MapVoidSuccess();
+        }
+        if (output is null)
+            throw new McpToolContractViolationException(
+                "MCP_TOOL_MISSING_OUTPUT",
+                "The tool produced an invalid server result.");
+
+        JsonElement? serialized;
+        try
+        {
+            serialized = await entry.Binding.Contract.SerializeOutputAsync(
+                output,
+                entry.Binding.OutputTypeInfo,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or JsonException or NotSupportedException)
+        {
+            throw new McpToolContractViolationException(
+                "MCP_TOOL_OUTPUT_TYPE_MISMATCH",
+                "The tool produced an invalid server result.",
+                exception);
+        }
+        if (!serialized.HasValue)
+            throw new McpToolContractViolationException(
+                "MCP_TOOL_MISSING_OUTPUT",
+                "The tool produced an invalid server result.");
+
+        var validation = _schemaValidator.Validate(entry.OutputSchema, serialized.Value);
+        if (!validation.IsValid)
+            throw new McpToolContractViolationException(
+                "MCP_TOOL_OUTPUT_SCHEMA_VIOLATION",
+                "The tool produced an invalid server result.");
+        return _results.MapStructuredSuccess(serialized.Value);
+    }
+
+    private void ConfigureExecutionContext(
+        CapabilityExecutionContext execution,
+        McpToolRuntimeEntry entry,
+        McpToolCallContext call,
+        JsonElement arguments)
+    {
+        execution.CausationId = call.RequestId;
+        execution.IdempotencyKey = _idempotencyKeys.Build(entry, call);
+        execution.InputJson = arguments.Clone();
+        execution.Items[McpCapabilityContextItemNames.ToolDescriptorId] = entry.Descriptor.Id;
+        execution.Items[McpCapabilityContextItemNames.ToolDescriptorVersion] = entry.Descriptor.Version;
+        execution.Items[McpCapabilityContextItemNames.ToolName] = entry.Descriptor.ToolName;
+        execution.Items[McpCapabilityContextItemNames.RequestId] = call.RequestId;
+        execution.Items[McpCapabilityContextItemNames.SessionId] = call.SessionId;
+        execution.Items[McpCapabilityContextItemNames.HostId] = call.Host.HostId;
+        execution.Items[McpCapabilityContextItemNames.InvocationId] = call.InvocationId;
+    }
+
+    private static JsonElement NormalizeArguments(JsonElement? arguments)
+    {
+        if (!arguments.HasValue)
+        {
+            using var empty = JsonDocument.Parse("{}");
+            return empty.RootElement.Clone();
+        }
+        if (arguments.Value.ValueKind != JsonValueKind.Object)
+            throw new McpInvalidRequestException("MCP_ARGUMENTS_NOT_OBJECT", "Tool arguments must be an object.");
+        return arguments.Value.Clone();
+    }
+
+    private static bool HasDuplicateProperties(JsonElement arguments)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        return arguments.EnumerateObject().Any(property => !names.Add(property.Name));
+    }
+}

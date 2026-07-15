@@ -5,4 +5,7 @@ namespace CrestCreates.Metadata.Abstractions.Registry;
 
 public sealed record ValidationIssue(
     SeverityLevel Severity,
-    string Message);
+    string Message)
+{
+    public DiagnosticCode? Code { get; init; }
+}

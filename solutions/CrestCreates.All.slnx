@@ -274,4 +274,11 @@
   </Folder>
   <Project Path="../tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture/CrestCreates.CapabilityEndpoint.AotFixture.csproj" />
   <Project Path="../tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture.Tests/CrestCreates.CapabilityEndpoint.AotFixture.Tests.csproj" />
+  <Project Path="../src/Integrations/CrestCreates.Mcp.Abstractions/CrestCreates.Mcp.Abstractions.csproj" />
+  <Project Path="../src/Integrations/CrestCreates.Mcp/CrestCreates.Mcp.csproj" />
+  <Project Path="../src/Metadata/CrestCreates.Metadata.Mcp.Abstractions/CrestCreates.Metadata.Mcp.Abstractions.csproj" />
+  <Project Path="../tests/Integrations/CrestCreates.Mcp.E2E.Tests/CrestCreates.Mcp.E2E.Tests.csproj" />
+  <Project Path="../tests/Integrations/CrestCreates.Mcp.Tests/CrestCreates.Mcp.Tests.csproj" />
+  <Project Path="../tests/Integrations/CrestCreates.Mcp.AotFixture.Tests/CrestCreates.Mcp.AotFixture.Tests.csproj" />
+  <Project Path="../tests/Integrations/CrestCreates.Mcp.AotFixture/CrestCreates.Mcp.AotFixture.csproj" />
 </Solution>

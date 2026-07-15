@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using Microsoft.AspNetCore.Http;
 
 namespace CrestCreates.DynamicApi;
 
@@ -13,13 +12,13 @@ namespace CrestCreates.DynamicApi;
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static class CapabilityEndpointResultContractRegistration
 {
-    private static readonly List<(string EndpointId, int Version, Func<EndpointExecutionContext, HttpContext, object> Mapper)> _pending = new();
+    private static readonly List<(string EndpointId, int Version, Func<EndpointExecutionContext, IServiceProvider, object> Mapper)> _pending = new();
 
     /// <summary>
     /// Enqueues a result mapper for deferred registration.
     /// Called by generated <c>[ModuleInitializer]</c> code during startup.
     /// </summary>
-    public static void Register(string endpointId, int version, Func<EndpointExecutionContext, HttpContext, object> mapResult)
+    public static void Register(string endpointId, int version, Func<EndpointExecutionContext, IServiceProvider, object> mapResult)
     {
         _pending.Add((endpointId, version, mapResult));
     }

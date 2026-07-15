@@ -119,6 +119,92 @@ public class DependencyBoundaryTests
     }
 
     [Fact]
+    public void MetadataProjects_DoNotReferenceIntegrations()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Metadata",
+            "Metadata must not depend on downstream Integrations projects.",
+            new[] { "src/Integrations" });
+    }
+
+    [Fact]
+    public void MetadataMcpAbstractions_DoesNotReferenceRuntimeOrIntegrations()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Metadata/CrestCreates.Metadata.Mcp.Abstractions",
+            "MCP descriptor metadata contracts must not depend on downstream Runtime or Integrations projects.",
+            new[] { "src/Runtime", "src/Integrations" });
+    }
+
+    [Fact]
+    public void McpAbstractions_DoesNotReferenceForbiddenHostsOrExecutionLayers()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Integrations/CrestCreates.Mcp.Abstractions",
+            "MCP abstractions must remain protocol-neutral and host-independent.",
+            new[]
+            {
+                "src/Framework/Api",
+                "src/Framework/Web",
+                "src/Platform",
+                "src/Runtime/Agent",
+                "CrestCreates.Application"
+            });
+    }
+
+    [Fact]
+    public void McpRuntime_DoesNotReferenceForbiddenHostsOrControlPlane()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Integrations/CrestCreates.Mcp",
+            "MCP runtime must not depend on DynamicApi, ASP.NET, Platform, or Agent Control Plane.",
+            new[]
+            {
+                "src/Framework/Api",
+                "src/Framework/Web",
+                "src/Platform",
+                "src/Runtime/Agent"
+            });
+    }
+
+    [Fact]
+    public void McpProductionSources_DoNotUseForbiddenExecutionOrReflectionFallbacks()
+    {
+        var repoRoot = FindRepoRoot();
+        var roots = new[]
+        {
+            repoRoot.Combine("src/Integrations/CrestCreates.Mcp.Abstractions").FullName,
+            repoRoot.Combine("src/Integrations/CrestCreates.Mcp").FullName,
+            repoRoot.Combine("src/Tooling/CrestCreates.CodeGenerator/McpToolGenerator").FullName
+        };
+        var forbidden = new[]
+        {
+            "CrestCreates.DynamicApi",
+            "Microsoft.AspNetCore",
+            "Agent.ControlPlane",
+            "ModelContextProtocol",
+            "Results.Json",
+            "DefaultJsonTypeInfoResolver",
+            "GetProperties(",
+            "Dictionary<string, object",
+            "ICapabilityHandler",
+            "HandlerInvoker"
+        };
+
+        var violations = roots
+            .SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
+            .SelectMany(file => File.ReadLines(file).Select((line, index) => (file, line, index)))
+            .Where(item => forbidden.Any(token => item.line.Contains(token, StringComparison.Ordinal)))
+            .Select(item => $"{Path.GetRelativePath(repoRoot.FullName, item.file)}:{item.index + 1}: {item.line.Trim()}")
+            .ToArray();
+
+        Assert.True(
+            violations.Length == 0,
+            "MCP production sources contain forbidden dependencies or fallback paths:" + Environment.NewLine
+            + string.Join(Environment.NewLine, violations));
+    }
+
+    [Fact]
     public void AgentMemoryProjects_DoNotReferenceForbiddenRuntimeOrPlatformLayers()
     {
         AssertNoDirectProjectReferences(
