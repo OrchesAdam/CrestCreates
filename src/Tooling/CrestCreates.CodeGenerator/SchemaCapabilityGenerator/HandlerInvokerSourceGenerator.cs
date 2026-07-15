@@ -55,7 +55,9 @@ public sealed class HandlerInvokerSourceGenerator : IIncrementalGenerator
         return new HandlerInvokerInfo
         {
             HandlerTypeName = symbol.Name,
-            HandlerNamespace = symbol.ContainingNamespace?.ToDisplayString() ?? string.Empty,
+            HandlerNamespace = symbol.ContainingNamespace is { IsGlobalNamespace: false }
+                ? symbol.ContainingNamespace.ToDisplayString()
+                : string.Empty,
             CapabilityName = capabilityName,
             InputTypeName = inputType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             OutputTypeName = outputType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
