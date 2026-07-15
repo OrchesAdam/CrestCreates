@@ -7,10 +7,15 @@ public sealed class McpToolResultMapper
 {
     public McpToolInvocationOutcome MapFailure(CapabilityExecutionResult result)
     {
-        var messages = result.Issues
-            .Where(issue => IsSafeValidationCode(issue.Code))
-            .Select(FormatValidationIssue)
-            .ToArray();
+        var messages = string.Equals(
+                result.ErrorCode,
+                CapabilityExecutionErrorCodes.ValidationFailed,
+                StringComparison.Ordinal)
+            ? result.Issues
+                .Where(issue => IsSafeValidationCode(issue.Code))
+                .Select(FormatValidationIssue)
+                .ToArray()
+            : [];
         var message = messages.Length == 0
             ? "The operation could not be completed."
             : string.Join(" ", messages);

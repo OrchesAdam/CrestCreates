@@ -75,7 +75,7 @@ public sealed class ValidationMiddleware : ICapabilityPipelineMiddleware
                     error.FieldName))
                 .ToArray();
             return Task.FromResult(CapabilityExecutionResult.Failure(
-                "CAPABILITY_VALIDATION_FAILED",
+                CapabilityExecutionErrorCodes.ValidationFailed,
                 $"Input validation failed: {errorMessages}",
                 TimeSpan.Zero,
                 issues));
