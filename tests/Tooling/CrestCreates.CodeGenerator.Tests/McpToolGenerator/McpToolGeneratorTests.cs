@@ -199,10 +199,16 @@ public static partial class BadRootTools
     public sealed class ListTool { }
     [CrestCreates.Mcp.McpToolSpec(""read-only-list"", InputType = typeof(IReadOnlyList<string>), Description = ""Read-only list."" )]
     public sealed class ReadOnlyListTool { }
+    [CrestCreates.Mcp.McpToolSpec(""nullable-guid"", InputType = typeof(Guid?), Description = ""Nullable Guid."" )]
+    public sealed class NullableGuidTool { }
+    [CrestCreates.Mcp.McpToolSpec(""nullable-date"", InputType = typeof(DateOnly?), Description = ""Nullable date."" )]
+    public sealed class NullableDateTool { }
+    [CrestCreates.Mcp.McpToolSpec(""nullable-datetime"", InputType = typeof(DateTime?), Description = ""Nullable date-time."" )]
+    public sealed class NullableDateTimeTool { }
 }
 ");
 
-        result.Diagnostics.Count(diagnostic => diagnostic.Id == "MCP006").Should().Be(4);
+        result.Diagnostics.Count(diagnostic => diagnostic.Id == "MCP006").Should().Be(7);
         result.GeneratedSources.Should().BeEmpty();
     }
 
