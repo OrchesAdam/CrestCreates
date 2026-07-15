@@ -1,4 +1,5 @@
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Schema.Abstractions;
 
 namespace CrestCreates.Mcp;
 
