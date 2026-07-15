@@ -363,7 +363,7 @@ Expected: FAIL because McpToolGenerator is absent.
 
 - [ ] **Step 4: Implement incremental discovery and normalization**
 
-Use `ForAttributeWithMetadataName` for `CrestCreates.Mcp.McpToolSpecsAttribute`. Validate that the container is non-generic static partial and every spec is a direct non-generic nested class. Normalize CapabilityVersion exactly:
+Use `ForAttributeWithMetadataName` for `CrestCreates.Mcp.McpToolSpecsAttribute`. Validate that the container is top-level, non-generic static partial and every spec is a direct non-generic nested class. Normalize CapabilityVersion exactly:
 
 ```csharp
 var selection = capabilityVersion == 0
@@ -599,7 +599,7 @@ Scan MCP project references and generated source to reject DynamicApi, ASP.NET, 
 
 - [ ] **Step 3: Build generator-backed E2E host and tests**
 
-Define Query+input/output, Command+input/output, no-input Query, and void Command through `[McpToolSpecs]`. Register an application JsonSerializerContext in Metadata mode. Test authorization denial, validation failure, two Host profiles, Latest Capability capture, high-risk policy input, output contract violations, and deterministic discovery without starting an MCP transport.
+Define Query+input/output, Command+input/output, no-input Query, and void Command through `[McpToolSpecs]`. Register an application JsonSerializerContext in Metadata mode. Test authorization denial, validation failure, null outer context and blank ToolName classification, input `[JsonRequired]` startup rejection, two Host profiles, Latest Capability capture, high-risk policy input, output contract violations, and deterministic discovery without starting an MCP transport.
 
 - [ ] **Step 4: Run E2E and boundary tests**
 
@@ -619,7 +619,7 @@ Run from the test with a temporary output directory:
 dotnet publish tests/Integrations/CrestCreates.Mcp.AotFixture/CrestCreates.Mcp.AotFixture.csproj -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
 ```
 
-Expected: NativeAOT compilation and native linking succeed with no MCP-path IL2026/IL3050 warning, and the native executable exits 0 with `MCP_NATIVEAOT_OK`.
+Expected: On the formal linux-x64 gate, NativeAOT compilation and native linking succeed with no MCP-path IL2026/IL3050 warning, and the native executable exits 0 with `MCP_NATIVEAOT_OK`. Other OS/architecture combinations skip this pinned fixture.
 
 - [ ] **Step 7: Run the affected suite and commit**
 

@@ -30,6 +30,7 @@ Completed:
 - Supported Schema subset covers primitive scalars and primitive collections for string, bool, int, long, decimal, double, Guid/UUID, DateOnly/date, and DateTime/date-time. Pattern, ValidationRules, and unsupported References fail MCP snapshot construction.
 - Diagnostics cover MCP001-MCP121 across generator and startup/runtime contract validation.
 - Generator-backed E2E, dependency-boundary, Agent authoring-policy, and NativeAOT publish-and-run fixtures are present.
+- MCP input parity rejects `JsonTypeInfo.IsRequired` metadata so Schema-owned presence validation always reaches the Capability Pipeline; null outer discovery/invocation contexts and blank ToolName are classified as protocol InvalidRequest. The NativeAOT fixture is explicitly a linux-x64 gate.
 
 Focused verification: MCP/Schema/Capability/generator/E2E/boundary suites passed. The former PublishTrimmed fixture was replaced by `CrestCreates.Mcp.AotFixture`, which performs a real linux-x64 NativeAOT publish, clang native link, and native-binary execution. The fixture passed with `MCP_NATIVEAOT_OK`, 0 warnings, and 0 errors on Ubuntu clang 21.1.8.
 

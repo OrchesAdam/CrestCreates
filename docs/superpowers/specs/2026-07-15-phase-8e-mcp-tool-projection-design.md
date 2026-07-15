@@ -312,7 +312,7 @@ Phase 8e authoring does not expose `VersionSelectionMode.Compatible`.
 
 Rules:
 
-- the `[McpToolSpecs]` container must be a non-generic `static partial class`;
+- the `[McpToolSpecs]` container must be a top-level, non-generic `static partial class`;
 - each `[McpToolSpec]` target must be a direct nested, non-generic class in that container;
 - spec classes need not be partial because the generator does not add members to them;
 - no input means both InputType and Capability InputSchema are absent;
@@ -495,7 +495,7 @@ the existing emitted strings. Any future global Schema vocabulary normalization
 is a separate migration event requiring canonical-hash shape versioning,
 compatibility rules, and DescriptorPackage republication; it is not part of 8e.
 
-Parity validation compares Schema fields with actual JSON property names in `JsonTypeInfo.Properties` in both directions. Input parity requires a deserializable setter/constructor binding and uses JsonPropertyInfo.IsSetNullable plus JsonPropertyInfo.IsRequired. Output parity requires a serializable getter, uses JsonPropertyInfo.IsGetNullable, and rejects properties that are unconditionally excluded from serialization. Any directionally participating JSON property absent from Schema fails startup. Conditional omission from ignore conditions or ShouldSerialize cannot be proven statically, so runtime OutputSchema validation remains authoritative for actual required-property presence. Both directions check exact primitive category, scalar/collection shape, and collection element category; the implementation must not choose one nullable Boolean for both read and write contracts.
+Parity validation compares Schema fields with actual JSON property names in `JsonTypeInfo.Properties` in both directions. Input parity requires a deserializable setter/constructor binding and uses JsonPropertyInfo.IsSetNullable. Input `JsonPropertyInfo.IsRequired` must always be false: Schema owns input presence validation, and JSON-required metadata would make the generated binder reject a missing property before Dispatcher/Pipeline. Output parity requires a serializable getter, uses JsonPropertyInfo.IsGetNullable, and requires JsonPropertyInfo.IsRequired to match Schema `IsRequired`. It also rejects properties that are unconditionally excluded from serialization. Any directionally participating JSON property absent from Schema fails startup. Conditional omission from ignore conditions or ShouldSerialize cannot be proven statically, so runtime OutputSchema validation remains authoritative for actual required-property presence. Both directions check exact primitive category, scalar/collection shape, and collection element category; the implementation must not choose one nullable Boolean for both read and write contracts.
 
 Every projected input and output schema sets `additionalProperties=false`. A no-input contract is exactly:
 
@@ -790,6 +790,13 @@ Invocation order is:
 7. generated serializer validates and serializes exact `TOutput`, then runtime validates the value against OutputSchema;
 8. map the result through the safe MCP result mapper.
 
+The protocol boundary classifies malformed outer inputs before dereferencing them. A
+null `McpToolCallContext` is `MCP_INVALID_CALL_CONTEXT`, a null
+`McpToolDiscoveryContext` is `MCP_INVALID_DISCOVERY_CONTEXT`, and a null or
+blank ToolName is `MCP_INVALID_TOOL_NAME`; all use the InvalidRequest protocol
+classification rather than leaking `NullReferenceException` or dictionary
+argument exceptions.
+
 Context propagation is:
 
 ```csharp
@@ -1074,7 +1081,7 @@ Also verify that Agent supported-kind manifests do not accidentally add McpTool.
 
 Use a source-generator-backed host without MCP transport. Cover Query and Command input/output, absent arguments, no-input Query, void Command, unauthorized and validation failures, exposure denial and policy failure, two distinct Host profiles, high-risk metadata supplied to policy, missing/unexpected/type-mismatched/schema-invalid output, missing JsonTypeInfo startup failure, and deterministic discovery.
 
-The NativeAOT fixture performs a real `PublishAot`, completes native linking, and executes the resulting native binary through input deserialization, `InputJson` schema validation, Dispatcher/Pipeline/Handler, output serialization, and discovery schema generation. It must produce no MCP-path IL2026/IL3050 warnings and must not rely on Generated CRUD DTOs from issue #61. A PublishTrimmed-only result is not sufficient for the first-party MCP runtime.
+The NativeAOT fixture performs a real `PublishAot`, completes native linking, and executes the resulting native binary through input deserialization, `InputJson` schema validation, Dispatcher/Pipeline/Handler, output serialization, and discovery schema generation. The formal gate is pinned to `linux-x64`; other operating systems and architectures skip this fixture rather than claiming a portable NativeAOT result. It must produce no MCP-path IL2026/IL3050 warnings and must not rely on Generated CRUD DTOs from issue #61. A PublishTrimmed-only result is not sufficient for the first-party MCP runtime.
 
 ## 15. Delivery slices
 

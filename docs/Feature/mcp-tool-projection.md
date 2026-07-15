@@ -4,7 +4,7 @@ Phase 8e projects explicitly selected `CapabilityDescriptor` instances as MCP 20
 
 ## Authoring a tool
 
-Declare tools in a non-generic `static partial class`. Each tool spec is a direct, non-generic nested class:
+Declare tools in a top-level, non-generic `static partial class`. Each tool spec is a direct, non-generic nested class:
 
 ```csharp
 using CrestCreates.Mcp;
@@ -76,7 +76,7 @@ var result = await invoker.InvokeAsync(
     cancellationToken);
 ```
 
-`arguments` may be absent and is normalized to `{}`. Every schema is a closed object (`additionalProperties: false`); unknown and duplicate JSON properties are rejected with Ordinal name comparison. Startup parity is bidirectional and validates property names, direction, requiredness, nullability, scalar/collection shape, and collection element category. `InvocationId` must remain stable for redelivery of the same logical call and differ for distinct calls in the Host idempotency domain.
+`arguments` may be absent and is normalized to `{}`. Every schema is a closed object (`additionalProperties: false`); unknown and duplicate JSON properties are rejected with Ordinal name comparison. Startup parity is bidirectional and validates property names, direction, requiredness, nullability, scalar/collection shape, and collection element category. Input DTOs must not use `JsonRequired`; Schema owns input presence validation so missing fields reach the Capability Pipeline. `InvocationId` must remain stable for redelivery of the same logical call and differ for distinct calls in the Host idempotency domain.
 
 The invoker always calls the descriptor overload of `ICapabilityDispatcher` with `InvocationSource.Mcp`. Authorization, validation, rate limiting, idempotency, audit, and events remain in the Capability Pipeline. MCP arguments cannot set tenant, user, permissions, risk, source, or idempotency identity.
 
@@ -107,6 +107,10 @@ Requiredness and nullability are independent. Properties and `required` entries 
 An active MCP snapshot fails closed for unknown types, invalid or inapplicable constraints, non-empty `Pattern`, `ValidationRules`, or unsupported `References`. Pattern remains supported by the shared Schema validator for other invocation sources; it is rejected only at the MCP projection boundary because .NET Regex and JSON Schema pattern semantics are not interchangeable.
 
 Capability InputSchema and OutputSchema references must be Exact, positive-version references without `ExpectedContractHash`. A declared output is serialized with the captured `JsonTypeInfo`, must have the exact configured runtime CLR type, and is validated against OutputSchema before `structuredContent` is returned.
+
+The NativeAOT verification gate is pinned to `linux-x64`; other operating systems
+and architectures skip the fixture rather than being described as portable
+NativeAOT support.
 
 ## Boundaries and non-goals
 
