@@ -125,6 +125,8 @@ public sealed class McpToolRuntimeSnapshotBuilder
             return null;
         if (reference.Value.SelectionMode != VersionSelectionMode.Exact || reference.Value.Version <= 0)
             throw new McpToolConfigurationException("MCP118", "Capability Schema reference must be exact.");
+        if (reference.Value.ExpectedContractHash is not null)
+            throw new McpToolConfigurationException("MCP119", "Capability Schema ExpectedContractHash is unsupported.");
         return _schemas.GetByVersion(reference.Value.Id, reference.Value.Version)
             ?? throw new McpToolConfigurationException("MCP104", "Schema could not be resolved.");
     }

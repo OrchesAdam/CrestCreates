@@ -108,6 +108,48 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
         action.Should().NotThrow();
     }
 
+    [Fact]
+    public void Schema_expected_contract_hash_is_rejected_before_resolution()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var tool = Tool("mcp-tool:hash." + suffix, "hash." + suffix, DescriptorState.Active);
+        var capability = new CapabilityDescriptor
+        {
+            Id = "orders.get",
+            Name = "Get order",
+            Version = 1,
+            State = DescriptorState.Active,
+            CapabilityKind = CapabilityKind.Query,
+            InputSchema = new VersionedDescriptorRef<SchemaDescriptor>(
+                "input." + suffix,
+                1,
+                VersionSelectionMode.Exact,
+                "schema-hash")
+        };
+        var tools = new Mock<IMcpToolRegistry>();
+        var capabilities = new Mock<ICapabilityRegistry>();
+        var schemas = new Mock<ISchemaRegistry>();
+        tools.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        capabilities.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        schemas.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        tools.Setup(registry => registry.GetAll()).Returns([tool]);
+        capabilities.Setup(registry => registry.GetAll()).Returns([capability]);
+        McpToolBindingRegistry.Register(VoidBinding(tool));
+
+        var builder = new McpToolRuntimeSnapshotBuilder(
+            tools.Object,
+            capabilities.Object,
+            schemas.Object,
+            new McpJsonSchemaProjector(),
+            new McpToolSchemaParityValidator(),
+            new DefaultCanonicalHashComputer(),
+            new McpJsonOptions { SerializerOptions = new JsonSerializerOptions { TypeInfoResolver = McpTestJsonContext.Default } });
+
+        var action = () => builder.Build();
+
+        action.Should().Throw<McpToolConfigurationException>().Which.Code.Should().Be("MCP119");
+    }
+
     private static McpToolDescriptor Tool(string id, string toolName, DescriptorState state) => new()
     {
         Id = id,

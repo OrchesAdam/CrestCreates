@@ -42,7 +42,27 @@ public sealed class DefaultMcpIdempotencyKeyBuilderTests
         first.Should().NotBe(second);
     }
 
-    private static McpToolRuntimeEntry Entry(string toolHash, string capabilityHash)
+    [Fact]
+    public void Key_changes_when_schema_contract_hash_changes_or_changes_presence()
+    {
+        var builder = new DefaultMcpIdempotencyKeyBuilder();
+        var call = new McpToolCallContext(new McpToolHostContext("host", "test"), "logical", "request");
+
+        var absent = builder.Build(Entry("tool", "cap", null, null), call);
+        var input = builder.Build(Entry("tool", "cap", "input-v1", null), call);
+        var output = builder.Build(Entry("tool", "cap", null, "output-v1"), call);
+        var changed = builder.Build(Entry("tool", "cap", "input-v2", null), call);
+
+        absent.Should().NotBe(input);
+        absent.Should().NotBe(output);
+        input.Should().NotBe(changed);
+    }
+
+    private static McpToolRuntimeEntry Entry(
+        string toolHash,
+        string capabilityHash,
+        string? inputSchemaHash = null,
+        string? outputSchemaHash = null)
     {
         using var schema = JsonDocument.Parse("{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}");
         var descriptor = new McpToolDescriptor
@@ -71,7 +91,7 @@ public sealed class DefaultMcpIdempotencyKeyBuilderTests
             new McpToolContract("test", null, "Test.", schema.RootElement.Clone(), null, new McpToolAnnotations(false, null, null, null)),
             toolHash,
             capabilityHash,
-            null,
-            null);
+            inputSchemaHash,
+            outputSchemaHash);
     }
 }

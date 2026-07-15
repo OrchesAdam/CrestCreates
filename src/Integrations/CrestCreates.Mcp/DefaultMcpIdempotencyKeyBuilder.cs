@@ -18,6 +18,8 @@ public sealed class DefaultMcpIdempotencyKeyBuilder : IMcpIdempotencyKeyBuilder
         Write(stream, context.Host.HostId);
         Write(stream, entry.ToolContractHash);
         Write(stream, entry.CapabilityContractHash);
+        WriteOptional(stream, entry.InputSchemaContractHash);
+        WriteOptional(stream, entry.OutputSchemaContractHash);
         Write(stream, context.InvocationId);
         var digest = SHA256.HashData(stream.ToArray());
         return "mcp:v1:" + Convert.ToBase64String(digest)
@@ -33,5 +35,12 @@ public sealed class DefaultMcpIdempotencyKeyBuilder : IMcpIdempotencyKeyBuilder
         BinaryPrimitives.WriteInt32BigEndian(length, bytes.Length);
         stream.Write(length);
         stream.Write(bytes);
+    }
+
+    private static void WriteOptional(Stream stream, string? value)
+    {
+        stream.WriteByte(value is null ? (byte)0 : (byte)1);
+        if (value is not null)
+            Write(stream, value);
     }
 }
