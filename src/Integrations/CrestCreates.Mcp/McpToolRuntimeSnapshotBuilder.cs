@@ -53,6 +53,7 @@ public sealed class McpToolRuntimeSnapshotBuilder
         }
         var serializerOptions = new JsonSerializerOptions(_json.SerializerOptions);
         ValidateResolvers(serializerOptions);
+        ValidateInputConstraintOptions(serializerOptions);
         serializerOptions.MakeReadOnly();
 
         var entries = new List<McpToolRuntimeEntry>();
@@ -160,6 +161,16 @@ public sealed class McpToolRuntimeSnapshotBuilder
 
         if (options.TypeInfoResolver is not JsonSerializerContext)
             throw new McpToolConfigurationException("MCP114", "MCP JSON resolver must be source-generated.");
+    }
+
+    private static void ValidateInputConstraintOptions(JsonSerializerOptions options)
+    {
+        if (options.RespectNullableAnnotations || options.RespectRequiredConstructorParameters)
+        {
+            throw new McpToolConfigurationException(
+                "MCP114",
+                "MCP JSON options must leave Schema-owned nullability and constructor presence validation to the Capability Pipeline.");
+        }
     }
 
     private static void ValidateSchemaTypePresence(SchemaDescriptor? schema, Type? type, string direction)

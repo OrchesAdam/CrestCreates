@@ -80,6 +80,35 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
     }
 
     [Fact]
+    public void Json_options_that_enforce_input_constraints_before_dispatch_fail_closed()
+    {
+        var tools = new Mock<IMcpToolRegistry>();
+        tools.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        var capabilities = new Mock<ICapabilityRegistry>();
+        capabilities.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        var schemas = new Mock<ISchemaRegistry>();
+        schemas.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        tools.Setup(registry => registry.GetAll()).Returns([]);
+        var options = new JsonSerializerOptions
+        {
+            TypeInfoResolver = McpTestJsonContext.Default,
+            RespectNullableAnnotations = true
+        };
+        var builder = new McpToolRuntimeSnapshotBuilder(
+            tools.Object,
+            capabilities.Object,
+            schemas.Object,
+            new McpJsonSchemaProjector(),
+            new McpToolSchemaParityValidator(),
+            new DefaultCanonicalHashComputer(),
+            new McpJsonOptions { SerializerOptions = options });
+
+        var action = () => builder.Build();
+
+        action.Should().Throw<McpToolConfigurationException>().Which.Code.Should().Be("MCP114");
+    }
+
+    [Fact]
     public void Multiple_source_generated_contexts_in_resolver_chain_are_supported()
     {
         var tools = new Mock<IMcpToolRegistry>();
