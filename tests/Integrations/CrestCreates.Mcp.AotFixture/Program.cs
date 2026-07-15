@@ -37,8 +37,6 @@ try
     DescriptorProviderRegistry.Register<CapabilityDescriptor>(
         new Provider<CapabilityDescriptor>([capability]));
 
-    CapabilityHandlerResolverProvider.Register("fixture.echo", new FixtureHandlerInvoker());
-
     var builder = Host.CreateApplicationBuilder();
     builder.Services.AddSingleton<ISchemaRegistry>(schemas);
     builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
@@ -59,9 +57,7 @@ try
 
     if (outcome.IsError
         || outcome.StructuredContent?.GetProperty("value").GetString() != "trimmed"
-        || FixtureHandlerInvoker.LastSource != InvocationSource.Mcp
-        || FixtureHandlerInvoker.LastInputJson?.GetProperty("value").GetString() != "trimmed"
-        || string.IsNullOrWhiteSpace(FixtureHandlerInvoker.LastIdempotencyKey))
+        || FixtureEchoHandler.LastInput?.Value != "trimmed")
         return 2;
 
     Console.WriteLine("MCP_NATIVEAOT_PIPELINE_OK");
@@ -79,21 +75,14 @@ internal sealed class Provider<T>(IReadOnlyList<T> descriptors) : IDescriptorPro
     public IReadOnlyList<T> GetDescriptors() => descriptors;
 }
 
-internal sealed class FixtureHandlerInvoker : ICapabilityContextAwareHandlerInvoker
+[CapabilityName("fixture.echo")]
+internal sealed class FixtureEchoHandler : ICapabilityHandler<FixtureInput, FixtureOutput>
 {
-    public static InvocationSource LastSource { get; private set; }
-    public static JsonElement? LastInputJson { get; private set; }
-    public static string? LastIdempotencyKey { get; private set; }
-
-    public Task<object?> InvokeAsync(object? input, CancellationToken ct)
-        => throw new InvalidOperationException("The context-aware handler path is required.");
-
-    public Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
+    public Task<FixtureOutput> ExecuteAsync(FixtureInput input, CancellationToken ct)
     {
-        LastSource = context.InvocationSource;
-        LastInputJson = context.InputJson;
-        LastIdempotencyKey = context.IdempotencyKey;
-        var typed = (FixtureInput)context.Input!;
-        return Task.FromResult<object?>(new FixtureOutput { Value = typed.Value });
+        LastInput = input;
+        return Task.FromResult(new FixtureOutput { Value = input.Value });
     }
+
+    public static FixtureInput? LastInput { get; private set; }
 }

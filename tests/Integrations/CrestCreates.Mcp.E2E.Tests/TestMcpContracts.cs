@@ -12,6 +12,7 @@ public sealed class EchoInput
 public sealed class EchoOutput
 {
     [JsonPropertyName("value")]
+    [JsonRequired]
     public string Value { get; set; } = string.Empty;
 }
 

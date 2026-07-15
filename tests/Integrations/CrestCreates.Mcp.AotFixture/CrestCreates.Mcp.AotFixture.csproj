@@ -7,7 +7,6 @@
     <PublishTrimmed>true</PublishTrimmed>
     <PublishAot>true</PublishAot>
     <TrimMode>full</TrimMode>
-    <CrestCreatesCodeGeneration>false</CrestCreatesCodeGeneration>
     <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL3050;SYSLIB1034</WarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>

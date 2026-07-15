@@ -29,7 +29,14 @@ public sealed class McpToolSchemaParityValidator
                 throw new McpToolConfigurationException("MCP108", "Schema and JSON contract properties do not match.");
             }
 
-            if (property.IsRequired != field.IsRequired)
+            // For input contracts, the Schema remains the authoritative presence
+            // rule so that a missing property can materialize its DTO and reach
+            // Capability ValidationMiddleware. A JsonTypeInfo-required property
+            // must still not weaken an optional Schema field. Output contracts
+            // must match the serializer's declared presence metadata exactly.
+            if (input
+                ? property.IsRequired && !field.IsRequired
+                : property.IsRequired != field.IsRequired)
                 throw new McpToolConfigurationException("MCP108", "Schema and JSON requiredness do not match.");
 
             var nullable = input ? property.IsSetNullable : property.IsGetNullable;

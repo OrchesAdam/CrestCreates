@@ -38,12 +38,11 @@ public sealed class McpToolProjectionE2ETests
         var capabilities = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>([]));
         DescriptorProviderRegistry.Register<SchemaDescriptor>(new Provider<SchemaDescriptor>([inputSchema, outputSchema]));
         DescriptorProviderRegistry.Register<CapabilityDescriptor>(new Provider<CapabilityDescriptor>([capability]));
-        CapabilityHandlerResolverProvider.Register("e2e.echo", new EchoHandlerInvoker());
-
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ISchemaRegistry>(schemas);
         builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
         builder.Services.AddCapabilityRuntime();
+        builder.Services.AddInMemoryCapabilityAudit();
         builder.Services.AddCrestMcpToolProjection(options =>
             options.SerializerOptions.TypeInfoResolver = E2EJsonContext.Default);
         using var host = builder.Build();
@@ -59,12 +58,21 @@ public sealed class McpToolProjectionE2ETests
 
         outcome.IsError.Should().BeFalse();
         outcome.StructuredContent!.Value.GetProperty("value").GetString().Should().Be("hello");
-        EchoHandlerInvoker.Input.Should().BeOfType<EchoInput>().Which.Value.Should().Be("hello");
-        EchoHandlerInvoker.Source.Should().Be(InvocationSource.Mcp);
-        EchoHandlerInvoker.InputJson!.Value.GetProperty("value").GetString().Should().Be("hello");
-        EchoHandlerInvoker.IdempotencyKey.Should().StartWith("mcp:v1:");
+        EchoHandler.LastInput.Should().BeOfType<EchoInput>().Which.Value.Should().Be("hello");
         host.Services.GetRequiredService<McpToolRuntimeSnapshotProvider>()
             .GetRequired().Find("e2e.echo")!.Capability.Version.Should().Be(2);
+
+        using var missingArguments = JsonDocument.Parse("{}");
+        var validationOutcome = await invoker.InvokeAsync(
+            "e2e.echo",
+            missingArguments.RootElement,
+            new McpToolCallContext(new McpToolHostContext("e2e", "test"), "logical-2", "request-2"));
+        validationOutcome.IsError.Should().BeTrue();
+        ((McpToolTextContent)validationOutcome.Content.Single()).Text.Should().Contain("Field 'value': required.");
+        EchoHandler.InvocationCount.Should().Be(1);
+        host.Services.GetRequiredService<ICapabilityAuditStore>()
+            .Should().BeOfType<InMemoryCapabilityAuditStore>()
+            .Which.GetRecords().Should().HaveCount(2);
     }
 
     private static SchemaDescriptor Schema(string id) => new()
@@ -72,7 +80,7 @@ public sealed class McpToolProjectionE2ETests
         Id = id,
         Name = id,
         Version = 1,
-        Fields = [new SchemaFieldDescriptor { Name = "value", FieldType = "string" }]
+        Fields = [new SchemaFieldDescriptor { Name = "value", FieldType = "string", IsRequired = true }]
     };
 
     private sealed class Provider<T>(IReadOnlyList<T> descriptors) : IDescriptorProvider<T>
@@ -81,23 +89,18 @@ public sealed class McpToolProjectionE2ETests
         public IReadOnlyList<T> GetDescriptors() => descriptors;
     }
 
-    private sealed class EchoHandlerInvoker : ICapabilityContextAwareHandlerInvoker
+}
+
+[CapabilityName("e2e.echo")]
+internal sealed class EchoHandler : ICapabilityHandler<EchoInput, EchoOutput>
+{
+    public static EchoInput? LastInput { get; private set; }
+    public static int InvocationCount { get; private set; }
+
+    public Task<EchoOutput> ExecuteAsync(EchoInput input, CancellationToken ct)
     {
-        public static object? Input { get; private set; }
-        public static InvocationSource Source { get; private set; }
-        public static JsonElement? InputJson { get; private set; }
-        public static string? IdempotencyKey { get; private set; }
-
-        public Task<object?> InvokeAsync(object? input, CancellationToken ct)
-            => throw new InvalidOperationException("Context-aware handler path is required.");
-
-        public Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
-        {
-            Input = context.Input;
-            Source = context.InvocationSource;
-            InputJson = context.InputJson;
-            IdempotencyKey = context.IdempotencyKey;
-            return Task.FromResult<object?>(new EchoOutput { Value = ((EchoInput)context.Input!).Value });
-        }
+        LastInput = input;
+        InvocationCount++;
+        return Task.FromResult(new EchoOutput { Value = input.Value });
     }
 }
