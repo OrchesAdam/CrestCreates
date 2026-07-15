@@ -22,6 +22,8 @@ public sealed class McpToolDiscoveryService : IMcpToolDiscoveryService
         McpToolDiscoveryContext context,
         CancellationToken cancellationToken = default)
     {
+        if (context is null)
+            throw new McpInvalidRequestException("MCP_INVALID_DISCOVERY_CONTEXT", "MCP discovery context is required.");
         ValidateHost(context.Host);
         var contracts = new List<McpToolContract>();
         foreach (var entry in _snapshotProvider.GetRequired().Entries.Values.OrderBy(

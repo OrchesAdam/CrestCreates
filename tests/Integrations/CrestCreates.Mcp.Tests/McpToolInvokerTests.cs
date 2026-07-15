@@ -67,6 +67,32 @@ public sealed class McpToolInvokerTests
     }
 
     [Fact]
+    public async Task Null_outer_context_is_classified_as_invalid_request()
+    {
+        var entry = Entry();
+        var invoker = Invoker(entry, new CapturingDispatcher(CapabilityExecutionResult.Success(null, TimeSpan.Zero)), McpToolExposureDecision.Allow);
+
+        var action = async () => await invoker.InvokeAsync(entry.Descriptor.ToolName, null, null!);
+
+        var exception = await action.Should().ThrowAsync<McpToolProtocolException>();
+        exception.Which.FailureKind.Should().Be(McpToolProtocolFailureKind.InvalidRequest);
+        exception.Which.InternalCode.Should().Be("MCP_INVALID_CALL_CONTEXT");
+    }
+
+    [Fact]
+    public async Task Empty_tool_name_is_classified_as_invalid_request()
+    {
+        var entry = Entry();
+        var invoker = Invoker(entry, new CapturingDispatcher(CapabilityExecutionResult.Success(null, TimeSpan.Zero)), McpToolExposureDecision.Allow);
+
+        var action = async () => await invoker.InvokeAsync("", null, Call());
+
+        var exception = await action.Should().ThrowAsync<McpToolProtocolException>();
+        exception.Which.FailureKind.Should().Be(McpToolProtocolFailureKind.InvalidRequest);
+        exception.Which.InternalCode.Should().Be("MCP_INVALID_TOOL_NAME");
+    }
+
+    [Fact]
     public async Task Duplicate_arguments_are_tool_input_errors()
     {
         var entry = Entry();

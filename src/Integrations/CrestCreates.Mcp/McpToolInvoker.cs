@@ -36,6 +36,10 @@ public sealed class McpToolInvoker : IMcpToolInvoker
         McpToolCallContext context,
         CancellationToken cancellationToken = default)
     {
+        if (context is null)
+            throw new McpInvalidRequestException("MCP_INVALID_CALL_CONTEXT", "MCP call context is required.");
+        if (string.IsNullOrWhiteSpace(toolName))
+            throw new McpInvalidRequestException("MCP_INVALID_TOOL_NAME", "Tool name is required.");
         McpToolDiscoveryService.ValidateHost(context.Host);
         if (string.IsNullOrWhiteSpace(context.InvocationId) || string.IsNullOrWhiteSpace(context.RequestId))
             throw new McpInvalidRequestException("MCP_INVALID_CALL_CONTEXT", "Invalid call context.");

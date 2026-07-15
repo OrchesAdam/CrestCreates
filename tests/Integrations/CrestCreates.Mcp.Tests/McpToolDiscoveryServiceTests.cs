@@ -57,6 +57,20 @@ public sealed class McpToolDiscoveryServiceTests
         calls.Should().Be(0);
     }
 
+    [Fact]
+    public async Task Null_outer_context_is_classified_as_invalid_request()
+    {
+        var service = new McpToolDiscoveryService(
+            new McpToolRuntimeSnapshotProvider(Snapshot(Entry("orders.get"))),
+            new DelegatePolicy(_ => McpToolExposureDecision.Allow));
+
+        var action = async () => await service.ListAsync(null!);
+
+        var exception = await action.Should().ThrowAsync<McpToolProtocolException>();
+        exception.Which.FailureKind.Should().Be(McpToolProtocolFailureKind.InvalidRequest);
+        exception.Which.InternalCode.Should().Be("MCP_INVALID_DISCOVERY_CONTEXT");
+    }
+
     private static McpToolRuntimeSnapshot Snapshot(params McpToolRuntimeEntry[] entries)
         => new(entries.ToFrozenDictionary(entry => entry.Descriptor.ToolName, StringComparer.Ordinal));
 

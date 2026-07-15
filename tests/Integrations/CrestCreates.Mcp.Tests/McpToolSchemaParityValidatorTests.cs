@@ -42,6 +42,18 @@ public sealed class McpToolSchemaParityValidatorTests
     }
 
     [Fact]
+    public void Input_json_required_metadata_is_rejected_so_schema_owns_presence_validation()
+    {
+        var schema = Schema(new SchemaFieldDescriptor { Name = "name", FieldType = "string", IsRequired = true });
+
+        var action = () => new McpToolSchemaParityValidator().ValidateInput(
+            schema,
+            McpTestJsonContext.Default.JsonRequiredInputDto);
+
+        action.Should().Throw<McpToolConfigurationException>().Which.Code.Should().Be("MCP108");
+    }
+
+    [Fact]
     public void Scalar_schema_type_must_match_json_property_type()
     {
         var schema = Schema(new SchemaFieldDescriptor { Name = "name", FieldType = "int", IsNullable = true });
@@ -119,9 +131,17 @@ public sealed class ExtraOutputDto
     public string? Extra { get; init; }
 }
 
+public sealed class JsonRequiredInputDto
+{
+    [JsonPropertyName("name")]
+    [JsonRequired]
+    public string Name { get; set; } = string.Empty;
+}
+
 [JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(MutableDto))]
 [JsonSerializable(typeof(ReadOnlyInputDto))]
 [JsonSerializable(typeof(StringCollectionDto))]
 [JsonSerializable(typeof(ExtraOutputDto))]
+[JsonSerializable(typeof(JsonRequiredInputDto))]
 internal partial class McpTestJsonContext : JsonSerializerContext;
