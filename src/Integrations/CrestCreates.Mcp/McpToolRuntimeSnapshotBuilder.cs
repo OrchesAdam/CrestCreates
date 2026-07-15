@@ -5,6 +5,7 @@ using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions.Registry;
 using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Metadata.Mcp;
@@ -42,6 +43,14 @@ public sealed class McpToolRuntimeSnapshotBuilder
 
     public McpToolRuntimeSnapshot Build()
     {
+        if (_tools.State != RegistryState.Built
+            || _capabilities.State != RegistryState.Built
+            || _schemas.State != RegistryState.Built)
+        {
+            throw new McpToolConfigurationException(
+                "MCP_SNAPSHOT_NOT_READY",
+                "MCP dependency registries must be built before the runtime snapshot.");
+        }
         var serializerOptions = new JsonSerializerOptions(_json.SerializerOptions);
         ValidateResolvers(serializerOptions);
         serializerOptions.MakeReadOnly();

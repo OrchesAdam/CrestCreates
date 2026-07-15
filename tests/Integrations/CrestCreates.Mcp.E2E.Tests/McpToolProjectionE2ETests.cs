@@ -54,7 +54,7 @@ public sealed class McpToolProjectionE2ETests
             }).Build();
         var dispatcher = new EchoDispatcher();
         var invoker = new McpToolInvoker(
-            snapshot,
+            new McpToolRuntimeSnapshotProvider(snapshot),
             new DefaultMcpToolExposurePolicy(),
             dispatcher,
             new DefaultMcpIdempotencyKeyBuilder(),

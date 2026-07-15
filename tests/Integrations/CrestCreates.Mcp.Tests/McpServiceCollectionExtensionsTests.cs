@@ -33,15 +33,37 @@ public sealed class McpServiceCollectionExtensionsTests
             && descriptor.ImplementationType == typeof(McpToolRelationshipExtractor)).Should().Be(1);
         services.Count(descriptor => descriptor.ServiceType == typeof(IHostedService)
             && descriptor.ImplementationType?.Name == "McpToolProjectionStartupValidator").Should().Be(1);
+        services.Single(descriptor => descriptor.ServiceType == typeof(IMcpToolInvoker))
+            .Lifetime.Should().Be(ServiceLifetime.Scoped);
+        services.Single(descriptor => descriptor.ServiceType == typeof(IMcpToolDiscoveryService))
+            .Lifetime.Should().Be(ServiceLifetime.Scoped);
+    }
+
+    [Fact]
+    public void Projection_services_pass_scope_validation_with_scoped_dispatcher()
+    {
+        var services = new ServiceCollection();
+        services.AddScoped<ICapabilityDispatcher>(_ => Mock.Of<ICapabilityDispatcher>());
+        services.AddCrestMcpToolProjection();
+
+        using var provider = services.BuildServiceProvider(validateScopes: true);
+        using var scope = provider.CreateScope();
+        scope.ServiceProvider.GetRequiredService<IMcpToolInvoker>().Should().NotBeNull();
     }
 
     [Fact]
     public async Task Host_start_eagerly_builds_snapshot_and_propagates_configuration_failure()
     {
         var builder = Host.CreateApplicationBuilder();
-        builder.Services.AddSingleton(Mock.Of<IMcpToolRegistry>());
-        builder.Services.AddSingleton(Mock.Of<ICapabilityRegistry>());
-        builder.Services.AddSingleton(Mock.Of<ISchemaRegistry>());
+        var tools = new Mock<IMcpToolRegistry>();
+        var capabilities = new Mock<ICapabilityRegistry>();
+        var schemas = new Mock<ISchemaRegistry>();
+        tools.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        capabilities.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        schemas.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        builder.Services.AddSingleton(tools.Object);
+        builder.Services.AddSingleton(capabilities.Object);
+        builder.Services.AddSingleton(schemas.Object);
         builder.Services.AddSingleton(Mock.Of<ICanonicalHashComputer>());
         builder.Services.AddCrestMcpToolProjection();
         using var host = builder.Build();
@@ -58,6 +80,8 @@ public sealed class McpServiceCollectionExtensionsTests
         var builder = Host.CreateApplicationBuilder();
         var capabilities = new Mock<ICapabilityRegistry>();
         var schemas = new Mock<ISchemaRegistry>();
+        capabilities.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        schemas.SetupGet(registry => registry.State).Returns(RegistryState.Built);
         builder.Services.AddSingleton(capabilities.Object);
         builder.Services.AddSingleton(schemas.Object);
         builder.Services.AddSingleton(Mock.Of<ICanonicalHashComputer>());

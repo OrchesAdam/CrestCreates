@@ -18,7 +18,7 @@ public sealed class McpToolDiscoveryServiceTests
             context.Host.ProfileName == "readonly" && context.Tool.ToolName == "zeta"
                 ? McpToolExposureDecision.Deny
                 : McpToolExposureDecision.Allow);
-        var service = new McpToolDiscoveryService(snapshot, policy);
+        var service = new McpToolDiscoveryService(new McpToolRuntimeSnapshotProvider(snapshot), policy);
 
         var contracts = await service.ListAsync(new McpToolDiscoveryContext(
             new McpToolHostContext("host", "test", "readonly")));
@@ -30,7 +30,7 @@ public sealed class McpToolDiscoveryServiceTests
     public async Task Policy_failure_is_fail_closed_for_discovery()
     {
         var service = new McpToolDiscoveryService(
-            Snapshot(Entry("orders.get")),
+            new McpToolRuntimeSnapshotProvider(Snapshot(Entry("orders.get"))),
             new DelegatePolicy(_ => throw new InvalidOperationException("policy unavailable")));
 
         var action = async () => await service.ListAsync(new McpToolDiscoveryContext(
@@ -46,7 +46,7 @@ public sealed class McpToolDiscoveryServiceTests
     {
         var calls = 0;
         var service = new McpToolDiscoveryService(
-            Snapshot(Entry("orders.get")),
+            new McpToolRuntimeSnapshotProvider(Snapshot(Entry("orders.get"))),
             new DelegatePolicy(_ => { calls++; return McpToolExposureDecision.Allow; }));
 
         var action = async () => await service.ListAsync(new McpToolDiscoveryContext(

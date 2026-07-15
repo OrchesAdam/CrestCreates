@@ -3,6 +3,7 @@ using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
+using CrestCreates.Metadata.Abstractions.Registry;
 using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Metadata.Mcp;
@@ -26,6 +27,9 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
         var tools = new Mock<IMcpToolRegistry>();
         var capabilities = new Mock<ICapabilityRegistry>();
         var schemas = new Mock<ISchemaRegistry>();
+        tools.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        capabilities.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        schemas.SetupGet(registry => registry.State).Returns(RegistryState.Built);
         tools.Setup(registry => registry.GetAll()).Returns([active, deprecated]);
         capabilities.Setup(registry => registry.GetAll()).Returns([capabilityV1, capabilityV2]);
         McpToolBindingRegistry.Register(VoidBinding(active));
@@ -57,11 +61,16 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
     public void Non_source_generated_json_resolver_fails_closed()
     {
         var tools = new Mock<IMcpToolRegistry>();
+        tools.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        var capabilities = new Mock<ICapabilityRegistry>();
+        capabilities.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        var schemas = new Mock<ISchemaRegistry>();
+        schemas.SetupGet(registry => registry.State).Returns(RegistryState.Built);
         tools.Setup(registry => registry.GetAll()).Returns([]);
         var builder = new McpToolRuntimeSnapshotBuilder(
             tools.Object,
-            Mock.Of<ICapabilityRegistry>(),
-            Mock.Of<ISchemaRegistry>(),
+            capabilities.Object,
+            schemas.Object,
             new McpJsonSchemaProjector(),
             new McpToolSchemaParityValidator(),
             new DefaultCanonicalHashComputer(),
@@ -76,14 +85,19 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
     public void Multiple_source_generated_contexts_in_resolver_chain_are_supported()
     {
         var tools = new Mock<IMcpToolRegistry>();
+        tools.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        var capabilities = new Mock<ICapabilityRegistry>();
+        capabilities.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        var schemas = new Mock<ISchemaRegistry>();
+        schemas.SetupGet(registry => registry.State).Returns(RegistryState.Built);
         tools.Setup(registry => registry.GetAll()).Returns([]);
         var options = new JsonSerializerOptions();
         options.TypeInfoResolverChain.Add(McpTestJsonContext.Default);
         options.TypeInfoResolverChain.Add(SecondaryMcpTestJsonContext.Default);
         var builder = new McpToolRuntimeSnapshotBuilder(
             tools.Object,
-            Mock.Of<ICapabilityRegistry>(),
-            Mock.Of<ISchemaRegistry>(),
+            capabilities.Object,
+            schemas.Object,
             new McpJsonSchemaProjector(),
             new McpToolSchemaParityValidator(),
             new DefaultCanonicalHashComputer(),

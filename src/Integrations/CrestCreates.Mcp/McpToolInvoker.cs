@@ -7,7 +7,7 @@ namespace CrestCreates.Mcp;
 
 public sealed class McpToolInvoker : IMcpToolInvoker
 {
-    private readonly McpToolRuntimeSnapshot _snapshot;
+    private readonly McpToolRuntimeSnapshotProvider _snapshotProvider;
     private readonly IMcpToolExposurePolicy _exposurePolicy;
     private readonly ICapabilityDispatcher _dispatcher;
     private readonly IMcpIdempotencyKeyBuilder _idempotencyKeys;
@@ -15,14 +15,14 @@ public sealed class McpToolInvoker : IMcpToolInvoker
     private readonly McpToolResultMapper _results;
 
     public McpToolInvoker(
-        McpToolRuntimeSnapshot snapshot,
+        McpToolRuntimeSnapshotProvider snapshotProvider,
         IMcpToolExposurePolicy exposurePolicy,
         ICapabilityDispatcher dispatcher,
         IMcpIdempotencyKeyBuilder idempotencyKeys,
         ISchemaValidator schemaValidator,
         McpToolResultMapper results)
     {
-        _snapshot = snapshot;
+        _snapshotProvider = snapshotProvider;
         _exposurePolicy = exposurePolicy;
         _dispatcher = dispatcher;
         _idempotencyKeys = idempotencyKeys;
@@ -40,7 +40,7 @@ public sealed class McpToolInvoker : IMcpToolInvoker
         if (string.IsNullOrWhiteSpace(context.InvocationId) || string.IsNullOrWhiteSpace(context.RequestId))
             throw new McpInvalidRequestException("MCP_INVALID_CALL_CONTEXT", "Invalid call context.");
 
-        var entry = _snapshot.Find(toolName) ?? throw new McpUnknownToolException();
+        var entry = _snapshotProvider.GetRequired().Find(toolName) ?? throw new McpUnknownToolException();
         McpToolExposureDecision exposure;
         try
         {

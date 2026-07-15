@@ -10,6 +10,8 @@ public sealed class TenantScopedRegistry<TDescriptor> : IVersionedDescriptorRegi
     private readonly ITenantContext? _tenantContext;
     private readonly Func<TDescriptor, string?> _tenantSelector;
 
+    public RegistryState State => _inner.State;
+
     public TenantScopedRegistry(
         IVersionedDescriptorRegistry<TDescriptor> inner,
         ITenantContext? tenantContext,

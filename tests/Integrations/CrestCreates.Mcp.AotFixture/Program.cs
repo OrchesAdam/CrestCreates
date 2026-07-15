@@ -47,7 +47,7 @@ try
             SerializerOptions = new JsonSerializerOptions { TypeInfoResolver = McpFixtureJsonContext.Default }
         }).Build();
     var invoker = new McpToolInvoker(
-        snapshot,
+        new McpToolRuntimeSnapshotProvider(snapshot),
         new DefaultMcpToolExposurePolicy(),
         new FixtureDispatcher(),
         new DefaultMcpIdempotencyKeyBuilder(),

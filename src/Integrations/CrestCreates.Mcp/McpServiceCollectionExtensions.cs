@@ -27,14 +27,14 @@ public static class McpServiceCollectionExtensions
         services.TryAddSingleton<IMcpJsonSchemaProjector, McpJsonSchemaProjector>();
         services.TryAddSingleton<McpToolSchemaParityValidator>();
         services.TryAddSingleton<McpToolRuntimeSnapshotBuilder>();
-        services.TryAddSingleton(provider => provider.GetRequiredService<McpToolRuntimeSnapshotBuilder>().Build());
+        services.TryAddSingleton<McpToolRuntimeSnapshotProvider>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, McpToolProjectionStartupValidator>());
         services.TryAddSingleton<IMcpToolExposurePolicy, DefaultMcpToolExposurePolicy>();
         services.TryAddSingleton<IMcpIdempotencyKeyBuilder, DefaultMcpIdempotencyKeyBuilder>();
         services.TryAddSingleton<ISchemaValidator, SchemaValidator>();
         services.TryAddSingleton<McpToolResultMapper>();
-        services.TryAddSingleton<IMcpToolDiscoveryService, McpToolDiscoveryService>();
-        services.TryAddSingleton<IMcpToolInvoker, McpToolInvoker>();
+        services.TryAddScoped<IMcpToolDiscoveryService, McpToolDiscoveryService>();
+        services.TryAddScoped<IMcpToolInvoker, McpToolInvoker>();
         return services;
     }
 }

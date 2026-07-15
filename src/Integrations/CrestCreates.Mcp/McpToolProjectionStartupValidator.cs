@@ -13,18 +13,21 @@ internal sealed class McpToolProjectionStartupValidator : IHostedService
     private readonly ISchemaRegistry _schemaRegistry;
     private readonly ICapabilityRegistry _capabilityRegistry;
     private readonly McpToolRegistry _registry;
-    private readonly IServiceProvider _services;
+    private readonly McpToolRuntimeSnapshotBuilder _snapshotBuilder;
+    private readonly McpToolRuntimeSnapshotProvider _snapshotProvider;
 
     public McpToolProjectionStartupValidator(
         ISchemaRegistry schemaRegistry,
         ICapabilityRegistry capabilityRegistry,
         McpToolRegistry registry,
-        IServiceProvider services)
+        McpToolRuntimeSnapshotBuilder snapshotBuilder,
+        McpToolRuntimeSnapshotProvider snapshotProvider)
     {
         _schemaRegistry = schemaRegistry;
         _capabilityRegistry = capabilityRegistry;
         _registry = registry;
-        _services = services;
+        _snapshotBuilder = snapshotBuilder;
+        _snapshotProvider = snapshotProvider;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -35,7 +38,7 @@ internal sealed class McpToolProjectionStartupValidator : IHostedService
         _schemaRegistry.Build(DescriptorProviderRegistry.GetProviders<SchemaDescriptor>());
         _capabilityRegistry.Build(DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>());
         _registry.Build(DescriptorProviderRegistry.GetProviders<McpToolDescriptor>());
-        _ = _services.GetRequiredService<McpToolRuntimeSnapshot>();
+        _snapshotProvider.Publish(_snapshotBuilder.Build());
         return Task.CompletedTask;
     }
 

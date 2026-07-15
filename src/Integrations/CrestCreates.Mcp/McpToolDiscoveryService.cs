@@ -4,16 +4,16 @@ namespace CrestCreates.Mcp;
 
 public sealed class McpToolDiscoveryService : IMcpToolDiscoveryService
 {
-    private readonly McpToolRuntimeSnapshot _snapshot;
+    private readonly McpToolRuntimeSnapshotProvider _snapshotProvider;
     private readonly IMcpToolExposurePolicy _exposurePolicy;
     private readonly ILogger<McpToolDiscoveryService>? _logger;
 
     public McpToolDiscoveryService(
-        McpToolRuntimeSnapshot snapshot,
+        McpToolRuntimeSnapshotProvider snapshotProvider,
         IMcpToolExposurePolicy exposurePolicy,
         ILogger<McpToolDiscoveryService>? logger = null)
     {
-        _snapshot = snapshot;
+        _snapshotProvider = snapshotProvider;
         _exposurePolicy = exposurePolicy;
         _logger = logger;
     }
@@ -24,7 +24,7 @@ public sealed class McpToolDiscoveryService : IMcpToolDiscoveryService
     {
         ValidateHost(context.Host);
         var contracts = new List<McpToolContract>();
-        foreach (var entry in _snapshot.Entries.Values.OrderBy(
+        foreach (var entry in _snapshotProvider.GetRequired().Entries.Values.OrderBy(
                      entry => entry.Descriptor.ToolName,
                      StringComparer.Ordinal))
         {

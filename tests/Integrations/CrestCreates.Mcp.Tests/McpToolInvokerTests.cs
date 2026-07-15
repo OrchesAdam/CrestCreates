@@ -115,7 +115,7 @@ public sealed class McpToolInvokerTests
         CapturingDispatcher dispatcher,
         McpToolExposureDecision exposure)
         => new(
-            new McpToolRuntimeSnapshot(new[] { entry }.ToFrozenDictionary(item => item.Descriptor.ToolName, StringComparer.Ordinal)),
+            new McpToolRuntimeSnapshotProvider(new McpToolRuntimeSnapshot(new[] { entry }.ToFrozenDictionary(item => item.Descriptor.ToolName, StringComparer.Ordinal))),
             new FixedPolicy(exposure),
             dispatcher,
             new DefaultMcpIdempotencyKeyBuilder(),

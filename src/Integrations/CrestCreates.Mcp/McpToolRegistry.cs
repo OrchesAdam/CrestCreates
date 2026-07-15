@@ -9,6 +9,7 @@ namespace CrestCreates.Mcp;
 
 public interface IMcpToolRegistry
 {
+    RegistryState State { get; }
     McpToolDescriptor? GetById(string id);
 
     McpToolDescriptor? GetByVersion(string id, int version);
