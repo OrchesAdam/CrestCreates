@@ -392,6 +392,12 @@ services.Configure<McpJsonOptions>(options =>
 
 All projected input and output types require `JsonTypeInfo`. MCP provides no `DefaultJsonTypeInfoResolver` or reflection fallback. Because schema/type parity reads `JsonTypeInfo.Properties`, the application context must provide Metadata generation for projected types; a serialization-only fast path is insufficient.
 
+The configured JSON options must leave `RespectNullableAnnotations` and
+`RespectRequiredConstructorParameters` disabled. If either option is enabled,
+snapshot construction fails with MCP114 because STJ could reject nullable or
+missing input members before the captured Capability reaches Dispatcher and the
+Capability Pipeline.
+
 During startup, MCP copies the configured JsonSerializerOptions, requires either one application-owned `JsonSerializerContext` or a resolver chain whose entries are all source-generated contexts, rejects `DefaultJsonTypeInfoResolver`, resolves and caches every required JsonTypeInfo, and calls `MakeReadOnly()` before publishing the snapshot. The framework-created composite resolver facade for a valid chain is accepted. Runtime bindings hold the resolved JsonTypeInfo objects and do not consult mutable options or IServiceProvider again. Application-provided custom converters remain the application's trimming responsibility and are exercised by the publish fixture.
 
 Issue #61 remains independent. MCP specs may reference only DTOs visible to the application's STJ generator and explicitly included in its `JsonSerializerContext`. Phase 8e does not claim that same-round Generated CRUD DTOs are trimming-safe.

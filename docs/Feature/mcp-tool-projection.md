@@ -49,6 +49,10 @@ services.AddCrestMcpToolProjection(options =>
 
 Snapshot construction resolves and caches each `JsonTypeInfo`. A reflection fallback, missing metadata, a non-object root, or schema/type parity failure prevents snapshot publication.
 
+`RespectNullableAnnotations` and `RespectRequiredConstructorParameters` must
+remain disabled for MCP JSON options; enabling either causes startup failure so
+Schema-owned input validation cannot be bypassed by STJ during binding.
+
 The MCP Descriptor stores a Metadata-owned `McpCapabilityReference`; it does not
 make Metadata depend on the Runtime Capability assembly. Runtime snapshot
 construction resolves that value to the captured `CapabilityDescriptor`. A hosted
