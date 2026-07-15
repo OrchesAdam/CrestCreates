@@ -65,15 +65,11 @@ public sealed class McpToolInvoker : IMcpToolInvoker
         var normalized = NormalizeArguments(arguments);
         if (HasDuplicateProperties(normalized))
             return _results.MapInputError("DUPLICATE_ARGUMENT", "Tool arguments contain duplicate properties.");
-        if (entry.InputSchema is not null)
-        {
-            var inputValidation = _schemaValidator.Validate(
-                entry.InputSchema,
-                normalized,
-                rejectUnknownProperties: true);
-            if (!inputValidation.IsValid)
-                return _results.MapInputValidationError(inputValidation.Errors);
-        }
+        if (entry.InputSchema is not null
+            && TryFindUnknownArgument(entry.InputSchema, normalized, out var unknownArgument))
+            return _results.MapInputError(
+                "UNKNOWN_ARGUMENT",
+                $"Tool arguments contain an unknown property '{unknownArgument}'.");
         if (entry.Binding.Contract.InputType is null && normalized.EnumerateObject().Any())
             return _results.MapInputError("INVALID_ARGUMENTS", "This tool does not accept arguments.");
 
@@ -182,5 +178,19 @@ public sealed class McpToolInvoker : IMcpToolInvoker
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
         return arguments.EnumerateObject().Any(property => !names.Add(property.Name));
+    }
+
+    private static bool TryFindUnknownArgument(
+        SchemaDescriptor schema,
+        JsonElement arguments,
+        out string? unknownArgument)
+    {
+        var fields = schema.Fields
+            .Select(field => field.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var unknown = arguments.EnumerateObject()
+            .FirstOrDefault(property => !fields.Contains(property.Name));
+        unknownArgument = unknown.Name;
+        return !string.IsNullOrEmpty(unknownArgument);
     }
 }
