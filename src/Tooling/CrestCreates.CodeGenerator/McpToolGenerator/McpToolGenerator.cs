@@ -148,7 +148,11 @@ public sealed class McpToolGenerator : IIncrementalGenerator
             return true;
         if (type is not INamedTypeSymbol named || named.IsUnboundGenericType || named.TypeArguments.Any(item => item.TypeKind == TypeKind.TypeParameter))
             return false;
-        if (named.TypeKind is TypeKind.Interface or TypeKind.Dynamic || named.IsAbstract)
+        if (named.TypeKind is TypeKind.Interface or TypeKind.Dynamic or TypeKind.Enum or TypeKind.Delegate
+            || named.IsAbstract)
+            return false;
+        if (named.TypeKind == TypeKind.Struct
+            && !named.GetMembers().OfType<IPropertySymbol>().Any(property => !property.IsStatic))
             return false;
         var original = named.OriginalDefinition.ToDisplayString();
         return original != "System.Collections.Generic.Dictionary<TKey, TValue>"
