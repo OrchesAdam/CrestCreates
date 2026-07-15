@@ -1,16 +1,18 @@
 using System.Text.Json;
+using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Mcp;
 using CrestCreates.Mcp.AotFixture;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
-using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Metadata.Mcp;
 using CrestCreates.Metadata.Registry;
 using CrestCreates.Schema;
 using CrestCreates.Schema.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 try
 {
@@ -18,7 +20,8 @@ try
     var inputSchema = new SchemaDescriptor { Id = "fixture.input", Name = "Input", Version = 1, Fields = fields };
     var outputSchema = new SchemaDescriptor { Id = "fixture.output", Name = "Output", Version = 1, Fields = fields };
     var schemas = new SchemaRegistry(new RegistryValidationEngine<SchemaDescriptor>([]));
-    schemas.Build([new Provider<SchemaDescriptor>([inputSchema, outputSchema])]);
+    DescriptorProviderRegistry.Register<SchemaDescriptor>(
+        new Provider<SchemaDescriptor>([inputSchema, outputSchema]));
 
     var capability = new CapabilityDescriptor
     {
@@ -31,36 +34,37 @@ try
         OutputSchema = new VersionedDescriptorRef<SchemaDescriptor>(outputSchema.Id, 1)
     };
     var capabilities = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>([]));
-    capabilities.Build([new Provider<CapabilityDescriptor>([capability])]);
+    DescriptorProviderRegistry.Register<CapabilityDescriptor>(
+        new Provider<CapabilityDescriptor>([capability]));
 
-    var tools = new McpToolRegistry(new RegistryValidationEngine<McpToolDescriptor>([new McpToolDescriptorValidator()]));
-    tools.Build(DescriptorProviderRegistry.GetProviders<McpToolDescriptor>());
-    var snapshot = new McpToolRuntimeSnapshotBuilder(
-        tools,
-        capabilities,
-        schemas,
-        new McpJsonSchemaProjector(),
-        new McpToolSchemaParityValidator(),
-        new DefaultCanonicalHashComputer(),
-        new McpJsonOptions
-        {
-            SerializerOptions = new JsonSerializerOptions { TypeInfoResolver = McpFixtureJsonContext.Default }
-        }).Build();
-    var invoker = new McpToolInvoker(
-        new McpToolRuntimeSnapshotProvider(snapshot),
-        new DefaultMcpToolExposurePolicy(),
-        new FixtureDispatcher(),
-        new DefaultMcpIdempotencyKeyBuilder(),
-        new SchemaValidator(),
-        new McpToolResultMapper());
+    CapabilityHandlerResolverProvider.Register("fixture.echo", new FixtureHandlerInvoker());
+
+    var builder = Host.CreateApplicationBuilder();
+    builder.Services.AddSingleton<ISchemaRegistry>(schemas);
+    builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
+    builder.Services.AddCapabilityRuntime();
+    builder.Services.AddCrestMcpToolProjection(options =>
+        options.SerializerOptions.TypeInfoResolver = McpFixtureJsonContext.Default);
+
+    using var host = builder.Build();
+    await host.StartAsync();
+    using var scope = host.Services.CreateScope();
+    var invoker = scope.ServiceProvider.GetRequiredService<IMcpToolInvoker>();
+
     using var arguments = JsonDocument.Parse("{\"value\":\"trimmed\"}");
     var outcome = await invoker.InvokeAsync(
         "fixture.echo",
         arguments.RootElement,
         new McpToolCallContext(new McpToolHostContext("fixture", "test"), "logical", "request"));
-    if (outcome.IsError || outcome.StructuredContent?.GetProperty("value").GetString() != "trimmed")
+
+    if (outcome.IsError
+        || outcome.StructuredContent?.GetProperty("value").GetString() != "trimmed"
+        || FixtureHandlerInvoker.LastSource != InvocationSource.Mcp
+        || FixtureHandlerInvoker.LastInputJson?.GetProperty("value").GetString() != "trimmed"
+        || string.IsNullOrWhiteSpace(FixtureHandlerInvoker.LastIdempotencyKey))
         return 2;
-    Console.WriteLine("MCP_NATIVEAOT_OK");
+
+    Console.WriteLine("MCP_NATIVEAOT_PIPELINE_OK");
     return 0;
 }
 catch (Exception exception)
@@ -75,28 +79,21 @@ internal sealed class Provider<T>(IReadOnlyList<T> descriptors) : IDescriptorPro
     public IReadOnlyList<T> GetDescriptors() => descriptors;
 }
 
-internal sealed class FixtureDispatcher : ICapabilityDispatcher
+internal sealed class FixtureHandlerInvoker : ICapabilityContextAwareHandlerInvoker
 {
-    public Task<CapabilityExecutionResult> DispatchAsync(
-        CapabilityDescriptor descriptor,
-        InvocationSource source,
-        object? input = null,
-        Action<CapabilityExecutionContext>? configureContext = null,
-        CancellationToken ct = default)
-    {
-        var context = new CapabilityExecutionContext { ServiceProvider = null!, Input = input };
-        configureContext?.Invoke(context);
-        var typed = (FixtureInput)input!;
-        return Task.FromResult(CapabilityExecutionResult.Success(
-            new FixtureOutput { Value = typed.Value },
-            TimeSpan.Zero));
-    }
+    public static InvocationSource LastSource { get; private set; }
+    public static JsonElement? LastInputJson { get; private set; }
+    public static string? LastIdempotencyKey { get; private set; }
 
-    public Task<CapabilityExecutionResult> DispatchAsync(
-        string capabilityId,
-        InvocationSource source,
-        object? input = null,
-        Action<CapabilityExecutionContext>? configureContext = null,
-        CancellationToken ct = default)
-        => throw new InvalidOperationException("String overload is forbidden.");
+    public Task<object?> InvokeAsync(object? input, CancellationToken ct)
+        => throw new InvalidOperationException("The context-aware handler path is required.");
+
+    public Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
+    {
+        LastSource = context.InvocationSource;
+        LastInputJson = context.InputJson;
+        LastIdempotencyKey = context.IdempotencyKey;
+        var typed = (FixtureInput)context.Input!;
+        return Task.FromResult<object?>(new FixtureOutput { Value = typed.Value });
+    }
 }

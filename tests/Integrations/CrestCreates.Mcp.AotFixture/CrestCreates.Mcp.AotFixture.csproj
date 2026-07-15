@@ -11,6 +11,7 @@
     <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL3050;SYSLIB1034</WarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
     <ProjectReference Include="../../../src/Integrations/CrestCreates.Mcp/CrestCreates.Mcp.csproj" />
     <ProjectReference Include="../../../src/Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj"
                       OutputItemType="Analyzer"

@@ -25,7 +25,7 @@ public sealed class McpAotFixtureTests
             var executable = Path.Combine(output, "CrestCreates.Mcp.AotFixture");
             var execution = await RunAsync(executable, string.Empty);
             execution.ExitCode.Should().Be(0, execution.Output);
-            execution.Output.Should().Contain("MCP_NATIVEAOT_OK");
+            execution.Output.Should().Contain("MCP_NATIVEAOT_PIPELINE_OK");
         }
         finally
         {
