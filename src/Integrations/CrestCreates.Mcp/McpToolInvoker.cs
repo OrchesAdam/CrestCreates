@@ -188,9 +188,16 @@ public sealed class McpToolInvoker : IMcpToolInvoker
         var fields = schema.Fields
             .Select(field => field.Name)
             .ToHashSet(StringComparer.Ordinal);
-        var unknown = arguments.EnumerateObject()
-            .FirstOrDefault(property => !fields.Contains(property.Name));
-        unknownArgument = unknown.Name;
-        return !string.IsNullOrEmpty(unknownArgument);
+        foreach (var property in arguments.EnumerateObject())
+        {
+            if (!fields.Contains(property.Name))
+            {
+                unknownArgument = property.Name;
+                return true;
+            }
+        }
+
+        unknownArgument = null;
+        return false;
     }
 }
