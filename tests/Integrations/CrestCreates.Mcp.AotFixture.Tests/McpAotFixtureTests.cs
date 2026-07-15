@@ -23,6 +23,15 @@ public sealed class McpAotFixtureTests
             publish.Output.Should().NotContain("warning IL3050");
 
             var executable = Path.Combine(output, "CrestCreates.Mcp.AotFixture");
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(
+                    executable,
+                    File.GetUnixFileMode(executable)
+                    | UnixFileMode.UserExecute
+                    | UnixFileMode.GroupExecute
+                    | UnixFileMode.OtherExecute);
+            }
             var execution = await RunAsync(executable, string.Empty);
             execution.ExitCode.Should().Be(0, execution.Output);
             execution.Output.Should().Contain("MCP_NATIVEAOT_PIPELINE_OK");
