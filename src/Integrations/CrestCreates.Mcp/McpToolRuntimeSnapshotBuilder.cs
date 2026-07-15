@@ -44,8 +44,8 @@ public sealed class McpToolRuntimeSnapshotBuilder
     public McpToolRuntimeSnapshot Build()
     {
         if (_tools.State != RegistryState.Built
-            || RegistryStateOf(_capabilities) != RegistryState.Built
-            || RegistryStateOf(_schemas) != RegistryState.Built)
+            || IsKnownNotBuilt(_capabilities)
+            || IsKnownNotBuilt(_schemas))
         {
             throw new McpToolConfigurationException(
                 "MCP_SNAPSHOT_NOT_READY",
@@ -145,8 +145,9 @@ public sealed class McpToolRuntimeSnapshotBuilder
         }
     }
 
-    private static RegistryState RegistryStateOf(object registry)
-        => registry is IRegistryState state ? state.State : RegistryState.Created;
+    private static bool IsKnownNotBuilt(object registry)
+        => registry is IRegistryState state
+            && state.State != RegistryState.Built;
 
     private static void ValidateResolvers(JsonSerializerOptions options)
     {

@@ -3,14 +3,12 @@ using CrestCreates.MultiTenancy.Abstract;
 
 namespace CrestCreates.Metadata.Registry;
 
-public sealed class TenantScopedRegistry<TDescriptor> : IVersionedDescriptorRegistry<TDescriptor>, IRegistryState
+public sealed class TenantScopedRegistry<TDescriptor> : IVersionedDescriptorRegistry<TDescriptor>
     where TDescriptor : class, IVersionedDescriptor
 {
     private readonly IVersionedDescriptorRegistry<TDescriptor> _inner;
     private readonly ITenantContext? _tenantContext;
     private readonly Func<TDescriptor, string?> _tenantSelector;
-
-    public RegistryState State => _inner is IRegistryState state ? state.State : RegistryState.Created;
 
     public TenantScopedRegistry(
         IVersionedDescriptorRegistry<TDescriptor> inner,

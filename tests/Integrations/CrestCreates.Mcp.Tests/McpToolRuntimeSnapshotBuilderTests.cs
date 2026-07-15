@@ -63,9 +63,7 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
         var tools = new Mock<IMcpToolRegistry>();
         tools.SetupGet(registry => registry.State).Returns(RegistryState.Built);
         var capabilities = new Mock<ICapabilityRegistry>();
-        capabilities.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
         var schemas = new Mock<ISchemaRegistry>();
-        schemas.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
         tools.Setup(registry => registry.GetAll()).Returns([]);
         var builder = new McpToolRuntimeSnapshotBuilder(
             tools.Object,
