@@ -1,5 +1,4 @@
 using CrestCreates.Capability.Abstractions;
-using CrestCreates.Schema.Abstractions;
 
 namespace CrestCreates.Mcp;
 
@@ -28,24 +27,6 @@ public sealed class McpToolResultMapper
 
     public McpToolInvocationOutcome MapInputError(string code, string safeMessage)
         => new(true, [new McpToolTextContent(safeMessage)], null, code);
-
-    public McpToolInvocationOutcome MapInputValidationError(IReadOnlyList<SchemaValidationError> errors)
-    {
-        var issues = errors
-            .Select(error => new CapabilityExecutionIssue(
-                error.ErrorCode.ToString(),
-                error.Message,
-                error.FieldName))
-            .ToArray();
-        var messages = issues
-            .Where(issue => IsSafeValidationCode(issue.Code))
-            .Select(FormatValidationIssue)
-            .ToArray();
-        var text = messages.Length == 0
-            ? "Tool arguments are invalid."
-            : string.Join(" ", messages);
-        return new(true, [new McpToolTextContent(text)], null, "INVALID_ARGUMENTS");
-    }
 
     public McpToolInvocationOutcome MapVoidSuccess()
         => new(false, [new McpToolTextContent("Operation completed successfully.")]);
