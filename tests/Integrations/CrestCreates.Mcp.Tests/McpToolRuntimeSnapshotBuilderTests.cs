@@ -28,8 +28,8 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
         var capabilities = new Mock<ICapabilityRegistry>();
         var schemas = new Mock<ISchemaRegistry>();
         tools.SetupGet(registry => registry.State).Returns(RegistryState.Built);
-        capabilities.SetupGet(registry => registry.State).Returns(RegistryState.Built);
-        schemas.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        capabilities.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        schemas.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
         tools.Setup(registry => registry.GetAll()).Returns([active, deprecated]);
         capabilities.Setup(registry => registry.GetAll()).Returns([capabilityV1, capabilityV2]);
         McpToolBindingRegistry.Register(VoidBinding(active));
@@ -63,9 +63,9 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
         var tools = new Mock<IMcpToolRegistry>();
         tools.SetupGet(registry => registry.State).Returns(RegistryState.Built);
         var capabilities = new Mock<ICapabilityRegistry>();
-        capabilities.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        capabilities.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
         var schemas = new Mock<ISchemaRegistry>();
-        schemas.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        schemas.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
         tools.Setup(registry => registry.GetAll()).Returns([]);
         var builder = new McpToolRuntimeSnapshotBuilder(
             tools.Object,
@@ -87,9 +87,9 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
         var tools = new Mock<IMcpToolRegistry>();
         tools.SetupGet(registry => registry.State).Returns(RegistryState.Built);
         var capabilities = new Mock<ICapabilityRegistry>();
-        capabilities.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        capabilities.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
         var schemas = new Mock<ISchemaRegistry>();
-        schemas.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        schemas.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
         tools.Setup(registry => registry.GetAll()).Returns([]);
         var options = new JsonSerializerOptions();
         options.TypeInfoResolverChain.Add(McpTestJsonContext.Default);
@@ -130,8 +130,8 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
         var capabilities = new Mock<ICapabilityRegistry>();
         var schemas = new Mock<ISchemaRegistry>();
         tools.SetupGet(registry => registry.State).Returns(RegistryState.Built);
-        capabilities.SetupGet(registry => registry.State).Returns(RegistryState.Built);
-        schemas.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        capabilities.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        schemas.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
         tools.Setup(registry => registry.GetAll()).Returns([tool]);
         capabilities.Setup(registry => registry.GetAll()).Returns([capability]);
         McpToolBindingRegistry.Register(VoidBinding(tool));

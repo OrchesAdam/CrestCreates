@@ -44,8 +44,8 @@ public sealed class McpToolRuntimeSnapshotBuilder
     public McpToolRuntimeSnapshot Build()
     {
         if (_tools.State != RegistryState.Built
-            || _capabilities.State != RegistryState.Built
-            || _schemas.State != RegistryState.Built)
+            || RegistryStateOf(_capabilities) != RegistryState.Built
+            || RegistryStateOf(_schemas) != RegistryState.Built)
         {
             throw new McpToolConfigurationException(
                 "MCP_SNAPSHOT_NOT_READY",
@@ -144,6 +144,9 @@ public sealed class McpToolRuntimeSnapshotBuilder
             throw new McpToolConfigurationException(code, "Application JsonTypeInfo is missing.");
         }
     }
+
+    private static RegistryState RegistryStateOf(object registry)
+        => registry is IRegistryState state ? state.State : RegistryState.Created;
 
     private static void ValidateResolvers(JsonSerializerOptions options)
     {

@@ -4,7 +4,7 @@ using CrestCreates.Metadata.Abstractions.Registry;
 
 namespace CrestCreates.Metadata.Registry;
 
-public abstract class RegistryBase<TDescriptor>
+public abstract class RegistryBase<TDescriptor> : IRegistryState
     where TDescriptor : class, IDescriptor
 {
     protected RegistrySnapshot<TDescriptor>? _snapshot;

@@ -59,8 +59,8 @@ public sealed class McpServiceCollectionExtensionsTests
         var capabilities = new Mock<ICapabilityRegistry>();
         var schemas = new Mock<ISchemaRegistry>();
         tools.SetupGet(registry => registry.State).Returns(RegistryState.Built);
-        capabilities.SetupGet(registry => registry.State).Returns(RegistryState.Built);
-        schemas.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        capabilities.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        schemas.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
         builder.Services.AddSingleton(tools.Object);
         builder.Services.AddSingleton(capabilities.Object);
         builder.Services.AddSingleton(schemas.Object);
@@ -80,8 +80,8 @@ public sealed class McpServiceCollectionExtensionsTests
         var builder = Host.CreateApplicationBuilder();
         var capabilities = new Mock<ICapabilityRegistry>();
         var schemas = new Mock<ISchemaRegistry>();
-        capabilities.SetupGet(registry => registry.State).Returns(RegistryState.Built);
-        schemas.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        capabilities.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        schemas.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
         builder.Services.AddSingleton(capabilities.Object);
         builder.Services.AddSingleton(schemas.Object);
         builder.Services.AddSingleton(Mock.Of<ICanonicalHashComputer>());
