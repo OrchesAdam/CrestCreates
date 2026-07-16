@@ -635,7 +635,7 @@ git commit -m "test(mcp): close projection e2e and trimming paths"
 ### Task 8: Documentation, Memory, and Full Verification
 
 **Files:**
-- Create: `docs/Feature/mcp-tool-projection.md`
+- Create: `docs/Feature/MCP/arc-design.md` and `docs/Feature/MCP/usage-guide.md`
 - Modify: `memory.md`
 - Modify: `docs/superpowers/specs/2026-07-15-phase-8e-mcp-tool-projection-design.md` only if implementation reveals a factual discrepancy; preserve Approved decisions.
 
@@ -686,7 +686,7 @@ Expected: only boundary-test strings or explanatory diagnostics appear; no produ
 - [ ] **Step 6: Commit closure documentation**
 
 ```bash
-git add docs/Feature/mcp-tool-projection.md memory.md docs/superpowers/specs/2026-07-15-phase-8e-mcp-tool-projection-design.md
+git add docs/Feature/MCP/arc-design.md docs/Feature/MCP/usage-guide.md memory.md docs/superpowers/specs/2026-07-15-phase-8e-mcp-tool-projection-design.md
 git commit -m "docs(mcp): document tool projection mainline"
 ```
 

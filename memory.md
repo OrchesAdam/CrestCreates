@@ -40,7 +40,7 @@ Non-goals still open:
 - automatic Capability exposure, approval workflows, and hot reload
 - Generated CRUD trimming-safe JSON contracts (GitHub issue #61)
 
-Guide: `docs/Feature/mcp-tool-projection.md`
+Guides: `docs/Feature/MCP/arc-design.md`, `docs/Feature/MCP/usage-guide.md`
 Spec: `docs/superpowers/specs/2026-07-15-phase-8e-mcp-tool-projection-design.md`
 
 ### Tenant Management
