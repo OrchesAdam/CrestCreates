@@ -12,6 +12,7 @@ internal static class McpToolProviderEmitter
         builder.AppendLine("using System.Collections.Generic;");
         builder.AppendLine("using CrestCreates.Metadata;");
         builder.AppendLine("using CrestCreates.Metadata.Abstractions;");
+        builder.AppendLine("using CrestCreates.Metadata.Abstractions.DescriptorCapability;");
         builder.AppendLine("using CrestCreates.Metadata.Mcp;");
         if (container.Namespace.Length > 0)
             builder.AppendLine("namespace " + container.Namespace + ";");
@@ -26,7 +27,7 @@ internal static class McpToolProviderEmitter
             builder.AppendLine("            Id = \"" + Escape(spec.DescriptorId) + "\",");
             builder.AppendLine("            Name = \"" + Escape(spec.SpecName) + "\",");
             builder.AppendLine("            Version = " + spec.DescriptorVersion + ",");
-            builder.AppendLine("            Capability = new McpCapabilityReference(");
+            builder.AppendLine("            Capability = new CapabilityProjectionReference(");
             builder.AppendLine("                \"" + Escape(spec.CapabilityId) + "\", " + spec.CapabilityVersion + ", VersionSelectionMode."
                 + (spec.CapabilityVersion == 0 ? "Latest" : "Exact") + "),");
             builder.AppendLine("            ToolName = \"" + Escape(spec.ToolName) + "\",");

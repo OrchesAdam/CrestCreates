@@ -4,6 +4,7 @@ using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.AgentTool;
 using CrestCreates.Metadata.Mcp;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
@@ -128,12 +129,41 @@ public sealed class DescriptorStableHashCoverageTests
             new(nameof(McpToolAnnotationOverrides.OpenWorldHint), HashFieldCoverage.Contract, "Protocol hint override"),
         },
 
-        [typeof(McpCapabilityReference)] = new FieldCoverage[]
+        [typeof(CapabilityProjectionReference)] = new FieldCoverage[]
         {
-            new(nameof(McpCapabilityReference.Id), HashFieldCoverage.Contract, "Referenced capability identity"),
-            new(nameof(McpCapabilityReference.Version), HashFieldCoverage.Contract, "Referenced capability version"),
-            new(nameof(McpCapabilityReference.SelectionMode), HashFieldCoverage.Contract, "Capability resolution semantics"),
-            new(nameof(McpCapabilityReference.ExpectedContractHash), HashFieldCoverage.Contract, "Optional contract guard"),
+            new(nameof(CapabilityProjectionReference.Id), HashFieldCoverage.Contract, "Referenced capability identity"),
+            new(nameof(CapabilityProjectionReference.Version), HashFieldCoverage.Contract, "Referenced capability version"),
+            new(nameof(CapabilityProjectionReference.SelectionMode), HashFieldCoverage.Contract, "Capability resolution semantics"),
+            new(nameof(CapabilityProjectionReference.ExpectedContractHash), HashFieldCoverage.Contract, "Optional contract guard"),
+        },
+
+        [typeof(AgentCapabilityToolDescriptor)] = new FieldCoverage[]
+        {
+            new(nameof(AgentCapabilityToolDescriptor.Namespace), HashFieldCoverage.ExcludedWithReason, "Computed per-kind constant"),
+            new(nameof(AgentCapabilityToolDescriptor.Kind), HashFieldCoverage.ExcludedWithReason, "Computed per-kind constant"),
+            new(nameof(AgentCapabilityToolDescriptor.Id), HashFieldCoverage.Contract, "Stable Agent Tool projection identity"),
+            new(nameof(AgentCapabilityToolDescriptor.Name), HashFieldCoverage.Contract, "Descriptor identity"),
+            new(nameof(AgentCapabilityToolDescriptor.Version), HashFieldCoverage.Contract, "Versioned identity"),
+            new(nameof(AgentCapabilityToolDescriptor.State), HashFieldCoverage.Contract, "Lifecycle state affects exposure"),
+            new(nameof(AgentCapabilityToolDescriptor.SupersededById), HashFieldCoverage.Contract, "Affects version resolution"),
+            new(nameof(AgentCapabilityToolDescriptor.Capability), HashFieldCoverage.Contract, "Captured Capability authority"),
+            new(nameof(AgentCapabilityToolDescriptor.ToolName), HashFieldCoverage.Contract, "Model-visible Tool identity"),
+            new(nameof(AgentCapabilityToolDescriptor.Title), HashFieldCoverage.Contract, "Model-facing selection metadata"),
+            new(nameof(AgentCapabilityToolDescriptor.Description), HashFieldCoverage.Contract, "Model-facing behavior contract"),
+            new(nameof(AgentCapabilityToolDescriptor.SelectionPolicy), HashFieldCoverage.Contract, "Controls planner selection eligibility"),
+            new(nameof(AgentCapabilityToolDescriptor.SideEffectKind), HashFieldCoverage.Contract, "Controls governance policy"),
+            new(nameof(AgentCapabilityToolDescriptor.RiskFloor), HashFieldCoverage.Contract, "Raises effective execution risk"),
+            new(nameof(AgentCapabilityToolDescriptor.ApprovalMode), HashFieldCoverage.Contract, "Controls approval governance"),
+            new(nameof(AgentCapabilityToolDescriptor.Budget), HashFieldCoverage.Contract, "Controls budget governance"),
+            new(nameof(AgentCapabilityToolDescriptor.AuditMode), HashFieldCoverage.Contract, "Controls governance audit"),
+            new(nameof(AgentCapabilityToolDescriptor.AllowedAgentRoles), HashFieldCoverage.Contract, "Controls Agent exposure"),
+        },
+
+        [typeof(AgentToolBudgetRequirement)] = new FieldCoverage[]
+        {
+            new(nameof(AgentToolBudgetRequirement.Category), HashFieldCoverage.Contract, "Budget ledger category"),
+            new(nameof(AgentToolBudgetRequirement.CostUnits), HashFieldCoverage.Contract, "Budget charge units"),
+            new(nameof(AgentToolBudgetRequirement.MaxCallsPerExecution), HashFieldCoverage.Contract, "Execution call capacity"),
         },
 
         // ── EventDescriptor ───────────────────────────────────

@@ -183,7 +183,7 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
         Name = toolName,
         Version = 1,
         State = state,
-        Capability = new McpCapabilityReference(
+        Capability = new CapabilityProjectionReference(
             "orders.get", 0, VersionSelectionMode.Latest),
         ToolName = toolName,
         Description = "Gets an order."

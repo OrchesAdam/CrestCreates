@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Text.Json;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Mcp;
 using FluentAssertions;
 using Xunit;
@@ -70,7 +71,7 @@ public sealed class DefaultMcpIdempotencyKeyBuilderTests
             Id = "mcp-tool:test",
             Name = "Test",
             Version = 1,
-            Capability = new McpCapabilityReference("test", 1),
+            Capability = new CapabilityProjectionReference("test", 1),
             ToolName = "test",
             Description = "Test."
         };

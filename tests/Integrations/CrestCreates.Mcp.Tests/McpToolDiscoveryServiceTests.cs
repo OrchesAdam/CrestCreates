@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Text.Json;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Mcp;
 using FluentAssertions;
 using Xunit;
@@ -82,7 +83,7 @@ public sealed class McpToolDiscoveryServiceTests
             Id = "mcp-tool:" + toolName,
             Name = toolName,
             Version = 1,
-            Capability = new McpCapabilityReference(toolName, 1),
+            Capability = new CapabilityProjectionReference(toolName, 1),
             ToolName = toolName,
             Description = "Description"
         };

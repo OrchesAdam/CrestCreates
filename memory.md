@@ -1,13 +1,99 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-15 (Phase 8e MCP Tool Projection NativeAOT verification)
+Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection implemented)
+
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
 
 ---
 
+## Approved Designs
+
+No approved-but-unimplemented design is currently recorded here.
+
 ## Completed Features
+
+### Phase 8f — Agent Tool Projection
+
+Status: Implemented; provider SDK adapters and a planner/runtime loop remain
+future composition concerns.
+
+Approved mainline:
+
+`[AgentToolSpec]` → Source Generator → independent
+`AgentCapabilityToolDescriptor` + exact typed binding → immutable Agent Tool
+snapshot → trusted Agent context / selection / roles → logical invocation lease
+and fencing → approval / budget / governance audit →
+`ICapabilityDispatcher` with `InvocationSource.Agent` → Capability Pipeline →
+exact output serialization and Schema validation → independent budget and
+invocation finalization.
+
+Key decisions:
+
+- `Agent.Tools` is an independent vertical slice; `Agent.Runtime` remains a
+  future composition root and the Phase 7c Control Plane
+  `AgentToolDescriptor` remains unchanged.
+- MCP and Agent share only a protocol-neutral Schema/JSON projection kernel;
+  Phase 8e MCP hashes, package/snapshot compatibility, E2E, and NativeAOT gates
+  are mandatory migration checks.
+- `AgentToolSelectionPolicy` and `AgentToolCallOrigin` are distinct safe-default
+  enums; CallOrigin is part of the canonical invocation fingerprint.
+- logical invocation, execution attempt/lease, and budget reservation are
+  separate identities; lease expiry, renewal, atomic DispatchStarted, and
+  fencing prevent stale completion without claiming distributed exactly-once.
+- approval evidence may replay only for the same logical invocation and
+  fingerprint; cross-node claim/replay protection belongs to a durable Host
+  adapter.
+- Budget uses Reserved/Released/Committed/Indeterminate and is independent from
+  Invocation terminal state; Budget Committed + Invocation Indeterminate is a
+  valid post-dispatch result.
+- Title is model-facing behavior and participates in Agent Tool ContractHash.
+- Actual completion requires a linux-x64 NativeAOT publish-link-run fixture;
+  provider adapters, a planner/runtime loop, durable stores, approval workflow,
+  hot reload, and issue #61 remain out of scope.
+
+Completed:
+
+- Added independent Metadata Agent Tool contracts, `DescriptorKind.AgentTool`,
+  canonical Contract/Definition hashing, package/snapshot round trips, and a
+  strong Capability relationship without opening Agent Draft/Authoring/Control
+  Plane mutation allowlists.
+- Extracted the protocol-neutral Schema/JSON projection and directional
+  JsonTypeInfo parity kernel. MCP remains an independent vertical slice, with
+  its canonical hash golden vectors, package JSON, E2E, and NativeAOT behavior
+  preserved.
+- Added `[AgentToolSpecs]` / `[AgentToolSpec]` incremental generation for
+  descriptors, exact input binding, exact output serialization, and
+  application-owned source-generated JSON registrations.
+- Added eager Active-only immutable runtime snapshots with captured Capability,
+  exact Schemas, frozen JsonTypeInfo, effective governance floors, provider-
+  neutral discovery, trusted role filtering, and safe SelectionPolicy ×
+  CallOrigin behavior.
+- Added canonical invocation fingerprints including CallOrigin; logical
+  invocation leases with renewal, fencing, atomic DispatchStarted, Completed
+  replay, conflict detection, and Indeterminate blocking; and explicitly
+  volatile development adapters.
+- Added fail-closed approval evidence binding/claim semantics, per-attempt budget
+  reservation and independent settlement, two-checkpoint governance audit, and
+  the fixed governed `InvocationSource.Agent` Dispatcher execution order.
+- Added DI/startup fail-closed checks, usage documentation, dependency guards,
+  generator-backed E2E, and a real linux-x64 NativeAOT publish-link-run fixture
+  that executes discovery, exact DTO binding, Capability Handler dispatch,
+  output validation, governance settlement, and terminal replay.
+
+Focused verification on 2026-07-16: Metadata 467/467, Schema 42/42,
+Agent.Tools abstractions 16/16, Agent.Tools runtime 52/52, Agent E2E 1/1,
+Agent NativeAOT 1/1, MCP runtime 63/63, MCP E2E 1/1, MCP NativeAOT 1/1,
+dependency boundaries 40/40, CodeGenerator 276/276, and Control Plane 484/484.
+The complete main solution builds with 0 errors. A full parallel test invocation
+still reports environment-dependent Docker/RabbitMQ/Kafka suites and the
+pre-existing DraftContractGenerator test fixture that searches for implementation
+Payload types while referencing only `DescriptorDraft.Abstractions`; neither is
+on the Phase 8f path.
+
+Spec: `docs/superpowers/specs/2026-07-16-phase-8f-agent-tool-projection-design.md`
+Guide: `docs/Feature/AgentTools/usage-guide.md`
 
 ### Phase 8e — MCP Tool Projection
 

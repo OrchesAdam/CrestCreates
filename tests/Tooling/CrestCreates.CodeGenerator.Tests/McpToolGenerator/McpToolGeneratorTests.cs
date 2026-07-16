@@ -32,7 +32,13 @@ public static partial class OrderTools
         result.GeneratedSources.Should().HaveCount(2);
         var generated = string.Join("\n", result.GeneratedSources.Select(source => source.SourceText));
         generated.Should().Contain("IDescriptorProvider<McpToolDescriptor>");
-        generated.Should().Contain("new McpCapabilityReference(");
+        generated.Should().Contain("new CapabilityProjectionReference(");
+        generated.Should().Contain("using CrestCreates.Metadata.Abstractions.DescriptorCapability;");
+        generated.Should().NotContain("new McpCapabilityReference(");
+        generated.Should().Contain("""
+            Capability = new CapabilityProjectionReference(
+                            "orders.create", 0, VersionSelectionMode.Latest),
+            """);
         generated.Should().NotContain("VersionedDescriptorRef<CapabilityDescriptor>");
         generated.Should().Contain("VersionSelectionMode.Latest");
         generated.Should().Contain("JsonTypeInfo<global::Demo.InputDto>");

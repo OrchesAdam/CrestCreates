@@ -1,0 +1,134 @@
+# Agent Tool Projection — Usage Guide
+
+Phase 8f exposes explicitly authored Capabilities to trusted Agent runtimes. It
+does not provide a planner or provider SDK adapter. Discovery and invocation are
+provider-neutral and always execute through the captured Capability Dispatcher
+mainline.
+
+## 1. Author a generated Tool
+
+Define the Capability and its exact input/output DTOs as usual, then add one
+top-level static partial Tool container:
+
+```csharp
+[AgentToolSpecs]
+public static partial class OrderAgentTools
+{
+    [AgentToolSpec(
+        "orders.lookup",
+        CapabilityVersion = 1,
+        InputType = typeof(LookupOrderInput),
+        OutputType = typeof(LookupOrderOutput),
+        ToolName = "orders.lookup",
+        Title = "Look up order",
+        Description = "Returns one order visible to the current user.",
+        SelectionPolicy = AgentToolSelectionPolicy.AutomaticAllowed,
+        BudgetCategory = "order-read",
+        CostUnits = 1,
+        MaxCallsPerExecution = 10,
+        ApprovalMode = AgentToolApprovalMode.None,
+        AuditMode = AgentToolAuditMode.Required,
+        AllowedAgentRoles = new[] { "order-agent" })]
+    public sealed class Lookup;
+}
+```
+
+The Source Generator emits the descriptor provider, exact input binder, exact
+output serializer, and JSON contract registrations. Runtime scanning,
+reflection serialization, dictionary payload fallback, and direct Handler
+invocation are not supported.
+
+`Title`, description, selection policy, roles, approval, budget, audit, risk,
+and side-effect classification affect the Tool contract hash. Changing them is
+a governed contract change.
+
+## 2. Register the runtime
+
+The application owns its source-generated JSON context:
+
+```csharp
+[JsonSerializable(typeof(LookupOrderInput))]
+[JsonSerializable(typeof(LookupOrderOutput))]
+internal partial class AgentToolJsonContext : JsonSerializerContext;
+
+services.AddCrestAgentTools(options =>
+    options.SerializerOptions.TypeInfoResolver = AgentToolJsonContext.Default);
+```
+
+For every Active Tool, the Host must also register:
+
+```csharp
+IAgentExecutionContextAccessor
+IAgentToolInvocationGate
+IAgentToolBudgetGate
+IAgentToolGovernanceAuditor
+```
+
+`AddCrestAgentTools()` installs the fail-closed approval gate. A Host verifier
+must be registered when required or policy-driven calls can be approved. The
+runtime intentionally installs no permissive invocation, budget, or audit
+default; missing governance infrastructure fails Host startup.
+
+The existing scoped `ICurrentUser` and `ITenantContext` remain authoritative
+for user and tenant identity. Never copy these values from model-generated Tool
+arguments.
+
+## 3. Establish trusted Agent context
+
+The Host or future Agent orchestrator creates the scoped context:
+
+```csharp
+new AgentExecutionContext
+{
+    ExecutionId = executionId,
+    InvocationId = invocationId,
+    AgentId = agentId,
+    AgentRoles = roles,
+    CallOrigin = AgentToolCallOrigin.AutomaticSelection,
+    CausationId = causationId
+};
+```
+
+`SelectionPolicy` describes whether a Tool may be selected automatically;
+`CallOrigin` records how this call was actually selected. Unknown values fail
+closed. A role or selection denial is returned as UnknownTool to avoid an
+existence oracle.
+
+Provider adapters use `IAgentToolCatalog` for discovery and `IAgentToolInvoker`
+for calls. They may translate provider request/response shapes, but must not
+bypass these services or invoke Capability Handlers directly.
+
+## 4. Logical calls, retries, and reconciliation
+
+`ExecutionId + InvocationId` identifies one logical call within the trusted
+tenant/user/Agent scope. Its first accepted canonical fingerprint permanently
+binds Tool, Capability, Schemas, arguments, roles, and CallOrigin.
+
+- an identical Completed retry returns the stored safe outcome without another
+  approval, reservation, dispatch, or audit;
+- a changed fingerprint is `InvocationConflict`;
+- an active attempt is `InProgress`;
+- an uncertain post-dispatch result is `InvocationIndeterminate` and must not be
+  retried automatically;
+- a pre-dispatch Released attempt may acquire a new lease and reservation with
+  the same fingerprint.
+
+Budget and invocation terminal state are independent. For example, a business
+call may have consumed its budget while a required post-dispatch audit failure
+leaves the logical invocation Indeterminate. Hosts must route Indeterminate
+records to reconciliation instead of treating them as failed-before-execution.
+
+## 5. Development adapters
+
+`DevelopmentInMemoryAgentToolInvocationGate`,
+`DevelopmentInMemoryAgentToolBudgetGate`,
+`DevelopmentInMemoryAgentToolGovernanceAuditor`, and the development approval
+evidence verifier are volatile single-process adapters for tests and explicit
+single-node development use.
+
+They do not survive restart, coordinate across nodes, or provide distributed
+exactly-once guarantees. Production Hosts must supply durable adapters with
+atomic evidence claims, compare-and-swap fencing, persistent budget settlement,
+governance audit durability, and Indeterminate reconciliation.
+
+Design details: `docs/superpowers/specs/2026-07-16-phase-8f-agent-tool-projection-design.md`.

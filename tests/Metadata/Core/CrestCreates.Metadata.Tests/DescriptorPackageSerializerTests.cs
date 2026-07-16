@@ -118,7 +118,7 @@ public class DescriptorPackageSerializerTests
             Id = "mcp-tool:orders.get",
             Name = "Get order",
             Version = 1,
-            Capability = new McpCapabilityReference(
+            Capability = new CapabilityProjectionReference(
                 "orders.get", 1, VersionSelectionMode.Exact),
             ToolName = "orders.get",
             Description = "Gets one order."
@@ -138,4 +138,40 @@ public class DescriptorPackageSerializerTests
         entry.ContractHash.Should().Be(package.SnapshotData.Descriptors[0].ContractHash);
         entry.DefinitionHash.Should().Be(package.SnapshotData.Descriptors[0].DefinitionHash);
     }
+
+    [Fact]
+    public void McpTool_package_json_matches_phase_8e_golden_bytes()
+    {
+        var descriptor = new McpToolDescriptor
+        {
+            Id = "mcp-tool:orders.get",
+            Name = "Get order",
+            Version = 1,
+            Capability = new CapabilityProjectionReference(
+                "orders.get", 1, VersionSelectionMode.Exact),
+            ToolName = "orders.get",
+            Description = "Gets one order."
+        };
+        var package = _builder.Build(new DescriptorPackageBuildRequest
+        {
+            PackageId = "mcp.pkg",
+            PackageVersion = "1.0.0",
+            CreatedAt = new DateTimeOffset(2026, 7, 15, 0, 0, 0, TimeSpan.Zero),
+            Descriptors = [descriptor]
+        });
+
+        var json = _serializer.Serialize(package);
+
+        var golden = LoadGolden("mcp-tool-phase-8e-package.json");
+        json.Should().Be(golden);
+        _serializer.Serialize(_serializer.Deserialize(golden)).Should().Be(golden);
+    }
+
+    private static string LoadGolden(string fileName)
+        => File.ReadAllText(Path.Combine(
+                "DescriptorPackage",
+                "CanonicalHashing",
+                "GoldenFiles",
+                fileName))
+            .TrimEnd('\r', '\n');
 }

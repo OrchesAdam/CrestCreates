@@ -10,5 +10,6 @@ public enum DescriptorKind
     Form = 5,
     HumanTask = 6,
     DynamicApiEndpoint = 7,
-    McpTool = 8
+    McpTool = 8,
+    AgentTool = 9
 }

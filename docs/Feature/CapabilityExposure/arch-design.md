@@ -590,23 +590,25 @@ EnumerateContractTypes, CreateMethodKey, BuildQueryProperties, IsNullableType
 
 ## 10. MCP Tool Projection
 
-**Not yet implemented.** The intended architecture (Track 3 in Section 4) projects `CapabilityDescriptor` instances into MCP tool surfaces:
+**Implemented in Phase 8e.** Explicit generated MCP Tool descriptors resolve and
+capture a Capability plus exact Schemas during eager startup, then invoke only
+the captured descriptor overload of `ICapabilityDispatcher` with
+`InvocationSource.Mcp`.
 
-1. A tool projection descriptor maps a capability to an MCP tool definition (name, description, JSON Schema for parameters derived from the capability's input schema).
-2. An MCP server bridge receives tool invocation requests and translates them into `ICapabilityDispatcher.DispatchAsync(descriptor, InvocationSource.Mcp, input, ...)`.
-3. The result is mapped back to the MCP tool response format.
-
-No source generator, attribute (`[McpTool]` or similar), or runtime bridge currently exists. The `InvocationSource.Mcp` value is reserved.
+Architecture and hosting boundaries are documented in
+`docs/Feature/MCP/arc-design.md`.
 
 ## 11. Agent Tool Projection
 
-**Not yet implemented.** The intended architecture follows the same pattern as MCP but for Agent invocation:
+**Implemented in Phase 8f.** Agent Tools remain independent from MCP and the
+Agent Control Plane. Explicit generated descriptors are projected into an
+immutable provider-neutral discovery snapshot. Invocation applies trusted Agent
+roles/origin, canonical logical-call identity, lease/fencing, approval, budget,
+and governance audit before dispatching the captured Capability with
+`InvocationSource.Agent`.
 
-1. An agent tool projection descriptor maps a capability to an agent tool specification.
-2. The agent runtime bridge calls `ICapabilityDispatcher.DispatchAsync(descriptor, InvocationSource.Agent, input, ...)`.
-3. The result feeds back into the agent's decision loop.
-
-The `InvocationSource.Agent` value is reserved. No implementation exists.
+Provider SDK adapters and a planner loop remain outside the projection runtime.
+See `docs/superpowers/specs/2026-07-16-phase-8f-agent-tool-projection-design.md`.
 
 ## 12. Projection Registry and Generated Bindings
 

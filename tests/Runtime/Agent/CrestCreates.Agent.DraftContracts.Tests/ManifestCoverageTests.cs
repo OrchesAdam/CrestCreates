@@ -24,6 +24,7 @@ public class ManifestCoverageTests
         kinds.Should().Contain(DescriptorKind.HumanTask);
         kinds.Should().Contain(DescriptorKind.Schema);
         kinds.Should().Contain(DescriptorKind.Workflow);
+        kinds.Should().NotContain(DescriptorKind.AgentTool);
     }
 
     [Fact]

@@ -3,6 +3,7 @@ using System.Text.Json;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Mcp;
 using CrestCreates.Schema;
 using CrestCreates.Schema.Abstractions;
@@ -196,7 +197,7 @@ public sealed class McpToolInvokerTests
             Id = "mcp-tool:orders.get",
             Name = "Get order",
             Version = 1,
-            Capability = new McpCapabilityReference("orders.get", 1),
+            Capability = new CapabilityProjectionReference("orders.get", 1),
             ToolName = "orders.get",
             Description = "Gets order."
         };

@@ -77,6 +77,18 @@ public sealed class OutputParserTests
     }
 
     [Fact]
+    public void AgentTool_descriptor_kind_remains_outside_authoring_allowlist()
+    {
+        var json = BuildOutputJsonWithItem("AgentTool", "agent-tool:orders.lookup", "Create");
+
+        var result = _parser.Parse(json, _validContext);
+
+        result.Status.Should().Be(DescriptorAuthoringStatus.Blocked);
+        result.Diagnostics.Should().Contain(d =>
+            d.Code == DescriptorAuthoringDiagnosticCodes.UnknownDescriptorKind);
+    }
+
+    [Fact]
     public void UnsupportedOperation_Returns_Blocked()
     {
         var json = BuildOutputJsonWithItem("HumanTask", "ht_1", "Remove");

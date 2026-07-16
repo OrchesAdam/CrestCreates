@@ -1,5 +1,6 @@
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Abstractions.DescriptorRelationship;
 using CrestCreates.Metadata.Mcp;
 using FluentAssertions;
@@ -17,7 +18,7 @@ public sealed class McpToolRelationshipExtractorTests
             Id = "mcp-tool:orders.get",
             Name = "Get order",
             Version = 2,
-            Capability = new McpCapabilityReference(
+            Capability = new CapabilityProjectionReference(
                 "orders.get", 3, VersionSelectionMode.Exact),
             ToolName = "orders.get",
             Description = "Gets one order."

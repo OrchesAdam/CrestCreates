@@ -1,5 +1,6 @@
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Mcp;
 using FluentAssertions;
 using Xunit;
@@ -19,7 +20,7 @@ public sealed class McpToolDescriptorValidatorTests
         int version)
     {
         var descriptor = ValidDescriptor(
-            capability: new McpCapabilityReference(
+            capability: new CapabilityProjectionReference(
                 "orders.get",
                 version,
                 selectionMode));
@@ -33,7 +34,7 @@ public sealed class McpToolDescriptorValidatorTests
     public void Validate_expected_contract_hash_fails()
     {
         var descriptor = ValidDescriptor(
-            capability: new McpCapabilityReference(
+            capability: new CapabilityProjectionReference(
                 "orders.get",
                 1,
                 VersionSelectionMode.Exact,
@@ -97,7 +98,7 @@ public sealed class McpToolDescriptorValidatorTests
             Id = "mcp-tool:orders.get",
             Name = "Get order",
             Version = 1,
-            Capability = new McpCapabilityReference(
+            Capability = new CapabilityProjectionReference(
                 "orders.get", 0, VersionSelectionMode.Latest),
             ToolName = "orders.get",
             Description = "Gets one order.",
@@ -114,12 +115,12 @@ public sealed class McpToolDescriptorValidatorTests
         string name = "Get order MCP tool",
         string description = "Gets one order.",
         string toolName = "orders.get",
-        McpCapabilityReference? capability = null) => new()
+        CapabilityProjectionReference? capability = null) => new()
     {
         Id = id,
         Name = name,
         Version = 1,
-        Capability = capability ?? new McpCapabilityReference(
+        Capability = capability ?? new CapabilityProjectionReference(
                 "orders.get",
                 0,
                 VersionSelectionMode.Latest),

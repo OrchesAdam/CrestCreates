@@ -15,6 +15,7 @@ public static class DescriptorKindNames
     public const string HumanTask = "HumanTask";
     public const string DynamicApiEndpoint = "DynamicApiEndpoint";
     public const string McpTool = "McpTool";
+    public const string AgentTool = "AgentTool";
 
     /// <summary>
     /// Converts a <see cref="DescriptorKind"/> to its canonical string representation.
@@ -29,6 +30,7 @@ public static class DescriptorKindNames
         DescriptorKind.HumanTask => HumanTask,
         DescriptorKind.DynamicApiEndpoint => DynamicApiEndpoint,
         DescriptorKind.McpTool => McpTool,
+        DescriptorKind.AgentTool => AgentTool,
         DescriptorKind.Unknown => throw new InvalidOperationException($"Canonical string not defined for {nameof(DescriptorKind)}.{nameof(DescriptorKind.Unknown)}."),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown DescriptorKind")
     };

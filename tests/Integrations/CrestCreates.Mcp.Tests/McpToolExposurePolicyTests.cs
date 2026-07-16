@@ -1,5 +1,6 @@
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Mcp;
 using FluentAssertions;
 using Xunit;
@@ -16,7 +17,7 @@ public sealed class McpToolExposurePolicyTests
             Id = "mcp-tool:orders.get",
             Name = "Get order",
             Version = 1,
-            Capability = new McpCapabilityReference("orders.get", 1),
+            Capability = new CapabilityProjectionReference("orders.get", 1),
             ToolName = "orders.get",
             Description = "Gets order."
         };

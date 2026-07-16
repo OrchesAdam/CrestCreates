@@ -9,6 +9,7 @@ public static class RelationshipRoles
     public const string PayloadSchema   = "PayloadSchema";
     public const string VariableSchema  = "VariableSchema";
     public const string CapabilityStep  = "CapabilityStep";
+    public const string Capability      = "Capability";
     public const string HumanTaskStep   = "HumanTaskStep";
     public const string SubWorkflowStep = "SubWorkflowStep";
     public const string Outcome         = "Outcome";

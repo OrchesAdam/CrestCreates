@@ -1,5 +1,6 @@
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Abstractions.Registry;
 using CrestCreates.Metadata.Mcp;
 using CrestCreates.Metadata.Registry;
@@ -35,7 +36,7 @@ public sealed class McpToolRegistryTests
         Name = "Get order",
         Version = version,
         State = state,
-        Capability = new McpCapabilityReference(
+        Capability = new CapabilityProjectionReference(
             "orders.get", version, VersionSelectionMode.Exact),
         ToolName = toolName,
         Description = "Gets one order."

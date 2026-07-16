@@ -34,6 +34,7 @@ public static class MetadataServiceCollectionExtensions
 
         services.AddSingleton<IDescriptorRelationshipExtractor, SchemaRelationshipExtractor>();
         services.AddSingleton<IDescriptorRelationshipExtractor, WorkflowRelationshipExtractor>();
+        services.AddSingleton<IDescriptorRelationshipExtractor, AgentToolRelationshipExtractor>();
 
         return services;
     }

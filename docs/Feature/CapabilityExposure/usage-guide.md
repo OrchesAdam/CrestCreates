@@ -293,13 +293,18 @@ This guarantee is verified by the `AuthorizationFailureE2ETests` — a pipeline 
 
 ## 10. Exposing Capabilities as MCP Tools
 
-Not yet implemented. Reserved for Track 3.
+Implemented by the independent Phase 8e MCP vertical slice. Use explicit
+`[McpToolSpec]` authoring and `AddCrestMcpToolProjection()`; see
+`docs/Feature/MCP/usage-guide.md`.
 
 ---
 
 ## 11. Exposing Capabilities as Agent Tools
 
-Not yet implemented. Reserved for Track 3.
+Implemented by the independent Phase 8f Agent Tools vertical slice. Use explicit
+`[AgentToolSpec]` authoring, register `AddCrestAgentTools()` plus Host-owned
+governance adapters, and invoke through `IAgentToolInvoker`; see
+`docs/Feature/AgentTools/usage-guide.md`.
 
 ---
 

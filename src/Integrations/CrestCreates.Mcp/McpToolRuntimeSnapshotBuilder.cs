@@ -5,6 +5,7 @@ using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Abstractions.Registry;
 using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.DescriptorCapability;
@@ -107,7 +108,7 @@ public sealed class McpToolRuntimeSnapshotBuilder
         }
     }
 
-    private CapabilityDescriptor ResolveCapability(McpCapabilityReference reference)
+    private CapabilityDescriptor ResolveCapability(CapabilityProjectionReference reference)
     {
         var capability = reference.SelectionMode switch
         {
