@@ -72,6 +72,31 @@ public sealed class AgentToolGovernanceAuditorTests
     }
 
     [Fact]
+    public async Task FinalizationState_TransitionsFromNotFinalizedToFinalized()
+    {
+        var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();
+        var context = GovernanceTestData.Context();
+        var handle = await auditor.RecordPreDispatchAsync(
+            GovernanceTestData.PreDispatch(context));
+        var finalization = Finalization(
+            handle.AuditId,
+            context,
+            AgentToolBudgetReservationState.Committed,
+            AgentToolGovernanceAttemptFinalState.Completed,
+            AgentToolInvocationTerminalState.Completed);
+
+        var before = await auditor.GetFinalizationStateAsync(handle.AuditId);
+        var persisted = await auditor.FinalizeAsync(finalization);
+        var after = await auditor.GetFinalizationStateAsync(handle.AuditId);
+
+        before.Status.Should().Be(AgentToolGovernanceFinalizationStatus.NotFinalized);
+        before.Record.Should().BeNull();
+        persisted.Status.Should().Be(AgentToolGovernanceFinalizationStatus.Finalized);
+        persisted.Record.Should().Be(finalization);
+        after.Should().Be(persisted);
+    }
+
+    [Fact]
     public async Task BudgetCommitted_InvocationIndeterminate_IsRepresentable()
     {
         var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();

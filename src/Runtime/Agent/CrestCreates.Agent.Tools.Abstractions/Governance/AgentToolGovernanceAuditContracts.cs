@@ -110,6 +110,20 @@ public sealed record AgentToolGovernanceFinalizationRecord
     public required string ReasonCode { get; init; }
 }
 
+public enum AgentToolGovernanceFinalizationStatus
+{
+    Unknown = 0,
+    NotFinalized = 1,
+    Finalized = 2
+}
+
+public sealed record AgentToolGovernanceFinalizationResult
+{
+    public required AgentToolGovernanceFinalizationStatus Status { get; init; }
+
+    public AgentToolGovernanceFinalizationRecord? Record { get; init; }
+}
+
 public interface IAgentToolGovernanceAuditor
 {
     ValueTask RecordDecisionAsync(
@@ -120,7 +134,11 @@ public interface IAgentToolGovernanceAuditor
         AgentToolGovernancePreDispatchRecord record,
         CancellationToken cancellationToken = default);
 
-    ValueTask FinalizeAsync(
+    ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(
         AgentToolGovernanceFinalizationRecord record,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
+        string auditId,
         CancellationToken cancellationToken = default);
 }

@@ -64,7 +64,8 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 if (entry.DispatchStarted)
                 {
                     entry.Indeterminate = true;
-                    entry.ActiveLease = null;
+                    entry.LastReasonCode = "post_dispatch_lease_expired";
+                    ClearLease(entry, active, AttemptTerminalState.Indeterminate);
                     return ValueTask.FromResult(Result(AgentToolInvocationAcquireStatus.Indeterminate));
                 }
                 _leaseKeys.Remove(active.LeaseId);
@@ -143,7 +144,8 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         {
             if (IsSameTerminalTransition(lease, AttemptTerminalState.Completed, out var terminalEntry))
             {
-                if (!Equivalent(terminalEntry.CompletedOutcome, request.Outcome))
+                if (!Equivalent(terminalEntry.CompletedOutcome, request.Outcome)
+                    || !MatchesPreparationIdentity(terminalEntry, request))
                     throw new InvalidOperationException("The completed invocation outcome cannot be changed.");
                 return ValueTask.CompletedTask;
             }
@@ -151,18 +153,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             if (IsSameTerminalTransition(lease, AttemptTerminalState.CompletionPending, out var pendingEntry))
             {
                 if (!Equivalent(pendingEntry.CompletionPendingOutcome, request.Outcome)
-                    || !string.Equals(
-                        pendingEntry.CompletionPendingAuditId,
-                        request.AuditId,
-                        StringComparison.Ordinal)
-                    || !string.Equals(
-                        pendingEntry.CompletionPendingBudgetReservationId,
-                        request.BudgetReservationId,
-                        StringComparison.Ordinal)
-                    || !string.Equals(
-                        pendingEntry.CompletionPendingReasonCode,
-                        request.ReasonCode,
-                        StringComparison.Ordinal))
+                    || !MatchesPreparationIdentity(pendingEntry, request))
                     throw new InvalidOperationException("The pending completion outcome cannot be changed.");
                 return ValueTask.CompletedTask;
             }
@@ -234,17 +225,9 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             if (IsSameTerminalTransition(lease, AttemptTerminalState.Indeterminate, out _))
                 return ValueTask.CompletedTask;
 
-            if (IsSameTerminalTransition(lease, AttemptTerminalState.Completed, out var completedEntry))
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.Completed, out _))
             {
-                completedEntry.CompletedOutcome = null;
-                completedEntry.CompletionPendingPreparedAt = null;
-                completedEntry.CompletionPendingAuditId = null;
-                completedEntry.CompletionPendingBudgetReservationId = null;
-                completedEntry.CompletionPendingReasonCode = null;
-                completedEntry.Indeterminate = true;
-                completedEntry.LastReasonCode = reasonCode;
-                completedEntry.LastAttemptState = AttemptTerminalState.Indeterminate;
-                return ValueTask.CompletedTask;
+                throw new InvalidOperationException("A published completion cannot be changed.");
             }
 
             if (IsSameTerminalTransition(lease, AttemptTerminalState.CompletionPending, out var pendingEntry))
@@ -364,6 +347,19 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 or AgentToolInvocationOutcomeKind.InternalContractFailure))
             throw new ArgumentException("The completion outcome is not publishable.", nameof(outcome));
     }
+
+    private static bool MatchesPreparationIdentity(
+        Entry entry,
+        AgentToolInvocationPrepareCompletionRequest request)
+        => string.Equals(entry.CompletionPendingAuditId, request.AuditId, StringComparison.Ordinal)
+            && string.Equals(
+                entry.CompletionPendingBudgetReservationId,
+                request.BudgetReservationId,
+                StringComparison.Ordinal)
+            && string.Equals(
+                entry.CompletionPendingReasonCode,
+                request.ReasonCode,
+                StringComparison.Ordinal);
 
     private AgentToolInvocationCompletionResult GetCompletionResult(
         AgentToolInvocationLease lease,

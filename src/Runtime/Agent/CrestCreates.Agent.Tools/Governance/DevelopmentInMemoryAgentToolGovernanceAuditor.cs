@@ -120,7 +120,7 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
         }
     }
 
-    public ValueTask FinalizeAsync(
+    public ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(
         AgentToolGovernanceFinalizationRecord record,
         CancellationToken cancellationToken = default)
     {
@@ -145,7 +145,7 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
             {
                 if (Equivalent(entry.Finalization, record))
                 {
-                    return ValueTask.CompletedTask;
+                    return ValueTask.FromResult(Finalized(entry.Finalization));
                 }
 
                 throw new InvalidOperationException(
@@ -153,9 +153,42 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
             }
 
             entry.Finalization = record;
-            return ValueTask.CompletedTask;
+            return ValueTask.FromResult(Finalized(record));
         }
     }
+
+    public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
+        string auditId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(auditId);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            if (!_entriesById.TryGetValue(auditId, out var entry))
+            {
+                return ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
+                {
+                    Status = AgentToolGovernanceFinalizationStatus.Unknown
+                });
+            }
+
+            return ValueTask.FromResult(entry.Finalization is null
+                ? new AgentToolGovernanceFinalizationResult
+                {
+                    Status = AgentToolGovernanceFinalizationStatus.NotFinalized
+                }
+                : Finalized(entry.Finalization));
+        }
+    }
+
+    private static AgentToolGovernanceFinalizationResult Finalized(
+        AgentToolGovernanceFinalizationRecord record)
+        => new()
+        {
+            Status = AgentToolGovernanceFinalizationStatus.Finalized,
+            Record = record
+        };
 
     private static void ValidatePreDispatch(AgentToolGovernancePreDispatchRecord record)
     {

@@ -50,6 +50,46 @@ public sealed class AgentToolInvocationGateTests
         replay.Status.Should().Be(AgentToolInvocationAcquireStatus.Completed);
     }
 
+    [Fact]
+    public async Task PublishedCompletion_CannotBeChangedToIndeterminate()
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var request = Request("fingerprint-a");
+        var acquired = await gate.AcquireAsync(request);
+        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!)).Should().BeTrue();
+        var outcome = Success();
+        await gate.PrepareCompletionAsync(acquired.Lease!, PrepareRequest(outcome));
+        await gate.PublishCompletionAsync(acquired.Lease!);
+
+        var act = () => gate.MarkIndeterminateAsync(
+            acquired.Lease!,
+            "late_uncertainty").AsTask();
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        var replay = await gate.AcquireAsync(request);
+        replay.Status.Should().Be(AgentToolInvocationAcquireStatus.Completed);
+        replay.CompletedOutcome.Should().BeSameAs(outcome);
+    }
+
+    [Fact]
+    public async Task PublishedCompletion_RejectsConflictingPrepareIdentity()
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var acquired = await gate.AcquireAsync(Request("fingerprint-a"));
+        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!)).Should().BeTrue();
+        var outcome = Success();
+        await gate.PrepareCompletionAsync(
+            acquired.Lease!,
+            PrepareRequest(outcome, auditId: "audit-1", reservationId: "reservation-1"));
+        await gate.PublishCompletionAsync(acquired.Lease!);
+
+        var act = () => gate.PrepareCompletionAsync(
+            acquired.Lease!,
+            PrepareRequest(outcome, auditId: "audit-2", reservationId: "reservation-2")).AsTask();
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
     [Theory]
     [InlineData(AgentToolInvocationOutcomeKind.UnknownTool)]
     [InlineData(AgentToolInvocationOutcomeKind.InvalidRequest)]
@@ -110,8 +150,11 @@ public sealed class AgentToolInvocationGateTests
         time.Advance(TimeSpan.FromSeconds(11));
 
         var retry = await gate.AcquireAsync(Request("fingerprint-a"));
+        var state = await gate.GetCompletionStateAsync(first.Lease!);
 
         retry.Status.Should().Be(AgentToolInvocationAcquireStatus.Indeterminate);
+        state.State.Should().Be(AgentToolInvocationCompletionState.Indeterminate);
+        state.ReasonCode.Should().Be("post_dispatch_lease_expired");
     }
 
     private static AgentToolInvocationAcquireRequest Request(string fingerprint)
@@ -128,11 +171,14 @@ public sealed class AgentToolInvocationGateTests
         };
 
     private static AgentToolInvocationPrepareCompletionRequest PrepareRequest(
-        AgentToolInvocationOutcome outcome)
+        AgentToolInvocationOutcome outcome,
+        string? auditId = null,
+        string reservationId = "reservation")
         => new()
         {
             Outcome = outcome,
-            BudgetReservationId = "reservation",
+            AuditId = auditId,
+            BudgetReservationId = reservationId,
             ReasonCode = "completed"
         };
 

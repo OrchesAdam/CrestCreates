@@ -955,10 +955,14 @@ public interface IAgentToolInvocationGate
 
     ValueTask PrepareCompletionAsync(
         AgentToolInvocationLease lease,
-        AgentToolInvocationOutcome outcome,
+        AgentToolInvocationPrepareCompletionRequest request,
         CancellationToken cancellationToken = default);
 
-    ValueTask PublishCompletionAsync(
+    ValueTask<AgentToolInvocationCompletionResult> PublishCompletionAsync(
+        AgentToolInvocationLease lease,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolInvocationCompletionResult> GetCompletionStateAsync(
         AgentToolInvocationLease lease,
         CancellationToken cancellationToken = default);
 
@@ -1011,6 +1015,8 @@ reconciliation.
   or mismatched lease;
 - an expired or fenced Worker cannot complete, release, or overwrite newer
   state;
+- Published Completed is monotonic: MarkIndeterminate rejects it, and repeated
+  Prepare validates Outcome, AuditId, Budget ReservationId, and reason code;
 - the invoker calls `TryMarkDispatchStartedAsync` as the final operation before
   Dispatcher and may dispatch only when it returns true;
 - this transition atomically records that the attempt may have entered business
@@ -1270,8 +1276,12 @@ public interface IAgentToolGovernanceAuditor
         AgentToolGovernancePreDispatchRecord record,
         CancellationToken cancellationToken = default);
 
-    ValueTask FinalizeAsync(
+    ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(
         AgentToolGovernanceFinalizationRecord record,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
+        string auditId,
         CancellationToken cancellationToken = default);
 }
 ```
@@ -1344,10 +1354,14 @@ settle Budget
 
 If preparation fails after the Dispatcher, the audit checkpoint is finalized as
 `Budget=Committed`, `Attempt=Indeterminate`, `Invocation=Indeterminate` when
-possible. If Required audit finalization fails, the same Indeterminate
-finalization is attempted and publication is skipped. If publication is
-uncertain, the gate remains fenced and reconciliation is authoritative; no
-concurrent request may observe a Completed replay during the pending window.
+possible. If Required audit finalization throws, the Invoker queries the AuditId:
+a content-equivalent Completed record continues to publication, a confirmed
+Indeterminate record moves the pending Gate to Indeterminate, and an absent,
+unknown, or conflicting record leaves CompletionPending unchanged for
+reconciliation. It never guesses Indeterminate after an unconfirmed audit
+response. If publication is uncertain, the gate remains fenced and
+reconciliation is authoritative; no concurrent request may observe a Completed
+replay during the pending window.
 A publish response-loss path must never blindly convert a possibly persisted
 Completed state to Indeterminate.
 

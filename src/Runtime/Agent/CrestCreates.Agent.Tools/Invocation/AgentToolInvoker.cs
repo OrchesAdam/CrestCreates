@@ -528,29 +528,39 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
 
         if (auditHandle is not null)
         {
+            var completedFinalization = Finalization(
+                auditHandle, auditContext, lease, settled, true,
+                AgentToolGovernanceAttemptFinalState.Completed,
+                AgentToolInvocationTerminalState.Completed,
+                outcome,
+                "dispatch_completed");
+            AgentToolAuditConfirmation confirmation;
             try
             {
-                await _audit.FinalizeAsync(
-                    Finalization(
-                        auditHandle, auditContext, lease, settled, true,
-                        AgentToolGovernanceAttemptFinalState.Completed,
-                        AgentToolInvocationTerminalState.Completed,
-                        outcome,
-                        "dispatch_completed"),
+                var result = await _audit.FinalizeAsync(
+                    completedFinalization,
                     CancellationToken.None).ConfigureAwait(false);
+                confirmation = ResolveAuditConfirmation(result, completedFinalization);
             }
             catch
             {
-                if (entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required)
+                confirmation = await QueryAuditConfirmationAsync(
+                    auditHandle.AuditId,
+                    completedFinalization).ConfigureAwait(false);
+            }
+
+            if (entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required)
+            {
+                if (confirmation == AgentToolAuditConfirmation.Indeterminate)
                 {
-                    return await FinishIndeterminateWithSettledBudgetAsync(
-                            auditHandle,
-                            auditContext,
-                            lease,
-                            settled,
-                            "post_dispatch_audit_failure")
-                        .ConfigureAwait(false);
+                    await MarkIndeterminateIgnoringFailureAsync(
+                        lease,
+                        "post_dispatch_audit_indeterminate").ConfigureAwait(false);
+                    return Indeterminate("post_dispatch_audit_indeterminate");
                 }
+
+                if (confirmation != AgentToolAuditConfirmation.Completed)
+                    return Indeterminate("post_dispatch_audit_uncertain");
             }
         }
 
@@ -558,28 +568,44 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             var published = await _invocations.PublishCompletionAsync(lease, CancellationToken.None)
                 .ConfigureAwait(false);
-            if (published.State == AgentToolInvocationCompletionState.Completed
-                && EquivalentOutcome(published.Outcome, outcome))
+            if (MatchesPreparedCompletion(
+                    published,
+                    outcome,
+                    auditHandle?.AuditId,
+                    settled.ReservationId,
+                    "dispatch_completed"))
                 return outcome;
 
             return Indeterminate("invocation_publish_failure");
         }
         catch
         {
-            return await ResolvePublishUncertaintyAsync(lease, outcome).ConfigureAwait(false);
+            return await ResolvePublishUncertaintyAsync(
+                lease,
+                outcome,
+                auditHandle?.AuditId,
+                settled.ReservationId,
+                "dispatch_completed").ConfigureAwait(false);
         }
     }
 
     private async ValueTask<AgentToolInvocationOutcome> ResolvePublishUncertaintyAsync(
         AgentToolInvocationLease lease,
-        AgentToolInvocationOutcome expectedOutcome)
+        AgentToolInvocationOutcome expectedOutcome,
+        string? expectedAuditId,
+        string expectedReservationId,
+        string expectedReasonCode)
     {
         try
         {
             var state = await _invocations.GetCompletionStateAsync(lease, CancellationToken.None)
                 .ConfigureAwait(false);
-            return state.State == AgentToolInvocationCompletionState.Completed
-                && EquivalentOutcome(state.Outcome, expectedOutcome)
+            return MatchesPreparedCompletion(
+                    state,
+                    expectedOutcome,
+                    expectedAuditId,
+                    expectedReservationId,
+                    expectedReasonCode)
                 ? expectedOutcome
                 : Indeterminate("invocation_publish_uncertain");
         }
@@ -587,6 +613,90 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             return Indeterminate("invocation_publish_uncertain");
         }
+    }
+
+    private async ValueTask<AgentToolAuditConfirmation> QueryAuditConfirmationAsync(
+        string auditId,
+        AgentToolGovernanceFinalizationRecord expected)
+    {
+        try
+        {
+            var result = await _audit.GetFinalizationStateAsync(auditId, CancellationToken.None)
+                .ConfigureAwait(false);
+            return ResolveAuditConfirmation(result, expected);
+        }
+        catch
+        {
+            return AgentToolAuditConfirmation.Unconfirmed;
+        }
+    }
+
+    private static AgentToolAuditConfirmation ResolveAuditConfirmation(
+        AgentToolGovernanceFinalizationResult result,
+        AgentToolGovernanceFinalizationRecord expected)
+    {
+        if (result.Status != AgentToolGovernanceFinalizationStatus.Finalized
+            || result.Record is null)
+            return AgentToolAuditConfirmation.Unconfirmed;
+        if (EquivalentFinalization(result.Record, expected))
+            return AgentToolAuditConfirmation.Completed;
+        return SameFinalizationIdentity(result.Record, expected)
+            && result.Record.AttemptState == AgentToolGovernanceAttemptFinalState.Indeterminate
+            && result.Record.InvocationState is null or AgentToolInvocationTerminalState.Indeterminate
+            ? AgentToolAuditConfirmation.Indeterminate
+            : AgentToolAuditConfirmation.Unconfirmed;
+    }
+
+    private static bool MatchesPreparedCompletion(
+        AgentToolInvocationCompletionResult result,
+        AgentToolInvocationOutcome expectedOutcome,
+        string? expectedAuditId,
+        string expectedReservationId,
+        string expectedReasonCode)
+        => result.State == AgentToolInvocationCompletionState.Completed
+            && EquivalentOutcome(result.Outcome, expectedOutcome)
+            && result.PreparedAt.HasValue
+            && string.Equals(result.AuditId, expectedAuditId, StringComparison.Ordinal)
+            && string.Equals(
+                result.BudgetReservationId,
+                expectedReservationId,
+                StringComparison.Ordinal)
+            && string.Equals(result.ReasonCode, expectedReasonCode, StringComparison.Ordinal);
+
+    private static bool EquivalentFinalization(
+        AgentToolGovernanceFinalizationRecord left,
+        AgentToolGovernanceFinalizationRecord right)
+        => SameFinalizationIdentity(left, right)
+            && left.Context.Equals(right.Context)
+            && left.DispatchStarted == right.DispatchStarted
+            && left.BudgetReservation.Equals(right.BudgetReservation)
+            && left.AttemptState == right.AttemptState
+            && left.InvocationState == right.InvocationState
+            && EquivalentOutcome(left.Outcome, right.Outcome)
+            && string.Equals(left.ReasonCode, right.ReasonCode, StringComparison.Ordinal);
+
+    private static bool SameFinalizationIdentity(
+        AgentToolGovernanceFinalizationRecord left,
+        AgentToolGovernanceFinalizationRecord right)
+        => string.Equals(left.AuditId, right.AuditId, StringComparison.Ordinal)
+            && left.Context.LogicalInvocationKey == right.Context.LogicalInvocationKey
+            && string.Equals(left.Context.AttemptId, right.Context.AttemptId, StringComparison.Ordinal)
+            && string.Equals(
+                left.Context.InvocationFingerprint,
+                right.Context.InvocationFingerprint,
+                StringComparison.Ordinal)
+            && string.Equals(left.Lease.LeaseId, right.Lease.LeaseId, StringComparison.Ordinal)
+            && left.Lease.FencingToken == right.Lease.FencingToken
+            && string.Equals(
+                left.BudgetReservation.ReservationId,
+                right.BudgetReservation.ReservationId,
+                StringComparison.Ordinal);
+
+    private enum AgentToolAuditConfirmation
+    {
+        Unconfirmed,
+        Completed,
+        Indeterminate
     }
 
     private static bool EquivalentOutcome(
