@@ -163,6 +163,14 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             if (IsSameTerminalTransition(lease, AttemptTerminalState.Indeterminate, out _))
                 return ValueTask.CompletedTask;
 
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.Completed, out var completedEntry))
+            {
+                completedEntry.CompletedOutcome = null;
+                completedEntry.Indeterminate = true;
+                completedEntry.LastAttemptState = AttemptTerminalState.Indeterminate;
+                return ValueTask.CompletedTask;
+            }
+
             var (entry, _) = GetCurrent(lease);
             entry.Indeterminate = true;
             ClearLease(entry, lease, AttemptTerminalState.Indeterminate);

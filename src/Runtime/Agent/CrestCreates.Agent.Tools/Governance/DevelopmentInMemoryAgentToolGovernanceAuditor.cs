@@ -65,7 +65,17 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
                         record.Context.AttemptId,
                         StringComparison.Ordinal)))
             {
-                return ValueTask.CompletedTask;
+                var existing = _decisions.First(item =>
+                    item.Context.LogicalInvocationKey == record.Context.LogicalInvocationKey
+                    && string.Equals(
+                        item.Context.AttemptId,
+                        record.Context.AttemptId,
+                        StringComparison.Ordinal));
+                if (Equivalent(existing, record))
+                    return ValueTask.CompletedTask;
+
+                throw new InvalidOperationException(
+                    "The governance decision conflicts with the existing AttemptId.");
             }
 
             _decisions.Add(record);
@@ -180,13 +190,40 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
             || record.Outcome is null
             || string.IsNullOrWhiteSpace(record.Outcome.Code)
             || string.IsNullOrWhiteSpace(record.ReasonCode)
-            || record.Outcome.Kind == AgentToolInvocationOutcomeKind.Unknown)
+            || record.Outcome.Kind == AgentToolInvocationOutcomeKind.Unknown
+            || !IsDecisionConsistent(record))
         {
             throw new ArgumentException(
                 "Governance decision record has an invalid contract.",
                 nameof(record));
         }
     }
+
+    private static bool IsDecisionConsistent(AgentToolGovernanceDecisionRecord record)
+        => record.Decision switch
+        {
+            AgentToolGovernanceDecisionState.Denied => record.Outcome.Kind is
+                AgentToolInvocationOutcomeKind.UnknownTool
+                or AgentToolInvocationOutcomeKind.InvalidRequest
+                or AgentToolInvocationOutcomeKind.GovernanceDenied,
+            AgentToolGovernanceDecisionState.Indeterminate =>
+                record.Outcome.Kind == AgentToolInvocationOutcomeKind.InvocationIndeterminate,
+            _ => false
+        };
+
+    private static bool Equivalent(
+        AgentToolGovernanceDecisionRecord left,
+        AgentToolGovernanceDecisionRecord right)
+        => left.Context.LogicalInvocationKey == right.Context.LogicalInvocationKey
+            && string.Equals(left.Context.AttemptId, right.Context.AttemptId, StringComparison.Ordinal)
+            && left.Context.Equals(right.Context)
+            && string.Equals(left.Context.InvocationFingerprint, right.Context.InvocationFingerprint, StringComparison.Ordinal)
+            && left.Decision == right.Decision
+            && left.Outcome.Kind == right.Outcome.Kind
+            && string.Equals(left.Outcome.Code, right.Outcome.Code, StringComparison.Ordinal)
+            && string.Equals(left.Outcome.Message, right.Outcome.Message, StringComparison.Ordinal)
+            && left.Outcome.Issues.SequenceEqual(right.Outcome.Issues)
+            && string.Equals(left.ReasonCode, right.ReasonCode, StringComparison.Ordinal);
 
     private static void ValidateFinalization(AgentToolGovernanceFinalizationRecord record)
     {

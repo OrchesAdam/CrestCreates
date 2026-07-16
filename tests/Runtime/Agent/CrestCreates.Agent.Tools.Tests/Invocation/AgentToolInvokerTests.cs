@@ -3,9 +3,11 @@ using CrestCreates.Agent.Abstractions;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
+using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.AgentTool;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Schema;
+using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
 
@@ -103,6 +105,37 @@ public sealed class AgentToolInvokerTests
     }
 
     [Fact]
+    public async Task Invoke_InvalidSchemaTypesRemainInvalidRequestsAndDoNotEscape()
+    {
+        var harness = CreateHarness(withIntInputSchema: true);
+        using var document = JsonDocument.Parse("{\"Value\":\"not-an-int\"}");
+
+        var outcome = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName, document.RootElement.Clone()));
+
+        outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvalidRequest);
+        harness.Dispatcher.CallCount.Should().Be(0);
+        harness.Budget.ReserveCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("{\"value\":1}")]
+    [InlineData("{\"value\":true}")]
+    [InlineData("{\"value\":{\"nested\":1}}")]
+    public async Task Invoke_NoInputToolRejectsNonStringArgumentsWithoutFingerprintException(string rawArguments)
+    {
+        var harness = CreateHarness();
+        using var document = JsonDocument.Parse(rawArguments);
+
+        var outcome = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName, document.RootElement.Clone()));
+
+        outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvalidRequest);
+        harness.Dispatcher.CallCount.Should().Be(0);
+        harness.Budget.ReserveCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task Invoke_UncertainDispatchFenceReleasesBudgetButMarksInvocationIndeterminate()
     {
         var gate = new ThrowingDispatchFenceGate();
@@ -147,6 +180,74 @@ public sealed class AgentToolInvokerTests
                 && finalization.InvocationState == AgentToolInvocationTerminalState.Indeterminate);
     }
 
+    [Fact]
+    public async Task Invoke_CompletionFailureDoesNotFinalizeCompletedAuditOrReplay()
+    {
+        var gate = new ThrowingCompletionGate();
+        var harness = CreateHarness(invocationGate: gate);
+
+        var first = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+        var retry = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+        harness.Auditor!.Finalizations.Should().BeEmpty();
+        harness.Dispatcher.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Invoke_DeniedBudgetWithReservationIsIndeterminateAndCannotRetry()
+    {
+        var harness = CreateHarness(malformedDeniedBudget: true);
+
+        var first = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+        var retry = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+        harness.Dispatcher.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Invoke_RequiredDecisionAuditFailureReturnsStableAuditFailure()
+    {
+        var harness = CreateHarness(
+            requiredAudit: true,
+            audit: new ThrowingAuditor(throwDecision: true));
+        harness.Execution.CurrentValue = harness.Execution.CurrentValue! with
+        {
+            AgentRoles = new HashSet<string>(StringComparer.Ordinal) { "viewer" }
+        };
+
+        var outcome = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.GovernanceDenied);
+        outcome.Code.Should().Be("AGENT_TOOL_AUDIT_FAILURE");
+        harness.Dispatcher.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Invoke_RequiredPostDispatchAuditFailureFencesPreviouslyCompletedAttempt()
+    {
+        var harness = CreateHarness(
+            requiredAudit: true,
+            audit: new FinalizationThrowingAuditor());
+
+        var first = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+        var retry = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+        harness.Dispatcher.CallCount.Should().Be(1);
+    }
+
     private static Harness CreateHarness(
         CapabilityExecutionResult? dispatcherResult = null,
         bool automaticAllowed = false,
@@ -154,20 +255,34 @@ public sealed class AgentToolInvokerTests
         IAgentToolGovernanceAuditor? audit = null,
         IAgentToolInvocationGate? invocationGate = null,
         bool throwOnBudgetReserve = false,
-        bool throwOnBudgetFinalize = false)
+        bool throwOnBudgetFinalize = false,
+        bool malformedDeniedBudget = false,
+        bool withIntInputSchema = false)
     {
-        var capability = AgentToolRuntimeTestFixture.Capability("invoker-capability");
+        var inputSchema = withIntInputSchema
+            ? AgentToolRuntimeTestFixture.Schema("invoker-input-schema")
+            : null;
+        var capability = AgentToolRuntimeTestFixture.Capability(
+            "invoker-capability",
+            input: inputSchema is null
+                ? null
+                : new VersionedDescriptorRef<SchemaDescriptor>(inputSchema.Id, inputSchema.Version));
         var source = AgentToolRuntimeTestFixture.Tool(
             $"invoker-tool-{Guid.NewGuid():N}",
             capability.Id,
             $"invoker.tool.{Guid.NewGuid():N}",
             audit: requiredAudit ? AgentToolAuditMode.Required : AgentToolAuditMode.BestEffort);
         var tool = automaticAllowed ? CopyWithAutomaticSelection(source) : source;
-        AgentToolRuntimeTestFixture.RegisterNoPayloadBinding(tool);
+        if (withIntInputSchema)
+            AgentToolRuntimeTestFixture.RegisterInputDtoBinding(tool);
+        else
+            AgentToolRuntimeTestFixture.RegisterNoPayloadBinding(tool);
         var snapshot = AgentToolRuntimeTestFixture.SnapshotBuilder(
-                AgentToolRuntimeTestFixture.BuildToolRegistry(tool),
-                AgentToolRuntimeTestFixture.BuildCapabilityRegistry(capability),
-                AgentToolRuntimeTestFixture.BuildSchemaRegistry())
+            AgentToolRuntimeTestFixture.BuildToolRegistry(tool),
+            AgentToolRuntimeTestFixture.BuildCapabilityRegistry(capability),
+            inputSchema is null
+                ? AgentToolRuntimeTestFixture.BuildSchemaRegistry()
+                : AgentToolRuntimeTestFixture.BuildSchemaRegistry(inputSchema))
             .Build();
         var snapshots = new AgentToolRuntimeSnapshotProvider();
         snapshots.Publish(snapshot);
@@ -185,7 +300,10 @@ public sealed class AgentToolInvokerTests
         };
         var dispatcher = new RecordingDispatcher(
             dispatcherResult ?? CapabilityExecutionResult.Success(null, TimeSpan.Zero));
-        var budget = new RecordingBudgetGate(throwOnBudgetReserve, throwOnBudgetFinalize);
+        var budget = new RecordingBudgetGate(
+            throwOnBudgetReserve,
+            throwOnBudgetFinalize,
+            malformedDeniedBudget);
         var inMemoryAudit = audit is null
             ? new DevelopmentInMemoryAgentToolGovernanceAuditor()
             : null;
@@ -288,7 +406,10 @@ public sealed class AgentToolInvokerTests
             => throw new NotSupportedException();
     }
 
-    private sealed class RecordingBudgetGate(bool throwOnReserve, bool throwOnFinalize) : IAgentToolBudgetGate
+    private sealed class RecordingBudgetGate(
+        bool throwOnReserve,
+        bool throwOnFinalize,
+        bool malformedDenied) : IAgentToolBudgetGate
     {
         private AgentToolBudgetReservation? _reservation;
 
@@ -312,6 +433,15 @@ public sealed class AgentToolInvokerTests
                 MaxCallsPerExecution = request.Context.Governance.Budget.MaxCallsPerExecution,
                 State = AgentToolBudgetReservationState.Reserved
             };
+            if (malformedDenied)
+            {
+                return ValueTask.FromResult(new AgentToolBudgetReserveResult
+                {
+                    Status = AgentToolBudgetReserveStatus.Denied,
+                    Reservation = _reservation,
+                    ReasonCode = "budget_denied"
+                });
+            }
             return ValueTask.FromResult(new AgentToolBudgetReserveResult
             {
                 Status = AgentToolBudgetReserveStatus.Reserved,
@@ -331,12 +461,14 @@ public sealed class AgentToolInvokerTests
         }
     }
 
-    private sealed class ThrowingAuditor : IAgentToolGovernanceAuditor
+    private sealed class ThrowingAuditor(bool throwDecision = false) : IAgentToolGovernanceAuditor
     {
         public ValueTask RecordDecisionAsync(
             AgentToolGovernanceDecisionRecord record,
             CancellationToken cancellationToken = default)
-            => ValueTask.CompletedTask;
+            => throwDecision
+                ? ValueTask.FromException(new InvalidOperationException("decision audit unavailable"))
+                : ValueTask.CompletedTask;
 
         public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
             AgentToolGovernancePreDispatchRecord record,
@@ -384,6 +516,65 @@ public sealed class AgentToolInvokerTests
             MarkIndeterminateCount++;
             await _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
         }
+
+        public ValueTask ReleaseLeaseAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.ReleaseLeaseAsync(lease, cancellationToken);
+    }
+
+    private sealed class FinalizationThrowingAuditor : IAgentToolGovernanceAuditor
+    {
+        public ValueTask RecordDecisionAsync(
+            AgentToolGovernanceDecisionRecord record,
+            CancellationToken cancellationToken = default)
+            => ValueTask.CompletedTask;
+
+        public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+            AgentToolGovernancePreDispatchRecord record,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(new AgentToolGovernanceAuditHandle
+            {
+                AuditId = "audit-test",
+                AcceptedAt = DateTimeOffset.UtcNow
+            });
+
+        public ValueTask FinalizeAsync(
+            AgentToolGovernanceFinalizationRecord record,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromException(new InvalidOperationException("finalization unavailable"));
+    }
+
+    private sealed class ThrowingCompletionGate : IAgentToolInvocationGate
+    {
+        private readonly DevelopmentInMemoryAgentToolInvocationGate _inner = new();
+
+        public ValueTask<AgentToolInvocationAcquireResult> AcquireAsync(
+            AgentToolInvocationAcquireRequest request,
+            CancellationToken cancellationToken = default)
+            => _inner.AcquireAsync(request, cancellationToken);
+
+        public ValueTask<AgentToolInvocationLease> RenewAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.RenewAsync(lease, cancellationToken);
+
+        public ValueTask<bool> TryMarkDispatchStartedAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.TryMarkDispatchStartedAsync(lease, cancellationToken);
+
+        public ValueTask CompleteAsync(
+            AgentToolInvocationLease lease,
+            AgentToolInvocationOutcome outcome,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromException(new InvalidOperationException("completion unavailable"));
+
+        public ValueTask MarkIndeterminateAsync(
+            AgentToolInvocationLease lease,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+            => _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
 
         public ValueTask ReleaseLeaseAsync(
             AgentToolInvocationLease lease,

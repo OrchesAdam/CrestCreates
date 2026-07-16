@@ -162,6 +162,19 @@ internal static class AgentToolRuntimeTestFixture
             SerializeOutputAsync = static (_, _, _) => ValueTask.FromResult<JsonElement?>(null)
         });
     }
+
+    public static void RegisterInputDtoBinding(AgentCapabilityToolDescriptor tool)
+    {
+        AgentToolJsonContractRegistry.RegisterInputType(typeof(TestDto));
+        AgentToolBindingRegistry.Register(new AgentToolBindingContract
+        {
+            ToolDescriptorId = tool.Id,
+            ToolDescriptorVersion = tool.Version,
+            InputType = typeof(TestDto),
+            BindInputAsync = static (_, _, _) => ValueTask.FromResult<object?>(new TestDto()),
+            SerializeOutputAsync = static (_, _, _) => ValueTask.FromResult<JsonElement?>(null)
+        });
+    }
 }
 
 internal sealed class TestDescriptorProvider<TDescriptor> : IDescriptorProvider<TDescriptor>

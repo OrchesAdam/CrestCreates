@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection review fixes)
+Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection second review fixes)
 
 ## Purpose
 
@@ -58,6 +58,17 @@ Key decisions:
 - Generator governance diagnostics reject only statically provable unsafe
   combinations; Unknown side-effect semantics are resolved at startup after
   CapabilityKind is known.
+- Role/Selection filtering occurs before argument traversal. Rejection audit
+  fingerprints use a safe fallback when raw arguments do not match a business
+  Schema and therefore never let invalid JSON types escape as runtime errors.
+- Invocation terminal persistence precedes Required governance completion audit;
+  completion/audit failure fences the invocation as Indeterminate and prevents
+  Completed replay. In-memory gates can reconcile a just-completed attempt to
+  Indeterminate.
+- Budget Denied is trusted only when Reservation is null and ReasonCode is
+  present; malformed Denied shapes remain Indeterminate. Decision Audit is
+  content-idempotent and conflicts on same-attempt differences, and Required
+  Decision Audit failures return stable audit-failure outcomes.
 - Title is model-facing behavior and participates in Agent Tool ContractHash.
 - Actual completion requires a linux-x64 NativeAOT publish-link-run fixture;
   provider adapters, a planner/runtime loop, durable stores, approval workflow,
@@ -93,7 +104,7 @@ Completed:
   output validation, governance settlement, and terminal replay.
 
 Focused verification on 2026-07-16: Metadata 467/467, Schema 42/42,
-Agent.Tools abstractions 16/16, Agent.Tools runtime 58/58, Agent E2E 1/1,
+Agent.Tools abstractions 16/16, Agent.Tools runtime 67/67, Agent E2E 1/1,
 Agent NativeAOT 1/1, MCP runtime 63/63, MCP E2E 1/1, MCP NativeAOT 1/1,
 dependency boundaries 40/40, CodeGenerator 277/277, and Control Plane 484/484.
 The Runtime solution build also completes with 0 errors and now includes the

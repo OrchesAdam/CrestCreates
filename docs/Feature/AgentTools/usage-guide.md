@@ -121,7 +121,9 @@ Budget reservation/finalization responses that are uncertain are represented as
 `Unknown` in the governance checkpoint and keep the logical invocation fenced.
 Role, selection, schema, approval, and known budget denials are recorded through
 the governance decision-audit contract without inventing an Approval or Budget
-reservation.
+reservation. A Required audit policy also covers these decision records; if the
+record cannot be accepted, the call returns a stable audit-failure outcome and
+does not dispatch.
 
 ## 5. Development adapters
 

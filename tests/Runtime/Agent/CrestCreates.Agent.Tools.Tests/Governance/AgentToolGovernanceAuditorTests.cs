@@ -133,6 +133,39 @@ public sealed class AgentToolGovernanceAuditorTests
     }
 
     [Fact]
+    public async Task DecisionConflict_WithSameAttemptIdCannotBeSilentlyIgnored()
+    {
+        var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();
+        var context = GovernanceTestData.AuditContext(GovernanceTestData.Context());
+        var record = new AgentToolGovernanceDecisionRecord
+        {
+            Context = context,
+            Decision = AgentToolGovernanceDecisionState.Denied,
+            Outcome = new AgentToolInvocationOutcome
+            {
+                Kind = AgentToolInvocationOutcomeKind.GovernanceDenied,
+                Code = "AGENT_TOOL_ROLE_DENIED",
+                Message = "blocked"
+            },
+            ReasonCode = "role_denied"
+        };
+        await auditor.RecordDecisionAsync(record);
+
+        var act = async () => await auditor.RecordDecisionAsync(record with
+        {
+            Decision = AgentToolGovernanceDecisionState.Indeterminate,
+            Outcome = record.Outcome with
+            {
+                Kind = AgentToolInvocationOutcomeKind.InvocationIndeterminate,
+                Code = "AGENT_TOOL_INVOCATION_INDETERMINATE"
+            },
+            ReasonCode = "budget_failure"
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
     public async Task UnknownAuditMode_FailsClosedBeforeAuditIdIsIssued()
     {
         var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();

@@ -1167,7 +1167,10 @@ Reserve returns either a known denial or a Reserved value containing
 ReservationId, AttemptId, fingerprint, units, and provisional capacity facts.
 Unknown/malformed results fail closed. Finalize includes ReservationId,
 AttemptId, fingerprint, requested terminal state, and reason code; the adapter
-must return the persisted terminal state and reject an identity mismatch.
+must return the persisted terminal state and reject an identity mismatch. A
+known denial is exactly `Status=Denied`, a null Reservation, and a non-empty
+ReasonCode; a Denied result carrying a reservation or lacking its reason is
+Indeterminate and must retain the invocation lease for reconciliation.
 
 Reservation belongs to an attempt, not the logical invocation:
 
@@ -1257,7 +1260,11 @@ Budget reservation. An uncertain approval/budget result is recorded as an
 Indeterminate decision and fences the logical invocation. If budget settlement
 cannot be confirmed, `FinalizeAsync` uses `BudgetReservationState.Unknown` with
 `InvocationState=Indeterminate`; it must still close or durably mark the audit
-checkpoint for reconciliation.
+checkpoint for reconciliation. Decision records are idempotent only when the
+same AttemptId and full decision content match; a conflicting decision is an
+adapter error. `AuditMode.Required` applies to Decision Audit too: if its
+record cannot be accepted, the facade returns a stable audit-failure outcome
+and never dispatches.
 
 Pre-dispatch succeeds only after its record is durably accepted according to
 the adapter's advertised guarantee. Finalize uses AuditId plus the logical and
@@ -1298,6 +1305,13 @@ AND budget settlement is known
 AND required governance finalization succeeded
 AND the invocation terminal outcome was persisted
 ```
+
+The completion protocol persists the Invocation terminal outcome before
+finalizing the Required governance audit. If terminal persistence fails, no
+Completed audit is written. If Required audit finalization fails after the
+terminal write, the Invocation Gate must fence/reconcile that just-completed
+attempt to Indeterminate; the returned result and subsequent Acquire must not
+expose a Completed replay until both records are known consistent.
 
 Invocation is Indeterminate when any critical result becomes unknown after
 DispatchStarted.
