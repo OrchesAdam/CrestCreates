@@ -115,12 +115,64 @@ public sealed class AgentToolInvocationGateTests
     {
         var gate = new DevelopmentInMemoryAgentToolInvocationGate();
         var acquired = await gate.AcquireAsync(Request("fingerprint-a"));
-        await gate.ReleaseLeaseAsync(acquired.Lease!);
-        await gate.ReleaseLeaseAsync(acquired.Lease!);
+        await gate.AbandonUnrecordedLeaseAsync(acquired.Lease!, "pre_dispatch_unrecorded");
+        await gate.AbandonUnrecordedLeaseAsync(acquired.Lease!, "pre_dispatch_unrecorded");
 
         var conflict = await gate.AcquireAsync(Request("fingerprint-b"));
 
         conflict.Status.Should().Be(AgentToolInvocationAcquireStatus.Conflict);
+    }
+
+    [Fact]
+    public async Task PreparedRelease_PersistsAuditAndBudgetUntilPublished()
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var acquired = await gate.AcquireAsync(Request("fingerprint-a"));
+        var request = new AgentToolInvocationPrepareReleaseRequest
+        {
+            AuditId = "audit-1",
+            BudgetReservationId = "reservation-1",
+            ReasonCode = "pre_dispatch_audit_failure"
+        };
+
+        await gate.PrepareReleaseAsync(acquired.Lease!, request);
+        var pending = await gate.GetReleaseStateAsync(acquired.Lease!);
+
+        pending.State.Should().Be(AgentToolInvocationReleaseState.ReleasePending);
+        pending.PreparedAt.Should().NotBeNull();
+        pending.AuditId.Should().Be("audit-1");
+        pending.BudgetReservationId.Should().Be("reservation-1");
+        pending.ReasonCode.Should().Be(request.ReasonCode);
+        (await gate.AcquireAsync(Request("fingerprint-a"))).Status
+            .Should().Be(AgentToolInvocationAcquireStatus.InProgress);
+
+        var published = await gate.PublishReleaseAsync(acquired.Lease!);
+        published.State.Should().Be(AgentToolInvocationReleaseState.Released);
+        published.AuditId.Should().Be("audit-1");
+        published.BudgetReservationId.Should().Be("reservation-1");
+    }
+
+    [Fact]
+    public async Task PublishedRelease_CannotBeChangedAndAllowsNextAttempt()
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var request = Request("fingerprint-a");
+        var acquired = await gate.AcquireAsync(request);
+        await gate.PrepareReleaseAsync(acquired.Lease!, new AgentToolInvocationPrepareReleaseRequest
+        {
+            BudgetReservationId = "reservation-1",
+            ReasonCode = "pre_dispatch_audit_failure"
+        });
+        await gate.PublishReleaseAsync(acquired.Lease!);
+
+        var act = () => gate.MarkIndeterminateAsync(
+            acquired.Lease!,
+            "late_uncertainty").AsTask();
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        var next = await gate.AcquireAsync(request);
+        next.Status.Should().Be(AgentToolInvocationAcquireStatus.Acquired);
+        next.Lease!.AttemptId.Should().NotBe(acquired.Lease!.AttemptId);
     }
 
     [Fact]

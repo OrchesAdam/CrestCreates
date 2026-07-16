@@ -87,13 +87,38 @@ public enum AgentToolInvocationReleaseState
     Indeterminate = 3
 }
 
+public sealed record AgentToolInvocationPrepareReleaseRequest
+{
+    public string? AuditId { get; init; }
+
+    public required string BudgetReservationId { get; init; }
+
+    public required string ReasonCode { get; init; }
+}
+
 public sealed record AgentToolInvocationReleaseResult
 {
     public required AgentToolInvocationReleaseState State { get; init; }
 
     public DateTimeOffset? PreparedAt { get; init; }
 
+    public string? AuditId { get; init; }
+
+    public string? BudgetReservationId { get; init; }
+
     public string? ReasonCode { get; init; }
+}
+
+/// <summary>
+/// Abandons a lease only when no governance pre-dispatch checkpoint was
+/// accepted. A recorded attempt must use PrepareRelease/PublishRelease.
+/// </summary>
+public interface IAgentToolInvocationLeaseAbandoner
+{
+    ValueTask AbandonUnrecordedLeaseAsync(
+        AgentToolInvocationLease lease,
+        string reasonCode,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IAgentToolInvocationGate
@@ -125,7 +150,7 @@ public interface IAgentToolInvocationGate
 
     ValueTask PrepareReleaseAsync(
         AgentToolInvocationLease lease,
-        string reasonCode,
+        AgentToolInvocationPrepareReleaseRequest request,
         CancellationToken cancellationToken = default);
 
     ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
@@ -141,7 +166,4 @@ public interface IAgentToolInvocationGate
         string reasonCode,
         CancellationToken cancellationToken = default);
 
-    ValueTask ReleaseLeaseAsync(
-        AgentToolInvocationLease lease,
-        CancellationToken cancellationToken = default);
 }

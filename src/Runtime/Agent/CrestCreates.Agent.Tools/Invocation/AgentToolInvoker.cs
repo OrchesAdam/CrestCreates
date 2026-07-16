@@ -18,6 +18,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     private readonly ICurrentUser _currentUser;
     private readonly ITenantContext _tenant;
     private readonly IAgentToolInvocationGate _invocations;
+    private readonly IAgentToolInvocationLeaseAbandoner _leaseAbandoner;
     private readonly IAgentToolApprovalGate _approval;
     private readonly IAgentToolBudgetGate _budget;
     private readonly IAgentToolGovernanceAuditor _audit;
@@ -33,6 +34,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         ICurrentUser currentUser,
         ITenantContext tenant,
         IAgentToolInvocationGate invocations,
+        IAgentToolInvocationLeaseAbandoner leaseAbandoner,
         IAgentToolApprovalGate approval,
         IAgentToolBudgetGate budget,
         IAgentToolGovernanceAuditor audit,
@@ -47,6 +49,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         _currentUser = currentUser;
         _tenant = tenant;
         _invocations = invocations;
+        _leaseAbandoner = leaseAbandoner;
         _approval = approval;
         _budget = budget;
         _audit = audit;
@@ -209,7 +212,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await ReleaseLeaseBestEffortAsync(lease).ConfigureAwait(false);
+            await AbandonUnrecordedLeaseBestEffortAsync(lease, "approval_cancelled").ConfigureAwait(false);
             throw;
         }
         catch
@@ -233,7 +236,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 AgentToolGovernanceDecisionState.Denied,
                 GovernanceDenied("AGENT_TOOL_APPROVAL_DENIED"),
                 "approval_denied").ConfigureAwait(false);
-            await ReleaseLeaseBestEffortAsync(lease).ConfigureAwait(false);
+            await AbandonUnrecordedLeaseBestEffortAsync(lease, "approval_denied").ConfigureAwait(false);
             return !recorded && entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required
                 ? GovernanceDenied("AGENT_TOOL_AUDIT_FAILURE")
                 : GovernanceDenied("AGENT_TOOL_APPROVAL_DENIED");
@@ -285,7 +288,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 AgentToolGovernanceDecisionState.Denied,
                 decisionOutcome,
                 reason).ConfigureAwait(false);
-            await ReleaseLeaseBestEffortAsync(lease).ConfigureAwait(false);
+            await AbandonUnrecordedLeaseBestEffortAsync(lease, "budget_denied").ConfigureAwait(false);
             return !recorded && entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required
                 ? GovernanceDenied("AGENT_TOOL_AUDIT_FAILURE")
                 : decisionOutcome;
@@ -884,7 +887,12 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             await _invocations.PrepareReleaseAsync(
                 lease,
-                reasonCode,
+                new AgentToolInvocationPrepareReleaseRequest
+                {
+                    AuditId = auditHandle?.AuditId,
+                    BudgetReservationId = released.ReservationId,
+                    ReasonCode = reasonCode
+                },
                 CancellationToken.None).ConfigureAwait(false);
         }
         catch
@@ -938,18 +946,32 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             var published = await _invocations.PublishReleaseAsync(lease, CancellationToken.None)
                 .ConfigureAwait(false);
-            return MatchesPublishedRelease(published, reasonCode)
+            return MatchesPublishedRelease(
+                published,
+                auditHandle?.AuditId,
+                released.ReservationId,
+                reasonCode)
                 ? outcome
-                : await ResolveReleaseUncertaintyAsync(lease, reasonCode).ConfigureAwait(false);
+                : await ResolveReleaseUncertaintyAsync(
+                    lease,
+                    auditHandle?.AuditId,
+                    released.ReservationId,
+                    reasonCode).ConfigureAwait(false);
         }
         catch
         {
-            return await ResolveReleaseUncertaintyAsync(lease, reasonCode).ConfigureAwait(false);
+            return await ResolveReleaseUncertaintyAsync(
+                lease,
+                auditHandle?.AuditId,
+                released.ReservationId,
+                reasonCode).ConfigureAwait(false);
         }
     }
 
     private async ValueTask<AgentToolInvocationOutcome> ResolveReleaseUncertaintyAsync(
         AgentToolInvocationLease lease,
+        string? auditId,
+        string reservationId,
         string reasonCode)
     {
         try
@@ -957,6 +979,9 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             var state = await _invocations.GetReleaseStateAsync(lease, CancellationToken.None)
                 .ConfigureAwait(false);
             if (state.State == AgentToolInvocationReleaseState.Released
+                && state.PreparedAt.HasValue
+                && string.Equals(state.AuditId, auditId, StringComparison.Ordinal)
+                && string.Equals(state.BudgetReservationId, reservationId, StringComparison.Ordinal)
                 && string.Equals(state.ReasonCode, reasonCode, StringComparison.Ordinal))
             {
                 return Outcome(
@@ -983,8 +1008,13 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
 
     private static bool MatchesPublishedRelease(
         AgentToolInvocationReleaseResult result,
+        string? auditId,
+        string reservationId,
         string reasonCode)
         => result.State == AgentToolInvocationReleaseState.Released
+            && result.PreparedAt.HasValue
+            && string.Equals(result.AuditId, auditId, StringComparison.Ordinal)
+            && string.Equals(result.BudgetReservationId, reservationId, StringComparison.Ordinal)
             && string.Equals(result.ReasonCode, reasonCode, StringComparison.Ordinal);
 
     private async ValueTask<AgentToolInvocationOutcome> FinishFenceIndeterminateAsync(
@@ -1040,7 +1070,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             await MarkIndeterminateIgnoringFailureAsync(lease, "budget_settlement_failure").ConfigureAwait(false);
             return Indeterminate("budget_settlement_failure");
         }
-        await ReleaseLeaseBestEffortAsync(lease).ConfigureAwait(false);
+        await AbandonUnrecordedLeaseBestEffortAsync(lease, reasonCode).ConfigureAwait(false);
         return null;
     }
 
@@ -1319,16 +1349,23 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     private static AgentToolInvocationOutcome Indeterminate(string reasonCode)
         => Outcome(AgentToolInvocationOutcomeKind.InvocationIndeterminate, "AGENT_TOOL_INVOCATION_INDETERMINATE", "The invocation result is uncertain and must not be retried automatically.");
 
-    private async ValueTask ReleaseLeaseBestEffortAsync(AgentToolInvocationLease lease)
+    private async ValueTask AbandonUnrecordedLeaseBestEffortAsync(
+        AgentToolInvocationLease lease,
+        string reasonCode)
     {
-        _ = await TryReleaseLeaseAsync(lease).ConfigureAwait(false);
+        _ = await TryAbandonUnrecordedLeaseAsync(lease, reasonCode).ConfigureAwait(false);
     }
 
-    private async ValueTask<bool> TryReleaseLeaseAsync(AgentToolInvocationLease lease)
+    private async ValueTask<bool> TryAbandonUnrecordedLeaseAsync(
+        AgentToolInvocationLease lease,
+        string reasonCode)
     {
         try
         {
-            await _invocations.ReleaseLeaseAsync(lease, CancellationToken.None).ConfigureAwait(false);
+            await _leaseAbandoner.AbandonUnrecordedLeaseAsync(
+                lease,
+                reasonCode,
+                CancellationToken.None).ConfigureAwait(false);
             return true;
         }
         catch

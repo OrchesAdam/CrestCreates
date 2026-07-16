@@ -24,6 +24,7 @@ internal sealed class AgentToolProjectionHostedService : IHostedService
             return Task.CompletedTask;
 
         Require<IAgentToolInvocationGate>(AgentToolStartupDiagnosticCodes.MissingInvocationGate);
+        Require<IAgentToolInvocationLeaseAbandoner>(AgentToolStartupDiagnosticCodes.MissingInvocationLeaseAbandoner);
         Require<IAgentToolApprovalGate>(AgentToolStartupDiagnosticCodes.MissingApprovalGate);
         Require<IAgentToolBudgetGate>(AgentToolStartupDiagnosticCodes.MissingBudgetGate);
         Require<IAgentToolGovernanceAuditor>(AgentToolStartupDiagnosticCodes.MissingGovernanceAuditor);

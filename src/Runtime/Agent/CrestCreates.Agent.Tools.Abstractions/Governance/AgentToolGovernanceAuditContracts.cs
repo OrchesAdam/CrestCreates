@@ -108,10 +108,11 @@ public sealed record AgentToolGovernanceFinalizationRecord
     public required AgentToolInvocationOutcome Outcome { get; init; }
 
     /// <summary>
-    /// Data-minimizing integrity digest of Outcome. It is not a confidentiality
-    /// mechanism; durable auditors may persist it instead of full output.
+    /// Required data-minimizing integrity digest of Outcome. It is not a
+    /// confidentiality mechanism; durable auditors may persist it instead of
+    /// full output.
     /// </summary>
-    public string? OutcomeHash { get; init; }
+    public required string OutcomeHash { get; init; }
 
     public required string ReasonCode { get; init; }
 }

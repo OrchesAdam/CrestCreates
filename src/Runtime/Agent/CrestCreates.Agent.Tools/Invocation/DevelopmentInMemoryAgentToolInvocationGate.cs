@@ -8,7 +8,7 @@ namespace CrestCreates.Agent.Tools;
 /// or distributed exactly-once guarantee.
 /// </summary>
 public sealed class DevelopmentInMemoryAgentToolInvocationGate
-    : IAgentToolInvocationGate
+    : IAgentToolInvocationGate, IAgentToolInvocationLeaseAbandoner
 {
     private readonly object _sync = new();
     private readonly Dictionary<AgentToolLogicalInvocationKey, Entry> _entries = [];
@@ -80,6 +80,8 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 entry.LastTerminalLease = null;
                 entry.LastAttemptState = AttemptTerminalState.None;
                 entry.ReleasePendingPreparedAt = null;
+                entry.ReleasePendingAuditId = null;
+                entry.ReleasePendingBudgetReservationId = null;
                 entry.ReleasePendingReasonCode = null;
             }
 
@@ -219,22 +221,24 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
 
     public ValueTask PrepareReleaseAsync(
         AgentToolInvocationLease lease,
-        string reasonCode,
+        AgentToolInvocationPrepareReleaseRequest request,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.BudgetReservationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ReasonCode);
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
             if (IsSameTerminalTransition(lease, AttemptTerminalState.ReleasePending, out var pending))
             {
-                EnsureReleaseReason(pending, reasonCode);
+                EnsureReleaseRequest(pending, request);
                 return ValueTask.CompletedTask;
             }
 
             if (IsSameTerminalTransition(lease, AttemptTerminalState.Released, out var released))
             {
-                EnsureReleaseReason(released, reasonCode);
+                EnsureReleaseRequest(released, request);
                 return ValueTask.CompletedTask;
             }
 
@@ -242,8 +246,10 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             if (entry.DispatchStarted)
                 throw new InvalidOperationException("A dispatched invocation cannot prepare release.");
             entry.ReleasePendingPreparedAt = _timeProvider.GetUtcNow();
-            entry.ReleasePendingReasonCode = reasonCode;
-            entry.LastReasonCode = reasonCode;
+            entry.ReleasePendingAuditId = request.AuditId;
+            entry.ReleasePendingBudgetReservationId = request.BudgetReservationId;
+            entry.ReleasePendingReasonCode = request.ReasonCode;
+            entry.LastReasonCode = request.ReasonCode;
             ClearLease(entry, lease, AttemptTerminalState.ReleasePending);
             return ValueTask.CompletedTask;
         }
@@ -315,8 +321,12 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 return ValueTask.CompletedTask;
             }
 
-            if (IsSameTerminalTransition(lease, AttemptTerminalState.ReleasePending, out var releasedEntry)
-                || IsSameTerminalTransition(lease, AttemptTerminalState.Released, out releasedEntry))
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.Released, out _))
+            {
+                throw new InvalidOperationException("A published release cannot be changed.");
+            }
+
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.ReleasePending, out var releasedEntry))
             {
                 releasedEntry.Indeterminate = true;
                 releasedEntry.LastReasonCode = reasonCode;
@@ -332,10 +342,12 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         }
     }
 
-    public ValueTask ReleaseLeaseAsync(
+    public ValueTask AbandonUnrecordedLeaseAsync(
         AgentToolInvocationLease lease,
+        string reasonCode,
         CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
@@ -345,6 +357,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             var (entry, _) = GetCurrent(lease);
             if (entry.DispatchStarted)
                 throw new InvalidOperationException("A dispatched invocation lease cannot be released.");
+            entry.LastReasonCode = reasonCode;
             ClearLease(entry, lease, AttemptTerminalState.Released);
             return ValueTask.CompletedTask;
         }
@@ -474,17 +487,26 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         {
             State = state,
             PreparedAt = entry.ReleasePendingPreparedAt,
+            AuditId = entry.ReleasePendingAuditId,
+            BudgetReservationId = entry.ReleasePendingBudgetReservationId,
             ReasonCode = entry.ReleasePendingReasonCode ?? entry.LastReasonCode
         };
 
-    private static void EnsureReleaseReason(Entry entry, string reasonCode)
+    private static void EnsureReleaseRequest(
+        Entry entry,
+        AgentToolInvocationPrepareReleaseRequest request)
     {
-        if (!string.Equals(
+        if (!string.Equals(entry.ReleasePendingAuditId, request.AuditId, StringComparison.Ordinal)
+            || !string.Equals(
+                entry.ReleasePendingBudgetReservationId,
+                request.BudgetReservationId,
+                StringComparison.Ordinal)
+            || !string.Equals(
                 entry.ReleasePendingReasonCode ?? entry.LastReasonCode,
-                reasonCode,
+                request.ReasonCode,
                 StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("The release reason cannot be changed.");
+            throw new InvalidOperationException("The pending release identity cannot be changed.");
         }
     }
 
@@ -520,6 +542,8 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         public string? CompletionPendingBudgetReservationId { get; set; }
         public string? CompletionPendingReasonCode { get; set; }
         public DateTimeOffset? ReleasePendingPreparedAt { get; set; }
+        public string? ReleasePendingAuditId { get; set; }
+        public string? ReleasePendingBudgetReservationId { get; set; }
         public string? ReleasePendingReasonCode { get; set; }
         public string? LastReasonCode { get; set; }
         public AgentToolInvocationLease? LastTerminalLease { get; set; }

@@ -139,6 +139,12 @@ public sealed class AgentToolAbstractionContractTests
                 Code = "AGENT_TOOL_POST_DISPATCH_FINALIZATION_FAILED",
                 Message = "The invocation result could not be determined."
             },
+            OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(new AgentToolInvocationOutcome
+            {
+                Kind = AgentToolInvocationOutcomeKind.InvocationIndeterminate,
+                Code = "AGENT_TOOL_POST_DISPATCH_FINALIZATION_FAILED",
+                Message = "The invocation result could not be determined."
+            }),
             ReasonCode = "PostDispatchAuditFailure"
         };
 

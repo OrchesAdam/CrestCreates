@@ -54,6 +54,8 @@ namespace CrestCreates.Agent.Tools.AotFixture
                 builder.Services.AddSingleton<ITenantContext, FixtureTenantContext>();
                 builder.Services.AddSingleton<IAgentExecutionContextAccessor, FixtureAgentExecutionContextAccessor>();
                 builder.Services.AddSingleton<IAgentToolInvocationGate, DevelopmentInMemoryAgentToolInvocationGate>();
+                builder.Services.AddSingleton<IAgentToolInvocationLeaseAbandoner>(provider =>
+                    (IAgentToolInvocationLeaseAbandoner)provider.GetRequiredService<IAgentToolInvocationGate>());
                 builder.Services.AddSingleton<IAgentToolBudgetGate, DevelopmentInMemoryAgentToolBudgetGate>();
                 builder.Services.AddSingleton<IAgentToolGovernanceAuditor, DevelopmentInMemoryAgentToolGovernanceAuditor>();
                 builder.Services.AddCapabilityRuntime();

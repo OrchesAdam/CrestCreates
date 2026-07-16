@@ -966,13 +966,31 @@ public interface IAgentToolInvocationGate
         AgentToolInvocationLease lease,
         CancellationToken cancellationToken = default);
 
+    ValueTask PrepareReleaseAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPrepareReleaseRequest request,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
+        AgentToolInvocationLease lease,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolInvocationReleaseResult> GetReleaseStateAsync(
+        AgentToolInvocationLease lease,
+        CancellationToken cancellationToken = default);
+
     ValueTask MarkIndeterminateAsync(
         AgentToolInvocationLease lease,
         string reasonCode,
         CancellationToken cancellationToken = default);
 
-    ValueTask ReleaseLeaseAsync(
+}
+
+public interface IAgentToolInvocationLeaseAbandoner
+{
+    ValueTask AbandonUnrecordedLeaseAsync(
         AgentToolInvocationLease lease,
+        string reasonCode,
         CancellationToken cancellationToken = default);
 }
 ```
@@ -1005,6 +1023,12 @@ Both success and deterministic business/contract failure are completed terminal
 outcomes. `Indeterminate` never auto-dispatches and requires explicit
 reconciliation.
 
+`PrepareReleaseAsync` persists the same recovery references as completion:
+`AuditId`, the settled `BudgetReservationId`, `PreparedAt`, and `ReasonCode`.
+This allows a durable reconciler to resume a crashed `ReleasePending` attempt
+without guessing which Audit or reservation it belongs to. Only
+`PublishReleaseAsync` makes the Released state visible to a new Acquire.
+
 Pre-dispatch release uses the same publication fence:
 
 ```text
@@ -1019,6 +1043,10 @@ audit transitions that fenced attempt to logical `Indeterminate`; a conflicting
 or otherwise unconfirmed Required audit leaves it pending for reconciliation.
 BestEffort may publish an unconfirmed release, but it still must not expose a
 new attempt before `PublishRelease` succeeds.
+Release publication confirmation requires `State=Released`, a non-null
+`PreparedAt`, and matching `AuditId`, `BudgetReservationId`, and `ReasonCode`;
+an unassociated or incomplete response is resolved through
+`GetReleaseStateAsync`.
 
 ### 13.1 Lease and fencing rules
 
@@ -1026,7 +1054,7 @@ new attempt before `PublishRelease` succeeds.
   new attempt ownership;
 - Renew, TryMarkDispatchStarted, PrepareCompletion, PublishCompletion,
   GetCompletionState, PrepareRelease, PublishRelease, GetReleaseState,
-  MarkIndeterminate, and ReleaseLease
+  MarkIndeterminate, and AbandonUnrecordedLease
   validate both LeaseId and FencingToken;
 - every transition is idempotent for the same valid lease and rejects a stale
   or mismatched lease;
@@ -1338,8 +1366,9 @@ Governance audit records metadata by default:
 - ReservationId, budget category/units, and settlement;
 - optional read-only `ObservedReservation` on a malformed budget decision so a
   reconciliation adapter can recover a returned ReservationId;
-- OutcomeHash, a canonical SHA-256 digest used to confirm terminal outcomes
-  without requiring durable storage of Message, Issues, or StructuredOutput;
+- required OutcomeHash, a canonical SHA-256 digest used to confirm terminal
+  outcomes without requiring durable storage of Message, Issues, or
+  StructuredOutput;
 - block/failure code, DispatchStarted, and terminal state.
 
 Full arguments/output are not recorded by default. `OutcomeHash` is a

@@ -518,12 +518,16 @@ public sealed class AgentToolInvokerTests
         var inMemoryAudit = audit is null
             ? new DevelopmentInMemoryAgentToolGovernanceAuditor()
             : null;
+        var gate = invocationGate ?? new DevelopmentInMemoryAgentToolInvocationGate();
+        var abandoner = gate as IAgentToolInvocationLeaseAbandoner
+            ?? throw new InvalidOperationException("The test gate must provide lease abandonment.");
         var invoker = new AgentToolInvoker(
             snapshots,
             execution,
             new TestCurrentUser(),
             new TestTenantContext(),
-            invocationGate ?? new DevelopmentInMemoryAgentToolInvocationGate(),
+            gate,
+            abandoner,
             new FailClosedAgentToolApprovalGate(),
             budget,
             audit ?? inMemoryAudit!,
@@ -708,7 +712,7 @@ public sealed class AgentToolInvokerTests
             });
     }
 
-    private sealed class ThrowingDispatchFenceGate : IAgentToolInvocationGate
+    private sealed class ThrowingDispatchFenceGate : IAgentToolInvocationGate, IAgentToolInvocationLeaseAbandoner
     {
         private readonly DevelopmentInMemoryAgentToolInvocationGate _inner = new();
 
@@ -747,9 +751,9 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask PrepareReleaseAsync(
             AgentToolInvocationLease lease,
-            string reasonCode,
+            AgentToolInvocationPrepareReleaseRequest request,
             CancellationToken cancellationToken = default)
-            => _inner.PrepareReleaseAsync(lease, reasonCode, cancellationToken);
+            => _inner.PrepareReleaseAsync(lease, request, cancellationToken);
 
         public ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
             AgentToolInvocationLease lease,
@@ -770,13 +774,14 @@ public sealed class AgentToolInvokerTests
             await _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
         }
 
-        public ValueTask ReleaseLeaseAsync(
+        public ValueTask AbandonUnrecordedLeaseAsync(
             AgentToolInvocationLease lease,
+            string reasonCode,
             CancellationToken cancellationToken = default)
-            => _inner.ReleaseLeaseAsync(lease, cancellationToken);
+            => _inner.AbandonUnrecordedLeaseAsync(lease, reasonCode, cancellationToken);
     }
 
-    private sealed class RejectingDispatchFenceGate : IAgentToolInvocationGate
+    private sealed class RejectingDispatchFenceGate : IAgentToolInvocationGate, IAgentToolInvocationLeaseAbandoner
     {
         private readonly DevelopmentInMemoryAgentToolInvocationGate _inner = new();
 
@@ -813,9 +818,9 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask PrepareReleaseAsync(
             AgentToolInvocationLease lease,
-            string reasonCode,
+            AgentToolInvocationPrepareReleaseRequest request,
             CancellationToken cancellationToken = default)
-            => _inner.PrepareReleaseAsync(lease, reasonCode, cancellationToken);
+            => _inner.PrepareReleaseAsync(lease, request, cancellationToken);
 
         public ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
             AgentToolInvocationLease lease,
@@ -833,10 +838,11 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
 
-        public ValueTask ReleaseLeaseAsync(
+        public ValueTask AbandonUnrecordedLeaseAsync(
             AgentToolInvocationLease lease,
+            string reasonCode,
             CancellationToken cancellationToken = default)
-            => _inner.ReleaseLeaseAsync(lease, cancellationToken);
+            => _inner.AbandonUnrecordedLeaseAsync(lease, reasonCode, cancellationToken);
     }
 
     private sealed class FinalizationThrowingAuditor : IAgentToolGovernanceAuditor
@@ -1074,7 +1080,7 @@ public sealed class AgentToolInvokerTests
             });
     }
 
-    private sealed class ThrowingCompletionGate : IAgentToolInvocationGate
+    private sealed class ThrowingCompletionGate : IAgentToolInvocationGate, IAgentToolInvocationLeaseAbandoner
     {
         private readonly DevelopmentInMemoryAgentToolInvocationGate _inner = new();
 
@@ -1120,9 +1126,9 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask PrepareReleaseAsync(
             AgentToolInvocationLease lease,
-            string reasonCode,
+            AgentToolInvocationPrepareReleaseRequest request,
             CancellationToken cancellationToken = default)
-            => _inner.PrepareReleaseAsync(lease, reasonCode, cancellationToken);
+            => _inner.PrepareReleaseAsync(lease, request, cancellationToken);
 
         public ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
             AgentToolInvocationLease lease,
@@ -1140,13 +1146,14 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
 
-        public ValueTask ReleaseLeaseAsync(
+        public ValueTask AbandonUnrecordedLeaseAsync(
             AgentToolInvocationLease lease,
+            string reasonCode,
             CancellationToken cancellationToken = default)
-            => _inner.ReleaseLeaseAsync(lease, cancellationToken);
+            => _inner.AbandonUnrecordedLeaseAsync(lease, reasonCode, cancellationToken);
     }
 
-    private sealed class PublishResponseLossGate : IAgentToolInvocationGate
+    private sealed class PublishResponseLossGate : IAgentToolInvocationGate, IAgentToolInvocationLeaseAbandoner
     {
         private readonly DevelopmentInMemoryAgentToolInvocationGate _inner = new();
 
@@ -1186,9 +1193,9 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask PrepareReleaseAsync(
             AgentToolInvocationLease lease,
-            string reasonCode,
+            AgentToolInvocationPrepareReleaseRequest request,
             CancellationToken cancellationToken = default)
-            => _inner.PrepareReleaseAsync(lease, reasonCode, cancellationToken);
+            => _inner.PrepareReleaseAsync(lease, request, cancellationToken);
 
         public ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
             AgentToolInvocationLease lease,
@@ -1206,13 +1213,14 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
 
-        public ValueTask ReleaseLeaseAsync(
+        public ValueTask AbandonUnrecordedLeaseAsync(
             AgentToolInvocationLease lease,
+            string reasonCode,
             CancellationToken cancellationToken = default)
-            => _inner.ReleaseLeaseAsync(lease, cancellationToken);
+            => _inner.AbandonUnrecordedLeaseAsync(lease, reasonCode, cancellationToken);
     }
 
-    private sealed class MismatchedPublishResultGate : IAgentToolInvocationGate
+    private sealed class MismatchedPublishResultGate : IAgentToolInvocationGate, IAgentToolInvocationLeaseAbandoner
     {
         private readonly DevelopmentInMemoryAgentToolInvocationGate _inner = new();
         private AgentToolInvocationOutcome? _outcome;
@@ -1260,9 +1268,9 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask PrepareReleaseAsync(
             AgentToolInvocationLease lease,
-            string reasonCode,
+            AgentToolInvocationPrepareReleaseRequest request,
             CancellationToken cancellationToken = default)
-            => _inner.PrepareReleaseAsync(lease, reasonCode, cancellationToken);
+            => _inner.PrepareReleaseAsync(lease, request, cancellationToken);
 
         public ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
             AgentToolInvocationLease lease,
@@ -1280,10 +1288,11 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
 
-        public ValueTask ReleaseLeaseAsync(
+        public ValueTask AbandonUnrecordedLeaseAsync(
             AgentToolInvocationLease lease,
+            string reasonCode,
             CancellationToken cancellationToken = default)
-            => _inner.ReleaseLeaseAsync(lease, cancellationToken);
+            => _inner.AbandonUnrecordedLeaseAsync(lease, reasonCode, cancellationToken);
     }
 
     private sealed class EmptyServiceProvider : IServiceProvider

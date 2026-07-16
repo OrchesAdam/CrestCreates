@@ -22,6 +22,7 @@ public static class AgentToolStartupDiagnosticCodes
     public const string InvalidRiskFloor = "ATP118";
     public const string UnsafeGovernance = "ATP119";
     public const string MissingInvocationGate = "ATP120";
+    public const string MissingInvocationLeaseAbandoner = "ATP126";
     public const string MissingApprovalGate = "ATP121";
     public const string MissingBudgetGate = "ATP122";
     public const string MissingGovernanceAuditor = "ATP123";
