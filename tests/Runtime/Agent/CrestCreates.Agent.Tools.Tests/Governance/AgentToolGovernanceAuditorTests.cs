@@ -59,13 +59,15 @@ public sealed class AgentToolGovernanceAuditorTests
 
         await auditor.FinalizeAsync(finalization);
         await auditor.FinalizeAsync(finalization);
+        var conflictingOutcome = finalization.Outcome with
+        {
+            Kind = AgentToolInvocationOutcomeKind.InternalContractFailure,
+            Code = "agent_tool_output_contract_failure"
+        };
         var conflicting = async () => await auditor.FinalizeAsync(finalization with
         {
-            Outcome = finalization.Outcome with
-            {
-                Kind = AgentToolInvocationOutcomeKind.InternalContractFailure,
-                Code = "agent_tool_output_contract_failure"
-            },
+            Outcome = conflictingOutcome,
+            OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(conflictingOutcome),
             ReasonCode = "output_contract_failure"
         });
 
@@ -105,7 +107,12 @@ public sealed class AgentToolGovernanceAuditorTests
             Outcome = finalization.Outcome with
             {
                 StructuredOutput = JsonDocument.Parse("{\"value\":2}").RootElement.Clone()
-            }
+            },
+            OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(
+                finalization.Outcome with
+                {
+                    StructuredOutput = JsonDocument.Parse("{\"value\":2}").RootElement.Clone()
+                })
         });
         var contextConflict = async () => await auditor.FinalizeAsync(finalization with
         {
@@ -319,7 +326,18 @@ public sealed class AgentToolGovernanceAuditorTests
         AgentToolInvocationTerminalState? invocationState,
         bool dispatchStarted = true,
         AgentToolInvocationOutcomeKind? outcomeKind = null)
-        => new()
+    {
+        var outcome = new AgentToolInvocationOutcome
+        {
+            Kind = outcomeKind ?? (invocationState == AgentToolInvocationTerminalState.Completed
+                ? AgentToolInvocationOutcomeKind.Succeeded
+                : AgentToolInvocationOutcomeKind.InvocationIndeterminate),
+            Code = invocationState == AgentToolInvocationTerminalState.Completed
+                ? "agent_tool_succeeded"
+                : "agent_tool_indeterminate",
+            Message = "safe-message"
+        };
+        return new()
         {
             AuditId = auditId,
             Context = GovernanceTestData.AuditContext(context),
@@ -328,20 +346,13 @@ public sealed class AgentToolGovernanceAuditorTests
             BudgetReservation = GovernanceTestData.Reservation(context, budgetState),
             AttemptState = attemptState,
             InvocationState = invocationState,
-            Outcome = new AgentToolInvocationOutcome
-            {
-                Kind = outcomeKind ?? (invocationState == AgentToolInvocationTerminalState.Completed
-                    ? AgentToolInvocationOutcomeKind.Succeeded
-                    : AgentToolInvocationOutcomeKind.InvocationIndeterminate),
-                Code = invocationState == AgentToolInvocationTerminalState.Completed
-                    ? "agent_tool_succeeded"
-                    : "agent_tool_indeterminate",
-                Message = "safe-message"
-            },
+            Outcome = outcome,
+            OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(outcome),
             ReasonCode = invocationState == AgentToolInvocationTerminalState.Completed
                 ? "completed"
                 : invocationState == AgentToolInvocationTerminalState.Indeterminate
                     ? "post_dispatch_audit_failure"
                     : "dispatch_fencing_lost"
         };
+    }
 }

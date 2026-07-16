@@ -1029,8 +1029,8 @@ reconciliation.
 - the active owner renews a long-running lease; renewal returns the updated
   expiry while retaining attempt identity and fencing ownership;
 - after acquisition, the invoker owns one renewal loop until Release,
-  Complete, or MarkIndeterminate finishes; application and Handler code never
-  renew the lease directly;
+  PrepareCompletion/PublishCompletion, or MarkIndeterminate finishes;
+  application and Handler code never renew the lease directly;
 - renewal failure before DispatchStarted blocks dispatch; renewal failure after
   DispatchStarted is Indeterminate unless the durable adapter can prove a
   terminal outcome; cancellation of the renewal loop is cleanup and is not
@@ -1321,6 +1321,8 @@ Governance audit records metadata by default:
 - ReservationId, budget category/units, and settlement;
 - optional read-only `ObservedReservation` on a malformed budget decision so a
   reconciliation adapter can recover a returned ReservationId;
+- OutcomeHash, a canonical SHA-256 digest used to confirm terminal outcomes
+  without requiring durable storage of Message, Issues, or StructuredOutput;
 - block/failure code, DispatchStarted, and terminal state.
 
 Full arguments/output are not recorded by default. Audit implementations own
@@ -1371,6 +1373,9 @@ does not treat `Unknown`, `NotFinalized`, or a conflicting finalization as
 success. BestEffort may tolerate an unconfirmed checkpoint, but a confirmed
 opposite `Indeterminate` finalization still fences the invocation and cannot be
 overwritten by a Completed publication.
+Any non-equivalent direct `Finalized` response is queried again by AuditId;
+only a content-equivalent durable query can confirm publication. If that query
+is unavailable, the invocation remains fenced for reconciliation.
 
 Invocation is Indeterminate when any critical result becomes unknown after
 DispatchStarted.

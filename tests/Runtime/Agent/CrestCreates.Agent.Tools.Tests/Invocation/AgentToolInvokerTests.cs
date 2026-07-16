@@ -309,6 +309,23 @@ public sealed class AgentToolInvokerTests
     }
 
     [Fact]
+    public async Task Invoke_MismatchedAuditFinalizationQueriesDurableState()
+    {
+        var harness = CreateHarness(
+            requiredAudit: true,
+            audit: new MismatchedFinalizationAuditor());
+
+        var first = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+        var replay = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
+        replay.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
+        harness.Dispatcher.CallCount.Should().Be(1);
+    }
+
+    [Fact]
     public async Task Invoke_BestEffortConfirmedIndeterminateAuditBlocksCompletion()
     {
         var harness = CreateHarness(audit: new IndeterminateFinalizationAuditor());
@@ -321,6 +338,41 @@ public sealed class AgentToolInvokerTests
         first.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
         retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
         harness.Dispatcher.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Invoke_AuditConflictLeavesCompletionPendingForReconciliation()
+    {
+        var harness = CreateHarness(
+            requiredAudit: true,
+            audit: new ConflictingFinalizationAuditor());
+
+        var first = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+        var retry = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.InProgress);
+        harness.Dispatcher.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Invoke_ReleasedIndeterminateAuditFencesLogicalInvocation()
+    {
+        var harness = CreateHarness(
+            requiredAudit: true,
+            audit: new IndeterminateFinalizationAuditor(),
+            invocationGate: new RejectingDispatchFenceGate());
+
+        var first = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+        var retry = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+        harness.Dispatcher.CallCount.Should().Be(0);
     }
 
     [Fact]
@@ -779,6 +831,58 @@ public sealed class AgentToolInvokerTests
             throw new IOException("audit finalization response lost");
         }
 
+        public async ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
+            string auditId,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _inner.GetFinalizationStateAsync(auditId, cancellationToken);
+            return result.Record is not { } record
+                ? result
+                : result with
+                {
+                    Record = record with
+                    {
+                        Outcome = new AgentToolInvocationOutcome
+                        {
+                            Kind = record.Outcome.Kind,
+                            Code = record.Outcome.Code,
+                            Message = "redacted audit outcome"
+                        }
+                    }
+                };
+        }
+    }
+
+    private sealed class MismatchedFinalizationAuditor : IAgentToolGovernanceAuditor
+    {
+        private readonly DevelopmentInMemoryAgentToolGovernanceAuditor _inner = new();
+
+        public ValueTask RecordDecisionAsync(
+            AgentToolGovernanceDecisionRecord record,
+            CancellationToken cancellationToken = default)
+            => _inner.RecordDecisionAsync(record, cancellationToken);
+
+        public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+            AgentToolGovernancePreDispatchRecord record,
+            CancellationToken cancellationToken = default)
+            => _inner.RecordPreDispatchAsync(record, cancellationToken);
+
+        public async ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(
+            AgentToolGovernanceFinalizationRecord record,
+            CancellationToken cancellationToken = default)
+        {
+            _ = await _inner.FinalizeAsync(record, cancellationToken);
+            var stale = record with
+            {
+                Outcome = record.Outcome with { Message = "stale response" }
+            };
+            stale = stale with
+            {
+                OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(stale.Outcome)
+            };
+            return Finalized(stale);
+        }
+
         public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
             string auditId,
             CancellationToken cancellationToken = default)
@@ -803,7 +907,8 @@ public sealed class AgentToolInvokerTests
             AgentToolGovernanceFinalizationRecord record,
             CancellationToken cancellationToken = default)
         {
-            if (record.AttemptState == AgentToolGovernanceAttemptFinalState.Completed)
+            if (record.AttemptState is AgentToolGovernanceAttemptFinalState.Completed
+                or AgentToolGovernanceAttemptFinalState.Released)
             {
                 var indeterminate = record with
                 {
@@ -816,10 +921,50 @@ public sealed class AgentToolInvokerTests
                     },
                     ReasonCode = "audit_indeterminate"
                 };
+                indeterminate = indeterminate with
+                {
+                    OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(indeterminate.Outcome)
+                };
+                _ = _inner.FinalizeAsync(indeterminate, cancellationToken);
                 return ValueTask.FromResult(Finalized(indeterminate));
             }
 
             return _inner.FinalizeAsync(record, cancellationToken);
+        }
+
+        public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
+            string auditId,
+            CancellationToken cancellationToken = default)
+            => _inner.GetFinalizationStateAsync(auditId, cancellationToken);
+    }
+
+    private sealed class ConflictingFinalizationAuditor : IAgentToolGovernanceAuditor
+    {
+        private readonly DevelopmentInMemoryAgentToolGovernanceAuditor _inner = new();
+
+        public ValueTask RecordDecisionAsync(
+            AgentToolGovernanceDecisionRecord record,
+            CancellationToken cancellationToken = default)
+            => _inner.RecordDecisionAsync(record, cancellationToken);
+
+        public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+            AgentToolGovernancePreDispatchRecord record,
+            CancellationToken cancellationToken = default)
+            => _inner.RecordPreDispatchAsync(record, cancellationToken);
+
+        public async ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(
+            AgentToolGovernanceFinalizationRecord record,
+            CancellationToken cancellationToken = default)
+        {
+            var conflicting = record with
+            {
+                Outcome = record.Outcome with { Message = "different terminal content" }
+            };
+            conflicting = conflicting with
+            {
+                OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(conflicting.Outcome)
+            };
+            return await _inner.FinalizeAsync(conflicting, cancellationToken);
         }
 
         public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(

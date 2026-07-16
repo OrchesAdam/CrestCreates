@@ -538,14 +538,16 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 completedFinalization,
                 entry.Governance.EffectiveAuditMode).ConfigureAwait(false);
 
-            if (confirmation is AgentToolAuditConfirmation.Indeterminate
-                or AgentToolAuditConfirmation.Conflict)
+            if (confirmation == AgentToolAuditConfirmation.Indeterminate)
             {
                 await MarkIndeterminateIgnoringFailureAsync(
                     lease,
                     "post_dispatch_audit_indeterminate").ConfigureAwait(false);
                 return Indeterminate("post_dispatch_audit_indeterminate");
             }
+
+            if (confirmation == AgentToolAuditConfirmation.Conflict)
+                return Indeterminate("post_dispatch_audit_conflict");
 
             if (entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required
                 && confirmation != AgentToolAuditConfirmation.Completed)
@@ -643,11 +645,17 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             direct = AgentToolAuditConfirmation.Unconfirmed;
         }
 
-        if (direct != AgentToolAuditConfirmation.Unconfirmed)
+        if (direct == AgentToolAuditConfirmation.Completed)
             return direct;
 
-        return await QueryAuditConfirmationAsync(expected.AuditId, expected)
+        // A non-equivalent direct response may be stale. The durable AuditId
+        // query is authoritative before fencing or accepting the terminal state.
+        var queried = await QueryAuditConfirmationAsync(expected.AuditId, expected)
             .ConfigureAwait(false);
+        return queried == AgentToolAuditConfirmation.Unconfirmed
+            && direct != AgentToolAuditConfirmation.Unconfirmed
+            ? AgentToolAuditConfirmation.Conflict
+            : queried;
     }
 
     private static AgentToolAuditConfirmation ResolveAuditConfirmation(
@@ -691,7 +699,10 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             && left.BudgetReservation.Equals(right.BudgetReservation)
             && left.AttemptState == right.AttemptState
             && left.InvocationState == right.InvocationState
-            && EquivalentOutcome(left.Outcome, right.Outcome)
+            && string.Equals(
+                left.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(left.Outcome),
+                right.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(right.Outcome),
+                StringComparison.Ordinal)
             && string.Equals(left.ReasonCode, right.ReasonCode, StringComparison.Ordinal);
 
     private static bool EquivalentContext(
@@ -896,9 +907,22 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                     reasonCode),
                 entry.Governance.EffectiveAuditMode).ConfigureAwait(false);
             if (confirmation is AgentToolAuditConfirmation.Indeterminate
-                or AgentToolAuditConfirmation.Conflict
-                || entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required
-                    && confirmation != AgentToolAuditConfirmation.Completed)
+                or AgentToolAuditConfirmation.Conflict)
+            {
+                var fenced = await TryMarkIndeterminateAsync(
+                    lease,
+                    confirmation == AgentToolAuditConfirmation.Conflict
+                        ? "pre_dispatch_audit_conflict"
+                        : "pre_dispatch_audit_indeterminate").ConfigureAwait(false);
+                outcome = fenced
+                    ? Indeterminate(
+                        confirmation == AgentToolAuditConfirmation.Conflict
+                            ? "pre_dispatch_audit_conflict"
+                            : "pre_dispatch_audit_indeterminate")
+                    : GovernanceDenied("AGENT_TOOL_AUDIT_FAILURE");
+            }
+            else if (entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required
+                && confirmation != AgentToolAuditConfirmation.Completed)
                 outcome = GovernanceDenied("AGENT_TOOL_AUDIT_FAILURE");
         }
 
@@ -1141,6 +1165,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             AttemptState = attemptState,
             InvocationState = invocationState,
             Outcome = outcome,
+            OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(outcome),
             ReasonCode = reasonCode
         };
 

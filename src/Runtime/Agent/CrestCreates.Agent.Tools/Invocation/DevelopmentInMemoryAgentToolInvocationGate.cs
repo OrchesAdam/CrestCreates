@@ -243,6 +243,14 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 return ValueTask.CompletedTask;
             }
 
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.Released, out var releasedEntry))
+            {
+                releasedEntry.Indeterminate = true;
+                releasedEntry.LastReasonCode = reasonCode;
+                releasedEntry.LastAttemptState = AttemptTerminalState.Indeterminate;
+                return ValueTask.CompletedTask;
+            }
+
             var (entry, _) = GetCurrent(lease);
             entry.Indeterminate = true;
             entry.LastReasonCode = reasonCode;
