@@ -17,6 +17,13 @@ public enum AgentToolGovernanceAttemptFinalState
     Indeterminate = 3
 }
 
+public enum AgentToolGovernanceDecisionState
+{
+    Unknown = 0,
+    Denied = 1,
+    Indeterminate = 2
+}
+
 public sealed record AgentToolGovernanceAuditContext
 {
     public required AgentToolLogicalInvocationKey LogicalInvocationKey { get; init; }
@@ -60,6 +67,22 @@ public sealed record AgentToolGovernanceAuditHandle
     public required DateTimeOffset AcceptedAt { get; init; }
 }
 
+/// <summary>
+/// Records a governance decision that prevented dispatch before a pre-dispatch
+/// checkpoint could be created. It intentionally contains no fabricated lease,
+/// approval, or budget reservation.
+/// </summary>
+public sealed record AgentToolGovernanceDecisionRecord
+{
+    public required AgentToolGovernanceAuditContext Context { get; init; }
+
+    public required AgentToolGovernanceDecisionState Decision { get; init; }
+
+    public required AgentToolInvocationOutcome Outcome { get; init; }
+
+    public required string ReasonCode { get; init; }
+}
+
 public sealed record AgentToolGovernanceFinalizationRecord
 {
     public required string AuditId { get; init; }
@@ -83,6 +106,10 @@ public sealed record AgentToolGovernanceFinalizationRecord
 
 public interface IAgentToolGovernanceAuditor
 {
+    ValueTask RecordDecisionAsync(
+        AgentToolGovernanceDecisionRecord record,
+        CancellationToken cancellationToken = default);
+
     ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
         AgentToolGovernancePreDispatchRecord record,
         CancellationToken cancellationToken = default);

@@ -91,6 +91,48 @@ public sealed class AgentToolGovernanceAuditorTests
     }
 
     [Fact]
+    public async Task UnknownBudgetSettlement_InvocationIndeterminate_IsRepresentable()
+    {
+        var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();
+        var context = GovernanceTestData.Context();
+        var handle = await auditor.RecordPreDispatchAsync(
+            GovernanceTestData.PreDispatch(context));
+        var finalization = Finalization(
+            handle.AuditId,
+            context,
+            AgentToolBudgetReservationState.Unknown,
+            AgentToolGovernanceAttemptFinalState.Indeterminate,
+            AgentToolInvocationTerminalState.Indeterminate);
+
+        var act = async () => await auditor.FinalizeAsync(finalization);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task DeniedDecision_IsRecordedWithoutApprovalOrBudgetReservation()
+    {
+        var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();
+        var context = GovernanceTestData.AuditContext(GovernanceTestData.Context());
+        var record = new AgentToolGovernanceDecisionRecord
+        {
+            Context = context,
+            Decision = AgentToolGovernanceDecisionState.Denied,
+            Outcome = new AgentToolInvocationOutcome
+            {
+                Kind = AgentToolInvocationOutcomeKind.GovernanceDenied,
+                Code = "AGENT_TOOL_ROLE_DENIED",
+                Message = "blocked"
+            },
+            ReasonCode = "role_denied"
+        };
+
+        await auditor.RecordDecisionAsync(record);
+
+        auditor.Decisions.Should().ContainSingle().Which.ReasonCode.Should().Be("role_denied");
+    }
+
+    [Fact]
     public async Task UnknownAuditMode_FailsClosedBeforeAuditIdIsIssued()
     {
         var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();

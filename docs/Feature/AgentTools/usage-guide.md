@@ -117,6 +117,11 @@ Budget and invocation terminal state are independent. For example, a business
 call may have consumed its budget while a required post-dispatch audit failure
 leaves the logical invocation Indeterminate. Hosts must route Indeterminate
 records to reconciliation instead of treating them as failed-before-execution.
+Budget reservation/finalization responses that are uncertain are represented as
+`Unknown` in the governance checkpoint and keep the logical invocation fenced.
+Role, selection, schema, approval, and known budget denials are recorded through
+the governance decision-audit contract without inventing an Approval or Budget
+reservation.
 
 ## 5. Development adapters
 

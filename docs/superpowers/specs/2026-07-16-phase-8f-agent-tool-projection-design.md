@@ -1212,6 +1212,9 @@ Settlement rules:
   default Agent settlement is Indeterminate;
 - finalization failures are recorded and never represented as “business did not
   execute.”
+- Reserve/Finalize responses that are unknown because the adapter may have
+  durably changed state are not released or retried automatically; the logical
+  invocation is marked Indeterminate and remains available for reconciliation.
 
 No allow-unlimited default budget gate is registered. Tests use a concurrent
 in-memory ledger. A production distributed ledger is outside Phase 8f.
@@ -1228,11 +1231,16 @@ Two audit layers remain distinct:
 Agent audit never replaces Capability audit. Capability audit does not prove
 Agent selection, approval, budget, or replay decisions.
 
-The governance sink has two idempotent checkpoints tied by one AuditId:
+The governance sink has two idempotent checkpoints tied by one AuditId, plus a
+decision record for denials that occur before approval/budget reservation:
 
 ```csharp
 public interface IAgentToolGovernanceAuditor
 {
+    ValueTask RecordDecisionAsync(
+        AgentToolGovernanceDecisionRecord record,
+        CancellationToken cancellationToken = default);
+
     ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
         AgentToolGovernancePreDispatchRecord record,
         CancellationToken cancellationToken = default);
@@ -1242,6 +1250,14 @@ public interface IAgentToolGovernanceAuditor
         CancellationToken cancellationToken = default);
 }
 ```
+
+`RecordDecisionAsync` records Role/SelectionPolicy, schema/argument,
+approval, and known budget denials without fabricating an Approval, Lease, or
+Budget reservation. An uncertain approval/budget result is recorded as an
+Indeterminate decision and fences the logical invocation. If budget settlement
+cannot be confirmed, `FinalizeAsync` uses `BudgetReservationState.Unknown` with
+`InvocationState=Indeterminate`; it must still close or durably mark the audit
+checkpoint for reconciliation.
 
 Pre-dispatch succeeds only after its record is durably accepted according to
 the adapter's advertised guarantee. Finalize uses AuditId plus the logical and
@@ -1421,7 +1437,10 @@ Capability ErrorMessage, stack traces, SQL, authorization policy details, CLR
 types, inner exceptions, or unsanitized audit data.
 
 Safe field guidance may use `CapabilityExecutionResult.Issues` code and field
-path. Authorization, rate limit, timeout, and unknown business failures receive
+path only when `ErrorCode == ValidationFailed` and the issue code is in the
+fixed Schema validation allowlist (`FIELD_REQUIRED`, `TYPE_MISMATCH`, and the
+other built-in shape/range/property codes). Authorization, rate limit, timeout,
+unknown business failures, and arbitrary Handler/Middleware issue codes receive
 stable generic model-facing messages.
 
 Unknown or role/selection-denied Tool names share UnknownTool. Malformed outer
@@ -1528,6 +1547,11 @@ the existing Agent Control Plane `AgentToolDiagnosticCodes` surface.
 | ATP014 | invalid CostUnits or MaxCallsPerExecution |
 | ATP015 | contradictory Query/Command side-effect classification detectable at compile time |
 | ATP016 | unsafe approval/audit combination detectable at compile time |
+
+ATP016 is intentionally limited to statically provable unsafe combinations:
+ExternalWrite/Destructive with BestEffort audit, or explicit High/Critical risk
+without Required approval and audit. Unknown side-effect semantics are resolved
+at startup after the captured Capability kind is available.
 
 One Error in a container suppresses all Agent Tool provider, binding, and type
 registration output for that container. The generator must not emit a partial
@@ -1651,7 +1675,8 @@ establish a trusted call scope, but cannot:
 Cover valid provider/binding/type-registration output, no-input, void-output,
 exact typed DTOs, explicit risk-floor mapping, safe enum defaults, zero/latest
 and positive/exact CapabilityVersion semantics, deterministic role ordering,
-all ATP001-ATP016 diagnostics, container-level output suppression, and rejected
+all ATP001-ATP016 diagnostics, container-level output suppression, Unknown
+side-effect + BestEffort authoring, and rejected
 interface/abstract/open-generic/dynamic-dictionary/primitive roots.
 
 Generated-source guards reject MCP types, provider SDKs, DynamicApi, ASP.NET,

@@ -69,19 +69,81 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             return Outcome(AgentToolInvocationOutcomeKind.InvalidRequest, "AGENT_TOOL_INVALID_CONTEXT", "A valid trusted execution context is required.");
 
         var entry = _snapshots.GetRequired().Find(request.ToolName);
-        if (entry is null || !AgentToolCatalog.IsVisible(entry, execution!))
+        if (entry is null)
             return Outcome(AgentToolInvocationOutcomeKind.UnknownTool, "AGENT_TOOL_UNKNOWN", "The requested tool is unavailable.");
 
+        var key = new AgentToolLogicalInvocationKey(
+            tenantId,
+            userId,
+            execution!.AgentId,
+            execution.ExecutionId,
+            execution.InvocationId);
+        var decisionAttemptId = $"decision-{Guid.NewGuid():N}";
+
         if (!TryNormalizeArguments(request.Arguments, out var arguments, out var argumentFailure))
-            return argumentFailure!;
+        {
+            var context = CreateGovernanceContext(
+                entry, execution, key, decisionAttemptId, EmptyFingerprint());
+            var roleDenied = !entry.AllowedAgentRoles.Overlaps(execution.AgentRoles);
+            var selectionDenied = execution.CallOrigin == AgentToolCallOrigin.AutomaticSelection
+                && entry.Governance.SelectionPolicy != AgentToolSelectionPolicy.AutomaticAllowed;
+            if (roleDenied || selectionDenied)
+            {
+                return await RecordDecisionAndReturnAsync(
+                    context,
+                    AgentToolGovernanceDecisionState.Denied,
+                    Outcome(AgentToolInvocationOutcomeKind.UnknownTool, "AGENT_TOOL_UNKNOWN", "The requested tool is unavailable."),
+                    roleDenied ? "role_denied" : "selection_policy_denied").ConfigureAwait(false);
+            }
+            return await RecordDecisionAndReturnAsync(
+                context,
+                AgentToolGovernanceDecisionState.Denied,
+                argumentFailure!,
+                "invalid_arguments").ConfigureAwait(false);
+        }
+        var decisionFingerprint = TryBuildDecisionFingerprint(entry, execution, key, arguments);
+        var decisionContext = CreateGovernanceContext(
+            entry, execution, key, decisionAttemptId, decisionFingerprint);
+        if (!entry.AllowedAgentRoles.Overlaps(execution.AgentRoles))
+        {
+            return await RecordDecisionAndReturnAsync(
+                decisionContext,
+                AgentToolGovernanceDecisionState.Denied,
+                Outcome(AgentToolInvocationOutcomeKind.UnknownTool, "AGENT_TOOL_UNKNOWN", "The requested tool is unavailable."),
+                "role_denied").ConfigureAwait(false);
+        }
+        if (execution.CallOrigin == AgentToolCallOrigin.AutomaticSelection
+            && entry.Governance.SelectionPolicy != AgentToolSelectionPolicy.AutomaticAllowed)
+        {
+            return await RecordDecisionAndReturnAsync(
+                decisionContext,
+                AgentToolGovernanceDecisionState.Denied,
+                Outcome(AgentToolInvocationOutcomeKind.UnknownTool, "AGENT_TOOL_UNKNOWN", "The requested tool is unavailable."),
+                "selection_policy_denied").ConfigureAwait(false);
+        }
+
         if (HasDuplicateProperties(arguments))
-            return Outcome(AgentToolInvocationOutcomeKind.InvalidRequest, "AGENT_TOOL_DUPLICATE_ARGUMENT", "Tool arguments contain duplicate properties.");
+        {
+            var context = CreateGovernanceContext(
+                entry, execution, key, decisionAttemptId, EmptyFingerprint(arguments));
+            return await RecordDecisionAndReturnAsync(
+                context,
+                AgentToolGovernanceDecisionState.Denied,
+                Outcome(AgentToolInvocationOutcomeKind.InvalidRequest, "AGENT_TOOL_DUPLICATE_ARGUMENT", "Tool arguments contain duplicate properties."),
+                "duplicate_arguments").ConfigureAwait(false);
+        }
         if (entry.InputSchema is not null)
         {
             var validation = _schemas.Validate(entry.InputSchema, arguments, rejectUnknownProperties: true);
             if (!validation.IsValid)
             {
-                return new AgentToolInvocationOutcome
+                var context = CreateGovernanceContext(
+                    entry,
+                    execution,
+                    key,
+                    decisionAttemptId,
+                    _fingerprints.Build(entry, execution, key, arguments));
+                var invalid = new AgentToolInvocationOutcome
                 {
                     Kind = AgentToolInvocationOutcomeKind.InvalidRequest,
                     Code = "AGENT_TOOL_INVALID_ARGUMENTS",
@@ -89,11 +151,26 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                     Issues = validation.Errors.Select(error =>
                         new AgentToolInvocationIssue(error.ErrorCode, error.FieldName)).ToArray()
                 };
+                return await RecordDecisionAndReturnAsync(
+                    context,
+                    AgentToolGovernanceDecisionState.Denied,
+                    invalid,
+                    "schema_validation_failed").ConfigureAwait(false);
             }
         }
         else if (arguments.EnumerateObject().Any())
         {
-            return Outcome(AgentToolInvocationOutcomeKind.InvalidRequest, "AGENT_TOOL_ARGUMENTS_NOT_ACCEPTED", "This tool does not accept arguments.");
+            var context = CreateGovernanceContext(
+                entry,
+                execution,
+                key,
+                decisionAttemptId,
+                _fingerprints.Build(entry, execution, key, arguments));
+            return await RecordDecisionAndReturnAsync(
+                context,
+                AgentToolGovernanceDecisionState.Denied,
+                Outcome(AgentToolInvocationOutcomeKind.InvalidRequest, "AGENT_TOOL_ARGUMENTS_NOT_ACCEPTED", "This tool does not accept arguments."),
+                "arguments_not_accepted").ConfigureAwait(false);
         }
 
         object? input;
@@ -110,15 +187,13 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
         catch (Exception exception) when (exception is JsonException or NotSupportedException or InvalidOperationException)
         {
-            return Outcome(AgentToolInvocationOutcomeKind.InvalidRequest, "AGENT_TOOL_INVALID_ARGUMENTS", "Tool arguments are invalid.");
+            return await RecordDecisionAndReturnAsync(
+                decisionContext,
+                AgentToolGovernanceDecisionState.Denied,
+                Outcome(AgentToolInvocationOutcomeKind.InvalidRequest, "AGENT_TOOL_INVALID_ARGUMENTS", "Tool arguments are invalid."),
+                "input_binding_failed").ConfigureAwait(false);
         }
 
-        var key = new AgentToolLogicalInvocationKey(
-            tenantId,
-            userId,
-            execution!.AgentId,
-            execution.ExecutionId,
-            execution.InvocationId);
         var fingerprint = _fingerprints.Build(entry, execution, key, arguments);
         var acquired = await _invocations.AcquireAsync(
             new AgentToolInvocationAcquireRequest(key, fingerprint.Value),
@@ -146,12 +221,22 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
         catch
         {
-            await ReleaseLeaseBestEffortAsync(lease).ConfigureAwait(false);
-            return GovernanceDenied("AGENT_TOOL_APPROVAL_FAILURE");
+            await RecordDecisionBestEffortAsync(
+                CreateAuditContext(governance),
+                AgentToolGovernanceDecisionState.Indeterminate,
+                Indeterminate("AGENT_TOOL_APPROVAL_FAILURE"),
+                "approval_failure").ConfigureAwait(false);
+            await MarkIndeterminateIgnoringFailureAsync(lease, "approval_failure").ConfigureAwait(false);
+            return Indeterminate("approval_failure");
         }
 
         if (!IsAcceptedApproval(approval))
         {
+            await RecordDecisionBestEffortAsync(
+                CreateAuditContext(governance),
+                AgentToolGovernanceDecisionState.Denied,
+                GovernanceDenied("AGENT_TOOL_APPROVAL_DENIED"),
+                "approval_denied").ConfigureAwait(false);
             await ReleaseLeaseBestEffortAsync(lease).ConfigureAwait(false);
             return GovernanceDenied("AGENT_TOOL_APPROVAL_DENIED");
         }
@@ -165,21 +250,51 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await ReleaseLeaseBestEffortAsync(lease).ConfigureAwait(false);
-            throw;
+            var decisionOutcome = Indeterminate("AGENT_TOOL_BUDGET_RESERVATION_UNCERTAIN");
+            await RecordDecisionBestEffortAsync(
+                CreateAuditContext(governance),
+                AgentToolGovernanceDecisionState.Indeterminate,
+                decisionOutcome,
+                "budget_reservation_uncertain").ConfigureAwait(false);
+            await MarkIndeterminateIgnoringFailureAsync(lease, "budget_reservation_uncertain").ConfigureAwait(false);
+            return decisionOutcome;
         }
         catch
         {
-            await ReleaseLeaseBestEffortAsync(lease).ConfigureAwait(false);
-            return GovernanceDenied("AGENT_TOOL_BUDGET_FAILURE");
+            var decisionOutcome = Indeterminate("AGENT_TOOL_BUDGET_FAILURE");
+            await RecordDecisionBestEffortAsync(
+                CreateAuditContext(governance),
+                AgentToolGovernanceDecisionState.Indeterminate,
+                decisionOutcome,
+                "budget_reservation_uncertain").ConfigureAwait(false);
+            await MarkIndeterminateIgnoringFailureAsync(lease, "budget_reservation_uncertain").ConfigureAwait(false);
+            return decisionOutcome;
         }
 
         if (reserved.Status != AgentToolBudgetReserveStatus.Reserved
             || reserved.Reservation is not { State: AgentToolBudgetReservationState.Reserved } reservation
             || !Matches(reservation, governance))
         {
+            var reason = reserved.Status == AgentToolBudgetReserveStatus.Denied
+                ? "budget_denied"
+                : "budget_reservation_invalid";
+            var decisionOutcome = reserved.Status == AgentToolBudgetReserveStatus.Denied
+                ? GovernanceDenied("AGENT_TOOL_BUDGET_DENIED")
+                : Indeterminate("AGENT_TOOL_BUDGET_FAILURE");
+            await RecordDecisionBestEffortAsync(
+                CreateAuditContext(governance),
+                reserved.Status == AgentToolBudgetReserveStatus.Denied
+                    ? AgentToolGovernanceDecisionState.Denied
+                    : AgentToolGovernanceDecisionState.Indeterminate,
+                decisionOutcome,
+                reason).ConfigureAwait(false);
+            if (reserved.Status != AgentToolBudgetReserveStatus.Denied)
+            {
+                await MarkIndeterminateIgnoringFailureAsync(lease, reason).ConfigureAwait(false);
+                return decisionOutcome;
+            }
             await ReleaseLeaseBestEffortAsync(lease).ConfigureAwait(false);
-            return GovernanceDenied("AGENT_TOOL_BUDGET_DENIED");
+            return decisionOutcome;
         }
 
         var auditContext = CreateAuditContext(governance);
@@ -205,7 +320,12 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             if (entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required)
             {
-                await ReleaseBeforeDispatchAsync(lease, reservation, "pre_dispatch_audit_failure").ConfigureAwait(false);
+                var cleanup = await ReleaseBeforeDispatchAsync(
+                    lease,
+                    reservation,
+                    "pre_dispatch_audit_failure").ConfigureAwait(false);
+                if (cleanup is not null)
+                    return cleanup;
                 return GovernanceDenied("AGENT_TOOL_AUDIT_FAILURE");
             }
         }
@@ -454,9 +574,36 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolGovernanceAuditContext auditContext,
         AgentToolInvocationLease lease,
         AgentToolBudgetReservation reservation,
-        string reasonCode)
+        string reasonCode,
+        bool dispatchStarted = true)
     {
         var outcome = Indeterminate(reasonCode);
+        var unknownReservation = reservation with
+        {
+            State = AgentToolBudgetReservationState.Unknown
+        };
+        if (auditHandle is not null)
+        {
+            try
+            {
+                await _audit.FinalizeAsync(
+                    Finalization(
+                        auditHandle,
+                        auditContext,
+                        lease,
+                        unknownReservation,
+                        dispatchStarted,
+                        AgentToolGovernanceAttemptFinalState.Indeterminate,
+                        AgentToolInvocationTerminalState.Indeterminate,
+                        outcome,
+                        reasonCode),
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Reconciliation remains authoritative when the audit adapter is unavailable.
+            }
+        }
         await MarkIndeterminateIgnoringFailureAsync(lease, reasonCode).ConfigureAwait(false);
         return outcome;
     }
@@ -477,8 +624,13 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
         catch
         {
-            await ReleaseLeaseBestEffortAsync(lease).ConfigureAwait(false);
-            return GovernanceDenied("AGENT_TOOL_BUDGET_FINALIZATION_FAILURE");
+            return await FinishIndeterminateWithoutBudgetAsync(
+                auditHandle,
+                auditContext,
+                lease,
+                reservation,
+                "budget_settlement_failure",
+                dispatchStarted: false).ConfigureAwait(false);
         }
 
         var releasedLease = await TryReleaseLeaseAsync(lease).ConfigureAwait(false);
@@ -530,11 +682,17 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
         catch
         {
-            settled = reservation;
+            return await FinishIndeterminateWithoutBudgetAsync(
+                auditHandle,
+                auditContext,
+                lease,
+                reservation,
+                "budget_settlement_failure",
+                dispatchStarted: false).ConfigureAwait(false);
         }
 
         var outcome = Indeterminate(reasonCode);
-        if (auditHandle is not null && settled.State == AgentToolBudgetReservationState.Released)
+        if (auditHandle is not null)
         {
             try
             {
@@ -561,7 +719,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         return outcome;
     }
 
-    private async ValueTask ReleaseBeforeDispatchAsync(
+    private async ValueTask<AgentToolInvocationOutcome?> ReleaseBeforeDispatchAsync(
         AgentToolInvocationLease lease,
         AgentToolBudgetReservation reservation,
         string reasonCode)
@@ -573,9 +731,11 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
         catch
         {
-            // Cleanup is best effort; the adapter retains the unresolved reservation for reconciliation.
+            await MarkIndeterminateIgnoringFailureAsync(lease, "budget_settlement_failure").ConfigureAwait(false);
+            return Indeterminate("budget_settlement_failure");
         }
         await ReleaseLeaseBestEffortAsync(lease).ConfigureAwait(false);
+        return null;
     }
 
     private ValueTask<AgentToolBudgetReservation> FinalizeBudgetAsync(
@@ -623,10 +783,18 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolLogicalInvocationKey key,
         AgentToolInvocationLease lease,
         AgentToolInvocationFingerprint fingerprint)
+        => CreateGovernanceContext(entry, execution, key, lease.AttemptId, fingerprint);
+
+    private static AgentToolGovernanceContext CreateGovernanceContext(
+        AgentToolRuntimeEntry entry,
+        AgentExecutionContext execution,
+        AgentToolLogicalInvocationKey key,
+        string attemptId,
+        AgentToolInvocationFingerprint fingerprint)
         => new()
         {
             LogicalInvocationKey = key,
-            AttemptId = lease.AttemptId,
+            AttemptId = attemptId,
             InvocationFingerprint = fingerprint.Value,
             ArgumentsHash = fingerprint.ArgumentsHash,
             ExecutionContext = execution,
@@ -636,6 +804,63 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             OutputSchemaContract = entry.DiscoveryContract.OutputSchemaContract,
             Governance = entry.Governance
         };
+
+    private static AgentToolInvocationFingerprint EmptyFingerprint(JsonElement? arguments = null)
+        => new(
+            "decision-arguments",
+            arguments.HasValue ? "decision-fingerprint" : "decision-fingerprint-empty");
+
+    private AgentToolInvocationFingerprint TryBuildDecisionFingerprint(
+        AgentToolRuntimeEntry entry,
+        AgentExecutionContext execution,
+        AgentToolLogicalInvocationKey key,
+        JsonElement arguments)
+    {
+        try
+        {
+            return _fingerprints.Build(entry, execution, key, arguments);
+        }
+        catch (Exception) when (arguments.ValueKind == JsonValueKind.Object)
+        {
+            return EmptyFingerprint(arguments);
+        }
+    }
+
+    private async ValueTask<AgentToolInvocationOutcome> RecordDecisionAndReturnAsync(
+        AgentToolGovernanceContext context,
+        AgentToolGovernanceDecisionState decision,
+        AgentToolInvocationOutcome outcome,
+        string reasonCode)
+    {
+        await RecordDecisionBestEffortAsync(
+            CreateAuditContext(context), decision, outcome, reasonCode).ConfigureAwait(false);
+        return outcome;
+    }
+
+    private async ValueTask RecordDecisionBestEffortAsync(
+        AgentToolGovernanceAuditContext context,
+        AgentToolGovernanceDecisionState decision,
+        AgentToolInvocationOutcome outcome,
+        string reasonCode)
+    {
+        try
+        {
+            await _audit.RecordDecisionAsync(
+                new AgentToolGovernanceDecisionRecord
+                {
+                    Context = context,
+                    Decision = decision,
+                    Outcome = outcome,
+                    ReasonCode = reasonCode
+                },
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // A decision record is best-effort at this boundary; the returned
+            // governance result must not be changed into an execution result.
+        }
+    }
 
     private static AgentToolGovernanceAuditContext CreateAuditContext(AgentToolGovernanceContext context)
         => new()

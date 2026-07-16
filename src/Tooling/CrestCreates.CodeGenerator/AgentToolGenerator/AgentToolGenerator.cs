@@ -233,11 +233,11 @@ public sealed class AgentToolGenerator : IIncrementalGenerator
 
     private static bool IsUnsafeGovernance(int sideEffectKind, int riskFloor, int approvalMode, int auditMode)
     {
-        var requiresStrongGovernance = sideEffectKind is 3 or 4 || riskFloor is 3 or 4;
-        if (requiresStrongGovernance && (approvalMode == 3 || auditMode != 1))
+        if (sideEffectKind is 3 or 4 && auditMode == 2)
             return true;
 
-        return auditMode == 2 && sideEffectKind != 1;
+        return riskFloor is 3 or 4
+            && (approvalMode != 2 || auditMode != 1);
     }
 
     private static bool IsKnownSelectionPolicy(int value) => value is 1 or 2;

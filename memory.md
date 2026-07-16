@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection implemented)
+Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection review fixes)
 
 ## Purpose
 
@@ -47,7 +47,17 @@ Key decisions:
   adapter.
 - Budget uses Reserved/Released/Committed/Indeterminate and is independent from
   Invocation terminal state; Budget Committed + Invocation Indeterminate is a
-  valid post-dispatch result.
+  valid post-dispatch result. Unknown settlement is represented explicitly in
+  Governance Audit and keeps the logical invocation Indeterminate.
+- Governance Audit records denied/uncertain decisions without fabricating an
+  Approval or Budget reservation; reservation/finalization uncertainty fences
+  the logical invocation instead of releasing it for automatic retry.
+- Agent Tool capability issues are model-facing only when the Capability result
+  is the authoritative ValidationFailed code and each issue uses the fixed
+  safe Schema validation-code allowlist.
+- Generator governance diagnostics reject only statically provable unsafe
+  combinations; Unknown side-effect semantics are resolved at startup after
+  CapabilityKind is known.
 - Title is model-facing behavior and participates in Agent Tool ContractHash.
 - Actual completion requires a linux-x64 NativeAOT publish-link-run fixture;
   provider adapters, a planner/runtime loop, durable stores, approval workflow,
@@ -83,10 +93,11 @@ Completed:
   output validation, governance settlement, and terminal replay.
 
 Focused verification on 2026-07-16: Metadata 467/467, Schema 42/42,
-Agent.Tools abstractions 16/16, Agent.Tools runtime 52/52, Agent E2E 1/1,
+Agent.Tools abstractions 16/16, Agent.Tools runtime 58/58, Agent E2E 1/1,
 Agent NativeAOT 1/1, MCP runtime 63/63, MCP E2E 1/1, MCP NativeAOT 1/1,
-dependency boundaries 40/40, CodeGenerator 276/276, and Control Plane 484/484.
-The complete main solution builds with 0 errors. A full parallel test invocation
+dependency boundaries 40/40, CodeGenerator 277/277, and Control Plane 484/484.
+The Runtime solution build also completes with 0 errors and now includes the
+Agent Tool runtime, E2E, and NativeAOT fixture projects. A full parallel test invocation
 still reports environment-dependent Docker/RabbitMQ/Kafka suites and the
 pre-existing DraftContractGenerator test fixture that searches for implementation
 Payload types while referencing only `DescriptorDraft.Abstractions`; neither is

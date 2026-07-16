@@ -23,6 +23,7 @@
   </Folder>
   <Folder Name="/src/Metadata/">
     <Project Path="../src/Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
+    <Project Path="../src/Metadata/CrestCreates.Metadata.AgentTool.Abstractions/CrestCreates.Metadata.AgentTool.Abstractions.csproj" />
     <Project Path="../src/Tooling/CrestCreates.Metadata.Analyzers/CrestCreates.Metadata.Analyzers.csproj" />
     <Project Path="../src/Metadata/CrestCreates.Metadata.ContextPack.Abstractions/CrestCreates.Metadata.ContextPack.Abstractions.csproj" />
     <Project Path="../src/Metadata/CrestCreates.Metadata.ContextPack/CrestCreates.Metadata.ContextPack.csproj" />
@@ -37,6 +38,8 @@
   </Folder>
   <Folder Name="/src/Runtime/">
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Abstractions/CrestCreates.Agent.Abstractions.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions/CrestCreates.Agent.Tools.Abstractions.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Authoring.Abstractions/CrestCreates.Agent.Authoring.Abstractions.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Authoring/CrestCreates.Agent.Authoring.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Authoring.Http/CrestCreates.Agent.Authoring.Http.csproj" />
@@ -95,6 +98,11 @@
     <Project Path="../tests/Runtime/HumanTask/CrestCreates.HumanTask.Tests/CrestCreates.HumanTask.Tests.csproj" />
     <Project Path="../tests/Runtime/Workflow/CrestCreates.Workflow.Tests/CrestCreates.Workflow.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests/CrestCreates.Agent.Authoring.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions.Tests/CrestCreates.Agent.Tools.Abstractions.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.Tests/CrestCreates.Agent.Tools.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.E2E.Tests/CrestCreates.Agent.Tools.E2E.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture.Tests/CrestCreates.Agent.Tools.AotFixture.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture/CrestCreates.Agent.Tools.AotFixture.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.DraftContracts.Tests/CrestCreates.Agent.DraftContracts.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Memory.Llm.Tests/CrestCreates.Agent.Memory.Llm.Tests.csproj" />

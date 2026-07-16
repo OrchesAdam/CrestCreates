@@ -17,11 +17,61 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
     private readonly Dictionary<AuditKey, AuditEntry> _entriesByKey = [];
     private readonly Dictionary<string, AuditEntry> _entriesById
         = new(StringComparer.Ordinal);
+    private readonly List<AgentToolGovernanceDecisionRecord> _decisions = [];
 
     public DevelopmentInMemoryAgentToolGovernanceAuditor(
         TimeProvider? timeProvider = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
+    public IReadOnlyList<AgentToolGovernanceDecisionRecord> Decisions
+    {
+        get
+        {
+            lock (_sync)
+                return _decisions.ToArray();
+        }
+    }
+
+    public IReadOnlyList<AgentToolGovernanceFinalizationRecord> Finalizations
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _entriesById.Values
+                    .Where(entry => entry.Finalization is not null)
+                    .Select(entry => entry.Finalization!)
+                    .ToArray();
+            }
+        }
+    }
+
+    public ValueTask RecordDecisionAsync(
+        AgentToolGovernanceDecisionRecord record,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateDecision(record);
+
+        lock (_sync)
+        {
+            if (_decisions.Any(existing =>
+                    existing.Context.LogicalInvocationKey == record.Context.LogicalInvocationKey
+                    && string.Equals(
+                        existing.Context.AttemptId,
+                        record.Context.AttemptId,
+                        StringComparison.Ordinal)))
+            {
+                return ValueTask.CompletedTask;
+            }
+
+            _decisions.Add(record);
+        }
+
+        return ValueTask.CompletedTask;
     }
 
     public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
@@ -121,6 +171,23 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
         }
     }
 
+    private static void ValidateDecision(AgentToolGovernanceDecisionRecord record)
+    {
+        if (!IsValid(record.Context)
+            || record.Decision is not (
+                AgentToolGovernanceDecisionState.Denied
+                or AgentToolGovernanceDecisionState.Indeterminate)
+            || record.Outcome is null
+            || string.IsNullOrWhiteSpace(record.Outcome.Code)
+            || string.IsNullOrWhiteSpace(record.ReasonCode)
+            || record.Outcome.Kind == AgentToolInvocationOutcomeKind.Unknown)
+        {
+            throw new ArgumentException(
+                "Governance decision record has an invalid contract.",
+                nameof(record));
+        }
+    }
+
     private static void ValidateFinalization(AgentToolGovernanceFinalizationRecord record)
     {
         if (string.IsNullOrWhiteSpace(record.AuditId)
@@ -131,9 +198,10 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
                 record.Context.AttemptId,
                 StringComparison.Ordinal)
             || record.BudgetReservation is null
-            || record.BudgetReservation.State is AgentToolBudgetReservationState.Unknown
-                or AgentToolBudgetReservationState.Reserved
+            || record.BudgetReservation.State == AgentToolBudgetReservationState.Reserved
             || record.BudgetReservation.State is not (
+                AgentToolBudgetReservationState.Unknown
+                or
                 AgentToolBudgetReservationState.Released
                 or AgentToolBudgetReservationState.Committed
                 or AgentToolBudgetReservationState.Indeterminate)
@@ -297,10 +365,14 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
                     or AgentToolInvocationOutcomeKind.InternalContractFailure,
             AgentToolGovernanceAttemptFinalState.Indeterminate =>
                 (record.DispatchStarted
-                    && record.BudgetReservation.State is AgentToolBudgetReservationState.Committed
+                    && record.BudgetReservation.State is (
+                        AgentToolBudgetReservationState.Committed
                         or AgentToolBudgetReservationState.Indeterminate
+                        or AgentToolBudgetReservationState.Unknown)
                     || !record.DispatchStarted
-                    && record.BudgetReservation.State == AgentToolBudgetReservationState.Released)
+                    && record.BudgetReservation.State is (
+                        AgentToolBudgetReservationState.Released
+                        or AgentToolBudgetReservationState.Unknown))
                 && record.InvocationState == AgentToolInvocationTerminalState.Indeterminate
                 && record.Outcome.Kind == AgentToolInvocationOutcomeKind.InvocationIndeterminate,
             _ => false

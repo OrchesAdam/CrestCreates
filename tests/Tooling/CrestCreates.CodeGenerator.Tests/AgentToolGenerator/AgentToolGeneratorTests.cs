@@ -281,14 +281,14 @@ public static partial class RoleTools
     }
 
     [Fact]
-    public void Unsafe_strong_governance_and_best_effort_write_audit_are_rejected()
+    public void Unsafe_strong_governance_and_external_best_effort_audit_are_rejected()
     {
         var result = Run(@"
 [CrestCreates.Agent.Tools.AgentToolSpecs]
 public static partial class GovernanceTools
 {
     [CrestCreates.Agent.Tools.AgentToolSpec(""high"", Description = ""High."", BudgetCategory = ""b"", AllowedAgentRoles = new[] { ""r"" }, RiskFloor = CrestCreates.Agent.Tools.AgentToolRiskFloor.High, ApprovalMode = CrestCreates.Metadata.AgentTool.AgentToolApprovalMode.None)] public sealed class High { }
-    [CrestCreates.Agent.Tools.AgentToolSpec(""write"", Description = ""Write."", BudgetCategory = ""b"", AllowedAgentRoles = new[] { ""r"" }, SideEffectKind = CrestCreates.Metadata.AgentTool.AgentToolSideEffectKind.InternalWrite, AuditMode = CrestCreates.Metadata.AgentTool.AgentToolAuditMode.BestEffort)] public sealed class Write { }
+    [CrestCreates.Agent.Tools.AgentToolSpec(""write"", Description = ""Write."", BudgetCategory = ""b"", AllowedAgentRoles = new[] { ""r"" }, SideEffectKind = CrestCreates.Metadata.AgentTool.AgentToolSideEffectKind.ExternalWrite, AuditMode = CrestCreates.Metadata.AgentTool.AgentToolAuditMode.BestEffort)] public sealed class Write { }
 }");
 
         result.Diagnostics.Count(diagnostic => diagnostic.Id == "ATP016").Should().Be(2);
@@ -337,6 +337,26 @@ public static partial class KindUnknownTools
 
         result.Diagnostics.Should().NotContain(diagnostic => diagnostic.Id == "ATP015",
             "CapabilityKind has no stable same-compilation authoring source in Phase 8f and must be validated at startup");
+        result.GeneratedSources.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void Unknown_side_effect_with_best_effort_audit_is_deferred_to_startup()
+    {
+        var result = Run(@"
+[CrestCreates.Agent.Tools.AgentToolSpecs]
+public static partial class QueryTools
+{
+    [CrestCreates.Agent.Tools.AgentToolSpec(
+        ""orders.query"",
+        Description = ""Reads orders."",
+        BudgetCategory = ""read"",
+        AllowedAgentRoles = new[] { ""reader"" },
+        AuditMode = CrestCreates.Metadata.AgentTool.AgentToolAuditMode.BestEffort)]
+    public sealed class Query { }
+}");
+
+        result.Diagnostics.Should().NotContain(diagnostic => diagnostic.Id == "ATP016");
         result.GeneratedSources.Should().HaveCount(2);
     }
 
