@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection third review fixes)
+Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection fourth review fixes)
 
 ## Purpose
 
@@ -73,6 +73,13 @@ Key decisions:
   CompletionPending state, so concurrent Acquire cannot observe Completed before
   Required Audit finalization. Completion uncertainty closes an Indeterminate
   audit checkpoint when possible.
+- The invocation gate has no direct Complete shortcut. Publish returns a durable
+  state and response loss is resolved through GetCompletionState without
+  overwriting a possible Completed record. CompletionPending retains audit,
+  budget, prepared-at, and reason metadata for reconciliation.
+- All post-dispatch Indeterminate paths persist the gate state before writing
+  Audit; a failed gate transition is represented with a null InvocationState.
+  Gate publication rejects non-terminal success/failure outcomes.
 - Role/Selection Decision Audit failures preserve the external UnknownTool mask.
   Rejected payloads use schema-neutral raw canonical argument hashes; a
   pre-evaluation denial records ArgumentsEvaluated=false with no hash. Malformed
@@ -112,7 +119,7 @@ Completed:
   output validation, governance settlement, and terminal replay.
 
 Focused verification on 2026-07-16: Metadata 467/467, Schema 42/42,
-Agent.Tools abstractions 16/16, Agent.Tools runtime 69/69, Agent E2E 1/1,
+Agent.Tools abstractions 16/16, Agent.Tools runtime 75/75, Agent E2E 1/1,
 Agent NativeAOT 1/1, MCP runtime 63/63, MCP E2E 1/1, MCP NativeAOT 1/1,
 dependency boundaries 40/40, CodeGenerator 277/277, and Control Plane 484/484.
 The Runtime solution build also completes with 0 errors and now includes the

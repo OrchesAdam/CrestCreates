@@ -130,23 +130,39 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
 
     public ValueTask PrepareCompletionAsync(
         AgentToolInvocationLease lease,
-        AgentToolInvocationOutcome outcome,
+        AgentToolInvocationPrepareCompletionRequest request,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(outcome);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Outcome);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.BudgetReservationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ReasonCode);
+        ValidateCompletionOutcome(request.Outcome);
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
             if (IsSameTerminalTransition(lease, AttemptTerminalState.Completed, out var terminalEntry))
             {
-                if (!Equivalent(terminalEntry.CompletedOutcome, outcome))
+                if (!Equivalent(terminalEntry.CompletedOutcome, request.Outcome))
                     throw new InvalidOperationException("The completed invocation outcome cannot be changed.");
                 return ValueTask.CompletedTask;
             }
 
             if (IsSameTerminalTransition(lease, AttemptTerminalState.CompletionPending, out var pendingEntry))
             {
-                if (!Equivalent(pendingEntry.CompletionPendingOutcome, outcome))
+                if (!Equivalent(pendingEntry.CompletionPendingOutcome, request.Outcome)
+                    || !string.Equals(
+                        pendingEntry.CompletionPendingAuditId,
+                        request.AuditId,
+                        StringComparison.Ordinal)
+                    || !string.Equals(
+                        pendingEntry.CompletionPendingBudgetReservationId,
+                        request.BudgetReservationId,
+                        StringComparison.Ordinal)
+                    || !string.Equals(
+                        pendingEntry.CompletionPendingReasonCode,
+                        request.ReasonCode,
+                        StringComparison.Ordinal))
                     throw new InvalidOperationException("The pending completion outcome cannot be changed.");
                 return ValueTask.CompletedTask;
             }
@@ -154,13 +170,18 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             var (entry, _) = GetCurrent(lease);
             if (!entry.DispatchStarted)
                 throw new InvalidOperationException("Dispatch has not started.");
-            entry.CompletionPendingOutcome = outcome;
+            entry.CompletionPendingOutcome = request.Outcome;
+            entry.CompletionPendingPreparedAt = _timeProvider.GetUtcNow();
+            entry.CompletionPendingAuditId = request.AuditId;
+            entry.CompletionPendingBudgetReservationId = request.BudgetReservationId;
+            entry.CompletionPendingReasonCode = request.ReasonCode;
+            entry.LastReasonCode = request.ReasonCode;
             ClearLease(entry, lease, AttemptTerminalState.CompletionPending);
             return ValueTask.CompletedTask;
         }
     }
 
-    public ValueTask PublishCompletionAsync(
+    public ValueTask<AgentToolInvocationCompletionResult> PublishCompletionAsync(
         AgentToolInvocationLease lease,
         CancellationToken cancellationToken = default)
     {
@@ -168,7 +189,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         lock (_sync)
         {
             if (IsSameTerminalTransition(lease, AttemptTerminalState.Completed, out _))
-                return ValueTask.CompletedTask;
+                return ValueTask.FromResult(GetCompletionResult(lease, AgentToolInvocationCompletionState.Completed));
 
             if (!IsSameTerminalTransition(lease, AttemptTerminalState.CompletionPending, out var entry)
                 || entry.CompletionPendingOutcome is null)
@@ -177,17 +198,28 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             entry.CompletedOutcome = entry.CompletionPendingOutcome;
             entry.CompletionPendingOutcome = null;
             entry.LastAttemptState = AttemptTerminalState.Completed;
-            return ValueTask.CompletedTask;
+            return ValueTask.FromResult(GetCompletionResult(lease, AgentToolInvocationCompletionState.Completed));
         }
     }
 
-    public async ValueTask CompleteAsync(
+    public ValueTask<AgentToolInvocationCompletionResult> GetCompletionStateAsync(
         AgentToolInvocationLease lease,
-        AgentToolInvocationOutcome outcome,
         CancellationToken cancellationToken = default)
     {
-        await PrepareCompletionAsync(lease, outcome, cancellationToken).ConfigureAwait(false);
-        await PublishCompletionAsync(lease, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.Completed, out _))
+                return ValueTask.FromResult(GetCompletionResult(lease, AgentToolInvocationCompletionState.Completed));
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.CompletionPending, out _))
+                return ValueTask.FromResult(GetCompletionResult(lease, AgentToolInvocationCompletionState.CompletionPending));
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.Indeterminate, out _))
+                return ValueTask.FromResult(GetCompletionResult(lease, AgentToolInvocationCompletionState.Indeterminate));
+            return ValueTask.FromResult(new AgentToolInvocationCompletionResult
+            {
+                State = AgentToolInvocationCompletionState.Unknown
+            });
+        }
     }
 
     public ValueTask MarkIndeterminateAsync(
@@ -205,7 +237,12 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             if (IsSameTerminalTransition(lease, AttemptTerminalState.Completed, out var completedEntry))
             {
                 completedEntry.CompletedOutcome = null;
+                completedEntry.CompletionPendingPreparedAt = null;
+                completedEntry.CompletionPendingAuditId = null;
+                completedEntry.CompletionPendingBudgetReservationId = null;
+                completedEntry.CompletionPendingReasonCode = null;
                 completedEntry.Indeterminate = true;
+                completedEntry.LastReasonCode = reasonCode;
                 completedEntry.LastAttemptState = AttemptTerminalState.Indeterminate;
                 return ValueTask.CompletedTask;
             }
@@ -213,13 +250,19 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             if (IsSameTerminalTransition(lease, AttemptTerminalState.CompletionPending, out var pendingEntry))
             {
                 pendingEntry.CompletionPendingOutcome = null;
+                pendingEntry.CompletionPendingPreparedAt = null;
+                pendingEntry.CompletionPendingAuditId = null;
+                pendingEntry.CompletionPendingBudgetReservationId = null;
+                pendingEntry.CompletionPendingReasonCode = null;
                 pendingEntry.Indeterminate = true;
+                pendingEntry.LastReasonCode = reasonCode;
                 pendingEntry.LastAttemptState = AttemptTerminalState.Indeterminate;
                 return ValueTask.CompletedTask;
             }
 
             var (entry, _) = GetCurrent(lease);
             entry.Indeterminate = true;
+            entry.LastReasonCode = reasonCode;
             ClearLease(entry, lease, AttemptTerminalState.Indeterminate);
             return ValueTask.CompletedTask;
         }
@@ -313,6 +356,40 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         AgentToolInvocationOutcome? outcome = null)
         => new() { Status = status, Lease = lease, CompletedOutcome = outcome };
 
+    private static void ValidateCompletionOutcome(AgentToolInvocationOutcome outcome)
+    {
+        if (outcome.Kind is not (
+                AgentToolInvocationOutcomeKind.Succeeded
+                or AgentToolInvocationOutcomeKind.CapabilityFailure
+                or AgentToolInvocationOutcomeKind.InternalContractFailure))
+            throw new ArgumentException("The completion outcome is not publishable.", nameof(outcome));
+    }
+
+    private AgentToolInvocationCompletionResult GetCompletionResult(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationCompletionState state)
+    {
+        if (!_leaseKeys.TryGetValue(lease.LeaseId, out var key)
+            || !_entries.TryGetValue(key, out var entry))
+            return new AgentToolInvocationCompletionResult
+            {
+                State = AgentToolInvocationCompletionState.Unknown
+            };
+
+        return new AgentToolInvocationCompletionResult
+        {
+            State = state,
+            Outcome = state == AgentToolInvocationCompletionState.Completed
+                ? entry.CompletedOutcome
+                : entry.CompletionPendingOutcome,
+            PreparedAt = entry.CompletionPendingPreparedAt,
+            AuditId = entry.CompletionPendingAuditId,
+            BudgetReservationId = entry.CompletionPendingBudgetReservationId,
+            ReasonCode = entry.CompletionPendingReasonCode
+                ?? entry.LastReasonCode
+        };
+    }
+
     private static bool Equivalent(
         AgentToolInvocationOutcome? left,
         AgentToolInvocationOutcome right)
@@ -340,6 +417,11 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         public bool Indeterminate { get; set; }
         public AgentToolInvocationOutcome? CompletedOutcome { get; set; }
         public AgentToolInvocationOutcome? CompletionPendingOutcome { get; set; }
+        public DateTimeOffset? CompletionPendingPreparedAt { get; set; }
+        public string? CompletionPendingAuditId { get; set; }
+        public string? CompletionPendingBudgetReservationId { get; set; }
+        public string? CompletionPendingReasonCode { get; set; }
+        public string? LastReasonCode { get; set; }
         public AgentToolInvocationLease? LastTerminalLease { get; set; }
         public AttemptTerminalState LastAttemptState { get; set; }
     }

@@ -504,7 +504,16 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
 
         try
         {
-            await _invocations.PrepareCompletionAsync(lease, outcome, CancellationToken.None)
+            await _invocations.PrepareCompletionAsync(
+                    lease,
+                    new AgentToolInvocationPrepareCompletionRequest
+                    {
+                        Outcome = outcome,
+                        AuditId = auditHandle?.AuditId,
+                        BudgetReservationId = settled.ReservationId,
+                        ReasonCode = "dispatch_completed"
+                    },
+                    CancellationToken.None)
                 .ConfigureAwait(false);
         }
         catch
@@ -547,26 +556,74 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
 
         try
         {
-            await _invocations.PublishCompletionAsync(lease, CancellationToken.None)
+            var published = await _invocations.PublishCompletionAsync(lease, CancellationToken.None)
                 .ConfigureAwait(false);
+            if (published.State == AgentToolInvocationCompletionState.Completed
+                && EquivalentOutcome(published.Outcome, outcome))
+                return outcome;
+
+            return Indeterminate("invocation_publish_failure");
         }
         catch
         {
-            return await FinishIndeterminateWithSettledBudgetAsync(
-                auditHandle,
-                auditContext,
-                lease,
-                settled,
-                "invocation_publish_failure").ConfigureAwait(false);
+            return await ResolvePublishUncertaintyAsync(lease, outcome).ConfigureAwait(false);
         }
-        return outcome;
     }
+
+    private async ValueTask<AgentToolInvocationOutcome> ResolvePublishUncertaintyAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationOutcome expectedOutcome)
+    {
+        try
+        {
+            var state = await _invocations.GetCompletionStateAsync(lease, CancellationToken.None)
+                .ConfigureAwait(false);
+            return state.State == AgentToolInvocationCompletionState.Completed
+                && EquivalentOutcome(state.Outcome, expectedOutcome)
+                ? expectedOutcome
+                : Indeterminate("invocation_publish_uncertain");
+        }
+        catch
+        {
+            return Indeterminate("invocation_publish_uncertain");
+        }
+    }
+
+    private static bool EquivalentOutcome(
+        AgentToolInvocationOutcome? left,
+        AgentToolInvocationOutcome right)
+        => left is not null
+            && left.Kind == right.Kind
+            && string.Equals(left.Code, right.Code, StringComparison.Ordinal)
+            && string.Equals(left.Message, right.Message, StringComparison.Ordinal)
+            && left.Issues.SequenceEqual(right.Issues)
+            && (!left.StructuredOutput.HasValue == !right.StructuredOutput.HasValue
+                && (!left.StructuredOutput.HasValue
+                    || string.Equals(
+                        left.StructuredOutput.Value.GetRawText(),
+                        right.StructuredOutput?.GetRawText(),
+                        StringComparison.Ordinal)));
 
     private async ValueTask<AgentToolInvocationOutcome> FinishIndeterminateWithSettledBudgetAsync(
         AgentToolGovernanceAuditHandle? auditHandle,
         AgentToolGovernanceAuditContext auditContext,
         AgentToolInvocationLease lease,
         AgentToolBudgetReservation settled,
+        string reasonCode)
+        => await FinalizeIndeterminateAfterGateAsync(
+            auditHandle,
+            auditContext,
+            lease,
+            settled,
+            dispatchStarted: true,
+            reasonCode).ConfigureAwait(false);
+
+    private async ValueTask<AgentToolInvocationOutcome> FinalizeIndeterminateAfterGateAsync(
+        AgentToolGovernanceAuditHandle? auditHandle,
+        AgentToolGovernanceAuditContext auditContext,
+        AgentToolInvocationLease lease,
+        AgentToolBudgetReservation reservation,
+        bool dispatchStarted,
         string reasonCode)
     {
         var outcome = Indeterminate(reasonCode);
@@ -582,8 +639,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                         auditHandle,
                         auditContext,
                         lease,
-                        settled,
-                        true,
+                        reservation,
+                        dispatchStarted,
                         AgentToolGovernanceAttemptFinalState.Indeterminate,
                         invocationPersisted ? AgentToolInvocationTerminalState.Indeterminate : null,
                         outcome,
@@ -618,29 +675,13 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 auditHandle, auditContext, lease, reservation, "budget_settlement_failure").ConfigureAwait(false);
         }
 
-        var outcome = Indeterminate(reasonCode);
-        if (auditHandle is not null)
-        {
-            try
-            {
-                await _audit.FinalizeAsync(
-                    Finalization(
-                        auditHandle, auditContext, lease, settled, true,
-                        AgentToolGovernanceAttemptFinalState.Indeterminate,
-                        AgentToolInvocationTerminalState.Indeterminate,
-                        outcome,
-                        reasonCode),
-                    CancellationToken.None).ConfigureAwait(false);
-            }
-            catch
-            {
-                reasonCode = "post_dispatch_audit_failure";
-                outcome = Indeterminate(reasonCode);
-            }
-        }
-
-        await MarkIndeterminateIgnoringFailureAsync(lease, reasonCode).ConfigureAwait(false);
-        return outcome;
+        return await FinalizeIndeterminateAfterGateAsync(
+            auditHandle,
+            auditContext,
+            lease,
+            settled,
+            dispatchStarted: true,
+            reasonCode).ConfigureAwait(false);
     }
 
     private async ValueTask<AgentToolInvocationOutcome> FinishIndeterminateWithoutBudgetAsync(
@@ -651,35 +692,17 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         string reasonCode,
         bool dispatchStarted = true)
     {
-        var outcome = Indeterminate(reasonCode);
         var unknownReservation = reservation with
         {
             State = AgentToolBudgetReservationState.Unknown
         };
-        if (auditHandle is not null)
-        {
-            try
-            {
-                await _audit.FinalizeAsync(
-                    Finalization(
-                        auditHandle,
-                        auditContext,
-                        lease,
-                        unknownReservation,
-                        dispatchStarted,
-                        AgentToolGovernanceAttemptFinalState.Indeterminate,
-                        AgentToolInvocationTerminalState.Indeterminate,
-                        outcome,
-                        reasonCode),
-                    CancellationToken.None).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Reconciliation remains authoritative when the audit adapter is unavailable.
-            }
-        }
-        await MarkIndeterminateIgnoringFailureAsync(lease, reasonCode).ConfigureAwait(false);
-        return outcome;
+        return await FinalizeIndeterminateAfterGateAsync(
+            auditHandle,
+            auditContext,
+            lease,
+            unknownReservation,
+            dispatchStarted,
+            reasonCode).ConfigureAwait(false);
     }
 
     private async ValueTask<AgentToolInvocationOutcome> ReleaseAuditedBeforeDispatchAsync(
@@ -708,9 +731,21 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
 
         var releasedLease = await TryReleaseLeaseAsync(lease).ConfigureAwait(false);
-        var outcome = releasedLease
-            ? Outcome(AgentToolInvocationOutcomeKind.InProgress, "AGENT_TOOL_INVOCATION_NOT_ACQUIRED", "The tool invocation could not acquire execution ownership.")
-            : Indeterminate("lease_release_failure");
+        if (!releasedLease)
+        {
+            return await FinalizeIndeterminateAfterGateAsync(
+                auditHandle,
+                auditContext,
+                lease,
+                released,
+                dispatchStarted: false,
+                reasonCode).ConfigureAwait(false);
+        }
+
+        var outcome = Outcome(
+            AgentToolInvocationOutcomeKind.InProgress,
+            "AGENT_TOOL_INVOCATION_NOT_ACQUIRED",
+            "The tool invocation could not acquire execution ownership.");
         if (auditHandle is not null)
         {
             try
@@ -718,10 +753,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 await _audit.FinalizeAsync(
                     Finalization(
                         auditHandle, auditContext, lease, released, false,
-                        releasedLease
-                            ? AgentToolGovernanceAttemptFinalState.Released
-                            : AgentToolGovernanceAttemptFinalState.Indeterminate,
-                        releasedLease ? null : AgentToolInvocationTerminalState.Indeterminate,
+                        AgentToolGovernanceAttemptFinalState.Released,
+                        null,
                         outcome,
                         reasonCode),
                     CancellationToken.None).ConfigureAwait(false);
@@ -765,32 +798,13 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 dispatchStarted: false).ConfigureAwait(false);
         }
 
-        var outcome = Indeterminate(reasonCode);
-        if (auditHandle is not null)
-        {
-            try
-            {
-                await _audit.FinalizeAsync(
-                    Finalization(
-                        auditHandle,
-                        auditContext,
-                        lease,
-                        settled,
-                        false,
-                        AgentToolGovernanceAttemptFinalState.Indeterminate,
-                        AgentToolInvocationTerminalState.Indeterminate,
-                        outcome,
-                        reasonCode),
-                    CancellationToken.None).ConfigureAwait(false);
-            }
-            catch
-            {
-                // The invocation remains Indeterminate regardless of audit availability.
-            }
-        }
-
-        await MarkIndeterminateIgnoringFailureAsync(lease, reasonCode).ConfigureAwait(false);
-        return outcome;
+        return await FinalizeIndeterminateAfterGateAsync(
+            auditHandle,
+            auditContext,
+            lease,
+            settled,
+            dispatchStarted: false,
+            reasonCode).ConfigureAwait(false);
     }
 
     private async ValueTask<AgentToolInvocationOutcome?> ReleaseBeforeDispatchAsync(
@@ -914,7 +928,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolBudgetReservation? observedReservation = null)
     {
         var recorded = await RecordDecisionBestEffortAsync(
-            CreateAuditContext(context), decision, outcome, reasonCode).ConfigureAwait(false);
+            CreateAuditContext(context), decision, outcome, reasonCode, observedReservation)
+            .ConfigureAwait(false);
         if (recorded || context.Governance.EffectiveAuditMode != AgentToolAuditMode.Required)
             return outcome;
 

@@ -962,12 +962,6 @@ public interface IAgentToolInvocationGate
         AgentToolInvocationLease lease,
         CancellationToken cancellationToken = default);
 
-    [Obsolete("Use PrepareCompletionAsync followed by PublishCompletionAsync.")]
-    ValueTask CompleteAsync(
-        AgentToolInvocationLease lease,
-        AgentToolInvocationOutcome outcome,
-        CancellationToken cancellationToken = default);
-
     ValueTask MarkIndeterminateAsync(
         AgentToolInvocationLease lease,
         string reasonCode,
@@ -992,12 +986,15 @@ Acquire behavior:
 | any bound state | different | Conflict |
 
 `PrepareCompletionAsync` persists a fenced `CompletionPending` state containing
-the terminal outcome. Acquire returns `InProgress` while that state is pending;
-it never exposes a replay before publication. `PublishCompletionAsync` is called
-only after Required governance finalization succeeds and makes the outcome
-visible as `Completed`. If preparation, audit finalization, or publication is
-uncertain, the gate transitions the attempt to `Indeterminate` and no Completed
-replay is exposed. `Completed` returns the stored provider-neutral Agent outcome. It does not
+the terminal outcome, `PreparedAt`, `AttemptId`, optional `AuditId`, budget
+ReservationId, and reason code. Acquire returns `InProgress` while that state
+is pending; it never exposes a replay before publication.
+`PublishCompletionAsync` returns a durable completion state and is called only
+after Required governance finalization succeeds. If its response is lost, the
+Invoker calls `GetCompletionStateAsync`: a matching `Completed` state is
+treated as success, `CompletionPending` remains fenced for reconciliation,
+and `Indeterminate`/`Unknown` is returned without overwriting a possible
+Completed record. `Completed` returns the stored provider-neutral Agent outcome. It does not
 re-run approval, reserve budget, dispatch, serialize output, or finalize audit.
 Both success and deterministic business/contract failure are completed terminal
 outcomes. `Indeterminate` never auto-dispatches and requires explicit
@@ -1007,7 +1004,8 @@ reconciliation.
 
 - FencingToken is monotonic for one LogicalInvocationKey and increases for each
   new attempt ownership;
-- Renew, TryMarkDispatchStarted, Complete, MarkIndeterminate, and ReleaseLease
+- Renew, TryMarkDispatchStarted, PrepareCompletion, PublishCompletion,
+  GetCompletionState, MarkIndeterminate, and ReleaseLease
   validate both LeaseId and FencingToken;
 - every transition is idempotent for the same valid lease and rejects a stale
   or mismatched lease;
@@ -1350,6 +1348,8 @@ possible. If Required audit finalization fails, the same Indeterminate
 finalization is attempted and publication is skipped. If publication is
 uncertain, the gate remains fenced and reconciliation is authoritative; no
 concurrent request may observe a Completed replay during the pending window.
+A publish response-loss path must never blindly convert a possibly persisted
+Completed state to Indeterminate.
 
 Invocation is Indeterminate when any critical result becomes unknown after
 DispatchStarted.

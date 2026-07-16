@@ -210,6 +210,21 @@ public sealed class AgentToolInvokerTests
     }
 
     [Fact]
+    public async Task Invoke_PublishResponseLossQueriesDurableStateAndReplaysCompletedOutcome()
+    {
+        var harness = CreateHarness(invocationGate: new PublishResponseLossGate());
+
+        var first = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+        var replay = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
+        replay.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
+        harness.Dispatcher.CallCount.Should().Be(1);
+    }
+
+    [Fact]
     public async Task Invoke_DeniedBudgetWithReservationIsIndeterminateAndCannotRetry()
     {
         var harness = CreateHarness(malformedDeniedBudget: true);
@@ -541,20 +556,19 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask PrepareCompletionAsync(
             AgentToolInvocationLease lease,
-            AgentToolInvocationOutcome outcome,
+            AgentToolInvocationPrepareCompletionRequest request,
             CancellationToken cancellationToken = default)
-            => _inner.PrepareCompletionAsync(lease, outcome, cancellationToken);
+            => _inner.PrepareCompletionAsync(lease, request, cancellationToken);
 
-        public ValueTask PublishCompletionAsync(
+        public ValueTask<AgentToolInvocationCompletionResult> PublishCompletionAsync(
             AgentToolInvocationLease lease,
             CancellationToken cancellationToken = default)
             => _inner.PublishCompletionAsync(lease, cancellationToken);
 
-        public ValueTask CompleteAsync(
+        public ValueTask<AgentToolInvocationCompletionResult> GetCompletionStateAsync(
             AgentToolInvocationLease lease,
-            AgentToolInvocationOutcome outcome,
             CancellationToken cancellationToken = default)
-            => _inner.CompleteAsync(lease, outcome, cancellationToken);
+            => _inner.GetCompletionStateAsync(lease, cancellationToken);
 
         public async ValueTask MarkIndeterminateAsync(
             AgentToolInvocationLease lease,
@@ -646,29 +660,78 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask PrepareCompletionAsync(
             AgentToolInvocationLease lease,
-            AgentToolInvocationOutcome outcome,
+            AgentToolInvocationPrepareCompletionRequest request,
             CancellationToken cancellationToken = default)
-            => PrepareThenLoseResponseAsync(lease, outcome, cancellationToken);
+            => PrepareThenLoseResponseAsync(lease, request, cancellationToken);
 
         private async ValueTask PrepareThenLoseResponseAsync(
             AgentToolInvocationLease lease,
-            AgentToolInvocationOutcome outcome,
+            AgentToolInvocationPrepareCompletionRequest request,
             CancellationToken cancellationToken)
         {
-            await _inner.PrepareCompletionAsync(lease, outcome, cancellationToken);
+            await _inner.PrepareCompletionAsync(lease, request, cancellationToken);
             throw new IOException("completion response lost");
         }
 
-        public ValueTask PublishCompletionAsync(
+        public ValueTask<AgentToolInvocationCompletionResult> PublishCompletionAsync(
             AgentToolInvocationLease lease,
             CancellationToken cancellationToken = default)
             => _inner.PublishCompletionAsync(lease, cancellationToken);
 
-        public ValueTask CompleteAsync(
+        public ValueTask<AgentToolInvocationCompletionResult> GetCompletionStateAsync(
             AgentToolInvocationLease lease,
-            AgentToolInvocationOutcome outcome,
             CancellationToken cancellationToken = default)
-            => ValueTask.FromException(new InvalidOperationException("completion unavailable"));
+            => _inner.GetCompletionStateAsync(lease, cancellationToken);
+
+        public ValueTask MarkIndeterminateAsync(
+            AgentToolInvocationLease lease,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+            => _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
+
+        public ValueTask ReleaseLeaseAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.ReleaseLeaseAsync(lease, cancellationToken);
+    }
+
+    private sealed class PublishResponseLossGate : IAgentToolInvocationGate
+    {
+        private readonly DevelopmentInMemoryAgentToolInvocationGate _inner = new();
+
+        public ValueTask<AgentToolInvocationAcquireResult> AcquireAsync(
+            AgentToolInvocationAcquireRequest request,
+            CancellationToken cancellationToken = default)
+            => _inner.AcquireAsync(request, cancellationToken);
+
+        public ValueTask<AgentToolInvocationLease> RenewAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.RenewAsync(lease, cancellationToken);
+
+        public ValueTask<bool> TryMarkDispatchStartedAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.TryMarkDispatchStartedAsync(lease, cancellationToken);
+
+        public ValueTask PrepareCompletionAsync(
+            AgentToolInvocationLease lease,
+            AgentToolInvocationPrepareCompletionRequest request,
+            CancellationToken cancellationToken = default)
+            => _inner.PrepareCompletionAsync(lease, request, cancellationToken);
+
+        public async ValueTask<AgentToolInvocationCompletionResult> PublishCompletionAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+        {
+            _ = await _inner.PublishCompletionAsync(lease, cancellationToken);
+            throw new IOException("publish response lost");
+        }
+
+        public ValueTask<AgentToolInvocationCompletionResult> GetCompletionStateAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.GetCompletionStateAsync(lease, cancellationToken);
 
         public ValueTask MarkIndeterminateAsync(
             AgentToolInvocationLease lease,

@@ -18,8 +18,11 @@ public sealed class AgentToolInvocationGateTests
         concurrent.Status.Should().Be(AgentToolInvocationAcquireStatus.InProgress);
         (await gate.TryMarkDispatchStartedAsync(acquired.Lease!)).Should().BeTrue();
         var outcome = Success();
-        await gate.CompleteAsync(acquired.Lease!, outcome);
-        await gate.CompleteAsync(acquired.Lease!, outcome);
+        await gate.PrepareCompletionAsync(acquired.Lease!, PrepareRequest(outcome));
+        (await gate.PublishCompletionAsync(acquired.Lease!)).State
+            .Should().Be(AgentToolInvocationCompletionState.Completed);
+        (await gate.PublishCompletionAsync(acquired.Lease!)).State
+            .Should().Be(AgentToolInvocationCompletionState.Completed);
 
         var replay = await gate.AcquireAsync(request);
         replay.Status.Should().Be(AgentToolInvocationAcquireStatus.Completed);
@@ -33,13 +36,38 @@ public sealed class AgentToolInvocationGateTests
         var acquired = await gate.AcquireAsync(Request("fingerprint-a"));
         (await gate.TryMarkDispatchStartedAsync(acquired.Lease!)).Should().BeTrue();
 
-        await gate.PrepareCompletionAsync(acquired.Lease!, Success());
+        await gate.PrepareCompletionAsync(acquired.Lease!, PrepareRequest(Success()));
         var pending = await gate.AcquireAsync(Request("fingerprint-a"));
         pending.Status.Should().Be(AgentToolInvocationAcquireStatus.InProgress);
+        var pendingState = await gate.GetCompletionStateAsync(acquired.Lease!);
+        pendingState.State.Should().Be(AgentToolInvocationCompletionState.CompletionPending);
+        pendingState.PreparedAt.Should().NotBeNull();
+        pendingState.BudgetReservationId.Should().Be("reservation");
+        pendingState.ReasonCode.Should().Be("completed");
 
         await gate.PublishCompletionAsync(acquired.Lease!);
         var replay = await gate.AcquireAsync(Request("fingerprint-a"));
         replay.Status.Should().Be(AgentToolInvocationAcquireStatus.Completed);
+    }
+
+    [Theory]
+    [InlineData(AgentToolInvocationOutcomeKind.UnknownTool)]
+    [InlineData(AgentToolInvocationOutcomeKind.InvalidRequest)]
+    [InlineData(AgentToolInvocationOutcomeKind.GovernanceDenied)]
+    [InlineData(AgentToolInvocationOutcomeKind.InProgress)]
+    [InlineData(AgentToolInvocationOutcomeKind.InvocationIndeterminate)]
+    public async Task PrepareCompletion_RejectsNonPublishableOutcome(
+        AgentToolInvocationOutcomeKind kind)
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var acquired = await gate.AcquireAsync(Request("fingerprint-a"));
+        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!)).Should().BeTrue();
+
+        var act = () => gate.PrepareCompletionAsync(
+            acquired.Lease!,
+            PrepareRequest(Success() with { Kind = kind })).AsTask();
+
+        await act.Should().ThrowAsync<ArgumentException>();
     }
 
     [Fact]
@@ -68,7 +96,7 @@ public sealed class AgentToolInvocationGateTests
         second.Status.Should().Be(AgentToolInvocationAcquireStatus.Acquired);
         second.Lease!.FencingToken.Should().BeGreaterThan(first.Lease!.FencingToken);
         (await gate.TryMarkDispatchStartedAsync(first.Lease!)).Should().BeFalse();
-        var staleCompletion = () => gate.CompleteAsync(first.Lease!, Success()).AsTask();
+        var staleCompletion = () => gate.PrepareCompletionAsync(first.Lease!, PrepareRequest(Success())).AsTask();
         await staleCompletion.Should().ThrowAsync<InvalidOperationException>();
     }
 
@@ -97,6 +125,15 @@ public sealed class AgentToolInvocationGateTests
             Kind = AgentToolInvocationOutcomeKind.Succeeded,
             Code = "ok",
             Message = "ok"
+        };
+
+    private static AgentToolInvocationPrepareCompletionRequest PrepareRequest(
+        AgentToolInvocationOutcome outcome)
+        => new()
+        {
+            Outcome = outcome,
+            BudgetReservationId = "reservation",
+            ReasonCode = "completed"
         };
 
     private sealed class ManualTimeProvider : TimeProvider

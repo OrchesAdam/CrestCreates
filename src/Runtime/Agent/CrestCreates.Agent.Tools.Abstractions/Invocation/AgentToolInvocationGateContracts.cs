@@ -45,6 +45,40 @@ public sealed record AgentToolInvocationAcquireResult
     public string? ReasonCode { get; init; }
 }
 
+public enum AgentToolInvocationCompletionState
+{
+    Unknown = 0,
+    CompletionPending = 1,
+    Completed = 2,
+    Indeterminate = 3
+}
+
+public sealed record AgentToolInvocationPrepareCompletionRequest
+{
+    public required AgentToolInvocationOutcome Outcome { get; init; }
+
+    public string? AuditId { get; init; }
+
+    public required string BudgetReservationId { get; init; }
+
+    public required string ReasonCode { get; init; }
+}
+
+public sealed record AgentToolInvocationCompletionResult
+{
+    public required AgentToolInvocationCompletionState State { get; init; }
+
+    public AgentToolInvocationOutcome? Outcome { get; init; }
+
+    public DateTimeOffset? PreparedAt { get; init; }
+
+    public string? AuditId { get; init; }
+
+    public string? BudgetReservationId { get; init; }
+
+    public string? ReasonCode { get; init; }
+}
+
 public interface IAgentToolInvocationGate
 {
     ValueTask<AgentToolInvocationAcquireResult> AcquireAsync(
@@ -61,17 +95,15 @@ public interface IAgentToolInvocationGate
 
     ValueTask PrepareCompletionAsync(
         AgentToolInvocationLease lease,
-        AgentToolInvocationOutcome outcome,
+        AgentToolInvocationPrepareCompletionRequest request,
         CancellationToken cancellationToken = default);
 
-    ValueTask PublishCompletionAsync(
+    ValueTask<AgentToolInvocationCompletionResult> PublishCompletionAsync(
         AgentToolInvocationLease lease,
         CancellationToken cancellationToken = default);
 
-    [Obsolete("Use PrepareCompletionAsync followed by PublishCompletionAsync.")]
-    ValueTask CompleteAsync(
+    ValueTask<AgentToolInvocationCompletionResult> GetCompletionStateAsync(
         AgentToolInvocationLease lease,
-        AgentToolInvocationOutcome outcome,
         CancellationToken cancellationToken = default);
 
     ValueTask MarkIndeterminateAsync(
