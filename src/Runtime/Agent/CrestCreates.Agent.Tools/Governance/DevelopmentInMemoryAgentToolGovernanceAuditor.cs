@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Metadata.AgentTool;
 
@@ -372,26 +373,44 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
         AgentToolGovernanceFinalizationRecord left,
         AgentToolGovernanceFinalizationRecord right)
         => string.Equals(left.AuditId, right.AuditId, StringComparison.Ordinal)
-            && MatchesPreDispatch(
-                new AgentToolGovernancePreDispatchRecord
-                {
-                    Context = left.Context,
-                    Lease = left.Lease,
-                    Approval = new AgentToolApprovalResult
-                    {
-                        Decision = AgentToolApprovalDecision.NotRequired,
-                        ClaimState = AgentToolApprovalEvidenceClaimState.NotApplicable
-                    },
-                    BudgetReservation = left.BudgetReservation
-                },
-                right)
+            && EquivalentContext(left.Context, right.Context)
+            && left.Lease.Equals(right.Lease)
+            && left.BudgetReservation.Equals(right.BudgetReservation)
             && left.DispatchStarted == right.DispatchStarted
-            && left.BudgetReservation.State == right.BudgetReservation.State
             && left.AttemptState == right.AttemptState
             && left.InvocationState == right.InvocationState
-            && left.Outcome.Kind == right.Outcome.Kind
-            && string.Equals(left.Outcome.Code, right.Outcome.Code, StringComparison.Ordinal)
+            && EquivalentOutcome(left.Outcome, right.Outcome)
             && string.Equals(left.ReasonCode, right.ReasonCode, StringComparison.Ordinal);
+
+    private static bool EquivalentContext(
+        AgentToolGovernanceAuditContext left,
+        AgentToolGovernanceAuditContext right)
+        => left.LogicalInvocationKey == right.LogicalInvocationKey
+            && string.Equals(left.AttemptId, right.AttemptId, StringComparison.Ordinal)
+            && string.Equals(left.InvocationFingerprint, right.InvocationFingerprint, StringComparison.Ordinal)
+            && string.Equals(left.ArgumentsHash, right.ArgumentsHash, StringComparison.Ordinal)
+            && left.ArgumentsEvaluated == right.ArgumentsEvaluated
+            && left.CallOrigin == right.CallOrigin
+            && string.Equals(left.AgentRolesHash, right.AgentRolesHash, StringComparison.Ordinal)
+            && left.ToolContract.Equals(right.ToolContract)
+            && left.CapabilityContract.Equals(right.CapabilityContract)
+            && Equals(left.InputSchemaContract, right.InputSchemaContract)
+            && Equals(left.OutputSchemaContract, right.OutputSchemaContract)
+            && left.Governance.Equals(right.Governance);
+
+    private static bool EquivalentOutcome(
+        AgentToolInvocationOutcome left,
+        AgentToolInvocationOutcome right)
+        => left.Kind == right.Kind
+            && string.Equals(left.Code, right.Code, StringComparison.Ordinal)
+            && string.Equals(left.Message, right.Message, StringComparison.Ordinal)
+            && left.Issues.SequenceEqual(right.Issues)
+            && left.StructuredOutput.HasValue == right.StructuredOutput.HasValue
+            && (!left.StructuredOutput.HasValue
+                || string.Equals(
+                    left.StructuredOutput.Value.GetRawText(),
+                    right.StructuredOutput!.Value.GetRawText(),
+                    StringComparison.Ordinal));
 
     private static bool IsKnown(AgentToolInvocationOutcomeKind kind)
         => kind is AgentToolInvocationOutcomeKind.Succeeded

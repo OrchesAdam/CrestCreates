@@ -1365,6 +1365,13 @@ replay during the pending window.
 A publish response-loss path must never blindly convert a possibly persisted
 Completed state to Indeterminate.
 
+Every terminal audit finalization uses the same direct-result/query confirmation
+protocol, including `Released` and `Indeterminate` checkpoints. Required Audit
+does not treat `Unknown`, `NotFinalized`, or a conflicting finalization as
+success. BestEffort may tolerate an unconfirmed checkpoint, but a confirmed
+opposite `Indeterminate` finalization still fences the invocation and cannot be
+overwritten by a Completed publication.
+
 Invocation is Indeterminate when any critical result becomes unknown after
 DispatchStarted.
 
@@ -1400,8 +1407,9 @@ Outcome = InternalContractFailure
 
 when required governance finalization succeeds. It cannot automatically repeat
 the business call. Only an inability to determine output/finalization state is
-Indeterminate. BestEffort audit failure does not by itself prevent Completed;
-Required audit failure does.
+Indeterminate. BestEffort audit unavailability does not by itself prevent
+Completed, but a confirmed contradictory terminal audit state does;
+reconciliation remains authoritative.
 
 ## 17. Invocation order and Dispatcher integration
 

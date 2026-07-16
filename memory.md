@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection fifth review fixes)
+Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection sixth review fixes)
 
 ## Purpose
 
@@ -82,6 +82,10 @@ Key decisions:
   resolved by AuditId: matching Completed proceeds, confirmed Indeterminate
   fences the Gate, and unknown/conflicting state remains CompletionPending.
   Published Completed is an irreversible Gate terminal state.
+- All terminal Audit finalizations, including Released and Indeterminate paths,
+  use direct-result plus AuditId query confirmation. BestEffort tolerates only
+  unconfirmed audit state; a confirmed contradictory Indeterminate state fences
+  the invocation.
 - Role/Selection Decision Audit failures preserve the external UnknownTool mask.
   Rejected payloads use schema-neutral raw canonical argument hashes; a
   pre-evaluation denial records ArgumentsEvaluated=false with no hash. Malformed
@@ -121,7 +125,7 @@ Completed:
   output validation, governance settlement, and terminal replay.
 
 Focused verification on 2026-07-16: Metadata 467/467, Schema 42/42,
-Agent.Tools abstractions 16/16, Agent.Tools runtime 80/80, Agent E2E 1/1,
+Agent.Tools abstractions 16/16, Agent.Tools runtime 84/84, Agent E2E 1/1,
 Agent NativeAOT 1/1, MCP runtime 63/63, MCP E2E 1/1, MCP NativeAOT 1/1,
 dependency boundaries 40/40, CodeGenerator 277/277, and Control Plane 484/484.
 The Runtime solution build also completes with 0 errors and now includes the

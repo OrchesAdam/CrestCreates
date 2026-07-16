@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CrestCreates.Metadata.AgentTool;
 using FluentAssertions;
 using Xunit;
@@ -69,6 +70,50 @@ public sealed class AgentToolGovernanceAuditorTests
         });
 
         await conflicting.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task Finalization_ConflictsOnStructuredOutputIssuesAndContext()
+    {
+        var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();
+        var context = GovernanceTestData.Context();
+        var handle = await auditor.RecordPreDispatchAsync(
+            GovernanceTestData.PreDispatch(context));
+        using var document = JsonDocument.Parse("{\"value\":1}");
+        var finalization = Finalization(
+            handle.AuditId,
+            context,
+            AgentToolBudgetReservationState.Committed,
+            AgentToolGovernanceAttemptFinalState.Completed,
+            AgentToolInvocationTerminalState.Completed) with
+        {
+            Outcome = Finalization(
+                handle.AuditId,
+                context,
+                AgentToolBudgetReservationState.Committed,
+                AgentToolGovernanceAttemptFinalState.Completed,
+                AgentToolInvocationTerminalState.Completed).Outcome with
+            {
+                StructuredOutput = document.RootElement.Clone(),
+                Issues = [new AgentToolInvocationIssue("safe_issue", "value")]
+            }
+        };
+        await auditor.FinalizeAsync(finalization);
+
+        var structuredConflict = async () => await auditor.FinalizeAsync(finalization with
+        {
+            Outcome = finalization.Outcome with
+            {
+                StructuredOutput = JsonDocument.Parse("{\"value\":2}").RootElement.Clone()
+            }
+        });
+        var contextConflict = async () => await auditor.FinalizeAsync(finalization with
+        {
+            Context = finalization.Context with { AgentRolesHash = "different-roles" }
+        });
+
+        await structuredConflict.Should().ThrowAsync<InvalidOperationException>();
+        await contextConflict.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [Fact]

@@ -225,7 +225,7 @@ public sealed class AgentToolInvokerTests
     }
 
     [Fact]
-    public async Task Invoke_MismatchedPublishAssociationDoesNotConfirmCompletion()
+    public async Task Invoke_MismatchedPublishAssociationQueriesDurableCompletion()
     {
         var harness = CreateHarness(invocationGate: new MismatchedPublishResultGate());
 
@@ -234,8 +234,8 @@ public sealed class AgentToolInvokerTests
         var retry = await harness.Invoker.InvokeAsync(
             new AgentToolInvocationRequest(harness.ToolName));
 
-        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
-        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.InProgress);
+        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
+        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
         harness.Dispatcher.CallCount.Should().Be(1);
     }
 
@@ -305,6 +305,52 @@ public sealed class AgentToolInvokerTests
 
         first.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
         replay.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
+        harness.Dispatcher.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Invoke_BestEffortConfirmedIndeterminateAuditBlocksCompletion()
+    {
+        var harness = CreateHarness(audit: new IndeterminateFinalizationAuditor());
+
+        var first = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+        var retry = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+        harness.Dispatcher.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Invoke_RequiredReleasedFinalizationNotFinalizedDoesNotCountAsSuccess()
+    {
+        var harness = CreateHarness(
+            requiredAudit: true,
+            audit: new FinalizationThrowingAuditor(),
+            invocationGate: new RejectingDispatchFenceGate());
+
+        var outcome = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.GovernanceDenied);
+        harness.Dispatcher.CallCount.Should().Be(0);
+        harness.Budget.LastFinalState.Should().Be(AgentToolBudgetReservationState.Released);
+    }
+
+    [Fact]
+    public async Task Invoke_RequiredIndeterminateFinalizationNotFinalizedDoesNotThrow()
+    {
+        var harness = CreateHarness(
+            requiredAudit: true,
+            audit: new FinalizationThrowingAuditor(),
+            throwOnBudgetFinalize: true);
+
+        var outcome = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
         harness.Dispatcher.CallCount.Should().Be(1);
     }
 
@@ -633,6 +679,53 @@ public sealed class AgentToolInvokerTests
             => _inner.ReleaseLeaseAsync(lease, cancellationToken);
     }
 
+    private sealed class RejectingDispatchFenceGate : IAgentToolInvocationGate
+    {
+        private readonly DevelopmentInMemoryAgentToolInvocationGate _inner = new();
+
+        public ValueTask<AgentToolInvocationAcquireResult> AcquireAsync(
+            AgentToolInvocationAcquireRequest request,
+            CancellationToken cancellationToken = default)
+            => _inner.AcquireAsync(request, cancellationToken);
+
+        public ValueTask<AgentToolInvocationLease> RenewAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.RenewAsync(lease, cancellationToken);
+
+        public ValueTask<bool> TryMarkDispatchStartedAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(false);
+
+        public ValueTask PrepareCompletionAsync(
+            AgentToolInvocationLease lease,
+            AgentToolInvocationPrepareCompletionRequest request,
+            CancellationToken cancellationToken = default)
+            => _inner.PrepareCompletionAsync(lease, request, cancellationToken);
+
+        public ValueTask<AgentToolInvocationCompletionResult> PublishCompletionAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.PublishCompletionAsync(lease, cancellationToken);
+
+        public ValueTask<AgentToolInvocationCompletionResult> GetCompletionStateAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.GetCompletionStateAsync(lease, cancellationToken);
+
+        public ValueTask MarkIndeterminateAsync(
+            AgentToolInvocationLease lease,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+            => _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
+
+        public ValueTask ReleaseLeaseAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.ReleaseLeaseAsync(lease, cancellationToken);
+    }
+
     private sealed class FinalizationThrowingAuditor : IAgentToolGovernanceAuditor
     {
         public ValueTask RecordDecisionAsync(
@@ -684,6 +777,49 @@ public sealed class AgentToolInvokerTests
         {
             _ = await _inner.FinalizeAsync(record, cancellationToken);
             throw new IOException("audit finalization response lost");
+        }
+
+        public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
+            string auditId,
+            CancellationToken cancellationToken = default)
+            => _inner.GetFinalizationStateAsync(auditId, cancellationToken);
+    }
+
+    private sealed class IndeterminateFinalizationAuditor : IAgentToolGovernanceAuditor
+    {
+        private readonly DevelopmentInMemoryAgentToolGovernanceAuditor _inner = new();
+
+        public ValueTask RecordDecisionAsync(
+            AgentToolGovernanceDecisionRecord record,
+            CancellationToken cancellationToken = default)
+            => _inner.RecordDecisionAsync(record, cancellationToken);
+
+        public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+            AgentToolGovernancePreDispatchRecord record,
+            CancellationToken cancellationToken = default)
+            => _inner.RecordPreDispatchAsync(record, cancellationToken);
+
+        public ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(
+            AgentToolGovernanceFinalizationRecord record,
+            CancellationToken cancellationToken = default)
+        {
+            if (record.AttemptState == AgentToolGovernanceAttemptFinalState.Completed)
+            {
+                var indeterminate = record with
+                {
+                    AttemptState = AgentToolGovernanceAttemptFinalState.Indeterminate,
+                    InvocationState = AgentToolInvocationTerminalState.Indeterminate,
+                    Outcome = record.Outcome with
+                    {
+                        Kind = AgentToolInvocationOutcomeKind.InvocationIndeterminate,
+                        Code = "AGENT_TOOL_INVOCATION_INDETERMINATE"
+                    },
+                    ReasonCode = "audit_indeterminate"
+                };
+                return ValueTask.FromResult(Finalized(indeterminate));
+            }
+
+            return _inner.FinalizeAsync(record, cancellationToken);
         }
 
         public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
@@ -867,18 +1003,17 @@ public sealed class AgentToolInvokerTests
             return _inner.PrepareCompletionAsync(lease, request, cancellationToken);
         }
 
-        public ValueTask<AgentToolInvocationCompletionResult> PublishCompletionAsync(
+        public async ValueTask<AgentToolInvocationCompletionResult> PublishCompletionAsync(
             AgentToolInvocationLease lease,
             CancellationToken cancellationToken = default)
-            => ValueTask.FromResult(new AgentToolInvocationCompletionResult
+        {
+            var published = await _inner.PublishCompletionAsync(lease, cancellationToken);
+            return published with
             {
-                State = AgentToolInvocationCompletionState.Completed,
-                Outcome = _outcome,
-                PreparedAt = DateTimeOffset.UtcNow,
                 AuditId = "wrong-audit",
-                BudgetReservationId = "wrong-reservation",
-                ReasonCode = "dispatch_completed"
-            });
+                BudgetReservationId = "wrong-reservation"
+            };
+        }
 
         public ValueTask<AgentToolInvocationCompletionResult> GetCompletionStateAsync(
             AgentToolInvocationLease lease,

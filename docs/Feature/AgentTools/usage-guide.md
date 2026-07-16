@@ -123,6 +123,8 @@ If Required Audit finalization loses its response, the runtime queries the
 AuditId. A matching Completed record continues to publication; an unconfirmed
 record leaves CompletionPending fenced rather than guessing a terminal state.
 Published Completed is immutable and cannot be downgraded to Indeterminate.
+BestEffort tolerates an unavailable or unconfirmed audit checkpoint, but a
+confirmed contradictory Indeterminate finalization still fences the invocation.
 Budget reservation/finalization responses that are uncertain are represented as
 `Unknown` in the governance checkpoint and keep the logical invocation fenced.
 Role, selection, schema, approval, and known budget denials are recorded through
