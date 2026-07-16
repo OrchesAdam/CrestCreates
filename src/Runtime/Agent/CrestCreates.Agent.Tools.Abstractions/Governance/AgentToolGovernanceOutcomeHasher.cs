@@ -5,9 +5,10 @@ using System.Text.Json;
 namespace CrestCreates.Agent.Tools;
 
 /// <summary>
-/// Produces the non-sensitive digest used to confirm a governance finalization.
-/// The digest lets durable auditors omit the full structured output while still
-/// proving that a queried terminal record belongs to the same outcome.
+/// Produces a data-minimizing integrity digest used to confirm a governance
+/// finalization. It lets durable auditors omit the full structured output while
+/// still proving that a queried terminal record belongs to the same outcome;
+/// ordinary SHA-256 does not provide confidentiality against offline guessing.
 /// </summary>
 public static class AgentToolGovernanceOutcomeHasher
 {

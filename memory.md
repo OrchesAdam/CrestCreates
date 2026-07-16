@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection seventh review fixes)
+Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection eighth review fixes)
 
 ## Purpose
 
@@ -86,11 +86,13 @@ Key decisions:
   use direct-result plus AuditId query confirmation. BestEffort tolerates only
   unconfirmed audit state; a confirmed contradictory Indeterminate state fences
   the invocation.
-- Audit finalization confirmation uses the non-sensitive canonical OutcomeHash;
+- Audit finalization confirmation uses a data-minimizing canonical OutcomeHash;
+  ordinary SHA-256 is an integrity digest, not a confidentiality mechanism;
   full Message/Issues/StructuredOutput persistence is not required. Confirmed
-  Audit conflicts leave CompletionPending for reconciliation, while a confirmed
-  Released-attempt Indeterminate state transitions the same fenced lease to a
-  logical Indeterminate gate.
+  Audit conflicts leave CompletionPending for reconciliation. Pre-dispatch
+  release uses ReleasePending until Released Audit confirmation and
+  PublishRelease; a confirmed Released-attempt Indeterminate state transitions
+  the same fenced lease to a logical Indeterminate gate.
 - A non-equivalent direct Finalized response is never authoritative by itself;
   the Auditor is queried again by AuditId before accepting, fencing, or
   publishing a terminal state.
@@ -133,7 +135,7 @@ Completed:
   output validation, governance settlement, and terminal replay.
 
 Focused verification on 2026-07-16: Metadata 467/467, Schema 42/42,
-Agent.Tools abstractions 16/16, Agent.Tools runtime 87/87, Agent E2E 1/1,
+Agent.Tools abstractions 16/16, Agent.Tools runtime 90/90, Agent E2E 1/1,
 Agent NativeAOT 1/1, MCP runtime 63/63, MCP E2E 1/1, MCP NativeAOT 1/1,
 dependency boundaries 40/40, CodeGenerator 277/277, and Control Plane 484/484.
 The Runtime solution build also completes with 0 errors and now includes the

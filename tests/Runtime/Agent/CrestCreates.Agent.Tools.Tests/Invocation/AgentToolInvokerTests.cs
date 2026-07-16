@@ -385,10 +385,39 @@ public sealed class AgentToolInvokerTests
 
         var outcome = await harness.Invoker.InvokeAsync(
             new AgentToolInvocationRequest(harness.ToolName));
+        var retry = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
 
         outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.GovernanceDenied);
+        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.InProgress);
         harness.Dispatcher.CallCount.Should().Be(0);
         harness.Budget.LastFinalState.Should().Be(AgentToolBudgetReservationState.Released);
+    }
+
+    [Fact]
+    public async Task Invoke_BlockingReleasedAuditKeepsConcurrentAcquireInProgress()
+    {
+        var audit = new BlockingFinalizationAuditor();
+        var harness = CreateHarness(
+            requiredAudit: true,
+            audit: audit,
+            invocationGate: new RejectingDispatchFenceGate());
+        var firstTask = harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName)).AsTask();
+
+        await audit.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var concurrent = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        concurrent.Kind.Should().Be(AgentToolInvocationOutcomeKind.InProgress);
+        audit.Release.TrySetResult();
+        var first = await firstTask;
+        var retry = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.GovernanceDenied);
+        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.InProgress);
+        harness.Dispatcher.CallCount.Should().Be(0);
     }
 
     [Fact]
@@ -716,6 +745,22 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.GetCompletionStateAsync(lease, cancellationToken);
 
+        public ValueTask PrepareReleaseAsync(
+            AgentToolInvocationLease lease,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+            => _inner.PrepareReleaseAsync(lease, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.PublishReleaseAsync(lease, cancellationToken);
+
+        public ValueTask<AgentToolInvocationReleaseResult> GetReleaseStateAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.GetReleaseStateAsync(lease, cancellationToken);
+
         public async ValueTask MarkIndeterminateAsync(
             AgentToolInvocationLease lease,
             string reasonCode,
@@ -765,6 +810,22 @@ public sealed class AgentToolInvokerTests
             AgentToolInvocationLease lease,
             CancellationToken cancellationToken = default)
             => _inner.GetCompletionStateAsync(lease, cancellationToken);
+
+        public ValueTask PrepareReleaseAsync(
+            AgentToolInvocationLease lease,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+            => _inner.PrepareReleaseAsync(lease, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.PublishReleaseAsync(lease, cancellationToken);
+
+        public ValueTask<AgentToolInvocationReleaseResult> GetReleaseStateAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.GetReleaseStateAsync(lease, cancellationToken);
 
         public ValueTask MarkIndeterminateAsync(
             AgentToolInvocationLease lease,
@@ -1057,6 +1118,22 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.GetCompletionStateAsync(lease, cancellationToken);
 
+        public ValueTask PrepareReleaseAsync(
+            AgentToolInvocationLease lease,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+            => _inner.PrepareReleaseAsync(lease, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.PublishReleaseAsync(lease, cancellationToken);
+
+        public ValueTask<AgentToolInvocationReleaseResult> GetReleaseStateAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.GetReleaseStateAsync(lease, cancellationToken);
+
         public ValueTask MarkIndeterminateAsync(
             AgentToolInvocationLease lease,
             string reasonCode,
@@ -1106,6 +1183,22 @@ public sealed class AgentToolInvokerTests
             AgentToolInvocationLease lease,
             CancellationToken cancellationToken = default)
             => _inner.GetCompletionStateAsync(lease, cancellationToken);
+
+        public ValueTask PrepareReleaseAsync(
+            AgentToolInvocationLease lease,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+            => _inner.PrepareReleaseAsync(lease, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.PublishReleaseAsync(lease, cancellationToken);
+
+        public ValueTask<AgentToolInvocationReleaseResult> GetReleaseStateAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.GetReleaseStateAsync(lease, cancellationToken);
 
         public ValueTask MarkIndeterminateAsync(
             AgentToolInvocationLease lease,
@@ -1164,6 +1257,22 @@ public sealed class AgentToolInvokerTests
             AgentToolInvocationLease lease,
             CancellationToken cancellationToken = default)
             => _inner.GetCompletionStateAsync(lease, cancellationToken);
+
+        public ValueTask PrepareReleaseAsync(
+            AgentToolInvocationLease lease,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+            => _inner.PrepareReleaseAsync(lease, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.PublishReleaseAsync(lease, cancellationToken);
+
+        public ValueTask<AgentToolInvocationReleaseResult> GetReleaseStateAsync(
+            AgentToolInvocationLease lease,
+            CancellationToken cancellationToken = default)
+            => _inner.GetReleaseStateAsync(lease, cancellationToken);
 
         public ValueTask MarkIndeterminateAsync(
             AgentToolInvocationLease lease,

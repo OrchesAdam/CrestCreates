@@ -79,6 +79,23 @@ public sealed record AgentToolInvocationCompletionResult
     public string? ReasonCode { get; init; }
 }
 
+public enum AgentToolInvocationReleaseState
+{
+    Unknown = 0,
+    ReleasePending = 1,
+    Released = 2,
+    Indeterminate = 3
+}
+
+public sealed record AgentToolInvocationReleaseResult
+{
+    public required AgentToolInvocationReleaseState State { get; init; }
+
+    public DateTimeOffset? PreparedAt { get; init; }
+
+    public string? ReasonCode { get; init; }
+}
+
 public interface IAgentToolInvocationGate
 {
     ValueTask<AgentToolInvocationAcquireResult> AcquireAsync(
@@ -103,6 +120,19 @@ public interface IAgentToolInvocationGate
         CancellationToken cancellationToken = default);
 
     ValueTask<AgentToolInvocationCompletionResult> GetCompletionStateAsync(
+        AgentToolInvocationLease lease,
+        CancellationToken cancellationToken = default);
+
+    ValueTask PrepareReleaseAsync(
+        AgentToolInvocationLease lease,
+        string reasonCode,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
+        AgentToolInvocationLease lease,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolInvocationReleaseResult> GetReleaseStateAsync(
         AgentToolInvocationLease lease,
         CancellationToken cancellationToken = default);
 

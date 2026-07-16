@@ -880,8 +880,14 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 dispatchStarted: false).ConfigureAwait(false);
         }
 
-        var releasedLease = await TryReleaseLeaseAsync(lease).ConfigureAwait(false);
-        if (!releasedLease)
+        try
+        {
+            await _invocations.PrepareReleaseAsync(
+                lease,
+                reasonCode,
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
         {
             return await FinalizeIndeterminateAfterGateAsync(
                 auditHandle,
@@ -909,16 +915,14 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             if (confirmation is AgentToolAuditConfirmation.Indeterminate
                 or AgentToolAuditConfirmation.Conflict)
             {
+                if (confirmation == AgentToolAuditConfirmation.Conflict)
+                    return Indeterminate("pre_dispatch_audit_conflict");
+
                 var fenced = await TryMarkIndeterminateAsync(
                     lease,
-                    confirmation == AgentToolAuditConfirmation.Conflict
-                        ? "pre_dispatch_audit_conflict"
-                        : "pre_dispatch_audit_indeterminate").ConfigureAwait(false);
-                outcome = fenced
-                    ? Indeterminate(
-                        confirmation == AgentToolAuditConfirmation.Conflict
-                            ? "pre_dispatch_audit_conflict"
-                            : "pre_dispatch_audit_indeterminate")
+                    "pre_dispatch_audit_indeterminate").ConfigureAwait(false);
+                return fenced
+                    ? Indeterminate("pre_dispatch_audit_indeterminate")
                     : GovernanceDenied("AGENT_TOOL_AUDIT_FAILURE");
             }
             else if (entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required
@@ -926,8 +930,62 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 outcome = GovernanceDenied("AGENT_TOOL_AUDIT_FAILURE");
         }
 
-        return outcome;
+        if (entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required
+            && outcome.Kind == AgentToolInvocationOutcomeKind.GovernanceDenied)
+            return outcome;
+
+        try
+        {
+            var published = await _invocations.PublishReleaseAsync(lease, CancellationToken.None)
+                .ConfigureAwait(false);
+            return MatchesPublishedRelease(published, reasonCode)
+                ? outcome
+                : await ResolveReleaseUncertaintyAsync(lease, reasonCode).ConfigureAwait(false);
+        }
+        catch
+        {
+            return await ResolveReleaseUncertaintyAsync(lease, reasonCode).ConfigureAwait(false);
+        }
     }
+
+    private async ValueTask<AgentToolInvocationOutcome> ResolveReleaseUncertaintyAsync(
+        AgentToolInvocationLease lease,
+        string reasonCode)
+    {
+        try
+        {
+            var state = await _invocations.GetReleaseStateAsync(lease, CancellationToken.None)
+                .ConfigureAwait(false);
+            if (state.State == AgentToolInvocationReleaseState.Released
+                && string.Equals(state.ReasonCode, reasonCode, StringComparison.Ordinal))
+            {
+                return Outcome(
+                    AgentToolInvocationOutcomeKind.InProgress,
+                    "AGENT_TOOL_INVOCATION_NOT_ACQUIRED",
+                    "The tool invocation could not acquire execution ownership.");
+            }
+
+            if (state.State == AgentToolInvocationReleaseState.Indeterminate)
+            {
+                await MarkIndeterminateIgnoringFailureAsync(
+                    lease,
+                    "pre_dispatch_release_uncertain").ConfigureAwait(false);
+                return Indeterminate("pre_dispatch_release_uncertain");
+            }
+        }
+        catch
+        {
+            // The durable gate remains fenced when release publication cannot be confirmed.
+        }
+
+        return Indeterminate("pre_dispatch_release_uncertain");
+    }
+
+    private static bool MatchesPublishedRelease(
+        AgentToolInvocationReleaseResult result,
+        string reasonCode)
+        => result.State == AgentToolInvocationReleaseState.Released
+            && string.Equals(result.ReasonCode, reasonCode, StringComparison.Ordinal);
 
     private async ValueTask<AgentToolInvocationOutcome> FinishFenceIndeterminateAsync(
         AgentToolGovernanceAuditHandle? auditHandle,

@@ -82,10 +82,6 @@ public sealed record AgentToolGovernanceDecisionRecord
 
     public required AgentToolGovernanceDecisionState Decision { get; init; }
 
-    /// <summary>
-    /// Outcome envelope. A durable query may return a redacted envelope when
-    /// OutcomeHash is present; the invoker does not require full output here.
-    /// </summary>
     public required AgentToolInvocationOutcome Outcome { get; init; }
 
     public required string ReasonCode { get; init; }
@@ -112,8 +108,8 @@ public sealed record AgentToolGovernanceFinalizationRecord
     public required AgentToolInvocationOutcome Outcome { get; init; }
 
     /// <summary>
-    /// Non-sensitive digest of Outcome. Durable auditors should persist this
-    /// instead of the full structured output and return it during confirmation.
+    /// Data-minimizing integrity digest of Outcome. It is not a confidentiality
+    /// mechanism; durable auditors may persist it instead of full output.
     /// </summary>
     public string? OutcomeHash { get; init; }
 

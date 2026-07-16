@@ -53,6 +53,8 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 return ValueTask.FromResult(Result(AgentToolInvocationAcquireStatus.Completed, outcome: entry.CompletedOutcome));
             if (entry.CompletionPendingOutcome is not null)
                 return ValueTask.FromResult(Result(AgentToolInvocationAcquireStatus.InProgress));
+            if (entry.LastAttemptState == AttemptTerminalState.ReleasePending)
+                return ValueTask.FromResult(Result(AgentToolInvocationAcquireStatus.InProgress));
             if (entry.Indeterminate)
                 return ValueTask.FromResult(Result(AgentToolInvocationAcquireStatus.Indeterminate));
 
@@ -77,6 +79,8 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 _leaseKeys.Remove(terminalLease.LeaseId);
                 entry.LastTerminalLease = null;
                 entry.LastAttemptState = AttemptTerminalState.None;
+                entry.ReleasePendingPreparedAt = null;
+                entry.ReleasePendingReasonCode = null;
             }
 
             entry.FencingToken++;
@@ -213,6 +217,74 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         }
     }
 
+    public ValueTask PrepareReleaseAsync(
+        AgentToolInvocationLease lease,
+        string reasonCode,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.ReleasePending, out var pending))
+            {
+                EnsureReleaseReason(pending, reasonCode);
+                return ValueTask.CompletedTask;
+            }
+
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.Released, out var released))
+            {
+                EnsureReleaseReason(released, reasonCode);
+                return ValueTask.CompletedTask;
+            }
+
+            var (entry, _) = GetCurrent(lease);
+            if (entry.DispatchStarted)
+                throw new InvalidOperationException("A dispatched invocation cannot prepare release.");
+            entry.ReleasePendingPreparedAt = _timeProvider.GetUtcNow();
+            entry.ReleasePendingReasonCode = reasonCode;
+            entry.LastReasonCode = reasonCode;
+            ClearLease(entry, lease, AttemptTerminalState.ReleasePending);
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    public ValueTask<AgentToolInvocationReleaseResult> PublishReleaseAsync(
+        AgentToolInvocationLease lease,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.Released, out var released))
+                return ValueTask.FromResult(GetReleaseResult(released, AgentToolInvocationReleaseState.Released));
+            if (!IsSameTerminalTransition(lease, AttemptTerminalState.ReleasePending, out var pending))
+                throw new InvalidOperationException("The invocation has no pending release.");
+            pending.LastAttemptState = AttemptTerminalState.Released;
+            return ValueTask.FromResult(GetReleaseResult(pending, AgentToolInvocationReleaseState.Released));
+        }
+    }
+
+    public ValueTask<AgentToolInvocationReleaseResult> GetReleaseStateAsync(
+        AgentToolInvocationLease lease,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.ReleasePending, out var pending))
+                return ValueTask.FromResult(GetReleaseResult(pending, AgentToolInvocationReleaseState.ReleasePending));
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.Released, out var released))
+                return ValueTask.FromResult(GetReleaseResult(released, AgentToolInvocationReleaseState.Released));
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.Indeterminate, out var indeterminate))
+                return ValueTask.FromResult(GetReleaseResult(indeterminate, AgentToolInvocationReleaseState.Indeterminate));
+            return ValueTask.FromResult(new AgentToolInvocationReleaseResult
+            {
+                State = AgentToolInvocationReleaseState.Unknown
+            });
+        }
+    }
+
     public ValueTask MarkIndeterminateAsync(
         AgentToolInvocationLease lease,
         string reasonCode,
@@ -243,7 +315,8 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 return ValueTask.CompletedTask;
             }
 
-            if (IsSameTerminalTransition(lease, AttemptTerminalState.Released, out var releasedEntry))
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.ReleasePending, out var releasedEntry)
+                || IsSameTerminalTransition(lease, AttemptTerminalState.Released, out releasedEntry))
             {
                 releasedEntry.Indeterminate = true;
                 releasedEntry.LastReasonCode = reasonCode;
@@ -394,6 +467,27 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         };
     }
 
+    private static AgentToolInvocationReleaseResult GetReleaseResult(
+        Entry entry,
+        AgentToolInvocationReleaseState state)
+        => new()
+        {
+            State = state,
+            PreparedAt = entry.ReleasePendingPreparedAt,
+            ReasonCode = entry.ReleasePendingReasonCode ?? entry.LastReasonCode
+        };
+
+    private static void EnsureReleaseReason(Entry entry, string reasonCode)
+    {
+        if (!string.Equals(
+                entry.ReleasePendingReasonCode ?? entry.LastReasonCode,
+                reasonCode,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The release reason cannot be changed.");
+        }
+    }
+
     private static bool Equivalent(
         AgentToolInvocationOutcome? left,
         AgentToolInvocationOutcome right)
@@ -425,6 +519,8 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         public string? CompletionPendingAuditId { get; set; }
         public string? CompletionPendingBudgetReservationId { get; set; }
         public string? CompletionPendingReasonCode { get; set; }
+        public DateTimeOffset? ReleasePendingPreparedAt { get; set; }
+        public string? ReleasePendingReasonCode { get; set; }
         public string? LastReasonCode { get; set; }
         public AgentToolInvocationLease? LastTerminalLease { get; set; }
         public AttemptTerminalState LastAttemptState { get; set; }
@@ -433,6 +529,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
     private enum AttemptTerminalState
     {
         None,
+        ReleasePending,
         Released,
         CompletionPending,
         Completed,

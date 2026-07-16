@@ -100,6 +100,10 @@ public sealed class AgentToolGovernanceAuditorTests
                 Issues = [new AgentToolInvocationIssue("safe_issue", "value")]
             }
         };
+        finalization = finalization with
+        {
+            OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(finalization.Outcome)
+        };
         await auditor.FinalizeAsync(finalization);
 
         var structuredConflict = async () => await auditor.FinalizeAsync(finalization with
@@ -314,6 +318,52 @@ public sealed class AgentToolGovernanceAuditorTests
             outcomeKind: AgentToolInvocationOutcomeKind.InProgress);
 
         var act = async () => await auditor.FinalizeAsync(malformed);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task Finalization_RejectsOutcomeHashThatDoesNotMatchOutcome()
+    {
+        var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();
+        var context = GovernanceTestData.Context();
+        var handle = await auditor.RecordPreDispatchAsync(
+            GovernanceTestData.PreDispatch(context));
+        var finalization = Finalization(
+            handle.AuditId,
+            context,
+            AgentToolBudgetReservationState.Committed,
+            AgentToolGovernanceAttemptFinalState.Completed,
+            AgentToolInvocationTerminalState.Completed);
+        var differentOutcome = finalization.Outcome with { Message = "different" };
+
+        var act = async () => await auditor.FinalizeAsync(finalization with
+        {
+            OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(differentOutcome)
+        });
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task Finalization_RejectsChangedOutcomeThatReusesOriginalHash()
+    {
+        var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();
+        var context = GovernanceTestData.Context();
+        var handle = await auditor.RecordPreDispatchAsync(
+            GovernanceTestData.PreDispatch(context));
+        var finalization = Finalization(
+            handle.AuditId,
+            context,
+            AgentToolBudgetReservationState.Committed,
+            AgentToolGovernanceAttemptFinalState.Completed,
+            AgentToolInvocationTerminalState.Completed);
+        await auditor.FinalizeAsync(finalization);
+
+        var act = async () => await auditor.FinalizeAsync(finalization with
+        {
+            Outcome = finalization.Outcome with { Message = "different" }
+        });
 
         await act.Should().ThrowAsync<ArgumentException>();
     }

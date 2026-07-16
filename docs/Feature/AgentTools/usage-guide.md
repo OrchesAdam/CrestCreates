@@ -112,8 +112,9 @@ binds Tool, Capability, Schemas, arguments, roles, and CallOrigin.
   finalization is accepted and Completed replay is explicitly published;
 - an uncertain post-dispatch result is `InvocationIndeterminate` and must not be
   retried automatically;
-- a pre-dispatch Released attempt may acquire a new lease and reservation with
-  the same fingerprint.
+- a pre-dispatch release remains fenced as `ReleasePending` until its terminal
+  audit is confirmed and `PublishRelease` succeeds; only then may the same
+  fingerprint acquire a new lease and reservation.
 
 Budget and invocation terminal state are independent. For example, a business
 call may have consumed its budget while a required post-dispatch audit failure
@@ -125,7 +126,8 @@ record leaves CompletionPending fenced rather than guessing a terminal state.
 Published Completed is immutable and cannot be downgraded to Indeterminate.
 BestEffort tolerates an unavailable or unconfirmed audit checkpoint, but a
 confirmed contradictory Indeterminate finalization still fences the invocation.
-Audit confirmation uses `OutcomeHash`; adapters do not need to persist the full
+Audit confirmation uses `OutcomeHash`, a data-minimizing integrity digest (not
+a confidentiality mechanism); adapters do not need to persist the full
 structured output merely to confirm a response-loss retry.
 Budget reservation/finalization responses that are uncertain are represented as
 `Unknown` in the governance checkpoint and keep the logical invocation fenced.

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Metadata.AgentTool;
 
@@ -282,6 +283,7 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
                 or AgentToolGovernanceAttemptFinalState.Completed
                 or AgentToolGovernanceAttemptFinalState.Indeterminate)
             || record.Outcome is null
+            || !HasValidOutcomeHash(record)
             || record.Outcome.Kind == AgentToolInvocationOutcomeKind.Unknown
             || !IsKnown(record.Outcome.Kind)
             || !IsConsistent(record)
@@ -411,6 +413,26 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
             or AgentToolInvocationOutcomeKind.CapabilityFailure
             or AgentToolInvocationOutcomeKind.InternalContractFailure
             or AgentToolInvocationOutcomeKind.InternalServer;
+
+    private static bool HasValidOutcomeHash(AgentToolGovernanceFinalizationRecord record)
+    {
+        if (string.IsNullOrWhiteSpace(record.OutcomeHash)
+            || record.Outcome.Issues is null
+            || record.Outcome.Issues.Any(issue => issue is null))
+            return false;
+
+        try
+        {
+            var supplied = Convert.FromHexString(record.OutcomeHash);
+            var computed = Convert.FromHexString(
+                AgentToolGovernanceOutcomeHasher.Compute(record.Outcome));
+            return CryptographicOperations.FixedTimeEquals(supplied, computed);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
 
     private static bool IsAcceptedApproval(AgentToolApprovalResult approval)
         => approval.Decision switch

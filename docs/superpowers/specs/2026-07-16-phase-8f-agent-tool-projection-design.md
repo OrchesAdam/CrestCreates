@@ -984,6 +984,7 @@ Acquire behavior:
 | absent | new | Acquired with first attempt |
 | available, no active attempt | same | Acquired with new attempt |
 | active attempt | same | InProgress |
+| ReleasePending | same | InProgress |
 | CompletionPending | same | InProgress |
 | Completed | same | Completed with stored safe outcome |
 | Indeterminate | same | Indeterminate |
@@ -1004,12 +1005,28 @@ Both success and deterministic business/contract failure are completed terminal
 outcomes. `Indeterminate` never auto-dispatches and requires explicit
 reconciliation.
 
+Pre-dispatch release uses the same publication fence:
+
+```text
+settle Budget = Released
+→ PrepareRelease (Invocation remains fenced as ReleasePending)
+→ finalize/confirm Released governance audit
+→ PublishRelease (only now may Acquire create a new attempt)
+```
+
+Acquire returns `InProgress` while `ReleasePending`. A confirmed Indeterminate
+audit transitions that fenced attempt to logical `Indeterminate`; a conflicting
+or otherwise unconfirmed Required audit leaves it pending for reconciliation.
+BestEffort may publish an unconfirmed release, but it still must not expose a
+new attempt before `PublishRelease` succeeds.
+
 ### 13.1 Lease and fencing rules
 
 - FencingToken is monotonic for one LogicalInvocationKey and increases for each
   new attempt ownership;
 - Renew, TryMarkDispatchStarted, PrepareCompletion, PublishCompletion,
-  GetCompletionState, MarkIndeterminate, and ReleaseLease
+  GetCompletionState, PrepareRelease, PublishRelease, GetReleaseState,
+  MarkIndeterminate, and ReleaseLease
   validate both LeaseId and FencingToken;
 - every transition is idempotent for the same valid lease and rejects a stale
   or mismatched lease;
@@ -1325,8 +1342,9 @@ Governance audit records metadata by default:
   without requiring durable storage of Message, Issues, or StructuredOutput;
 - block/failure code, DispatchStarted, and terminal state.
 
-Full arguments/output are not recorded by default. Audit implementations own
-redaction, retention, and persistence.
+Full arguments/output are not recorded by default. `OutcomeHash` is a
+data-minimizing SHA-256 integrity digest, not a confidentiality mechanism;
+Audit implementations own redaction, retention, and persistence.
 
 Required pre-dispatch audit failure releases a held reservation and lease and
 does not call Dispatcher. BestEffort audit failure records a diagnostic and may
