@@ -12,6 +12,9 @@ public sealed record AgentToolInvocationFingerprint(
 
 public sealed class AgentToolInvocationFingerprintBuilder
 {
+    public string BuildRawArgumentsHash(JsonElement? arguments)
+        => Hash(writer => WriteRawValue(writer, arguments ?? default));
+
     public AgentToolInvocationFingerprint Build(
         AgentToolRuntimeEntry entry,
         AgentExecutionContext execution,
@@ -85,6 +88,46 @@ public sealed class AgentToolInvocationFingerprintBuilder
             return;
         }
         WriteScalar(writer, value, field?.FieldType);
+    }
+
+    private static void WriteRawValue(Utf8JsonWriter writer, JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var property in value.EnumerateObject().OrderBy(item => item.Name, StringComparer.Ordinal))
+                {
+                    writer.WritePropertyName(property.Name);
+                    WriteRawValue(writer, property.Value);
+                }
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in value.EnumerateArray())
+                    WriteRawValue(writer, item);
+                writer.WriteEndArray();
+                break;
+            case JsonValueKind.String:
+                writer.WriteStringValue(value.GetString());
+                break;
+            case JsonValueKind.Number:
+                writer.WriteRawValue(value.GetRawText(), skipInputValidation: false);
+                break;
+            case JsonValueKind.True:
+                writer.WriteBooleanValue(true);
+                break;
+            case JsonValueKind.False:
+                writer.WriteBooleanValue(false);
+                break;
+            case JsonValueKind.Null:
+            case JsonValueKind.Undefined:
+                writer.WriteNullValue();
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(value));
+        }
     }
 
     private static void WriteScalar(Utf8JsonWriter writer, JsonElement value, string? token)

@@ -51,6 +51,8 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
 
             if (entry.CompletedOutcome is not null)
                 return ValueTask.FromResult(Result(AgentToolInvocationAcquireStatus.Completed, outcome: entry.CompletedOutcome));
+            if (entry.CompletionPendingOutcome is not null)
+                return ValueTask.FromResult(Result(AgentToolInvocationAcquireStatus.InProgress));
             if (entry.Indeterminate)
                 return ValueTask.FromResult(Result(AgentToolInvocationAcquireStatus.Indeterminate));
 
@@ -126,7 +128,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         }
     }
 
-    public ValueTask CompleteAsync(
+    public ValueTask PrepareCompletionAsync(
         AgentToolInvocationLease lease,
         AgentToolInvocationOutcome outcome,
         CancellationToken cancellationToken = default)
@@ -142,13 +144,50 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 return ValueTask.CompletedTask;
             }
 
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.CompletionPending, out var pendingEntry))
+            {
+                if (!Equivalent(pendingEntry.CompletionPendingOutcome, outcome))
+                    throw new InvalidOperationException("The pending completion outcome cannot be changed.");
+                return ValueTask.CompletedTask;
+            }
+
             var (entry, _) = GetCurrent(lease);
             if (!entry.DispatchStarted)
                 throw new InvalidOperationException("Dispatch has not started.");
-            entry.CompletedOutcome = outcome;
-            ClearLease(entry, lease, AttemptTerminalState.Completed);
+            entry.CompletionPendingOutcome = outcome;
+            ClearLease(entry, lease, AttemptTerminalState.CompletionPending);
             return ValueTask.CompletedTask;
         }
+    }
+
+    public ValueTask PublishCompletionAsync(
+        AgentToolInvocationLease lease,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.Completed, out _))
+                return ValueTask.CompletedTask;
+
+            if (!IsSameTerminalTransition(lease, AttemptTerminalState.CompletionPending, out var entry)
+                || entry.CompletionPendingOutcome is null)
+                throw new InvalidOperationException("The invocation has no pending completion.");
+
+            entry.CompletedOutcome = entry.CompletionPendingOutcome;
+            entry.CompletionPendingOutcome = null;
+            entry.LastAttemptState = AttemptTerminalState.Completed;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    public async ValueTask CompleteAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationOutcome outcome,
+        CancellationToken cancellationToken = default)
+    {
+        await PrepareCompletionAsync(lease, outcome, cancellationToken).ConfigureAwait(false);
+        await PublishCompletionAsync(lease, cancellationToken).ConfigureAwait(false);
     }
 
     public ValueTask MarkIndeterminateAsync(
@@ -168,6 +207,14 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 completedEntry.CompletedOutcome = null;
                 completedEntry.Indeterminate = true;
                 completedEntry.LastAttemptState = AttemptTerminalState.Indeterminate;
+                return ValueTask.CompletedTask;
+            }
+
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.CompletionPending, out var pendingEntry))
+            {
+                pendingEntry.CompletionPendingOutcome = null;
+                pendingEntry.Indeterminate = true;
+                pendingEntry.LastAttemptState = AttemptTerminalState.Indeterminate;
                 return ValueTask.CompletedTask;
             }
 
@@ -292,6 +339,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         public bool DispatchStarted { get; set; }
         public bool Indeterminate { get; set; }
         public AgentToolInvocationOutcome? CompletedOutcome { get; set; }
+        public AgentToolInvocationOutcome? CompletionPendingOutcome { get; set; }
         public AgentToolInvocationLease? LastTerminalLease { get; set; }
         public AttemptTerminalState LastAttemptState { get; set; }
     }
@@ -300,6 +348,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
     {
         None,
         Released,
+        CompletionPending,
         Completed,
         Indeterminate
     }

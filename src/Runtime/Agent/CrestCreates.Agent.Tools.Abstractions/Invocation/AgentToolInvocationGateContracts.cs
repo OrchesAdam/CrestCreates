@@ -59,6 +59,16 @@ public interface IAgentToolInvocationGate
         AgentToolInvocationLease lease,
         CancellationToken cancellationToken = default);
 
+    ValueTask PrepareCompletionAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationOutcome outcome,
+        CancellationToken cancellationToken = default);
+
+    ValueTask PublishCompletionAsync(
+        AgentToolInvocationLease lease,
+        CancellationToken cancellationToken = default);
+
+    [Obsolete("Use PrepareCompletionAsync followed by PublishCompletionAsync.")]
     ValueTask CompleteAsync(
         AgentToolInvocationLease lease,
         AgentToolInvocationOutcome outcome,

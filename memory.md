@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection second review fixes)
+Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection third review fixes)
 
 ## Purpose
 
@@ -69,6 +69,14 @@ Key decisions:
   present; malformed Denied shapes remain Indeterminate. Decision Audit is
   content-idempotent and conflicts on same-attempt differences, and Required
   Decision Audit failures return stable audit-failure outcomes.
+- Invocation completion uses PrepareCompletion/PublishCompletion with a fenced
+  CompletionPending state, so concurrent Acquire cannot observe Completed before
+  Required Audit finalization. Completion uncertainty closes an Indeterminate
+  audit checkpoint when possible.
+- Role/Selection Decision Audit failures preserve the external UnknownTool mask.
+  Rejected payloads use schema-neutral raw canonical argument hashes; a
+  pre-evaluation denial records ArgumentsEvaluated=false with no hash. Malformed
+  budget results retain ObservedReservation for reconciliation.
 - Title is model-facing behavior and participates in Agent Tool ContractHash.
 - Actual completion requires a linux-x64 NativeAOT publish-link-run fixture;
   provider adapters, a planner/runtime loop, durable stores, approval workflow,
@@ -104,7 +112,7 @@ Completed:
   output validation, governance settlement, and terminal replay.
 
 Focused verification on 2026-07-16: Metadata 467/467, Schema 42/42,
-Agent.Tools abstractions 16/16, Agent.Tools runtime 67/67, Agent E2E 1/1,
+Agent.Tools abstractions 16/16, Agent.Tools runtime 69/69, Agent E2E 1/1,
 Agent NativeAOT 1/1, MCP runtime 63/63, MCP E2E 1/1, MCP NativeAOT 1/1,
 dependency boundaries 40/40, CodeGenerator 277/277, and Control Plane 484/484.
 The Runtime solution build also completes with 0 errors and now includes the

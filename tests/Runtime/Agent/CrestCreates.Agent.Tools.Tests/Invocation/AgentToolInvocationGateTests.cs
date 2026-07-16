@@ -27,6 +27,22 @@ public sealed class AgentToolInvocationGateTests
     }
 
     [Fact]
+    public async Task PreparedCompletion_IsInProgressUntilPublished()
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var acquired = await gate.AcquireAsync(Request("fingerprint-a"));
+        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!)).Should().BeTrue();
+
+        await gate.PrepareCompletionAsync(acquired.Lease!, Success());
+        var pending = await gate.AcquireAsync(Request("fingerprint-a"));
+        pending.Status.Should().Be(AgentToolInvocationAcquireStatus.InProgress);
+
+        await gate.PublishCompletionAsync(acquired.Lease!);
+        var replay = await gate.AcquireAsync(Request("fingerprint-a"));
+        replay.Status.Should().Be(AgentToolInvocationAcquireStatus.Completed);
+    }
+
+    [Fact]
     public async Task Acquire_PermanentlyRejectsDifferentFingerprintAfterReleasedAttempt()
     {
         var gate = new DevelopmentInMemoryAgentToolInvocationGate();

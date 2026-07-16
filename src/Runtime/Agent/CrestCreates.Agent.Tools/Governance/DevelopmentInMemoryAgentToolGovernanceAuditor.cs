@@ -223,7 +223,8 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
             && string.Equals(left.Outcome.Code, right.Outcome.Code, StringComparison.Ordinal)
             && string.Equals(left.Outcome.Message, right.Outcome.Message, StringComparison.Ordinal)
             && left.Outcome.Issues.SequenceEqual(right.Outcome.Issues)
-            && string.Equals(left.ReasonCode, right.ReasonCode, StringComparison.Ordinal);
+            && string.Equals(left.ReasonCode, right.ReasonCode, StringComparison.Ordinal)
+            && Equals(left.ObservedReservation, right.ObservedReservation);
 
     private static void ValidateFinalization(AgentToolGovernanceFinalizationRecord record)
     {
@@ -265,7 +266,9 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
             && AgentToolGovernanceGuard.IsValid(context.LogicalInvocationKey)
             && !string.IsNullOrWhiteSpace(context.AttemptId)
             && !string.IsNullOrWhiteSpace(context.InvocationFingerprint)
-            && !string.IsNullOrWhiteSpace(context.ArgumentsHash)
+            && (context.ArgumentsEvaluated
+                ? !string.IsNullOrWhiteSpace(context.ArgumentsHash)
+                : context.ArgumentsHash is null)
             && context.CallOrigin is AgentToolCallOrigin.ExplicitRequest
                 or AgentToolCallOrigin.AutomaticSelection
             && !string.IsNullOrWhiteSpace(context.AgentRolesHash)
@@ -410,7 +413,7 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
                     && record.BudgetReservation.State is (
                         AgentToolBudgetReservationState.Released
                         or AgentToolBudgetReservationState.Unknown))
-                && record.InvocationState == AgentToolInvocationTerminalState.Indeterminate
+                && record.InvocationState is null or AgentToolInvocationTerminalState.Indeterminate
                 && record.Outcome.Kind == AgentToolInvocationOutcomeKind.InvocationIndeterminate,
             _ => false
         };

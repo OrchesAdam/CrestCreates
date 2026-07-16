@@ -108,6 +108,8 @@ binds Tool, Capability, Schemas, arguments, roles, and CallOrigin.
   approval, reservation, dispatch, or audit;
 - a changed fingerprint is `InvocationConflict`;
 - an active attempt is `InProgress`;
+- a `CompletionPending` attempt remains `InProgress` until Required governance
+  finalization is accepted and Completed replay is explicitly published;
 - an uncertain post-dispatch result is `InvocationIndeterminate` and must not be
   retried automatically;
 - a pre-dispatch Released attempt may acquire a new lease and reservation with
@@ -123,7 +125,9 @@ Role, selection, schema, approval, and known budget denials are recorded through
 the governance decision-audit contract without inventing an Approval or Budget
 reservation. A Required audit policy also covers these decision records; if the
 record cannot be accepted, the call returns a stable audit-failure outcome and
-does not dispatch.
+does not dispatch. Role/Selection denials retain the external `UnknownTool`
+mask even when their Required Decision Audit is unavailable. Malformed budget
+responses retain any observed reservation for reconciliation.
 
 ## 5. Development adapters
 

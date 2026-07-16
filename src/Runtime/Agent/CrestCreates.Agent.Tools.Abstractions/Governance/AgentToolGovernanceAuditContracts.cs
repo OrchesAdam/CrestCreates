@@ -32,7 +32,9 @@ public sealed record AgentToolGovernanceAuditContext
 
     public required string InvocationFingerprint { get; init; }
 
-    public required string ArgumentsHash { get; init; }
+    public string? ArgumentsHash { get; init; }
+
+    public bool ArgumentsEvaluated { get; init; } = true;
 
     public required AgentToolCallOrigin CallOrigin { get; init; }
 
@@ -70,7 +72,9 @@ public sealed record AgentToolGovernanceAuditHandle
 /// <summary>
 /// Records a governance decision that prevented dispatch before a pre-dispatch
 /// checkpoint could be created. It intentionally contains no fabricated lease,
-/// approval, or budget reservation.
+/// approval, or budget reservation. ObservedReservation, when present, is the
+/// adapter response captured for reconciliation and is not trusted as a valid
+/// reservation by the invoker.
 /// </summary>
 public sealed record AgentToolGovernanceDecisionRecord
 {
@@ -81,6 +85,8 @@ public sealed record AgentToolGovernanceDecisionRecord
     public required AgentToolInvocationOutcome Outcome { get; init; }
 
     public required string ReasonCode { get; init; }
+
+    public AgentToolBudgetReservation? ObservedReservation { get; init; }
 }
 
 public sealed record AgentToolGovernanceFinalizationRecord

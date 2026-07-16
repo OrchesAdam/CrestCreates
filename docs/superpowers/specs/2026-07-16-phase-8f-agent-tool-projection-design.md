@@ -860,8 +860,9 @@ as a second field. CallOrigin is a per-call trusted fact and is written directly
 Changing one InvocationId from AutomaticSelection to ExplicitRequest therefore
 changes fingerprint and produces an invocation conflict rather than replay.
 
-ArgumentsHash is computed only after duplicate/unknown-property and captured
-Schema validation. Its canonical writer is Schema-aware and reflection-free:
+For accepted input, ArgumentsHash is computed only after duplicate/unknown-
+property and captured Schema validation. Its canonical writer is Schema-aware
+and reflection-free:
 
 - object properties are sorted by JSON property name with Ordinal comparison;
 - arrays preserve element order;
@@ -873,6 +874,12 @@ Schema validation. Its canonical writer is Schema-aware and reflection-free:
 - supported date/date-time/UUID values retain their already validated canonical
   lexical form;
 - unsupported shapes never reach the writer.
+
+For a rejected payload, the decision audit uses a schema-neutral canonical raw
+JSON hash that sorts object properties but never reads values according to the
+business Schema. This keeps invalid values distinguishable without allowing a
+fingerprint exception to escape. Role/Selection denials occur before argument
+evaluation and record `ArgumentsEvaluated=false` with a null ArgumentsHash.
 
 The payload is written with `Utf8JsonWriter`, hashed with SHA-256, and encoded as
 a stable lowercase hexadecimal or Base64Url value chosen once by the concrete
@@ -946,6 +953,16 @@ public interface IAgentToolInvocationGate
         AgentToolInvocationLease lease,
         CancellationToken cancellationToken = default);
 
+    ValueTask PrepareCompletionAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationOutcome outcome,
+        CancellationToken cancellationToken = default);
+
+    ValueTask PublishCompletionAsync(
+        AgentToolInvocationLease lease,
+        CancellationToken cancellationToken = default);
+
+    [Obsolete("Use PrepareCompletionAsync followed by PublishCompletionAsync.")]
     ValueTask CompleteAsync(
         AgentToolInvocationLease lease,
         AgentToolInvocationOutcome outcome,
@@ -969,11 +986,18 @@ Acquire behavior:
 | absent | new | Acquired with first attempt |
 | available, no active attempt | same | Acquired with new attempt |
 | active attempt | same | InProgress |
+| CompletionPending | same | InProgress |
 | Completed | same | Completed with stored safe outcome |
 | Indeterminate | same | Indeterminate |
 | any bound state | different | Conflict |
 
-`Completed` returns the stored provider-neutral Agent outcome. It does not
+`PrepareCompletionAsync` persists a fenced `CompletionPending` state containing
+the terminal outcome. Acquire returns `InProgress` while that state is pending;
+it never exposes a replay before publication. `PublishCompletionAsync` is called
+only after Required governance finalization succeeds and makes the outcome
+visible as `Completed`. If preparation, audit finalization, or publication is
+uncertain, the gate transitions the attempt to `Indeterminate` and no Completed
+replay is exposed. `Completed` returns the stored provider-neutral Agent outcome. It does not
 re-run approval, reserve budget, dispatch, serialize output, or finalize audit.
 Both success and deterministic business/contract failure are completed terminal
 outcomes. `Indeterminate` never auto-dispatches and requires explicit
@@ -1282,10 +1306,13 @@ Governance audit records metadata by default:
 - resolved Capability identity and contract hash;
 - tenant/user/Agent/execution/invocation correlation;
 - CallOrigin and Agent roles hash;
-- ArgumentsHash, not full arguments;
+- ArgumentsHash, not full arguments; decision records may carry
+  `ArgumentsEvaluated=false` and a null hash for pre-evaluation masking;
 - AttemptId, LeaseId-safe reference, and FencingToken;
 - EvidenceId and claim result;
 - ReservationId, budget category/units, and settlement;
+- optional read-only `ObservedReservation` on a malformed budget decision so a
+  reconciliation adapter can recover a returned ReservationId;
 - block/failure code, DispatchStarted, and terminal state.
 
 Full arguments/output are not recorded by default. Audit implementations own
@@ -1293,7 +1320,9 @@ redaction, retention, and persistence.
 
 Required pre-dispatch audit failure releases a held reservation and lease and
 does not call Dispatcher. BestEffort audit failure records a diagnostic and may
-continue only where descriptor validation allows BestEffort.
+continue only where descriptor validation allows BestEffort. Role/Selection
+denials always retain the external `UnknownTool` mask, even when Required
+Decision Audit itself is unavailable.
 
 Budget and Invocation terminal state are independent. Invocation is Completed
 only when all of these are determined:
@@ -1306,12 +1335,21 @@ AND required governance finalization succeeded
 AND the invocation terminal outcome was persisted
 ```
 
-The completion protocol persists the Invocation terminal outcome before
-finalizing the Required governance audit. If terminal persistence fails, no
-Completed audit is written. If Required audit finalization fails after the
-terminal write, the Invocation Gate must fence/reconcile that just-completed
-attempt to Indeterminate; the returned result and subsequent Acquire must not
-expose a Completed replay until both records are known consistent.
+The completion protocol is a three-phase fence:
+
+```text
+settle Budget
+→ PrepareCompletion (Invocation = CompletionPending)
+→ Finalize Required governance audit
+→ PublishCompletion (Completed replay becomes visible)
+```
+
+If preparation fails after the Dispatcher, the audit checkpoint is finalized as
+`Budget=Committed`, `Attempt=Indeterminate`, `Invocation=Indeterminate` when
+possible. If Required audit finalization fails, the same Indeterminate
+finalization is attempted and publication is skipped. If publication is
+uncertain, the gate remains fenced and reconciliation is authoritative; no
+concurrent request may observe a Completed replay during the pending window.
 
 Invocation is Indeterminate when any critical result becomes unknown after
 DispatchStarted.
@@ -1376,9 +1414,10 @@ The fixed invocation order is:
 14. map deterministic Capability failure or serialize exact output and validate
     captured OutputSchema;
 15. settle budget;
-16. finalize required governance audit;
-17. persist invocation Completed or Indeterminate through the valid fenced
-    lease.
+16. persist `CompletionPending` through the valid fenced lease;
+17. finalize required governance audit as Completed (or Indeterminate on any
+    known post-dispatch failure);
+18. publish Completed replay visibility through the same fenced lease.
 
 Every role, selection, input, acquisition, approval, budget, pre-audit, expired
 lease, and fencing rejection proves Dispatcher call count zero.

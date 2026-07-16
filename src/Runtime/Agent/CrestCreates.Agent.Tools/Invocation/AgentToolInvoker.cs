@@ -86,7 +86,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         if (roleDeniedBeforeArguments || selectionDeniedBeforeArguments)
         {
             var context = CreateGovernanceContext(
-                entry, execution, key, decisionAttemptId, EmptyFingerprint());
+                entry, execution, key, decisionAttemptId, NotEvaluatedFingerprint(), argumentsEvaluated: false);
             return await RecordDecisionAndReturnAsync(
                 context,
                 AgentToolGovernanceDecisionState.Denied,
@@ -97,7 +97,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         if (!TryNormalizeArguments(request.Arguments, out var arguments, out var argumentFailure))
         {
             var context = CreateGovernanceContext(
-                entry, execution, key, decisionAttemptId, EmptyFingerprint());
+                entry, execution, key, decisionAttemptId, RawArgumentsFingerprint(request.Arguments));
             return await RecordDecisionAndReturnAsync(
                 context,
                 AgentToolGovernanceDecisionState.Denied,
@@ -301,7 +301,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 CreateAuditContext(governance),
                 AgentToolGovernanceDecisionState.Indeterminate,
                 decisionOutcome,
-                reason).ConfigureAwait(false);
+                reason,
+                reserved.Reservation).ConfigureAwait(false);
             if (!recorded && entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required)
                 decisionOutcome = Indeterminate("decision_audit_failure");
             await MarkIndeterminateIgnoringFailureAsync(lease, reason).ConfigureAwait(false);
@@ -503,12 +504,17 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
 
         try
         {
-            await _invocations.CompleteAsync(lease, outcome, CancellationToken.None).ConfigureAwait(false);
+            await _invocations.PrepareCompletionAsync(lease, outcome, CancellationToken.None)
+                .ConfigureAwait(false);
         }
         catch
         {
-            await MarkIndeterminateIgnoringFailureAsync(lease, "invocation_completion_failure").ConfigureAwait(false);
-            return Indeterminate("invocation_completion_failure");
+            return await FinishIndeterminateWithSettledBudgetAsync(
+                auditHandle,
+                auditContext,
+                lease,
+                settled,
+                "invocation_completion_failure").ConfigureAwait(false);
         }
 
         if (auditHandle is not null)
@@ -528,11 +534,68 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             {
                 if (entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required)
                 {
-                    return await MarkIndeterminateBestEffortAsync(lease, "post_dispatch_audit_failure")
+                    return await FinishIndeterminateWithSettledBudgetAsync(
+                            auditHandle,
+                            auditContext,
+                            lease,
+                            settled,
+                            "post_dispatch_audit_failure")
                         .ConfigureAwait(false);
                 }
             }
         }
+
+        try
+        {
+            await _invocations.PublishCompletionAsync(lease, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            return await FinishIndeterminateWithSettledBudgetAsync(
+                auditHandle,
+                auditContext,
+                lease,
+                settled,
+                "invocation_publish_failure").ConfigureAwait(false);
+        }
+        return outcome;
+    }
+
+    private async ValueTask<AgentToolInvocationOutcome> FinishIndeterminateWithSettledBudgetAsync(
+        AgentToolGovernanceAuditHandle? auditHandle,
+        AgentToolGovernanceAuditContext auditContext,
+        AgentToolInvocationLease lease,
+        AgentToolBudgetReservation settled,
+        string reasonCode)
+    {
+        var outcome = Indeterminate(reasonCode);
+        var invocationPersisted = await TryMarkIndeterminateAsync(lease, reasonCode)
+            .ConfigureAwait(false);
+        var auditReason = invocationPersisted ? reasonCode : "invocation_completion_uncertain";
+        if (auditHandle is not null)
+        {
+            try
+            {
+                await _audit.FinalizeAsync(
+                    Finalization(
+                        auditHandle,
+                        auditContext,
+                        lease,
+                        settled,
+                        true,
+                        AgentToolGovernanceAttemptFinalState.Indeterminate,
+                        invocationPersisted ? AgentToolInvocationTerminalState.Indeterminate : null,
+                        outcome,
+                        auditReason),
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Reconciliation remains authoritative when the audit adapter is unavailable.
+            }
+        }
+
         return outcome;
     }
 
@@ -801,13 +864,15 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentExecutionContext execution,
         AgentToolLogicalInvocationKey key,
         string attemptId,
-        AgentToolInvocationFingerprint fingerprint)
+        AgentToolInvocationFingerprint fingerprint,
+        bool argumentsEvaluated = true)
         => new()
         {
             LogicalInvocationKey = key,
             AttemptId = attemptId,
             InvocationFingerprint = fingerprint.Value,
-            ArgumentsHash = fingerprint.ArgumentsHash,
+            ArgumentsHash = argumentsEvaluated ? fingerprint.ArgumentsHash : null,
+            ArgumentsEvaluated = argumentsEvaluated,
             ExecutionContext = execution,
             ToolContract = entry.DiscoveryContract.ToolContract,
             CapabilityContract = entry.DiscoveryContract.CapabilityContract,
@@ -816,10 +881,14 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             Governance = entry.Governance
         };
 
-    private static AgentToolInvocationFingerprint EmptyFingerprint(JsonElement? arguments = null)
-        => new(
-            "decision-arguments",
-            arguments.HasValue ? "decision-fingerprint" : "decision-fingerprint-empty");
+    private static AgentToolInvocationFingerprint NotEvaluatedFingerprint()
+        => new("not-evaluated", "decision-not-evaluated");
+
+    private AgentToolInvocationFingerprint RawArgumentsFingerprint(JsonElement? arguments)
+    {
+        var hash = _fingerprints.BuildRawArgumentsHash(arguments);
+        return new AgentToolInvocationFingerprint(hash, $"decision-raw-{hash}");
+    }
 
     private AgentToolInvocationFingerprint TryBuildDecisionFingerprint(
         AgentToolRuntimeEntry entry,
@@ -833,7 +902,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
         catch (Exception) when (arguments.ValueKind == JsonValueKind.Object)
         {
-            return EmptyFingerprint(arguments);
+            return RawArgumentsFingerprint(arguments);
         }
     }
 
@@ -841,11 +910,15 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolGovernanceContext context,
         AgentToolGovernanceDecisionState decision,
         AgentToolInvocationOutcome outcome,
-        string reasonCode)
+        string reasonCode,
+        AgentToolBudgetReservation? observedReservation = null)
     {
         var recorded = await RecordDecisionBestEffortAsync(
             CreateAuditContext(context), decision, outcome, reasonCode).ConfigureAwait(false);
         if (recorded || context.Governance.EffectiveAuditMode != AgentToolAuditMode.Required)
+            return outcome;
+
+        if (outcome.Kind == AgentToolInvocationOutcomeKind.UnknownTool)
             return outcome;
 
         return decision == AgentToolGovernanceDecisionState.Indeterminate
@@ -857,7 +930,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolGovernanceAuditContext context,
         AgentToolGovernanceDecisionState decision,
         AgentToolInvocationOutcome outcome,
-        string reasonCode)
+        string reasonCode,
+        AgentToolBudgetReservation? observedReservation = null)
     {
         try
         {
@@ -867,7 +941,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                     Context = context,
                     Decision = decision,
                     Outcome = outcome,
-                    ReasonCode = reasonCode
+                    ReasonCode = reasonCode,
+                    ObservedReservation = observedReservation
                 },
                 CancellationToken.None).ConfigureAwait(false);
             return true;
@@ -885,6 +960,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             AttemptId = context.AttemptId,
             InvocationFingerprint = context.InvocationFingerprint,
             ArgumentsHash = context.ArgumentsHash,
+            ArgumentsEvaluated = context.ArgumentsEvaluated,
             CallOrigin = context.ExecutionContext.CallOrigin,
             AgentRolesHash = HashRoles(context.ExecutionContext.AgentRoles),
             ToolContract = context.ToolContract,
@@ -1040,14 +1116,23 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolInvocationLease lease,
         string reasonCode)
     {
+        _ = await TryMarkIndeterminateAsync(lease, reasonCode).ConfigureAwait(false);
+    }
+
+    private async ValueTask<bool> TryMarkIndeterminateAsync(
+        AgentToolInvocationLease lease,
+        string reasonCode)
+    {
         try
         {
             await _invocations.MarkIndeterminateAsync(lease, reasonCode, CancellationToken.None)
                 .ConfigureAwait(false);
+            return true;
         }
         catch
         {
             // The durable gate or its reconciler remains authoritative when ownership was lost.
+            return false;
         }
     }
 

@@ -10,7 +10,9 @@ public sealed record AgentToolGovernanceContext
 
     public required string InvocationFingerprint { get; init; }
 
-    public required string ArgumentsHash { get; init; }
+    public string? ArgumentsHash { get; init; }
+
+    public bool ArgumentsEvaluated { get; init; } = true;
 
     public required AgentExecutionContext ExecutionContext { get; init; }
 
