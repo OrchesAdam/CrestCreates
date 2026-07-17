@@ -187,6 +187,46 @@ public sealed class AgentToolInvocationGateTests
     }
 
     [Fact]
+    public async Task PublishedRelease_RejectsMismatchedFencingToken()
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var acquired = await gate.AcquireAsync(Request("fingerprint-a"));
+        await gate.PrepareReleaseAsync(acquired.Lease!, new AgentToolInvocationPrepareReleaseRequest
+        {
+            BudgetReservationId = "reservation-1",
+            ReasonCode = "pre_dispatch_audit_failure"
+        });
+        await gate.PublishReleaseAsync(acquired.Lease!);
+
+        var forged = acquired.Lease! with { FencingToken = acquired.Lease.FencingToken + 1 };
+
+        var publish = () => gate.PublishReleaseAsync(forged).AsTask();
+        var query = () => gate.GetReleaseStateAsync(forged).AsTask();
+
+        await publish.Should().ThrowAsync<InvalidOperationException>();
+        await query.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task GetReleaseState_RejectsMismatchedAttemptIdentity()
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var acquired = await gate.AcquireAsync(Request("fingerprint-a"));
+        await gate.PrepareReleaseAsync(acquired.Lease!, new AgentToolInvocationPrepareReleaseRequest
+        {
+            BudgetReservationId = "reservation-1",
+            ReasonCode = "pre_dispatch_audit_failure"
+        });
+        await gate.PublishReleaseAsync(acquired.Lease!);
+
+        var forged = acquired.Lease! with { AttemptId = "forged-attempt" };
+
+        var query = () => gate.GetReleaseStateAsync(forged).AsTask();
+
+        await query.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
     public async Task AbandonedLease_IsIdempotentOnlyForSameReason()
     {
         var gate = new DevelopmentInMemoryAgentToolInvocationGate();
@@ -199,6 +239,19 @@ public sealed class AgentToolInvocationGateTests
             acquired.Lease!,
             "budget_denied").AsTask();
         await conflict.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task RepeatedAbandon_RejectsMismatchedFencingIdentity()
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var acquired = await gate.AcquireAsync(Request("fingerprint-a"));
+        await gate.AbandonUnrecordedLeaseAsync(acquired.Lease!, "approval_denied");
+
+        var forged = acquired.Lease! with { FencingToken = acquired.Lease.FencingToken + 1 };
+        var abandon = () => gate.AbandonUnrecordedLeaseAsync(forged, "approval_denied").AsTask();
+
+        await abandon.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [Fact]

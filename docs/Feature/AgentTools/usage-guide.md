@@ -77,6 +77,11 @@ services.AddSingleton<IAgentToolInvocationLeaseAbandoner>(sp =>
     sp.GetRequiredService<DevelopmentInMemoryAgentToolInvocationGate>());
 ```
 
+The development gate retains terminal receipts for the process lifetime and
+loses them on restart. Production adapters must retain per-Attempt receipts
+for at least the Audit reconciliation window, with an explicit TTL or archive
+policy.
+
 `AddCrestAgentTools()` installs the fail-closed approval gate. A Host verifier
 must be registered when required or policy-driven calls can be approved. The
 runtime intentionally installs no permissive invocation, budget, or audit

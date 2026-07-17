@@ -4,8 +4,9 @@ namespace CrestCreates.Agent.Tools;
 
 /// <summary>
 /// Volatile single-process invocation gate for development and tests. State is
-/// lost on restart and is not coordinated across nodes; it provides no durable
-/// or distributed exactly-once guarantee.
+/// lost on restart and is not coordinated across nodes; terminal receipts are
+/// retained for the process lifetime. It provides no durable or distributed
+/// exactly-once guarantee.
 /// </summary>
 public sealed class DevelopmentInMemoryAgentToolInvocationGate
     : IAgentToolInvocationGate, IAgentToolInvocationLeaseAbandoner
@@ -14,9 +15,9 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
     private readonly Dictionary<AgentToolLogicalInvocationKey, Entry> _entries = [];
     private readonly Dictionary<string, AgentToolLogicalInvocationKey> _leaseKeys
         = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, AgentToolInvocationReleaseResult> _releaseReceipts
+    private readonly Dictionary<string, ReleaseReceipt> _releaseReceipts
         = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, string> _abandonedReasons
+    private readonly Dictionary<string, AbandonedReceipt> _abandonedReasons
         = new(StringComparer.Ordinal);
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _leaseDuration;
@@ -80,6 +81,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
 
             if (entry.LastTerminalLease is { } terminalLease)
             {
+                _leaseKeys.Remove(terminalLease.LeaseId);
                 entry.LastTerminalLease = null;
                 entry.LastAttemptState = AttemptTerminalState.None;
                 entry.ReleasePendingPreparedAt = null;
@@ -266,14 +268,17 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         lock (_sync)
         {
             if (_releaseReceipts.TryGetValue(lease.LeaseId, out var receipt))
-                return ValueTask.FromResult(receipt);
+            {
+                EnsureLeaseIdentity(receipt.Lease, lease);
+                return ValueTask.FromResult(receipt.Result);
+            }
             if (IsSameTerminalTransition(lease, AttemptTerminalState.Released, out var released))
                 return ValueTask.FromResult(GetReleaseResult(released, AgentToolInvocationReleaseState.Released));
             if (!IsSameTerminalTransition(lease, AttemptTerminalState.ReleasePending, out var pending))
                 throw new InvalidOperationException("The invocation has no pending release.");
             pending.LastAttemptState = AttemptTerminalState.Released;
             var result = GetReleaseResult(pending, AgentToolInvocationReleaseState.Released);
-            _releaseReceipts[lease.LeaseId] = result;
+            _releaseReceipts[lease.LeaseId] = new ReleaseReceipt(lease, result);
             return ValueTask.FromResult(result);
         }
     }
@@ -292,7 +297,10 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             if (IsSameTerminalTransition(lease, AttemptTerminalState.Indeterminate, out var indeterminate))
                 return ValueTask.FromResult(GetReleaseResult(indeterminate, AgentToolInvocationReleaseState.Indeterminate));
             if (_releaseReceipts.TryGetValue(lease.LeaseId, out var receipt))
-                return ValueTask.FromResult(receipt);
+            {
+                EnsureLeaseIdentity(receipt.Lease, lease);
+                return ValueTask.FromResult(receipt.Result);
+            }
             return ValueTask.FromResult(new AgentToolInvocationReleaseResult
             {
                 State = AgentToolInvocationReleaseState.Unknown
@@ -363,9 +371,10 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             if (_releaseReceipts.ContainsKey(lease.LeaseId))
                 throw new InvalidOperationException("A published release cannot be abandoned.");
 
-            if (_abandonedReasons.TryGetValue(lease.LeaseId, out var abandonedReason))
+            if (_abandonedReasons.TryGetValue(lease.LeaseId, out var abandonedReceipt))
             {
-                if (!string.Equals(abandonedReason, reasonCode, StringComparison.Ordinal))
+                EnsureLeaseIdentity(abandonedReceipt.Lease, lease);
+                if (!string.Equals(abandonedReceipt.ReasonCode, reasonCode, StringComparison.Ordinal))
                     throw new InvalidOperationException("The abandoned lease reason cannot be changed.");
                 return ValueTask.CompletedTask;
             }
@@ -377,7 +386,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             if (entry.DispatchStarted)
                 throw new InvalidOperationException("A dispatched invocation lease cannot be released.");
             entry.LastReasonCode = reasonCode;
-            _abandonedReasons[lease.LeaseId] = reasonCode;
+            _abandonedReasons[lease.LeaseId] = new AbandonedReceipt(lease, reasonCode);
             ClearLease(entry, lease, AttemptTerminalState.Abandoned);
             return ValueTask.CompletedTask;
         }
@@ -461,6 +470,21 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 or AgentToolInvocationOutcomeKind.InternalContractFailure))
             throw new ArgumentException("The completion outcome is not publishable.", nameof(outcome));
     }
+
+    private static void EnsureLeaseIdentity(
+        AgentToolInvocationLease expected,
+        AgentToolInvocationLease actual)
+    {
+        if (!SameLeaseIdentity(expected, actual))
+            throw new InvalidOperationException("The invocation lease fencing identity does not match.");
+    }
+
+    private static bool SameLeaseIdentity(
+        AgentToolInvocationLease left,
+        AgentToolInvocationLease right)
+        => string.Equals(left.LeaseId, right.LeaseId, StringComparison.Ordinal)
+            && string.Equals(left.AttemptId, right.AttemptId, StringComparison.Ordinal)
+            && left.FencingToken == right.FencingToken;
 
     private static bool MatchesPreparationIdentity(
         Entry entry,
@@ -569,6 +593,14 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         public AgentToolInvocationLease? LastTerminalLease { get; set; }
         public AttemptTerminalState LastAttemptState { get; set; }
     }
+
+    private sealed record ReleaseReceipt(
+        AgentToolInvocationLease Lease,
+        AgentToolInvocationReleaseResult Result);
+
+    private sealed record AbandonedReceipt(
+        AgentToolInvocationLease Lease,
+        string ReasonCode);
 
     private enum AttemptTerminalState
     {

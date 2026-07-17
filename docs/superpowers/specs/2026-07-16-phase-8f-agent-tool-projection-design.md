@@ -1031,7 +1031,10 @@ without guessing which Audit or reservation it belongs to. Only
 Published terminal receipts are per-Attempt records, not merely the logical
 invocation's current state; `GetReleaseStateAsync` must retain them by
 LeaseId/AttemptId for the adapter's documented reconciliation retention period
-even after a later Attempt acquires.
+even after a later Attempt acquires. Receipt lookup must validate the complete
+stored lease identity (`LeaseId`, `AttemptId`, and `FencingToken`); a matching
+LeaseId with a forged AttemptId or fencing token is a stale-lease conflict,
+not a receipt hit.
 
 Pre-dispatch release uses the same publication fence:
 
