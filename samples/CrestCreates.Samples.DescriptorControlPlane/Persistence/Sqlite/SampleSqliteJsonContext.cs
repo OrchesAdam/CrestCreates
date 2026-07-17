@@ -122,10 +122,11 @@ public sealed partial class SampleSqliteJsonContext : JsonSerializerContext
     {
         if (value is null)
         {
+            using var nullDoc = JsonDocument.Parse("null");
             return new PersistedRuntimeValue
             {
                 Type = "null",
-                Payload = JsonDocument.Parse("null").RootElement.Clone(),
+                Payload = nullDoc.RootElement.Clone(),
             };
         }
 

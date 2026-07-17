@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
@@ -442,7 +443,7 @@ public sealed class CompanyCertificationSqliteGoldenScenarioTests
     }
 
     [Fact]
-    public async Task Sqlite_RuntimeValueEnvelope_Should_Preserve_All_Supported_Types()
+    public void RuntimeValueEnvelope_Should_Preserve_All_Supported_Types()
     {
         // Build a dictionary with every supported runtime value type
         var original = new Dictionary<string, object?>
@@ -505,7 +506,7 @@ public sealed class CompanyCertificationSqliteGoldenScenarioTests
     }
 
     [Fact]
-    public async Task Sqlite_WorkflowVariables_Should_Preserve_ExplicitNull_Key()
+    public void WorkflowVariables_Should_Preserve_ExplicitNull_Key()
     {
         // Test that explicit null dictionary keys survive the PersistedRuntimeValue envelope round-trip
         var original = new Dictionary<string, object?>
@@ -521,5 +522,79 @@ public sealed class CompanyCertificationSqliteGoldenScenarioTests
             "explicit null keys must survive SQLite persistence round-trip");
         restored["NullableValue"].Should().BeNull();
         restored["ActiveKey"].Should().Be("present");
+    }
+
+    [Fact]
+    public async Task Sqlite_WorkflowStore_Should_Preserve_RuntimeValue_Types()
+    {
+        var dbPath = GetTestDatabasePath();
+        try
+        {
+            var inventory = CompanyCertificationDescriptorCloner.CopyAllDescriptors();
+            using var host = CompanyCertificationGoldenScenarioHost.CreateSqlite(dbPath, inventory);
+
+            var expectedGuid = Guid.Parse("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+            var instance = new WorkflowInstance
+            {
+                InstanceId = Guid.NewGuid().ToString("N"),
+                Workflow = new VersionedDescriptorRef<WorkflowDescriptor>(
+                    "wf_company_certification", 1, VersionSelectionMode.Exact),
+                Status = WorkflowInstanceStatus.Running,
+                CurrentStepId = "step1",
+                StepIndex = 0,
+                StartedAt = DateTimeOffset.UtcNow,
+                Variables = new Dictionary<string, object?>
+                {
+                    ["SubmitInput"] = new CertificationSubmitInput(
+                        CompanyName: "Test Corp",
+                        UnifiedSocialCreditCode: "91110000MA01",
+                        CertificationType: "ISO9001",
+                        ApplicationDate: "2026-01-15",
+                        Notes: "Test submission"),
+                    ["NullableValue"] = null,
+                    ["GuidValue"] = expectedGuid,
+                    ["StringValue"] = "hello",
+                },
+                ConcurrencyStamp = Guid.NewGuid().ToString("N"),
+            };
+
+            using var scope = host.CreateScope();
+            var store = scope.ServiceProvider.GetRequiredService<IWorkflowInstanceStore>();
+            await store.SaveAsync(instance);
+
+            var restored = await store.GetAsync(instance.InstanceId);
+            restored.Should().NotBeNull();
+
+            // Explicit null key must survive SQLite round-trip
+            restored!.Variables.Should().ContainKey("NullableValue",
+                "explicit null keys must survive SQLite persistence round-trip");
+            restored.Variables["NullableValue"].Should().BeNull();
+
+            // Guid must restore as Guid, not JsonElement or long
+            restored.Variables["GuidValue"].Should().Be(expectedGuid);
+
+            // String must restore as string
+            restored.Variables["StringValue"].Should().Be("hello");
+
+            // CertificationSubmitInput must restore as its original CLR type
+            restored.Variables["SubmitInput"]
+                .Should().BeOfType<CertificationSubmitInput>()
+                .Which.CompanyName.Should().Be("Test Corp");
+        }
+        finally
+        {
+            CleanupDatabase(dbPath);
+        }
+    }
+
+    [Fact]
+    public void Reflection_Should_Be_Disabled_In_Test_Host()
+    {
+        // Verify that JsonSerializerIsReflectionEnabledByDefault=false is effective
+        // at test time, not just at publish time. This ensures the sample's
+        // Source Generated Context is the only serialization path.
+        JsonSerializer.IsReflectionEnabledByDefault.Should().BeFalse(
+            "JsonSerializerIsReflectionEnabledByDefault must be false in the sample project " +
+            "so that reflection-based serialization failures are caught at test time");
     }
 }

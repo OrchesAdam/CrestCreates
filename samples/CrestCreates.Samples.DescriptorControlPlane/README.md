@@ -196,11 +196,11 @@ services.AddWorkflowEngine();  // TryAddSingleton<InMemoryWorkflowInstanceStore>
 
 | Type | Discriminator |
 |---|---|
-| `string` | `String` |
-| `bool` | `Boolean` |
-| `int` | `Int32` |
-| `long` | `Int64` |
-| `double` | `Double` |
+| `string` | `string` |
+| `bool` | `bool` |
+| `int` | `int` |
+| `long` | `long` |
+| `double` | `double` |
 | `Guid` | `Guid` |
 | `CertificationSubmitInput` | `CertificationSubmitInput` |
 | `CertificationReviewInput` | `CertificationReviewInput` |
@@ -243,7 +243,7 @@ Event: CompanyCertificationApproved captured
 - Breaking change blocks runtime activation
 - Missing workflow target blocks runtime activation
 
-### SQLite Persistence Tests (8 tests)
+### SQLite Persistence Tests (10 tests)
 - SQLite happy path — full workflow completion with persistence
 - Host restart — business record recovery
 - Host restart — workflow instance recovery
@@ -251,7 +251,9 @@ Event: CompanyCertificationApproved captured
 - Workflow concurrency conflict — `RuntimeConcurrencyException` on stale stamp
 - HumanTask concurrency conflict — `RuntimeConcurrencyException` on stale stamp
 - Test isolation — different databases do not pollute each other
-- Governance blocked — no runtime data created
+- Governance blocked — no runtime data created (verified via `COUNT(*)` on all 3 tables)
+- Runtime value envelope — all supported types survive round-trip through `PersistedRuntimeValue`
+- Explicit null key — dictionary keys with null values survive SQLite persistence
 
 ### Authoring Golden Scenario Tests (13 tests)
 - Fake agent output is deterministic
