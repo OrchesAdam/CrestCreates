@@ -194,8 +194,10 @@ services.AddWorkflowEngine();  // TryAddSingleton<InMemoryWorkflowInstanceStore>
 ## One-Command Regression
 
 ```bash
-dotnet test --filter GoldenScenario
+dotnet test --filter "FullyQualifiedName~GoldenScenario"
 ```
+
+This filter covers both InMemory and SQLite Golden Scenario test classes.
 
 Expected output:
 ```

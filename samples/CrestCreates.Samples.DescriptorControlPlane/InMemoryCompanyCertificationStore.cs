@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using CrestCreates.Metadata.Abstractions;
 
 namespace CrestCreates.Samples.DescriptorControlPlane;
 
@@ -44,17 +45,16 @@ public sealed class InMemoryCompanyCertificationStore : ICompanyCertificationSto
         string reviewerUserId,
         CancellationToken cancellationToken = default)
     {
-        if (_records.TryGetValue(id, out var existing))
+        if (!_records.TryGetValue(id, out var existing))
+            throw new RuntimeEntityNotFoundException($"CertificationRecord '{id}' not found.");
+        var updated = existing with
         {
-            var updated = existing with
-            {
-                Status = CertificationStatus.Approved,
-                ReviewerNotes = review.ReviewerNotes,
-                ReviewerDecision = review.Decision,
-                ReviewedBy = reviewerUserId,
-            };
-            _records[id] = updated;
-        }
+            Status = CertificationStatus.Approved,
+            ReviewerNotes = review.ReviewerNotes,
+            ReviewerDecision = review.Decision,
+            ReviewedBy = reviewerUserId,
+        };
+        _records[id] = updated;
         return Task.CompletedTask;
     }
 
@@ -64,17 +64,16 @@ public sealed class InMemoryCompanyCertificationStore : ICompanyCertificationSto
         string reviewerUserId,
         CancellationToken cancellationToken = default)
     {
-        if (_records.TryGetValue(id, out var existing))
+        if (!_records.TryGetValue(id, out var existing))
+            throw new RuntimeEntityNotFoundException($"CertificationRecord '{id}' not found.");
+        var updated = existing with
         {
-            var updated = existing with
-            {
-                Status = CertificationStatus.Rejected,
-                ReviewerNotes = review.ReviewerNotes,
-                ReviewerDecision = review.Decision,
-                ReviewedBy = reviewerUserId,
-            };
-            _records[id] = updated;
-        }
+            Status = CertificationStatus.Rejected,
+            ReviewerNotes = review.ReviewerNotes,
+            ReviewerDecision = review.Decision,
+            ReviewedBy = reviewerUserId,
+        };
+        _records[id] = updated;
         return Task.CompletedTask;
     }
 

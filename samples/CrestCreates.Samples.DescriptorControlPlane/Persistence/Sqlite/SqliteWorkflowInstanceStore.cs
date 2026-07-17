@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Workflow.Abstractions;
@@ -183,11 +182,11 @@ public sealed class SqliteWorkflowInstanceStore : IWorkflowInstanceStore
         cmd.Parameters.AddWithValue("@completed_at", instance.CompletedAt.HasValue
             ? instance.CompletedAt.Value.ToString("O") : (object)DBNull.Value);
         cmd.Parameters.AddWithValue("@variables",
-            SerializeDictionary(instance.Variables) ?? (object)DBNull.Value);
+            SampleSqliteJsonContext.SerializeDictionary(instance.Variables) ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("@step_variables",
-            SerializeDictionary(instance.StepVariables) ?? (object)DBNull.Value);
+            SampleSqliteJsonContext.SerializeDictionary(instance.StepVariables) ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("@step_results",
-            SerializeStepResults(instance.StepResults) ?? (object)DBNull.Value);
+            SampleSqliteJsonContext.SerializeStepResults(instance.StepResults) ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("@error_message", (object?)instance.ErrorMessage ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@concurrency_stamp", newStamp);
     }
@@ -209,42 +208,11 @@ public sealed class SqliteWorkflowInstanceStore : IWorkflowInstanceStore
             StartedAt = DateTimeOffset.Parse(reader.GetString(9), null, System.Globalization.DateTimeStyles.RoundtripKind),
             UpdatedAt = reader.IsDBNull(10) ? null : DateTimeOffset.Parse(reader.GetString(10), null, System.Globalization.DateTimeStyles.RoundtripKind),
             CompletedAt = reader.IsDBNull(11) ? null : DateTimeOffset.Parse(reader.GetString(11), null, System.Globalization.DateTimeStyles.RoundtripKind),
-            Variables = DeserializeDictionary(reader.IsDBNull(12) ? null : reader.GetString(12)),
-            StepVariables = DeserializeDictionary(reader.IsDBNull(13) ? null : reader.GetString(13)),
-            StepResults = DeserializeStepResults(reader.IsDBNull(14) ? null : reader.GetString(14)),
+            Variables = SampleSqliteJsonContext.DeserializeDictionary(reader.IsDBNull(12) ? null : reader.GetString(12)),
+            StepVariables = SampleSqliteJsonContext.DeserializeDictionary(reader.IsDBNull(13) ? null : reader.GetString(13)),
+            StepResults = SampleSqliteJsonContext.DeserializeStepResults(reader.IsDBNull(14) ? null : reader.GetString(14)),
             ErrorMessage = reader.IsDBNull(15) ? null : reader.GetString(15),
             ConcurrencyStamp = reader.GetString(16),
         };
-    }
-
-    private static string? SerializeDictionary(Dictionary<string, object?> dict)
-    {
-        if (dict.Count == 0) return null;
-        return JsonSerializer.Serialize(dict, SampleSqliteJsonContext.ReflectionOptions);
-    }
-
-    private static Dictionary<string, object?> DeserializeDictionary(string? json)
-    {
-        if (string.IsNullOrEmpty(json)) return new Dictionary<string, object?>();
-        var raw = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, SampleSqliteJsonContext.ReflectionOptions)
-            ?? new Dictionary<string, object?>();
-        // Convert JsonElement values back to CLR types for workflow variable compatibility
-        var result = new Dictionary<string, object?>(raw.Count);
-        foreach (var kvp in raw)
-            result[kvp.Key] = SampleSqliteJsonContext.ConvertJsonElement(kvp.Value);
-        return result;
-    }
-
-    private static string? SerializeStepResults(List<WorkflowStepResult> results)
-    {
-        if (results.Count == 0) return null;
-        return JsonSerializer.Serialize(results, SampleSqliteJsonContext.ReflectionOptions);
-    }
-
-    private static List<WorkflowStepResult> DeserializeStepResults(string? json)
-    {
-        if (string.IsNullOrEmpty(json)) return new List<WorkflowStepResult>();
-        return JsonSerializer.Deserialize<List<WorkflowStepResult>>(json, SampleSqliteJsonContext.ReflectionOptions)
-            ?? new List<WorkflowStepResult>();
     }
 }

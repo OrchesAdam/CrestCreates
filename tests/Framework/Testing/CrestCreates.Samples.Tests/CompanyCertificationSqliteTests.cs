@@ -13,7 +13,7 @@ using Xunit;
 
 namespace CrestCreates.Samples.Tests;
 
-public sealed class CompanyCertificationSqliteTests
+public sealed class CompanyCertificationSqliteGoldenScenarioTests
 {
     private static string GetTestDatabasePath()
     {
@@ -424,15 +424,16 @@ public sealed class CompanyCertificationSqliteTests
             (await host.Store.CountAsync()).Should().Be(0,
                 "governance-blocked scenarios must not create certification records");
 
-            // No workflow or human task instances should exist
+            // Verify runtime tables are empty — not just the report, but the actual database
             using var scope = host.CreateScope();
-            var wfStore = scope.ServiceProvider.GetRequiredService<IWorkflowInstanceStore>();
-            var htStore = scope.ServiceProvider.GetRequiredService<IHumanTaskInstanceStore>();
+            var diagnostics = scope.ServiceProvider.GetRequiredService<SqliteRuntimeStoreDiagnostics>();
 
-            // We can't enumerate all instances, but we can verify the store is empty
-            // by checking that the workflow instance ID is null
-            report.WorkflowInstanceId.Should().BeNull(
-                "governance-blocked scenarios must not create workflow instances");
+            (await diagnostics.CountWorkflowInstancesAsync()).Should().Be(0,
+                "governance-blocked scenarios must not create workflow instance rows");
+            (await diagnostics.CountHumanTaskInstancesAsync()).Should().Be(0,
+                "governance-blocked scenarios must not create human task instance rows");
+            (await diagnostics.CountCompanyCertificationsAsync()).Should().Be(0,
+                "governance-blocked scenarios must not create certification rows");
         }
         finally
         {

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
@@ -231,8 +230,10 @@ public sealed class SqliteHumanTaskInstanceStore : IHumanTaskInstanceStore
         cmd.Parameters.AddWithValue("@assignee_role_id", (object?)instance.AssigneeRoleId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@workflow_instance_id", (object?)instance.WorkflowInstanceId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@workflow_step_id", (object?)instance.WorkflowStepId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@input", SerializeObject(instance.Input) ?? (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("@output", SerializeObject(instance.Output) ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("@input",
+            SampleSqliteJsonContext.SerializeObjectField(instance.Input) ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("@output",
+            SampleSqliteJsonContext.SerializeObjectField(instance.Output) ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("@outcome", (object?)instance.Outcome ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@created_at", instance.CreatedAt.ToString("O"));
         cmd.Parameters.AddWithValue("@updated_at", updatedAt.ToString("O"));
@@ -265,8 +266,8 @@ public sealed class SqliteHumanTaskInstanceStore : IHumanTaskInstanceStore
             AssigneeRoleId = reader.IsDBNull(6) ? null : reader.GetString(6),
             WorkflowInstanceId = reader.IsDBNull(7) ? null : reader.GetString(7),
             WorkflowStepId = reader.IsDBNull(8) ? null : reader.GetString(8),
-            Input = DeserializeObject(reader.IsDBNull(9) ? null : reader.GetString(9)),
-            Output = DeserializeObject(reader.IsDBNull(10) ? null : reader.GetString(10)),
+            Input = SampleSqliteJsonContext.DeserializeObjectField(reader.IsDBNull(9) ? null : reader.GetString(9)),
+            Output = SampleSqliteJsonContext.DeserializeObjectField(reader.IsDBNull(10) ? null : reader.GetString(10)),
             Outcome = reader.IsDBNull(11) ? null : reader.GetString(11),
             CreatedAt = DateTimeOffset.Parse(reader.GetString(12), null, System.Globalization.DateTimeStyles.RoundtripKind),
             UpdatedAt = reader.IsDBNull(13) ? null : DateTimeOffset.Parse(reader.GetString(13), null, System.Globalization.DateTimeStyles.RoundtripKind),
@@ -282,29 +283,17 @@ public sealed class SqliteHumanTaskInstanceStore : IHumanTaskInstanceStore
         };
     }
 
-    private static string? SerializeObject(object? value)
-    {
-        if (value is null) return null;
-        return JsonSerializer.Serialize(value, value.GetType(), SampleSqliteJsonContext.ReflectionOptions);
-    }
-
-    private static object? DeserializeObject(string? json)
-    {
-        if (string.IsNullOrEmpty(json)) return null;
-        var raw = JsonSerializer.Deserialize<object?>(json, SampleSqliteJsonContext.ReflectionOptions);
-        return SampleSqliteJsonContext.ConvertJsonElement(raw);
-    }
-
     private static string? SerializeStringList(IReadOnlyList<string> list)
     {
         if (list.Count == 0) return null;
-        return JsonSerializer.Serialize(list, SampleSqliteJsonContext.ReflectionOptions);
+        return System.Text.Json.JsonSerializer.Serialize(list, SampleSqliteJsonContext.Default.ListString);
     }
 
     private static IReadOnlyList<string> DeserializeStringList(string? json)
     {
         if (string.IsNullOrEmpty(json)) return Array.Empty<string>();
-        return (IReadOnlyList<string>?)JsonSerializer.Deserialize<List<string>>(json, SampleSqliteJsonContext.ReflectionOptions)
+        return (IReadOnlyList<string>?)System.Text.Json.JsonSerializer.Deserialize<List<string>>(
+            json, SampleSqliteJsonContext.Default.ListString)
             ?? Array.Empty<string>();
     }
 }

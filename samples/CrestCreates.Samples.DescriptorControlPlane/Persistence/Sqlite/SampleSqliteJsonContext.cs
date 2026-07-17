@@ -1,49 +1,299 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Workflow.Abstractions;
 
 namespace CrestCreates.Samples.DescriptorControlPlane;
 
 /// <summary>
-/// JSON serialization configuration for SQLite persistence in the Company Certification sample.
-/// All serialization uses ReflectionOptions since Dictionary&lt;string, object?&gt; and object?
-/// fields contain polymorphic workflow variables that cannot be represented in source-generated contexts.
-/// This is acceptable for a sample project — not framework core.
+/// Type-preserving envelope for persisting polymorphic runtime values in SQLite.
+/// Each value is stored with its CLR type discriminator so deserialization
+/// can reconstruct the exact original type — no reflection, no $type hack, no GUID guessing.
 /// </summary>
-public static class SampleSqliteJsonContext
+public sealed record PersistedRuntimeValue
 {
     /// <summary>
-    /// Reflection-based options for serializing Dictionary&lt;string, object?&gt;
-    /// and object? fields. This is acceptable for a sample project — not framework core.
-    /// Workflow variables and HumanTask input/output are inherently polymorphic
-    /// and cannot be represented in source-generated contexts.
+    /// Assembly-free type discriminator (e.g., "Guid", "CertificationSubmitInput").
+    /// Must be one of the types registered in <see cref="RuntimeValueTypeDiscriminator"/>.
     /// </summary>
-    public static readonly JsonSerializerOptions ReflectionOptions = new()
-    {
-        WriteIndented = false,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
+    public required string Type { get; init; }
 
     /// <summary>
-    /// Converts a deserialized value (possibly JsonElement) back to its CLR type.
-    /// Handles nested objects and arrays recursively.
-    /// Guid strings are detected via TryGetGuid for workflow variable compatibility.
+    /// The serialized payload. Deserialized using the JsonTypeInfo resolved from Type.
     /// </summary>
-    public static object? ConvertJsonElement(object? value)
+    public required JsonElement Payload { get; init; }
+}
+
+/// <summary>
+/// Registry of known runtime value types for SQLite persistence.
+/// Maps CLR types to stable string discriminators and back.
+/// Only types registered here can be persisted — fail-closed, no reflection fallback.
+/// </summary>
+public static class RuntimeValueTypeDiscriminator
+{
+    private static readonly Dictionary<Type, string> TypeToDiscriminator = new()
     {
-        if (value is not JsonElement element) return value;
-        return element.ValueKind switch
+        [typeof(string)] = "string",
+        [typeof(bool)] = "bool",
+        [typeof(int)] = "int",
+        [typeof(long)] = "long",
+        [typeof(double)] = "double",
+        [typeof(Guid)] = "Guid",
+        [typeof(CertificationSubmitInput)] = "CertificationSubmitInput",
+        [typeof(CertificationReviewInput)] = "CertificationReviewInput",
+        [typeof(CertificationResult)] = "CertificationResult",
+        [typeof(Dictionary<string, object?>)] = "DictStrObject",
+        [typeof(Dictionary<string, PersistedRuntimeValue>)] = "DictStrPersistedValue",
+        [typeof(List<PersistedRuntimeValue>)] = "ListPersistedValue",
+    };
+
+    private static readonly Dictionary<string, Type> DiscriminatorToType =
+        TypeToDiscriminator.ToDictionary(kvp => kvp.Value, kvp => kvp.Key);
+
+    public static string GetDiscriminator(Type type)
+    {
+        if (TypeToDiscriminator.TryGetValue(type, out var disc))
+            return disc;
+        throw new InvalidOperationException(
+            $"Type '{type.Name}' is not registered in {nameof(RuntimeValueTypeDiscriminator)}. " +
+            "Add it to the registry before persistencing values of this type.");
+    }
+
+    public static Type GetType(string discriminator)
+    {
+        if (DiscriminatorToType.TryGetValue(discriminator, out var type))
+            return type;
+        throw new InvalidOperationException(
+            $"Discriminator '{discriminator}' is not registered in {nameof(RuntimeValueTypeDiscriminator)}. " +
+            "The database may contain data from a newer version of the sample.");
+    }
+
+    public static bool IsRegistered(Type type) => TypeToDiscriminator.ContainsKey(type);
+}
+
+/// <summary>
+/// Persistence DTO for WorkflowStepResult with type-preserving Output.
+/// The Output field is wrapped in PersistedRuntimeValue for safe serialization.
+/// </summary>
+public sealed record PersistedWorkflowStepResult
+{
+    public string StepId { get; init; } = string.Empty;
+    public string StepName { get; init; } = string.Empty;
+    public StepExecutionStatus Status { get; init; }
+    public PersistedRuntimeValue? Output { get; init; }
+    public string? ErrorMessage { get; init; }
+    public DateTimeOffset ExecutedAt { get; init; }
+    public TimeSpan Duration { get; init; }
+}
+
+/// <summary>
+/// Source-generated JSON context for SQLite persistence.
+/// All persisted types are explicitly registered — no reflection, no $type discriminator.
+/// Reflection is disabled via JsonSerializerIsReflectionEnabledByDefault=false in the project file.
+/// </summary>
+[JsonSourceGenerationOptions(
+    WriteIndented = false,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(PersistedRuntimeValue))]
+[JsonSerializable(typeof(List<PersistedRuntimeValue>))]
+[JsonSerializable(typeof(Dictionary<string, PersistedRuntimeValue>))]
+[JsonSerializable(typeof(CertificationSubmitInput))]
+[JsonSerializable(typeof(CertificationReviewInput))]
+[JsonSerializable(typeof(CertificationResult))]
+[JsonSerializable(typeof(PersistedWorkflowStepResult))]
+[JsonSerializable(typeof(List<PersistedWorkflowStepResult>))]
+[JsonSerializable(typeof(List<string>))]
+// Primitive types for type-preserving envelope serialization
+[JsonSerializable(typeof(string))]
+[JsonSerializable(typeof(bool))]
+[JsonSerializable(typeof(int))]
+[JsonSerializable(typeof(long))]
+[JsonSerializable(typeof(double))]
+[JsonSerializable(typeof(Guid))]
+public sealed partial class SampleSqliteJsonContext : JsonSerializerContext
+{
+    /// <summary>
+    /// Wraps a non-null runtime value into a type-preserving envelope for SQLite persistence.
+    /// Uses source-generated JsonTypeInfo per type — no reflection.
+    /// Dictionary&lt;string, object?&gt; values are recursively wrapped into Dictionary&lt;string, PersistedRuntimeValue&gt;.
+    /// </summary>
+    public static PersistedRuntimeValue WrapValue(object value)
+    {
+        var type = value.GetType();
+        var discriminator = RuntimeValueTypeDiscriminator.GetDiscriminator(type);
+        string json;
+
+        // Special handling: Dictionary<string, object?> must be recursively wrapped
+        if (type == typeof(Dictionary<string, object?>))
         {
-            JsonValueKind.String => element.TryGetGuid(out var g) ? g : element.GetString(),
-            JsonValueKind.Number => element.TryGetInt64(out var l) ? l : element.GetDouble(),
-            JsonValueKind.True or JsonValueKind.False => element.GetBoolean(),
-            JsonValueKind.Null => null,
-            JsonValueKind.Array => JsonSerializer.Deserialize<List<object?>>(
-                    element.GetRawText(), ReflectionOptions)
-                ?.Select(ConvertJsonElement).ToList(),
-            JsonValueKind.Object => JsonSerializer.Deserialize<Dictionary<string, object?>>(
-                    element.GetRawText(), ReflectionOptions)
-                ?.ToDictionary(kvp => kvp.Key, kvp => ConvertJsonElement(kvp.Value)),
-            _ => element.ToString()
+            var dict = (Dictionary<string, object?>)value;
+            var wrapped = new Dictionary<string, PersistedRuntimeValue>(dict.Count);
+            foreach (var kvp in dict)
+            {
+                if (kvp.Value is not null)
+                    wrapped[kvp.Key] = WrapValue(kvp.Value);
+            }
+            json = JsonSerializer.Serialize(wrapped, Default.DictionaryStringPersistedRuntimeValue);
+        }
+        else
+        {
+            json = SerializeByDiscriminator(value, discriminator);
+        }
+
+        var element = JsonDocument.Parse(json).RootElement;
+        return new PersistedRuntimeValue { Type = discriminator, Payload = element.Clone() };
+    }
+
+    /// <summary>
+    /// Unwraps a type-preserving envelope back to its original CLR type.
+    /// Uses source-generated JsonTypeInfo per type — no reflection.
+    /// DictStrObject values are recursively unwrapped from DictStrPersistedValue.
+    /// </summary>
+    public static object? UnwrapValue(PersistedRuntimeValue? envelope)
+    {
+        if (envelope is null) return null;
+
+        // Special handling: DictStrObject was stored as DictStrPersistedValue
+        if (envelope.Type == "DictStrObject")
+        {
+            var wrapped = envelope.Payload.Deserialize(Default.DictionaryStringPersistedRuntimeValue);
+            if (wrapped is null) return null;
+            var result = new Dictionary<string, object?>(wrapped.Count);
+            foreach (var kvp in wrapped)
+                result[kvp.Key] = UnwrapValue(kvp.Value);
+            return result;
+        }
+
+        return DeserializeByDiscriminator(envelope.Type, envelope.Payload);
+    }
+
+    private static string SerializeByDiscriminator(object value, string discriminator)
+    {
+        return discriminator switch
+        {
+            "string" => JsonSerializer.Serialize((string)value, Default.String),
+            "bool" => JsonSerializer.Serialize((bool)value, Default.Boolean),
+            "int" => JsonSerializer.Serialize((int)value, Default.Int32),
+            "long" => JsonSerializer.Serialize((long)value, Default.Int64),
+            "double" => JsonSerializer.Serialize((double)value, Default.Double),
+            "Guid" => JsonSerializer.Serialize((Guid)value, Default.Guid),
+            "CertificationSubmitInput" => JsonSerializer.Serialize((CertificationSubmitInput)value, Default.CertificationSubmitInput),
+            "CertificationReviewInput" => JsonSerializer.Serialize((CertificationReviewInput)value, Default.CertificationReviewInput),
+            "CertificationResult" => JsonSerializer.Serialize((CertificationResult)value, Default.CertificationResult),
+            "DictStrPersistedValue" => JsonSerializer.Serialize((Dictionary<string, PersistedRuntimeValue>)value, Default.DictionaryStringPersistedRuntimeValue),
+            "ListPersistedValue" => JsonSerializer.Serialize((List<PersistedRuntimeValue>)value, Default.ListPersistedRuntimeValue),
+            _ => throw new InvalidOperationException($"No source-generated serializer for discriminator '{discriminator}'."),
         };
+    }
+
+    private static object? DeserializeByDiscriminator(string discriminator, JsonElement payload)
+    {
+        return discriminator switch
+        {
+            "string" => payload.Deserialize(Default.String),
+            "bool" => payload.Deserialize(Default.Boolean),
+            "int" => payload.Deserialize(Default.Int32),
+            "long" => payload.Deserialize(Default.Int64),
+            "double" => payload.Deserialize(Default.Double),
+            "Guid" => payload.Deserialize(Default.Guid),
+            "CertificationSubmitInput" => payload.Deserialize(Default.CertificationSubmitInput),
+            "CertificationReviewInput" => payload.Deserialize(Default.CertificationReviewInput),
+            "CertificationResult" => payload.Deserialize(Default.CertificationResult),
+            "DictStrPersistedValue" => payload.Deserialize(Default.DictionaryStringPersistedRuntimeValue),
+            "ListPersistedValue" => payload.Deserialize(Default.ListPersistedRuntimeValue),
+            _ => throw new InvalidOperationException($"No source-generated deserializer for discriminator '{discriminator}'."),
+        };
+    }
+
+    /// <summary>
+    /// Serializes a Dictionary&lt;string, object?&gt; with type-preserving envelopes.
+    /// Null values are omitted from the persisted dictionary (absent key = null on deserialization).
+    /// </summary>
+    public static string? SerializeDictionary(Dictionary<string, object?> dict)
+    {
+        if (dict.Count == 0) return null;
+        var wrapped = new Dictionary<string, PersistedRuntimeValue>(dict.Count);
+        foreach (var kvp in dict)
+        {
+            if (kvp.Value is not null)
+                wrapped[kvp.Key] = WrapValue(kvp.Value);
+        }
+        return JsonSerializer.Serialize(wrapped, Default.DictionaryStringPersistedRuntimeValue);
+    }
+
+    /// <summary>
+    /// Deserializes a type-preserving dictionary back to Dictionary&lt;string, object?&gt;.
+    /// </summary>
+    public static Dictionary<string, object?> DeserializeDictionary(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return new Dictionary<string, object?>();
+        var wrapped = JsonSerializer.Deserialize<Dictionary<string, PersistedRuntimeValue>>(
+            json, Default.DictionaryStringPersistedRuntimeValue);
+        if (wrapped is null) return new Dictionary<string, object?>();
+        var result = new Dictionary<string, object?>(wrapped.Count);
+        foreach (var kvp in wrapped)
+            result[kvp.Key] = UnwrapValue(kvp.Value);
+        return result;
+    }
+
+    /// <summary>
+    /// Serializes a List&lt;WorkflowStepResult&gt; with type-preserving Output envelopes.
+    /// </summary>
+    public static string? SerializeStepResults(List<WorkflowStepResult> results)
+    {
+        if (results.Count == 0) return null;
+        var dtos = results.Select(r => new PersistedWorkflowStepResult
+        {
+            StepId = r.StepId,
+            StepName = r.StepName,
+            Status = r.Status,
+            Output = r.Output is not null ? WrapValue(r.Output) : null,
+            ErrorMessage = r.ErrorMessage,
+            ExecutedAt = r.ExecutedAt,
+            Duration = r.Duration,
+        }).ToList();
+        return JsonSerializer.Serialize(dtos, Default.ListPersistedWorkflowStepResult);
+    }
+
+    /// <summary>
+    /// Deserializes type-preserving step results back to List&lt;WorkflowStepResult&gt;.
+    /// </summary>
+    public static List<WorkflowStepResult> DeserializeStepResults(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return new List<WorkflowStepResult>();
+        var dtos = JsonSerializer.Deserialize<List<PersistedWorkflowStepResult>>(
+            json, Default.ListPersistedWorkflowStepResult);
+        if (dtos is null) return new List<WorkflowStepResult>();
+        return dtos.Select(d => new WorkflowStepResult
+        {
+            StepId = d.StepId,
+            StepName = d.StepName,
+            Status = d.Status,
+            Output = UnwrapValue(d.Output),
+            ErrorMessage = d.ErrorMessage,
+            ExecutedAt = d.ExecutedAt,
+            Duration = d.Duration,
+        }).ToList();
+    }
+
+    /// <summary>
+    /// Serializes an object? field with type-preserving envelope.
+    /// </summary>
+    public static string? SerializeObjectField(object? value)
+    {
+        if (value is null) return null;
+        var envelope = WrapValue(value);
+        return JsonSerializer.Serialize(envelope, Default.PersistedRuntimeValue);
+    }
+
+    /// <summary>
+    /// Deserializes a type-preserving object? field back to its original CLR type.
+    /// </summary>
+    public static object? DeserializeObjectField(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return null;
+        var envelope = JsonSerializer.Deserialize<PersistedRuntimeValue>(json, Default.PersistedRuntimeValue);
+        return UnwrapValue(envelope);
     }
 }

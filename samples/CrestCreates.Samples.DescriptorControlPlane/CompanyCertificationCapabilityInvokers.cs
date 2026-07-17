@@ -27,15 +27,15 @@ public sealed class SubmitCompanyCertificationInvoker : ICapabilityContextAwareH
             CompanyName = record.CompanyName,
         });
 
-        // Return a dictionary so CapabilityStepExecutor extracts CertificationId
-        // into workflow variables for subsequent steps to find.
+        // Return a schema-conformant dictionary matching schema_company_certification_result:
+        //   CertificationId: string, Status: string, Message: string?
+        // CapabilityStepExecutor extracts Dictionary<string, object?> as workflow variables,
+        // so subsequent steps can find CertificationId in the workflow variable dictionary.
         return new Dictionary<string, object?>
         {
-            ["CertificationId"] = record.Id,
-            ["Result"] = new CertificationResult(
-                CertificationId: record.Id.ToString(),
-                Status: record.Status.ToString(),
-                Message: $"Certification submitted for {record.CompanyName}"),
+            ["CertificationId"] = record.Id.ToString(),
+            ["Status"] = record.Status.ToString(),
+            ["Message"] = $"Certification submitted for {record.CompanyName}",
         };
     }
 }
@@ -135,6 +135,10 @@ internal static class CapabilityInputHelper
 
     public static Guid ResolveCertificationId(CapabilityExecutionContext context)
     {
+        // CertificationId is stored as string in workflow variables (per schema_company_certification_result)
+        if (TryGetVariable<string>(context, "CertificationId", out var s) && Guid.TryParse(s, out var parsed))
+            return parsed;
+        // Also support direct Guid (e.g., from Items in same-execution context)
         if (TryGetVariable<Guid>(context, "CertificationId", out var g))
             return g;
         var inputKeys = context.Input is Dictionary<string, object?> vars

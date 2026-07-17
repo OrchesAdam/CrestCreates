@@ -88,6 +88,7 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
             services.AddSingleton<IWorkflowInstanceStore>(sp => new SqliteWorkflowInstanceStore(connectionFactory));
             services.AddSingleton<IHumanTaskInstanceStore>(sp => new SqliteHumanTaskInstanceStore(connectionFactory));
             services.AddSingleton(connectionFactory);
+            services.AddSingleton(new SqliteRuntimeStoreDiagnostics(connectionFactory));
         }
         else
         {
