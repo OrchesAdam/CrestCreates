@@ -173,6 +173,32 @@ public sealed class AgentToolInvocationGateTests
         var next = await gate.AcquireAsync(request);
         next.Status.Should().Be(AgentToolInvocationAcquireStatus.Acquired);
         next.Lease!.AttemptId.Should().NotBe(acquired.Lease!.AttemptId);
+
+        var oldReceipt = await gate.GetReleaseStateAsync(acquired.Lease!);
+        oldReceipt.State.Should().Be(AgentToolInvocationReleaseState.Released);
+        oldReceipt.PreparedAt.Should().NotBeNull();
+        oldReceipt.BudgetReservationId.Should().Be("reservation-1");
+        oldReceipt.ReasonCode.Should().Be("pre_dispatch_audit_failure");
+
+        var abandon = () => gate.AbandonUnrecordedLeaseAsync(
+            acquired.Lease!,
+            "late_abandon").AsTask();
+        await abandon.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task AbandonedLease_IsIdempotentOnlyForSameReason()
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var acquired = await gate.AcquireAsync(Request("fingerprint-a"));
+
+        await gate.AbandonUnrecordedLeaseAsync(acquired.Lease!, "approval_denied");
+        await gate.AbandonUnrecordedLeaseAsync(acquired.Lease!, "approval_denied");
+
+        var conflict = () => gate.AbandonUnrecordedLeaseAsync(
+            acquired.Lease!,
+            "budget_denied").AsTask();
+        await conflict.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [Fact]

@@ -77,8 +77,9 @@ Key decisions:
   budget, prepared-at, and reason metadata for reconciliation.
 - Pre-dispatch release uses PrepareRelease/PublishRelease with persisted
   AuditId, BudgetReservationId, PreparedAt, and ReasonCode; only Published
-  Released permits a new Attempt. Unrecorded lease cleanup is isolated behind
-  AbandonUnrecordedLeaseAsync.
+  Released permits a new Attempt. Published terminal receipts remain queryable
+  by old LeaseId after a new Attempt acquires. Unrecorded lease cleanup is
+  isolated behind AbandonUnrecordedLeaseAsync, with same-reason idempotency.
 - All post-dispatch Indeterminate paths persist the gate state before writing
   Audit; a failed gate transition is represented with a null InvocationState.
   Gate publication rejects non-terminal success/failure outcomes.
@@ -139,7 +140,7 @@ Completed:
   output validation, governance settlement, and terminal replay.
 
 Focused verification on 2026-07-16: Metadata 467/467, Schema 42/42,
-Agent.Tools abstractions 16/16, Agent.Tools runtime 92/92, Agent E2E 1/1,
+Agent.Tools abstractions 16/16, Agent.Tools runtime 93/93, Agent E2E 1/1,
 Agent NativeAOT 1/1, MCP runtime 63/63, MCP E2E 1/1, MCP NativeAOT 1/1,
 dependency boundaries 40/40, CodeGenerator 277/277, and Control Plane 484/484.
 The Runtime solution build also completes with 0 errors and now includes the

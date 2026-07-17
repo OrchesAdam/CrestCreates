@@ -14,6 +14,10 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
     private readonly Dictionary<AgentToolLogicalInvocationKey, Entry> _entries = [];
     private readonly Dictionary<string, AgentToolLogicalInvocationKey> _leaseKeys
         = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, AgentToolInvocationReleaseResult> _releaseReceipts
+        = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _abandonedReasons
+        = new(StringComparer.Ordinal);
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _leaseDuration;
 
@@ -76,7 +80,6 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
 
             if (entry.LastTerminalLease is { } terminalLease)
             {
-                _leaseKeys.Remove(terminalLease.LeaseId);
                 entry.LastTerminalLease = null;
                 entry.LastAttemptState = AttemptTerminalState.None;
                 entry.ReleasePendingPreparedAt = null;
@@ -262,12 +265,16 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
+            if (_releaseReceipts.TryGetValue(lease.LeaseId, out var receipt))
+                return ValueTask.FromResult(receipt);
             if (IsSameTerminalTransition(lease, AttemptTerminalState.Released, out var released))
                 return ValueTask.FromResult(GetReleaseResult(released, AgentToolInvocationReleaseState.Released));
             if (!IsSameTerminalTransition(lease, AttemptTerminalState.ReleasePending, out var pending))
                 throw new InvalidOperationException("The invocation has no pending release.");
             pending.LastAttemptState = AttemptTerminalState.Released;
-            return ValueTask.FromResult(GetReleaseResult(pending, AgentToolInvocationReleaseState.Released));
+            var result = GetReleaseResult(pending, AgentToolInvocationReleaseState.Released);
+            _releaseReceipts[lease.LeaseId] = result;
+            return ValueTask.FromResult(result);
         }
     }
 
@@ -284,6 +291,8 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 return ValueTask.FromResult(GetReleaseResult(released, AgentToolInvocationReleaseState.Released));
             if (IsSameTerminalTransition(lease, AttemptTerminalState.Indeterminate, out var indeterminate))
                 return ValueTask.FromResult(GetReleaseResult(indeterminate, AgentToolInvocationReleaseState.Indeterminate));
+            if (_releaseReceipts.TryGetValue(lease.LeaseId, out var receipt))
+                return ValueTask.FromResult(receipt);
             return ValueTask.FromResult(new AgentToolInvocationReleaseResult
             {
                 State = AgentToolInvocationReleaseState.Unknown
@@ -351,14 +360,25 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
-            if (IsSameTerminalTransition(lease, AttemptTerminalState.Released, out _))
+            if (_releaseReceipts.ContainsKey(lease.LeaseId))
+                throw new InvalidOperationException("A published release cannot be abandoned.");
+
+            if (_abandonedReasons.TryGetValue(lease.LeaseId, out var abandonedReason))
+            {
+                if (!string.Equals(abandonedReason, reasonCode, StringComparison.Ordinal))
+                    throw new InvalidOperationException("The abandoned lease reason cannot be changed.");
                 return ValueTask.CompletedTask;
+            }
+
+            if (IsSameTerminalTransition(lease, AttemptTerminalState.Released, out _))
+                throw new InvalidOperationException("A published release cannot be abandoned.");
 
             var (entry, _) = GetCurrent(lease);
             if (entry.DispatchStarted)
                 throw new InvalidOperationException("A dispatched invocation lease cannot be released.");
             entry.LastReasonCode = reasonCode;
-            ClearLease(entry, lease, AttemptTerminalState.Released);
+            _abandonedReasons[lease.LeaseId] = reasonCode;
+            ClearLease(entry, lease, AttemptTerminalState.Abandoned);
             return ValueTask.CompletedTask;
         }
     }
@@ -553,6 +573,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
     private enum AttemptTerminalState
     {
         None,
+        Abandoned,
         ReleasePending,
         Released,
         CompletionPending,

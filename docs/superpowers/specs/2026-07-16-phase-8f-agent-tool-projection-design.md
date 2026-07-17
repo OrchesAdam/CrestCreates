@@ -1028,6 +1028,10 @@ reconciliation.
 This allows a durable reconciler to resume a crashed `ReleasePending` attempt
 without guessing which Audit or reservation it belongs to. Only
 `PublishReleaseAsync` makes the Released state visible to a new Acquire.
+Published terminal receipts are per-Attempt records, not merely the logical
+invocation's current state; `GetReleaseStateAsync` must retain them by
+LeaseId/AttemptId for the adapter's documented reconciliation retention period
+even after a later Attempt acquires.
 
 Pre-dispatch release uses the same publication fence:
 
@@ -1062,6 +1066,12 @@ an unassociated or incomplete response is resolved through
   state;
 - Published Completed is monotonic: MarkIndeterminate rejects it, and repeated
   Prepare validates Outcome, AuditId, Budget ReservationId, and reason code;
+- `AbandonUnrecordedLease` is a separate pre-dispatch cleanup transition, used
+  only when no governance checkpoint was accepted. It records an `Abandoned`
+  attempt receipt: repeating it with the same reason is idempotent, changing
+  the reason is a conflict, and a published `Released` attempt must reject
+  abandonment. Abandonment does not publish a governance release and may be
+  followed by a new attempt for the same fingerprint;
 - the invoker calls `TryMarkDispatchStartedAsync` as the final operation before
   Dispatcher and may dispatch only when it returns true;
 - this transition atomically records that the attempt may have entered business

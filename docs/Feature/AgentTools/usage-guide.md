@@ -60,8 +60,21 @@ For every Active Tool, the Host must also register:
 ```csharp
 IAgentExecutionContextAccessor
 IAgentToolInvocationGate
+IAgentToolInvocationLeaseAbandoner
 IAgentToolBudgetGate
 IAgentToolGovernanceAuditor
+```
+
+`IAgentToolInvocationGate` and `IAgentToolInvocationLeaseAbandoner` must resolve
+to the same durable backing store. For the development in-memory gate, register
+one instance under both interfaces:
+
+```csharp
+services.AddSingleton<DevelopmentInMemoryAgentToolInvocationGate>();
+services.AddSingleton<IAgentToolInvocationGate>(sp =>
+    sp.GetRequiredService<DevelopmentInMemoryAgentToolInvocationGate>());
+services.AddSingleton<IAgentToolInvocationLeaseAbandoner>(sp =>
+    sp.GetRequiredService<DevelopmentInMemoryAgentToolInvocationGate>());
 ```
 
 `AddCrestAgentTools()` installs the fail-closed approval gate. A Host verifier
