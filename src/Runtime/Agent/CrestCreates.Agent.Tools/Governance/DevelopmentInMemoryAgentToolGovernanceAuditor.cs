@@ -333,42 +333,32 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
         AgentToolGovernancePreDispatchRecord left,
         AgentToolGovernancePreDispatchRecord right)
         => left.Context.LogicalInvocationKey == right.Context.LogicalInvocationKey
-            && string.Equals(left.Context.AttemptId, right.Context.AttemptId, StringComparison.Ordinal)
-            && string.Equals(
-                left.Context.InvocationFingerprint,
-                right.Context.InvocationFingerprint,
-                StringComparison.Ordinal)
-            && string.Equals(left.Lease.LeaseId, right.Lease.LeaseId, StringComparison.Ordinal)
-            && left.Lease.FencingToken == right.Lease.FencingToken
-            && string.Equals(
-                left.BudgetReservation.ReservationId,
-                right.BudgetReservation.ReservationId,
-                StringComparison.Ordinal)
-            && left.Approval.Decision == right.Approval.Decision
-            && left.Approval.ClaimState == right.Approval.ClaimState
-            && string.Equals(left.Approval.EvidenceId, right.Approval.EvidenceId, StringComparison.Ordinal);
+            && EquivalentContext(left.Context, right.Context)
+            && left.Lease.Equals(right.Lease)
+            && left.BudgetReservation.Equals(right.BudgetReservation)
+            && left.Approval.Equals(right.Approval);
 
     private static bool MatchesPreDispatch(
         AgentToolGovernancePreDispatchRecord preDispatch,
         AgentToolGovernanceFinalizationRecord finalization)
-        => preDispatch.Context.LogicalInvocationKey == finalization.Context.LogicalInvocationKey
+        => EquivalentContext(preDispatch.Context, finalization.Context)
+            && preDispatch.Lease.Equals(finalization.Lease)
+            && MatchesReservationIdentity(
+                preDispatch.BudgetReservation,
+                finalization.BudgetReservation);
+
+    private static bool MatchesReservationIdentity(
+        AgentToolBudgetReservation left,
+        AgentToolBudgetReservation right)
+        => string.Equals(left.ReservationId, right.ReservationId, StringComparison.Ordinal)
+            && string.Equals(left.AttemptId, right.AttemptId, StringComparison.Ordinal)
             && string.Equals(
-                preDispatch.Context.AttemptId,
-                finalization.Context.AttemptId,
+                left.InvocationFingerprint,
+                right.InvocationFingerprint,
                 StringComparison.Ordinal)
-            && string.Equals(
-                preDispatch.Context.InvocationFingerprint,
-                finalization.Context.InvocationFingerprint,
-                StringComparison.Ordinal)
-            && string.Equals(
-                preDispatch.Lease.LeaseId,
-                finalization.Lease.LeaseId,
-                StringComparison.Ordinal)
-            && preDispatch.Lease.FencingToken == finalization.Lease.FencingToken
-            && string.Equals(
-                preDispatch.BudgetReservation.ReservationId,
-                finalization.BudgetReservation.ReservationId,
-                StringComparison.Ordinal);
+            && string.Equals(left.Category, right.Category, StringComparison.Ordinal)
+            && left.CostUnits == right.CostUnits
+            && left.MaxCallsPerExecution == right.MaxCallsPerExecution;
 
     private static bool Equivalent(
         AgentToolGovernanceFinalizationRecord left,

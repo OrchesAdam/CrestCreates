@@ -44,6 +44,102 @@ public sealed class AgentToolGovernanceAuditorTests
     }
 
     [Fact]
+    public async Task RepeatedPreDispatch_WithChangedGovernanceConflicts()
+    {
+        var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();
+        var context = GovernanceTestData.Context();
+        var record = GovernanceTestData.PreDispatch(context);
+        await auditor.RecordPreDispatchAsync(record);
+
+        var changed = record with
+        {
+            Context = record.Context with
+            {
+                Governance = record.Context.Governance with
+                {
+                    EffectiveAuditMode = AgentToolAuditMode.BestEffort
+                }
+            }
+        };
+
+        var act = async () => await auditor.RecordPreDispatchAsync(changed);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task RepeatedPreDispatch_WithChangedBudgetConflicts()
+    {
+        var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();
+        var context = GovernanceTestData.Context();
+        var record = GovernanceTestData.PreDispatch(context);
+        await auditor.RecordPreDispatchAsync(record);
+
+        var changed = record with
+        {
+            Context = record.Context with
+            {
+                Governance = record.Context.Governance with
+                {
+                    Budget = record.Context.Governance.Budget with { CostUnits = 99 }
+                }
+            },
+            BudgetReservation = record.BudgetReservation with { CostUnits = 99 }
+        };
+
+        var act = async () => await auditor.RecordPreDispatchAsync(changed);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task FirstFinalization_WithChangedAgentRolesHashIsRejected()
+    {
+        var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();
+        var context = GovernanceTestData.Context();
+        var preDispatch = GovernanceTestData.PreDispatch(context);
+        var handle = await auditor.RecordPreDispatchAsync(preDispatch);
+        var finalization = Finalization(
+            handle.AuditId,
+            context,
+            AgentToolBudgetReservationState.Committed,
+            AgentToolGovernanceAttemptFinalState.Completed,
+            AgentToolInvocationTerminalState.Completed) with
+        {
+            Context = GovernanceTestData.AuditContext(context) with
+            {
+                AgentRolesHash = "changed-roles"
+            }
+        };
+
+        var act = async () => await auditor.FinalizeAsync(finalization);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task FirstFinalization_WithChangedLeaseAttemptIdIsRejected()
+    {
+        var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();
+        var context = GovernanceTestData.Context();
+        var preDispatch = GovernanceTestData.PreDispatch(context);
+        var handle = await auditor.RecordPreDispatchAsync(preDispatch);
+        var finalization = Finalization(
+            handle.AuditId,
+            context,
+            AgentToolBudgetReservationState.Committed,
+            AgentToolGovernanceAttemptFinalState.Completed,
+            AgentToolInvocationTerminalState.Completed) with
+        {
+            Lease = preDispatch.Lease with { AttemptId = "different-attempt" }
+        };
+
+        var act = async () => await auditor.FinalizeAsync(finalization);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
     public async Task Finalization_IsIdempotentAndCannotBeChanged()
     {
         var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();

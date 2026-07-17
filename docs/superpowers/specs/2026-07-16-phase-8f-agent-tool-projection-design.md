@@ -824,7 +824,9 @@ Lifecycle-aware validation follows Phase 8e:
 Latest Capability resolution occurs once at startup and is captured. Invocation
 does not re-resolve Latest. Exact Schema versions are required. Schema Latest or
 Compatible references in a resolved Capability remain unsupported for the Tool
-projection and fail startup.
+projection and fail startup. An Active Agent Tool must resolve an Active
+Capability for both Exact and Latest references; Draft, Removed, and Deprecated
+Capabilities are never projected implicitly.
 
 `AddCrestAgentTools()` registers an `IHostedService` that eagerly builds the
 dependency registries and publishes the snapshot before the Host reports
@@ -1388,11 +1390,16 @@ Full arguments/output are not recorded by default. `OutcomeHash` is a
 data-minimizing SHA-256 integrity digest, not a confidentiality mechanism;
 Audit implementations own redaction, retention, and persistence.
 
-Required pre-dispatch audit failure releases a held reservation and lease and
-does not call Dispatcher. BestEffort audit failure records a diagnostic and may
-continue only where descriptor validation allows BestEffort. Role/Selection
-denials always retain the external `UnknownTool` mask, even when Required
-Decision Audit itself is unavailable.
+The Invoker retries the identical pre-dispatch record once after an ambiguous
+`RecordPreDispatchAsync` failure, allowing an idempotent Auditor to recover an
+accepted checkpoint and its AuditId. A confirmed pre-dispatch rejection may
+release its reservation and abandon the unrecorded lease. If both record
+attempts are unconfirmed, Required and BestEffort paths alike settle
+conservatively, fence the logical invocation as `Indeterminate`, and do not
+abandon or dispatch; a durable adapter must provide a reconciliation path for
+the possible accepted checkpoint. Role/Selection denials always retain the
+external `UnknownTool` mask, even when Required Decision Audit itself is
+unavailable.
 
 Budget and Invocation terminal state are independent. Invocation is Completed
 only when all of these are determined:
@@ -1519,7 +1526,7 @@ await dispatcher.DispatchAsync(
     ctx =>
     {
         ctx.CausationId = execution.CausationId;
-        ctx.IdempotencyKey = idempotencyKeyBuilder.Build(entry, execution);
+        ctx.IdempotencyKey = idempotencyKeyBuilder.Build(fingerprint);
         ctx.InputJson = normalizedArguments.Clone();
 
         ctx.Items[AgentCapabilityContextItemNames.ToolDescriptorId]
@@ -1549,11 +1556,12 @@ await dispatcher.DispatchAsync(
 The Item names are typed constants owned by Agent.Tools runtime. Handler code
 does not parse Tool protocols or governance string keys.
 
-The Agent Capability IdempotencyKey uses versioned canonical SHA-256 over Tool,
-Capability, and Schema hashes plus trusted logical ExecutionId and InvocationId.
-It does not include AttemptId or ReservationId. A changed arguments or CallOrigin
-for the same logical key is stopped by the invocation fingerprint conflict
-before Capability idempotency can replay it.
+The Agent Capability IdempotencyKey is `agent:v1:{fingerprint.Value}` and is
+therefore based on the complete normalized Agent fingerprint: Tool, Capability,
+Schema, tenant, user, Agent, roles, arguments, logical Execution/Invocation
+identity, and CallOrigin. It does not include AttemptId or ReservationId. A
+changed fingerprint is stopped by the Agent invocation gate before Capability
+idempotency can replay it; identical Released retries preserve the same key.
 
 ## 18. Outcomes and safe error mapping
 

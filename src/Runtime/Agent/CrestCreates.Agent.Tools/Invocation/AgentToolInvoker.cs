@@ -313,36 +313,53 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
 
         var auditContext = CreateAuditContext(governance);
+        var preDispatch = new AgentToolGovernancePreDispatchRecord
+        {
+            Context = auditContext,
+            Lease = lease,
+            Approval = approval,
+            BudgetReservation = reservation
+        };
         AgentToolGovernanceAuditHandle? auditHandle = null;
         try
         {
-            auditHandle = await _audit.RecordPreDispatchAsync(
-                new AgentToolGovernancePreDispatchRecord
-                {
-                    Context = auditContext,
-                    Lease = lease,
-                    Approval = approval,
-                    BudgetReservation = reservation
-                },
-                cancellationToken).ConfigureAwait(false);
+            auditHandle = await _audit.RecordPreDispatchAsync(preDispatch, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            await ReleaseBeforeDispatchAsync(lease, reservation, "pre_dispatch_cancelled").ConfigureAwait(false);
+            auditHandle = await TryRecoverPreDispatchAsync(preDispatch).ConfigureAwait(false);
+            if (auditHandle is not null)
+            {
+                _ = await ReleaseAuditedBeforeDispatchAsync(
+                    entry,
+                    auditHandle,
+                    auditContext,
+                    lease,
+                    reservation,
+                    "pre_dispatch_cancelled").ConfigureAwait(false);
+            }
+            else
+            {
+                _ = await FinishFenceIndeterminateAsync(
+                    null,
+                    auditContext,
+                    lease,
+                    reservation,
+                    "pre_dispatch_audit_uncertain").ConfigureAwait(false);
+            }
             throw;
         }
         catch
         {
-            if (entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required)
-            {
-                var cleanup = await ReleaseBeforeDispatchAsync(
+            auditHandle = await TryRecoverPreDispatchAsync(preDispatch).ConfigureAwait(false);
+            if (auditHandle is null)
+                return await FinishFenceIndeterminateAsync(
+                    null,
+                    auditContext,
                     lease,
                     reservation,
-                    "pre_dispatch_audit_failure").ConfigureAwait(false);
-                if (cleanup is not null)
-                    return cleanup;
-                return GovernanceDenied("AGENT_TOOL_AUDIT_FAILURE");
-            }
+                    "pre_dispatch_audit_uncertain").ConfigureAwait(false);
         }
 
         if (renewal.HasFailed)
@@ -390,7 +407,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 InvocationSource.Agent,
                 input,
                 context => ConfigureCapabilityContext(
-                    context, entry, execution, arguments, lease, approval, reservation),
+                    context, entry, execution, arguments, fingerprint, lease, approval, reservation),
                 cancellationToken).ConfigureAwait(false);
         }
         catch
@@ -735,6 +752,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 right.Context.InvocationFingerprint,
                 StringComparison.Ordinal)
             && string.Equals(left.Lease.LeaseId, right.Lease.LeaseId, StringComparison.Ordinal)
+            && string.Equals(left.Lease.AttemptId, right.Lease.AttemptId, StringComparison.Ordinal)
             && left.Lease.FencingToken == right.Lease.FencingToken
             && string.Equals(
                 left.BudgetReservation.ReservationId,
@@ -1055,25 +1073,6 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             reasonCode).ConfigureAwait(false);
     }
 
-    private async ValueTask<AgentToolInvocationOutcome?> ReleaseBeforeDispatchAsync(
-        AgentToolInvocationLease lease,
-        AgentToolBudgetReservation reservation,
-        string reasonCode)
-    {
-        try
-        {
-            await FinalizeBudgetAsync(reservation, AgentToolBudgetReservationState.Released, reasonCode)
-                .ConfigureAwait(false);
-        }
-        catch
-        {
-            await MarkIndeterminateIgnoringFailureAsync(lease, "budget_settlement_failure").ConfigureAwait(false);
-            return Indeterminate("budget_settlement_failure");
-        }
-        await AbandonUnrecordedLeaseBestEffortAsync(lease, reasonCode).ConfigureAwait(false);
-        return null;
-    }
-
     private ValueTask<AgentToolBudgetReservation> FinalizeBudgetAsync(
         AgentToolBudgetReservation reservation,
         AgentToolBudgetReservationState state,
@@ -1094,12 +1093,13 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolRuntimeEntry entry,
         AgentExecutionContext execution,
         JsonElement arguments,
+        AgentToolInvocationFingerprint fingerprint,
         AgentToolInvocationLease lease,
         AgentToolApprovalResult approval,
         AgentToolBudgetReservation reservation)
     {
         context.CausationId = execution.CausationId;
-        context.IdempotencyKey = _idempotency.Build(entry, execution);
+        context.IdempotencyKey = _idempotency.Build(fingerprint);
         context.InputJson = arguments.Clone();
         context.Items[AgentCapabilityContextItemNames.ToolDescriptorId] = entry.Descriptor.Id;
         context.Items[AgentCapabilityContextItemNames.ToolDescriptorVersion] = entry.Descriptor.Version;
@@ -1213,6 +1213,20 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         catch
         {
             return false;
+        }
+    }
+
+    private async ValueTask<AgentToolGovernanceAuditHandle?> TryRecoverPreDispatchAsync(
+        AgentToolGovernancePreDispatchRecord record)
+    {
+        try
+        {
+            return await _audit.RecordPreDispatchAsync(record, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            return null;
         }
     }
 

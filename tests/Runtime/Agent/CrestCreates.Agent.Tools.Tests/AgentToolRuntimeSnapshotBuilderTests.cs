@@ -55,6 +55,31 @@ public sealed class AgentToolRuntimeSnapshotBuilderTests
         snapshot.Find(tool.ToolName)!.DiscoveryContract.CapabilityContract.Version.Should().Be(2);
     }
 
+    [Theory]
+    [InlineData(DescriptorState.Draft)]
+    [InlineData(DescriptorState.Removed)]
+    [InlineData(DescriptorState.Deprecated)]
+    public void Build_RejectsActiveToolReferencingNonActiveCapability(DescriptorState state)
+    {
+        var capability = AgentToolRuntimeTestFixture.Capability(
+            $"inactive-capability-{state}",
+            state: state);
+        var tool = AgentToolRuntimeTestFixture.Tool(
+            $"inactive-capability-tool-{state}",
+            capability.Id,
+            "inactive.capability.tool");
+        AgentToolRuntimeTestFixture.RegisterNoPayloadBinding(tool);
+
+        var action = () => AgentToolRuntimeTestFixture.SnapshotBuilder(
+                AgentToolRuntimeTestFixture.BuildToolRegistry(tool),
+                AgentToolRuntimeTestFixture.BuildCapabilityRegistry(capability),
+                AgentToolRuntimeTestFixture.BuildSchemaRegistry())
+            .Build();
+
+        action.Should().Throw<AgentToolConfigurationException>()
+            .Which.Code.Should().Be(AgentToolStartupDiagnosticCodes.CapabilityResolutionFailure);
+    }
+
     [Fact]
     public void Build_RejectsExpectedCapabilityHashMismatch()
     {

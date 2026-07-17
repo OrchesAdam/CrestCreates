@@ -49,13 +49,14 @@ internal static class AgentToolRuntimeTestFixture
         string id,
         int version = 1,
         VersionedDescriptorRef<SchemaDescriptor>? input = null,
-        VersionedDescriptorRef<SchemaDescriptor>? output = null)
+        VersionedDescriptorRef<SchemaDescriptor>? output = null,
+        DescriptorState state = DescriptorState.Active)
         => new()
         {
             Id = id,
             Name = id,
             Version = version,
-            State = DescriptorState.Active,
+            State = state,
             CapabilityKind = CapabilityKind.Query,
             RiskLevel = CapabilityRiskLevel.Low,
             InputSchema = input,

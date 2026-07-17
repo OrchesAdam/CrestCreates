@@ -57,6 +57,66 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
         capabilities.Verify(registry => registry.GetAll(), Times.Once);
     }
 
+    [Theory]
+    [InlineData(DescriptorState.Draft)]
+    [InlineData(DescriptorState.Removed)]
+    [InlineData(DescriptorState.Deprecated)]
+    public void Build_rejects_active_tool_referencing_non_active_capability(DescriptorState state)
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var tool = new McpToolDescriptor
+        {
+            Id = "mcp-tool:exact." + suffix,
+            Name = "exact." + suffix,
+            Version = 1,
+            State = DescriptorState.Active,
+            Capability = new CapabilityProjectionReference(
+                "inactive-capability." + suffix,
+                1,
+                VersionSelectionMode.Exact),
+            ToolName = "exact." + suffix,
+            Description = "Gets an order."
+        };
+        var capability = new CapabilityDescriptor
+        {
+            Id = "inactive-capability." + suffix,
+            Name = "Inactive capability",
+            Version = 1,
+            State = state,
+            CapabilityKind = CapabilityKind.Query
+        };
+        var tools = new Mock<IMcpToolRegistry>();
+        var capabilities = new Mock<ICapabilityRegistry>();
+        var schemas = new Mock<ISchemaRegistry>();
+        tools.SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        capabilities.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        schemas.As<IRegistryState>().SetupGet(registry => registry.State).Returns(RegistryState.Built);
+        tools.Setup(registry => registry.GetAll()).Returns([tool]);
+        capabilities.Setup(registry => registry.GetByVersion(capability.Id, capability.Version))
+            .Returns(capability);
+        McpToolBindingRegistry.Register(VoidBinding(tool));
+
+        var builder = new McpToolRuntimeSnapshotBuilder(
+            tools.Object,
+            capabilities.Object,
+            schemas.Object,
+            new McpJsonSchemaProjector(),
+            new McpToolSchemaParityValidator(),
+            new DefaultCanonicalHashComputer(),
+            new McpJsonOptions
+            {
+                SerializerOptions = new JsonSerializerOptions
+                {
+                    TypeInfoResolver = McpTestJsonContext.Default
+                }
+            });
+
+        var action = () => builder.Build();
+
+        action.Should().Throw<McpToolConfigurationException>()
+            .Which.Code.Should().Be("MCP103");
+    }
+
     [Fact]
     public void Non_source_generated_json_resolver_fails_closed()
     {

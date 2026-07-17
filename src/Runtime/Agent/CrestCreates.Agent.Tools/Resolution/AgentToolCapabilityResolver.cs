@@ -28,8 +28,16 @@ public sealed class AgentToolCapabilityResolver
                 "Agent Tool Capability selection is unsupported.")
         };
 
-        return capability ?? throw new AgentToolConfigurationException(
-            AgentToolStartupDiagnosticCodes.CapabilityResolutionFailure,
-            "Agent Tool Capability could not be resolved.");
+        if (capability is null)
+            throw new AgentToolConfigurationException(
+                AgentToolStartupDiagnosticCodes.CapabilityResolutionFailure,
+                "Agent Tool Capability could not be resolved.");
+
+        if (capability.State != DescriptorState.Active)
+            throw new AgentToolConfigurationException(
+                AgentToolStartupDiagnosticCodes.CapabilityResolutionFailure,
+                "An active Agent Tool must resolve an active Capability.");
+
+        return capability;
     }
 }

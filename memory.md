@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-16 (Phase 8f Agent Tool Projection ninth review fixes)
+Last Updated: 2026-07-17 (Phase 8f Agent Tool Projection audit/idempotency review fixes)
 
 ## Purpose
 
@@ -61,6 +61,13 @@ Key decisions:
 - Role/Selection filtering occurs before argument traversal. Rejection audit
   fingerprints use a safe fallback when raw arguments do not match a business
   Schema and therefore never let invalid JSON types escape as runtime errors.
+- Capability idempotency keys are derived directly from the complete Agent
+  invocation fingerprint, preserving tenant/user/Agent/roles/arguments and
+  CallOrigin isolation while keeping identical Attempts stable.
+- Ambiguous pre-dispatch audit writes are retried once with the identical
+  record. If the AuditId remains unconfirmed, the budget is settled
+  conservatively and the logical invocation is fenced Indeterminate; the
+  lease is never abandoned or dispatched without a confirmed checkpoint.
 - Invocation terminal preparation precedes Required governance completion audit;
   Completed replay is published only after the audit is durably confirmed.
 - Budget Denied is trusted only when Reservation is null and ReasonCode is
@@ -142,8 +149,8 @@ Completed:
   output validation, governance settlement, and terminal replay.
 
 Focused verification on 2026-07-16: Metadata 467/467, Schema 42/42,
-Agent.Tools abstractions 16/16, Agent.Tools runtime 96/96, Agent E2E 1/1,
-Agent NativeAOT 1/1, MCP runtime 63/63, MCP E2E 1/1, MCP NativeAOT 1/1,
+Agent.Tools abstractions 16/16, Agent.Tools runtime 112/112, Agent E2E 1/1,
+Agent NativeAOT 1/1, MCP runtime 66/66, MCP E2E 1/1, MCP NativeAOT 1/1,
 dependency boundaries 40/40, CodeGenerator 277/277, and Control Plane 484/484.
 The Runtime solution build also completes with 0 errors and now includes the
 Agent Tool runtime, E2E, and NativeAOT fixture projects. A full parallel test invocation

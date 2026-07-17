@@ -604,6 +604,9 @@ Capability reference combinations are exact:
 | unknown enum | any | startup error |
 
 Phase 8e does not support ExpectedContractHash. A non-null value fails startup. Capability InputSchema and OutputSchema references must both use SelectionMode.Exact, Version greater than zero, and null ExpectedContractHash. MCP discovery always captures a deterministic Schema version; Latest and Compatible Schema references fail startup.
+An Active MCP Tool must resolve an Active Capability for both Exact and Latest
+references; Draft, Removed, and Deprecated Capabilities are never projected
+implicitly.
 
 Startup composition is:
 

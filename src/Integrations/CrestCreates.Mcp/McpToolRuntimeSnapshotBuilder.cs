@@ -118,7 +118,13 @@ public sealed class McpToolRuntimeSnapshotBuilder
                 .MaxBy(item => item.Version),
             _ => throw new McpToolConfigurationException("MCP117", "Capability selection is unsupported.")
         };
-        return capability ?? throw new McpToolConfigurationException("MCP103", "Capability could not be resolved.");
+        if (capability is null)
+            throw new McpToolConfigurationException("MCP103", "Capability could not be resolved.");
+        if (capability.State != DescriptorState.Active)
+            throw new McpToolConfigurationException(
+                "MCP103",
+                "An active MCP Tool must resolve an active Capability.");
+        return capability;
     }
 
     private SchemaDescriptor? ResolveSchema(VersionedDescriptorRef<SchemaDescriptor>? reference)

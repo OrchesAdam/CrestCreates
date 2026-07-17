@@ -82,15 +82,46 @@ public sealed class AgentToolInvokerTests
     }
 
     [Fact]
-    public async Task Invoke_RequiredPreDispatchAuditFailureReleasesBudgetAndNeverDispatches()
+    public async Task Invoke_UnconfirmedPreDispatchAuditFencesInvocationAndNeverDispatches()
     {
         var harness = CreateHarness(requiredAudit: true, audit: new ThrowingAuditor());
 
         var outcome = await harness.Invoker.InvokeAsync(new AgentToolInvocationRequest(harness.ToolName));
 
-        outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.GovernanceDenied);
+        outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
         harness.Dispatcher.CallCount.Should().Be(0);
         harness.Budget.LastFinalState.Should().Be(AgentToolBudgetReservationState.Released);
+        var retry = await harness.Invoker.InvokeAsync(new AgentToolInvocationRequest(harness.ToolName));
+        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+    }
+
+    [Fact]
+    public async Task Invoke_RequiredPreDispatchResponseLossRecoversAcceptedAudit()
+    {
+        var audit = new PreDispatchResponseLossAuditor();
+        var harness = CreateHarness(requiredAudit: true, audit: audit);
+
+        var outcome = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
+        audit.RecordCalls.Should().Be(2);
+        harness.Dispatcher.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Invoke_BestEffortPreDispatchResponseLossFinalizesSameAudit()
+    {
+        var audit = new PreDispatchResponseLossAuditor();
+        var harness = CreateHarness(audit: audit);
+
+        var outcome = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
+        audit.RecordCalls.Should().Be(2);
+        audit.Inner.Finalizations.Should().ContainSingle();
+        harness.Dispatcher.CallCount.Should().Be(1);
     }
 
     [Fact]
@@ -918,6 +949,39 @@ public sealed class AgentToolInvokerTests
                     }
                 };
         }
+    }
+
+    private sealed class PreDispatchResponseLossAuditor : IAgentToolGovernanceAuditor
+    {
+        public DevelopmentInMemoryAgentToolGovernanceAuditor Inner { get; } = new();
+
+        public int RecordCalls { get; private set; }
+
+        public ValueTask RecordDecisionAsync(
+            AgentToolGovernanceDecisionRecord record,
+            CancellationToken cancellationToken = default)
+            => Inner.RecordDecisionAsync(record, cancellationToken);
+
+        public async ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+            AgentToolGovernancePreDispatchRecord record,
+            CancellationToken cancellationToken = default)
+        {
+            RecordCalls++;
+            var handle = await Inner.RecordPreDispatchAsync(record, cancellationToken);
+            if (RecordCalls == 1)
+                throw new IOException("pre-dispatch audit response lost");
+            return handle;
+        }
+
+        public ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(
+            AgentToolGovernanceFinalizationRecord record,
+            CancellationToken cancellationToken = default)
+            => Inner.FinalizeAsync(record, cancellationToken);
+
+        public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
+            string auditId,
+            CancellationToken cancellationToken = default)
+            => Inner.GetFinalizationStateAsync(auditId, cancellationToken);
     }
 
     private sealed class MismatchedFinalizationAuditor : IAgentToolGovernanceAuditor
