@@ -202,6 +202,7 @@ public class AgentDraftContractGeneratorTests
         AddReference(references, "CrestCreates.Schema.Abstractions");
         AddReference(references, "CrestCreates.Capability.Abstractions");
         AddReference(references, "CrestCreates.DescriptorDraft.Abstractions");
+        AddReference(references, "CrestCreates.DescriptorDraft");
 
         if (additionalReferences is not null)
         {

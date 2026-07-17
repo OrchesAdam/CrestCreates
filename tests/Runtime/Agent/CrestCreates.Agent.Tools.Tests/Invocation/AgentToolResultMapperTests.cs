@@ -1,5 +1,6 @@
 using CrestCreates.Agent.Tools;
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
 
@@ -29,13 +30,13 @@ public sealed class AgentToolResultMapperTests
             "invalid",
             TimeSpan.Zero,
             [
-                new CapabilityExecutionIssue("FIELD_REQUIRED", "required", "name"),
+                new CapabilityExecutionIssue(SchemaValidationErrorCodes.FieldRequired, "required", "name"),
                 new CapabilityExecutionIssue("SECRET_POLICY_NAME", "internal detail", "privateField")
             ]);
 
         var outcome = new AgentToolResultMapper().CapabilityFailure(result);
 
         outcome.Issues.Should().ContainSingle(issue =>
-            issue.Code == "FIELD_REQUIRED" && issue.FieldPath == "name");
+            issue.Code == SchemaValidationErrorCodes.FieldRequired && issue.FieldPath == "name");
     }
 }

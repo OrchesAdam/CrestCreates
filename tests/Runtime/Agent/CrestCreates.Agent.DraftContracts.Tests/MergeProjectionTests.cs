@@ -76,10 +76,10 @@ public class MergeProjectionTests
 
         var patchDto = new AgentCapabilityDraftPayloadDto
         {
-            CapabilityKind = CapabilityKind.Query,
+            CapabilityKind = CapabilityKind.Command,  // changed AND in ChangedFields — ensures non-empty
             RiskLevel = CapabilityRiskLevel.Low,
             State = DescriptorState.Active,
-            Name = "DifferentName",       // different but NOT in ChangedFields
+            Name = "DifferentName",                   // different but NOT in ChangedFields
         };
 
         var patch = new AgentDraftPayloadPatchDto
@@ -88,7 +88,7 @@ public class MergeProjectionTests
             Capability = new AgentCapabilityDraftPayloadPatchDto
             {
                 Payload = patchDto,
-                ChangedFields = 0,  // ContractHash was removed
+                ChangedFields = AgentCapabilityDraftChangedField.CapabilityKind,
             },
         };
 
@@ -96,8 +96,8 @@ public class MergeProjectionTests
         result.IsSuccess.Should().BeTrue();
 
         var merged = (CapabilityDescriptorDraftPayload)result.Value!;
-        merged.Descriptor.Name.Should().Be("ExistingName");       // preserved (not changed)
-//         merged.Descriptor.ContractHash.Should().Be("new-ch");     // changed to explicit value
+        merged.Descriptor.Name.Should().Be("ExistingName");               // preserved (not in ChangedFields)
+        merged.Descriptor.CapabilityKind.Should().Be(CapabilityKind.Command); // overwritten (in ChangedFields)
     }
 
     /// <summary>
