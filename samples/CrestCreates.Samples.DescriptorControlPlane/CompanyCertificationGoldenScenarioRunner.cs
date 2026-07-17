@@ -125,12 +125,14 @@ public sealed class CompanyCertificationGoldenScenarioRunner
                     if (wf.Status == WorkflowInstanceStatus.Completed)
                     {
                         var store = _host.Store;
+                        var allRecords = await store.GetAllAsync();
+                        var firstRecord = allRecords.FirstOrDefault();
                         report = report with
                         {
                             HumanTaskStatus = "Approved",
-                            SubmittedEventCaptured = store.Count > 0,
-                            ApprovedEventCaptured = store.Get(store.GetAll().FirstOrDefault()?.Id
-                                ?? Guid.Empty)?.Status == CertificationStatus.Approved,
+                            SubmittedEventCaptured = allRecords.Count > 0,
+                            ApprovedEventCaptured = firstRecord is not null
+                                && await store.GetAsync(firstRecord.Id) is { Status: CertificationStatus.Approved },
                         };
                     }
                     return report;

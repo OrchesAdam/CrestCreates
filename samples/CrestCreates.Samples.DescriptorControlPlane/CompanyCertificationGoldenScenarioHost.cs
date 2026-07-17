@@ -28,37 +28,93 @@ namespace CrestCreates.Samples.DescriptorControlPlane;
 public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
 {
     public ServiceProvider Provider { get; }
-    public InMemoryCompanyCertificationStore Store { get; }
+    public ICompanyCertificationStore Store { get; }
+    public CompanyCertificationPersistenceOptions PersistenceOptions { get; }
 
-    public CompanyCertificationGoldenScenarioHost(
-        IReadOnlyList<IDescriptor>? runtimeInventory = null,
-        InMemoryCompanyCertificationStore? store = null)
+    // ── Factory Methods ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Creates a host with SQLite persistence. Default mode for demonstration.
+    /// </summary>
+    public static CompanyCertificationGoldenScenarioHost CreateSqlite(
+        string databasePath,
+        IReadOnlyList<IDescriptor>? runtimeInventory = null)
     {
-        Store = store ?? new InMemoryCompanyCertificationStore();
-        var services = new ServiceCollection();
+        var options = new CompanyCertificationPersistenceOptions
+        {
+            Mode = CompanyCertificationPersistenceMode.Sqlite,
+            DatabasePath = databasePath
+        };
+        return new CompanyCertificationGoldenScenarioHost(options, runtimeInventory);
+    }
 
-        // ── Store ──────────────────────────────────────────────────────
-        services.AddSingleton(Store);
+    /// <summary>
+    /// Creates a host with in-memory persistence. Useful for fast, isolated unit-style tests.
+    /// </summary>
+    public static CompanyCertificationGoldenScenarioHost CreateInMemory(
+        IReadOnlyList<IDescriptor>? runtimeInventory = null)
+    {
+        var options = new CompanyCertificationPersistenceOptions
+        {
+            Mode = CompanyCertificationPersistenceMode.InMemory
+        };
+        return new CompanyCertificationGoldenScenarioHost(options, runtimeInventory);
+    }
+
+    // ── Constructor ────────────────────────────────────────────────────
+
+    private CompanyCertificationGoldenScenarioHost(
+        CompanyCertificationPersistenceOptions persistenceOptions,
+        IReadOnlyList<IDescriptor>? runtimeInventory = null)
+    {
+        PersistenceOptions = persistenceOptions;
+        var services = new ServiceCollection();
 
         // ── Logging ────────────────────────────────────────────────────
         services.AddLogging();
 
+        // ── Persistence ────────────────────────────────────────────────
+        // Register BEFORE AddWorkflowEngine/AddHumanTaskRuntime so SQLite stores
+        // take precedence over TryAddSingleton defaults in those methods.
+        ICompanyCertificationStore companyStore;
+        if (persistenceOptions.Mode == CompanyCertificationPersistenceMode.Sqlite)
+        {
+            var connectionFactory = new SqliteConnectionFactory(persistenceOptions);
+            var initializer = new SqliteDatabaseInitializer(connectionFactory);
+            initializer.Initialize();
+
+            companyStore = new SqliteCompanyCertificationStore(connectionFactory);
+            services.AddSingleton<ICompanyCertificationStore>(companyStore);
+            services.AddSingleton<IWorkflowInstanceStore>(sp => new SqliteWorkflowInstanceStore(connectionFactory));
+            services.AddSingleton<IHumanTaskInstanceStore>(sp => new SqliteHumanTaskInstanceStore(connectionFactory));
+            services.AddSingleton(connectionFactory);
+        }
+        else
+        {
+            companyStore = new InMemoryCompanyCertificationStore();
+            services.AddSingleton<ICompanyCertificationStore>(companyStore);
+        }
+
+        Store = companyStore;
+
         var inventory = runtimeInventory
             ?? CompanyCertificationDescriptorCloner.CopyAllDescriptors();
 
-        RegisterRuntimeRegistries(services, inventory, Store);
+        RegisterRuntimeRegistries(services, inventory);
         RegisterRuntimeServices(services);
         RegisterControlPlaneServices(services);
 
         Provider = services.BuildServiceProvider(validateScopes: true);
+
+        // ── Wire up Capability Handler Resolver with DI-resolved invokers ──
+        RegisterCapabilityHandlers(services, Provider);
     }
 
     // ── Runtime Registries ─────────────────────────────────────────────
 
     private static void RegisterRuntimeRegistries(
         IServiceCollection services,
-        IReadOnlyList<IDescriptor> inventory,
-        InMemoryCompanyCertificationStore store)
+        IReadOnlyList<IDescriptor> inventory)
     {
         // ── Capability Registry ────────────────────────────────────────
         var capabilities = inventory.OfType<CapabilityDescriptor>().ToArray();
@@ -67,15 +123,14 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
         capRegistry.Build([new InlineDescriptorProvider<CapabilityDescriptor>(capabilities)]);
         services.AddSingleton<ICapabilityRegistry>(capRegistry);
 
-        // ── Capability Handler Resolver ────────────────────────────────
+        // ── Capability Handler Resolver (empty — populated after SP build) ──
         var handlerResolver = new CapabilityHandlerResolver();
-        handlerResolver.Register("cap_submit_company_certification",
-            new SubmitCompanyCertificationInvoker(store));
-        handlerResolver.Register("cap_approve_company_certification",
-            new ApproveCompanyCertificationInvoker(store));
-        handlerResolver.Register("cap_reject_company_certification",
-            new RejectCompanyCertificationInvoker(store));
         services.AddSingleton<ICapabilityHandlerResolver>(handlerResolver);
+
+        // ── Invokers (registered as singletons for DI resolution) ──
+        services.AddSingleton<SubmitCompanyCertificationInvoker>();
+        services.AddSingleton<ApproveCompanyCertificationInvoker>();
+        services.AddSingleton<RejectCompanyCertificationInvoker>();
 
         // ── HumanTask Registry ─────────────────────────────────────────
         var humanTasks = inventory.OfType<HumanTaskDescriptor>().ToArray();
@@ -90,6 +145,20 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
         var wfRegistry = new WorkflowRegistry(wfEngine);
         wfRegistry.Build([new InlineDescriptorProvider<WorkflowDescriptor>(workflows)]);
         services.AddSingleton<IWorkflowRegistry>(wfRegistry);
+    }
+
+    private static void RegisterCapabilityHandlers(
+        IServiceCollection services,
+        ServiceProvider provider)
+    {
+        // Use the concrete type — Register() is not on the interface
+        var handlerResolver = (CapabilityHandlerResolver)provider.GetRequiredService<ICapabilityHandlerResolver>();
+        handlerResolver.Register("cap_submit_company_certification",
+            provider.GetRequiredService<SubmitCompanyCertificationInvoker>());
+        handlerResolver.Register("cap_approve_company_certification",
+            provider.GetRequiredService<ApproveCompanyCertificationInvoker>());
+        handlerResolver.Register("cap_reject_company_certification",
+            provider.GetRequiredService<RejectCompanyCertificationInvoker>());
     }
 
     // ── Runtime Services ───────────────────────────────────────────────
@@ -113,9 +182,11 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
         services.AddCapabilityRuntime();
 
         // ── HumanTask Runtime ──────────────────────────────────────────
+        // TryAddSingleton defaults — will NOT override SQLite stores registered earlier
         services.AddHumanTaskRuntime();
 
         // ── Workflow Engine ────────────────────────────────────────────
+        // TryAddSingleton defaults — will NOT override SQLite stores registered earlier
         services.AddWorkflowEngine();
     }
 

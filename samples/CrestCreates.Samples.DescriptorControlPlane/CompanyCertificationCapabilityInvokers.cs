@@ -5,9 +5,9 @@ namespace CrestCreates.Samples.DescriptorControlPlane;
 
 public sealed class SubmitCompanyCertificationInvoker : ICapabilityContextAwareHandlerInvoker
 {
-    private readonly InMemoryCompanyCertificationStore _store;
+    private readonly ICompanyCertificationStore _store;
 
-    public SubmitCompanyCertificationInvoker(InMemoryCompanyCertificationStore store)
+    public SubmitCompanyCertificationInvoker(ICompanyCertificationStore store)
     {
         _store = store;
     }
@@ -15,11 +15,11 @@ public sealed class SubmitCompanyCertificationInvoker : ICapabilityContextAwareH
     public Task<object?> InvokeAsync(object? input, CancellationToken ct) =>
         throw new NotSupportedException("Use context-aware overload");
 
-    public Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
+    public async Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
     {
         var input = CapabilityInputHelper.Extract<CertificationSubmitInput>(context);
 
-        var record = _store.Create(input);
+        var record = await _store.CreateAsync(input, ct);
 
         CapabilityInputHelper.EmitDomainEvent(context, new CompanyCertificationSubmittedEvent
         {
@@ -27,22 +27,24 @@ public sealed class SubmitCompanyCertificationInvoker : ICapabilityContextAwareH
             CompanyName = record.CompanyName,
         });
 
-        CapabilityInputHelper.StoreVariable(context, "CertificationId", record.Id);
-
-        var result = new CertificationResult(
-            CertificationId: record.Id.ToString(),
-            Status: record.Status.ToString(),
-            Message: $"Certification submitted for {record.CompanyName}");
-
-        return Task.FromResult<object?>(result);
+        // Return a dictionary so CapabilityStepExecutor extracts CertificationId
+        // into workflow variables for subsequent steps to find.
+        return new Dictionary<string, object?>
+        {
+            ["CertificationId"] = record.Id,
+            ["Result"] = new CertificationResult(
+                CertificationId: record.Id.ToString(),
+                Status: record.Status.ToString(),
+                Message: $"Certification submitted for {record.CompanyName}"),
+        };
     }
 }
 
 public sealed class ApproveCompanyCertificationInvoker : ICapabilityContextAwareHandlerInvoker
 {
-    private readonly InMemoryCompanyCertificationStore _store;
+    private readonly ICompanyCertificationStore _store;
 
-    public ApproveCompanyCertificationInvoker(InMemoryCompanyCertificationStore store)
+    public ApproveCompanyCertificationInvoker(ICompanyCertificationStore store)
     {
         _store = store;
     }
@@ -50,14 +52,14 @@ public sealed class ApproveCompanyCertificationInvoker : ICapabilityContextAware
     public Task<object?> InvokeAsync(object? input, CancellationToken ct) =>
         throw new NotSupportedException("Use context-aware overload");
 
-    public Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
+    public async Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
     {
         var input = CapabilityInputHelper.Extract<CertificationReviewInput>(context);
 
-        var certId = ResolveCertificationId(context);
+        var certId = CapabilityInputHelper.ResolveCertificationId(context);
 
         var reviewerUserId = context.UserId ?? "system";
-        _store.Approve(certId, input, reviewerUserId);
+        await _store.ApproveAsync(certId, input, reviewerUserId, ct);
 
         CapabilityInputHelper.EmitDomainEvent(context, new CompanyCertificationApprovedEvent
         {
@@ -70,26 +72,15 @@ public sealed class ApproveCompanyCertificationInvoker : ICapabilityContextAware
             Status: CertificationStatus.Approved.ToString(),
             Message: "Certification approved");
 
-        return Task.FromResult<object?>(result);
-    }
-
-    private Guid ResolveCertificationId(CapabilityExecutionContext context)
-    {
-        if (CapabilityInputHelper.TryGetVariable<Guid>(context, "CertificationId", out var g))
-            return g;
-        var records = _store.GetAll();
-        if (records.Count > 0)
-            return records[^1].Id;
-        throw new InvalidOperationException(
-            "CertificationId not found in context or store");
+        return result;
     }
 }
 
 public sealed class RejectCompanyCertificationInvoker : ICapabilityContextAwareHandlerInvoker
 {
-    private readonly InMemoryCompanyCertificationStore _store;
+    private readonly ICompanyCertificationStore _store;
 
-    public RejectCompanyCertificationInvoker(InMemoryCompanyCertificationStore store)
+    public RejectCompanyCertificationInvoker(ICompanyCertificationStore store)
     {
         _store = store;
     }
@@ -97,14 +88,14 @@ public sealed class RejectCompanyCertificationInvoker : ICapabilityContextAwareH
     public Task<object?> InvokeAsync(object? input, CancellationToken ct) =>
         throw new NotSupportedException("Use context-aware overload");
 
-    public Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
+    public async Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
     {
         var input = CapabilityInputHelper.Extract<CertificationReviewInput>(context);
 
-        var certId = ResolveCertificationId(context);
+        var certId = CapabilityInputHelper.ResolveCertificationId(context);
 
         var reviewerUserId = context.UserId ?? "system";
-        _store.Reject(certId, input, reviewerUserId);
+        await _store.RejectAsync(certId, input, reviewerUserId, ct);
 
         CapabilityInputHelper.EmitDomainEvent(context, new CompanyCertificationRejectedEvent
         {
@@ -118,18 +109,7 @@ public sealed class RejectCompanyCertificationInvoker : ICapabilityContextAwareH
             Status: CertificationStatus.Rejected.ToString(),
             Message: "Certification rejected");
 
-        return Task.FromResult<object?>(result);
-    }
-
-    private Guid ResolveCertificationId(CapabilityExecutionContext context)
-    {
-        if (CapabilityInputHelper.TryGetVariable<Guid>(context, "CertificationId", out var g))
-            return g;
-        var records = _store.GetAll();
-        if (records.Count > 0)
-            return records[^1].Id;
-        throw new InvalidOperationException(
-            "CertificationId not found in context or store");
+        return result;
     }
 }
 
@@ -139,23 +119,47 @@ internal static class CapabilityInputHelper
     {
         if (context.Input is T direct)
             return direct;
-        if (context.Input is Dictionary<string, object?> vars
-            && vars.TryGetValue(typeof(T).Name, out var obj) && obj is T fromVars)
-            return fromVars;
-        // Golden scenario fallback: create default input when workflow
-        // variables don't carry the expected typed input between steps.
-        if (typeof(T) == typeof(CertificationReviewInput))
-            return (T)(object)new CertificationReviewInput(null, "Approved via workflow", "Approve");
+        if (context.Input is Dictionary<string, object?> vars)
+        {
+            // Check by type name (e.g., "CertificationReviewInput")
+            if (vars.TryGetValue(typeof(T).Name, out var obj) && obj is T fromVars)
+                return fromVars;
+            // Check "lastStepResult" — WorkflowContinuationService stores HumanTask output here
+            if (vars.TryGetValue("lastStepResult", out var stepResult) && stepResult is T fromStep)
+                return fromStep;
+        }
         throw new InvalidOperationException(
-            $"Expected {typeof(T).Name}, got {context.Input?.GetType().Name ?? "null"}");
+            $"Expected {typeof(T).Name}, got {context.Input?.GetType().Name ?? "null"}. " +
+            "The workflow must pass typed input between steps via workflow variables.");
+    }
+
+    public static Guid ResolveCertificationId(CapabilityExecutionContext context)
+    {
+        if (TryGetVariable<Guid>(context, "CertificationId", out var g))
+            return g;
+        var inputKeys = context.Input is Dictionary<string, object?> vars
+            ? string.Join(", ", vars.Keys) : "(not a dictionary)";
+        throw new InvalidOperationException(
+            "CertificationId not found in workflow/capability execution context. " +
+            "The Submit step must store CertificationId as a workflow variable. " +
+            $"Items keys: [{string.Join(", ", context.Items.Keys)}], " +
+            $"Input keys: [{inputKeys}]");
     }
 
     public static bool TryGetVariable<T>(CapabilityExecutionContext context, string key, out T value)
     {
         value = default!;
+        // Check Items first (same-execution context)
         if (context.Items.TryGetValue(key, out var obj) && obj is T t)
         {
             value = t;
+            return true;
+        }
+        // Check Input dictionary (workflow variables passed between steps)
+        if (context.Input is Dictionary<string, object?> vars
+            && vars.TryGetValue(key, out var inputObj) && inputObj is T inputT)
+        {
+            value = inputT;
             return true;
         }
         return false;

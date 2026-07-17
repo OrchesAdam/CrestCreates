@@ -79,7 +79,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
     [Fact]
     public async Task DraftSet_SequentialMaterialization_Produces_FinalProposedInventory()
     {
-        using var host = new CompanyCertificationGoldenScenarioHost();
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
         var runner = host.Provider.GetRequiredService<CompanyCertificationAuthoringGoldenScenarioRunner>();
 
         var report = await runner.RunUntilDraftSetReviewAsync(Phase7fIntent);
@@ -94,7 +94,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
     [Fact]
     public async Task DraftSet_FinalDecision_Rechecks_CompleteInventory()
     {
-        using var host = new CompanyCertificationGoldenScenarioHost();
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
         var runner = host.Provider.GetRequiredService<CompanyCertificationAuthoringGoldenScenarioRunner>();
 
         var report = await runner.RunUntilDraftSetReviewAsync(Phase7fIntent);
@@ -109,7 +109,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
     [Fact]
     public async Task RuntimeProof_Builds_FreshHost_From_ApprovedFinalInventory()
     {
-        using var host = new CompanyCertificationGoldenScenarioHost();
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
         var runner = host.Provider.GetRequiredService<CompanyCertificationAuthoringGoldenScenarioRunner>();
 
         var report = await runner.RunAsync(Phase7fIntent);
@@ -123,7 +123,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
     [Fact]
     public async Task RuntimeProof_Completes_InitialReview_Then_FinanceReview()
     {
-        using var host = new CompanyCertificationGoldenScenarioHost();
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
         var runner = host.Provider.GetRequiredService<CompanyCertificationAuthoringGoldenScenarioRunner>();
 
         var report = await runner.RunAsync(Phase7fIntent);
@@ -140,7 +140,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
     [Fact]
     public async Task ActivationRequest_Binds_FinalReview_And_PackageEvidenceHashes()
     {
-        using var host = new CompanyCertificationGoldenScenarioHost();
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
         var runner = host.Provider.GetRequiredService<CompanyCertificationAuthoringGoldenScenarioRunner>();
 
         var report = await runner.RunAsync(Phase7fIntent);
@@ -191,7 +191,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
     [Fact]
     public async Task ActivationGateSuccess_Alone_DoesNot_Count_As_RuntimeProof()
     {
-        using var host = new CompanyCertificationGoldenScenarioHost();
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
         var runner = host.Provider.GetRequiredService<CompanyCertificationAuthoringGoldenScenarioRunner>();
 
         var report = await runner.RunActivationOnlyAsync(Phase7fIntent);
@@ -203,7 +203,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
     [Fact]
     public async Task Phase7f_Should_Run_Authoring_To_Activated_Runtime_GoldenScenario()
     {
-        using var host = new CompanyCertificationGoldenScenarioHost();
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
         var runner = host.Provider.GetRequiredService<CompanyCertificationAuthoringGoldenScenarioRunner>();
 
         var report = await runner.RunAsync(Phase7fIntent);
@@ -225,7 +225,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
     {
         // Arrange: create a host and manually save an invalid draft
         // that references a non-existent descriptor.
-        using var host = new CompanyCertificationGoldenScenarioHost();
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
         var draftStore = host.Provider.GetRequiredService<IDescriptorDraftStore>();
         var reviewService = host.Provider.GetRequiredService<IDescriptorDraftReviewService>();
 
@@ -295,7 +295,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
     {
         // Verify that for the standard golden scenario, the all-or-block
         // mechanism does not block valid drafts.
-        using var host = new CompanyCertificationGoldenScenarioHost();
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
         var runner = host.Provider.GetRequiredService<CompanyCertificationAuthoringGoldenScenarioRunner>();
 
         var report = await runner.RunUntilDraftSetReviewAsync(Phase7fIntent);
@@ -312,7 +312,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
         // The fake agent produces a workflow update draft that still references
         // ht_review_company_certification, causing draft validation to fail.
         // The runner's all-or-block mechanism must detect this and block the set.
-        using var host = new CompanyCertificationGoldenScenarioHost();
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
         var runner = host.Provider.GetRequiredService<CompanyCertificationAuthoringGoldenScenarioRunner>();
 
         var incompleteInventory = CompanyCertificationDescriptorCloner.CopyAllDescriptors()
@@ -433,7 +433,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
     public async Task LlmAgent_GoldenScenario_DraftsFlowThroughReviewPipeline()
     {
         // 1. Create golden scenario host (provides review/governance DI services)
-        using var host = new CompanyCertificationGoldenScenarioHost();
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
 
         // 2. Build the exact same AgentAuthoringContext the runner will build internally,
         //    so we can pre-compute the prompt input hash for the recorded model client.

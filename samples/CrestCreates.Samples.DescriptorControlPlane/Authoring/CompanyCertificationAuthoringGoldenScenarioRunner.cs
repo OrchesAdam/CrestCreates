@@ -584,9 +584,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
         var activatedInventoryHash = string.Join("|", descriptorHashes);
 
         // ── Fresh host runtime proof ──
-        using var activatedHost = new CompanyCertificationGoldenScenarioHost(
-            reviewReport.FinalProposedInventory,
-            new InMemoryCompanyCertificationStore());
+        using var activatedHost = CompanyCertificationGoldenScenarioHost.CreateInMemory(
+            reviewReport.FinalProposedInventory);
         var runtimeRunner = new CompanyCertificationGoldenScenarioRunner(activatedHost);
         var runtimeScenario = CompanyCertificationChangeScenario.FromInventory(
             "Phase7f activated inventory", reviewReport.FinalProposedInventory);

@@ -17,7 +17,7 @@ public sealed class CompanyCertificationGoldenScenarioTests : IAsyncLifetime
 
     public Task InitializeAsync()
     {
-        _host = new CompanyCertificationGoldenScenarioHost();
+        _host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
         _runner = new CompanyCertificationGoldenScenarioRunner(_host);
         return Task.CompletedTask;
     }
@@ -58,8 +58,9 @@ public sealed class CompanyCertificationGoldenScenarioTests : IAsyncLifetime
         report.HumanTaskInstanceId.Should().NotBeNullOrEmpty();
 
         var store = _host.Store;
-        store.Count.Should().Be(1);
-        store.GetAll()[0].Status.Should().Be(CertificationStatus.Approved);
+        var allRecords = await store.GetAllAsync();
+        (await store.CountAsync()).Should().Be(1);
+        allRecords[0].Status.Should().Be(CertificationStatus.Approved);
     }
 
     [Fact]
@@ -132,7 +133,7 @@ public sealed class CompanyCertificationGoldenScenarioTests : IAsyncLifetime
         };
         inventory.Add(financeTask);
 
-        using var host = new CompanyCertificationGoldenScenarioHost(inventory);
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory(inventory);
         using var scope = host.CreateScope();
 
         var registry = scope.ServiceProvider.GetRequiredService<IHumanTaskRegistry>();

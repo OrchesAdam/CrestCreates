@@ -433,6 +433,12 @@ nul
 # Deepwork progress files
 .slim/deepwork/
 
+# Sample SQLite databases
+artifacts/sample-data/*.db
+artifacts/sample-data/*.db-wal
+artifacts/sample-data/*.db-shm
+artifacts/test-data/
+
 # Magic Context
 .cortexkit/
 99_RecycleBin/

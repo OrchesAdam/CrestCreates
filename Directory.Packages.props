@@ -40,6 +40,7 @@
     <PackageVersion Include="SqlSugarCore" Version="5.1.4.214" />
     <PackageVersion Include="FreeSql" Version="3.5.308" />
     <PackageVersion Include="FreeSql.Provider.Sqlite" Version="3.5.308" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="$(RuntimePackageVersion)" />
     <PackageVersion Include="SQLitePCLRaw.bundle_green" Version="2.1.11" />
     <!-- 中介者模式 -->
     <PackageVersion Include="Mediator.Abstractions" Version="3.0.2" />

@@ -2,7 +2,7 @@ namespace CrestCreates.Samples.DescriptorControlPlane;
 
 /// <summary>
 /// Domain data types for the Company Certification runtime execution plane.
-/// No persistence, no ORM - pure in-memory model for the golden scenario.
+/// Persisted via SQLite in the reference sample; no ORM — raw ADO.NET parameterized queries.
 /// </summary>
 
 public sealed record CertificationSubmitInput(
@@ -38,8 +38,8 @@ public sealed record CertificationRecord
     public required string CertificationType { get; init; }
     public string? ApplicationDate { get; init; }
     public string? Notes { get; init; }
-    public CertificationStatus Status { get; set; } = CertificationStatus.Submitted;
-    public string? ReviewerNotes { get; set; }
-    public string? ReviewerDecision { get; set; }
-    public string? ReviewedBy { get; set; }
+    public CertificationStatus Status { get; init; } = CertificationStatus.Submitted;
+    public string? ReviewerNotes { get; init; }
+    public string? ReviewerDecision { get; init; }
+    public string? ReviewedBy { get; init; }
 }
