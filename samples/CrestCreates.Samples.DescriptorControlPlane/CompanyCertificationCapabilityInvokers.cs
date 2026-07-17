@@ -67,12 +67,14 @@ public sealed class ApproveCompanyCertificationInvoker : ICapabilityContextAware
             ApprovedBy = reviewerUserId,
         });
 
-        var result = new CertificationResult(
-            CertificationId: certId.ToString(),
-            Status: CertificationStatus.Approved.ToString(),
-            Message: "Certification approved");
-
-        return result;
+        // Return schema-conformant dictionary matching schema_company_certification_approved_payload:
+        //   CertificationId: string, ApprovedBy: string, ApprovedAt: string
+        return new Dictionary<string, object?>
+        {
+            ["CertificationId"] = certId.ToString(),
+            ["ApprovedBy"] = reviewerUserId,
+            ["ApprovedAt"] = DateTimeOffset.UtcNow.ToString("O"),
+        };
     }
 }
 
@@ -104,12 +106,14 @@ public sealed class RejectCompanyCertificationInvoker : ICapabilityContextAwareH
             Reason = input.ReviewerNotes ?? "No reason provided",
         });
 
-        var result = new CertificationResult(
-            CertificationId: certId.ToString(),
-            Status: CertificationStatus.Rejected.ToString(),
-            Message: "Certification rejected");
-
-        return result;
+        // Return schema-conformant dictionary matching schema_company_certification_rejected_payload:
+        //   CertificationId: string, RejectedBy: string, Reason: string?
+        return new Dictionary<string, object?>
+        {
+            ["CertificationId"] = certId.ToString(),
+            ["RejectedBy"] = reviewerUserId,
+            ["Reason"] = input.ReviewerNotes,
+        };
     }
 }
 

@@ -184,12 +184,29 @@ services.AddWorkflowEngine();  // TryAddSingleton<InMemoryWorkflowInstanceStore>
 
 ## JSON/AOT Serialization Strategy
 
-- Strongly-typed collections (`List<WorkflowStepResult>`, `List<string>`) use reflection-based `JsonSerializerOptions` (acceptable for a sample project)
-- `Dictionary<string, object?>` (workflow variables) uses reflection-based serialization with `JsonElement` → CLR type conversion on deserialization
-- `object?` fields (HumanTask input/output) use type-preserving serialization
-- `Guid` values in workflow variables are correctly round-tripped (detected via `TryGetGuid` during `JsonElement` conversion)
-- No arbitrary `$type` discriminators or runtime type name usage
+- Uses `SampleSqliteJsonContext` Source Generation Context with `[JsonSerializable]` for all known types
+- `JsonSerializerIsReflectionEnabledByDefault=false` in project configuration — reflection fallback fails at test time, not publish time
+- `PersistedRuntimeValue` type-preserving envelope wraps each runtime value with an explicit CLR type discriminator
+- Only whitelisted Runtime Value types are supported — unregistered types fail closed with `InvalidOperationException`
+- Explicit null dictionary keys are preserved via `"null"` discriminator (key present with null value vs key absent)
+- No assembly-qualified type names, no `$type` discriminators, no reflection-based deserialization
 - This is a sample project — framework core maintains stricter AOT requirements
+
+### Supported Runtime Value Types
+
+| Type | Discriminator |
+|---|---|
+| `string` | `String` |
+| `bool` | `Boolean` |
+| `int` | `Int32` |
+| `long` | `Int64` |
+| `double` | `Double` |
+| `Guid` | `Guid` |
+| `CertificationSubmitInput` | `CertificationSubmitInput` |
+| `CertificationReviewInput` | `CertificationReviewInput` |
+| `CertificationResult` | `CertificationResult` |
+| `Dictionary<string, object?>` | `DictStrObject` (recursively wrapped) |
+| `null` | `null` (explicit null key preservation) |
 
 ## One-Command Regression
 

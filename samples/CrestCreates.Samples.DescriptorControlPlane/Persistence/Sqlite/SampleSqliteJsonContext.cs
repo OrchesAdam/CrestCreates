@@ -114,6 +114,25 @@ public sealed record PersistedWorkflowStepResult
 public sealed partial class SampleSqliteJsonContext : JsonSerializerContext
 {
     /// <summary>
+    /// Wraps a nullable runtime value into a type-preserving envelope for SQLite persistence.
+    /// Null values are represented with discriminator "null" so that explicit null keys
+    /// in dictionaries survive round-trip (key present but value null vs key absent).
+    /// </summary>
+    public static PersistedRuntimeValue WrapNullableValue(object? value)
+    {
+        if (value is null)
+        {
+            return new PersistedRuntimeValue
+            {
+                Type = "null",
+                Payload = JsonDocument.Parse("null").RootElement.Clone(),
+            };
+        }
+
+        return WrapValue(value);
+    }
+
+    /// <summary>
     /// Wraps a non-null runtime value into a type-preserving envelope for SQLite persistence.
     /// Uses source-generated JsonTypeInfo per type — no reflection.
     /// Dictionary&lt;string, object?&gt; values are recursively wrapped into Dictionary&lt;string, PersistedRuntimeValue&gt;.
@@ -130,10 +149,7 @@ public sealed partial class SampleSqliteJsonContext : JsonSerializerContext
             var dict = (Dictionary<string, object?>)value;
             var wrapped = new Dictionary<string, PersistedRuntimeValue>(dict.Count);
             foreach (var kvp in dict)
-            {
-                if (kvp.Value is not null)
-                    wrapped[kvp.Key] = WrapValue(kvp.Value);
-            }
+                wrapped[kvp.Key] = WrapNullableValue(kvp.Value);
             json = JsonSerializer.Serialize(wrapped, Default.DictionaryStringPersistedRuntimeValue);
         }
         else
@@ -141,18 +157,22 @@ public sealed partial class SampleSqliteJsonContext : JsonSerializerContext
             json = SerializeByDiscriminator(value, discriminator);
         }
 
-        var element = JsonDocument.Parse(json).RootElement;
-        return new PersistedRuntimeValue { Type = discriminator, Payload = element.Clone() };
+        using var document = JsonDocument.Parse(json);
+        return new PersistedRuntimeValue { Type = discriminator, Payload = document.RootElement.Clone() };
     }
 
     /// <summary>
     /// Unwraps a type-preserving envelope back to its original CLR type.
     /// Uses source-generated JsonTypeInfo per type — no reflection.
-    /// DictStrObject values are recursively unwrapped from DictStrPersistedValue.
+    /// "null" discriminator returns null. DictStrObject values are recursively unwrapped.
     /// </summary>
     public static object? UnwrapValue(PersistedRuntimeValue? envelope)
     {
         if (envelope is null) return null;
+
+        // Explicit null discriminator — preserves null-valued dictionary keys
+        if (envelope.Type == "null")
+            return null;
 
         // Special handling: DictStrObject was stored as DictStrPersistedValue
         if (envelope.Type == "DictStrObject")
@@ -208,17 +228,15 @@ public sealed partial class SampleSqliteJsonContext : JsonSerializerContext
 
     /// <summary>
     /// Serializes a Dictionary&lt;string, object?&gt; with type-preserving envelopes.
-    /// Null values are omitted from the persisted dictionary (absent key = null on deserialization).
+    /// Explicit null values are preserved with "null" discriminator so that
+    /// ContainsKey survives round-trip (key present with null value vs key absent).
     /// </summary>
     public static string? SerializeDictionary(Dictionary<string, object?> dict)
     {
         if (dict.Count == 0) return null;
         var wrapped = new Dictionary<string, PersistedRuntimeValue>(dict.Count);
         foreach (var kvp in dict)
-        {
-            if (kvp.Value is not null)
-                wrapped[kvp.Key] = WrapValue(kvp.Value);
-        }
+            wrapped[kvp.Key] = WrapNullableValue(kvp.Value);
         return JsonSerializer.Serialize(wrapped, Default.DictionaryStringPersistedRuntimeValue);
     }
 

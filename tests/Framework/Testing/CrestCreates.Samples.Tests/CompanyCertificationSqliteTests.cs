@@ -440,4 +440,86 @@ public sealed class CompanyCertificationSqliteGoldenScenarioTests
             CleanupDatabase(dbPath);
         }
     }
+
+    [Fact]
+    public async Task Sqlite_RuntimeValueEnvelope_Should_Preserve_All_Supported_Types()
+    {
+        // Build a dictionary with every supported runtime value type
+        var original = new Dictionary<string, object?>
+            {
+                ["StringVal"] = "hello",
+                ["BoolVal"] = true,
+                ["IntVal"] = 42,
+                ["LongVal"] = 123456789L,
+                ["DoubleVal"] = 3.14,
+                ["GuidVal"] = Guid.Parse("a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
+                ["SubmitInput"] = new CertificationSubmitInput(
+                    CompanyName: "Test Corp",
+                    UnifiedSocialCreditCode: "91110000MA01KXTX01",
+                    CertificationType: "ISO9001",
+                    ApplicationDate: "2026-01-15",
+                    Notes: "Test submission"),
+                ["ReviewInput"] = new CertificationReviewInput(
+                    CertificationId: null,
+                    ReviewerNotes: "Looks good",
+                    Decision: "Approve"),
+                ["CertResult"] = new CertificationResult(
+                    CertificationId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    Status: "Approved",
+                    Message: "OK"),
+                ["NestedDict"] = new Dictionary<string, object?>
+                {
+                    ["InnerKey"] = "inner-value",
+                    ["InnerGuid"] = Guid.Parse("b2c3d4e5-f6a7-8901-bcde-f12345678901"),
+                },
+                ["ExplicitNull"] = null,
+            };
+
+            // Serialize → deserialize through the envelope
+            var json = SampleSqliteJsonContext.SerializeDictionary(original);
+            var restored = SampleSqliteJsonContext.DeserializeDictionary(json);
+
+            // Assert all values round-trip with correct types
+            restored["StringVal"].Should().Be("hello");
+            restored["BoolVal"].Should().Be(true);
+            restored["IntVal"].Should().Be(42);
+            restored["LongVal"].Should().Be(123456789L);
+            restored["DoubleVal"].Should().Be(3.14);
+            restored["GuidVal"].Should().Be(Guid.Parse("a1b2c3d4-e5f6-7890-abcd-ef1234567890"));
+
+            restored["SubmitInput"].Should().BeOfType<CertificationSubmitInput>()
+                .Which.CompanyName.Should().Be("Test Corp");
+            restored["ReviewInput"].Should().BeOfType<CertificationReviewInput>()
+                .Which.ReviewerNotes.Should().Be("Looks good");
+            restored["CertResult"].Should().BeOfType<CertificationResult>()
+                .Which.Status.Should().Be("Approved");
+
+            // Nested dictionary
+            var nested = restored["NestedDict"].Should().BeOfType<Dictionary<string, object?>>().Subject;
+            nested["InnerKey"].Should().Be("inner-value");
+            nested["InnerGuid"].Should().Be(Guid.Parse("b2c3d4e5-f6a7-8901-bcde-f12345678901"));
+
+            // Explicit null key must survive round-trip
+            restored.Should().ContainKey("ExplicitNull", "explicit null values must preserve their key");
+            restored["ExplicitNull"].Should().BeNull("explicit null values must deserialize as null");
+    }
+
+    [Fact]
+    public async Task Sqlite_WorkflowVariables_Should_Preserve_ExplicitNull_Key()
+    {
+        // Test that explicit null dictionary keys survive the PersistedRuntimeValue envelope round-trip
+        var original = new Dictionary<string, object?>
+        {
+            ["ActiveKey"] = "present",
+            ["NullableValue"] = null,
+        };
+
+        var json = SampleSqliteJsonContext.SerializeDictionary(original);
+        var restored = SampleSqliteJsonContext.DeserializeDictionary(json);
+
+        restored.Should().ContainKey("NullableValue",
+            "explicit null keys must survive SQLite persistence round-trip");
+        restored["NullableValue"].Should().BeNull();
+        restored["ActiveKey"].Should().Be("present");
+    }
 }
