@@ -3,16 +3,28 @@ namespace CrestCreates.Agent.Tools;
 internal sealed class AgentToolOutputPreflightReceiptSink : IAgentToolOutputPreflightReceiptSink
 {
     private readonly AgentToolPreparedOutcomeContract? _contract;
+    private readonly AgentToolAuditProjectionContract? _auditContract;
     private IReadOnlyList<AgentToolPreparedOutcomeReceipt>? _outcomes;
 
-    public AgentToolOutputPreflightReceiptSink(AgentToolPreparedOutcomeContract? contract)
-        => _contract = contract;
+    public AgentToolOutputPreflightReceiptSink(
+        AgentToolPreparedOutcomeContract? contract,
+        AgentToolAuditProjectionContract? auditContract)
+    {
+        _contract = contract;
+        _auditContract = auditContract;
+    }
 
     public bool HasPublishedOutcomes => _outcomes is not null;
 
-    public void PublishAllowedOutcomes(IReadOnlyList<AgentToolPreparedOutcomeReceipt> outcomes)
+    public void PublishAllowedOutcomes(
+        IReadOnlyList<AgentToolPreparedOutcomeReceipt> outcomes,
+        IReadOnlyList<AgentToolAuditFact> branchInvariantFacts,
+        int effectiveMaximumFacts)
     {
         ArgumentNullException.ThrowIfNull(outcomes);
+        ArgumentNullException.ThrowIfNull(branchInvariantFacts);
+        if (effectiveMaximumFacts is < 0 or > 64)
+            throw new ArgumentOutOfRangeException(nameof(effectiveMaximumFacts));
         if (_outcomes is not null)
             throw new InvalidOperationException("Output preflight receipts may only be published once.");
         if (outcomes.Count == 0)
@@ -29,6 +41,11 @@ internal sealed class AgentToolOutputPreflightReceiptSink : IAgentToolOutputPref
             || item.InternalFacts.Any(fact => fact is null || string.IsNullOrWhiteSpace(fact.Code)
                 || fact.Code.Length > 96 || fact.Value?.Length > 256)))
             throw new ArgumentException("Output preflight branch facts exceed the safe shape.", nameof(outcomes));
+        if (outcomes.Any(item => !AgentToolAuditFactValidator.Validate(
+                branchInvariantFacts.Concat(item.InternalFacts).Concat(item.ProjectedOutputFacts).ToArray(),
+                effectiveMaximumFacts,
+                _auditContract)))
+            throw new ArgumentException("Output preflight facts violate the frozen audit contract or effective limit.", nameof(outcomes));
         _outcomes = outcomes.Select(item => item with
         {
             Receipt = item.Receipt with { },

@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace CrestCreates.Agent.Tools;
 
 /// <summary>
@@ -39,7 +41,7 @@ public enum AgentToolAuditFactMatchKind
 
 public sealed record AgentToolAuditProjectionContract
 {
-    public required IReadOnlyList<AgentToolAuditFactDefinition> Definitions { get; init; }
+    public required ImmutableArray<AgentToolAuditFactDefinition> Definitions { get; init; }
     public int MaximumFacts { get; init; } = 64;
 }
 

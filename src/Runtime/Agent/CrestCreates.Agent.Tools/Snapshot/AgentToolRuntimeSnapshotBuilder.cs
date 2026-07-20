@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -200,7 +201,7 @@ public sealed class AgentToolRuntimeSnapshotBuilder
         var rawAuditContract = auditContracts.SingleOrDefault();
         if (rawAuditContract is not null
             && (rawAuditContract.MaximumFacts is < 1 or > 64
-                || rawAuditContract.Definitions.Count == 0
+                || rawAuditContract.Definitions.Length == 0
                 || rawAuditContract.Definitions.Any(definition => string.IsNullOrWhiteSpace(definition.CodePrefix)
                     || definition.Kind == AgentToolAuditFactKind.Unknown
                     || definition.ValueEncoding == AgentToolAuditFactValueEncoding.Unknown
@@ -220,7 +221,7 @@ public sealed class AgentToolRuntimeSnapshotBuilder
                     {
                         AllowedValues = definition.AllowedValues?.ToFrozenSet(StringComparer.Ordinal)
                     })
-                    .ToArray()
+                    .ToImmutableArray()
             };
         var outcomeProjectors = _outcomeCodeProviders
             .Select(provider => provider.CreateOutcomeCode(tool.ToolName, contract.OutputType ?? typeof(object)))

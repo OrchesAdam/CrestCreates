@@ -116,12 +116,14 @@ internal abstract class AgentMemoryToolHandlerBase
             return;
 
         var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, Principal);
-        facts.AddTrustedFacts(
-        [
+        var branchFacts = new AgentToolAuditFact[]
+        {
             new AgentToolAuditFact { Code = "memory.scope-fingerprint", Value = scopeFingerprint, Kind = AgentToolAuditFactKind.BranchInvariant },
             new AgentToolAuditFact { Code = "memory.operation", Value = operation, Kind = AgentToolAuditFactKind.BranchInvariant }
-        ], scope.MaxAuditFacts);
+        };
+        facts.AddTrustedFacts(branchFacts, scope.MaxAuditFacts);
         Context.Items[AgentCapabilityContextItemNames.AuditFactMaximum] = scope.MaxAuditFacts;
+        Context.Items[AgentCapabilityContextItemNames.BranchInvariantFacts] = branchFacts;
         Context.Items[AgentCapabilityContextItemNames.BranchInvariantFactsPrepared] = true;
     }
 
@@ -171,12 +173,24 @@ internal abstract class AgentMemoryToolHandlerBase
             && maximumValue is int maximum
             && Context.Items.TryGetValue(AgentCapabilityContextItemNames.OutputAuditProjectionContract, out var auditContractValue)
             && auditContractValue is AgentToolAuditProjectionContract auditContract
-            && outcomes.Any(item => item.Prepared.ProjectedOutputFacts.Count + 2
+            && Context.Items.TryGetValue(AgentCapabilityContextItemNames.BranchInvariantFacts, out var branchValue)
+            && branchValue is IReadOnlyList<AgentToolAuditFact> branchFacts
+            && outcomes.Any(item => branchFacts.Count + item.Prepared.ProjectedOutputFacts.Count
                 > Math.Min(64, Math.Min(maximum, auditContract.MaximumFacts))))
             throw new InvalidOperationException("Prepared output facts exceed the trusted audit fact limit.");
 
         Context.Items[AgentCapabilityContextItemNames.RequiresOutputPreflightReceipt] = true;
-        sink.PublishAllowedOutcomes(receipts);
+        var effectiveMaximum = Context.Items.TryGetValue(AgentCapabilityContextItemNames.AuditFactMaximum, out var limitValue)
+            && limitValue is int limit
+            && Context.Items.TryGetValue(AgentCapabilityContextItemNames.OutputAuditProjectionContract, out var contractValue2)
+            && contractValue2 is AgentToolAuditProjectionContract contract2
+            ? Math.Min(64, Math.Min(limit, contract2.MaximumFacts))
+            : 64;
+        var preparedBranchFacts = Context.Items.TryGetValue(AgentCapabilityContextItemNames.BranchInvariantFacts, out var preparedBranchValue)
+            && preparedBranchValue is IReadOnlyList<AgentToolAuditFact> preparedFacts
+            ? preparedFacts
+            : Array.Empty<AgentToolAuditFact>();
+        sink.PublishAllowedOutcomes(receipts, preparedBranchFacts, effectiveMaximum);
     }
 
     protected TOutput PrepareOutcome<TOutput>(

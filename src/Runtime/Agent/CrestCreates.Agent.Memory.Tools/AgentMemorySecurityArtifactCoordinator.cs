@@ -92,6 +92,11 @@ internal sealed class AgentMemorySecurityArtifactCoordinator : IAgentMemorySecur
         IReadOnlyList<AgentMemorySourceGrant> grants,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(hostBatchKey.HostOperationId)
+            || string.IsNullOrWhiteSpace(hostBatchKey.ArtifactPurpose)
+            || sourceKind == AgentMemoryHistorySourceKind.Unknown
+            || string.IsNullOrWhiteSpace(sourceId))
+            throw new InvalidOperationException("A complete trusted Host artifact request is required.");
         if (handles.Count == 0)
             throw new InvalidOperationException("A Host artifact preparation requires at least one resource handle.");
         ValidateHostFingerprint(hostBatchKey.OperationFingerprint);
@@ -183,6 +188,7 @@ internal sealed class AgentMemorySecurityArtifactCoordinator : IAgentMemorySecur
             || !string.Equals(fingerprint.Algorithm, "SHA-256", StringComparison.Ordinal)
             || !string.Equals(fingerprint.AlgorithmVersion, "sha256-canonical-json-v1", StringComparison.Ordinal)
             || !string.Equals(fingerprint.ArtifactKind, "agent-memory-host-operation", StringComparison.Ordinal)
+            || !string.Equals(fingerprint.Scope, "TenantVisible", StringComparison.Ordinal)
             || !string.Equals(fingerprint.Purpose, "HostOperation", StringComparison.Ordinal)
             || !string.Equals(fingerprint.ContractVersion, "memory-security-artifact-v2", StringComparison.Ordinal)
             || !string.Equals(fingerprint.CanonicalShapeVersion, "agent-memory-host-operation-v1", StringComparison.Ordinal))
@@ -219,8 +225,15 @@ internal sealed class AgentMemorySecurityArtifactCoordinator : IAgentMemorySecur
             || !string.Equals(grant.SourceRef.TenantId, principal.TenantId, StringComparison.Ordinal)
             || grant.SourceRef.SourceKind != expectedSourceKind
             || !string.Equals(grant.SourceRef.SourceId, sourceId, StringComparison.Ordinal)
+            || !string.Equals(grant.IssuingInvocationId, hostBatchKey.HostOperationId, StringComparison.Ordinal)
             || !string.Equals(grant.ScopeFingerprint, scopeFingerprint, StringComparison.Ordinal)
-            || grant.ExpiresAt <= grant.IssuedAt))
+            || grant.ExpiresAt <= grant.IssuedAt
+            || grant.RequiredDescriptorRefs.Any(item => item.Version is not > 0)
+            || grant.SourceRef.DescriptorRefs.Any(item => item.Version is not > 0)
+            || grant.RequiredDescriptorRefs.Any(item => !scope.VisibleDescriptorRefs.Contains(item))
+            || grant.SourceRef.DescriptorRefs.Any(item => !grant.RequiredDescriptorRefs.Contains(item))
+            || grant.IsUnscoped != (grant.RequiredDescriptorRefs.Count == 0)
+            || (grant.IsUnscoped && !scope.AllowUnscopedMemory)))
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.StateConflict, "Host grant preparation is inconsistent with the trusted history request.");
     }
 }

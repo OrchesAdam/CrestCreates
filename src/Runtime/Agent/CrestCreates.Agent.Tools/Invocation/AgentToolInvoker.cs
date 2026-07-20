@@ -403,7 +403,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
 
         var factBuffer = new AgentToolInvocationFactBuffer();
-        var preflightReceipts = new AgentToolOutputPreflightReceiptSink(entry.PreparedOutcomeContract);
+        var preflightReceipts = new AgentToolOutputPreflightReceiptSink(
+            entry.PreparedOutcomeContract, entry.OutputAuditProjection);
         CapabilityExecutionResult capabilityResult;
         try
         {
