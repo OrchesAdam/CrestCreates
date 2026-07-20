@@ -39,7 +39,7 @@ public sealed class AgentMemoryResourceHandleStore : IAgentMemoryResourceHandleS
         lock (_gate)
         {
             if (_batchPlans.TryGetValue(identity, out var existingPlan)
-                && !string.Equals(existingPlan, batchKey.ArtifactPlanHash, StringComparison.Ordinal))
+                && !string.Equals(existingPlan, batchKey.ArtifactPlanHash.Value, StringComparison.Ordinal))
                 throw new InvalidOperationException("Security artifact batch plan conflicts with an existing preparation.");
             if (_batches.TryGetValue(key, out var existingIds))
                 return ValueTask.FromResult(new AgentMemoryResourceHandleIssueResult
@@ -76,7 +76,7 @@ public sealed class AgentMemoryResourceHandleStore : IAgentMemoryResourceHandleS
             foreach (var handle in handles)
                 _handles[handle.HandleId] = handle;
             _batches[key] = handles.Select(item => item.HandleId).ToArray();
-            _batchPlans[identity] = batchKey.ArtifactPlanHash;
+            _batchPlans[identity] = batchKey.ArtifactPlanHash.Value;
             return ValueTask.FromResult(new AgentMemoryResourceHandleIssueResult
             {
                 Handles = handles.ToArray(),

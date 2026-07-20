@@ -18,6 +18,12 @@ public sealed record AgentToolPreparedOutcomeReceipt
     public IReadOnlyList<AgentToolAuditFact> InternalFacts { get; init; } = Array.Empty<AgentToolAuditFact>();
 }
 
+public sealed record AgentToolPreparedOutcomeContract
+{
+    public required IReadOnlySet<string> AllowedOutcomeCodes { get; init; }
+    public int MaximumBranches { get; init; } = 5;
+}
+
 public sealed record AgentToolPreparedOutput<TOutput>
 {
     public required TOutput Output { get; init; }
@@ -38,7 +44,7 @@ public interface IAgentToolOutputPreflight<TOutput>
 /// </summary>
 public interface IAgentToolOutputPreflightRuntime
 {
-    AgentToolPreparedOutput<TOutput> Prepare<TOutput>(TOutput output, JsonTypeInfo<TOutput> typeInfo);
+    AgentToolPreparedOutput<TOutput> Prepare<TOutput>(TOutput output);
 }
 
 public interface IAgentToolOutputPreflightReceiptSink

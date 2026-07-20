@@ -25,10 +25,46 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
         ArgumentNullException.ThrowIfNull(candidate);
         lock (_gate)
         {
-            if (_candidates.TryGetValue((candidate.TenantId, candidate.CandidateId), out var existing)
-                && !EquivalentPayload(existing, candidate))
-                throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.StateConflict, "Candidate payload is immutable after creation.");
+            if (_candidates.ContainsKey((candidate.TenantId, candidate.CandidateId)))
+                throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.IdentityConflict, "Candidate identity already exists; use a conditional lifecycle transition.");
             _candidates[(candidate.TenantId, candidate.CandidateId)] = candidate.Snapshot();
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask CreateCandidateAsync(AgentMemoryCandidate candidate, CancellationToken cancellationToken = default)
+        => CreateCandidatesAsync([candidate], cancellationToken);
+
+    public ValueTask CreateCandidatesAsync(IReadOnlyList<AgentMemoryCandidate> candidates, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        if (candidates.Count == 0 || candidates.Any(item => item is null))
+            throw new ArgumentException("At least one Candidate is required.", nameof(candidates));
+        lock (_gate)
+        {
+            if (candidates.Select(item => (item.TenantId, item.CandidateId)).Distinct().Count() != candidates.Count
+                || candidates.Any(item => _candidates.ContainsKey((item.TenantId, item.CandidateId))))
+                throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.IdentityConflict, "Candidate identity already exists.");
+            foreach (var candidate in candidates)
+                _candidates[(candidate.TenantId, candidate.CandidateId)] = candidate.Snapshot();
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask TransitionCandidateStatusAsync(
+        string tenantId,
+        string candidateId,
+        AgentMemoryStatus expectedStatus,
+        AgentMemoryStatus newStatus,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            if (!_candidates.TryGetValue((tenantId, candidateId), out var candidate))
+                throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Candidate is unavailable.");
+            if (candidate.Status != expectedStatus)
+                throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.InvalidLifecycleState, "Candidate lifecycle state changed.");
+            _candidates[(tenantId, candidateId)] = candidate with { Status = newStatus };
         }
         return ValueTask.CompletedTask;
     }

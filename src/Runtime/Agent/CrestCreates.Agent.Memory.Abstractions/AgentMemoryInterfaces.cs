@@ -17,13 +17,23 @@ public interface IAgentTaskHistoryStore
 public interface IAgentCompressedContextStore
 {
     ValueTask SaveCompressedContextAsync(AgentCompressedContext context, CancellationToken cancellationToken = default);
+    ValueTask CreateCompressedContextAsync(AgentCompressedContext context, CancellationToken cancellationToken = default);
     ValueTask<AgentCompressedContext?> GetCompressedContextAsync(string tenantId, string contextId, CancellationToken cancellationToken = default);
     ValueTask<AgentCompressedContextBlock?> GetCompressedContextBlockAsync(string tenantId, string blockId, CancellationToken cancellationToken = default);
 }
 
 public interface IAgentMemoryStore
 {
+    /// <summary>Creates a candidate and rejects every existing identity.</summary>
     ValueTask SaveCandidateAsync(AgentMemoryCandidate candidate, CancellationToken cancellationToken = default);
+    ValueTask CreateCandidateAsync(AgentMemoryCandidate candidate, CancellationToken cancellationToken = default);
+    ValueTask CreateCandidatesAsync(IReadOnlyList<AgentMemoryCandidate> candidates, CancellationToken cancellationToken = default);
+    ValueTask TransitionCandidateStatusAsync(
+        string tenantId,
+        string candidateId,
+        AgentMemoryStatus expectedStatus,
+        AgentMemoryStatus newStatus,
+        CancellationToken cancellationToken = default);
     ValueTask<AgentMemoryCandidate?> GetCandidateAsync(string tenantId, string candidateId, CancellationToken cancellationToken = default);
     ValueTask SaveMemoryAsync(AgentMemoryItem memory, CancellationToken cancellationToken = default);
     ValueTask<AgentMemoryItem?> GetMemoryAsync(string tenantId, string memoryId, CancellationToken cancellationToken = default);

@@ -81,7 +81,7 @@ internal sealed class ExpandAgentMemorySourceHandler : AgentMemoryToolHandlerBas
     {
         AddBranchInvariantFacts(scope, "expand-memory-source");
         PublishAllowedOutcomes((WireStatus(result.OperationStatus),
-            PrepareOutput(result, AgentMemoryToolJsonSerializerContext.Default.ExpandAgentMemorySourceResult)));
+            PrepareOutput(result)));
         return result;
     }
 

@@ -104,7 +104,7 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
         expanded.StructuredOutput!.Value.GetProperty("SanitizedContent").GetString().Should().NotContain("adjacent turn");
 
         var historyHandle = await services.GetRequiredService<IAgentMemoryHistoryResourceHandleIssuer>().IssueAsync(
-            new AgentMemoryHostArtifactBatchKey { HostOperationId = "host-history", OperationFingerprint = "history-plan", ArtifactPurpose = "history" },
+            new AgentMemoryHostArtifactBatchKey { HostOperationId = "host-history", OperationFingerprint = TestHash("history-plan"), ArtifactPurpose = "history" },
             principal, AgentMemoryHistorySourceKind.Conversation, conversation.ConversationId);
         execution.Set("compress-1");
         var compressed = await InvokeAsync(services, AgentMemoryToolCapabilityIds.CompressHistory, new { HistorySourceHandle = historyHandle });
@@ -155,7 +155,7 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
             ExpiresAt = now.Add(scope.ResourceHandleLifetime), RequiredDescriptorRefs = []
         };
         var result = await services.GetRequiredService<IAgentMemoryResourceHandleStore>().TryIssueBatchAsync(
-            new AgentMemorySecurityArtifactBatchKey { OriginKind = AgentMemorySecurityArtifactBatchOriginKind.TrustedHostOperation, ArtifactPurpose = purpose, PreparationOrdinal = 0, ArtifactPlanHash = purpose },
+            new AgentMemorySecurityArtifactBatchKey { OriginKind = AgentMemorySecurityArtifactBatchOriginKind.TrustedHostOperation, OriginBindingHash = TestHash("host-origin"), ArtifactPurpose = purpose, PreparationOrdinal = 0, ArtifactPlanHash = TestHash(purpose) },
             [handle], scope.MaxActiveResourceHandlesPerResource);
         return result.Handles[0].HandleId;
     }
@@ -166,6 +166,13 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
         ArtifactKind = CanonicalHashArtifactNames.AgentMemoryContent, Scope = "TenantVisible",
         Purpose = CanonicalHashPurposeNames.SourceIdentity, ContractVersion = "memory-hash-v2",
         CanonicalShapeVersion = AgentMemoryCanonicalShapeVersions.MemoryContentV2
+    };
+
+    private static CanonicalHash TestHash(string value) => new()
+    {
+        Value = value.PadLeft(64, '0'), Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+        ArtifactKind = "test", Scope = "TenantVisible", Purpose = "Test",
+        ContractVersion = "test-v1", CanonicalShapeVersion = "test-v1"
     };
 
     private sealed class FixtureScopeProvider : IAgentMemoryToolAccessScopeProvider

@@ -54,7 +54,6 @@ public static class AgentToolServiceCollectionExtensions
         services.TryAddSingleton<AgentToolInvocationFingerprintBuilder>();
         services.TryAddSingleton<AgentCapabilityIdempotencyKeyBuilder>();
         services.TryAddSingleton<AgentToolResultMapper>();
-        services.TryAddSingleton<IAgentToolInvocationFactBufferFactory, AgentToolInvocationFactBufferFactory>();
         services.TryAddScoped<IAgentToolCatalog, AgentToolCatalog>();
         services.TryAddScoped<IAgentToolInvoker, AgentToolInvoker>();
         return services;

@@ -17,7 +17,7 @@ public sealed class AgentMemorySecurityArtifactBatchStore : IAgentMemorySecurity
     {
         ArgumentNullException.ThrowIfNull(batchKey);
         ArgumentNullException.ThrowIfNull(plan);
-        if (string.IsNullOrWhiteSpace(batchKey.ArtifactPlanHash))
+        if (string.IsNullOrWhiteSpace(batchKey.ArtifactPlanHash.Value))
             throw new InvalidOperationException("Artifact plan hash is required.");
         var key = batchKey.ToCanonicalKey();
         var snapshot = plan.Select(item => item with { }).ToArray();

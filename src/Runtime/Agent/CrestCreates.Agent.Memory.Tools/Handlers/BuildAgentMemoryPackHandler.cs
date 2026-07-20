@@ -13,9 +13,8 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
 {
     private readonly IAgentMemoryToolAccessScopeProvider _scopeProvider;
     private readonly IAgentMemoryRetriever _retriever;
-    private readonly IAgentMemoryResourceHandleStore _handles;
     private readonly IAgentMemoryResourceHandleResolver _handleResolver;
-    private readonly IAgentMemorySourceGrantStore _grants;
+    private readonly IAgentMemorySecurityArtifactCoordinator _artifacts;
     private readonly TimeProvider _time;
 
     public BuildAgentMemoryPackHandler(
@@ -23,17 +22,15 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
         IAgentExecutionContextAccessor agentExecution,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
         IAgentMemoryRetriever retriever,
-        IAgentMemoryResourceHandleStore handles,
         IAgentMemoryResourceHandleResolver handleResolver,
-        IAgentMemorySourceGrantStore grants,
+        IAgentMemorySecurityArtifactCoordinator artifacts,
         TimeProvider time)
         : base(capabilityContext, agentExecution)
     {
         _scopeProvider = scopeProvider;
         _retriever = retriever;
-        _handles = handles;
         _handleResolver = handleResolver;
-        _grants = grants;
+        _artifacts = artifacts;
         _time = time;
     }
 
@@ -41,17 +38,17 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
     {
         var principal = Principal;
         var scope = await _scopeProvider.ResolveAsync(principal, ct).ConfigureAwait(false);
-        if (!IsValidScope(scope)) return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("scope-invalid"), AgentMemoryToolJsonSerializerContext.Default.BuildAgentMemoryPackResult);
+        if (!IsValidScope(scope)) return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("scope-invalid"));
         if (input.MaximumCount <= 0 || input.CharacterBudget <= 0
             || input.MaximumCount > scope.MaxRecallCount || input.CharacterBudget > scope.MaxRecallCharacters)
-            return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("budget-invalid"), AgentMemoryToolJsonSerializerContext.Default.BuildAgentMemoryPackResult);
+            return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("budget-invalid"));
 
         var memoryIds = new List<string>();
         foreach (var handleId in input.MemoryHandles)
         {
             var resolved = await _handleResolver.ResolveAsync(handleId, AgentMemoryResourceKind.Memory, principal, scope, ct).ConfigureAwait(false);
             if (resolved is null)
-                return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("resource-unavailable"), AgentMemoryToolJsonSerializerContext.Default.BuildAgentMemoryPackResult);
+                return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("resource-unavailable"));
             memoryIds.Add(resolved.Handle.ResourceId);
         }
 
@@ -74,11 +71,11 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
         };
         var pack = await _retriever.RecallAsync(query, ct).ConfigureAwait(false);
         if (!string.Equals(pack.TenantId, principal.TenantId, StringComparison.Ordinal))
-            return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("resource-unavailable"), AgentMemoryToolJsonSerializerContext.Default.BuildAgentMemoryPackResult);
+            return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("resource-unavailable"));
         var visible = scope.VisibleDescriptorRefs.ToHashSet();
         if (scope.VisibleDescriptorRefs.Any(item => item.Version is not > 0)
             || pack.Memories.Any(memory => !IsVisible(memory, principal.TenantId, visible, scope.AllowUnscopedMemory)))
-            return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("visibility-unavailable"), AgentMemoryToolJsonSerializerContext.Default.BuildAgentMemoryPackResult);
+            return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("visibility-unavailable"));
 
         var now = _time.GetUtcNow();
         var itemHandles = pack.Memories.Select(memory => new AgentMemoryResourceHandle
@@ -106,30 +103,18 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
             IssuedAt = now,
             ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
         })).ToArray();
-        var artifactPlanHash = AgentMemoryArtifactPlanProjector.Compute(principal, scope, "memory-pack", itemHandles, grantInputs);
-        var handleBatch = AgentToolBatchKey(Context, "memory-pack-handles", artifactPlanHash);
-        AgentMemoryResourceHandleIssueResult? issuedHandles = null;
-        AgentMemoryGrantIssueResult? issuedGrantResult = null;
+        AgentMemoryPreparedSecurityArtifacts? prepared = null;
         try
         {
-            issuedHandles = await _handles.TryIssueBatchAsync(handleBatch, itemHandles, scope.MaxActiveResourceHandlesPerResource, scope.MaxResourceHandlesPerInvocation, ct).ConfigureAwait(false);
-            issuedGrantResult = grantInputs.Length == 0
-                ? null
-                : await _grants.TryIssueBatchAsync(
-                    AgentToolBatchKey(Context, "memory-pack-grants", artifactPlanHash),
-                    grantInputs,
-                    scope.MaxGrantsPerResource,
-                    scope.MaxGrantsPerInvocation,
-                    ct).ConfigureAwait(false);
+            prepared = await _artifacts.PrepareForAgentToolAsync(
+                InvocationBinding, principal, scope, "memory-pack", 0, itemHandles, grantInputs, ct).ConfigureAwait(false);
         }
-        catch
-        {
-            await RevokeCreatedArtifactsAsync(_handles, issuedHandles, _grants, issuedGrantResult, CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
+        catch { throw; }
 
         try
         {
+            var issuedHandles = prepared.Handles;
+            var issuedGrantResult = prepared.Grants;
             if (issuedHandles is null || issuedHandles.Handles.Count != pack.Memories.Count)
                 throw new InvalidOperationException("Memory pack handle preparation returned an invalid result.");
             var handleByResource = issuedHandles.Handles.ToDictionary(item => item.ResourceId, StringComparer.Ordinal);
@@ -156,12 +141,12 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
             IsAuthoritative = false,
             Diagnostics = Array.Empty<AgentMemoryToolDiagnosticDto>()
             };
-            PublishAllowedOutcomes(("completed", PrepareOutput(result, AgentMemoryToolJsonSerializerContext.Default.BuildAgentMemoryPackResult)));
+            PublishAllowedOutcomes(("completed", PrepareOutput(result)));
             return result;
         }
         catch
         {
-            await RevokeCreatedArtifactsAsync(_handles, issuedHandles, _grants, issuedGrantResult, CancellationToken.None).ConfigureAwait(false);
+            await _artifacts.RevokeCreatedAsync(prepared, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }

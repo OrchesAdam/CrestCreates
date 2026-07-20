@@ -7,5 +7,5 @@ namespace CrestCreates.Agent.Tools;
 /// </summary>
 public interface IAgentToolPreparedOutcomeRequirementProvider
 {
-    bool RequiresPreparedOutcome(string toolName);
+    AgentToolPreparedOutcomeContract? Create(string toolName);
 }

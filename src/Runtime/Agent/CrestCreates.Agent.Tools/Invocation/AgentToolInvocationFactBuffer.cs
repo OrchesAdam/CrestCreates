@@ -1,6 +1,11 @@
 namespace CrestCreates.Agent.Tools;
 
-internal sealed class AgentToolInvocationFactBuffer : IAgentToolInvocationFactBuffer
+internal interface IAgentToolInvocationFactBufferOwner : IAgentToolInvocationFactSink
+{
+    AgentToolInvocationFactSnapshot Seal();
+}
+
+internal sealed class AgentToolInvocationFactBuffer : IAgentToolInvocationFactBufferOwner
 {
     private readonly object _sync = new();
     private readonly List<AgentToolAuditFact> _facts = new();
@@ -45,9 +50,4 @@ internal sealed class AgentToolInvocationFactBuffer : IAgentToolInvocationFactBu
             return new AgentToolInvocationFactSnapshot(_facts.ToArray(), _maximum);
         }
     }
-}
-
-internal sealed class AgentToolInvocationFactBufferFactory : IAgentToolInvocationFactBufferFactory
-{
-    public IAgentToolInvocationFactBuffer Create() => new AgentToolInvocationFactBuffer();
 }

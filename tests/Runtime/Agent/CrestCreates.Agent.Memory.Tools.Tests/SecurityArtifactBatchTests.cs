@@ -26,11 +26,10 @@ public sealed class SecurityArtifactBatchTests
         var key = new AgentMemorySecurityArtifactBatchKey
         {
             OriginKind = AgentMemorySecurityArtifactBatchOriginKind.AgentToolInvocation,
-            LogicalInvocationKeyHash = "logical",
-            InvocationFingerprint = "invocation",
+            OriginBindingHash = Hash("logical"),
             ArtifactPurpose = "memory-pack",
             PreparationOrdinal = 0,
-            ArtifactPlanHash = "plan-a"
+            ArtifactPlanHash = Hash("plan-a")
         };
         var handle = new AgentMemoryResourceHandle
         {
@@ -52,7 +51,7 @@ public sealed class SecurityArtifactBatchTests
         retry.ReusedExisting.Should().BeTrue();
         retry.Handles.Should().ContainSingle().Which.HandleId.Should().Be("hnd_test");
 
-        var changedPlan = key with { ArtifactPlanHash = "plan-b" };
+        var changedPlan = key with { ArtifactPlanHash = Hash("plan-b") };
         var action = () => store.TryIssueBatchAsync(changedPlan, [handle with { HandleId = "another" }], 2).AsTask();
         await action.Should().ThrowAsync<InvalidOperationException>();
     }
@@ -178,6 +177,42 @@ public sealed class SecurityArtifactBatchTests
         AgentContextSourceRefCanonicalComparer.Instance.Equals(first, adjacent).Should().BeFalse();
     }
 
+    [Fact]
+    public async Task CandidateCreateCollisionCannotResetItsLifecycle()
+    {
+        var store = new InMemoryAgentMemoryStore();
+        var candidate = new AgentMemoryCandidate
+        {
+            CandidateId = "candidate-collision", TenantId = "tenant", Kind = AgentMemoryKind.ProjectFact,
+            Content = "content", Confidence = AgentMemoryConfidence.High, Status = AgentMemoryStatus.Active,
+            CanonicalContentHash = new CanonicalHash
+            {
+                Value = new string('c', 64), Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+                ArtifactKind = "agent-memory-content", Scope = "TenantVisible", Purpose = "SourceIdentity",
+                ContractVersion = "memory-hash-v2", CanonicalShapeVersion = "memory-content-hash-v2"
+            }
+        };
+        await store.CreateCandidateAsync(candidate);
+        var replacement = candidate with { Status = AgentMemoryStatus.Candidate };
+
+        await FluentActions.Awaiting(() => store.CreateCandidateAsync(replacement).AsTask())
+            .Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(exception => exception.Code == AgentMemoryOperationFailureCode.IdentityConflict);
+        (await store.GetCandidateAsync("tenant", candidate.CandidateId)).Should().Match<AgentMemoryCandidate>(item => item.Status == AgentMemoryStatus.Active);
+    }
+
+    [Fact]
+    public async Task CompressedContextCreateCollisionIsRejected()
+    {
+        var store = new InMemoryAgentCompressedContextStore();
+        var context = new AgentCompressedContext { ContextId = "context-collision", TenantId = "tenant", Blocks = [] };
+        await store.CreateCompressedContextAsync(context);
+
+        await FluentActions.Awaiting(() => store.CreateCompressedContextAsync(context).AsTask())
+            .Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(exception => exception.Code == AgentMemoryOperationFailureCode.IdentityConflict);
+    }
+
     private static string ScopeFingerprint(AgentMemoryToolPrincipal principal, AgentMemoryToolAccessScope scope)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"memory-scope-v2|{principal.TenantId}|{scope.AllowUnscopedMemory}|{string.Join('|', scope.VisibleDescriptorRefs
@@ -194,8 +229,15 @@ public sealed class SecurityArtifactBatchTests
     private static AgentMemorySecurityArtifactBatchKey Key(string purpose, string plan) => new()
     {
         OriginKind = AgentMemorySecurityArtifactBatchOriginKind.AgentToolInvocation,
-        LogicalInvocationKeyHash = "logical", InvocationFingerprint = "invocation",
-        ArtifactPurpose = purpose, PreparationOrdinal = 0, ArtifactPlanHash = plan
+        OriginBindingHash = Hash("logical"),
+        ArtifactPurpose = purpose, PreparationOrdinal = 0, ArtifactPlanHash = Hash(plan)
+    };
+
+    private static CanonicalHash Hash(string value) => new()
+    {
+        Value = value.PadLeft(64, '0'), Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+        ArtifactKind = "test", Scope = "TenantVisible", Purpose = "Test",
+        ContractVersion = "test-v1", CanonicalShapeVersion = "test-v1"
     };
 
     private static AgentMemoryResourceHandle Handle(AgentMemoryToolPrincipal principal, string id, DateTimeOffset expiresAt) => new()

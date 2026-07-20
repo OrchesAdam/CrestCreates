@@ -399,7 +399,7 @@ public sealed class AgentToolInvokerTests
         harness.Dispatcher.LastContext!.Items[AgentCapabilityContextItemNames.InvocationBindingSnapshot]
             .Should().BeOfType<AgentToolInvocationBindingSnapshot>();
         harness.Dispatcher.LastContext.Items[AgentCapabilityContextItemNames.InvocationFactBuffer]
-            .Should().BeAssignableTo<IAgentToolInvocationFactBuffer>();
+            .Should().BeAssignableTo<IAgentToolInvocationFactSink>();
     }
 
     [Fact]

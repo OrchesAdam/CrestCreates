@@ -81,7 +81,8 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
         {
             if (candidate.Status != AgentMemoryStatus.Candidate)
                 throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.InvalidLifecycleState, $"Candidate has status '{candidate.Status}', expected 'Candidate'.");
-            await _store.SaveCandidateAsync(candidate with { Status = AgentMemoryStatus.Rejected }, cancellationToken);
+            await _store.TransitionCandidateStatusAsync(
+                tenantId, candidate.CandidateId, AgentMemoryStatus.Candidate, AgentMemoryStatus.Rejected, cancellationToken);
             return;
         }
         await RejectAsync(tenantId,
@@ -161,7 +162,8 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.IdentityConflict, "Memory identity conflicts.");
         var memory = CreatePromotedMemory(candidate, newMemoryId, request);
         _store.SaveMemoryAsync(memory, cancellationToken).GetAwaiter().GetResult();
-        _store.SaveCandidateAsync(candidate with { Status = AgentMemoryStatus.Active }, cancellationToken).GetAwaiter().GetResult();
+        _store.TransitionCandidateStatusAsync(
+            tenantId, candidate.CandidateId, AgentMemoryStatus.Candidate, AgentMemoryStatus.Active, cancellationToken).GetAwaiter().GetResult();
         return memory;
     }
 
@@ -177,7 +179,8 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
         var memory = CreatePromotedMemory(replacement, newMemoryId, request) with { SupersedesMemoryId = existing.MemoryId };
         _store.SaveMemoryAsync(superseded, cancellationToken).GetAwaiter().GetResult();
         _store.SaveMemoryAsync(memory, cancellationToken).GetAwaiter().GetResult();
-        _store.SaveCandidateAsync(replacement with { Status = AgentMemoryStatus.Active }, cancellationToken).GetAwaiter().GetResult();
+        _store.TransitionCandidateStatusAsync(
+            tenantId, replacement.CandidateId, AgentMemoryStatus.Candidate, AgentMemoryStatus.Active, cancellationToken).GetAwaiter().GetResult();
         return memory;
     }
 

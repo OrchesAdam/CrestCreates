@@ -25,6 +25,8 @@ public sealed class AgentToolRuntimeSnapshotBuilder
     private readonly ICanonicalHashComputer _hashes;
     private readonly AgentToolJsonOptions _json;
     private readonly IReadOnlyList<IAgentToolPreparedOutcomeRequirementProvider> _preparedOutcomeProviders;
+    private readonly IReadOnlyList<IAgentToolOutputAuditProjectionProvider> _auditProjectionProviders;
+    private readonly IReadOnlyList<IAgentToolOutputOutcomeCodeProvider> _outcomeCodeProviders;
 
     public AgentToolRuntimeSnapshotBuilder(
         IAgentToolRegistry tools,
@@ -37,7 +39,9 @@ public sealed class AgentToolRuntimeSnapshotBuilder
         AgentToolEffectiveGovernanceDeriver governance,
         ICanonicalHashComputer hashes,
         AgentToolJsonOptions json,
-        IEnumerable<IAgentToolPreparedOutcomeRequirementProvider>? preparedOutcomeProviders = null)
+        IEnumerable<IAgentToolPreparedOutcomeRequirementProvider>? preparedOutcomeProviders = null,
+        IEnumerable<IAgentToolOutputAuditProjectionProvider>? auditProjectionProviders = null,
+        IEnumerable<IAgentToolOutputOutcomeCodeProvider>? outcomeCodeProviders = null)
     {
         _tools = tools;
         _capabilities = capabilities;
@@ -50,6 +54,8 @@ public sealed class AgentToolRuntimeSnapshotBuilder
         _hashes = hashes;
         _json = json;
         _preparedOutcomeProviders = preparedOutcomeProviders?.ToArray() ?? Array.Empty<IAgentToolPreparedOutcomeRequirementProvider>();
+        _auditProjectionProviders = auditProjectionProviders?.ToArray() ?? Array.Empty<IAgentToolOutputAuditProjectionProvider>();
+        _outcomeCodeProviders = outcomeCodeProviders?.ToArray() ?? Array.Empty<IAgentToolOutputOutcomeCodeProvider>();
     }
 
     public AgentToolRuntimeSnapshot Build()
@@ -148,6 +154,10 @@ public sealed class AgentToolRuntimeSnapshotBuilder
             Governance = governance
         };
 
+        var preparedOutcomeContract = _preparedOutcomeProviders
+            .Select(provider => provider.Create(tool.ToolName))
+            .FirstOrDefault(contract => contract is not null);
+
         return new AgentToolRuntimeEntry(
             tool,
             capability,
@@ -163,7 +173,11 @@ public sealed class AgentToolRuntimeSnapshotBuilder
             capabilityHash,
             inputSchemaHash,
             outputSchemaHash,
-            _preparedOutcomeProviders.Any(provider => provider.RequiresPreparedOutcome(tool.ToolName)));
+            preparedOutcomeContract,
+            _auditProjectionProviders.Select(provider => provider.Create(tool.ToolName, contract.OutputType ?? typeof(object)))
+                .FirstOrDefault(projector => projector is not null),
+            _outcomeCodeProviders.Select(provider => provider.CreateOutcomeCode(tool.ToolName, contract.OutputType ?? typeof(object)))
+                .FirstOrDefault(projector => projector is not null));
     }
 
     private void EnsureRegistriesBuilt()

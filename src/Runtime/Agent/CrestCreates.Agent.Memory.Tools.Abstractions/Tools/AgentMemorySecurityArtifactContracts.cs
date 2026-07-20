@@ -1,3 +1,5 @@
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+
 namespace CrestCreates.Agent.Memory.Tools;
 
 public enum AgentMemorySecurityArtifactBatchOriginKind
@@ -10,30 +12,32 @@ public enum AgentMemorySecurityArtifactBatchOriginKind
 public sealed record AgentMemorySecurityArtifactBatchKey
 {
     public required AgentMemorySecurityArtifactBatchOriginKind OriginKind { get; init; }
-    public string? LogicalInvocationKeyHash { get; init; }
-    public string? InvocationFingerprint { get; init; }
+    public required CanonicalHash OriginBindingHash { get; init; }
     public required string ArtifactPurpose { get; init; }
     public required int PreparationOrdinal { get; init; }
-    public required string ArtifactPlanHash { get; init; }
+    public required CanonicalHash ArtifactPlanHash { get; init; }
 
     /// <summary>Returns the idempotency key including the concrete artifact plan.</summary>
     public string ToCanonicalKey()
-        => string.Join("|", OriginKind, Segment(LogicalInvocationKeyHash), Segment(InvocationFingerprint),
+        => string.Join("|", OriginKind, Segment(OriginBindingHash),
             Segment(ArtifactPurpose), PreparationOrdinal, Segment(ArtifactPlanHash));
 
     /// <summary>Returns the retry identity that deliberately excludes the plan hash.</summary>
     public string ToIdentityKey()
-        => string.Join("|", OriginKind, Segment(LogicalInvocationKeyHash), Segment(InvocationFingerprint),
+        => string.Join("|", OriginKind, Segment(OriginBindingHash),
             Segment(ArtifactPurpose), PreparationOrdinal);
 
-    private static string Segment(string? value)
-        => value is null ? "-1:" : $"{value.Length}:{value}";
+    private static string Segment(CanonicalHash value)
+        => $"{value.Value.Length}:{value.Value}:{value.AlgorithmVersion}:{value.ArtifactKind}:{value.Scope}:{value.Purpose}:{value.ContractVersion}:{value.CanonicalShapeVersion}";
+
+    private static string Segment(string value)
+        => $"{value.Length}:{value}";
 }
 
 public sealed record AgentMemoryHostArtifactBatchKey
 {
     public required string HostOperationId { get; init; }
-    public required string OperationFingerprint { get; init; }
+    public required CanonicalHash OperationFingerprint { get; init; }
     public required string ArtifactPurpose { get; init; }
 }
 

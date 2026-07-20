@@ -9,9 +9,8 @@ namespace CrestCreates.Agent.Memory.Tools;
 internal sealed class ExtractMemoryCandidatesHandler : AgentMemoryToolHandlerBase, ICapabilityHandler<ExtractMemoryCandidatesInput, ExtractMemoryCandidatesResult>
 {
     private readonly IAgentMemoryToolAccessScopeProvider _scopeProvider;
-    private readonly IAgentMemoryResourceHandleStore _handles;
     private readonly IAgentMemoryResourceHandleResolver _handleResolver;
-    private readonly IAgentMemorySourceGrantStore _grants;
+    private readonly IAgentMemorySecurityArtifactCoordinator _artifacts;
     private readonly IAgentCompressedContextStore _contexts;
     private readonly IAgentMemoryExtractor _extractor;
     private readonly IAgentMemoryStore _memoryStore;
@@ -23,9 +22,8 @@ internal sealed class ExtractMemoryCandidatesHandler : AgentMemoryToolHandlerBas
         ICapabilityExecutionContextAccessor capabilityContext,
         IAgentExecutionContextAccessor agentExecution,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
-        IAgentMemoryResourceHandleStore handles,
         IAgentMemoryResourceHandleResolver handleResolver,
-        IAgentMemorySourceGrantStore grants,
+        IAgentMemorySecurityArtifactCoordinator artifacts,
         IAgentCompressedContextStore contexts,
         IAgentMemoryExtractor extractor,
         IAgentMemoryStore memoryStore,
@@ -34,7 +32,7 @@ internal sealed class ExtractMemoryCandidatesHandler : AgentMemoryToolHandlerBas
         TimeProvider time)
         : base(capabilityContext, agentExecution)
     {
-        _scopeProvider = scopeProvider; _handles = handles; _grants = grants; _contexts = contexts;
+        _scopeProvider = scopeProvider; _artifacts = artifacts; _contexts = contexts;
         _handleResolver = handleResolver;
         _extractor = extractor; _memoryStore = memoryStore; _sanitizer = sanitizer; _ids = ids; _time = time;
     }
@@ -43,14 +41,14 @@ internal sealed class ExtractMemoryCandidatesHandler : AgentMemoryToolHandlerBas
     {
         var principal = Principal;
         var scope = await _scopeProvider.ResolveAsync(principal, ct).ConfigureAwait(false);
-        if (!IsValidScope(scope)) return PrepareOutcome(scope, "extract-memory-candidates", "unavailable", Unavailable("scope-invalid"), AgentMemoryToolJsonSerializerContext.Default.ExtractMemoryCandidatesResult);
+        if (!IsValidScope(scope)) return PrepareOutcome(scope, "extract-memory-candidates", "unavailable", Unavailable("scope-invalid"));
         var resolvedHandle = await _handleResolver.ResolveAsync(input.ContextHandle, AgentMemoryResourceKind.Context, principal, scope, ct).ConfigureAwait(false);
         var handle = resolvedHandle?.Handle;
         if (handle is null)
-            return PrepareOutcome(scope, "extract-memory-candidates", "unavailable", Unavailable("context-unavailable"), AgentMemoryToolJsonSerializerContext.Default.ExtractMemoryCandidatesResult);
+            return PrepareOutcome(scope, "extract-memory-candidates", "unavailable", Unavailable("context-unavailable"));
         var context = await _contexts.GetCompressedContextAsync(principal.TenantId, handle.ResourceId, ct).ConfigureAwait(false);
         if (context is null || context.Blocks.Any(block => block.SourceRefs.Count > scope.MaxSourceRefsPerArtifact))
-            return PrepareOutcome(scope, "extract-memory-candidates", "unavailable", Unavailable("context-unavailable"), AgentMemoryToolJsonSerializerContext.Default.ExtractMemoryCandidatesResult);
+            return PrepareOutcome(scope, "extract-memory-candidates", "unavailable", Unavailable("context-unavailable"));
         var allowedSourceRefs = context.Blocks.SelectMany(block => block.SourceRefs).ToArray();
         var allowedDescriptorRefs = allowedSourceRefs.SelectMany(source => source.DescriptorRefs).ToArray();
         var providerCandidates = (await _extractor.ExtractCandidatesAsync(context, ct).ConfigureAwait(false)).ToArray();
@@ -62,14 +60,14 @@ internal sealed class ExtractMemoryCandidatesHandler : AgentMemoryToolHandlerBas
                 || candidate.Tags.Count > scope.MaxTagsPerResource
                 || !IsTrustedSourceRefSubset(candidate.SourceRefs, allowedSourceRefs)
                 || candidate.DescriptorRefs.Any(reference => !allowedDescriptorRefs.Contains(reference))))
-            return PrepareOutcome(scope, "extract-memory-candidates", "unavailable", Unavailable("result-invalid"), AgentMemoryToolJsonSerializerContext.Default.ExtractMemoryCandidatesResult);
+            return PrepareOutcome(scope, "extract-memory-candidates", "unavailable", Unavailable("result-invalid"));
 
         var candidates = new List<AgentMemoryCandidate>(providerCandidates.Length);
         foreach (var providerCandidate in providerCandidates)
         {
             var sanitized = _sanitizer.Sanitize(principal.TenantId, providerCandidate.Content, providerCandidate.SourceRefs);
             if (sanitized.Rejected)
-                return PrepareOutcome(scope, "extract-memory-candidates", "unavailable", Unavailable("result-invalid"), AgentMemoryToolJsonSerializerContext.Default.ExtractMemoryCandidatesResult);
+                return PrepareOutcome(scope, "extract-memory-candidates", "unavailable", Unavailable("result-invalid"));
             candidates.Add(providerCandidate with
             {
                 CandidateId = _ids.CreateCandidateId(),
@@ -96,31 +94,17 @@ internal sealed class ExtractMemoryCandidatesHandler : AgentMemoryToolHandlerBas
             IsUnscoped = candidate.DescriptorRefs.Count == 0 && source.DescriptorRefs.Count == 0,
             IssuingInvocationId = principal.ExecutionId, IssuedAt = now, ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
         })).ToArray();
-        var artifactPlanHash = AgentMemoryArtifactPlanProjector.Compute(principal, scope, "extract-candidates", candidateHandles, grantsInput);
-        AgentMemoryResourceHandleIssueResult? issuedHandleResult = null;
+        AgentMemoryPreparedSecurityArtifacts? prepared = null;
         try
         {
-            issuedHandleResult = candidateHandles.Length == 0 ? null
-                : await _handles.TryIssueBatchAsync(AgentToolBatchKey(Context, "candidate-handles", artifactPlanHash), candidateHandles, scope.MaxActiveResourceHandlesPerResource, scope.MaxResourceHandlesPerInvocation, ct).ConfigureAwait(false);
+            prepared = await _artifacts.PrepareForAgentToolAsync(
+                InvocationBinding, principal, scope, "extract-candidates", 0, candidateHandles, grantsInput, ct).ConfigureAwait(false);
         }
-        catch
-        {
-            throw;
-        }
-        var issuedHandles = issuedHandleResult?.Handles.ToArray() ?? Array.Empty<AgentMemoryResourceHandle>();
-        AgentMemoryGrantIssueResult? grantResult = null;
+        catch { throw; }
         try
         {
-            grantResult = grantsInput.Length == 0 ? null
-                : await _grants.TryIssueBatchAsync(AgentToolBatchKey(Context, "candidate-grants", artifactPlanHash), grantsInput, scope.MaxGrantsPerResource, scope.MaxGrantsPerInvocation, ct).ConfigureAwait(false);
-        }
-        catch
-        {
-            await RevokeCreatedArtifactsAsync(_handles, issuedHandleResult, _grants, grantResult, CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
-        try
-        {
+            var issuedHandles = prepared.Handles?.Handles.ToArray() ?? Array.Empty<AgentMemoryResourceHandle>();
+            var grantResult = prepared.Grants;
             var grants = grantResult?.Grants.ToArray() ?? Array.Empty<AgentMemorySourceGrant>();
             var handleById = issuedHandles.ToDictionary(item => item.ResourceId, StringComparer.Ordinal);
             var grantsBySource = grants.ToLookup(item => item.SourceRef, AgentContextSourceRefCanonicalComparer.Instance);
@@ -146,14 +130,13 @@ internal sealed class ExtractMemoryCandidatesHandler : AgentMemoryToolHandlerBas
             Diagnostics = Array.Empty<AgentMemoryToolDiagnosticDto>()
             };
             AddBranchInvariantFacts(scope, "extract-memory-candidates");
-            PublishAllowedOutcomes(("completed", PrepareOutput(result, AgentMemoryToolJsonSerializerContext.Default.ExtractMemoryCandidatesResult)));
-            foreach (var candidate in candidates)
-                await _memoryStore.SaveCandidateAsync(candidate, ct).ConfigureAwait(false);
+            PublishAllowedOutcomes(("completed", PrepareOutput(result)));
+            await _memoryStore.CreateCandidatesAsync(candidates, ct).ConfigureAwait(false);
             return result;
         }
         catch
         {
-            await RevokeCreatedArtifactsAsync(_handles, issuedHandleResult, _grants, grantResult, CancellationToken.None).ConfigureAwait(false);
+            await _artifacts.RevokeCreatedAsync(prepared, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }

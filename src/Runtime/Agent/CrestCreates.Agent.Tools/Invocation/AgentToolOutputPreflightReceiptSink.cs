@@ -2,7 +2,11 @@ namespace CrestCreates.Agent.Tools;
 
 internal sealed class AgentToolOutputPreflightReceiptSink : IAgentToolOutputPreflightReceiptSink
 {
+    private readonly AgentToolPreparedOutcomeContract? _contract;
     private IReadOnlyList<AgentToolPreparedOutcomeReceipt>? _outcomes;
+
+    public AgentToolOutputPreflightReceiptSink(AgentToolPreparedOutcomeContract? contract)
+        => _contract = contract;
 
     public bool HasPublishedOutcomes => _outcomes is not null;
 
@@ -13,13 +17,12 @@ internal sealed class AgentToolOutputPreflightReceiptSink : IAgentToolOutputPref
             throw new InvalidOperationException("Output preflight receipts may only be published once.");
         if (outcomes.Count == 0)
             throw new ArgumentException("At least one allowed outcome is required.", nameof(outcomes));
-        if (outcomes.Count > 8)
-            throw new ArgumentException("Output preflight outcome sets are bounded to eight branches.", nameof(outcomes));
+        if (outcomes.Count > (_contract?.MaximumBranches ?? 5))
+            throw new ArgumentException("Output preflight outcome set exceeds its generated contract.", nameof(outcomes));
         if (outcomes.Select(item => item.OutcomeCode).Distinct(StringComparer.Ordinal).Count() != outcomes.Count)
             throw new ArgumentException("Output preflight outcome codes must be unique.", nameof(outcomes));
-        var allowed = new HashSet<string>(["completed", "unavailable", "conflict", "redacted", "not-expandable"], StringComparer.Ordinal);
-        if (outcomes.Any(item => !allowed.Contains(item.OutcomeCode)))
-            throw new ArgumentException("Output preflight outcome code is not an approved Tool status.", nameof(outcomes));
+        if (_contract is not null && outcomes.Any(item => !_contract.AllowedOutcomeCodes.Contains(item.OutcomeCode)))
+            throw new ArgumentException("Output preflight outcome code is not allowed by the generated Tool contract.", nameof(outcomes));
         if (outcomes.Select(item => $"{item.OutcomeCode}|{item.Receipt.ToolDescriptorId}|{item.Receipt.ToolDescriptorVersion}|{item.Receipt.OutputContractFingerprint}|{item.Receipt.StructuredOutputHash}").Distinct(StringComparer.Ordinal).Count() != outcomes.Count)
             throw new ArgumentException("Output preflight receipt identities must be unique.", nameof(outcomes));
         if (outcomes.Any(item => item.InternalFacts.Count > 32

@@ -27,7 +27,9 @@ public sealed record AgentToolRuntimeEntry(
     string CapabilityContractHash,
     string? InputSchemaContractHash,
     string? OutputSchemaContractHash,
-    bool RequiresPreparedOutcomeSet);
+    AgentToolPreparedOutcomeContract? PreparedOutcomeContract,
+    Func<object?, IReadOnlyList<AgentToolAuditFact>>? OutputAuditProjector,
+    Func<object?, string?>? OutputOutcomeCodeProjector);
 
 public sealed class AgentToolRuntimeSnapshot
 {

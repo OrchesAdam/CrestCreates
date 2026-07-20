@@ -11,9 +11,8 @@ namespace CrestCreates.Agent.Memory.Tools;
 internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase, ICapabilityHandler<PromoteMemoryCandidateInput, PromoteMemoryCandidateResult>
 {
     private readonly IAgentMemoryToolAccessScopeProvider _scopeProvider;
-    private readonly IAgentMemoryResourceHandleStore _handles;
     private readonly IAgentMemoryResourceHandleResolver _handleResolver;
-    private readonly IAgentMemorySourceGrantStore _grants;
+    private readonly IAgentMemorySecurityArtifactCoordinator _artifacts;
     private readonly IAgentMemoryPromotionService _promotion;
     private readonly IAgentMemoryArtifactIdGenerator _ids;
     private readonly AgentMemoryCanonicalHashProjector _hashes;
@@ -23,27 +22,26 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
         ICapabilityExecutionContextAccessor capabilityContext,
         IAgentExecutionContextAccessor agentExecution,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
-        IAgentMemoryResourceHandleStore handles,
         IAgentMemoryResourceHandleResolver handleResolver,
-        IAgentMemorySourceGrantStore grants,
+        IAgentMemorySecurityArtifactCoordinator artifacts,
         AgentMemoryToolRuntimeBinding runtimeBinding,
         IAgentMemoryArtifactIdGenerator ids,
         AgentMemoryCanonicalHashProjector hashes,
         TimeProvider time)
         : base(capabilityContext, agentExecution)
     {
-        _scopeProvider = scopeProvider; _handles = handles; _handleResolver = handleResolver; _grants = grants; _promotion = runtimeBinding.PromotionService; _ids = ids; _hashes = hashes; _time = time;
+        _scopeProvider = scopeProvider; _handleResolver = handleResolver; _artifacts = artifacts; _promotion = runtimeBinding.PromotionService; _ids = ids; _hashes = hashes; _time = time;
     }
 
     public async Task<PromoteMemoryCandidateResult> ExecuteAsync(PromoteMemoryCandidateInput input, CancellationToken ct)
     {
         var principal = Principal;
         var scope = await _scopeProvider.ResolveAsync(principal, ct).ConfigureAwait(false);
-        if (!IsValidScope(scope)) return PrepareOutcome(scope, "promote-memory-candidate", "unavailable", Unavailable("scope-invalid"), AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult);
+        if (!IsValidScope(scope)) return PrepareOutcome(scope, "promote-memory-candidate", "unavailable", Unavailable("scope-invalid"));
         var resolved = await _handleResolver.ResolveAsync(input.CandidateHandle, AgentMemoryResourceKind.Candidate, principal, scope, ct).ConfigureAwait(false);
-        if (resolved?.Resource is not AgentMemoryCandidate candidate) return PrepareOutcome(scope, "promote-memory-candidate", "unavailable", Unavailable("candidate-unavailable"), AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult);
+        if (resolved?.Resource is not AgentMemoryCandidate candidate) return PrepareOutcome(scope, "promote-memory-candidate", "unavailable", Unavailable("candidate-unavailable"));
         var handle = resolved.Handle;
-        if (candidate.Status != AgentMemoryStatus.Candidate) return PrepareOutcome(scope, "promote-memory-candidate", "conflict", Conflict("candidate-consumed"), AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult);
+        if (candidate.Status != AgentMemoryStatus.Candidate) return PrepareOutcome(scope, "promote-memory-candidate", "conflict", Conflict("candidate-consumed"));
         var newMemoryId = _ids.CreateMemoryId();
         var now = _time.GetUtcNow();
         var itemHandle = new AgentMemoryResourceHandle
@@ -60,22 +58,17 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
             IsUnscoped = EffectiveDescriptorRefs(candidate).Count == 0 && source.DescriptorRefs.Count == 0,
             IssuingInvocationId = principal.ExecutionId, IssuedAt = now, ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
         }).ToArray();
-        var planHash = AgentMemoryArtifactPlanProjector.Compute(principal, scope, "promote-memory", [itemHandle], grantsInput);
-        AgentMemoryResourceHandleIssueResult? preparedHandle = null;
-        AgentMemoryGrantIssueResult? preparedGrantResult = null;
+        AgentMemoryPreparedSecurityArtifacts? prepared = null;
         try
         {
-            preparedHandle = await _handles.TryIssueBatchAsync(AgentToolBatchKey(Context, "promote-memory-handle", planHash), [itemHandle], scope.MaxActiveResourceHandlesPerResource, scope.MaxResourceHandlesPerInvocation, ct).ConfigureAwait(false);
-            preparedGrantResult = grantsInput.Length == 0 ? null
-                : await _grants.TryIssueBatchAsync(AgentToolBatchKey(Context, "promote-memory-grants", planHash), grantsInput, scope.MaxGrantsPerResource, scope.MaxGrantsPerInvocation, ct).ConfigureAwait(false);
+            prepared = await _artifacts.PrepareForAgentToolAsync(
+                InvocationBinding, principal, scope, "promote-memory", 0, [itemHandle], grantsInput, ct).ConfigureAwait(false);
         }
-        catch
-        {
-            await RevokeCreatedArtifactsAsync(_handles, preparedHandle, _grants, preparedGrantResult, CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
+        catch { throw; }
         try
         {
+        var preparedHandle = prepared.Handles;
+        var preparedGrantResult = prepared.Grants;
         var preparedGrants = preparedGrantResult?.Grants.ToArray() ?? Array.Empty<AgentMemorySourceGrant>();
         if (preparedHandle is null || preparedHandle.Handles.Count != 1)
             throw new InvalidOperationException("Promotion handle preparation returned an invalid result.");
@@ -99,9 +92,9 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
         var unavailable = Unavailable("candidate-unavailable");
         AddBranchInvariantFacts(scope, "promote-memory-candidate");
         PublishAllowedOutcomes(
-            ("completed", PrepareOutput(completed, AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult)),
-            ("conflict", PrepareOutput(conflict, AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult)),
-            ("unavailable", PrepareOutput(unavailable, AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult)));
+            ("completed", PrepareOutput(completed)),
+            ("conflict", PrepareOutput(conflict)),
+            ("unavailable", PrepareOutput(unavailable)));
         AgentMemoryItem memory;
         try
         {
@@ -134,7 +127,7 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
             AgentMemoryOperationFailureCode.StateConflict or
             AgentMemoryOperationFailureCode.IdentityConflict)
         {
-            await RevokeCreatedArtifactsAsync(_handles, preparedHandle, _grants, preparedGrantResult, CancellationToken.None).ConfigureAwait(false);
+            await _artifacts.RevokeCreatedAsync(prepared, CancellationToken.None).ConfigureAwait(false);
             // Resource disappearance is a confirmed zero-write unavailable
             // branch; lifecycle/expectation races are normal Conflict.
             return exception.Code == AgentMemoryOperationFailureCode.ResourceUnavailable
@@ -151,14 +144,14 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
             || memory.CanonicalContentHash != candidate.CanonicalContentHash
             || !string.Equals(memory.Content, candidate.Content, StringComparison.Ordinal))
         {
-            await RevokeCreatedArtifactsAsync(_handles, preparedHandle, _grants, preparedGrantResult, CancellationToken.None).ConfigureAwait(false);
+            await _artifacts.RevokeCreatedAsync(prepared, CancellationToken.None).ConfigureAwait(false);
             throw new AgentMemoryPostCommitIntegrityException("Committed promotion graph differs from the preflight result.");
         }
         return completed;
         }
         catch
         {
-            await RevokeCreatedArtifactsAsync(_handles, preparedHandle, _grants, preparedGrantResult, CancellationToken.None).ConfigureAwait(false);
+            await _artifacts.RevokeCreatedAsync(prepared, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }

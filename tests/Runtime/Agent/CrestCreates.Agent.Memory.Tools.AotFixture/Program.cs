@@ -75,7 +75,7 @@ internal static class MemoryToolFixtureRunner
             var scope = await services.GetRequiredService<IAgentMemoryToolAccessScopeProvider>().ResolveAsync(principal);
             var now = DateTimeOffset.UtcNow;
             var issued = await services.GetRequiredService<IAgentMemoryResourceHandleStore>().TryIssueBatchAsync(
-                new AgentMemorySecurityArtifactBatchKey { OriginKind = AgentMemorySecurityArtifactBatchOriginKind.TrustedHostOperation, ArtifactPurpose = "aot-memory", PreparationOrdinal = 0, ArtifactPlanHash = "aot-memory" },
+                new AgentMemorySecurityArtifactBatchKey { OriginKind = AgentMemorySecurityArtifactBatchOriginKind.TrustedHostOperation, OriginBindingHash = TestHash("aot-origin"), ArtifactPurpose = "aot-memory", PreparationOrdinal = 0, ArtifactPlanHash = TestHash("aot-memory") },
                 [new AgentMemoryResourceHandle { HandleId = "aot-memory-handle", ResourceKind = AgentMemoryResourceKind.Memory, ResourceId = "aot-memory", Principal = principal,
                     ScopeFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"memory-scope-v2|{principal.TenantId}|True|"))).ToLowerInvariant(),
                     IsUnscoped = true, IssuingInvocationId = "host", IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime) }],
@@ -89,7 +89,7 @@ internal static class MemoryToolFixtureRunner
             var expanded = await InvokeAsync(services, AgentMemoryToolCapabilityIds.ExpandSource, new ExpandInput { GrantId = grant!, MaximumCharacters = 1024 }, FixtureJsonContext.Default.ExpandInput);
             if (!expanded.IsSuccess || expanded.StructuredOutput!.Value.GetProperty("SanitizedContent").GetString()?.Contains("adjacent", StringComparison.Ordinal) == true) return 3;
             var historyHandle = await services.GetRequiredService<IAgentMemoryHistoryResourceHandleIssuer>().IssueAsync(
-                new AgentMemoryHostArtifactBatchKey { HostOperationId = "aot-history", OperationFingerprint = "aot-history-plan", ArtifactPurpose = "history" },
+                new AgentMemoryHostArtifactBatchKey { HostOperationId = "aot-history", OperationFingerprint = TestHash("aot-history-plan"), ArtifactPurpose = "history" },
                 principal, AgentMemoryHistorySourceKind.Conversation, conversation.ConversationId);
             execution.Set("aot-compress");
             var compressed = await InvokeAsync(services, AgentMemoryToolCapabilityIds.CompressHistory, new HistoryInput { HistorySourceHandle = historyHandle }, FixtureJsonContext.Default.HistoryInput);
@@ -125,6 +125,13 @@ internal static class MemoryToolFixtureRunner
     {
         Value = new string('b', 64), Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1", ArtifactKind = CanonicalHashArtifactNames.AgentMemoryContent,
         Scope = "TenantVisible", Purpose = CanonicalHashPurposeNames.SourceIdentity, ContractVersion = "memory-hash-v2", CanonicalShapeVersion = AgentMemoryCanonicalShapeVersions.MemoryContentV2
+    };
+
+    private static CanonicalHash TestHash(string value) => new()
+    {
+        Value = value.PadLeft(64, '0'), Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+        ArtifactKind = "test", Scope = "TenantVisible", Purpose = "Test",
+        ContractVersion = "test-v1", CanonicalShapeVersion = "test-v1"
     };
 }
 

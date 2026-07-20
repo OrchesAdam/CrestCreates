@@ -1,24 +1,21 @@
-using System.Security.Cryptography;
-using System.Text;
-
 namespace CrestCreates.Agent.Memory.Tools;
 
 internal sealed class AgentMemoryHistoryResourceHandleIssuer : IAgentMemoryHistoryResourceHandleIssuer
 {
     private readonly IAgentMemoryHistoryAccessAuthorizer _authorizer;
     private readonly IAgentMemoryToolAccessScopeProvider _scopeProvider;
-    private readonly IAgentMemoryResourceHandleStore _store;
+    private readonly IAgentMemorySecurityArtifactCoordinator _coordinator;
     private readonly TimeProvider _time;
 
     public AgentMemoryHistoryResourceHandleIssuer(
         IAgentMemoryHistoryAccessAuthorizer authorizer,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
-        IAgentMemoryResourceHandleStore store,
+        IAgentMemorySecurityArtifactCoordinator coordinator,
         TimeProvider? time = null)
     {
         _authorizer = authorizer;
         _scopeProvider = scopeProvider;
-        _store = store;
+        _coordinator = coordinator;
         _time = time ?? TimeProvider.System;
     }
 
@@ -30,7 +27,8 @@ internal sealed class AgentMemoryHistoryResourceHandleIssuer : IAgentMemoryHisto
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(hostBatchKey.HostOperationId)
-            || string.IsNullOrWhiteSpace(hostBatchKey.OperationFingerprint)
+            || hostBatchKey.OperationFingerprint is null
+            || string.IsNullOrWhiteSpace(hostBatchKey.OperationFingerprint.Value)
             || string.IsNullOrWhiteSpace(hostBatchKey.ArtifactPurpose)
             || sourceKind == AgentMemoryHistorySourceKind.Unknown
             || string.IsNullOrWhiteSpace(sourceId))
@@ -53,15 +51,11 @@ internal sealed class AgentMemoryHistoryResourceHandleIssuer : IAgentMemoryHisto
             IssuedAt = now,
             ExpiresAt = now.Add(scope.ResourceHandleLifetime)
         };
-        var batch = new AgentMemorySecurityArtifactBatchKey
-        {
-            OriginKind = AgentMemorySecurityArtifactBatchOriginKind.TrustedHostOperation,
-            ArtifactPurpose = hostBatchKey.ArtifactPurpose,
-            PreparationOrdinal = 0,
-            ArtifactPlanHash = hostBatchKey.OperationFingerprint
-        };
-        var issued = await _store.TryIssueBatchAsync(batch, [handle], scope.MaxActiveResourceHandlesPerResource, scope.MaxResourceHandlesPerInvocation, cancellationToken).ConfigureAwait(false);
-        return issued.Handles[0].HandleId;
+        var prepared = await _coordinator.PrepareForHostAsync(
+            hostBatchKey, principal, scope, sourceKind, sourceId, [handle], [], cancellationToken).ConfigureAwait(false);
+        if (prepared.Handles is null || prepared.Handles.Handles.Count != 1)
+            throw new InvalidOperationException("History handle preparation returned an invalid result.");
+        return prepared.Handles.Handles[0].HandleId;
     }
 
 }

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
 namespace CrestCreates.Agent.Memory.Tools;
 
@@ -11,9 +12,9 @@ namespace CrestCreates.Agent.Memory.Tools;
 /// grant ids are intentionally excluded; the bound resource graph, principal,
 /// scope, provenance, and lifetime policy define retry identity.
 /// </summary>
-public static class AgentMemoryArtifactPlanProjector
+internal static class AgentMemoryArtifactPlanProjector
 {
-    public static string Compute(
+    public static CanonicalHash Compute(
         AgentMemoryToolPrincipal principal,
         AgentMemoryToolAccessScope scope,
         string purpose,
@@ -32,7 +33,7 @@ public static class AgentMemoryArtifactPlanProjector
             writer.WriteString("execution", principal.ExecutionId);
             writer.WriteString("scope", AgentMemoryScopeFingerprint.Compute(scope, principal));
             writer.WriteStartArray("handles");
-            foreach (var handle in handles.OrderBy(item => item.ResourceKind).ThenBy(item => item.ResourceId, StringComparer.Ordinal))
+            foreach (var handle in handles.OrderBy(HandleCanonical, StringComparer.Ordinal))
             {
                 writer.WriteStartObject();
                 writer.WriteString("kind", handle.ResourceKind.ToString());
@@ -44,8 +45,7 @@ public static class AgentMemoryArtifactPlanProjector
             }
             writer.WriteEndArray();
             writer.WriteStartArray("grants");
-            foreach (var grant in grants.OrderBy(item => item.SourceRef.SourceKind).ThenBy(item => item.SourceRef.SourceId, StringComparer.Ordinal)
-                .ThenBy(item => item.SourceRef.RangeStart).ThenBy(item => item.SourceRef.RangeEnd))
+            foreach (var grant in grants.OrderBy(GrantCanonical, StringComparer.Ordinal))
             {
                 writer.WriteStartObject();
                 writer.WriteBoolean("unscoped", grant.IsUnscoped);
@@ -58,7 +58,17 @@ public static class AgentMemoryArtifactPlanProjector
             writer.WriteEndObject();
             writer.Flush();
         }
-        return Convert.ToHexString(SHA256.HashData(buffer.WrittenSpan)).ToLowerInvariant();
+        return new CanonicalHash
+        {
+            Value = Convert.ToHexString(SHA256.HashData(buffer.WrittenSpan)).ToLowerInvariant(),
+            Algorithm = "SHA-256",
+            AlgorithmVersion = "sha256-canonical-json-v1",
+            ArtifactKind = "agent-memory-security-artifact-plan",
+            Scope = "TenantVisible",
+            Purpose = purpose,
+            ContractVersion = "memory-security-artifact-v2",
+            CanonicalShapeVersion = "agent-memory-security-artifact-plan-v3"
+        };
     }
 
     private static void WriteDescriptors(Utf8JsonWriter writer, IReadOnlyList<DescriptorRef> refs)
@@ -83,8 +93,58 @@ public static class AgentMemoryArtifactPlanProjector
         var hash = source.CanonicalContentHash;
         writer.WriteString("contentHash", hash?.Value ?? string.Empty);
         writer.WriteString("contentHashAlgorithm", hash?.Algorithm ?? string.Empty);
-        writer.WriteString("contentHashAlgorithmVersion", hash?.AlgorithmVersion ?? string.Empty);
+            writer.WriteString("contentHashAlgorithmVersion", hash?.AlgorithmVersion ?? string.Empty);
+            writer.WriteString("contentHashArtifactKind", hash?.ArtifactKind ?? string.Empty);
+            writer.WriteString("contentHashDescriptorKind", hash?.DescriptorKind ?? string.Empty);
+        writer.WriteString("contentHashScope", hash?.Scope ?? string.Empty);
+        writer.WriteString("contentHashPurpose", hash?.Purpose ?? string.Empty);
         writer.WriteString("contentHashContractVersion", hash?.ContractVersion ?? string.Empty);
         writer.WriteString("contentHashShapeVersion", hash?.CanonicalShapeVersion ?? string.Empty);
+        writer.WriteStartArray("sourceDescriptors");
+        foreach (var descriptor in source.DescriptorRefs.OrderBy(item => item.Namespace, StringComparer.Ordinal).ThenBy(item => item.Id, StringComparer.Ordinal).ThenBy(item => item.Version))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("namespace", descriptor.Namespace);
+            writer.WriteString("id", descriptor.Id);
+            writer.WriteNumber("version", descriptor.Version ?? -1);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
     }
+
+    private static string SourceCanonical(AgentContextSourceRef source)
+        => string.Join('|',
+            source.SourceKind, source.TenantId, source.SourceId,
+            source.RangeStart?.ToString() ?? "-", source.RangeEnd?.ToString() ?? "-",
+            source.CorrelationId ?? string.Empty, source.CausationId ?? string.Empty,
+            source.CanonicalContentHash?.Value ?? string.Empty,
+            source.CanonicalContentHash?.Algorithm ?? string.Empty,
+            source.CanonicalContentHash?.AlgorithmVersion ?? string.Empty,
+            source.CanonicalContentHash?.ArtifactKind ?? string.Empty,
+            source.CanonicalContentHash?.DescriptorKind ?? string.Empty,
+            source.CanonicalContentHash?.Scope ?? string.Empty,
+            source.CanonicalContentHash?.Purpose ?? string.Empty,
+            source.CanonicalContentHash?.ContractVersion ?? string.Empty,
+            source.CanonicalContentHash?.CanonicalShapeVersion ?? string.Empty,
+            string.Join(';', source.DescriptorRefs.OrderBy(item => item.Namespace, StringComparer.Ordinal)
+                .ThenBy(item => item.Id, StringComparer.Ordinal).ThenBy(item => item.Version)
+                .Select(item => $"{item.Namespace}:{item.Id}:{item.Version}")));
+
+    private static string HandleCanonical(AgentMemoryResourceHandle handle)
+        => string.Join('|', handle.ResourceKind, handle.ResourceId, handle.IsUnscoped,
+            (handle.ExpiresAt - handle.IssuedAt).Ticks,
+            string.Join(';', handle.RequiredDescriptorRefs
+                .OrderBy(item => item.Namespace, StringComparer.Ordinal)
+                .ThenBy(item => item.Id, StringComparer.Ordinal)
+                .ThenBy(item => item.Version)
+                .Select(item => $"{item.Namespace}:{item.Id}:{item.Version}")));
+
+    private static string GrantCanonical(AgentMemorySourceGrant grant)
+        => string.Join('|', SourceCanonical(grant.SourceRef), grant.IsUnscoped,
+            (grant.ExpiresAt - grant.IssuedAt).Ticks,
+            string.Join(';', grant.RequiredDescriptorRefs
+                .OrderBy(item => item.Namespace, StringComparer.Ordinal)
+                .ThenBy(item => item.Id, StringComparer.Ordinal)
+                .ThenBy(item => item.Version)
+                .Select(item => $"{item.Namespace}:{item.Id}:{item.Version}")));
 }

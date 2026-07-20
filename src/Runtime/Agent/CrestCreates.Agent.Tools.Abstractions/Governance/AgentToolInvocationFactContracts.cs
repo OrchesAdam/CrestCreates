@@ -28,13 +28,3 @@ public interface IAgentToolInvocationFactSink
 {
     void AddTrustedFacts(IReadOnlyList<AgentToolAuditFact> facts, int requestedMaximum);
 }
-
-public interface IAgentToolInvocationFactBuffer : IAgentToolInvocationFactSink
-{
-    AgentToolInvocationFactSnapshot Seal();
-}
-
-public interface IAgentToolInvocationFactBufferFactory
-{
-    IAgentToolInvocationFactBuffer Create();
-}

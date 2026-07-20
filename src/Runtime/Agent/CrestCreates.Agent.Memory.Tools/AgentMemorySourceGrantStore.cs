@@ -37,7 +37,7 @@ public sealed class AgentMemorySourceGrantStore : IAgentMemorySourceGrantStore
         lock (_gate)
         {
             if (_batchPlans.TryGetValue(identity, out var existingPlan)
-                && !string.Equals(existingPlan, batchKey.ArtifactPlanHash, StringComparison.Ordinal))
+                && !string.Equals(existingPlan, batchKey.ArtifactPlanHash.Value, StringComparison.Ordinal))
                 throw new InvalidOperationException("Security artifact batch plan conflicts with an existing preparation.");
             if (_batches.TryGetValue(key, out var existingIds))
                 return ValueTask.FromResult(new AgentMemoryGrantIssueResult
@@ -73,7 +73,7 @@ public sealed class AgentMemorySourceGrantStore : IAgentMemorySourceGrantStore
             foreach (var grant in grants)
                 _grants[grant.GrantId] = grant;
             _batches[key] = grants.Select(item => item.GrantId).ToArray();
-            _batchPlans[identity] = batchKey.ArtifactPlanHash;
+            _batchPlans[identity] = batchKey.ArtifactPlanHash.Value;
             return ValueTask.FromResult(new AgentMemoryGrantIssueResult
             {
                 Grants = grants.ToArray(),

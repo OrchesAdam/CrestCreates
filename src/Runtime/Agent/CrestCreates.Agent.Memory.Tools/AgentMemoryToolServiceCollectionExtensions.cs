@@ -13,6 +13,7 @@ public static class AgentMemoryToolServiceCollectionExtensions
     public static IServiceCollection AddAgentMemoryTools(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+        services.TryAddSingleton<IServiceCollection>(services);
         var promotionRegistration = services.LastOrDefault(item => item.ServiceType == typeof(IAgentMemoryPromotionService));
         if (promotionRegistration is not null && promotionRegistration.Lifetime != ServiceLifetime.Singleton)
             throw new InvalidOperationException("Memory curation requires a singleton Promotion Service binding.");
@@ -23,16 +24,24 @@ public static class AgentMemoryToolServiceCollectionExtensions
         GeneratedHandlerRegistry.Apply(services);
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolJsonContextContributor, AgentMemoryToolJsonContextContributor>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolPreparedOutcomeRequirementProvider, AgentMemoryPreparedOutcomeRequirementProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolOutputAuditProjectionProvider, AgentMemoryToolAuditProjectionProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolOutputOutcomeCodeProvider, AgentMemoryToolAuditProjectionProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolModuleSelection, AgentMemoryToolModuleMarker>());
         services.TryAddSingleton<IAgentMemorySecurityArtifactBatchStore, AgentMemorySecurityArtifactBatchStore>();
         services.TryAddSingleton<IAgentMemoryResourceHandleStore, AgentMemoryResourceHandleStore>();
         services.TryAddSingleton<IAgentMemorySourceGrantStore, AgentMemorySourceGrantStore>();
+        services.TryAddSingleton<IAgentMemorySecurityArtifactCoordinator, AgentMemorySecurityArtifactCoordinator>();
         services.TryAddSingleton<AgentMemoryResourceHandleResolver>();
         services.TryAddSingleton<IAgentMemoryResourceHandleResolver>(sp => sp.GetRequiredService<AgentMemoryResourceHandleResolver>());
         services.TryAddSingleton<IAgentMemorySourceGrantResolver>(sp => sp.GetRequiredService<AgentMemoryResourceHandleResolver>());
         services.TryAddSingleton<IAgentMemoryHistoryResourceHandleIssuer, AgentMemoryHistoryResourceHandleIssuer>();
         services.TryAddSingleton<AgentMemoryToolRuntimeBinding>(sp =>
         {
+            var finalRegistrations = sp.GetRequiredService<IServiceCollection>()
+                .Where(item => item.ServiceType == typeof(IAgentMemoryPromotionService))
+                .ToArray();
+            if (finalRegistrations.Length != 1 || finalRegistrations.Any(item => item.Lifetime != ServiceLifetime.Singleton))
+                throw new InvalidOperationException("The finalized Promotion Service registration must be singleton.");
             var service = sp.GetRequiredService<IAgentMemoryPromotionService>();
             if (service is not IAgentMemoryCurationServiceCapabilities capabilities)
                 throw new InvalidOperationException("Selected Promotion Service must expose curation capabilities.");
@@ -51,14 +60,20 @@ public static class AgentMemoryToolServiceCollectionExtensions
 
 internal sealed class AgentMemoryPreparedOutcomeRequirementProvider : IAgentToolPreparedOutcomeRequirementProvider
 {
-    public bool RequiresPreparedOutcome(string toolName)
+    public AgentToolPreparedOutcomeContract? Create(string toolName)
         => toolName is AgentMemoryToolCapabilityIds.BuildPack
             or AgentMemoryToolCapabilityIds.ExpandSource
             or AgentMemoryToolCapabilityIds.CompressHistory
             or AgentMemoryToolCapabilityIds.ExtractCandidates
             or AgentMemoryToolCapabilityIds.PromoteCandidate
             or AgentMemoryToolCapabilityIds.RejectCandidate
-            or AgentMemoryToolCapabilityIds.SupersedeItem;
+            or AgentMemoryToolCapabilityIds.SupersedeItem
+            ? new AgentToolPreparedOutcomeContract
+            {
+                AllowedOutcomeCodes = new HashSet<string>(["completed", "unavailable", "conflict", "redacted", "not-expandable"], StringComparer.Ordinal),
+                MaximumBranches = 5
+            }
+            : null;
 }
 
 internal sealed class AgentMemoryToolModuleMarker : IAgentToolModuleSelection

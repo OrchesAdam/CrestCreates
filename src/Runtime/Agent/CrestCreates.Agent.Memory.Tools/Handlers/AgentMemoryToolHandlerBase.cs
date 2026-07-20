@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Capability.Abstractions;
@@ -48,24 +47,15 @@ internal abstract class AgentMemoryToolHandlerBase
     protected AgentExecutionContext Execution
         => _agentExecution.Current ?? throw new InvalidOperationException("Agent execution context is unavailable.");
 
-    protected static AgentMemorySecurityArtifactBatchKey AgentToolBatchKey(
-        CapabilityExecutionContext context,
-        string purpose,
-        string artifactPlanHash,
-        int ordinal = 0)
+    protected AgentToolInvocationBindingSnapshot InvocationBinding
     {
-        if (!context.Items.TryGetValue(AgentCapabilityContextItemNames.InvocationBindingSnapshot, out var value)
-            || value is not AgentToolInvocationBindingSnapshot binding)
-            throw new InvalidOperationException("Exact invocation binding is unavailable.");
-        return new AgentMemorySecurityArtifactBatchKey
+        get
         {
-            OriginKind = AgentMemorySecurityArtifactBatchOriginKind.AgentToolInvocation,
-            LogicalInvocationKeyHash = ComputeLogicalKeyHash(binding.LogicalKey),
-            InvocationFingerprint = binding.InvocationFingerprint,
-            ArtifactPurpose = purpose,
-            PreparationOrdinal = ordinal,
-            ArtifactPlanHash = artifactPlanHash
-        };
+            if (!Context.Items.TryGetValue(AgentCapabilityContextItemNames.InvocationBindingSnapshot, out var value)
+            || value is not AgentToolInvocationBindingSnapshot binding)
+                throw new InvalidOperationException("Exact invocation binding is unavailable.");
+            return binding;
+        }
     }
 
     protected static AgentMemoryToolDiagnosticDto Diagnostic(string code, AgentMemoryToolDiagnosticSeverity severity = AgentMemoryToolDiagnosticSeverity.Warning)
@@ -86,33 +76,8 @@ internal abstract class AgentMemoryToolHandlerBase
             && scope.MaxGrantsPerInvocation > 0
             && scope.MaxResourceHandlesPerInvocation > 0
             && scope.MaxActiveResourceHandlesPerResource > 0
-            && scope.MaxAuditFacts > 0
+            && scope.MaxAuditFacts >= 2
             && scope.MaxTagsPerResource > 0;
-
-    /// <summary>
-    /// Rolls back only artifacts created by this preparation. A retry may have
-    /// reused an existing active handle/grant; revoking that artifact would
-    /// invalidate a result already published to another invocation.
-    /// </summary>
-    protected static async ValueTask RevokeCreatedArtifactsAsync(
-        IAgentMemoryResourceHandleStore handles,
-        AgentMemoryResourceHandleIssueResult? handleResult,
-        IAgentMemorySourceGrantStore grants,
-        AgentMemoryGrantIssueResult? grantResult,
-        CancellationToken cancellationToken = default)
-    {
-        if (handleResult is { ReusedExisting: false })
-        {
-            foreach (var handle in handleResult.Handles)
-                await handles.RevokeAsync(handle.HandleId, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (grantResult is { ReusedExisting: false })
-        {
-            foreach (var grant in grantResult.Grants)
-                await grants.RevokeAsync(grant.GrantId, cancellationToken).ConfigureAwait(false);
-        }
-    }
 
     protected static bool IsTrustedSourceRefSubset(
         IReadOnlyList<AgentContextSourceRef> produced,
@@ -165,6 +130,7 @@ internal abstract class AgentMemoryToolHandlerBase
             new AgentToolAuditFact { Code = "memory.scope-fingerprint", Value = scopeFingerprint, Kind = AgentToolAuditFactKind.BranchInvariant },
             new AgentToolAuditFact { Code = "memory.operation", Value = operation, Kind = AgentToolAuditFactKind.BranchInvariant }
         ], scope.MaxAuditFacts);
+        Context.Items[AgentCapabilityContextItemNames.AuditFactMaximum] = scope.MaxAuditFacts;
         Context.Items[AgentCapabilityContextItemNames.BranchInvariantFactsPrepared] = true;
     }
 
@@ -205,10 +171,14 @@ internal abstract class AgentMemoryToolHandlerBase
             receipts[index] = new AgentToolPreparedOutcomeReceipt
             {
                 OutcomeCode = outcome.OutcomeCode,
-                Receipt = outcome.Prepared.Receipt,
-                InternalFacts = outcome.Prepared.ProjectedOutputFacts
+                Receipt = outcome.Prepared.Receipt
             };
         }
+
+        if (Context.Items.TryGetValue(AgentCapabilityContextItemNames.AuditFactMaximum, out var maximumValue)
+            && maximumValue is int maximum
+            && outcomes.Any(item => item.Prepared.ProjectedOutputFacts.Count + 2 > maximum))
+            throw new InvalidOperationException("Prepared output facts exceed the trusted audit fact limit.");
 
         Context.Items[AgentCapabilityContextItemNames.RequiresOutputPreflightReceipt] = true;
         sink.PublishAllowedOutcomes(receipts);
@@ -218,27 +188,19 @@ internal abstract class AgentMemoryToolHandlerBase
         AgentMemoryToolAccessScope scope,
         string operation,
         string outcomeCode,
-        TOutput output,
-        JsonTypeInfo<TOutput> typeInfo)
+        TOutput output)
     {
         AddBranchInvariantFacts(scope, operation);
-        PublishAllowedOutcomes((outcomeCode, PrepareOutput(output, typeInfo)));
+        PublishAllowedOutcomes((outcomeCode, PrepareOutput(output)));
         return output;
     }
 
-    protected AgentToolPreparedOutput<TOutput> PrepareOutput<TOutput>(
-        TOutput output,
-        JsonTypeInfo<TOutput> typeInfo)
+    protected AgentToolPreparedOutput<TOutput> PrepareOutput<TOutput>(TOutput output)
     {
         if (!Context.Items.TryGetValue(AgentCapabilityContextItemNames.OutputPreflightRuntime, out var value)
             || value is not IAgentToolOutputPreflightRuntime runtime)
             throw new InvalidOperationException("The shared output preflight runtime is unavailable.");
-        return runtime.Prepare(output, typeInfo);
+        return runtime.Prepare(output);
     }
 
-    private static string ComputeLogicalKeyHash(AgentToolLogicalInvocationKey key)
-    {
-        var value = $"agent-tool-logical-key-v1|{key.TenantId}|{key.UserId}|{key.AgentId}|{key.ExecutionId}|{key.InvocationId}";
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
-    }
 }

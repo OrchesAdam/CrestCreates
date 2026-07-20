@@ -10,9 +10,8 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
 {
     private readonly IAgentMemoryToolAccessScopeProvider _scopeProvider;
     private readonly IAgentMemoryHistoryAccessAuthorizer _authorizer;
-    private readonly IAgentMemoryResourceHandleStore _handles;
     private readonly IAgentMemoryResourceHandleResolver _handleResolver;
-    private readonly IAgentMemorySourceGrantStore _grants;
+    private readonly IAgentMemorySecurityArtifactCoordinator _artifacts;
     private readonly IAgentConversationStore _conversations;
     private readonly IAgentTaskHistoryStore _tasks;
     private readonly IAgentContextCompressor _compressor;
@@ -26,9 +25,8 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
         IAgentExecutionContextAccessor agentExecution,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
         IAgentMemoryHistoryAccessAuthorizer authorizer,
-        IAgentMemoryResourceHandleStore handles,
         IAgentMemoryResourceHandleResolver handleResolver,
-        IAgentMemorySourceGrantStore grants,
+        IAgentMemorySecurityArtifactCoordinator artifacts,
         IAgentConversationStore conversations,
         IAgentTaskHistoryStore tasks,
         IAgentContextCompressor compressor,
@@ -38,7 +36,7 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
         TimeProvider time)
         : base(capabilityContext, agentExecution)
     {
-        _scopeProvider = scopeProvider; _authorizer = authorizer; _handles = handles; _grants = grants;
+        _scopeProvider = scopeProvider; _authorizer = authorizer; _artifacts = artifacts;
         _handleResolver = handleResolver;
         _conversations = conversations; _tasks = tasks; _compressor = compressor; _contexts = contexts;
         _sanitizer = sanitizer; _ids = ids; _time = time;
@@ -48,18 +46,18 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
     {
         var principal = Principal;
         var scope = await _scopeProvider.ResolveAsync(principal, ct).ConfigureAwait(false);
-        if (!IsValidScope(scope)) return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("scope-invalid"), AgentMemoryToolJsonSerializerContext.Default.CompressAgentHistoryResult);
+        if (!IsValidScope(scope)) return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("scope-invalid"));
         var resolvedHistory = await _handleResolver.ResolveAsync(input.HistorySourceHandle, AgentMemoryResourceKind.ConversationHistory, principal, scope, ct).ConfigureAwait(false)
             ?? await _handleResolver.ResolveAsync(input.HistorySourceHandle, AgentMemoryResourceKind.TaskHistory, principal, scope, ct).ConfigureAwait(false);
         var history = resolvedHistory?.Handle;
         if (history is null)
-            return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("history-unavailable"), AgentMemoryToolJsonSerializerContext.Default.CompressAgentHistoryResult);
+            return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("history-unavailable"));
         var sourceKind = history.ResourceKind == AgentMemoryResourceKind.ConversationHistory
             ? AgentMemoryHistorySourceKind.Conversation : history.ResourceKind == AgentMemoryResourceKind.TaskHistory
                 ? AgentMemoryHistorySourceKind.Task : AgentMemoryHistorySourceKind.Unknown;
         if (sourceKind == AgentMemoryHistorySourceKind.Unknown
             || !await _authorizer.IsAuthorizedAsync(principal, scope, sourceKind, history.ResourceId, ct).ConfigureAwait(false))
-            return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("history-unavailable"), AgentMemoryToolJsonSerializerContext.Default.CompressAgentHistoryResult);
+            return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("history-unavailable"));
 
         AgentCompressedContext context;
         IReadOnlyList<AgentContextSourceRef> allowedSourceRefs;
@@ -67,7 +65,7 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
         if (sourceKind == AgentMemoryHistorySourceKind.Conversation)
         {
             var conversation = await _conversations.GetConversationAsync(principal.TenantId, history.ResourceId, ct).ConfigureAwait(false);
-            if (conversation is null) return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("history-unavailable"), AgentMemoryToolJsonSerializerContext.Default.CompressAgentHistoryResult);
+            if (conversation is null) return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("history-unavailable"));
             allowedSourceRefs = conversation.Turns.SelectMany((turn, index) =>
                 turn.SourceRefs.Count > 0
                     ? turn.SourceRefs
@@ -83,7 +81,7 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
         else
         {
             var task = await _tasks.GetTaskAsync(principal.TenantId, history.ResourceId, ct).ConfigureAwait(false);
-            if (task is null) return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("history-unavailable"), AgentMemoryToolJsonSerializerContext.Default.CompressAgentHistoryResult);
+            if (task is null) return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("history-unavailable"));
             allowedSourceRefs =
             [
                 new AgentContextSourceRef
@@ -109,7 +107,7 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
                 || block.SourceRefs.Count > scope.MaxSourceRefsPerArtifact
                 || !string.Equals(block.TenantId, principal.TenantId, StringComparison.Ordinal)
                 || !IsTrustedSourceRefSubset(block.SourceRefs, allowedSourceRefs)))
-            return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("result-invalid"), AgentMemoryToolJsonSerializerContext.Default.CompressAgentHistoryResult);
+            return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("result-invalid"));
 
         // Provider labels are request-local only. Normalize the complete graph
         // to framework identities and recompute hashes from final sanitized
@@ -119,7 +117,7 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
         {
             var sanitized = _sanitizer.Sanitize(principal.TenantId, block.Content, block.SourceRefs);
             if (sanitized.Rejected)
-                return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("result-invalid"), AgentMemoryToolJsonSerializerContext.Default.CompressAgentHistoryResult);
+                return PrepareOutcome(scope, "compress-agent-history", "unavailable", Unavailable("result-invalid"));
             normalizedBlocks.Add(block with
             {
                 BlockId = _ids.CreateBlockId(),
@@ -148,24 +146,19 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
             IsUnscoped = sourceRef.DescriptorRefs.Count == 0, IssuingInvocationId = principal.ExecutionId,
             IssuedAt = now, ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
         })).ToArray();
-        var artifactPlanHash = AgentMemoryArtifactPlanProjector.Compute(principal, scope, "compressed-context", [contextHandle], grantInputs);
-        AgentMemoryResourceHandleIssueResult? issuedContext = null;
-        AgentMemoryGrantIssueResult? grantResult = null;
+        AgentMemoryPreparedSecurityArtifacts? prepared = null;
         try
         {
-            issuedContext = await _handles.TryIssueBatchAsync(
-                AgentToolBatchKey(Context, "compressed-context-handle", artifactPlanHash), [contextHandle],
-                scope.MaxActiveResourceHandlesPerResource, scope.MaxResourceHandlesPerInvocation, ct).ConfigureAwait(false);
-            grantResult = grantInputs.Length == 0 ? null
-                : await _grants.TryIssueBatchAsync(AgentToolBatchKey(Context, "compressed-context-grants", artifactPlanHash), grantInputs, scope.MaxGrantsPerResource, scope.MaxGrantsPerInvocation, ct).ConfigureAwait(false);
+            prepared = await _artifacts.PrepareForAgentToolAsync(
+                InvocationBinding, principal, scope, "compressed-context", 0, [contextHandle], grantInputs, ct).ConfigureAwait(false);
         }
-        catch
-        {
-            await RevokeCreatedArtifactsAsync(_handles, issuedContext, _grants, grantResult, CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
+        catch { throw; }
         try
         {
+            var issuedContext = prepared.Handles;
+            var grantResult = prepared.Grants;
+            if (issuedContext is null || issuedContext.Handles.Count != 1)
+                throw new InvalidOperationException("Compressed context handle preparation returned an invalid result.");
             var grants = grantResult?.Grants.ToArray() ?? Array.Empty<AgentMemorySourceGrant>();
             var grantsBySource = grants.ToLookup(item => item.SourceRef, AgentContextSourceRefCanonicalComparer.Instance);
             var result = new CompressAgentHistoryResult
@@ -187,13 +180,13 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
             Diagnostics = Array.Empty<AgentMemoryToolDiagnosticDto>()
             };
             AddBranchInvariantFacts(scope, "compress-agent-history");
-            PublishAllowedOutcomes(("completed", PrepareOutput(result, AgentMemoryToolJsonSerializerContext.Default.CompressAgentHistoryResult)));
-            await _contexts.SaveCompressedContextAsync(context, ct).ConfigureAwait(false);
+            PublishAllowedOutcomes(("completed", PrepareOutput(result)));
+            await _contexts.CreateCompressedContextAsync(context, ct).ConfigureAwait(false);
             return result;
         }
         catch
         {
-            await RevokeCreatedArtifactsAsync(_handles, issuedContext, _grants, grantResult, CancellationToken.None).ConfigureAwait(false);
+            await _artifacts.RevokeCreatedAsync(prepared, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }

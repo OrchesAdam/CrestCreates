@@ -10,9 +10,8 @@ namespace CrestCreates.Agent.Memory.Tools;
 internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, ICapabilityHandler<SupersedeMemoryItemInput, SupersedeMemoryItemResult>
 {
     private readonly IAgentMemoryToolAccessScopeProvider _scopeProvider;
-    private readonly IAgentMemoryResourceHandleStore _handles;
     private readonly IAgentMemoryResourceHandleResolver _handleResolver;
-    private readonly IAgentMemorySourceGrantStore _grants;
+    private readonly IAgentMemorySecurityArtifactCoordinator _artifacts;
     private readonly IAgentMemoryPromotionService _promotion;
     private readonly IAgentMemoryArtifactIdGenerator _ids;
     private readonly AgentMemoryCanonicalHashProjector _hashes;
@@ -22,26 +21,25 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
         ICapabilityExecutionContextAccessor capabilityContext,
         IAgentExecutionContextAccessor agentExecution,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
-        IAgentMemoryResourceHandleStore handles,
         IAgentMemoryResourceHandleResolver handleResolver,
-        IAgentMemorySourceGrantStore grants,
+        IAgentMemorySecurityArtifactCoordinator artifacts,
         AgentMemoryToolRuntimeBinding runtimeBinding,
         IAgentMemoryArtifactIdGenerator ids,
         AgentMemoryCanonicalHashProjector hashes,
         TimeProvider time)
         : base(capabilityContext, agentExecution)
-    { _scopeProvider = scopeProvider; _handles = handles; _handleResolver = handleResolver; _grants = grants; _promotion = runtimeBinding.PromotionService; _ids = ids; _hashes = hashes; _time = time; }
+    { _scopeProvider = scopeProvider; _handleResolver = handleResolver; _artifacts = artifacts; _promotion = runtimeBinding.PromotionService; _ids = ids; _hashes = hashes; _time = time; }
 
     public async Task<SupersedeMemoryItemResult> ExecuteAsync(SupersedeMemoryItemInput input, CancellationToken ct)
     {
         var principal = Principal;
         var scope = await _scopeProvider.ResolveAsync(principal, ct).ConfigureAwait(false);
-        if (!IsValidScope(scope)) return PrepareOutcome(scope, "supersede-memory-item", "unavailable", Unavailable("scope-invalid"), AgentMemoryToolJsonSerializerContext.Default.SupersedeMemoryItemResult);
+        if (!IsValidScope(scope)) return PrepareOutcome(scope, "supersede-memory-item", "unavailable", Unavailable("scope-invalid"));
         var targetResolved = await _handleResolver.ResolveAsync(input.MemoryHandle, AgentMemoryResourceKind.Memory, principal, scope, ct).ConfigureAwait(false);
         var replacementResolved = await _handleResolver.ResolveAsync(input.ReplacementCandidateHandle, AgentMemoryResourceKind.Candidate, principal, scope, ct).ConfigureAwait(false);
         if (targetResolved?.Resource is not AgentMemoryItem target || replacementResolved?.Resource is not AgentMemoryCandidate replacement)
-            return PrepareOutcome(scope, "supersede-memory-item", "unavailable", Unavailable("resource-unavailable"), AgentMemoryToolJsonSerializerContext.Default.SupersedeMemoryItemResult);
-        if (target.Status != AgentMemoryStatus.Active || replacement.Status != AgentMemoryStatus.Candidate) return PrepareOutcome(scope, "supersede-memory-item", "conflict", Conflict("lifecycle-conflict"), AgentMemoryToolJsonSerializerContext.Default.SupersedeMemoryItemResult);
+            return PrepareOutcome(scope, "supersede-memory-item", "unavailable", Unavailable("resource-unavailable"));
+        if (target.Status != AgentMemoryStatus.Active || replacement.Status != AgentMemoryStatus.Candidate) return PrepareOutcome(scope, "supersede-memory-item", "conflict", Conflict("lifecycle-conflict"));
         var newMemoryId = _ids.CreateMemoryId();
         var now = _time.GetUtcNow();
         var newHandle = new AgentMemoryResourceHandle
@@ -51,7 +49,7 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
             RequiredDescriptorRefs = EffectiveDescriptorRefs(replacement), IsUnscoped = EffectiveDescriptorRefs(replacement).Count == 0,
             IssuingInvocationId = principal.ExecutionId, IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime)
         };
-        AgentMemoryResourceHandleIssueResult? prepared = null;
+        AgentMemoryPreparedSecurityArtifacts? prepared = null;
         var grantInputs = replacement.SourceRefs.Select(source => new AgentMemorySourceGrant
         {
             GrantId = AgentMemorySecurityArtifactIdGenerator.Create("grt"), SourceRef = source, Principal = principal,
@@ -59,47 +57,41 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
             IsUnscoped = EffectiveDescriptorRefs(replacement).Count == 0 && source.DescriptorRefs.Count == 0,
             IssuingInvocationId = principal.ExecutionId, IssuedAt = now, ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
         }).ToArray();
-        var planHash = AgentMemoryArtifactPlanProjector.Compute(principal, scope, "supersede-memory", [newHandle], grantInputs);
-        AgentMemoryGrantIssueResult? grantResult = null;
         try
         {
-            prepared = await _handles.TryIssueBatchAsync(AgentToolBatchKey(Context, "supersede-memory-handle", planHash), [newHandle], scope.MaxActiveResourceHandlesPerResource, scope.MaxResourceHandlesPerInvocation, ct).ConfigureAwait(false);
-            grantResult = grantInputs.Length == 0 ? null
-                : await _grants.TryIssueBatchAsync(AgentToolBatchKey(Context, "supersede-memory-grants", planHash), grantInputs, scope.MaxGrantsPerResource, scope.MaxGrantsPerInvocation, ct).ConfigureAwait(false);
+            prepared = await _artifacts.PrepareForAgentToolAsync(
+                InvocationBinding, principal, scope, "supersede-memory", 0, [newHandle], grantInputs, ct).ConfigureAwait(false);
         }
-        catch
+        catch { throw; }
+        if (prepared.Handles is null || prepared.Handles.Handles.Count != 1)
         {
-            await RevokeCreatedArtifactsAsync(_handles, prepared, _grants, grantResult, CancellationToken.None).ConfigureAwait(false);
-            throw;
-        }
-        if (prepared is null || prepared.Handles.Count != 1)
-        {
-            await RevokeCreatedArtifactsAsync(_handles, prepared, _grants, grantResult, CancellationToken.None).ConfigureAwait(false);
+            await _artifacts.RevokeCreatedAsync(prepared, CancellationToken.None).ConfigureAwait(false);
             throw new InvalidOperationException("Supersession handle preparation returned an invalid result.");
         }
         try
         {
+        var grantResult = prepared.Grants;
         var grants = grantResult?.Grants.ToArray() ?? Array.Empty<AgentMemorySourceGrant>();
         var completed = new SupersedeMemoryItemResult
         {
             OperationStatus = AgentMemoryToolOperationStatus.Completed,
             Item = new AgentMemoryToolItemDto
             {
-                MemoryHandle = prepared!.Handles[0].HandleId, Kind = AgentMemoryToolProjection.ToToolKind(replacement.Kind), Content = replacement.Content,
+                MemoryHandle = prepared!.Handles!.Handles[0].HandleId, Kind = AgentMemoryToolProjection.ToToolKind(replacement.Kind), Content = replacement.Content,
                 CanonicalContentHash = AgentMemoryToolProjection.ToToolHash(replacement.CanonicalContentHash), Confidence = AgentMemoryToolProjection.ToToolConfidence(replacement.Confidence),
                 MemoryStatus = AgentMemoryToolMemoryStatus.Active, IsAuthoritative = false, Tags = replacement.Tags,
                 SourceGrants = grants.Select(grant => new AgentMemorySourceGrantDto { GrantId = grant.GrantId, SourceKind = AgentMemoryToolProjection.ToToolSourceKind(grant.SourceRef.SourceKind), ExpiresAt = grant.ExpiresAt }).ToArray()
             },
-            SupersededMemoryHandle = input.MemoryHandle, ActiveMemoryHandle = prepared!.Handles[0].HandleId,
+                SupersededMemoryHandle = input.MemoryHandle, ActiveMemoryHandle = prepared!.Handles!.Handles[0].HandleId,
             Diagnostics = Array.Empty<AgentMemoryToolDiagnosticDto>()
         };
         var conflict = Conflict("lifecycle-conflict");
         var unavailable = Unavailable("resource-unavailable");
         AddBranchInvariantFacts(scope, "supersede-memory-item");
         PublishAllowedOutcomes(
-            ("completed", PrepareOutput(completed, AgentMemoryToolJsonSerializerContext.Default.SupersedeMemoryItemResult)),
-            ("conflict", PrepareOutput(conflict, AgentMemoryToolJsonSerializerContext.Default.SupersedeMemoryItemResult)),
-            ("unavailable", PrepareOutput(unavailable, AgentMemoryToolJsonSerializerContext.Default.SupersedeMemoryItemResult)));
+            ("completed", PrepareOutput(completed)),
+            ("conflict", PrepareOutput(conflict)),
+            ("unavailable", PrepareOutput(unavailable)));
         AgentMemoryItem memory;
         try
         {
@@ -149,7 +141,7 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
             AgentMemoryOperationFailureCode.StateConflict or
             AgentMemoryOperationFailureCode.IdentityConflict)
         {
-            await RevokeCreatedArtifactsAsync(_handles, prepared, _grants, grantResult, CancellationToken.None).ConfigureAwait(false);
+            await _artifacts.RevokeCreatedAsync(prepared, CancellationToken.None).ConfigureAwait(false);
             return exception.Code == AgentMemoryOperationFailureCode.ResourceUnavailable
                 ? Unavailable("resource-unavailable")
                 : conflict;
@@ -160,7 +152,7 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
             // only artifacts created by this batch; reused artifacts remain
             // valid. A post-commit integrity exception is deliberately
             // rethrown so the Invoker fences the invocation as Indeterminate.
-            await RevokeCreatedArtifactsAsync(_handles, prepared, _grants, grantResult, CancellationToken.None).ConfigureAwait(false);
+            await _artifacts.RevokeCreatedAsync(prepared, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
 
@@ -168,7 +160,7 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
         }
         catch
         {
-            await RevokeCreatedArtifactsAsync(_handles, prepared, _grants, grantResult, CancellationToken.None).ConfigureAwait(false);
+            await _artifacts.RevokeCreatedAsync(prepared, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }
