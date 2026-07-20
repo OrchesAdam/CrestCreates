@@ -2,7 +2,7 @@ namespace CrestCreates.Agent.Tools;
 
 internal interface IAgentToolInvocationFactPreflightState
 {
-    AgentToolInvocationFactSnapshot Capture();
+    AgentToolInvocationFactSnapshot FreezeForPreflight();
 }
 
 internal interface IAgentToolInvocationFactBufferOwner : IAgentToolInvocationFactSink, IAgentToolInvocationFactPreflightState
@@ -15,6 +15,8 @@ internal sealed class AgentToolInvocationFactBuffer : IAgentToolInvocationFactBu
     private readonly object _sync = new();
     private readonly List<AgentToolAuditFact> _facts = new();
     private int _maximum = 64;
+    private AgentToolInvocationFactSnapshot? _preflightSnapshot;
+    private bool _preflightFrozen;
     private bool _sealed;
 
     public void AddTrustedFacts(IReadOnlyList<AgentToolAuditFact> facts, int requestedMaximum)
@@ -22,8 +24,8 @@ internal sealed class AgentToolInvocationFactBuffer : IAgentToolInvocationFactBu
         ArgumentNullException.ThrowIfNull(facts);
         lock (_sync)
         {
-            if (_sealed)
-                throw new InvalidOperationException("Invocation audit facts are already sealed.");
+            if (_sealed || _preflightFrozen)
+                throw new InvalidOperationException("Invocation audit facts are no longer mutable.");
             if (requestedMaximum < 0)
                 throw new ArgumentOutOfRangeException(nameof(requestedMaximum));
             _maximum = Math.Min(_maximum, requestedMaximum);
@@ -52,15 +54,22 @@ internal sealed class AgentToolInvocationFactBuffer : IAgentToolInvocationFactBu
             if (_sealed)
                 throw new InvalidOperationException("Invocation audit facts are already sealed.");
             _sealed = true;
-            return new AgentToolInvocationFactSnapshot(_facts.ToArray(), _maximum);
+            return _preflightSnapshot
+                ?? new AgentToolInvocationFactSnapshot(_facts.ToArray(), _maximum);
         }
     }
 
-    public AgentToolInvocationFactSnapshot Capture()
+    public AgentToolInvocationFactSnapshot FreezeForPreflight()
     {
         lock (_sync)
         {
-            return new AgentToolInvocationFactSnapshot(_facts.ToArray(), _maximum);
+            if (_preflightSnapshot is not null)
+                return _preflightSnapshot;
+            if (_sealed)
+                throw new InvalidOperationException("Invocation audit facts are already sealed.");
+            _preflightFrozen = true;
+            _preflightSnapshot = new AgentToolInvocationFactSnapshot(_facts.ToArray(), _maximum);
+            return _preflightSnapshot;
         }
     }
 }

@@ -38,7 +38,7 @@ internal sealed class AgentToolOutputPreflightReceiptSink : IAgentToolOutputPref
             || item.InternalFacts.Any(fact => fact is null || string.IsNullOrWhiteSpace(fact.Code)
                 || fact.Code.Length > 96 || fact.Value?.Length > 256)))
             throw new ArgumentException("Output preflight branch facts exceed the safe shape.", nameof(outcomes));
-        var factSnapshot = _factState.Capture();
+        var factSnapshot = _factState.FreezeForPreflight();
         var effectiveMaximumFacts = Math.Min(64, Math.Min(factSnapshot.MaximumFacts, _auditContract?.MaximumFacts ?? 64));
         if (outcomes.Any(item => !AgentToolAuditFactValidator.Validate(
                 factSnapshot.Facts.Concat(item.InternalFacts).Concat(item.ProjectedOutputFacts).ToArray(),
