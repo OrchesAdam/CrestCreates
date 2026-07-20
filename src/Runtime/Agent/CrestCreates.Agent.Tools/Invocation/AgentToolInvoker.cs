@@ -468,7 +468,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             var snapshot = factBuffer.Seal();
             facts = snapshot.Facts.Concat(preparedOutputFacts).ToArray();
-            if (!ValidateAuditFacts(
+            if (!AgentToolAuditFactValidator.Validate(
                     facts,
                     Math.Min(64, snapshot.MaximumFacts),
                     entry.OutputAuditProjection))
@@ -565,49 +565,15 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             .ToArray();
         if (matches.Length != 1)
             throw new InvalidOperationException("Final output did not match exactly one preflight receipt.");
-        var projected = entry.OutputAuditProjector?.Invoke(typedOutput) ?? Array.Empty<AgentToolAuditFact>();
+            var projected = entry.OutputAuditProjector?.Invoke(typedOutput) ?? Array.Empty<AgentToolAuditFact>();
+        if (!projected.SequenceEqual(matches[0].ProjectedOutputFacts))
+            throw new InvalidOperationException("Final output audit facts did not match the prepared outcome proof.");
         return matches[0].InternalFacts.Concat(projected).ToArray();
     }
 
     private static string ComputeStructuredOutputHash(JsonElement output)
         => Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(output.GetRawText())))
             .ToLowerInvariant();
-
-    private static bool ValidateAuditFacts(
-        IReadOnlyList<AgentToolAuditFact> facts,
-        int maximum,
-        AgentToolAuditProjectionContract? contract)
-        => facts.Count <= maximum
-            && (contract is null || facts.Count <= contract.MaximumFacts)
-            && facts.All(fact => fact is not null
-                && fact.Kind != AgentToolAuditFactKind.Unknown
-                && !string.IsNullOrWhiteSpace(fact.Code)
-                && fact.Code.Length <= 96
-                && fact.Value?.Length <= 256
-                && TryValidateDefinition(fact, contract))
-            && facts.Select(fact => fact.Code).Distinct(StringComparer.Ordinal).Count() == facts.Count;
-
-    private static bool TryValidateDefinition(AgentToolAuditFact fact, AgentToolAuditProjectionContract? contract)
-    {
-        if (contract is null)
-            return true;
-        var definitions = contract.Definitions
-            .Where(definition => fact.Code.StartsWith(definition.CodePrefix, StringComparison.Ordinal)
-                && fact.Code.EndsWith(definition.CodeSuffix, StringComparison.Ordinal))
-            .ToArray();
-        if (definitions.Length != 1 || definitions[0].Kind != fact.Kind)
-            return false;
-        return definitions[0].ValueEncoding switch
-        {
-            AgentToolAuditFactValueEncoding.Text => !string.IsNullOrWhiteSpace(fact.Value),
-            AgentToolAuditFactValueEncoding.Integer => long.TryParse(fact.Value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _),
-            AgentToolAuditFactValueEncoding.Boolean => string.Equals(fact.Value, "true", StringComparison.Ordinal)
-                || string.Equals(fact.Value, "false", StringComparison.Ordinal),
-            AgentToolAuditFactValueEncoding.Hash => fact.Value is { Length: 64 }
-                && fact.Value.All(Uri.IsHexDigit),
-            _ => false
-        };
-    }
 
     private async ValueTask<AgentToolInvocationOutcome> FinishCompletedAsync(
         AgentToolRuntimeEntry entry,
@@ -1225,6 +1191,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         context.Items[AgentCapabilityContextItemNames.BudgetReservationId] = reservation.ReservationId;
         context.Items[AgentCapabilityContextItemNames.OutputSchemaContractFingerprint] =
             entry.OutputSchemaContractHash ?? entry.ToolContractHash;
+        if (entry.OutputAuditProjection is not null)
+            context.Items[AgentCapabilityContextItemNames.OutputAuditProjectionContract] = entry.OutputAuditProjection;
         if (entry.OutputSchema is not null)
         {
             context.Items[AgentCapabilityContextItemNames.OutputPreflightRuntime] =
@@ -1239,7 +1207,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                     entry.OutputSchema,
                     _schemaRegistry?.GetAll() ?? Array.Empty<SchemaDescriptor>(),
                     _schemas,
-                    entry.OutputAuditProjector);
+                    entry.OutputAuditProjector,
+                    entry.OutputAuditProjection);
         }
         context.Items[AgentCapabilityContextItemNames.InvocationBindingSnapshot] =
             new AgentToolInvocationBindingSnapshot

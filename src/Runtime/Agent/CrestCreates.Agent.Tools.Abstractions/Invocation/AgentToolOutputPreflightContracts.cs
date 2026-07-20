@@ -16,6 +16,7 @@ public sealed record AgentToolPreparedOutcomeReceipt
     public required string OutcomeCode { get; init; }
     public required AgentToolOutputPreflightReceipt Receipt { get; init; }
     public IReadOnlyList<AgentToolAuditFact> InternalFacts { get; init; } = Array.Empty<AgentToolAuditFact>();
+    public IReadOnlyList<AgentToolAuditFact> ProjectedOutputFacts { get; init; } = Array.Empty<AgentToolAuditFact>();
 }
 
 public sealed record AgentToolPreparedOutcomeContract

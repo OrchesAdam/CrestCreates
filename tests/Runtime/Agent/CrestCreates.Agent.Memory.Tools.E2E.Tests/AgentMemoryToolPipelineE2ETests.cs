@@ -104,7 +104,7 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
         expanded.StructuredOutput!.Value.GetProperty("SanitizedContent").GetString().Should().NotContain("adjacent turn");
 
         var historyHandle = await services.GetRequiredService<IAgentMemoryHistoryResourceHandleIssuer>().IssueAsync(
-            new AgentMemoryHostArtifactBatchKey { HostOperationId = "host-history", OperationFingerprint = TestHash("history-plan"), ArtifactPurpose = "history" },
+            new AgentMemoryHostArtifactBatchKey { HostOperationId = "host-history", OperationFingerprint = HostHash("history-plan"), ArtifactPurpose = "history" },
             principal, AgentMemoryHistorySourceKind.Conversation, conversation.ConversationId);
         execution.Set("compress-1");
         var compressed = await InvokeAsync(services, AgentMemoryToolCapabilityIds.CompressHistory, new { HistorySourceHandle = historyHandle });
@@ -117,7 +117,19 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
         var firstCandidate = extracted.StructuredOutput!.Value.GetProperty("Candidates")[0].GetProperty("CandidateHandle").GetString();
         execution.Set("extract-2");
         var extractedAgain = await InvokeAsync(services, AgentMemoryToolCapabilityIds.ExtractCandidates, new { ContextHandle = contextHandle });
-        var replacementCandidate = extractedAgain.StructuredOutput!.Value.GetProperty("Candidates")[0].GetProperty("CandidateHandle").GetString();
+        extractedAgain.IsSuccess.Should().BeTrue(extractedAgain.Message);
+        var rejectedCandidate = extractedAgain.StructuredOutput!.Value.GetProperty("Candidates")[0].GetProperty("CandidateHandle").GetString();
+
+        execution.Set("reject-1");
+        var rejected = await InvokeAsync(services, AgentMemoryToolCapabilityIds.RejectCandidate, new { CandidateHandle = rejectedCandidate, Explanation = "e2e reject" });
+        rejected.IsSuccess.Should().BeTrue(rejected.Message);
+        rejected.StructuredOutput!.Value.GetProperty("OperationStatus").GetString().Should().Be("completed");
+        rejected.StructuredOutput!.Value.GetProperty("CandidateStatus").GetString().Should().Be("rejected");
+
+        execution.Set("extract-3");
+        var extractedForSupersede = await InvokeAsync(services, AgentMemoryToolCapabilityIds.ExtractCandidates, new { ContextHandle = contextHandle });
+        extractedForSupersede.IsSuccess.Should().BeTrue(extractedForSupersede.Message);
+        var replacementCandidate = extractedForSupersede.StructuredOutput!.Value.GetProperty("Candidates")[0].GetProperty("CandidateHandle").GetString();
 
         execution.Set("promote-1");
         var promoted = await InvokeAsync(services, AgentMemoryToolCapabilityIds.PromoteCandidate, new { CandidateHandle = firstCandidate, Explanation = "e2e" });
@@ -173,6 +185,13 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
         Value = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant(), Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
         ArtifactKind = "test", Scope = "TenantVisible", Purpose = "Test",
         ContractVersion = "test-v1", CanonicalShapeVersion = "test-v1"
+    };
+
+    private static CanonicalHash HostHash(string value) => new()
+    {
+        Value = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant(), Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+        ArtifactKind = "agent-memory-host-operation", Scope = "TenantVisible", Purpose = "HostOperation",
+        ContractVersion = "memory-security-artifact-v2", CanonicalShapeVersion = "agent-memory-host-operation-v1"
     };
 
     private sealed class FixtureScopeProvider : IAgentMemoryToolAccessScopeProvider

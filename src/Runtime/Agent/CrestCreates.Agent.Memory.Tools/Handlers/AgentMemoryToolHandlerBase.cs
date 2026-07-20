@@ -74,7 +74,7 @@ internal abstract class AgentMemoryToolHandlerBase
             && scope.MaxGrantsPerInvocation > 0
             && scope.MaxResourceHandlesPerInvocation > 0
             && scope.MaxActiveResourceHandlesPerResource > 0
-            && scope.MaxAuditFacts >= 2
+            && scope.MaxAuditFacts is >= 2 and <= 64
             && scope.MaxTagsPerResource > 0;
 
     protected static bool IsTrustedSourceRefSubset(
@@ -162,13 +162,17 @@ internal abstract class AgentMemoryToolHandlerBase
             receipts[index] = new AgentToolPreparedOutcomeReceipt
             {
                 OutcomeCode = outcome.OutcomeCode,
-                Receipt = outcome.Prepared.Receipt
+                Receipt = outcome.Prepared.Receipt,
+                ProjectedOutputFacts = outcome.Prepared.ProjectedOutputFacts.ToArray()
             };
         }
 
         if (Context.Items.TryGetValue(AgentCapabilityContextItemNames.AuditFactMaximum, out var maximumValue)
             && maximumValue is int maximum
-            && outcomes.Any(item => item.Prepared.ProjectedOutputFacts.Count + 2 > maximum))
+            && Context.Items.TryGetValue(AgentCapabilityContextItemNames.OutputAuditProjectionContract, out var auditContractValue)
+            && auditContractValue is AgentToolAuditProjectionContract auditContract
+            && outcomes.Any(item => item.Prepared.ProjectedOutputFacts.Count + 2
+                > Math.Min(64, Math.Min(maximum, auditContract.MaximumFacts))))
             throw new InvalidOperationException("Prepared output facts exceed the trusted audit fact limit.");
 
         Context.Items[AgentCapabilityContextItemNames.RequiresOutputPreflightReceipt] = true;

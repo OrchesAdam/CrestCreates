@@ -143,7 +143,7 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
         {
             await _artifacts.RevokeCreatedAsync(prepared, CancellationToken.None).ConfigureAwait(false);
             return exception.Code == AgentMemoryOperationFailureCode.ResourceUnavailable
-                ? Unavailable("resource-unavailable")
+                ? unavailable
                 : conflict;
         }
         catch

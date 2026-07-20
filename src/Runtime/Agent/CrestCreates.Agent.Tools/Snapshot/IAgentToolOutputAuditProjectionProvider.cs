@@ -23,8 +23,18 @@ public sealed record AgentToolAuditFactDefinition
 {
     public required string CodePrefix { get; init; }
     public string CodeSuffix { get; init; } = string.Empty;
+    public AgentToolAuditFactMatchKind MatchKind { get; init; } = AgentToolAuditFactMatchKind.Exact;
+    public int MaximumIndex { get; init; } = 64;
+    public IReadOnlySet<string>? AllowedValues { get; init; }
     public required AgentToolAuditFactKind Kind { get; init; }
     public AgentToolAuditFactValueEncoding ValueEncoding { get; init; } = AgentToolAuditFactValueEncoding.Text;
+}
+
+public enum AgentToolAuditFactMatchKind
+{
+    Unknown = 0,
+    Exact = 1,
+    Indexed = 2
 }
 
 public sealed record AgentToolAuditProjectionContract

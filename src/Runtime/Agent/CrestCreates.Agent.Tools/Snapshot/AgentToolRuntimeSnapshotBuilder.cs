@@ -203,7 +203,11 @@ public sealed class AgentToolRuntimeSnapshotBuilder
                 || rawAuditContract.Definitions.Count == 0
                 || rawAuditContract.Definitions.Any(definition => string.IsNullOrWhiteSpace(definition.CodePrefix)
                     || definition.Kind == AgentToolAuditFactKind.Unknown
-                    || definition.ValueEncoding == AgentToolAuditFactValueEncoding.Unknown)))
+                    || definition.ValueEncoding == AgentToolAuditFactValueEncoding.Unknown
+                    || definition.MatchKind == AgentToolAuditFactMatchKind.Unknown
+                    || (definition.MatchKind == AgentToolAuditFactMatchKind.Exact && definition.CodeSuffix.Length != 0)
+                    || (definition.AllowedValues is not null && definition.AllowedValues.Count == 0)
+                    || (definition.MatchKind == AgentToolAuditFactMatchKind.Indexed && definition.MaximumIndex <= 0))))
             throw new AgentToolConfigurationException(
                 AgentToolStartupDiagnosticCodes.InvalidDescriptorContract,
                 $"Output audit contract for '{tool.ToolName}' is invalid.");
@@ -211,7 +215,12 @@ public sealed class AgentToolRuntimeSnapshotBuilder
             ? null
             : rawAuditContract with
             {
-                Definitions = rawAuditContract.Definitions.ToArray()
+                Definitions = rawAuditContract.Definitions
+                    .Select(definition => definition with
+                    {
+                        AllowedValues = definition.AllowedValues?.ToFrozenSet(StringComparer.Ordinal)
+                    })
+                    .ToArray()
             };
         var outcomeProjectors = _outcomeCodeProviders
             .Select(provider => provider.CreateOutcomeCode(tool.ToolName, contract.OutputType ?? typeof(object)))

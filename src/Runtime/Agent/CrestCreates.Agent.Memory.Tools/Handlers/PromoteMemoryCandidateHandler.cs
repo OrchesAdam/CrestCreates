@@ -131,7 +131,7 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
             // Resource disappearance is a confirmed zero-write unavailable
             // branch; lifecycle/expectation races are normal Conflict.
             return exception.Code == AgentMemoryOperationFailureCode.ResourceUnavailable
-                ? Unavailable("candidate-unavailable")
+                ? unavailable
                 : conflict;
         }
         // The envelope was preflighted before the mutation. Do not construct a

@@ -32,7 +32,8 @@ internal sealed class AgentToolOutputPreflightReceiptSink : IAgentToolOutputPref
         _outcomes = outcomes.Select(item => item with
         {
             Receipt = item.Receipt with { },
-            InternalFacts = item.InternalFacts?.Select(fact => fact with { }).ToArray() ?? Array.Empty<AgentToolAuditFact>()
+            InternalFacts = item.InternalFacts?.Select(fact => fact with { }).ToArray() ?? Array.Empty<AgentToolAuditFact>(),
+            ProjectedOutputFacts = item.ProjectedOutputFacts?.Select(fact => fact with { }).ToArray() ?? Array.Empty<AgentToolAuditFact>()
         }).ToArray();
     }
 

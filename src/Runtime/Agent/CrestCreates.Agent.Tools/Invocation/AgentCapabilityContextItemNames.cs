@@ -23,4 +23,5 @@ public static class AgentCapabilityContextItemNames
     public const string BranchInvariantFactsPrepared = "AgentTool.BranchInvariantFactsPrepared";
     public const string RequiresOutputPreflightReceipt = "AgentTool.RequiresOutputPreflightReceipt";
     public const string AuditFactMaximum = "AgentTool.AuditFactMaximum";
+    public const string OutputAuditProjectionContract = "AgentTool.OutputAuditProjectionContract";
 }

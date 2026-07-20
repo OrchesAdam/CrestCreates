@@ -89,7 +89,7 @@ internal static class MemoryToolFixtureRunner
             var expanded = await InvokeAsync(services, AgentMemoryToolCapabilityIds.ExpandSource, new ExpandInput { GrantId = grant!, MaximumCharacters = 1024 }, FixtureJsonContext.Default.ExpandInput);
             if (!expanded.IsSuccess || expanded.StructuredOutput!.Value.GetProperty("SanitizedContent").GetString()?.Contains("adjacent", StringComparison.Ordinal) == true) return 3;
             var historyHandle = await services.GetRequiredService<IAgentMemoryHistoryResourceHandleIssuer>().IssueAsync(
-                new AgentMemoryHostArtifactBatchKey { HostOperationId = "aot-history", OperationFingerprint = TestHash("aot-history-plan"), ArtifactPurpose = "history" },
+                new AgentMemoryHostArtifactBatchKey { HostOperationId = "aot-history", OperationFingerprint = HostHash("aot-history-plan"), ArtifactPurpose = "history" },
                 principal, AgentMemoryHistorySourceKind.Conversation, conversation.ConversationId);
             execution.Set("aot-compress");
             var compressed = await InvokeAsync(services, AgentMemoryToolCapabilityIds.CompressHistory, new HistoryInput { HistorySourceHandle = historyHandle }, FixtureJsonContext.Default.HistoryInput);
@@ -132,6 +132,13 @@ internal static class MemoryToolFixtureRunner
         Value = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant(), Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
         ArtifactKind = "test", Scope = "TenantVisible", Purpose = "Test",
         ContractVersion = "test-v1", CanonicalShapeVersion = "test-v1"
+    };
+
+    private static CanonicalHash HostHash(string value) => new()
+    {
+        Value = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant(), Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+        ArtifactKind = "agent-memory-host-operation", Scope = "TenantVisible", Purpose = "HostOperation",
+        ContractVersion = "memory-security-artifact-v2", CanonicalShapeVersion = "agent-memory-host-operation-v1"
     };
 }
 

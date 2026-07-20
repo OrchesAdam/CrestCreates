@@ -95,6 +95,7 @@ internal sealed class AgentMemorySecurityArtifactCoordinator : IAgentMemorySecur
         if (handles.Count == 0)
             throw new InvalidOperationException("A Host artifact preparation requires at least one resource handle.");
         ValidateHostFingerprint(hostBatchKey.OperationFingerprint);
+        ValidateHostRequest(hostBatchKey, principal, scope, sourceKind, sourceId, handles, grants);
         var batch = AgentMemoryHostArtifactBatchProjector.Create(
             hostBatchKey, principal, scope, sourceKind, sourceId, handles, grants);
         AgentMemoryResourceHandleIssueResult? handleResult = null;
@@ -180,11 +181,46 @@ internal sealed class AgentMemorySecurityArtifactCoordinator : IAgentMemorySecur
             || fingerprint.Value.Length != 64
             || !fingerprint.Value.All(Uri.IsHexDigit)
             || !string.Equals(fingerprint.Algorithm, "SHA-256", StringComparison.Ordinal)
-            || string.IsNullOrWhiteSpace(fingerprint.AlgorithmVersion)
-            || string.IsNullOrWhiteSpace(fingerprint.ArtifactKind)
-            || string.IsNullOrWhiteSpace(fingerprint.Purpose)
-            || string.IsNullOrWhiteSpace(fingerprint.ContractVersion)
-            || string.IsNullOrWhiteSpace(fingerprint.CanonicalShapeVersion))
+            || !string.Equals(fingerprint.AlgorithmVersion, "sha256-canonical-json-v1", StringComparison.Ordinal)
+            || !string.Equals(fingerprint.ArtifactKind, "agent-memory-host-operation", StringComparison.Ordinal)
+            || !string.Equals(fingerprint.Purpose, "HostOperation", StringComparison.Ordinal)
+            || !string.Equals(fingerprint.ContractVersion, "memory-security-artifact-v2", StringComparison.Ordinal)
+            || !string.Equals(fingerprint.CanonicalShapeVersion, "agent-memory-host-operation-v1", StringComparison.Ordinal))
             throw new InvalidOperationException("Host operation fingerprint does not match the canonical hash profile.");
+    }
+
+    private static void ValidateHostRequest(
+        AgentMemoryHostArtifactBatchKey hostBatchKey,
+        AgentMemoryToolPrincipal principal,
+        AgentMemoryToolAccessScope scope,
+        AgentMemoryHistorySourceKind sourceKind,
+        string sourceId,
+        IReadOnlyList<AgentMemoryResourceHandle> handles,
+        IReadOnlyList<AgentMemorySourceGrant> grants)
+    {
+        var expectedKind = sourceKind == AgentMemoryHistorySourceKind.Conversation
+            ? AgentMemoryResourceKind.ConversationHistory
+            : AgentMemoryResourceKind.TaskHistory;
+        var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal);
+        if (handles.Any(handle => handle.ResourceKind != expectedKind
+            || !string.Equals(handle.ResourceId, sourceId, StringComparison.Ordinal)
+            || handle.Principal != principal
+            || !string.Equals(handle.ScopeFingerprint, scopeFingerprint, StringComparison.Ordinal)
+            || !string.Equals(handle.IssuingInvocationId, hostBatchKey.HostOperationId, StringComparison.Ordinal)
+            || handle.RequiredDescriptorRefs.Count != 0
+            || handle.IsUnscoped
+            || handle.ExpiresAt <= handle.IssuedAt))
+            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.StateConflict, "Host handle preparation is inconsistent with the trusted history request.");
+
+        var expectedSourceKind = sourceKind == AgentMemoryHistorySourceKind.Conversation
+            ? AgentSourceKind.ConversationTurn
+            : AgentSourceKind.TaskRecord;
+        if (grants.Any(grant => grant.Principal != principal
+            || !string.Equals(grant.SourceRef.TenantId, principal.TenantId, StringComparison.Ordinal)
+            || grant.SourceRef.SourceKind != expectedSourceKind
+            || !string.Equals(grant.SourceRef.SourceId, sourceId, StringComparison.Ordinal)
+            || !string.Equals(grant.ScopeFingerprint, scopeFingerprint, StringComparison.Ordinal)
+            || grant.ExpiresAt <= grant.IssuedAt))
+            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.StateConflict, "Host grant preparation is inconsistent with the trusted history request.");
     }
 }

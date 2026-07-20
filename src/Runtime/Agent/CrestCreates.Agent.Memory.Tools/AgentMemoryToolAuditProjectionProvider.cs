@@ -7,6 +7,13 @@ internal sealed class AgentMemoryToolAuditProjectionProvider :
     IAgentToolOutputOutcomeCodeProvider,
     IAgentToolOutputAuditProjectionContractProvider
 {
+    private static readonly IReadOnlySet<string> OperationStatuses =
+        new HashSet<string>(["completed", "unavailable", "conflict", "redacted", "not-expandable"], StringComparer.Ordinal);
+    private static readonly IReadOnlySet<string> MemoryStatuses =
+        new HashSet<string>(["active", "superseded", "archived"], StringComparer.Ordinal);
+    private static readonly IReadOnlySet<string> CandidateStatuses =
+        new HashSet<string>(["candidate", "active", "rejected"], StringComparer.Ordinal);
+
     public AgentToolAuditProjectionContract? CreateContract(string toolName, Type outputType)
         => IsKnown(toolName, outputType)
             ? new AgentToolAuditProjectionContract
@@ -16,18 +23,19 @@ internal sealed class AgentMemoryToolAuditProjectionProvider :
                 [
                     new() { CodePrefix = "memory.scope-fingerprint", Kind = AgentToolAuditFactKind.BranchInvariant, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
                     new() { CodePrefix = "memory.operation", Kind = AgentToolAuditFactKind.BranchInvariant, ValueEncoding = AgentToolAuditFactValueEncoding.Text },
-                    new() { CodePrefix = "output.operation-status", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Text },
+                    new() { CodePrefix = "output.operation-status", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Text, AllowedValues = OperationStatuses },
                     new() { CodePrefix = "output.returned-count", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Integer },
                     new() { CodePrefix = "output.block-count", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Integer },
                     new() { CodePrefix = "output.candidate-count", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Integer },
+                    new() { CodePrefix = "output.candidate-status", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Text, AllowedValues = CandidateStatuses },
                     new() { CodePrefix = "output.was-truncated", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Boolean },
-                    new() { CodePrefix = "output.items[", CodeSuffix = "].memory-status", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Text },
-                    new() { CodePrefix = "output.items[", CodeSuffix = "].canonical-content-hash", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
-                    new() { CodePrefix = "output.candidates[", CodeSuffix = "].candidate-status", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Text },
-                    new() { CodePrefix = "output.candidates[", CodeSuffix = "].canonical-content-hash", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
-                    new() { CodePrefix = "output.blocks[", CodeSuffix = "].canonical-content-hash", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
-                    new() { CodePrefix = "output.item.", CodeSuffix = ".memory-status", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Text },
-                    new() { CodePrefix = "output.item.", CodeSuffix = ".canonical-content-hash", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
+                    new() { CodePrefix = "output.items[", CodeSuffix = "].memory-status", MatchKind = AgentToolAuditFactMatchKind.Indexed, MaximumIndex = 64, Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Text, AllowedValues = MemoryStatuses },
+                    new() { CodePrefix = "output.items[", CodeSuffix = "].canonical-content-hash", MatchKind = AgentToolAuditFactMatchKind.Indexed, MaximumIndex = 64, Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
+                    new() { CodePrefix = "output.candidates[", CodeSuffix = "].candidate-status", MatchKind = AgentToolAuditFactMatchKind.Indexed, MaximumIndex = 64, Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Text, AllowedValues = CandidateStatuses },
+                    new() { CodePrefix = "output.candidates[", CodeSuffix = "].canonical-content-hash", MatchKind = AgentToolAuditFactMatchKind.Indexed, MaximumIndex = 64, Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
+                    new() { CodePrefix = "output.blocks[", CodeSuffix = "].canonical-content-hash", MatchKind = AgentToolAuditFactMatchKind.Indexed, MaximumIndex = 64, Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
+                    new() { CodePrefix = "output.item.memory-status", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Text, AllowedValues = MemoryStatuses },
+                    new() { CodePrefix = "output.item.canonical-content-hash", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
                     new() { CodePrefix = "output.canonical-content-hash", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash }
                 ]
             }
