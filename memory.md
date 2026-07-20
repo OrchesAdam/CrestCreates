@@ -51,6 +51,14 @@ and v2 hash recomputation, framework-owned remapping of provider artifact
 labels before persistence, and post-preflight exception fencing without
 misclassifying typed conflict branches.
 
+Code-review remediation additionally makes all in-memory security artifact
+stores use one lock-protected Dictionary model, performs key-based batch
+rollback, fences post-commit supersession graph mismatches as dedicated
+Indeterminate failures after revoking only batch-created artifacts, enforces
+branch-fact-before-receipt ordering, validates the selected Promotion Service
+directly for ConfirmedAtomic semantics, and covers handle/grant expiry,
+revocation, and quota regressions.
+
 ### Phase 8f — Agent Tool Projection
 
 Status: Implemented; provider SDK adapters and a planner/runtime loop remain

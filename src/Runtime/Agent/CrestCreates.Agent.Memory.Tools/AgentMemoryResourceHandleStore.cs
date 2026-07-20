@@ -1,14 +1,18 @@
-using System.Collections.Concurrent;
 using CrestCreates.Agent.Memory.Tools;
 
 namespace CrestCreates.Agent.Memory.Tools;
 
+/// <summary>
+/// Development in-memory handle store. Entries are lazily marked expired and
+/// are intentionally not evicted; durable providers must implement bounded
+/// retention and expiry cleanup.
+/// </summary>
 public sealed class AgentMemoryResourceHandleStore : IAgentMemoryResourceHandleStore
 {
     private readonly object _gate = new();
-    private readonly ConcurrentDictionary<string, AgentMemoryResourceHandle> _handles = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, IReadOnlyList<string>> _batches = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, string> _batchPlans = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, AgentMemoryResourceHandle> _handles = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IReadOnlyList<string>> _batches = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _batchPlans = new(StringComparer.Ordinal);
 
     public ValueTask<AgentMemoryResourceHandleIssueResult> TryIssueBatchAsync(
         AgentMemorySecurityArtifactBatchKey batchKey,
@@ -30,8 +34,8 @@ public sealed class AgentMemoryResourceHandleStore : IAgentMemoryResourceHandleS
             throw new InvalidOperationException("A non-empty opaque handle batch is required.");
         if (maxActiveHandlesPerResource <= 0 || maxActiveHandlesPerInvocation < handles.Count)
             throw new InvalidOperationException("Resource handle quota is exhausted.");
-        var key = CanonicalBatchKey(batchKey);
-        var identity = BatchIdentity(batchKey);
+        var key = batchKey.ToCanonicalKey();
+        var identity = batchKey.ToIdentityKey();
         lock (_gate)
         {
             if (_batchPlans.TryGetValue(identity, out var existingPlan)
@@ -83,28 +87,26 @@ public sealed class AgentMemoryResourceHandleStore : IAgentMemoryResourceHandleS
 
     public ValueTask<AgentMemoryResourceHandle?> GetAsync(string handleId, CancellationToken cancellationToken = default)
     {
-        if (!_handles.TryGetValue(handleId, out var handle))
-            return ValueTask.FromResult<AgentMemoryResourceHandle?>(null);
-        if (handle.State == AgentMemorySecurityArtifactState.Active && handle.ExpiresAt <= DateTimeOffset.UtcNow)
+        lock (_gate)
         {
-            handle = handle with { State = AgentMemorySecurityArtifactState.Expired };
-            _handles[handleId] = handle;
+            if (!_handles.TryGetValue(handleId, out var handle))
+                return ValueTask.FromResult<AgentMemoryResourceHandle?>(null);
+            if (handle.State == AgentMemorySecurityArtifactState.Active && handle.ExpiresAt <= DateTimeOffset.UtcNow)
+            {
+                handle = handle with { State = AgentMemorySecurityArtifactState.Expired };
+                _handles[handleId] = handle;
+            }
+            return ValueTask.FromResult<AgentMemoryResourceHandle?>(handle);
         }
-        return ValueTask.FromResult<AgentMemoryResourceHandle?>(handle);
     }
 
     public ValueTask RevokeAsync(string handleId, CancellationToken cancellationToken = default)
     {
-        if (_handles.TryGetValue(handleId, out var handle))
-            _handles[handleId] = handle with { State = AgentMemorySecurityArtifactState.Revoked };
+        lock (_gate)
+        {
+            if (_handles.TryGetValue(handleId, out var handle))
+                _handles[handleId] = handle with { State = AgentMemorySecurityArtifactState.Revoked };
+        }
         return ValueTask.CompletedTask;
     }
-
-    private static string CanonicalBatchKey(AgentMemorySecurityArtifactBatchKey key)
-        => string.Join("|", key.OriginKind, key.LogicalInvocationKeyHash, key.InvocationFingerprint,
-            key.ArtifactPurpose, key.PreparationOrdinal, key.ArtifactPlanHash);
-
-    private static string BatchIdentity(AgentMemorySecurityArtifactBatchKey key)
-        => string.Join("|", key.OriginKind, key.LogicalInvocationKeyHash, key.InvocationFingerprint,
-            key.ArtifactPurpose, key.PreparationOrdinal);
 }

@@ -39,8 +39,9 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
         if (!IsValidScope(scope)) return Unavailable("scope-invalid");
         var targetHandle = await _handles.GetAsync(input.MemoryHandle, ct).ConfigureAwait(false);
         var replacementHandle = await _handles.GetAsync(input.ReplacementCandidateHandle, ct).ConfigureAwait(false);
-        if (!Usable(targetHandle, principal, AgentMemoryResourceKind.Memory)
-            || !Usable(replacementHandle, principal, AgentMemoryResourceKind.Candidate)) return Unavailable("resource-unavailable");
+        var currentTime = _time.GetUtcNow();
+        if (!Usable(targetHandle, principal, AgentMemoryResourceKind.Memory, currentTime)
+            || !Usable(replacementHandle, principal, AgentMemoryResourceKind.Candidate, currentTime)) return Unavailable("resource-unavailable");
         var target = await _store.GetMemoryAsync(principal.TenantId, targetHandle!.ResourceId, ct).ConfigureAwait(false);
         var replacement = await _store.GetCandidateAsync(principal.TenantId, replacementHandle!.ResourceId, ct).ConfigureAwait(false);
         if (target is null || replacement is null) return Unavailable("resource-unavailable");
@@ -75,6 +76,11 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
         {
             await RevokeCreatedArtifactsAsync(_handles, prepared, _grants, grantResult, CancellationToken.None).ConfigureAwait(false);
             throw;
+        }
+        if (prepared is null || prepared.Handles.Count != 1)
+        {
+            await RevokeCreatedArtifactsAsync(_handles, prepared, _grants, grantResult, CancellationToken.None).ConfigureAwait(false);
+            throw new InvalidOperationException("Supersession handle preparation returned an invalid result.");
         }
         var grants = grantResult?.Grants.ToArray() ?? Array.Empty<AgentMemorySourceGrant>();
         var completed = new SupersedeMemoryItemResult
@@ -128,6 +134,17 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
                 ExpectedMemoryStateHash = _hashes.ComputeMemoryStateHash(plannedMemory),
                 Operation = request
             }, ct).ConfigureAwait(false);
+
+            // A confirmed commit that returns a different graph is a terminal
+            // integrity failure. It is not a zero-write Conflict and must not
+            // be represented by an envelope that was not preflighted.
+            if (!string.Equals(memory.MemoryId, newMemoryId, StringComparison.Ordinal)
+                || !string.Equals(memory.TenantId, principal.TenantId, StringComparison.Ordinal)
+                || memory.Status != AgentMemoryStatus.Active
+                || !string.Equals(memory.Content, replacement.Content, StringComparison.Ordinal)
+                || memory.CanonicalContentHash != replacement.CanonicalContentHash
+                || !string.Equals(memory.SupersedesMemoryId, target.MemoryId, StringComparison.Ordinal))
+                throw new AgentMemoryPostCommitIntegrityException("Committed supersession graph differs from the preflight result.");
         }
         catch (AgentMemoryOperationException exception) when (exception.Code is
             AgentMemoryOperationFailureCode.ResourceUnavailable or
@@ -140,23 +157,21 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
                 ? Unavailable("resource-unavailable")
                 : conflict;
         }
-
-        // The service has reported a committed result. Any graph mismatch is
-        // an output-finalization failure, not a lifecycle conflict; do not
-        // revoke artifacts or synthesize a different envelope in that case.
-        if (!string.Equals(memory.MemoryId, newMemoryId, StringComparison.Ordinal)
-            || !string.Equals(memory.TenantId, principal.TenantId, StringComparison.Ordinal)
-            || memory.Status != AgentMemoryStatus.Active
-            || !string.Equals(memory.Content, replacement.Content, StringComparison.Ordinal)
-            || memory.CanonicalContentHash != replacement.CanonicalContentHash
-            || !string.Equals(memory.SupersedesMemoryId, target.MemoryId, StringComparison.Ordinal))
-            throw new InvalidOperationException("Committed supersession graph differs from the preflight result.");
+        catch
+        {
+            // ConfirmedAtomic service failures are zero-write failures. Revoke
+            // only artifacts created by this batch; reused artifacts remain
+            // valid. A post-commit integrity exception is deliberately
+            // rethrown so the Invoker fences the invocation as Indeterminate.
+            await RevokeCreatedArtifactsAsync(_handles, prepared, _grants, grantResult, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
 
         return completed;
     }
 
-    private static bool Usable(AgentMemoryResourceHandle? handle, AgentMemoryToolPrincipal principal, AgentMemoryResourceKind kind)
-        => handle is not null && handle.ResourceKind == kind && handle.Principal == principal && handle.State == AgentMemorySecurityArtifactState.Active && handle.ExpiresAt > DateTimeOffset.UtcNow;
+    private static bool Usable(AgentMemoryResourceHandle? handle, AgentMemoryToolPrincipal principal, AgentMemoryResourceKind kind, DateTimeOffset now)
+        => handle is not null && handle.ResourceKind == kind && handle.Principal == principal && handle.State == AgentMemorySecurityArtifactState.Active && handle.ExpiresAt > now;
     private static SupersedeMemoryItemResult Unavailable(string code) => new() { OperationStatus = AgentMemoryToolOperationStatus.Unavailable, Item = null, SupersededMemoryHandle = null, ActiveMemoryHandle = null, Diagnostics = [Diagnostic(code)] };
     private static SupersedeMemoryItemResult Conflict(string code) => new() { OperationStatus = AgentMemoryToolOperationStatus.Conflict, Item = null, SupersededMemoryHandle = null, ActiveMemoryHandle = null, Diagnostics = [Diagnostic(code)] };
 }

@@ -855,6 +855,20 @@ The AOT fixture completed native publish, link, and execution; the build
 reported warnings only. No new fallback or source-generated JSON regressions
 were observed in this rerun.
 
+### Code-review remediation (2026-07-20)
+
+- Supersession graph mismatches now revoke only batch-created artifacts and
+  raise a dedicated post-commit integrity failure, which the Invoker fences as
+  Indeterminate rather than treating it as an undeclared inner outcome.
+- Handle, grant, and prepared-batch stores now use one lock-protected
+  Dictionary model; expiry/revocation reads cannot race quota checks, and
+  rollback matches immutable ArtifactId values.
+- The selected Promotion Service itself must expose `ConfirmedAtomic`; receipt
+  publication is executable-gated on branch-invariant fact preparation, and
+  redundant handler registrations were removed from the module extension.
+- Memory Tool security tests now cover expiry, revocation, source-grant quota,
+  and idempotent plan behavior.
+
 ### Audit delta (2026-07-20)
 
 The post-approval audit closed the remaining execution-boundary gaps before

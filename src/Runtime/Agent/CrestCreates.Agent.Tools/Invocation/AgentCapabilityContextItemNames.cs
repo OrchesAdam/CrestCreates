@@ -19,5 +19,6 @@ public static class AgentCapabilityContextItemNames
     public const string OutputSchemaDescriptor = "AgentTool.OutputSchemaDescriptor";
     public const string OutputSchemaReferences = "AgentTool.OutputSchemaReferences";
     public const string SchemaValidator = "AgentTool.SchemaValidator";
+    public const string BranchInvariantFactsPrepared = "AgentTool.BranchInvariantFactsPrepared";
     public const string RequiresOutputPreflightReceipt = "AgentTool.RequiresOutputPreflightReceipt";
 }

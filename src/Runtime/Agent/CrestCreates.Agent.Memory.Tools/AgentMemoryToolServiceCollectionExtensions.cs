@@ -24,13 +24,8 @@ public static class AgentMemoryToolServiceCollectionExtensions
         services.TryAddSingleton<IAgentMemoryResourceHandleStore, AgentMemoryResourceHandleStore>();
         services.TryAddSingleton<IAgentMemorySourceGrantStore, AgentMemorySourceGrantStore>();
         services.TryAddSingleton<IAgentMemoryHistoryResourceHandleIssuer, AgentMemoryHistoryResourceHandleIssuer>();
-        services.TryAddScoped<BuildAgentMemoryPackHandler>();
-        services.TryAddScoped<ExpandAgentMemorySourceHandler>();
-        services.TryAddScoped<CompressAgentHistoryHandler>();
-        services.TryAddScoped<ExtractMemoryCandidatesHandler>();
-        services.TryAddScoped<PromoteMemoryCandidateHandler>();
-        services.TryAddScoped<RejectMemoryCandidateHandler>();
-        services.TryAddScoped<SupersedeMemoryItemHandler>();
+        // GeneratedHandlerRegistry.Apply owns the scoped handler registrations
+        // and the Host-local resolver; keep one registration authority.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AgentMemoryToolCapabilityGateHostedService>());
         return services;
     }
@@ -50,8 +45,10 @@ internal sealed class AgentMemoryToolCapabilityGateHostedService : IHostedServic
     public Task StartAsync(CancellationToken cancellationToken)
     {
         var service = _services.GetRequiredService<IAgentMemoryPromotionService>();
-        var capabilities = _services.GetRequiredService<IAgentMemoryCurationServiceCapabilities>();
-        if (!ReferenceEquals(service, capabilities)
+        // The guarantee must be exposed by the actual selected promotion
+        // service. A separately registered capability object cannot prove the
+        // behavior of a decorator or replacement service.
+        if (service is not IAgentMemoryCurationServiceCapabilities capabilities
             || capabilities.OutcomeGuarantee != AgentMemoryCurationOutcomeGuarantee.ConfirmedAtomic)
         {
             throw new InvalidOperationException(

@@ -1,13 +1,16 @@
-using System.Collections.Concurrent;
-
 namespace CrestCreates.Agent.Memory.Tools;
 
+/// <summary>
+/// Development in-memory source-grant store. Entries are lazily marked
+/// expired and are intentionally not evicted; durable providers must implement
+/// bounded retention and expiry cleanup.
+/// </summary>
 public sealed class AgentMemorySourceGrantStore : IAgentMemorySourceGrantStore
 {
     private readonly object _gate = new();
-    private readonly ConcurrentDictionary<string, AgentMemorySourceGrant> _grants = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, IReadOnlyList<string>> _batches = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, string> _batchPlans = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, AgentMemorySourceGrant> _grants = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IReadOnlyList<string>> _batches = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _batchPlans = new(StringComparer.Ordinal);
 
     public ValueTask<AgentMemoryGrantIssueResult> TryIssueBatchAsync(
         AgentMemorySecurityArtifactBatchKey batchKey,
@@ -29,8 +32,8 @@ public sealed class AgentMemorySourceGrantStore : IAgentMemorySourceGrantStore
             throw new InvalidOperationException("A non-empty opaque grant batch is required.");
         if (maxActiveGrantsPerResource <= 0 || maxActiveGrantsPerInvocation < grants.Count)
             throw new InvalidOperationException("Source grant quota is exhausted.");
-        var key = CanonicalBatchKey(batchKey);
-        var identity = BatchIdentity(batchKey);
+        var key = batchKey.ToCanonicalKey();
+        var identity = batchKey.ToIdentityKey();
         lock (_gate)
         {
             if (_batchPlans.TryGetValue(identity, out var existingPlan)
@@ -81,28 +84,26 @@ public sealed class AgentMemorySourceGrantStore : IAgentMemorySourceGrantStore
 
     public ValueTask<AgentMemorySourceGrant?> GetAsync(string grantId, CancellationToken cancellationToken = default)
     {
-        if (!_grants.TryGetValue(grantId, out var grant))
-            return ValueTask.FromResult<AgentMemorySourceGrant?>(null);
-        if (grant.State == AgentMemorySecurityArtifactState.Active && grant.ExpiresAt <= DateTimeOffset.UtcNow)
+        lock (_gate)
         {
-            grant = grant with { State = AgentMemorySecurityArtifactState.Expired };
-            _grants[grantId] = grant;
+            if (!_grants.TryGetValue(grantId, out var grant))
+                return ValueTask.FromResult<AgentMemorySourceGrant?>(null);
+            if (grant.State == AgentMemorySecurityArtifactState.Active && grant.ExpiresAt <= DateTimeOffset.UtcNow)
+            {
+                grant = grant with { State = AgentMemorySecurityArtifactState.Expired };
+                _grants[grantId] = grant;
+            }
+            return ValueTask.FromResult<AgentMemorySourceGrant?>(grant);
         }
-        return ValueTask.FromResult<AgentMemorySourceGrant?>(grant);
     }
 
     public ValueTask RevokeAsync(string grantId, CancellationToken cancellationToken = default)
     {
-        if (_grants.TryGetValue(grantId, out var grant))
-            _grants[grantId] = grant with { State = AgentMemorySecurityArtifactState.Revoked };
+        lock (_gate)
+        {
+            if (_grants.TryGetValue(grantId, out var grant))
+                _grants[grantId] = grant with { State = AgentMemorySecurityArtifactState.Revoked };
+        }
         return ValueTask.CompletedTask;
     }
-
-    private static string CanonicalBatchKey(AgentMemorySecurityArtifactBatchKey key)
-        => string.Join("|", key.OriginKind, key.LogicalInvocationKeyHash, key.InvocationFingerprint,
-            key.ArtifactPurpose, key.PreparationOrdinal, key.ArtifactPlanHash);
-
-    private static string BatchIdentity(AgentMemorySecurityArtifactBatchKey key)
-        => string.Join("|", key.OriginKind, key.LogicalInvocationKeyHash, key.InvocationFingerprint,
-            key.ArtifactPurpose, key.PreparationOrdinal);
 }

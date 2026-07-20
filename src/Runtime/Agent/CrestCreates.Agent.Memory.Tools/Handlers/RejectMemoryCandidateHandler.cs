@@ -35,7 +35,7 @@ internal sealed class RejectMemoryCandidateHandler : AgentMemoryToolHandlerBase,
         if (!IsValidScope(scope)) return Unavailable("scope-invalid");
         var handle = await _handles.GetAsync(input.CandidateHandle, ct).ConfigureAwait(false);
         if (handle is null || handle.ResourceKind != AgentMemoryResourceKind.Candidate || handle.Principal != principal
-            || handle.State != AgentMemorySecurityArtifactState.Active || handle.ExpiresAt <= DateTimeOffset.UtcNow)
+            || handle.State != AgentMemorySecurityArtifactState.Active || handle.ExpiresAt <= _time.GetUtcNow())
             return Unavailable("candidate-unavailable");
         var candidate = await _store.GetCandidateAsync(principal.TenantId, handle.ResourceId, ct).ConfigureAwait(false);
         if (candidate is null) return Unavailable("candidate-unavailable");

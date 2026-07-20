@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 namespace CrestCreates.Agent.Memory.Tools;
 
 /// <summary>
@@ -9,7 +7,8 @@ namespace CrestCreates.Agent.Memory.Tools;
 /// </summary>
 public sealed class AgentMemorySecurityArtifactBatchStore : IAgentMemorySecurityArtifactBatchStore
 {
-    private readonly ConcurrentDictionary<string, IReadOnlyList<AgentMemoryPreparedSecurityArtifact>> _batches = new(StringComparer.Ordinal);
+    private readonly object _gate = new();
+    private readonly Dictionary<string, IReadOnlyList<AgentMemoryPreparedSecurityArtifact>> _batches = new(StringComparer.Ordinal);
 
     public ValueTask<IReadOnlyList<AgentMemoryPreparedSecurityArtifact>> PrepareAsync(
         AgentMemorySecurityArtifactBatchKey batchKey,
@@ -20,16 +19,19 @@ public sealed class AgentMemorySecurityArtifactBatchStore : IAgentMemorySecurity
         ArgumentNullException.ThrowIfNull(plan);
         if (string.IsNullOrWhiteSpace(batchKey.ArtifactPlanHash))
             throw new InvalidOperationException("Artifact plan hash is required.");
-        var key = CanonicalBatchKey(batchKey);
+        var key = batchKey.ToCanonicalKey();
         var snapshot = plan.Select(item => item with { }).ToArray();
-        if (_batches.TryGetValue(key, out var existing))
+        lock (_gate)
         {
-            if (!existing.SequenceEqual(snapshot))
-                throw new InvalidOperationException("Security artifact batch plan conflict.");
-            return ValueTask.FromResult(existing);
+            if (_batches.TryGetValue(key, out var existing))
+            {
+                if (!existing.SequenceEqual(snapshot))
+                    throw new InvalidOperationException("Security artifact batch plan conflict.");
+                return ValueTask.FromResult(existing);
+            }
+            _batches[key] = snapshot;
+            return ValueTask.FromResult<IReadOnlyList<AgentMemoryPreparedSecurityArtifact>>(snapshot);
         }
-        _batches[key] = snapshot;
-        return ValueTask.FromResult<IReadOnlyList<AgentMemoryPreparedSecurityArtifact>>(snapshot);
     }
 
     public ValueTask RevokeCreatedAsync(
@@ -37,19 +39,21 @@ public sealed class AgentMemorySecurityArtifactBatchStore : IAgentMemorySecurity
         IReadOnlyList<AgentMemoryPreparedSecurityArtifact> artifacts,
         CancellationToken cancellationToken = default)
     {
-        var key = CanonicalBatchKey(batchKey);
-        if (_batches.TryGetValue(key, out var existing))
+        var key = batchKey.ToCanonicalKey();
+        var artifactIds = artifacts
+            .Where(item => item.Disposition == PreparedArtifactDisposition.CreatedByBatch)
+            .Select(item => item.ArtifactId)
+            .ToHashSet(StringComparer.Ordinal);
+        lock (_gate)
         {
-            var retained = existing.Where(item =>
-                item.Disposition == PreparedArtifactDisposition.ReusedExisting
-                || !artifacts.Contains(item)).ToArray();
-            _batches[key] = retained;
+            if (_batches.TryGetValue(key, out var existing))
+            {
+                var retained = existing.Where(item =>
+                    item.Disposition == PreparedArtifactDisposition.ReusedExisting
+                    || !artifactIds.Contains(item.ArtifactId)).ToArray();
+                _batches[key] = retained;
+            }
         }
         return ValueTask.CompletedTask;
     }
-
-    private static string CanonicalBatchKey(AgentMemorySecurityArtifactBatchKey key)
-        => string.Join("|", key.OriginKind, key.LogicalInvocationKeyHash,
-            key.InvocationFingerprint, key.ArtifactPurpose,
-            key.PreparationOrdinal, key.ArtifactPlanHash);
 }

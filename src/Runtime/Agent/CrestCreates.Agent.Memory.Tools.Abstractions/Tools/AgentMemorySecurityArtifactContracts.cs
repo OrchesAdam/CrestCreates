@@ -15,6 +15,16 @@ public sealed record AgentMemorySecurityArtifactBatchKey
     public required string ArtifactPurpose { get; init; }
     public required int PreparationOrdinal { get; init; }
     public required string ArtifactPlanHash { get; init; }
+
+    /// <summary>Returns the idempotency key including the concrete artifact plan.</summary>
+    public string ToCanonicalKey()
+        => string.Join("|", OriginKind, LogicalInvocationKeyHash, InvocationFingerprint,
+            ArtifactPurpose, PreparationOrdinal, ArtifactPlanHash);
+
+    /// <summary>Returns the retry identity that deliberately excludes the plan hash.</summary>
+    public string ToIdentityKey()
+        => string.Join("|", OriginKind, LogicalInvocationKeyHash, InvocationFingerprint,
+            ArtifactPurpose, PreparationOrdinal);
 }
 
 public sealed record AgentMemoryHostArtifactBatchKey
@@ -38,6 +48,11 @@ public enum PreparedArtifactDisposition
     ReusedExisting = 2
 }
 
+/// <summary>
+/// Immutable prepared-artifact snapshot. Batch rollback matches ArtifactId
+/// explicitly so it remains correct even if a provider changes this type from
+/// a record implementation in a future compatibility revision.
+/// </summary>
 public sealed record AgentMemoryPreparedSecurityArtifact
 {
     public required AgentMemorySecurityArtifactKind Kind { get; init; }

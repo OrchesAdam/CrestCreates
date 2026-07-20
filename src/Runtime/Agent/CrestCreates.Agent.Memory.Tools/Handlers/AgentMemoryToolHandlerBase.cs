@@ -197,6 +197,7 @@ internal abstract class AgentMemoryToolHandlerBase
             new AgentToolAuditFact { Code = "memory.scope-fingerprint", Value = scopeFingerprint },
             new AgentToolAuditFact { Code = "memory.operation", Value = operation }
         ], scope.MaxAuditFacts);
+        Context.Items[AgentCapabilityContextItemNames.BranchInvariantFactsPrepared] = true;
     }
 
     /// <summary>
@@ -208,6 +209,12 @@ internal abstract class AgentMemoryToolHandlerBase
     protected void PublishAllowedOutcomes<T>(
         params (string OutcomeCode, T Output, JsonTypeInfo<T> TypeInfo)[] outcomes)
     {
+        // Branch-invariant facts must be staged before the receipt set. This
+        // makes the ordering requirement executable instead of relying on a
+        // convention shared by individual handlers.
+        if (!Context.Items.TryGetValue(AgentCapabilityContextItemNames.BranchInvariantFactsPrepared, out var factsPrepared)
+            || factsPrepared is not true)
+            throw new InvalidOperationException("Branch-invariant audit facts must be prepared before output receipts.");
         if (!Context.Items.TryGetValue(AgentCapabilityContextItemNames.OutputPreflightReceiptSink, out var value)
             || value is not IAgentToolOutputPreflightReceiptSink sink)
             throw new InvalidOperationException("Output preflight receipt sink is unavailable.");
