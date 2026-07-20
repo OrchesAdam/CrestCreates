@@ -94,7 +94,7 @@ internal sealed class AgentMemorySecurityArtifactCoordinator : IAgentMemorySecur
     {
         if (string.IsNullOrWhiteSpace(hostBatchKey.HostOperationId)
             || string.IsNullOrWhiteSpace(hostBatchKey.ArtifactPurpose)
-            || sourceKind == AgentMemoryHistorySourceKind.Unknown
+            || sourceKind is not (AgentMemoryHistorySourceKind.Conversation or AgentMemoryHistorySourceKind.Task)
             || string.IsNullOrWhiteSpace(sourceId))
             throw new InvalidOperationException("A complete trusted Host artifact request is required.");
         if (handles.Count == 0)
@@ -204,9 +204,12 @@ internal sealed class AgentMemorySecurityArtifactCoordinator : IAgentMemorySecur
         IReadOnlyList<AgentMemoryResourceHandle> handles,
         IReadOnlyList<AgentMemorySourceGrant> grants)
     {
-        var expectedKind = sourceKind == AgentMemoryHistorySourceKind.Conversation
-            ? AgentMemoryResourceKind.ConversationHistory
-            : AgentMemoryResourceKind.TaskHistory;
+        var expectedKind = sourceKind switch
+        {
+            AgentMemoryHistorySourceKind.Conversation => AgentMemoryResourceKind.ConversationHistory,
+            AgentMemoryHistorySourceKind.Task => AgentMemoryResourceKind.TaskHistory,
+            _ => throw new InvalidOperationException("Host history source kind is unsupported.")
+        };
         var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal);
         if (handles.Any(handle => handle.ResourceKind != expectedKind
             || !string.Equals(handle.ResourceId, sourceId, StringComparison.Ordinal)
@@ -218,9 +221,12 @@ internal sealed class AgentMemorySecurityArtifactCoordinator : IAgentMemorySecur
             || handle.ExpiresAt <= handle.IssuedAt))
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.StateConflict, "Host handle preparation is inconsistent with the trusted history request.");
 
-        var expectedSourceKind = sourceKind == AgentMemoryHistorySourceKind.Conversation
-            ? AgentSourceKind.ConversationTurn
-            : AgentSourceKind.TaskRecord;
+        var expectedSourceKind = sourceKind switch
+        {
+            AgentMemoryHistorySourceKind.Conversation => AgentSourceKind.ConversationTurn,
+            AgentMemoryHistorySourceKind.Task => AgentSourceKind.TaskRecord,
+            _ => throw new InvalidOperationException("Host history source kind is unsupported.")
+        };
         if (grants.Any(grant => grant.Principal != principal
             || !string.Equals(grant.SourceRef.TenantId, principal.TenantId, StringComparison.Ordinal)
             || grant.SourceRef.SourceKind != expectedSourceKind

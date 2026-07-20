@@ -21,8 +21,6 @@ public static class AgentCapabilityContextItemNames
     public const string SchemaValidator = "AgentTool.SchemaValidator";
     public const string OutputPreflightRuntime = "AgentTool.OutputPreflightRuntime";
     public const string BranchInvariantFactsPrepared = "AgentTool.BranchInvariantFactsPrepared";
-    public const string BranchInvariantFacts = "AgentTool.BranchInvariantFacts";
     public const string RequiresOutputPreflightReceipt = "AgentTool.RequiresOutputPreflightReceipt";
-    public const string AuditFactMaximum = "AgentTool.AuditFactMaximum";
     public const string OutputAuditProjectionContract = "AgentTool.OutputAuditProjectionContract";
 }

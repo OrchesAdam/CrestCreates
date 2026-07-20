@@ -1,6 +1,11 @@
 namespace CrestCreates.Agent.Tools;
 
-internal interface IAgentToolInvocationFactBufferOwner : IAgentToolInvocationFactSink
+internal interface IAgentToolInvocationFactPreflightState
+{
+    AgentToolInvocationFactSnapshot Capture();
+}
+
+internal interface IAgentToolInvocationFactBufferOwner : IAgentToolInvocationFactSink, IAgentToolInvocationFactPreflightState
 {
     AgentToolInvocationFactSnapshot Seal();
 }
@@ -47,6 +52,14 @@ internal sealed class AgentToolInvocationFactBuffer : IAgentToolInvocationFactBu
             if (_sealed)
                 throw new InvalidOperationException("Invocation audit facts are already sealed.");
             _sealed = true;
+            return new AgentToolInvocationFactSnapshot(_facts.ToArray(), _maximum);
+        }
+    }
+
+    public AgentToolInvocationFactSnapshot Capture()
+    {
+        lock (_sync)
+        {
             return new AgentToolInvocationFactSnapshot(_facts.ToArray(), _maximum);
         }
     }

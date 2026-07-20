@@ -51,8 +51,5 @@ public interface IAgentToolOutputPreflightRuntime
 public interface IAgentToolOutputPreflightReceiptSink
 {
     bool HasPublishedOutcomes { get; }
-    void PublishAllowedOutcomes(
-        IReadOnlyList<AgentToolPreparedOutcomeReceipt> outcomes,
-        IReadOnlyList<AgentToolAuditFact> branchInvariantFacts,
-        int effectiveMaximumFacts);
+    void PublishAllowedOutcomes(IReadOnlyList<AgentToolPreparedOutcomeReceipt> outcomes);
 }
