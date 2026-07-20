@@ -23,4 +23,6 @@ public static class CanonicalHashArtifactNames
     public const string AgentPromptTemplateDescriptor = "AgentPromptTemplateDescriptor";
     public const string AgentMemoryCompressedOutput = "AgentMemoryCompressedOutput";
     public const string AgentMemoryCandidateOutput = "AgentMemoryCandidateOutput";
+    public const string AgentMemoryCandidateState = "AgentMemoryCandidateState";
+    public const string AgentMemoryItemState = "AgentMemoryItemState";
 }

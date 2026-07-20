@@ -33,6 +33,8 @@ internal sealed class SchemaFieldCanonicalHashProfile
     [CanonicalHashField(nameof(SchemaFieldDescriptor.Pattern), CanonicalHashFieldClassification.Contract, Order = 8)]
     [CanonicalHashField(nameof(SchemaFieldDescriptor.IsCollection), CanonicalHashFieldClassification.Contract, Order = 9)]
     [CanonicalHashField(nameof(SchemaFieldDescriptor.CollectionElementType), CanonicalHashFieldClassification.Contract, Order = 10)]
+    [CanonicalHashField(nameof(SchemaFieldDescriptor.ObjectSchema), CanonicalHashFieldClassification.Excluded,
+        Reason = "Nested object references are represented by the Schema v3 projection.")]
 
     private static void Fields() { }
 }

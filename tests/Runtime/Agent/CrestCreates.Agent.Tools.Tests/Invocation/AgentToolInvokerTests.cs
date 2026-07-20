@@ -383,9 +383,23 @@ public sealed class AgentToolInvokerTests
         var retry = await harness.Invoker.InvokeAsync(
             new AgentToolInvocationRequest(harness.ToolName));
 
-        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
-        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.InProgress);
+        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
+        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
         harness.Dispatcher.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Invoke_PropagatesExactInvocationBindingAndFactBuffer()
+    {
+        var harness = CreateHarness();
+
+        _ = await harness.Invoker.InvokeAsync(new AgentToolInvocationRequest(harness.ToolName));
+
+        harness.Dispatcher.LastContext.Should().NotBeNull();
+        harness.Dispatcher.LastContext!.Items[AgentCapabilityContextItemNames.InvocationBindingSnapshot]
+            .Should().BeOfType<AgentToolInvocationBindingSnapshot>();
+        harness.Dispatcher.LastContext.Items[AgentCapabilityContextItemNames.InvocationFactBuffer]
+            .Should().BeAssignableTo<IAgentToolInvocationFactBuffer>();
     }
 
     [Fact]
@@ -638,6 +652,7 @@ public sealed class AgentToolInvokerTests
     private sealed class RecordingDispatcher(CapabilityExecutionResult result) : ICapabilityDispatcher
     {
         public int CallCount { get; private set; }
+        public CapabilityExecutionContext? LastContext { get; private set; }
 
         public Task<CapabilityExecutionResult> DispatchAsync(
             CapabilityDescriptor descriptor,
@@ -647,7 +662,9 @@ public sealed class AgentToolInvokerTests
             CancellationToken ct = default)
         {
             CallCount++;
-            configureContext?.Invoke(new CapabilityExecutionContext { ServiceProvider = EmptyServiceProvider.Instance });
+            var context = new CapabilityExecutionContext { ServiceProvider = EmptyServiceProvider.Instance };
+            LastContext = context;
+            configureContext?.Invoke(context);
             return Task.FromResult(result);
         }
 

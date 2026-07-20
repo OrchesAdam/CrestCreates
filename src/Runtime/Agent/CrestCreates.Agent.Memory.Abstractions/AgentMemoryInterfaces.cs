@@ -18,6 +18,7 @@ public interface IAgentCompressedContextStore
 {
     ValueTask SaveCompressedContextAsync(AgentCompressedContext context, CancellationToken cancellationToken = default);
     ValueTask<AgentCompressedContext?> GetCompressedContextAsync(string tenantId, string contextId, CancellationToken cancellationToken = default);
+    ValueTask<AgentCompressedContextBlock?> GetCompressedContextBlockAsync(string tenantId, string blockId, CancellationToken cancellationToken = default);
 }
 
 public interface IAgentMemoryStore
@@ -29,9 +30,60 @@ public interface IAgentMemoryStore
     ValueTask<IReadOnlyList<AgentMemoryItem>> ListMemoriesAsync(AgentMemoryQuery query, CancellationToken cancellationToken = default);
 }
 
+public enum AgentMemoryCurationOutcomeGuarantee
+{
+    Unknown = 0,
+    ConfirmedAtomic = 1
+}
+
+public interface IAgentMemoryStoreCapabilities
+{
+    AgentMemoryCurationOutcomeGuarantee CurationOutcomeGuarantee { get; }
+}
+
+/// <summary>
+/// Store-owned conditional transitions. Implementations must perform the
+/// expectation check and every lifecycle write in one provider primitive.
+/// </summary>
+public interface IAgentMemoryConditionalCurationStore
+{
+    ValueTask<AgentMemoryItem> PromoteAsync(
+        string tenantId,
+        AgentMemoryPromotionPlan plan,
+        CancellationToken cancellationToken = default);
+
+    ValueTask RejectAsync(
+        string tenantId,
+        AgentMemoryCandidateExpectation candidate,
+        AgentMemoryOperationRequest operation,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentMemoryItem> SupersedeAsync(
+        string tenantId,
+        AgentMemorySupersessionPlan plan,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IAgentMemoryCurationServiceCapabilities
+{
+    AgentMemoryCurationOutcomeGuarantee OutcomeGuarantee { get; }
+}
+
 public interface IAgentMemoryContentSanitizer
 {
     SanitizedAgentContent Sanitize(string tenantId, string content, IReadOnlyList<AgentContextSourceRef> sourceRefs);
+}
+
+/// <summary>
+/// Allocates framework-owned, opaque identities for persisted memory artifacts.
+/// Provider labels and source identifiers must never become store keys.
+/// </summary>
+public interface IAgentMemoryArtifactIdGenerator
+{
+    string CreateContextId();
+    string CreateBlockId();
+    string CreateCandidateId();
+    string CreateMemoryId();
 }
 
 public interface IAgentContextCompressor
@@ -47,9 +99,14 @@ public interface IAgentMemoryExtractor
 
 public interface IAgentMemoryPromotionService
 {
+    ValueTask<AgentMemoryItem> PromoteAsync(string tenantId, AgentMemoryPromotionPlan plan, CancellationToken cancellationToken = default);
+    ValueTask RejectAsync(string tenantId, AgentMemoryCandidateExpectation candidate, AgentMemoryOperationRequest operation, CancellationToken cancellationToken = default);
+    ValueTask<AgentMemoryItem> SupersedeAsync(string tenantId, AgentMemorySupersessionPlan plan, CancellationToken cancellationToken = default);
     ValueTask<AgentMemoryItem> PromoteAsync(string tenantId, string candidateId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default);
+    ValueTask<AgentMemoryItem> PromoteAsync(string tenantId, string candidateId, string newMemoryId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default);
     ValueTask RejectAsync(string tenantId, string candidateId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default);
     ValueTask<AgentMemoryItem> SupersedeAsync(string tenantId, string memoryId, AgentMemoryCandidate replacement, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default);
+    ValueTask<AgentMemoryItem> SupersedeAsync(string tenantId, string memoryId, string replacementCandidateId, string newMemoryId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default);
     ValueTask ArchiveAsync(string tenantId, string memoryId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default);
 }
 

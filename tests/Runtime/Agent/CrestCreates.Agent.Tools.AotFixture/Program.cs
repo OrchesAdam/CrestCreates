@@ -58,6 +58,9 @@ namespace CrestCreates.Agent.Tools.AotFixture
                     (IAgentToolInvocationLeaseAbandoner)provider.GetRequiredService<IAgentToolInvocationGate>());
                 builder.Services.AddSingleton<IAgentToolBudgetGate, DevelopmentInMemoryAgentToolBudgetGate>();
                 builder.Services.AddSingleton<IAgentToolGovernanceAuditor, DevelopmentInMemoryAgentToolGovernanceAuditor>();
+                // Generated capability invokers resolve handlers from the scoped
+                // service provider; registration is explicit and AOT-safe.
+                builder.Services.AddScoped<FixtureEchoHandler>();
                 builder.Services.AddCapabilityRuntime();
                 builder.Services.AddCrestAgentTools(options =>
                     options.SerializerOptions.TypeInfoResolver = AgentToolFixtureJsonContext.Default);

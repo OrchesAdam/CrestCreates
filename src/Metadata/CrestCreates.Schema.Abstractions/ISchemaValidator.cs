@@ -13,4 +13,10 @@ public interface ISchemaValidator
         SchemaDescriptor schema,
         JsonElement payload,
         bool rejectUnknownProperties = false);
+
+    SchemaValidationResult Validate(
+        SchemaDescriptor schema,
+        JsonElement payload,
+        IReadOnlyList<SchemaDescriptor> referencedSchemas,
+        bool rejectUnknownProperties = false);
 }

@@ -29,7 +29,10 @@ public sealed class DefaultAgentMemoryRetriever : IAgentMemoryRetriever
             IncludeStale = query.IncludeStale,
             IncludeSuperseded = query.IncludeSuperseded,
             IncludeArchived = query.IncludeArchived,
-            DescriptorRefs = query.DescriptorRefs
+            DescriptorRefs = query.DescriptorRefs,
+            // Visibility is an effective closure over nested SourceRefs and is
+            // therefore applied below, after the persistence query returns.
+            VisibilityBoundary = null
         };
 
         var memories = await _store.ListMemoriesAsync(storeQuery, cancellationToken);
@@ -74,13 +77,15 @@ public sealed class DefaultAgentMemoryRetriever : IAgentMemoryRetriever
         // Compute pack hash from final included memories' canonical content hashes
         var sortedMemoryHashes = budgetedMemories
             .Select(m => m.CanonicalContentHash)
-            .OrderBy(h => h.Value, StringComparer.Ordinal)
             .ToArray();
         var canonicalPackHash = _hashProjector.ComputePackHash(
             query.TenantId,
             scopeFingerprint,
             visibleMemorySetHash,
-            sortedMemoryHashes);
+            sortedMemoryHashes,
+            budgetedMemories.Count,
+            wasTruncated,
+            false);
 
         return new AgentMemoryPack
         {
@@ -88,6 +93,7 @@ public sealed class DefaultAgentMemoryRetriever : IAgentMemoryRetriever
             Memories = budgetedMemories,
             Diagnostics = diagnostics.ToArray(),
             IsAuthoritative = false,
+            WasTruncated = wasTruncated,
             ScopeFingerprint = scopeFingerprint,
             VisibleMemorySetHash = visibleMemorySetHash,
             CanonicalPackHash = canonicalPackHash
@@ -99,19 +105,53 @@ public sealed class DefaultAgentMemoryRetriever : IAgentMemoryRetriever
         AgentMemoryQuery query,
         List<AgentMemoryDiagnostic> diagnostics)
     {
-        // VisibleDescriptorKinds filter — fail closed: DescriptorRef doesn't carry DescriptorKind
+        var result = new List<AgentMemoryItem>();
+        if (query.VisibilityBoundary is { } boundary)
+        {
+            if (boundary.VisibleDescriptorRefs.Any(reference => reference.Version is not > 0))
+            {
+                diagnostics.Add(new AgentMemoryDiagnostic
+                {
+                    Code = AgentMemoryDiagnosticCodes.VisibilityKindUnresolvable,
+                    Message = "The visibility boundary contains an unpinned descriptor reference.",
+                    Severity = SeverityLevel.Warning
+                });
+                return Array.Empty<AgentMemoryItem>();
+            }
+
+            var visible = boundary.VisibleDescriptorRefs.ToHashSet();
+            foreach (var memory in memories)
+            {
+                if (memory.Confidence < query.MinimumConfidence)
+                    continue;
+                var closure = memory.DescriptorRefs
+                    .Concat(memory.SourceRefs.SelectMany(source => source.DescriptorRefs))
+                    .Distinct()
+                    .ToArray();
+                if (closure.Any(reference => reference.Version is not > 0))
+                    continue;
+                if (closure.Length == 0
+                    ? boundary.AllowUnscopedMemory
+                    : closure.All(visible.Contains))
+                    result.Add(memory);
+                if (query.MaxCount.HasValue && result.Count >= query.MaxCount.Value)
+                    break;
+            }
+            return result.ToArray();
+        }
+
+        // Legacy callers retain their pre-boundary behavior until they opt in
+        // to VisibilityBoundary. Tool adapters always set the boundary.
         if (query.VisibleDescriptorKinds.Count > 0)
         {
             diagnostics.Add(new AgentMemoryDiagnostic
             {
                 Code = AgentMemoryDiagnosticCodes.VisibilityKindUnresolvable,
-                Message = "VisibleDescriptorKinds filter was supplied but cannot be evaluated: DescriptorRef does not carry DescriptorKind. Returning empty results for safety.",
+                Message = "VisibleDescriptorKinds cannot be evaluated without DescriptorKind on DescriptorRef.",
                 Severity = SeverityLevel.Warning
             });
             return Array.Empty<AgentMemoryItem>();
         }
-
-        var result = new List<AgentMemoryItem>();
 
         foreach (var memory in memories)
         {

@@ -36,6 +36,9 @@ public static class CapabilityServiceCollectionExtensions
 
         services.TryAddSingleton(builder);
         services.TryAddScoped<ICapabilityPipeline, CapabilityPipeline>();
+        services.TryAddScoped<CapabilityExecutionContextAccessor>();
+        services.TryAddScoped<ICapabilityExecutionContextAccessor>(sp =>
+            sp.GetRequiredService<CapabilityExecutionContextAccessor>());
         services.TryAddScoped<ICapabilityAuthorizationService, PermissionCapabilityAuthorizationService>();
         services.TryAddTransient<AuditMiddleware>();       // New
         services.TryAddTransient<RateLimitMiddleware>();
@@ -46,9 +49,10 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddTransient<MetricsMiddleware>();
         services.TryAddTransient<EventPublishingMiddleware>();
 
-        // Register the single static resolver instance for both the concrete
-        // type and the interface so that DI resolution always returns the same
-        // object regardless of which service type is requested.
+        // Compatibility resolver for legacy generated providers. Explicitly
+        // selected generated modules replace this registration with a Host-
+        // owned resolver through their generated Apply(IServiceCollection)
+        // method before the Host is built.
         var concreteResolver = CapabilityHandlerResolverProvider.GetConcreteResolver();
         var interfaceResolver = CapabilityHandlerResolverProvider.GetResolver();
         services.TryAddSingleton<CapabilityHandlerResolver>(_ => concreteResolver);
@@ -99,11 +103,10 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddSingleton<IRegistryValidationEngine<CapabilityDescriptor>,
             RegistryValidationEngine<CapabilityDescriptor>>();
 
-        // Generated handler registrations are additive via CapabilityHandlerResolverProvider.Register().
-        // The static resolver is the single source of truth.
-        // Resolver registration is already done in AddCapabilityPipeline() so that
-        // AddCapabilityPipeline() remains independently usable.
-        // AddCapabilityRuntime() only adds dispatcher, resolver services, and bootstrap.
+        // Generated modules are applied explicitly by their Add* extension.
+        // The compatibility resolver above remains available only to legacy
+        // generated consumers during migration and is never selected by the
+        // Memory Tool module.
 
         // Binding Status Contributor
         services.AddSingleton<IDescriptorBindingStatusContributor, CapabilityBindingStatusContributor>();

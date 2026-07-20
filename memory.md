@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-17 (Phase 8f Agent Tool Projection audit/idempotency review fixes)
+Last Updated: 2026-07-20 (Phase 8d+ post-approval audit closure)
 
 ## Purpose
 
@@ -13,6 +13,43 @@ This file records the current platform status for CrestCreates so future threads
 No approved-but-unimplemented design is currently recorded here.
 
 ## Completed Features
+
+### Phase 8d+ — Governed Agent Memory Tool Projection
+
+Status: Implemented; the deterministic Memory Tool mainline is NativeAOT-verified
+for linux-x64. Memory.Llm remains separately scoped and does not inherit this
+AOT claim.
+
+The seven Memory Tools now use one generated Agent Tool → Capability Pipeline
+path with exact Schema v3 contracts, closed-world exact-version visibility,
+framework-owned opaque artifact identities, provenance-closed source grants,
+memory-content/scope/pack hash v2, bounded output receipts, and Invoker-owned
+governance facts. Compression, extraction, promotion, rejection, and
+supersession validate trusted inputs before mutation; curation is gated on the
+selected Promotion Service's `ConfirmedAtomic` guarantee. Completed replay is
+covered by E2E and native fixtures without a second mutation.
+
+Executable evidence:
+
+- Memory Tool contract/security/startup tests: 6 passing, including per-Host
+  generated-provider resolver isolation.
+- Generator-backed Memory Tool E2E: Build → exact-range Expand → Host history
+  handle → Compress → Extract → Promote → Supersede → replay, 1 passing.
+- linux-x64 NativeAOT publish-link-run Memory Tool fixture: Build, exact-range
+  Expand, Compress, Extract, Promote, and replay, 1 passing.
+- Existing Agent Tool and MCP NativeAOT gates remain passing; full solution
+  build completes with 0 errors.
+
+Canonical solution wiring includes the production Memory Tools, focused tests,
+E2E host, and NativeAOT fixture projects. Durable/distributed store atomicity
+and LLM adapter AOT remain explicitly deferred boundaries.
+
+Post-approval audit closure additionally enforces explicit generated-provider
+selection for the Memory module, CreatedByBatch-only artifact rollback,
+trusted compression/extraction provenance closure, final-content sanitization
+and v2 hash recomputation, framework-owned remapping of provider artifact
+labels before persistence, and post-preflight exception fencing without
+misclassifying typed conflict branches.
 
 ### Phase 8f — Agent Tool Projection
 

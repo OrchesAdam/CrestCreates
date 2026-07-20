@@ -374,6 +374,7 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
                 left.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(left.Outcome),
                 right.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(right.Outcome),
                 StringComparison.Ordinal)
+            && left.AuditFacts.SequenceEqual(right.AuditFacts)
             && string.Equals(left.ReasonCode, right.ReasonCode, StringComparison.Ordinal);
 
     private static bool EquivalentContext(

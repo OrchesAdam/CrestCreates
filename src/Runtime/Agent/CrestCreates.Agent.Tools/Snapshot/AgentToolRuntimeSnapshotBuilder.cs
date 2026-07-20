@@ -65,8 +65,8 @@ public sealed class AgentToolRuntimeSnapshotBuilder
                     .ToFrozenDictionary(StringComparer.Ordinal));
         }
 
-        var serializerOptions = FreezeJsonOptions(_json.SerializerOptions);
-        var entries = activeTools.Select(tool => BuildEntry(tool, serializerOptions)).ToArray();
+        var jsonSetup = FreezeJsonOptions(_json);
+        var entries = activeTools.Select(tool => BuildEntry(tool, jsonSetup.Options, jsonSetup.Contexts)).ToArray();
 
         try
         {
@@ -85,7 +85,8 @@ public sealed class AgentToolRuntimeSnapshotBuilder
 
     private AgentToolRuntimeEntry BuildEntry(
         AgentCapabilityToolDescriptor tool,
-        JsonSerializerOptions serializerOptions)
+        JsonSerializerOptions serializerOptions,
+        IReadOnlyList<JsonSerializerContext> contributorContexts)
     {
         var capability = _capabilityResolver.Resolve(tool.Capability);
         var capabilityHash = ContractHash(capability);
@@ -112,14 +113,14 @@ public sealed class AgentToolRuntimeSnapshotBuilder
         ValidateSchemaTypePresence(inputSchema, contract.InputType, input: true);
         ValidateSchemaTypePresence(outputSchema, contract.OutputType, input: false);
 
-        var inputTypeInfo = ResolveTypeInfo(serializerOptions, contract.InputType);
-        var outputTypeInfo = ResolveTypeInfo(serializerOptions, contract.OutputType);
+        var inputTypeInfo = ResolveTypeInfo(serializerOptions, contract.InputType, contributorContexts);
+        var outputTypeInfo = ResolveTypeInfo(serializerOptions, contract.OutputType, contributorContexts);
         ValidateTypeInfoRoot(inputTypeInfo);
         ValidateTypeInfoRoot(outputTypeInfo);
         if (inputSchema is not null && inputTypeInfo is not null)
-            _parity.ValidateInput(inputSchema, inputTypeInfo);
+            _parity.ValidateInput(inputSchema, inputTypeInfo, _schemas.GetAll());
         if (outputSchema is not null && outputTypeInfo is not null)
-            _parity.ValidateOutput(outputSchema, outputTypeInfo);
+            _parity.ValidateOutput(outputSchema, outputTypeInfo, _schemas.GetAll());
 
         var governance = _governance.Derive(tool, capability);
         var toolHash = ContractHash(tool);
@@ -135,8 +136,8 @@ public sealed class AgentToolRuntimeSnapshotBuilder
             ToolName = tool.ToolName,
             Title = tool.Title,
             Description = tool.Description,
-            InputSchema = _projector.ProjectInput(inputSchema),
-            OutputSchema = _projector.ProjectOutput(outputSchema),
+            InputSchema = _projector.ProjectInput(inputSchema, _schemas.GetAll()),
+            OutputSchema = _projector.ProjectOutput(outputSchema, _schemas.GetAll()),
             ToolContract = toolIdentity,
             CapabilityContract = capabilityIdentity,
             InputSchemaContract = inputIdentity,
@@ -189,12 +190,40 @@ public sealed class AgentToolRuntimeSnapshotBuilder
         }
     }
 
-    private static JsonSerializerOptions FreezeJsonOptions(JsonSerializerOptions configured)
+    private static (JsonSerializerOptions Options, IReadOnlyList<JsonSerializerContext> Contexts) FreezeJsonOptions(AgentToolJsonOptions configured)
     {
         JsonSerializerOptions options;
+        IJsonTypeInfoResolver[] sourceResolvers;
         try
         {
-            options = new JsonSerializerOptions(configured);
+            var source = configured.SerializerOptions;
+            sourceResolvers = source.TypeInfoResolverChain.ToArray();
+            if (sourceResolvers.Any(resolver => resolver is not JsonSerializerContext))
+            {
+                throw new AgentToolConfigurationException(
+                    AgentToolStartupDiagnosticCodes.InvalidJsonConfiguration,
+                    "Agent Tool JSON resolver must be source-generated.");
+            }
+            // Do not clone a context-owned options object: the clone can carry
+            // its read-only resolver state. Copy only the supported scalar and
+            // converter settings into a fresh mutable shared template.
+            options = new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = source.PropertyNamingPolicy,
+                DictionaryKeyPolicy = source.DictionaryKeyPolicy,
+                NumberHandling = source.NumberHandling,
+                DefaultIgnoreCondition = source.DefaultIgnoreCondition,
+                IgnoreReadOnlyProperties = source.IgnoreReadOnlyProperties,
+                IgnoreReadOnlyFields = source.IgnoreReadOnlyFields,
+                PropertyNameCaseInsensitive = source.PropertyNameCaseInsensitive,
+                AllowTrailingCommas = source.AllowTrailingCommas,
+                ReadCommentHandling = source.ReadCommentHandling,
+                WriteIndented = source.WriteIndented,
+                RespectNullableAnnotations = source.RespectNullableAnnotations,
+                RespectRequiredConstructorParameters = source.RespectRequiredConstructorParameters
+            };
+            foreach (var converter in source.Converters)
+                options.Converters.Add(converter);
         }
         catch (Exception exception)
         {
@@ -211,34 +240,144 @@ public sealed class AgentToolRuntimeSnapshotBuilder
                 "Schema-owned nullability and constructor presence validation must remain disabled.");
         }
 
-        if (options.TypeInfoResolverChain.Count > 0)
+        var contributors = configured.ContextContributors
+            .Where(contributor => configured.EnabledModuleIds.Contains(contributor.ModuleId))
+            .OrderBy(contributor => contributor.Order)
+            .ThenBy(contributor => contributor.Id, StringComparer.Ordinal)
+            .ToArray();
+        var contributorIds = new HashSet<string>(StringComparer.Ordinal);
+        var rootOwners = new Dictionary<Type, string>();
+        var typeContracts = new Dictionary<Type, AgentToolJsonTypeContract>();
+        var contributorContexts = sourceResolvers.OfType<JsonSerializerContext>().ToList();
+        // Do not read TypeInfoResolver here. On .NET 10 its getter can
+        // encapsulate a resolver-less options instance; generated context
+        // constructors must be the first owner of this shared template.
+        foreach (var contributor in contributors)
         {
-            if (options.TypeInfoResolverChain.Any(resolver => resolver is not JsonSerializerContext))
+            if (string.IsNullOrWhiteSpace(contributor.Id)
+                || !contributorIds.Add(contributor.Id))
+            {
+                throw new AgentToolConfigurationException(
+                    AgentToolStartupDiagnosticCodes.DuplicateJsonContributor,
+                    "Agent Tool JSON contributor IDs must be unique.");
+            }
+
+            foreach (var rootType in contributor.BindingRootTypes)
+            {
+                if (rootOwners.TryGetValue(rootType, out var owner))
+                {
+                    throw new AgentToolConfigurationException(
+                        AgentToolStartupDiagnosticCodes.DuplicateJsonBindingRoot,
+                        $"Agent Tool JSON binding root '{rootType}' is owned by both '{owner}' and '{contributor.Id}'.");
+                }
+                rootOwners[rootType] = contributor.Id;
+            }
+
+            foreach (var contract in contributor.TypeContracts)
+            {
+                if (contract.ClrType is null
+                    || !string.Equals(contract.ContributorId, contributor.Id, StringComparison.Ordinal)
+                    || contract.SchemaRef.Version is not > 0
+                    || string.IsNullOrWhiteSpace(contract.ContractFingerprint.Value))
+                {
+                    throw new AgentToolConfigurationException(
+                        AgentToolStartupDiagnosticCodes.InvalidJsonConfiguration,
+                        $"JSON contributor '{contributor.Id}' declared an invalid CLR type contract.");
+                }
+
+                if (typeContracts.TryGetValue(contract.ClrType, out var existingContract))
+                {
+                    if (existingContract.IsBindingRoot || contract.IsBindingRoot)
+                    {
+                        throw new AgentToolConfigurationException(
+                            AgentToolStartupDiagnosticCodes.DuplicateJsonBindingRoot,
+                            $"JSON binding root '{contract.ClrType}' has more than one owner.");
+                    }
+                    if (!Equals(existingContract.ContractFingerprint, contract.ContractFingerprint)
+                        || !Equals(existingContract.SchemaRef, contract.SchemaRef))
+                    {
+                        throw new AgentToolConfigurationException(
+                            AgentToolStartupDiagnosticCodes.InvalidJsonConfiguration,
+                            $"Nested JSON contract '{contract.ClrType}' is not equivalent across contributors.");
+                    }
+                }
+                else
+                {
+                    typeContracts.Add(contract.ClrType, contract);
+                }
+            }
+
+            JsonSerializerContext context;
+            try
+            {
+                // System.Text.Json source-generated contexts take ownership of
+                // their options and mark them read-only. Give each generated
+                // contributor an equivalent frozen template; the runtime
+                // contract is the normalized options fingerprint, not a
+                // mutable shared resolver chain (which STJ cannot support for
+                // multiple generated contexts).
+                var contextOptions = new JsonSerializerOptions(options);
+                context = contributor.Create(contextOptions)
+                    ?? throw new InvalidOperationException("JSON contributor returned null context.");
+                if (!string.Equals(JsonOptionsFingerprint(context.Options), JsonOptionsFingerprint(options), StringComparison.Ordinal))
+                    throw new AgentToolConfigurationException(
+                        AgentToolStartupDiagnosticCodes.InvalidJsonConfiguration,
+                        $"JSON contributor '{contributor.Id}' did not preserve the shared options contract.");
+            }
+            catch (Exception exception) when (exception is not AgentToolConfigurationException)
             {
                 throw new AgentToolConfigurationException(
                     AgentToolStartupDiagnosticCodes.InvalidJsonConfiguration,
-                    "Agent Tool JSON resolver chain must contain only source-generated contexts.");
+                    $"Agent Tool JSON contributor '{contributor.Id}' could not create its context.",
+                    exception);
             }
-        }
-        else if (options.TypeInfoResolver is not JsonSerializerContext)
-        {
-            throw new AgentToolConfigurationException(
-                AgentToolStartupDiagnosticCodes.InvalidJsonConfiguration,
-                "Agent Tool JSON resolver must be a source-generated context.");
+
+            contributorContexts.Add(context);
         }
 
+        options.TypeInfoResolver = EmptyJsonTypeInfoResolver.Instance;
         options.MakeReadOnly();
-        return options;
+        return (options, contributorContexts);
     }
 
-    private static JsonTypeInfo? ResolveTypeInfo(JsonSerializerOptions options, Type? type)
+    private static string JsonOptionsFingerprint(JsonSerializerOptions options)
+        => string.Join("|",
+            options.PropertyNamingPolicy?.GetType().AssemblyQualifiedName ?? string.Empty,
+            options.DictionaryKeyPolicy?.GetType().AssemblyQualifiedName ?? string.Empty,
+            options.NumberHandling,
+            options.DefaultIgnoreCondition,
+            options.IgnoreReadOnlyProperties,
+            options.IgnoreReadOnlyFields,
+            options.PropertyNameCaseInsensitive,
+            options.AllowTrailingCommas,
+            options.ReadCommentHandling,
+            options.WriteIndented,
+            options.Converters.Count);
+
+    private static JsonTypeInfo? ResolveTypeInfo(JsonSerializerOptions options, Type? type, IReadOnlyList<JsonSerializerContext> contexts)
     {
         if (type is null)
             return null;
 
         try
         {
-            return options.GetTypeInfo(type);
+            try
+            {
+                var resolved = options.GetTypeInfo(type);
+                if (resolved is not null)
+                    return resolved;
+            }
+            catch (NotSupportedException) { }
+            catch (InvalidOperationException) { }
+            foreach (var context in contexts)
+            {
+                var info = context.GetTypeInfo(type);
+                if (info is not null)
+                    return info;
+            }
+            throw new AgentToolConfigurationException(
+                AgentToolStartupDiagnosticCodes.MissingJsonTypeInfo,
+                "Application-owned source-generated JsonTypeInfo is missing.");
         }
         catch (NotSupportedException exception)
         {
@@ -247,6 +386,12 @@ public sealed class AgentToolRuntimeSnapshotBuilder
                 "Application-owned source-generated JsonTypeInfo is missing.",
                 exception);
         }
+    }
+
+    private sealed class EmptyJsonTypeInfoResolver : IJsonTypeInfoResolver
+    {
+        public static EmptyJsonTypeInfoResolver Instance { get; } = new();
+        public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options) => null;
     }
 
     private static void ValidateTypeInfoRoot(JsonTypeInfo? typeInfo)

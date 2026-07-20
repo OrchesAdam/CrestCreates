@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.CanonicalHashing.Generated;
+using CrestCreates.Schema.Abstractions;
 
 namespace CrestCreates.Metadata.CanonicalHashing;
 
@@ -25,6 +26,12 @@ public sealed class DefaultCanonicalHashComputer : ICanonicalHashComputer
 
     public CanonicalHash ComputeContractHash(IDescriptor descriptor, CanonicalHashScope scope)
     {
+        if (descriptor is SchemaDescriptor schema && schema.Fields.Any(field => field.ObjectSchema is not null))
+        {
+            return ComputeFromProjection(SchemaNestedCanonicalHashProjection.Create(
+                schema, scope, definition: false, ContractVersions.DescriptorHash, AlgorithmVersion));
+        }
+
         var projection = CanonicalHashProjectionDispatcher.ToContractProjection(
             descriptor, scope, ContractVersions.DescriptorHash, AlgorithmVersion);
         return ComputeFromProjection(projection);
@@ -32,6 +39,12 @@ public sealed class DefaultCanonicalHashComputer : ICanonicalHashComputer
 
     public CanonicalHash ComputeDefinitionHash(IDescriptor descriptor, CanonicalHashScope scope)
     {
+        if (descriptor is SchemaDescriptor schema && schema.Fields.Any(field => field.ObjectSchema is not null))
+        {
+            return ComputeFromProjection(SchemaNestedCanonicalHashProjection.Create(
+                schema, scope, definition: true, ContractVersions.DescriptorHash, AlgorithmVersion));
+        }
+
         var projection = CanonicalHashProjectionDispatcher.ToDefinitionProjection(
             descriptor, scope, ContractVersions.DescriptorHash, AlgorithmVersion);
         return ComputeFromProjection(projection);

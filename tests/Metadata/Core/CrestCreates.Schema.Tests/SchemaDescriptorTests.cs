@@ -63,4 +63,23 @@ public class SchemaDescriptorTests
         field.MaxLength.Should().Be(200);
         field.Pattern.Should().NotBeNull();
     }
+
+    [Fact]
+    public void SchemaFieldDescriptor_Supports_Exact_Nested_Object_Reference()
+    {
+        var field = new SchemaFieldDescriptor
+        {
+            Name = "Address",
+            FieldType = "object",
+            ObjectSchema = new VersionedDescriptorRef<SchemaDescriptor>(
+                "address",
+                2,
+                VersionSelectionMode.Exact)
+        };
+
+        field.ObjectSchema.Should().NotBeNull();
+        field.ObjectSchema!.Value.Id.Should().Be("address");
+        field.ObjectSchema.Value.Version.Should().Be(2);
+        field.ObjectSchema.Value.SelectionMode.Should().Be(VersionSelectionMode.Exact);
+    }
 }

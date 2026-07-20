@@ -130,6 +130,8 @@
     <Project Path="src/Runtime/Agent/CrestCreates.Agent.DraftContracts/CrestCreates.Agent.DraftContracts.csproj" />
     <Project Path="src/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions/CrestCreates.Agent.Tools.Abstractions.csproj" />
     <Project Path="src/Runtime/Agent/CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj" />
+    <Project Path="src/Runtime/Agent/CrestCreates.Agent.Memory.Tools.Abstractions/CrestCreates.Agent.Memory.Tools.Abstractions.csproj" />
+    <Project Path="src/Runtime/Agent/CrestCreates.Agent.Memory.Tools/CrestCreates.Agent.Memory.Tools.csproj" />
   </Folder>
   <Folder Name="/src/Runtime/Eventing/">
     <Project Path="src/Runtime/Eventing/CrestCreates.Event.Abstractions/CrestCreates.Event.Abstractions.csproj" />
@@ -257,6 +259,10 @@
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.DraftContracts.Tests/CrestCreates.Agent.DraftContracts.Tests.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Memory.Tests/CrestCreates.Agent.Memory.Tests.csproj" />
+    <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.Tests/CrestCreates.Agent.Memory.Tools.Tests.csproj" />
+    <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.E2E.Tests/CrestCreates.Agent.Memory.Tools.E2E.Tests.csproj" />
+    <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.AotFixture.Tests/CrestCreates.Agent.Memory.Tools.AotFixture.Tests.csproj" />
+    <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.AotFixture/CrestCreates.Agent.Memory.Tools.AotFixture.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Memory.Llm.Tests/CrestCreates.Agent.Memory.Llm.Tests.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests/CrestCreates.Agent.Authoring.Tests.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Prompting.Tests/CrestCreates.Agent.Prompting.Tests.csproj" />

@@ -21,4 +21,23 @@ public sealed class InMemoryAgentCompressedContextStore : IAgentCompressedContex
         var snapshot = context.Snapshot();
         return new ValueTask<AgentCompressedContext?>(snapshot);
     }
+
+    public ValueTask<AgentCompressedContextBlock?> GetCompressedContextBlockAsync(
+        string tenantId,
+        string blockId,
+        CancellationToken cancellationToken = default)
+    {
+        foreach (var context in _contexts.Values)
+        {
+            if (!string.Equals(context.TenantId, tenantId, StringComparison.Ordinal))
+                continue;
+
+            var block = context.Blocks.FirstOrDefault(item =>
+                string.Equals(item.BlockId, blockId, StringComparison.Ordinal));
+            if (block is not null)
+                return new ValueTask<AgentCompressedContextBlock?>(block.Snapshot());
+        }
+
+        return new ValueTask<AgentCompressedContextBlock?>((AgentCompressedContextBlock?)null);
+    }
 }

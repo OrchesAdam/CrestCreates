@@ -28,4 +28,8 @@ public static class AgentToolStartupDiagnosticCodes
     public const string MissingGovernanceAuditor = "ATP123";
     public const string InvalidLifecycle = "ATP124";
     public const string SnapshotPublicationFailure = "ATP125";
+    public const string DuplicateJsonContributor = "ATP127";
+    public const string JsonContributorOrderConflict = "ATP128";
+    public const string DuplicateJsonBindingRoot = "ATP129";
+    public const string JsonContributorOptionsMismatch = "ATP130";
 }

@@ -95,15 +95,24 @@ public sealed class HandlerInvokerSourceGenerator : IIncrementalGenerator
         sb.AppendLine("using System.Threading;");
         sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine("using CrestCreates.Capability.Abstractions;");
+        sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
+        sb.AppendLine("using Microsoft.Extensions.DependencyInjection.Extensions;");
         sb.AppendLine("using System.Runtime.CompilerServices;");
         sb.AppendLine();
         sb.AppendLine("namespace CrestCreates.Generated;");
         sb.AppendLine();
         sb.AppendLine("internal static class GeneratedHandlerRegistry");
         sb.AppendLine("{");
+        var providerId = compilation.AssemblyName is { Length: > 0 } assemblyName
+            ? assemblyName
+            : "generated-capability-provider";
+        var escapedProviderId = providerId.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        sb.AppendLine($"    private const string ProviderId = \"{escapedProviderId}\";");
         sb.AppendLine("    [ModuleInitializer]");
         sb.AppendLine("    internal static void Register()");
         sb.AppendLine("    {");
+        sb.AppendLine("        CapabilityHandlerResolverProvider.RegisterDefinition(ProviderId, resolver =>");
+        sb.AppendLine("        {");
 
         foreach (var handler in validHandlers)
         {
@@ -115,8 +124,33 @@ public sealed class HandlerInvokerSourceGenerator : IIncrementalGenerator
 
             sb.AppendLine();
             sb.AppendLine($"        // Handler: {fullName}");
-            sb.AppendLine($"        CapabilityHandlerResolverProvider.Register(\"{handler.CapabilityName}\",");
-            sb.AppendLine($"            new {invokerClassName}());");
+            sb.AppendLine($"            resolver.Register(\"{handler.CapabilityName}\", new {invokerClassName}());");
+        }
+
+        sb.AppendLine("        });");
+        sb.AppendLine("    }");
+
+        // Explicit host selection path. ModuleInitializer registration above is
+        // retained only for older compatibility consumers; new modules call
+        // Apply(IServiceCollection) from their Add* extension so each Host gets
+        // an isolated resolver and scoped handler registrations.
+        sb.AppendLine();
+        sb.AppendLine("    internal static void Apply(IServiceCollection services)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        var resolver = new CapabilityHandlerResolver();");
+        sb.AppendLine("        services.RemoveAll<CapabilityHandlerResolver>();");
+        sb.AppendLine("        services.RemoveAll<ICapabilityHandlerResolver>();");
+        sb.AppendLine("        services.AddSingleton(resolver);");
+        sb.AppendLine("        services.AddSingleton<ICapabilityHandlerResolver>(resolver);");
+
+        sb.AppendLine("        CapabilityHandlerResolverProvider.ApplyDefinition(ProviderId, resolver);");
+        foreach (var handler in validHandlers)
+        {
+            if (handler == null) continue;
+            var fullName = string.IsNullOrEmpty(handler.HandlerNamespace)
+                ? handler.HandlerTypeName
+                : $"{handler.HandlerNamespace}.{handler.HandlerTypeName}";
+            sb.AppendLine($"        services.AddScoped<{fullName}>();");
         }
 
         sb.AppendLine("    }");
@@ -131,12 +165,17 @@ public sealed class HandlerInvokerSourceGenerator : IIncrementalGenerator
             var invokerClassName = $"{handler.HandlerTypeName}_Invoker";
 
             sb.AppendLine();
-            sb.AppendLine($"    internal sealed class {invokerClassName} : ICapabilityHandlerInvoker");
+            sb.AppendLine($"    internal sealed class {invokerClassName} : ICapabilityContextAwareHandlerInvoker");
             sb.AppendLine("    {");
-            sb.AppendLine("        public async Task<object?> InvokeAsync(object? input, CancellationToken ct)");
+            sb.AppendLine("        public Task<object?> InvokeAsync(object? input, CancellationToken ct)");
             sb.AppendLine("        {");
-            sb.AppendLine($"            var handler = new {fullName}();");
-            sb.AppendLine($"            var typedInput = ({handler.InputTypeName})input!;");
+            sb.AppendLine("            throw new InvalidOperationException(\"Generated capability handlers require a CapabilityExecutionContext.\");");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            sb.AppendLine("        public async Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            var handler = context.ServiceProvider.GetRequiredService<{fullName}>();");
+            sb.AppendLine($"            var typedInput = ({handler.InputTypeName})context.Input!;");
             sb.AppendLine("            var result = await handler.ExecuteAsync(typedInput, ct).ConfigureAwait(false);");
             sb.AppendLine("            return result;");
             sb.AppendLine("        }");

@@ -114,6 +114,9 @@ public sealed record AgentToolGovernanceFinalizationRecord
     /// </summary>
     public required string OutcomeHash { get; init; }
 
+    public IReadOnlyList<AgentToolAuditFact> AuditFacts { get; init; }
+        = Array.Empty<AgentToolAuditFact>();
+
     public required string ReasonCode { get; init; }
 }
 

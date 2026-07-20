@@ -84,8 +84,7 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
                 }
 
                 var output = invoker is ICapabilityContextAwareHandlerInvoker contextAwareInvoker
-                    ? await contextAwareInvoker.InvokeAsync(ctx, ctx.CancellationToken)
-                        .ConfigureAwait(false)
+                    ? await InvokeWithContextAccessorAsync(contextAwareInvoker, ctx)
                     : await invoker.InvokeAsync(ctx.Input, ctx.CancellationToken)
                         .ConfigureAwait(false);
 
@@ -115,6 +114,22 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
                 "PIPELINE_ERROR",
                 ex.Message,
                 DateTimeOffset.UtcNow - startedAt);
+        }
+    }
+
+    private async Task<object?> InvokeWithContextAccessorAsync(
+        ICapabilityContextAwareHandlerInvoker invoker,
+        CapabilityExecutionContext context)
+    {
+        var accessor = _serviceProvider.GetService<CapabilityExecutionContextAccessor>();
+        accessor?.Set(context);
+        try
+        {
+            return await invoker.InvokeAsync(context, context.CancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            accessor?.Clear(context);
         }
     }
 }

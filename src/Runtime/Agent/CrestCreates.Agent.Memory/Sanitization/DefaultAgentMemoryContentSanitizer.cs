@@ -39,13 +39,10 @@ public sealed class DefaultAgentMemoryContentSanitizer : IAgentMemoryContentSani
     {
         if (string.IsNullOrWhiteSpace(content))
         {
-            var emptySourceId = sourceRefs.Count > 0 ? sourceRefs[0].SourceId : "unknown";
-            var emptySourceKind = sourceRefs.Count > 0 ? sourceRefs[0].SourceKind : AgentSourceKind.ConversationTurn;
-
             return new SanitizedAgentContent
             {
                 SanitizedContent = string.Empty,
-                CanonicalContentHash = _hashProjector.ComputeContentHash(tenantId, emptySourceKind, emptySourceId, null, null, string.Empty),
+                CanonicalContentHash = _hashProjector.ComputeContentHash(tenantId, sourceRefs, string.Empty),
                 Rejected = true,
                 RedactionKinds = [AgentMemoryDiagnosticCodes.AgentMemoryRedactionKinds.EmptyContent],
                 Diagnostics = [new AgentMemoryDiagnostic
@@ -123,27 +120,6 @@ public sealed class DefaultAgentMemoryContentSanitizer : IAgentMemoryContentSani
 
     private CanonicalHash ComputeCanonicalHashFromContext(string tenantId, IReadOnlyList<AgentContextSourceRef> sourceRefs, string content)
     {
-        AgentSourceKind sourceKind;
-        string sourceId;
-        int? rangeStart;
-        int? rangeEnd;
-
-        if (sourceRefs.Count > 0)
-        {
-            var first = sourceRefs[0];
-            sourceKind = first.SourceKind;
-            sourceId = first.SourceId;
-            rangeStart = first.RangeStart;
-            rangeEnd = first.RangeEnd;
-        }
-        else
-        {
-            sourceKind = AgentSourceKind.ConversationTurn;
-            sourceId = "unknown";
-            rangeStart = null;
-            rangeEnd = null;
-        }
-
-        return _hashProjector.ComputeContentHash(tenantId, sourceKind, sourceId, rangeStart, rangeEnd, content);
+        return _hashProjector.ComputeContentHash(tenantId, sourceRefs, content);
     }
 }

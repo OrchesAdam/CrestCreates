@@ -206,12 +206,12 @@ public sealed class AgentToolGovernanceAuditorTests
         {
             Outcome = finalization.Outcome with
             {
-                StructuredOutput = JsonDocument.Parse("{\"value\":2}").RootElement.Clone()
+                Code = "different-code"
             },
             OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(
                 finalization.Outcome with
                 {
-                    StructuredOutput = JsonDocument.Parse("{\"value\":2}").RootElement.Clone()
+                    Code = "different-code"
                 })
         });
         var contextConflict = async () => await auditor.FinalizeAsync(finalization with
@@ -431,7 +431,7 @@ public sealed class AgentToolGovernanceAuditorTests
             AgentToolBudgetReservationState.Committed,
             AgentToolGovernanceAttemptFinalState.Completed,
             AgentToolInvocationTerminalState.Completed);
-        var differentOutcome = finalization.Outcome with { Message = "different" };
+        var differentOutcome = finalization.Outcome with { Code = "different-code" };
 
         var act = async () => await auditor.FinalizeAsync(finalization with
         {
@@ -458,7 +458,7 @@ public sealed class AgentToolGovernanceAuditorTests
 
         var act = async () => await auditor.FinalizeAsync(finalization with
         {
-            Outcome = finalization.Outcome with { Message = "different" }
+            Outcome = finalization.Outcome with { Code = "different-code" }
         });
 
         await act.Should().ThrowAsync<ArgumentException>();

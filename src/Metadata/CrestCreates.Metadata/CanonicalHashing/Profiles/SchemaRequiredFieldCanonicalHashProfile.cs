@@ -26,6 +26,8 @@ internal sealed class SchemaRequiredFieldCanonicalHashProfile
     [CanonicalHashField(nameof(SchemaFieldDescriptor.IsNullable), CanonicalHashFieldClassification.Contract, Order = 3)]
     [CanonicalHashField(nameof(SchemaFieldDescriptor.IsCollection), CanonicalHashFieldClassification.Contract, Order = 4)]
     [CanonicalHashField(nameof(SchemaFieldDescriptor.CollectionElementType), CanonicalHashFieldClassification.Contract, Order = 5)]
+    [CanonicalHashField(nameof(SchemaFieldDescriptor.ObjectSchema), CanonicalHashFieldClassification.Excluded,
+        Reason = "Nested object references are represented by the Schema v3 projection.")]
     [CanonicalHashField(nameof(SchemaFieldDescriptor.MaxLength), CanonicalHashFieldClassification.Contract, Order = 6)]
     [CanonicalHashField(nameof(SchemaFieldDescriptor.MinLength), CanonicalHashFieldClassification.Contract, Order = 7)]
     [CanonicalHashField(nameof(SchemaFieldDescriptor.MaxValue), CanonicalHashFieldClassification.Contract, Order = 8)]

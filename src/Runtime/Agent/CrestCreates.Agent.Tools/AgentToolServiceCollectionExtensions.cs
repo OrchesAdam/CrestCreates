@@ -17,9 +17,21 @@ public static class AgentToolServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        var json = new AgentToolJsonOptions();
-        configureJson?.Invoke(json);
-        services.TryAddSingleton(json);
+        services.TryAddSingleton<AgentToolJsonOptions>(sp =>
+        {
+            var json = new AgentToolJsonOptions();
+            configureJson?.Invoke(json);
+            foreach (var selection in sp.GetServices<IAgentToolModuleSelection>())
+                json.EnabledModuleIds.Add(selection.ModuleId);
+            foreach (var contributor in sp.GetServices<IAgentToolJsonContextContributor>()
+                .OrderBy(item => item.Order)
+                .ThenBy(item => item.Id, StringComparer.Ordinal))
+            {
+                if (json.ContextContributors.All(item => item.Id != contributor.Id))
+                    json.ContextContributors.Add(contributor);
+            }
+            return json;
+        });
         services.TryAddSingleton<IRegistryValidator<AgentCapabilityToolDescriptor>, AgentToolDescriptorValidator>();
         services.TryAddSingleton<IRegistryValidationEngine<AgentCapabilityToolDescriptor>,
             RegistryValidationEngine<AgentCapabilityToolDescriptor>>();
@@ -42,6 +54,7 @@ public static class AgentToolServiceCollectionExtensions
         services.TryAddSingleton<AgentToolInvocationFingerprintBuilder>();
         services.TryAddSingleton<AgentCapabilityIdempotencyKeyBuilder>();
         services.TryAddSingleton<AgentToolResultMapper>();
+        services.TryAddSingleton<IAgentToolInvocationFactBufferFactory, AgentToolInvocationFactBufferFactory>();
         services.TryAddScoped<IAgentToolCatalog, AgentToolCatalog>();
         services.TryAddScoped<IAgentToolInvoker, AgentToolInvoker>();
         return services;

@@ -40,6 +40,7 @@ try
     var builder = Host.CreateApplicationBuilder();
     builder.Services.AddSingleton<ISchemaRegistry>(schemas);
     builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
+    builder.Services.AddScoped<FixtureEchoHandler>();
     builder.Services.AddCapabilityRuntime();
     builder.Services.AddCrestMcpToolProjection(options =>
         options.SerializerOptions.TypeInfoResolver = McpFixtureJsonContext.Default);

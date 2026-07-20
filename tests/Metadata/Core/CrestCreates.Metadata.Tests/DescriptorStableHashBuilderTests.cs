@@ -1080,6 +1080,56 @@ public sealed class DescriptorStableHashBuilderTests
     }
 
     [Fact]
+    public void FlatSchema_RetainsV2HashShape()
+    {
+        var schema = CreateSchema("flat-v2", "Flat", fields: new[]
+        {
+            new SchemaFieldDescriptor { Name = "name", FieldType = "string", IsRequired = true }
+        });
+
+        _hashComputer.ComputeContractHash(schema, CanonicalHashScope.InternalFull)
+            .CanonicalShapeVersion.Should().Be("schema-contract-hash-v2");
+        _hashComputer.ComputeDefinitionHash(schema, CanonicalHashScope.InternalFull)
+            .CanonicalShapeVersion.Should().Be("schema-definition-hash-v2");
+    }
+
+    [Fact]
+    public void NestedSchema_UsesV3ShapeAndReferenceParticipatesInHash()
+    {
+        var first = CreateSchema("nested", "Nested", fields: new[]
+        {
+            new SchemaFieldDescriptor
+            {
+                Name = "child", FieldType = "object", IsRequired = true,
+                ObjectSchema = new VersionedDescriptorRef<SchemaDescriptor>("address", 1)
+            }
+        });
+        var second = new SchemaDescriptor
+        {
+            Id = first.Id,
+            Name = first.Name,
+            Version = first.Version,
+            State = first.State,
+            Fields = new[]
+            {
+                new SchemaFieldDescriptor
+                {
+                    Name = "child", FieldType = "object", IsRequired = true,
+                    ObjectSchema = new VersionedDescriptorRef<SchemaDescriptor>("profile", 1)
+                }
+            }
+        };
+
+        var firstContract = _hashComputer.ComputeContractHash(first, CanonicalHashScope.InternalFull);
+        var secondContract = _hashComputer.ComputeContractHash(second, CanonicalHashScope.InternalFull);
+
+        firstContract.CanonicalShapeVersion.Should().Be("schema-contract-hash-v3");
+        _hashComputer.ComputeDefinitionHash(first, CanonicalHashScope.InternalFull)
+            .CanonicalShapeVersion.Should().Be("schema-definition-hash-v3");
+        firstContract.Value.Should().NotBe(secondContract.Value);
+    }
+
+    [Fact]
     public void WorkflowStep_TargetChange_ChangesContractHash()
     {
         // WorkflowStep.Target must participate in ContractHash —

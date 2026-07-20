@@ -1,4 +1,6 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Identity;
+using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Core.Abstractions.Identity;
 
 namespace CrestCreates.Agent.Memory.Compression;
@@ -6,10 +8,17 @@ namespace CrestCreates.Agent.Memory.Compression;
 public sealed class DefaultAgentContextCompressor : IAgentContextCompressor
 {
     private readonly IAgentMemoryContentSanitizer _sanitizer;
+    private readonly IAgentMemoryArtifactIdGenerator _ids;
+    private readonly AgentMemoryCanonicalHashProjector? _hashProjector;
 
-    public DefaultAgentContextCompressor(IAgentMemoryContentSanitizer sanitizer)
+    public DefaultAgentContextCompressor(
+        IAgentMemoryContentSanitizer sanitizer,
+        IAgentMemoryArtifactIdGenerator? ids = null,
+        AgentMemoryCanonicalHashProjector? hashProjector = null)
     {
         _sanitizer = sanitizer;
+        _ids = ids ?? new DefaultAgentMemoryArtifactIdGenerator();
+        _hashProjector = hashProjector;
     }
 
     public ValueTask<AgentCompressedContext> CompressConversationAsync(AgentConversationRecord conversation, CancellationToken cancellationToken = default)
@@ -61,13 +70,15 @@ public sealed class DefaultAgentContextCompressor : IAgentContextCompressor
                         CanonicalContentHash = sanitized.CanonicalContentHash
                     }
                 };
+            var blockHash = _hashProjector?.ComputeContentHash(conversation.TenantId, blockSourceRefs, content)
+                ?? sanitized.CanonicalContentHash;
 
             blocks.Add(new AgentCompressedContextBlock
             {
-                BlockId = $"{conversation.ConversationId}_{turn.TurnId}",
+                BlockId = _ids.CreateBlockId(),
                 TenantId = conversation.TenantId,
                 Content = content,
-                CanonicalContentHash = sanitized.CanonicalContentHash,
+                CanonicalContentHash = blockHash,
                 SourceRefs = blockSourceRefs,
                 Diagnostics = sanitized.Diagnostics.ToArray()
             });
@@ -75,7 +86,7 @@ public sealed class DefaultAgentContextCompressor : IAgentContextCompressor
 
         return new ValueTask<AgentCompressedContext>(new AgentCompressedContext
         {
-            ContextId = conversation.ConversationId,
+            ContextId = _ids.CreateContextId(),
             TenantId = conversation.TenantId,
             Blocks = blocks.ToArray(),
             Diagnostics = diagnostics.ToArray()
@@ -112,13 +123,16 @@ public sealed class DefaultAgentContextCompressor : IAgentContextCompressor
                     CanonicalContentHash = summarySanitized.CanonicalContentHash
                 }
             };
+            var summaryContent = $"[Task] {summarySanitized.SanitizedContent}";
+            var summaryHash = _hashProjector?.ComputeContentHash(task.TenantId, summaryBlockSourceRefs, summaryContent)
+                ?? summarySanitized.CanonicalContentHash;
 
             blocks.Add(new AgentCompressedContextBlock
             {
-                BlockId = $"{task.TaskId}_summary",
+                BlockId = _ids.CreateBlockId(),
                 TenantId = task.TenantId,
-                Content = $"[Task] {summarySanitized.SanitizedContent}",
-                CanonicalContentHash = summarySanitized.CanonicalContentHash,
+                Content = summaryContent,
+                CanonicalContentHash = summaryHash,
                 SourceRefs = summaryBlockSourceRefs
             });
         }
@@ -167,13 +181,15 @@ public sealed class DefaultAgentContextCompressor : IAgentContextCompressor
                         CanonicalContentHash = sanitized.CanonicalContentHash
                     }
                 };
+            var eventHash = _hashProjector?.ComputeContentHash(task.TenantId, eventBlockSourceRefs, content)
+                ?? sanitized.CanonicalContentHash;
 
             blocks.Add(new AgentCompressedContextBlock
             {
-                BlockId = $"{task.TaskId}_{evt.EventId}",
+                BlockId = _ids.CreateBlockId(),
                 TenantId = task.TenantId,
                 Content = content,
-                CanonicalContentHash = sanitized.CanonicalContentHash,
+                CanonicalContentHash = eventHash,
                 SourceRefs = eventBlockSourceRefs,
                 Diagnostics = sanitized.Diagnostics.ToArray()
             });
@@ -181,7 +197,7 @@ public sealed class DefaultAgentContextCompressor : IAgentContextCompressor
 
         return new ValueTask<AgentCompressedContext>(new AgentCompressedContext
         {
-            ContextId = task.TaskId,
+            ContextId = _ids.CreateContextId(),
             TenantId = task.TenantId,
             Blocks = blocks.ToArray(),
             Diagnostics = diagnostics.ToArray()

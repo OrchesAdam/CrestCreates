@@ -311,6 +311,12 @@ public sealed record AgentMemoryItem : ISnapshotable<AgentMemoryItem>
 public sealed record AgentMemoryQuery
 {
     public required string TenantId { get; init; }
+    /// <summary>
+    /// The closed-world visibility boundary. Tool callers must provide this
+    /// exact-version boundary; legacy fields remain only for existing runtime
+    /// callers during migration and are ignored when this value is present.
+    /// </summary>
+    public AgentMemoryVisibilityBoundary? VisibilityBoundary { get; init; }
     public string? IntentText { get; init; }
     public IReadOnlyList<string> MemoryIds { get; init; } = Array.Empty<string>();
     public IReadOnlyList<AgentMemoryKind> Kinds { get; init; } = Array.Empty<AgentMemoryKind>();
@@ -332,6 +338,7 @@ public sealed record AgentMemoryQuery
     /// </summary>
     public AgentMemoryQuery Copy() => this with
     {
+        VisibilityBoundary = VisibilityBoundary?.Snapshot(),
         MemoryIds = MemoryIds.ToArray(),
         Kinds = Kinds.ToArray(),
         Tags = Tags.ToArray(),
@@ -341,12 +348,83 @@ public sealed record AgentMemoryQuery
     };
 }
 
+public sealed record AgentMemoryVisibilityBoundary
+{
+    public IReadOnlyList<DescriptorRef> VisibleDescriptorRefs { get; init; } = Array.Empty<DescriptorRef>();
+    public bool AllowUnscopedMemory { get; init; }
+
+    public AgentMemoryVisibilityBoundary Snapshot() => this with
+    {
+        VisibleDescriptorRefs = VisibleDescriptorRefs.ToArray()
+    };
+}
+
+public enum AgentMemoryOperationFailureCode
+{
+    Unknown = 0,
+    ResourceUnavailable = 1,
+    InvalidLifecycleState = 2,
+    TenantMismatch = 3,
+    MissingActor = 4,
+    MissingReason = 5,
+    MissingTimestamp = 6,
+    MissingSourceOrExplanation = 7,
+    StateConflict = 8,
+    IdentityConflict = 9
+}
+
+public sealed class AgentMemoryOperationException : InvalidOperationException
+{
+    public AgentMemoryOperationException(
+        AgentMemoryOperationFailureCode code,
+        string message,
+        Exception? innerException = null)
+        : base(message, innerException)
+    {
+        Code = code;
+    }
+
+    public AgentMemoryOperationFailureCode Code { get; }
+}
+
+public sealed record AgentMemoryCandidateExpectation
+{
+    public required string CandidateId { get; init; }
+    public required CanonicalHash ExpectedStateHash { get; init; }
+}
+
+public sealed record AgentMemoryItemExpectation
+{
+    public required string MemoryId { get; init; }
+    public required CanonicalHash ExpectedStateHash { get; init; }
+}
+
+public sealed record AgentMemoryPromotionPlan
+{
+    public required AgentMemoryCandidateExpectation Candidate { get; init; }
+    public required string NewMemoryId { get; init; }
+    public required CanonicalHash ExpectedMemoryContentHash { get; init; }
+    public required CanonicalHash ExpectedMemoryStateHash { get; init; }
+    public required AgentMemoryOperationRequest Operation { get; init; }
+}
+
+public sealed record AgentMemorySupersessionPlan
+{
+    public required AgentMemoryItemExpectation TargetMemory { get; init; }
+    public required AgentMemoryCandidateExpectation ReplacementCandidate { get; init; }
+    public required string NewMemoryId { get; init; }
+    public required CanonicalHash ExpectedMemoryContentHash { get; init; }
+    public required CanonicalHash ExpectedMemoryStateHash { get; init; }
+    public required AgentMemoryOperationRequest Operation { get; init; }
+}
+
 public sealed record AgentMemoryPack : ISnapshotable<AgentMemoryPack>
 {
     public required string TenantId { get; init; }
     public IReadOnlyList<AgentMemoryItem> Memories { get; init; } = Array.Empty<AgentMemoryItem>();
     public IReadOnlyList<AgentMemoryDiagnostic> Diagnostics { get; init; } = Array.Empty<AgentMemoryDiagnostic>();
     public bool IsAuthoritative { get; init; }
+    public bool WasTruncated { get; init; }
     public CanonicalHash? ScopeFingerprint { get; init; }
     public CanonicalHash? VisibleMemorySetHash { get; init; }
     public CanonicalHash? CanonicalPackHash { get; init; }

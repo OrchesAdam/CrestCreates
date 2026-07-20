@@ -26,6 +26,7 @@ public sealed class SchemaFieldDescriptor
 {
     public string Name { get; init; } = string.Empty;
     public string FieldType { get; init; } = string.Empty;
+    public VersionedDescriptorRef<SchemaDescriptor>? ObjectSchema { get; init; }
     public bool IsRequired { get; init; }
     public bool IsNullable { get; init; }
     public int? MaxLength { get; init; }

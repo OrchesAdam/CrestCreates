@@ -1,5 +1,6 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Extraction;
+using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Llm.Model;
 using CrestCreates.Agent.Memory.Llm.Prompting;
 using CrestCreates.Agent.Memory.Llm.Validation;
@@ -24,6 +25,8 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
     private readonly IAgentPromptEvidenceFactory _evidenceFactory;
     private readonly IAgentPromptHashService _hashService;
     private readonly AgentMemoryLlmAdapterOptions _options;
+    private readonly IAgentMemoryArtifactIdGenerator _ids;
+    private readonly AgentMemoryCanonicalHashProjector? _hashProjector;
 
     public LlmAgentMemoryExtractor(
         IAgentMemoryContentSanitizer sanitizer,
@@ -33,7 +36,9 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
         IAgentMemoryExtractionOutputParser parser,
         IAgentPromptEvidenceFactory evidenceFactory,
         IAgentPromptHashService hashService,
-        AgentMemoryLlmAdapterOptions options)
+        AgentMemoryLlmAdapterOptions options,
+        IAgentMemoryArtifactIdGenerator? ids = null,
+        AgentMemoryCanonicalHashProjector? hashProjector = null)
     {
         _sanitizer = sanitizer;
         _fallback = fallback;
@@ -43,6 +48,8 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
         _evidenceFactory = evidenceFactory;
         _hashService = hashService;
         _options = options;
+        _ids = ids ?? new CrestCreates.Agent.Memory.Identity.DefaultAgentMemoryArtifactIdGenerator();
+        _hashProjector = hashProjector;
     }
 
     public async ValueTask<IReadOnlyList<AgentMemoryCandidate>> ExtractCandidatesAsync(
@@ -204,6 +211,8 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
                 .Where(id => sourceRefMap.ContainsKey(id))
                 .SelectMany(id => sourceRefMap[id])
                 .ToArray();
+            var finalHash = _hashProjector?.ComputeContentHash(context.TenantId, sourceRefs, sanitized.SanitizedContent)
+                ?? sanitized.CanonicalContentHash;
 
             var kind = ParseMemoryKind(dto.Kind);
             var confidence = ParseConfidence(dto.Confidence);
@@ -214,11 +223,11 @@ public sealed class LlmAgentMemoryExtractor : IAgentMemoryExtractor
 
             var candidate = new AgentMemoryCandidate
             {
-                CandidateId = dto.CandidateId ?? Guid.NewGuid().ToString("N"),
+                CandidateId = _ids.CreateCandidateId(),
                 TenantId = context.TenantId,
                 Kind = kind,
                 Content = sanitized.SanitizedContent,
-                CanonicalContentHash = sanitized.CanonicalContentHash,
+                CanonicalContentHash = finalHash,
                 Confidence = confidence,
                 SourceRefs = sourceRefs,
                 Status = AgentMemoryStatus.Candidate, // Always Candidate — never Active from LLM

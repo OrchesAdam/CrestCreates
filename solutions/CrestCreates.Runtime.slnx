@@ -101,6 +101,9 @@
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions.Tests/CrestCreates.Agent.Tools.Abstractions.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.Tests/CrestCreates.Agent.Tools.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.E2E.Tests/CrestCreates.Agent.Tools.E2E.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.E2E.Tests/CrestCreates.Agent.Memory.Tools.E2E.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.AotFixture.Tests/CrestCreates.Agent.Memory.Tools.AotFixture.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.AotFixture/CrestCreates.Agent.Memory.Tools.AotFixture.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture.Tests/CrestCreates.Agent.Tools.AotFixture.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture/CrestCreates.Agent.Tools.AotFixture.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj" />

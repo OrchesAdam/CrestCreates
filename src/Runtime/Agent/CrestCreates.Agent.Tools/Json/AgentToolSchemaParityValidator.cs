@@ -14,8 +14,20 @@ public sealed class AgentToolSchemaParityValidator
     public void ValidateInput(SchemaDescriptor schema, JsonTypeInfo typeInfo)
         => Validate(() => _validator.ValidateInput(schema, typeInfo));
 
+    public void ValidateInput(
+        SchemaDescriptor schema,
+        JsonTypeInfo typeInfo,
+        IReadOnlyList<SchemaDescriptor> referencedSchemas)
+        => Validate(() => _validator.ValidateInput(schema, typeInfo, referencedSchemas));
+
     public void ValidateOutput(SchemaDescriptor schema, JsonTypeInfo typeInfo)
         => Validate(() => _validator.ValidateOutput(schema, typeInfo));
+
+    public void ValidateOutput(
+        SchemaDescriptor schema,
+        JsonTypeInfo typeInfo,
+        IReadOnlyList<SchemaDescriptor> referencedSchemas)
+        => Validate(() => _validator.ValidateOutput(schema, typeInfo, referencedSchemas));
 
     private static void Validate(Action validation)
     {

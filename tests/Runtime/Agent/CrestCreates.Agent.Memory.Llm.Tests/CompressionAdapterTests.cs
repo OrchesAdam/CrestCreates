@@ -142,7 +142,8 @@ public class CompressionAdapterTests
             AgentMemoryLlmTestData.Conversation("conv-1", "tenant-1", "hello"));
 
         result.Blocks.Should().HaveCount(1);
-        result.Blocks[0].BlockId.Should().Be("conv-1_turn-1");
+        result.Blocks[0].BlockId.Should().StartWith("block_");
+        result.Blocks[0].BlockId.Should().NotContain("conv-1");
     }
 
     [Fact]

@@ -10,12 +10,31 @@ namespace CrestCreates.Schema;
 public sealed class SchemaJsonTypeInfoParityValidator
 {
     public void ValidateInput(SchemaDescriptor schema, JsonTypeInfo typeInfo)
-        => Validate(schema, typeInfo, input: true);
+        => ValidateInput(schema, typeInfo, Array.Empty<SchemaDescriptor>());
+
+    public void ValidateInput(
+        SchemaDescriptor schema,
+        JsonTypeInfo typeInfo,
+        IReadOnlyList<SchemaDescriptor> referencedSchemas)
+        => Validate(schema, typeInfo, referencedSchemas, input: true,
+            new HashSet<(string Id, int Version)>());
 
     public void ValidateOutput(SchemaDescriptor schema, JsonTypeInfo typeInfo)
-        => Validate(schema, typeInfo, input: false);
+        => ValidateOutput(schema, typeInfo, Array.Empty<SchemaDescriptor>());
 
-    private static void Validate(SchemaDescriptor schema, JsonTypeInfo typeInfo, bool input)
+    public void ValidateOutput(
+        SchemaDescriptor schema,
+        JsonTypeInfo typeInfo,
+        IReadOnlyList<SchemaDescriptor> referencedSchemas)
+        => Validate(schema, typeInfo, referencedSchemas, input: false,
+            new HashSet<(string Id, int Version)>());
+
+    private static void Validate(
+        SchemaDescriptor schema,
+        JsonTypeInfo typeInfo,
+        IReadOnlyList<SchemaDescriptor> referencedSchemas,
+        bool input,
+        HashSet<(string Id, int Version)> active)
     {
         if (typeInfo.Kind != JsonTypeInfoKind.Object)
         {
@@ -41,13 +60,11 @@ public sealed class SchemaJsonTypeInfoParityValidator
             // Input presence belongs to Schema validation. JsonTypeInfo.IsRequired
             // would make STJ reject a missing property before the execution pipeline.
             // Output presence must match the serializer contract exactly.
-            if (input
-                ? property.IsRequired
-                : property.IsRequired != field.IsRequired)
+            if (!input && property.IsRequired != field.IsRequired)
             {
                 throw new SchemaJsonContractException(
                     SchemaJsonContractViolation.RequirednessMismatch,
-                    "Schema and JSON requiredness do not match.");
+                    $"Schema and JSON requiredness do not match for '{field.Name}'.");
             }
 
             var nullable = input ? property.IsSetNullable : property.IsGetNullable;
@@ -55,14 +72,49 @@ public sealed class SchemaJsonTypeInfoParityValidator
             {
                 throw new SchemaJsonContractException(
                     SchemaJsonContractViolation.NullabilityMismatch,
-                    "Schema and JSON nullability do not match.");
+                    $"Schema and JSON nullability do not match for '{field.Name}'.");
             }
 
             if (!MatchesType(field, property.PropertyType))
             {
                 throw new SchemaJsonContractException(
                     SchemaJsonContractViolation.PropertyTypeMismatch,
-                    "Schema and JSON property types do not match.");
+                    $"Schema and JSON property types do not match for '{field.Name}'.");
+            }
+
+            if (field.ObjectSchema is { } nestedReference)
+            {
+                var resolver = referencedSchemas
+                    .GroupBy(item => (item.Id, item.Version))
+                    .ToDictionary(group => group.Key, group => group.First());
+                if (!resolver.TryGetValue((nestedReference.Id, nestedReference.Version), out var nestedSchema))
+                {
+                    throw new SchemaJsonContractException(
+                        SchemaJsonContractViolation.NestedSchemaNotFound,
+                        "Nested Schema reference is not present in the trusted resolver snapshot.");
+                }
+
+                var nestedType = field.IsCollection
+                    ? GetCollectionElementType(property.PropertyType)
+                    : Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+                if (nestedType is null)
+                    throw new SchemaJsonContractException(
+                        SchemaJsonContractViolation.PropertyTypeMismatch,
+                        "Nested collection does not expose an element type.");
+
+                var nestedInfo = typeInfo.Options.GetTypeInfo(nestedType);
+                if (nestedInfo is null)
+                    throw new SchemaJsonContractException(
+                        SchemaJsonContractViolation.NestedSchemaNotFound,
+                        "Nested JSON contract metadata is unavailable.");
+
+                var key = (nestedSchema.Id, nestedSchema.Version);
+                if (!active.Add(key))
+                    throw new SchemaJsonContractException(
+                        SchemaJsonContractViolation.NestedSchemaCycle,
+                        "Nested Schema contract graph contains a cycle.");
+                Validate(nestedSchema, nestedInfo, referencedSchemas, input, active);
+                active.Remove(key);
             }
         }
 
@@ -78,6 +130,16 @@ public sealed class SchemaJsonTypeInfoParityValidator
     private static bool MatchesType(SchemaFieldDescriptor field, Type propertyType)
     {
         propertyType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+            if (field.ObjectSchema is not null)
+            {
+                if (field.IsCollection)
+                {
+                var nestedElementType = GetCollectionElementType(propertyType);
+                return nestedElementType is not null && !SchemaScalarTypes.TryResolve(field.CollectionElementType, out _);
+            }
+            return !SchemaScalarTypes.TryResolve(field.FieldType, out _)
+                && propertyType != typeof(string);
+        }
         if (!field.IsCollection)
             return MatchesScalar(field.FieldType, propertyType);
 
@@ -109,7 +171,10 @@ public sealed class SchemaJsonTypeInfoParityValidator
             return false;
         return kind switch
         {
-            SchemaScalarKind.String => type == typeof(string),
+            // Closed Tool enums use stable string converters on the wire; the
+            // Schema contract therefore describes both string properties and
+            // enum CLR properties as the string scalar shape.
+            SchemaScalarKind.String => type == typeof(string) || type.IsEnum,
             SchemaScalarKind.Boolean => type == typeof(bool),
             SchemaScalarKind.Int32 => type == typeof(int),
             SchemaScalarKind.Int64 => type == typeof(long),

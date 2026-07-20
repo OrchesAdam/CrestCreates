@@ -48,8 +48,23 @@ public sealed class SchemaValidator : ISchemaValidator
         SchemaDescriptor schema,
         JsonElement payload,
         bool rejectUnknownProperties = false)
+        => Validate(schema, payload, Array.Empty<SchemaDescriptor>(), rejectUnknownProperties);
+
+    /// <summary>
+    /// Validates a payload against a bounded exact-version schema graph. The
+    /// descriptor list is an explicit trusted registry snapshot; nested refs
+    /// are never resolved by name, latest-version, or reflection conventions.
+    /// </summary>
+    public SchemaValidationResult Validate(
+        SchemaDescriptor schema,
+        JsonElement payload,
+        IReadOnlyList<SchemaDescriptor> referencedSchemas,
+        bool rejectUnknownProperties = false)
     {
         var errors = new List<SchemaValidationError>();
+        var resolver = referencedSchemas
+            .GroupBy(item => (item.Id, item.Version))
+            .ToDictionary(group => group.Key, group => group.First());
 
         if (payload.ValueKind != JsonValueKind.Object)
         {
@@ -58,40 +73,61 @@ public sealed class SchemaValidator : ISchemaValidator
             return SchemaValidationResult.Failure(errors);
         }
 
-        var propertyNames = new HashSet<string>(StringComparer.Ordinal);
-        var fieldNames = schema.Fields.Select(field => field.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var property in payload.EnumerateObject())
-        {
-            if (!propertyNames.Add(property.Name))
-            {
-                errors.Add(Error(property.Name, SchemaValidationErrorCodes.DuplicateProperty,
-                    $"Property '{property.Name}' occurs more than once."));
-            }
-            else if (rejectUnknownProperties && !fieldNames.Contains(property.Name))
-            {
-                errors.Add(Error(property.Name, SchemaValidationErrorCodes.UnknownProperty,
-                    $"Property '{property.Name}' is not declared by the schema."));
-            }
-        }
-
-        foreach (var field in schema.Fields)
-            ValidateField(payload, field, errors);
+        var active = new HashSet<(string Id, int Version)> { (schema.Id, schema.Version) };
+        ValidateObject(schema, payload, resolver, errors, rejectUnknownProperties, string.Empty, active);
 
         return errors.Count == 0
             ? SchemaValidationResult.Success()
             : SchemaValidationResult.Failure(errors);
     }
 
-    private static void ValidateField(JsonElement root, SchemaFieldDescriptor field, List<SchemaValidationError> errors)
+    private static void ValidateObject(
+        SchemaDescriptor schema,
+        JsonElement payload,
+        IReadOnlyDictionary<(string Id, int Version), SchemaDescriptor> resolver,
+        List<SchemaValidationError> errors,
+        bool rejectUnknownProperties,
+        string path,
+        HashSet<(string Id, int Version)> active)
+    {
+        var propertyNames = new HashSet<string>(StringComparer.Ordinal);
+        var fieldNames = schema.Fields.Select(field => field.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var property in payload.EnumerateObject())
+        {
+            var propertyPath = JoinPath(path, property.Name);
+            if (!propertyNames.Add(property.Name))
+            {
+                errors.Add(Error(propertyPath, SchemaValidationErrorCodes.DuplicateProperty,
+                    $"Property '{propertyPath}' occurs more than once."));
+            }
+            else if (rejectUnknownProperties && !fieldNames.Contains(property.Name))
+            {
+                errors.Add(Error(propertyPath, SchemaValidationErrorCodes.UnknownProperty,
+                    $"Property '{propertyPath}' is not declared by the schema."));
+            }
+        }
+
+        foreach (var field in schema.Fields)
+            ValidateField(payload, field, resolver, errors, rejectUnknownProperties, JoinPath(path, field.Name), active);
+    }
+
+    private static void ValidateField(
+        JsonElement root,
+        SchemaFieldDescriptor field,
+        IReadOnlyDictionary<(string Id, int Version), SchemaDescriptor> resolver,
+        List<SchemaValidationError> errors,
+        bool rejectUnknownProperties,
+        string path,
+        HashSet<(string Id, int Version)> active)
     {
         if (!root.TryGetProperty(field.Name, out var element))
         {
             if (field.IsRequired)
-                errors.Add(new SchemaValidationError
+            errors.Add(new SchemaValidationError
                 {
-                    FieldName = field.Name,
+                    FieldName = path,
                     ErrorCode = SchemaValidationErrorCodes.FieldRequired,
-                    Message = $"Field '{field.Name}' is required."
+                    Message = $"Field '{path}' is required."
                 });
             return;
         }
@@ -101,9 +137,9 @@ public sealed class SchemaValidator : ISchemaValidator
             if (!field.IsNullable)
                 errors.Add(new SchemaValidationError
                 {
-                    FieldName = field.Name,
+                    FieldName = path,
                     ErrorCode = SchemaValidationErrorCodes.NullNotAllowed,
-                    Message = $"Field '{field.Name}' does not allow null."
+                    Message = $"Field '{path}' does not allow null."
                 });
             return;
         }
@@ -112,25 +148,86 @@ public sealed class SchemaValidator : ISchemaValidator
         {
             if (element.ValueKind != JsonValueKind.Array)
             {
-                errors.Add(Error(field.Name, SchemaValidationErrorCodes.TypeMismatch,
-                    $"Field '{field.Name}' expected array, got {element.ValueKind}."));
+                errors.Add(Error(path, SchemaValidationErrorCodes.TypeMismatch,
+                    $"Field '{path}' expected array, got {element.ValueKind}."));
+                return;
+            }
+
+            if (field.ObjectSchema is { } collectionSchema)
+            {
+                if (!resolver.TryGetValue((collectionSchema.Id, collectionSchema.Version), out var nested))
+                {
+                    errors.Add(Error(path, SchemaValidationErrorCodes.UnknownFieldType,
+                        $"Nested schema for field '{path}' is unavailable."));
+                    return;
+                }
+
+                var key = (nested.Id, nested.Version);
+                if (!active.Add(key))
+                {
+                    errors.Add(Error(path, SchemaValidationErrorCodes.UnknownFieldType,
+                        $"Nested schema cycle detected at field '{path}'."));
+                    return;
+                }
+                var index = 0;
+                foreach (var item in element.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object)
+                    {
+                        errors.Add(Error($"{path}[{index}]", SchemaValidationErrorCodes.TypeMismatch,
+                            $"Field '{path}' expected object collection elements."));
+                    }
+                    else
+                    {
+                        ValidateObject(nested, item, resolver, errors, rejectUnknownProperties,
+                            $"{path}[{index}]", active);
+                    }
+                    index++;
+                }
+                active.Remove(key);
                 return;
             }
 
             var elementType = field.CollectionElementType;
             if (string.IsNullOrWhiteSpace(elementType))
             {
-                errors.Add(Error(field.Name, SchemaValidationErrorCodes.UnknownFieldType,
-                    $"Collection field '{field.Name}' has no element type."));
+                errors.Add(Error(path, SchemaValidationErrorCodes.UnknownFieldType,
+                    $"Collection field '{path}' has no element type."));
                 return;
             }
 
             foreach (var item in element.EnumerateArray())
-                ValidateScalar(field, elementType, item, errors, allowNull: false);
+                ValidateScalar(field, elementType, item, errors, allowNull: false, path);
             return;
         }
 
-        ValidateScalar(field, field.FieldType, element, errors, allowNull: field.IsNullable);
+        if (field.ObjectSchema is { } objectSchema)
+        {
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                errors.Add(Error(path, SchemaValidationErrorCodes.TypeMismatch,
+                    $"Field '{path}' expected object, got {element.ValueKind}."));
+                return;
+            }
+            if (!resolver.TryGetValue((objectSchema.Id, objectSchema.Version), out var nested))
+            {
+                errors.Add(Error(path, SchemaValidationErrorCodes.UnknownFieldType,
+                    $"Nested schema for field '{path}' is unavailable."));
+                return;
+            }
+            var key = (nested.Id, nested.Version);
+            if (!active.Add(key))
+            {
+                errors.Add(Error(path, SchemaValidationErrorCodes.UnknownFieldType,
+                    $"Nested schema cycle detected at field '{path}'."));
+                return;
+            }
+            ValidateObject(nested, element, resolver, errors, rejectUnknownProperties, path, active);
+            active.Remove(key);
+            return;
+        }
+
+        ValidateScalar(field, field.FieldType, element, errors, allowNull: field.IsNullable, path);
     }
 
     private static void ValidateScalar(
@@ -138,13 +235,14 @@ public sealed class SchemaValidator : ISchemaValidator
         string type,
         JsonElement element,
         List<SchemaValidationError> errors,
-        bool allowNull)
+        bool allowNull,
+        string path)
     {
         if (element.ValueKind == JsonValueKind.Null)
         {
             if (!allowNull)
-                errors.Add(Error(field.Name, SchemaValidationErrorCodes.NullNotAllowed,
-                    $"Field '{field.Name}' does not allow null."));
+                errors.Add(Error(path, SchemaValidationErrorCodes.NullNotAllowed,
+                    $"Field '{path}' does not allow null."));
             return;
         }
 
@@ -169,17 +267,17 @@ public sealed class SchemaValidator : ISchemaValidator
         if (!valid)
         {
             errors.Add(Error(
-                field.Name,
+                path,
                 SchemaScalarTypes.TryResolve(type, out _) ? SchemaValidationErrorCodes.TypeMismatch : SchemaValidationErrorCodes.UnknownFieldType,
-                $"Field '{field.Name}' expected {type}, got {kind}."));
+                $"Field '{path}' expected {type}, got {kind}."));
             return;
         }
 
-        ValidateStringConstraints(field, element, errors);
-        ValidateNumericConstraints(field, element, errors);
+        ValidateStringConstraints(field, element, errors, path);
+        ValidateNumericConstraints(field, element, errors, path);
     }
 
-    private static void ValidateStringConstraints(SchemaFieldDescriptor field, JsonElement element, List<SchemaValidationError> errors)
+    private static void ValidateStringConstraints(SchemaFieldDescriptor field, JsonElement element, List<SchemaValidationError> errors, string path)
     {
         if (element.ValueKind != JsonValueKind.String) return;
         var value = element.GetString()!;
@@ -187,29 +285,29 @@ public sealed class SchemaValidator : ISchemaValidator
         if (field.MaxLength.HasValue && value.Length > field.MaxLength.Value)
             errors.Add(new SchemaValidationError
             {
-                FieldName = field.Name,
+                FieldName = path,
                 ErrorCode = SchemaValidationErrorCodes.MaxLengthExceeded,
-                Message = $"Field '{field.Name}' exceeds max length {field.MaxLength}."
+                Message = $"Field '{path}' exceeds max length {field.MaxLength}."
             });
 
         if (field.MinLength.HasValue && value.Length < field.MinLength.Value)
             errors.Add(new SchemaValidationError
             {
-                FieldName = field.Name,
+                FieldName = path,
                 ErrorCode = SchemaValidationErrorCodes.MinLengthNotMet,
-                Message = $"Field '{field.Name}' shorter than min length {field.MinLength}."
+                Message = $"Field '{path}' shorter than min length {field.MinLength}."
             });
 
         if (field.Pattern != null && !Regex.IsMatch(value, field.Pattern))
             errors.Add(new SchemaValidationError
             {
-                FieldName = field.Name,
+                FieldName = path,
                 ErrorCode = SchemaValidationErrorCodes.PatternMismatch,
-                Message = $"Field '{field.Name}' does not match pattern '{field.Pattern}'."
+                Message = $"Field '{path}' does not match pattern '{field.Pattern}'."
             });
     }
 
-    private static void ValidateNumericConstraints(SchemaFieldDescriptor field, JsonElement element, List<SchemaValidationError> errors)
+    private static void ValidateNumericConstraints(SchemaFieldDescriptor field, JsonElement element, List<SchemaValidationError> errors, string path)
     {
         if (element.ValueKind != JsonValueKind.Number
             || !field.MinValue.HasValue && !field.MaxValue.HasValue)
@@ -218,18 +316,21 @@ public sealed class SchemaValidator : ISchemaValidator
         var value = element.GetDouble();
 
         if (field.MaxValue.HasValue && value > field.MaxValue.Value)
-            errors.Add(NumericError(field, SchemaValidationErrorCodes.MaxValueExceeded,
-                $"Field '{field.Name}' exceeds max value {field.MaxValue}."));
+            errors.Add(NumericError(path, SchemaValidationErrorCodes.MaxValueExceeded,
+                $"Field '{path}' exceeds max value {field.MaxValue}."));
 
         if (field.MinValue.HasValue && value < field.MinValue.Value)
-            errors.Add(NumericError(field, SchemaValidationErrorCodes.MinValueNotMet,
-                $"Field '{field.Name}' below min value {field.MinValue}."));
+            errors.Add(NumericError(path, SchemaValidationErrorCodes.MinValueNotMet,
+                $"Field '{path}' below min value {field.MinValue}."));
     }
 
     private static SchemaValidationError NumericError(
-        SchemaFieldDescriptor field,
+        string path,
         CrestCreates.Core.Abstractions.Identity.DiagnosticCode code,
-        string message) => new() { FieldName = field.Name, ErrorCode = code, Message = message };
+        string message) => new() { FieldName = path, ErrorCode = code, Message = message };
+
+    private static string JoinPath(string prefix, string name)
+        => string.IsNullOrEmpty(prefix) ? name : prefix + "." + name;
 
     private static bool IsRfc3339DateTime(string? value)
     {

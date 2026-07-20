@@ -27,6 +27,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     private readonly AgentToolInvocationFingerprintBuilder _fingerprints;
     private readonly AgentCapabilityIdempotencyKeyBuilder _idempotency;
     private readonly AgentToolResultMapper _results;
+    private readonly IAgentToolInvocationFactBufferFactory _factBuffers;
+    private readonly ISchemaRegistry? _schemaRegistry;
 
     public AgentToolInvoker(
         AgentToolRuntimeSnapshotProvider snapshots,
@@ -42,7 +44,9 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         ISchemaValidator schemas,
         AgentToolInvocationFingerprintBuilder fingerprints,
         AgentCapabilityIdempotencyKeyBuilder idempotency,
-        AgentToolResultMapper results)
+        AgentToolResultMapper results,
+        IAgentToolInvocationFactBufferFactory? factBuffers = null,
+        ISchemaRegistry? schemaRegistry = null)
     {
         _snapshots = snapshots;
         _execution = execution;
@@ -58,6 +62,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         _fingerprints = fingerprints;
         _idempotency = idempotency;
         _results = results;
+        _factBuffers = factBuffers ?? new AgentToolInvocationFactBufferFactory();
+        _schemaRegistry = schemaRegistry;
     }
 
     public async ValueTask<AgentToolInvocationOutcome> InvokeAsync(
@@ -399,6 +405,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 "dispatch_fence_rejected").ConfigureAwait(false);
         }
 
+        var factBuffer = _factBuffers.Create();
+        var preflightReceipts = new AgentToolOutputPreflightReceiptSink();
         CapabilityExecutionResult capabilityResult;
         try
         {
@@ -407,7 +415,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 InvocationSource.Agent,
                 input,
                 context => ConfigureCapabilityContext(
-                    context, entry, execution, arguments, fingerprint, lease, approval, reservation),
+                    context, entry, execution, arguments, fingerprint, lease, approval, reservation, factBuffer, preflightReceipts),
                 cancellationToken).ConfigureAwait(false);
         }
         catch
@@ -427,8 +435,19 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
 
         AgentToolInvocationOutcome outcome;
+        IReadOnlyList<AgentToolAuditFact> preparedOutputFacts = Array.Empty<AgentToolAuditFact>();
         if (!capabilityResult.IsSuccess)
         {
+            // Once a handler has published a write-before-mutation receipt set,
+            // an exception is no longer an ordinary capability failure. The
+            // domain may have committed before the exception was observed, so
+            // preserve the invocation fence instead of claiming Completed.
+            if (preflightReceipts.HasPublishedOutcomes)
+            {
+                return await FinishIndeterminateAsync(
+                    auditHandle, auditContext, lease, reservation, "output_finalization_failure")
+                    .ConfigureAwait(false);
+            }
             outcome = _results.CapabilityFailure(capabilityResult);
         }
         else
@@ -437,6 +456,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             {
                 outcome = await MapSuccessAsync(entry, capabilityResult.Output, cancellationToken)
                     .ConfigureAwait(false);
+                preparedOutputFacts = ValidatePreflightReceipt(entry, outcome, preflightReceipts.Seal());
             }
             catch
             {
@@ -446,13 +466,17 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             }
         }
 
+        var facts = capabilityResult.IsSuccess
+            ? factBuffer.Seal().Facts.Concat(preparedOutputFacts).ToArray()
+            : Array.Empty<AgentToolAuditFact>();
         return await FinishCompletedAsync(
             entry,
             auditHandle,
             auditContext,
             lease,
             reservation,
-            outcome).ConfigureAwait(false);
+            outcome,
+            facts).ConfigureAwait(false);
     }
 
     private async ValueTask<AgentToolInvocationOutcome> MapSuccessAsync(
@@ -489,7 +513,11 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         if (!serialized.HasValue)
             return ContractFailure("AGENT_TOOL_MISSING_OUTPUT");
 
-        var validation = _schemas.Validate(entry.OutputSchema, serialized.Value, rejectUnknownProperties: true);
+        var validation = _schemas.Validate(
+            entry.OutputSchema,
+            serialized.Value,
+            _schemaRegistry?.GetAll() ?? Array.Empty<SchemaDescriptor>(),
+            rejectUnknownProperties: true);
         if (!validation.IsValid)
             return ContractFailure("AGENT_TOOL_OUTPUT_SCHEMA_VIOLATION");
 
@@ -502,13 +530,41 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         };
     }
 
+    private static IReadOnlyList<AgentToolAuditFact> ValidatePreflightReceipt(
+        AgentToolRuntimeEntry entry,
+        AgentToolInvocationOutcome outcome,
+        IReadOnlyList<AgentToolPreparedOutcomeReceipt> receipts)
+    {
+        if (receipts.Count == 0)
+            return Array.Empty<AgentToolAuditFact>();
+        if (outcome.StructuredOutput is not { } structured)
+            throw new InvalidOperationException("Preflight receipt requires structured output.");
+
+        var outputHash = ComputeStructuredOutputHash(structured);
+        var contractFingerprint = entry.OutputSchemaContractHash ?? entry.ToolContractHash;
+        var matches = receipts.Where(item =>
+            string.Equals(item.Receipt.ToolDescriptorId, entry.Descriptor.Id, StringComparison.Ordinal)
+            && item.Receipt.ToolDescriptorVersion == entry.Descriptor.Version
+            && string.Equals(item.Receipt.OutputContractFingerprint, contractFingerprint, StringComparison.Ordinal)
+            && string.Equals(item.Receipt.StructuredOutputHash, outputHash, StringComparison.Ordinal))
+            .ToArray();
+        if (matches.Length != 1)
+            throw new InvalidOperationException("Final output did not match exactly one preflight receipt.");
+        return matches[0].InternalFacts;
+    }
+
+    private static string ComputeStructuredOutputHash(JsonElement output)
+        => Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(output.GetRawText())))
+            .ToLowerInvariant();
+
     private async ValueTask<AgentToolInvocationOutcome> FinishCompletedAsync(
         AgentToolRuntimeEntry entry,
         AgentToolGovernanceAuditHandle? auditHandle,
         AgentToolGovernanceAuditContext auditContext,
         AgentToolInvocationLease lease,
         AgentToolBudgetReservation reservation,
-        AgentToolInvocationOutcome outcome)
+        AgentToolInvocationOutcome outcome,
+        IReadOnlyList<AgentToolAuditFact> auditFacts)
     {
         AgentToolBudgetReservation settled;
         try
@@ -553,7 +609,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 AgentToolGovernanceAttemptFinalState.Completed,
                 AgentToolInvocationTerminalState.Completed,
                 outcome,
-                "dispatch_completed");
+                "dispatch_completed",
+                auditFacts);
             var confirmation = await ConfirmAuditFinalizationAsync(
                 completedFinalization,
                 entry.Governance.EffectiveAuditMode).ConfigureAwait(false);
@@ -802,7 +859,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolInvocationLease lease,
         AgentToolBudgetReservation reservation,
         bool dispatchStarted,
-        string reasonCode)
+        string reasonCode,
+        IReadOnlyList<AgentToolAuditFact>? auditFacts = null)
     {
         var outcome = Indeterminate(reasonCode);
         var invocationPersisted = await TryMarkIndeterminateAsync(lease, reasonCode)
@@ -1096,7 +1154,9 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolInvocationFingerprint fingerprint,
         AgentToolInvocationLease lease,
         AgentToolApprovalResult approval,
-        AgentToolBudgetReservation reservation)
+        AgentToolBudgetReservation reservation,
+        IAgentToolInvocationFactBuffer factBuffer,
+        IAgentToolOutputPreflightReceiptSink preflightReceipts)
     {
         context.CausationId = execution.CausationId;
         context.IdempotencyKey = _idempotency.Build(fingerprint);
@@ -1111,6 +1171,28 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         context.Items[AgentCapabilityContextItemNames.AttemptId] = lease.AttemptId;
         context.Items[AgentCapabilityContextItemNames.ApprovalEvidenceId] = approval.EvidenceId;
         context.Items[AgentCapabilityContextItemNames.BudgetReservationId] = reservation.ReservationId;
+        context.Items[AgentCapabilityContextItemNames.OutputSchemaContractFingerprint] =
+            entry.OutputSchemaContractHash ?? entry.ToolContractHash;
+        if (entry.OutputSchema is not null)
+        {
+            context.Items[AgentCapabilityContextItemNames.OutputSchemaDescriptor] = entry.OutputSchema;
+            context.Items[AgentCapabilityContextItemNames.OutputSchemaReferences] =
+                _schemaRegistry?.GetAll() ?? Array.Empty<SchemaDescriptor>();
+            context.Items[AgentCapabilityContextItemNames.SchemaValidator] = _schemas;
+        }
+        context.Items[AgentCapabilityContextItemNames.InvocationBindingSnapshot] =
+            new AgentToolInvocationBindingSnapshot
+            {
+                LogicalKey = new AgentToolLogicalInvocationKey(
+                    context.TenantId,
+                    _currentUser.Id,
+                    execution.AgentId,
+                    execution.ExecutionId,
+                    execution.InvocationId),
+                InvocationFingerprint = fingerprint.Value
+            };
+        context.Items[AgentCapabilityContextItemNames.InvocationFactBuffer] = factBuffer;
+        context.Items[AgentCapabilityContextItemNames.OutputPreflightReceiptSink] = preflightReceipts;
     }
 
     private static AgentToolGovernanceContext CreateGovernanceContext(
@@ -1256,7 +1338,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolGovernanceAttemptFinalState attemptState,
         AgentToolInvocationTerminalState? invocationState,
         AgentToolInvocationOutcome outcome,
-        string reasonCode)
+        string reasonCode,
+        IReadOnlyList<AgentToolAuditFact>? auditFacts = null)
         => new()
         {
             AuditId = handle.AuditId,
@@ -1268,6 +1351,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             InvocationState = invocationState,
             Outcome = outcome,
             OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(outcome),
+            AuditFacts = auditFacts ?? Array.Empty<AgentToolAuditFact>(),
             ReasonCode = reasonCode
         };
 

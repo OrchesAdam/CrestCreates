@@ -1,9 +1,22 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Identity;
+using CrestCreates.Agent.Memory.CanonicalHashing;
 
 namespace CrestCreates.Agent.Memory.Extraction;
 
 public sealed class DefaultAgentMemoryExtractor : IAgentMemoryExtractor
 {
+    private readonly IAgentMemoryArtifactIdGenerator _ids;
+    private readonly AgentMemoryCanonicalHashProjector? _hashProjector;
+
+    public DefaultAgentMemoryExtractor(
+        IAgentMemoryArtifactIdGenerator? ids = null,
+        AgentMemoryCanonicalHashProjector? hashProjector = null)
+    {
+        _ids = ids ?? new DefaultAgentMemoryArtifactIdGenerator();
+        _hashProjector = hashProjector;
+    }
+
     public ValueTask<IReadOnlyList<AgentMemoryCandidate>> ExtractCandidatesAsync(AgentCompressedContext context, CancellationToken cancellationToken = default)
     {
         var candidates = new List<AgentMemoryCandidate>();
@@ -41,11 +54,12 @@ public sealed class DefaultAgentMemoryExtractor : IAgentMemoryExtractor
 
             var candidate = new AgentMemoryCandidate
             {
-                CandidateId = $"candidate_{block.BlockId}",
+                CandidateId = _ids.CreateCandidateId(),
                 TenantId = context.TenantId,
                 Kind = AgentMemoryKind.ProjectFact,
                 Content = block.Content,
-                CanonicalContentHash = block.CanonicalContentHash,
+                CanonicalContentHash = _hashProjector?.ComputeContentHash(context.TenantId, block.SourceRefs, block.Content)
+                    ?? block.CanonicalContentHash,
                 Confidence = AgentMemoryConfidence.Low,
                 SourceRefs = block.SourceRefs.ToArray(),
                 RedactionKinds = redactionKinds.ToArray(),

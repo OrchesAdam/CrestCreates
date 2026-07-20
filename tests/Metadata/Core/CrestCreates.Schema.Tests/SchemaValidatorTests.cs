@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -215,6 +216,50 @@ public class SchemaValidatorTests
 
         new SchemaValidator().Validate(schema, valid.RootElement).IsValid.Should().BeTrue();
     }
+
+    [Fact]
+    public void Validate_NestedObject_UsesExactReferencedSchemaAndPathsErrors()
+    {
+        var address = Schema("address", new SchemaFieldDescriptor
+        {
+            Name = "city", FieldType = "string", IsRequired = true
+        });
+        var order = Schema("order", new SchemaFieldDescriptor
+        {
+            Name = "address", FieldType = "object", IsRequired = true,
+            ObjectSchema = new VersionedDescriptorRef<SchemaDescriptor>("address", 1)
+        });
+
+        using var json = JsonDocument.Parse("{\"address\":{\"city\":1}}");
+        var result = new SchemaValidator().Validate(order, json.RootElement, [address]);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(error =>
+            error.FieldName == "address.city"
+            && error.ErrorCode == SchemaValidationErrorCodes.TypeMismatch);
+    }
+
+    [Fact]
+    public void Validate_NestedObjectCollection_RejectsNullElements()
+    {
+        var item = Schema("item", new SchemaFieldDescriptor { Name = "id", FieldType = "int" });
+        var root = Schema("root", new SchemaFieldDescriptor
+        {
+            Name = "items", FieldType = "object", IsCollection = true,
+            ObjectSchema = new VersionedDescriptorRef<SchemaDescriptor>("item", 1)
+        });
+
+        using var json = JsonDocument.Parse("{\"items\":[null]}");
+        var result = new SchemaValidator().Validate(root, json.RootElement, [item]);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(error => error.FieldName == "items[0]");
+    }
+
+    private static SchemaDescriptor Schema(string id, params SchemaFieldDescriptor[] fields) => new()
+    {
+        Id = id, Name = id, Version = 1, Fields = fields
+    };
 
     [Fact]
     public void Validate_large_finite_double_without_constraints_does_not_require_decimal_conversion()

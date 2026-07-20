@@ -301,6 +301,75 @@ public sealed class MainChainTests
         result.Diagnostics.Should().NotBeEmpty();
     }
 
+    [Fact]
+    public async Task SourceExpander_UsesOriginalConversationIndexesForNonZeroSingletonRange()
+    {
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
+        var conversationStore = new InMemoryAgentConversationStore(sanitizer);
+        var expander = new DefaultAgentContextSourceExpander(
+            conversationStore,
+            new InMemoryAgentTaskHistoryStore(sanitizer),
+            new InMemoryAgentCompressedContextStore(),
+            new InMemoryAgentMemoryStore());
+
+        await conversationStore.SaveConversationAsync(new AgentConversationRecord
+        {
+            ConversationId = "conv-range",
+            TenantId = "tenant-1",
+            Turns =
+            [
+                new() { TurnId = "t0", TenantId = "tenant-1", Role = AgentConversationRole.User, Content = "zero" },
+                new() { TurnId = "t1", TenantId = "tenant-1", Role = AgentConversationRole.User, Content = "one" },
+                new() { TurnId = "t2", TenantId = "tenant-1", Role = AgentConversationRole.User, Content = "two" }
+            ]
+        });
+
+        var result = await expander.ExpandAsync(new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.ConversationTurn,
+            TenantId = "tenant-1",
+            SourceId = "conv-range",
+            RangeStart = 1,
+            RangeEnd = 1
+        });
+
+        result.Status.Should().Be(AgentMemorySourceExpansionStatus.Expanded);
+        result.SanitizedContent.Should().Be("[User] one");
+    }
+
+    [Fact]
+    public async Task SourceExpander_ResolvesOneCompressedBlockByBlockId()
+    {
+        var sanitizer = new DefaultAgentMemoryContentSanitizer(CreateTestHashProjector());
+        var contextStore = new InMemoryAgentCompressedContextStore();
+        var expander = new DefaultAgentContextSourceExpander(
+            new InMemoryAgentConversationStore(sanitizer),
+            new InMemoryAgentTaskHistoryStore(sanitizer),
+            contextStore,
+            new InMemoryAgentMemoryStore());
+
+        await contextStore.SaveCompressedContextAsync(new AgentCompressedContext
+        {
+            ContextId = "context-1",
+            TenantId = "tenant-1",
+            Blocks =
+            [
+                new() { BlockId = "block-a", TenantId = "tenant-1", Content = "A", CanonicalContentHash = TestCanonicalHash("a") },
+                new() { BlockId = "block-b", TenantId = "tenant-1", Content = "B", CanonicalContentHash = TestCanonicalHash("b") }
+            ]
+        });
+
+        var result = await expander.ExpandAsync(new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.CompressedContextBlock,
+            TenantId = "tenant-1",
+            SourceId = "block-b"
+        });
+
+        result.Status.Should().Be(AgentMemorySourceExpansionStatus.Expanded);
+        result.SanitizedContent.Should().Be("B");
+    }
+
     private static MetadataContextPack CreateMinimalMetadataContextPack(string tenantId)
     {
         return new MetadataContextPack

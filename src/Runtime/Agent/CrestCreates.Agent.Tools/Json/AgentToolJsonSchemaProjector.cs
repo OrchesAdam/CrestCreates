@@ -6,9 +6,9 @@ namespace CrestCreates.Agent.Tools;
 
 public interface IAgentToolJsonSchemaProjector
 {
-    JsonElement ProjectInput(SchemaDescriptor? schema);
+    JsonElement ProjectInput(SchemaDescriptor? schema, IReadOnlyList<SchemaDescriptor>? referencedSchemas = null);
 
-    JsonElement? ProjectOutput(SchemaDescriptor? schema);
+    JsonElement? ProjectOutput(SchemaDescriptor? schema, IReadOnlyList<SchemaDescriptor>? referencedSchemas = null);
 }
 
 public sealed class AgentToolJsonSchemaProjector : IAgentToolJsonSchemaProjector
@@ -18,16 +18,16 @@ public sealed class AgentToolJsonSchemaProjector : IAgentToolJsonSchemaProjector
     public AgentToolJsonSchemaProjector(SchemaJsonContractProjector projector)
         => _projector = projector;
 
-    public JsonElement ProjectInput(SchemaDescriptor? schema) => Project(schema);
+    public JsonElement ProjectInput(SchemaDescriptor? schema, IReadOnlyList<SchemaDescriptor>? referencedSchemas = null) => Project(schema, referencedSchemas);
 
-    public JsonElement? ProjectOutput(SchemaDescriptor? schema)
-        => schema is null ? null : Project(schema);
+    public JsonElement? ProjectOutput(SchemaDescriptor? schema, IReadOnlyList<SchemaDescriptor>? referencedSchemas = null)
+        => schema is null ? null : Project(schema, referencedSchemas);
 
-    private JsonElement Project(SchemaDescriptor? schema)
+    private JsonElement Project(SchemaDescriptor? schema, IReadOnlyList<SchemaDescriptor>? referencedSchemas)
     {
         try
         {
-            return _projector.ProjectObject(schema);
+            return _projector.ProjectObject(schema, referencedSchemas ?? Array.Empty<SchemaDescriptor>());
         }
         catch (SchemaJsonContractException exception)
         {

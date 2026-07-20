@@ -41,10 +41,13 @@ public sealed class DefaultAgentContextSourceExpander : IAgentContextSourceExpan
         if (conversation is null)
             return NotFound(sourceRef);
 
-        var content = string.Join("\n", conversation.Turns
-            .Where((_, i) => sourceRef.RangeStart is not { } start || i >= start)
-            .Where((_, i) => sourceRef.RangeEnd is not { } end || i <= end)
-            .Select(t => $"[{t.Role}] {t.Content}"));
+        if (!TryGetRange(sourceRef, conversation.Turns.Count, out var start, out var end))
+            return NotFound(sourceRef);
+
+        var turns = start.HasValue
+            ? conversation.Turns.Skip(start.Value).Take(end!.Value - start.Value + 1)
+            : conversation.Turns;
+        var content = string.Join("\n", turns.Select(t => $"[{t.Role}] {t.Content}"));
 
         return Expanded(sourceRef, content);
     }
@@ -57,14 +60,19 @@ public sealed class DefaultAgentContextSourceExpander : IAgentContextSourceExpan
 
         if (sourceRef.SourceKind == AgentSourceKind.TaskEvent)
         {
-            var events = task.Events
-                .Where((_, i) => sourceRef.RangeStart is not { } start || i >= start)
-                .Where((_, i) => sourceRef.RangeEnd is not { } end || i <= end)
-                .ToList();
+            if (!TryGetRange(sourceRef, task.Events.Count, out var start, out var end))
+                return NotFound(sourceRef);
+
+            var events = start.HasValue
+                ? task.Events.Skip(start.Value).Take(end!.Value - start.Value + 1)
+                : task.Events;
 
             var content = string.Join("\n", events.Select(e => $"[{e.EventKind}] {e.Content}"));
             return Expanded(sourceRef, content);
         }
+
+        if (sourceRef.RangeStart.HasValue || sourceRef.RangeEnd.HasValue)
+            return NotFound(sourceRef);
 
         // TaskRecord — return summary
         var taskContent = $"Task: {task.Title}\nSummary: {task.Summary ?? "N/A"}\nEvents: {task.Events.Count}";
@@ -73,12 +81,16 @@ public sealed class DefaultAgentContextSourceExpander : IAgentContextSourceExpan
 
     private async ValueTask<AgentSourceExpansionResult> ExpandCompressedContextAsync(AgentContextSourceRef sourceRef, CancellationToken cancellationToken)
     {
-        var context = await _contextStore.GetCompressedContextAsync(sourceRef.TenantId, sourceRef.SourceId, cancellationToken);
-        if (context is null)
+        if (sourceRef.RangeStart.HasValue || sourceRef.RangeEnd.HasValue)
             return NotFound(sourceRef);
 
-        var content = string.Join("\n---\n", context.Blocks.Select(b => b.Content));
-        return Expanded(sourceRef, content);
+        var block = await _contextStore.GetCompressedContextBlockAsync(
+            sourceRef.TenantId,
+            sourceRef.SourceId,
+            cancellationToken);
+        return block is null
+            ? NotFound(sourceRef)
+            : Expanded(sourceRef, block.Content);
     }
 
     private async ValueTask<AgentSourceExpansionResult> ExpandMemoryItemAsync(AgentContextSourceRef sourceRef, CancellationToken cancellationToken)
@@ -131,4 +143,22 @@ public sealed class DefaultAgentContextSourceExpander : IAgentContextSourceExpan
             SourceRefs = [sourceRef]
         }]
     };
+
+    private static bool TryGetRange(
+        AgentContextSourceRef sourceRef,
+        int count,
+        out int? start,
+        out int? end)
+    {
+        start = sourceRef.RangeStart;
+        end = sourceRef.RangeEnd;
+
+        if (!start.HasValue && !end.HasValue)
+            return true;
+        if (!start.HasValue || !end.HasValue)
+            return false;
+        if (start.Value < 0 || end.Value < start.Value || end.Value >= count)
+            return false;
+        return true;
+    }
 }

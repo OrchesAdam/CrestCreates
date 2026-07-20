@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CrestCreates.Agent.Memory.Tools</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CrestCreates.Agent.Memory.Tools.Abstractions/CrestCreates.Agent.Memory.Tools.Abstractions.csproj" />
+    <ProjectReference Include="../CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj" />
+    <ProjectReference Include="../CrestCreates.Agent.Memory/CrestCreates.Agent.Memory.csproj" />
+    <ProjectReference Include="../../Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
+    <ProjectReference Include="../../../Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../../Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
+    <ProjectReference Include="../../../Metadata/CrestCreates.Schema.Abstractions/CrestCreates.Schema.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

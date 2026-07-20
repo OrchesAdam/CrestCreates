@@ -79,8 +79,14 @@ namespace MyApp
         var result = Run(source);
         var generated = result.GetSourceByFileName("GeneratedHandlerRegistry.g.cs");
         generated.Should().NotBeNull();
-        generated!.SourceText.Should().Contain("CapabilityHandlerResolverProvider.Register(");
+        generated!.SourceText.Should().Contain("CapabilityHandlerResolverProvider.RegisterDefinition(");
+        generated.SourceText.Should().Contain("CapabilityHandlerResolverProvider.ApplyDefinition(");
+        generated.SourceText.Should().Contain("internal static void Apply(IServiceCollection services)");
+        generated.SourceText.Should().Contain("services.AddScoped<");
         generated.SourceText.Should().NotContain("CapabilityHandlerResolverProvider.SetResolver(");
-        generated.SourceText.Should().NotContain("new CapabilityHandlerResolver()");
+        generated.SourceText.Should().Contain("new CapabilityHandlerResolver()");
+        generated.SourceText.Should().Contain("ICapabilityContextAwareHandlerInvoker");
+        generated.SourceText.Should().Contain("context.ServiceProvider.GetRequiredService<MyApp.TestHandler>()");
+        generated.SourceText.Should().NotContain("new MyApp.TestHandler()");
     }
 }

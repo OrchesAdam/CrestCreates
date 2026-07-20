@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Memory.Tools/CrestCreates.Agent.Memory.Tools.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Memory/CrestCreates.Agent.Memory.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Schema/CrestCreates.Schema.csproj" />
+  </ItemGroup>
+</Project>

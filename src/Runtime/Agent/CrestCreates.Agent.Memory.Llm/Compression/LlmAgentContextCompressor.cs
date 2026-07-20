@@ -1,5 +1,6 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Compression;
+using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Llm.Model;
 using CrestCreates.Agent.Memory.Llm.Prompting;
 using CrestCreates.Agent.Memory.Llm.Validation;
@@ -23,6 +24,8 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
     private readonly IAgentPromptEvidenceFactory _evidenceFactory;
     private readonly IAgentPromptHashService _hashService;
     private readonly AgentMemoryLlmAdapterOptions _options;
+    private readonly IAgentMemoryArtifactIdGenerator _ids;
+    private readonly AgentMemoryCanonicalHashProjector? _hashProjector;
 
     public LlmAgentContextCompressor(
         IAgentMemoryContentSanitizer sanitizer,
@@ -32,7 +35,9 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
         IAgentMemoryCompressionOutputParser parser,
         IAgentPromptEvidenceFactory evidenceFactory,
         IAgentPromptHashService hashService,
-        AgentMemoryLlmAdapterOptions options)
+        AgentMemoryLlmAdapterOptions options,
+        IAgentMemoryArtifactIdGenerator? ids = null,
+        AgentMemoryCanonicalHashProjector? hashProjector = null)
     {
         _sanitizer = sanitizer;
         _fallback = fallback;
@@ -42,6 +47,8 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
         _evidenceFactory = evidenceFactory;
         _hashService = hashService;
         _options = options;
+        _ids = ids ?? new CrestCreates.Agent.Memory.Identity.DefaultAgentMemoryArtifactIdGenerator();
+        _hashProjector = hashProjector;
     }
 
     public async ValueTask<AgentCompressedContext> CompressConversationAsync(
@@ -265,6 +272,7 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
         Dictionary<string, IReadOnlyList<AgentContextSourceRef>> sourceRefMap,
         CancellationToken cancellationToken)
     {
+        var contextId = _ids.CreateContextId();
         // Build prompt
         var promptText = _promptBuilder.Build(promptInput);
 
@@ -298,7 +306,7 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
             AgentMemoryLlmOutputValidators.AddProviderFailureDiagnostics(modelResponse, diagnostics);
             return new AgentCompressedContext
             {
-                ContextId = promptInput.TenantId,
+                ContextId = contextId,
                 TenantId = promptInput.TenantId,
                 Blocks = [],
                 Diagnostics = diagnostics.ToArray(),
@@ -314,7 +322,7 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
         {
             return new AgentCompressedContext
             {
-                ContextId = promptInput.TenantId,
+                ContextId = contextId,
                 TenantId = promptInput.TenantId,
                 Blocks = [],
                 Diagnostics = parseResult.Diagnostics
@@ -353,13 +361,15 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
                 .Where(id => sourceRefMap.ContainsKey(id))
                 .SelectMany(id => sourceRefMap[id])
                 .ToArray();
+            var finalHash = _hashProjector?.ComputeContentHash(promptInput.TenantId, sourceRefs, sanitized.SanitizedContent)
+                ?? sanitized.CanonicalContentHash;
 
             blocks.Add(new AgentCompressedContextBlock
             {
-                BlockId = dto.BlockId ?? Guid.NewGuid().ToString("N"),
+                BlockId = _ids.CreateBlockId(),
                 TenantId = promptInput.TenantId,
                 Content = sanitized.SanitizedContent,
-                CanonicalContentHash = sanitized.CanonicalContentHash,
+                CanonicalContentHash = finalHash,
                 SourceRefs = sourceRefs,
                 Diagnostics = sanitized.Diagnostics.Concat(
                     sanitized.RedactionKinds.Count > 0
@@ -417,7 +427,7 @@ public sealed class LlmAgentContextCompressor : IAgentContextCompressor
 
         return new AgentCompressedContext
         {
-            ContextId = promptInput.TenantId,
+            ContextId = contextId,
             TenantId = promptInput.TenantId,
             Blocks = blocks.ToArray(),
             Diagnostics = parseResult.Diagnostics.Concat(truncationDiagnostics).ToArray(),

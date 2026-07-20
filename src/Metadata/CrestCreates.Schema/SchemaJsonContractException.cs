@@ -19,7 +19,11 @@ public enum SchemaJsonContractViolation
     RequirednessMismatch = 14,
     NullabilityMismatch = 15,
     PropertyTypeMismatch = 16,
-    AdditionalJsonProperty = 17
+    AdditionalJsonProperty = 17,
+    NestedSchemaReferenceInvalid = 18,
+    NestedSchemaNotFound = 19,
+    NestedSchemaCycle = 20,
+    NestedSchemaGraphLimitExceeded = 21
 }
 
 public sealed class SchemaJsonContractException : Exception

@@ -1,0 +1,31 @@
+namespace CrestCreates.Agent.Tools;
+
+internal sealed class AgentToolOutputPreflightReceiptSink : IAgentToolOutputPreflightReceiptSink
+{
+    private IReadOnlyList<AgentToolPreparedOutcomeReceipt>? _outcomes;
+
+    public bool HasPublishedOutcomes => _outcomes is not null;
+
+    public void PublishAllowedOutcomes(IReadOnlyList<AgentToolPreparedOutcomeReceipt> outcomes)
+    {
+        ArgumentNullException.ThrowIfNull(outcomes);
+        if (_outcomes is not null)
+            throw new InvalidOperationException("Output preflight receipts may only be published once.");
+        if (outcomes.Count == 0)
+            throw new ArgumentException("At least one allowed outcome is required.", nameof(outcomes));
+        if (outcomes.Select(item => item.OutcomeCode).Distinct(StringComparer.Ordinal).Count() != outcomes.Count)
+            throw new ArgumentException("Output preflight outcome codes must be unique.", nameof(outcomes));
+        if (outcomes.Any(item => item.InternalFacts.Count > 32
+            || item.InternalFacts.Any(fact => fact is null || string.IsNullOrWhiteSpace(fact.Code)
+                || fact.Code.Length > 96 || fact.Value?.Length > 256)))
+            throw new ArgumentException("Output preflight branch facts exceed the safe shape.", nameof(outcomes));
+        _outcomes = outcomes.Select(item => item with
+        {
+            Receipt = item.Receipt with { },
+            InternalFacts = item.InternalFacts?.Select(fact => fact with { }).ToArray() ?? Array.Empty<AgentToolAuditFact>()
+        }).ToArray();
+    }
+
+    public IReadOnlyList<AgentToolPreparedOutcomeReceipt> Seal()
+        => _outcomes ?? Array.Empty<AgentToolPreparedOutcomeReceipt>();
+}

@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -84,10 +85,50 @@ public sealed class SchemaJsonTypeInfoParityValidatorTests
             .Which.Violation.Should().Be(SchemaJsonContractViolation.PropertyTypeMismatch);
     }
 
-    private static SchemaDescriptor Schema(params SchemaFieldDescriptor[] fields) => new()
+    [Fact]
+    public void Nested_object_contract_is_validated_recursively()
     {
-        Id = "schema.test",
-        Name = "Test",
+        var child = Schema("child", new SchemaFieldDescriptor
+        {
+            Name = "city", FieldType = "string", IsRequired = true
+        });
+        var root = Schema("root", new SchemaFieldDescriptor
+        {
+            Name = "address", FieldType = "object", IsRequired = true,
+            ObjectSchema = new VersionedDescriptorRef<SchemaDescriptor>("child", 1)
+        });
+
+        _validator.ValidateOutput(
+            root,
+            SchemaContractTestJsonContext.Default.SchemaNestedRootDto,
+            [child]);
+    }
+
+    [Fact]
+    public void Missing_nested_schema_is_rejected_closed_world()
+    {
+        var root = Schema("root", new SchemaFieldDescriptor
+        {
+            Name = "address", FieldType = "object", IsRequired = true,
+            ObjectSchema = new VersionedDescriptorRef<SchemaDescriptor>("missing", 1)
+        });
+
+        var action = () => _validator.ValidateOutput(
+            root,
+            SchemaContractTestJsonContext.Default.SchemaNestedRootDto,
+            Array.Empty<SchemaDescriptor>());
+
+        action.Should().Throw<SchemaJsonContractException>()
+            .Which.Violation.Should().Be(SchemaJsonContractViolation.NestedSchemaNotFound);
+    }
+
+    private static SchemaDescriptor Schema(params SchemaFieldDescriptor[] fields)
+        => Schema("schema.test", fields);
+
+    private static SchemaDescriptor Schema(string id, params SchemaFieldDescriptor[] fields) => new()
+    {
+        Id = id,
+        Name = id,
         Version = 1,
         Fields = fields
     };
@@ -118,8 +159,22 @@ public sealed class SchemaContractStringCollectionDto
     public List<string> Values { get; init; } = [];
 }
 
+public sealed class SchemaNestedRootDto
+{
+    [JsonPropertyName("address")]
+    public required SchemaNestedChildDto Address { get; init; }
+}
+
+public sealed class SchemaNestedChildDto
+{
+    [JsonPropertyName("city")]
+    public required string City { get; init; }
+}
+
 [JsonSerializable(typeof(SchemaContractMutableDto))]
 [JsonSerializable(typeof(SchemaContractReadOnlyDto))]
 [JsonSerializable(typeof(SchemaContractRequiredDto))]
 [JsonSerializable(typeof(SchemaContractStringCollectionDto))]
+[JsonSerializable(typeof(SchemaNestedRootDto))]
+[JsonSerializable(typeof(SchemaNestedChildDto))]
 internal partial class SchemaContractTestJsonContext : JsonSerializerContext;

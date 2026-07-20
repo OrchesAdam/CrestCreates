@@ -12,4 +12,12 @@ public static class AgentCapabilityContextItemNames
     public const string AttemptId = "AgentTool.AttemptId";
     public const string ApprovalEvidenceId = "AgentTool.ApprovalEvidenceId";
     public const string BudgetReservationId = "AgentTool.BudgetReservationId";
+    public const string InvocationBindingSnapshot = "AgentTool.InvocationBindingSnapshot";
+    public const string InvocationFactBuffer = "AgentTool.InvocationFactBuffer";
+    public const string OutputPreflightReceiptSink = "AgentTool.OutputPreflightReceiptSink";
+    public const string OutputSchemaContractFingerprint = "AgentTool.OutputSchemaContractFingerprint";
+    public const string OutputSchemaDescriptor = "AgentTool.OutputSchemaDescriptor";
+    public const string OutputSchemaReferences = "AgentTool.OutputSchemaReferences";
+    public const string SchemaValidator = "AgentTool.SchemaValidator";
+    public const string RequiresOutputPreflightReceipt = "AgentTool.RequiresOutputPreflightReceipt";
 }

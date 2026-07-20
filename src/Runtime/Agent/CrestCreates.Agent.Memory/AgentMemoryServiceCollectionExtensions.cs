@@ -3,6 +3,7 @@ using CrestCreates.Agent.Memory.Authoring;
 using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Compression;
 using CrestCreates.Agent.Memory.Extraction;
+using CrestCreates.Agent.Memory.Identity;
 using CrestCreates.Agent.Memory.Promotion;
 using CrestCreates.Agent.Memory.Recall;
 using CrestCreates.Agent.Memory.Sanitization;
@@ -33,6 +34,7 @@ public static class AgentMemoryServiceCollectionExtensions
     public static IServiceCollection AddAgentMemoryRuntime(this IServiceCollection services)
     {
         // Stores
+        services.TryAddSingleton<IAgentMemoryArtifactIdGenerator, DefaultAgentMemoryArtifactIdGenerator>();
         services.TryAddSingleton<IAgentConversationStore, InMemoryAgentConversationStore>();
         services.TryAddSingleton<IAgentTaskHistoryStore, InMemoryAgentTaskHistoryStore>();
         services.TryAddSingleton<IAgentCompressedContextStore, InMemoryAgentCompressedContextStore>();
@@ -40,15 +42,26 @@ public static class AgentMemoryServiceCollectionExtensions
 
         // Sanitization & Compression
         services.TryAddSingleton<IAgentMemoryContentSanitizer, DefaultAgentMemoryContentSanitizer>();
-        services.TryAddSingleton<DefaultAgentContextCompressor>();
+        services.TryAddSingleton<DefaultAgentContextCompressor>(sp =>
+            new DefaultAgentContextCompressor(
+                sp.GetRequiredService<IAgentMemoryContentSanitizer>(),
+                sp.GetRequiredService<IAgentMemoryArtifactIdGenerator>(),
+                sp.GetRequiredService<AgentMemoryCanonicalHashProjector>()));
         services.TryAddSingleton<IAgentContextCompressor>(sp =>
             sp.GetRequiredService<DefaultAgentContextCompressor>());
 
         // Extraction & Promotion
-        services.TryAddSingleton<DefaultAgentMemoryExtractor>();
+        services.TryAddSingleton<DefaultAgentMemoryExtractor>(sp =>
+            new DefaultAgentMemoryExtractor(
+                sp.GetRequiredService<IAgentMemoryArtifactIdGenerator>(),
+                sp.GetRequiredService<AgentMemoryCanonicalHashProjector>()));
         services.TryAddSingleton<IAgentMemoryExtractor>(sp =>
             sp.GetRequiredService<DefaultAgentMemoryExtractor>());
-        services.TryAddSingleton<IAgentMemoryPromotionService, DefaultAgentMemoryPromotionService>();
+        services.TryAddSingleton<DefaultAgentMemoryPromotionService>();
+        services.TryAddSingleton<IAgentMemoryPromotionService>(sp =>
+            sp.GetRequiredService<DefaultAgentMemoryPromotionService>());
+        services.TryAddSingleton<IAgentMemoryCurationServiceCapabilities>(sp =>
+            sp.GetRequiredService<DefaultAgentMemoryPromotionService>());
 
         // Recall & Expansion
         services.TryAddSingleton<IAgentMemoryRetriever, DefaultAgentMemoryRetriever>();

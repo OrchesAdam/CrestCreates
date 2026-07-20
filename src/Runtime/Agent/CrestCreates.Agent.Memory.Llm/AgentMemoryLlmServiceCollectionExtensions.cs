@@ -1,4 +1,5 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Llm.Clients;
 using CrestCreates.Agent.Memory.Llm.Compression;
 using CrestCreates.Agent.Memory.Llm.Extraction;
@@ -86,7 +87,9 @@ public static class AgentMemoryLlmServiceCollectionExtensions
                 sp.GetRequiredService<IAgentMemoryCompressionOutputParser>(),
                 sp.GetRequiredService<IAgentPromptEvidenceFactory>(),
                 sp.GetRequiredService<IAgentPromptHashService>(),
-                sp.GetRequiredService<AgentMemoryLlmAdapterOptions>());
+                sp.GetRequiredService<AgentMemoryLlmAdapterOptions>(),
+                sp.GetRequiredService<IAgentMemoryArtifactIdGenerator>(),
+                sp.GetRequiredService<AgentMemoryCanonicalHashProjector>());
         });
 
         services.TryAddSingleton<IAgentContextCompressor>(sp => sp.GetRequiredService<LlmAgentContextCompressor>());
@@ -140,7 +143,9 @@ public static class AgentMemoryLlmServiceCollectionExtensions
                 sp.GetRequiredService<IAgentMemoryExtractionOutputParser>(),
                 sp.GetRequiredService<IAgentPromptEvidenceFactory>(),
                 sp.GetRequiredService<IAgentPromptHashService>(),
-                sp.GetRequiredService<AgentMemoryLlmAdapterOptions>());
+                sp.GetRequiredService<AgentMemoryLlmAdapterOptions>(),
+                sp.GetRequiredService<IAgentMemoryArtifactIdGenerator>(),
+                sp.GetRequiredService<AgentMemoryCanonicalHashProjector>());
         });
 
         services.TryAddSingleton<IAgentMemoryExtractor>(sp => sp.GetRequiredService<LlmAgentMemoryExtractor>());
