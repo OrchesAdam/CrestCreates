@@ -47,7 +47,7 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
             HandleId = AgentMemorySecurityArtifactIdGenerator.Create("hnd"), ResourceKind = AgentMemoryResourceKind.Memory,
             ResourceId = newMemoryId, Principal = principal, ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal),
             RequiredDescriptorRefs = EffectiveDescriptorRefs(replacement), IsUnscoped = EffectiveDescriptorRefs(replacement).Count == 0,
-            IssuingInvocationId = principal.ExecutionId, IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime)
+            IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId, IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime)
         };
         AgentMemoryPreparedSecurityArtifacts? prepared = null;
         var grantInputs = replacement.SourceRefs.Select(source => new AgentMemorySourceGrant
@@ -55,7 +55,7 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
             GrantId = AgentMemorySecurityArtifactIdGenerator.Create("grt"), SourceRef = source, Principal = principal,
             ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal), RequiredDescriptorRefs = EffectiveDescriptorRefs(replacement).Concat(source.DescriptorRefs).Distinct().ToArray(),
             IsUnscoped = EffectiveDescriptorRefs(replacement).Count == 0 && source.DescriptorRefs.Count == 0,
-            IssuingInvocationId = principal.ExecutionId, IssuedAt = now, ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
+            IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId, IssuedAt = now, ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
         }).ToArray();
         try
         {

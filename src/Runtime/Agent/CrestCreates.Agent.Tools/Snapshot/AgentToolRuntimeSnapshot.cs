@@ -28,6 +28,7 @@ public sealed record AgentToolRuntimeEntry(
     string? InputSchemaContractHash,
     string? OutputSchemaContractHash,
     AgentToolPreparedOutcomeContract? PreparedOutcomeContract,
+    AgentToolAuditProjectionContract? OutputAuditProjection,
     Func<object?, IReadOnlyList<AgentToolAuditFact>>? OutputAuditProjector,
     Func<object?, string?>? OutputOutcomeCodeProjector);
 

@@ -1,5 +1,7 @@
 namespace CrestCreates.Agent.Memory.Tools;
 
+using CrestCreates.Agent.Memory.Abstractions;
+
 /// <summary>
 /// Development in-memory source-grant store. Entries are lazily marked
 /// expired and are intentionally not evicted; durable providers must implement
@@ -36,21 +38,29 @@ public sealed class AgentMemorySourceGrantStore : IAgentMemorySourceGrantStore
         var identity = batchKey.ToIdentityKey();
         lock (_gate)
         {
+            var now = DateTimeOffset.UtcNow;
             if (_batchPlans.TryGetValue(identity, out var existingPlan)
                 && !string.Equals(existingPlan, batchKey.ArtifactPlanHash.Value, StringComparison.Ordinal))
                 throw new InvalidOperationException("Security artifact batch plan conflicts with an existing preparation.");
             if (_batches.TryGetValue(key, out var existingIds))
+            {
+                var existing = existingIds.Select(id => _grants[id]).ToArray();
+                if (existing.Any(item => item.State != AgentMemorySecurityArtifactState.Active
+                    || item.ExpiresAt <= now))
+                    throw new AgentMemoryOperationException(
+                        AgentMemoryOperationFailureCode.IdentityConflict,
+                        "The security artifact batch was aborted or expired and cannot be reused.");
                 return ValueTask.FromResult(new AgentMemoryGrantIssueResult
                 {
-                    Grants = existingIds.Select(id => _grants[id]).ToArray(),
+                    Grants = existing,
                     ReusedExisting = true
                 });
+            }
             if (grants.Select(item => item.GrantId).Distinct(StringComparer.Ordinal).Count() != grants.Count)
                 throw new InvalidOperationException("Grant ids must be unique within a batch.");
             var firstPrincipal = grants[0].Principal;
             if (grants.Any(item => item.Principal != firstPrincipal))
                 throw new InvalidOperationException("A grant batch must have one trusted principal.");
-            var now = DateTimeOffset.UtcNow;
             var requestedByResource = grants.GroupBy(item => (SourceKind: item.SourceRef.SourceKind, SourceId: item.SourceRef.SourceId, ScopeFingerprint: item.ScopeFingerprint));
             foreach (var group in requestedByResource)
             {

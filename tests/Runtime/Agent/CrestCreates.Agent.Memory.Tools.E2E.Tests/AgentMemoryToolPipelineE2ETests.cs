@@ -170,7 +170,7 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
 
     private static CanonicalHash TestHash(string value) => new()
     {
-        Value = value.PadLeft(64, '0'), Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+        Value = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant(), Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
         ArtifactKind = "test", Scope = "TenantVisible", Purpose = "Test",
         ContractVersion = "test-v1", CanonicalShapeVersion = "test-v1"
     };

@@ -2,8 +2,39 @@ using CrestCreates.Agent.Tools;
 
 namespace CrestCreates.Agent.Memory.Tools;
 
-internal sealed class AgentMemoryToolAuditProjectionProvider : IAgentToolOutputAuditProjectionProvider, IAgentToolOutputOutcomeCodeProvider
+internal sealed class AgentMemoryToolAuditProjectionProvider :
+    IAgentToolOutputAuditProjectionProvider,
+    IAgentToolOutputOutcomeCodeProvider,
+    IAgentToolOutputAuditProjectionContractProvider
 {
+    public AgentToolAuditProjectionContract? CreateContract(string toolName, Type outputType)
+        => IsKnown(toolName, outputType)
+            ? new AgentToolAuditProjectionContract
+            {
+                MaximumFacts = 64,
+                Definitions =
+                [
+                    new() { CodePrefix = "memory.scope-fingerprint", Kind = AgentToolAuditFactKind.BranchInvariant, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
+                    new() { CodePrefix = "memory.operation", Kind = AgentToolAuditFactKind.BranchInvariant, ValueEncoding = AgentToolAuditFactValueEncoding.Text },
+                    new() { CodePrefix = "output.operation-status", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Text },
+                    new() { CodePrefix = "output.returned-count", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Integer },
+                    new() { CodePrefix = "output.block-count", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Integer },
+                    new() { CodePrefix = "output.candidate-count", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Integer },
+                    new() { CodePrefix = "output.was-truncated", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Boolean },
+                    new() { CodePrefix = "output.items[", CodeSuffix = "].memory-status", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Text },
+                    new() { CodePrefix = "output.items[", CodeSuffix = "].canonical-content-hash", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
+                    new() { CodePrefix = "output.candidates[", CodeSuffix = "].candidate-status", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Text },
+                    new() { CodePrefix = "output.candidates[", CodeSuffix = "].canonical-content-hash", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
+                    new() { CodePrefix = "output.blocks[", CodeSuffix = "].canonical-content-hash", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
+                    new() { CodePrefix = "output.item.", CodeSuffix = ".memory-status", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Text },
+                    new() { CodePrefix = "output.item.", CodeSuffix = ".canonical-content-hash", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash },
+                    new() { CodePrefix = "output.canonical-content-hash", Kind = AgentToolAuditFactKind.Output, ValueEncoding = AgentToolAuditFactValueEncoding.Hash }
+                ]
+            }
+            : null;
+
+    private bool IsKnown(string toolName, Type outputType)
+        => Create(toolName, outputType) is not null;
     public Func<object?, string?>? CreateOutcomeCode(string toolName, Type outputType)
         => toolName switch
         {

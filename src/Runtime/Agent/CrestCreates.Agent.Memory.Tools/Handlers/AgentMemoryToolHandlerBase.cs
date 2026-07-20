@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Capability.Abstractions;
@@ -117,14 +115,7 @@ internal abstract class AgentMemoryToolHandlerBase
             || value is not IAgentToolInvocationFactSink facts)
             return;
 
-        var descriptorProjection = string.Join(';', scope.VisibleDescriptorRefs
-            .OrderBy(item => item.Namespace, StringComparer.Ordinal)
-            .ThenBy(item => item.Id, StringComparer.Ordinal)
-            .ThenBy(item => item.Version)
-            .Select(item => $"{item.Namespace}:{item.Id}:{item.Version}"));
-        var scopeFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-                $"memory-scope-v2|{Principal.TenantId}|{scope.AllowUnscopedMemory}|{descriptorProjection}")))
-            .ToLowerInvariant();
+        var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, Principal);
         facts.AddTrustedFacts(
         [
             new AgentToolAuditFact { Code = "memory.scope-fingerprint", Value = scopeFingerprint, Kind = AgentToolAuditFactKind.BranchInvariant },

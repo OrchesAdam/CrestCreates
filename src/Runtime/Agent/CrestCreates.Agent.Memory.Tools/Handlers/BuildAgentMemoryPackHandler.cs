@@ -87,7 +87,7 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
             ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal),
             RequiredDescriptorRefs = EffectiveDescriptorRefs(memory),
             IsUnscoped = EffectiveDescriptorRefs(memory).Count == 0,
-            IssuingInvocationId = principal.ExecutionId,
+            IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId,
             IssuedAt = now,
             ExpiresAt = now.Add(scope.ResourceHandleLifetime)
         }).ToArray();
@@ -99,7 +99,7 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
             ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal),
             RequiredDescriptorRefs = memory.DescriptorRefs.Concat(sourceRef.DescriptorRefs).Distinct().ToArray(),
             IsUnscoped = memory.DescriptorRefs.Count == 0 && sourceRef.DescriptorRefs.Count == 0,
-            IssuingInvocationId = principal.ExecutionId,
+            IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId,
             IssuedAt = now,
             ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
         })).ToArray();

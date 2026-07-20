@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using CrestCreates.Agent.Memory.Abstractions;
 
 namespace CrestCreates.Agent.Memory.Stores;
@@ -6,12 +5,26 @@ namespace CrestCreates.Agent.Memory.Stores;
 public sealed class InMemoryAgentCompressedContextStore : IAgentCompressedContextStore
 {
     private readonly object _gate = new();
-    private readonly ConcurrentDictionary<(string TenantId, string ContextId), AgentCompressedContext> _contexts = new();
+    private readonly Dictionary<(string TenantId, string ContextId), AgentCompressedContext> _contexts = new();
+    private readonly Dictionary<(string TenantId, string BlockId), AgentCompressedContextBlock> _blocks = new();
 
     public ValueTask SaveCompressedContextAsync(AgentCompressedContext context, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(context);
         lock (_gate)
-            _contexts[(context.TenantId, context.ContextId)] = context.Snapshot();
+        {
+            var key = (context.TenantId, context.ContextId);
+            var snapshot = ValidateAndSnapshot(context);
+            EnsureBlockIdentitiesAvailable(snapshot, key);
+            if (_contexts.TryGetValue(key, out var existing))
+            {
+                foreach (var block in existing.Blocks)
+                    _blocks.Remove((context.TenantId, block.BlockId));
+            }
+            _contexts[key] = snapshot;
+            foreach (var block in snapshot.Blocks)
+                _blocks[(context.TenantId, block.BlockId)] = block;
+        }
         return ValueTask.CompletedTask;
     }
 
@@ -20,8 +33,14 @@ public sealed class InMemoryAgentCompressedContextStore : IAgentCompressedContex
         ArgumentNullException.ThrowIfNull(context);
         lock (_gate)
         {
-            if (!_contexts.TryAdd((context.TenantId, context.ContextId), context.Snapshot()))
+            var key = (context.TenantId, context.ContextId);
+            if (_contexts.ContainsKey(key))
                 throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.IdentityConflict, "Context identity already exists.");
+            var snapshot = ValidateAndSnapshot(context);
+            EnsureBlockIdentitiesAvailable(snapshot, key);
+            _contexts[key] = snapshot;
+            foreach (var block in snapshot.Blocks)
+                _blocks[(context.TenantId, block.BlockId)] = block;
         }
         return ValueTask.CompletedTask;
     }
@@ -42,20 +61,29 @@ public sealed class InMemoryAgentCompressedContextStore : IAgentCompressedContex
         string blockId,
         CancellationToken cancellationToken = default)
     {
-        AgentCompressedContext[] contexts;
         lock (_gate)
-            contexts = _contexts.Values.ToArray();
-        foreach (var context in contexts)
-        {
-            if (!string.Equals(context.TenantId, tenantId, StringComparison.Ordinal))
-                continue;
+            return ValueTask.FromResult(_blocks.TryGetValue((tenantId, blockId), out var block)
+                ? (AgentCompressedContextBlock?)block.Snapshot()
+                : null);
+    }
 
-            var block = context.Blocks.FirstOrDefault(item =>
-                string.Equals(item.BlockId, blockId, StringComparison.Ordinal));
-            if (block is not null)
-                return new ValueTask<AgentCompressedContextBlock?>(block.Snapshot());
-        }
+    private static AgentCompressedContext ValidateAndSnapshot(AgentCompressedContext context)
+    {
+        var duplicate = context.Blocks
+            .GroupBy(item => item.BlockId, StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.IdentityConflict, "Compressed context contains duplicate BlockId values.");
+        if (context.Blocks.Any(item => !string.Equals(item.TenantId, context.TenantId, StringComparison.Ordinal)))
+            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.TenantMismatch, "Compressed context block tenant does not match the context tenant.");
+        return context.Snapshot();
+    }
 
-        return new ValueTask<AgentCompressedContextBlock?>((AgentCompressedContextBlock?)null);
+    private void EnsureBlockIdentitiesAvailable(AgentCompressedContext context, (string TenantId, string ContextId) contextKey)
+    {
+        if (context.Blocks.Any(item => _blocks.ContainsKey((context.TenantId, item.BlockId))
+            && (!_contexts.TryGetValue(contextKey, out var existing)
+                || existing.Blocks.All(block => !string.Equals(block.BlockId, item.BlockId, StringComparison.Ordinal)))))
+            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.IdentityConflict, "Compressed context BlockId already exists.");
     }
 }

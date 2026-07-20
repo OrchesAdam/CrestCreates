@@ -13,6 +13,7 @@ internal sealed class AgentToolOutputPreflightRuntime : IAgentToolOutputPrefligh
     private readonly SchemaDescriptor? _schema;
     private readonly IReadOnlyList<SchemaDescriptor> _references;
     private readonly ISchemaValidator _validator;
+    private readonly Func<object?, IReadOnlyList<AgentToolAuditFact>>? _auditProjector;
 
     public AgentToolOutputPreflightRuntime(
         string descriptorId,
@@ -22,7 +23,8 @@ internal sealed class AgentToolOutputPreflightRuntime : IAgentToolOutputPrefligh
         JsonTypeInfo outputTypeInfo,
         SchemaDescriptor? schema,
         IReadOnlyList<SchemaDescriptor> references,
-        ISchemaValidator validator)
+        ISchemaValidator validator,
+        Func<object?, IReadOnlyList<AgentToolAuditFact>>? auditProjector = null)
     {
         _descriptorId = descriptorId;
         _descriptorVersion = descriptorVersion;
@@ -32,6 +34,7 @@ internal sealed class AgentToolOutputPreflightRuntime : IAgentToolOutputPrefligh
         _schema = schema;
         _references = references;
         _validator = validator;
+        _auditProjector = auditProjector;
     }
 
     public AgentToolPreparedOutput<TOutput> Prepare<TOutput>(TOutput output)
@@ -40,6 +43,7 @@ internal sealed class AgentToolOutputPreflightRuntime : IAgentToolOutputPrefligh
             throw new InvalidOperationException("Prepared output type does not match the frozen binding root.");
         return new AgentToolOutputPreflight<TOutput>(
             _descriptorId, _descriptorVersion, _contractFingerprint, typeInfo,
-            _schema, _references, _validator).Prepare(output);
+            _schema, _references, _validator,
+            _auditProjector is null ? null : value => _auditProjector(value)).Prepare(output);
     }
 }

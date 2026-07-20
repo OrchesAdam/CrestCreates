@@ -85,14 +85,14 @@ internal sealed class ExtractMemoryCandidatesHandler : AgentMemoryToolHandlerBas
             HandleId = AgentMemorySecurityArtifactIdGenerator.Create("hnd"), ResourceKind = AgentMemoryResourceKind.Candidate,
             ResourceId = candidate.CandidateId, Principal = principal, ScopeFingerprint = scopeFingerprint,
             RequiredDescriptorRefs = EffectiveDescriptorRefs(candidate), IsUnscoped = EffectiveDescriptorRefs(candidate).Count == 0,
-            IssuingInvocationId = principal.ExecutionId, IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime)
+            IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId, IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime)
         }).ToArray();
         var grantsInput = candidates.SelectMany(candidate => candidate.SourceRefs.Select(source => new AgentMemorySourceGrant
         {
             GrantId = AgentMemorySecurityArtifactIdGenerator.Create("grt"), SourceRef = source, Principal = principal,
             ScopeFingerprint = scopeFingerprint, RequiredDescriptorRefs = candidate.DescriptorRefs.Concat(source.DescriptorRefs).Distinct().ToArray(),
             IsUnscoped = candidate.DescriptorRefs.Count == 0 && source.DescriptorRefs.Count == 0,
-            IssuingInvocationId = principal.ExecutionId, IssuedAt = now, ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
+            IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId, IssuedAt = now, ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
         })).ToArray();
         AgentMemoryPreparedSecurityArtifacts? prepared = null;
         try

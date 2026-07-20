@@ -2,6 +2,8 @@ using CrestCreates.Agent.Memory.Tools;
 
 namespace CrestCreates.Agent.Memory.Tools;
 
+using CrestCreates.Agent.Memory.Abstractions;
+
 /// <summary>
 /// Development in-memory handle store. Entries are lazily marked expired and
 /// are intentionally not evicted; durable providers must implement bounded
@@ -38,22 +40,30 @@ public sealed class AgentMemoryResourceHandleStore : IAgentMemoryResourceHandleS
         var identity = batchKey.ToIdentityKey();
         lock (_gate)
         {
+            var now = DateTimeOffset.UtcNow;
             if (_batchPlans.TryGetValue(identity, out var existingPlan)
                 && !string.Equals(existingPlan, batchKey.ArtifactPlanHash.Value, StringComparison.Ordinal))
                 throw new InvalidOperationException("Security artifact batch plan conflicts with an existing preparation.");
             if (_batches.TryGetValue(key, out var existingIds))
+            {
+                var existing = existingIds.Select(id => _handles[id]).ToArray();
+                if (existing.Any(item => item.State != AgentMemorySecurityArtifactState.Active
+                    || item.ExpiresAt <= now))
+                    throw new AgentMemoryOperationException(
+                        AgentMemoryOperationFailureCode.IdentityConflict,
+                        "The security artifact batch was aborted or expired and cannot be reused.");
                 return ValueTask.FromResult(new AgentMemoryResourceHandleIssueResult
                 {
-                    Handles = existingIds.Select(id => _handles[id]).ToArray(),
+                    Handles = existing,
                     ReusedExisting = true
                 });
+            }
 
             if (handles.Select(item => item.HandleId).Distinct(StringComparer.Ordinal).Count() != handles.Count)
                 throw new InvalidOperationException("Handle ids must be unique within a batch.");
             var firstPrincipal = handles[0].Principal;
             if (handles.Any(item => item.Principal != firstPrincipal))
                 throw new InvalidOperationException("A handle batch must have one trusted principal.");
-            var now = DateTimeOffset.UtcNow;
             var requestedByResource = handles.GroupBy(item => (ResourceKind: item.ResourceKind, ResourceId: item.ResourceId, ScopeFingerprint: item.ScopeFingerprint));
             foreach (var group in requestedByResource)
             {

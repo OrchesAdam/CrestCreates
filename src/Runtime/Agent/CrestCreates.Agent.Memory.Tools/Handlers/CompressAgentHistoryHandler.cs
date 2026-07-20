@@ -137,13 +137,13 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
             ResourceId = context.ContextId, Principal = principal, ScopeFingerprint = scopeFingerprint,
             RequiredDescriptorRefs = context.Blocks.SelectMany(block => block.SourceRefs.SelectMany(source => source.DescriptorRefs)).Distinct().ToArray(),
             IsUnscoped = !context.Blocks.SelectMany(block => block.SourceRefs.SelectMany(source => source.DescriptorRefs)).Any(),
-            IssuingInvocationId = principal.ExecutionId, IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime)
+            IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId, IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime)
         };
         var grantInputs = context.Blocks.SelectMany(block => block.SourceRefs.Select(sourceRef => new AgentMemorySourceGrant
         {
             GrantId = AgentMemorySecurityArtifactIdGenerator.Create("grt"), SourceRef = sourceRef, Principal = principal,
             ScopeFingerprint = scopeFingerprint, RequiredDescriptorRefs = sourceRef.DescriptorRefs,
-            IsUnscoped = sourceRef.DescriptorRefs.Count == 0, IssuingInvocationId = principal.ExecutionId,
+            IsUnscoped = sourceRef.DescriptorRefs.Count == 0, IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId,
             IssuedAt = now, ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
         })).ToArray();
         AgentMemoryPreparedSecurityArtifacts? prepared = null;

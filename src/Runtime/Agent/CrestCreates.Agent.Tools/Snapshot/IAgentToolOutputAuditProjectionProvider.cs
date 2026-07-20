@@ -10,6 +10,34 @@ public interface IAgentToolOutputAuditProjectionProvider
     Func<object?, IReadOnlyList<AgentToolAuditFact>>? Create(string toolName, Type outputType);
 }
 
+public enum AgentToolAuditFactValueEncoding
+{
+    Unknown = 0,
+    Text = 1,
+    Integer = 2,
+    Boolean = 3,
+    Hash = 4
+}
+
+public sealed record AgentToolAuditFactDefinition
+{
+    public required string CodePrefix { get; init; }
+    public string CodeSuffix { get; init; } = string.Empty;
+    public required AgentToolAuditFactKind Kind { get; init; }
+    public AgentToolAuditFactValueEncoding ValueEncoding { get; init; } = AgentToolAuditFactValueEncoding.Text;
+}
+
+public sealed record AgentToolAuditProjectionContract
+{
+    public required IReadOnlyList<AgentToolAuditFactDefinition> Definitions { get; init; }
+    public int MaximumFacts { get; init; } = 64;
+}
+
+public interface IAgentToolOutputAuditProjectionContractProvider
+{
+    AgentToolAuditProjectionContract? CreateContract(string toolName, Type outputType);
+}
+
 /// <summary>
 /// Provides the typed wire outcome discriminator for a binding root.  The
 /// invoker uses this instead of probing serialized JSON property names.

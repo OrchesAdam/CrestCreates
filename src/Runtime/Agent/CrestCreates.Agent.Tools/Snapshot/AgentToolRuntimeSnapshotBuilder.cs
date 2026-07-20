@@ -26,6 +26,7 @@ public sealed class AgentToolRuntimeSnapshotBuilder
     private readonly AgentToolJsonOptions _json;
     private readonly IReadOnlyList<IAgentToolPreparedOutcomeRequirementProvider> _preparedOutcomeProviders;
     private readonly IReadOnlyList<IAgentToolOutputAuditProjectionProvider> _auditProjectionProviders;
+    private readonly IReadOnlyList<IAgentToolOutputAuditProjectionContractProvider> _auditProjectionContractProviders;
     private readonly IReadOnlyList<IAgentToolOutputOutcomeCodeProvider> _outcomeCodeProviders;
 
     public AgentToolRuntimeSnapshotBuilder(
@@ -41,7 +42,8 @@ public sealed class AgentToolRuntimeSnapshotBuilder
         AgentToolJsonOptions json,
         IEnumerable<IAgentToolPreparedOutcomeRequirementProvider>? preparedOutcomeProviders = null,
         IEnumerable<IAgentToolOutputAuditProjectionProvider>? auditProjectionProviders = null,
-        IEnumerable<IAgentToolOutputOutcomeCodeProvider>? outcomeCodeProviders = null)
+        IEnumerable<IAgentToolOutputOutcomeCodeProvider>? outcomeCodeProviders = null,
+        IEnumerable<IAgentToolOutputAuditProjectionContractProvider>? auditProjectionContractProviders = null)
     {
         _tools = tools;
         _capabilities = capabilities;
@@ -55,6 +57,7 @@ public sealed class AgentToolRuntimeSnapshotBuilder
         _json = json;
         _preparedOutcomeProviders = preparedOutcomeProviders?.ToArray() ?? Array.Empty<IAgentToolPreparedOutcomeRequirementProvider>();
         _auditProjectionProviders = auditProjectionProviders?.ToArray() ?? Array.Empty<IAgentToolOutputAuditProjectionProvider>();
+        _auditProjectionContractProviders = auditProjectionContractProviders?.ToArray() ?? Array.Empty<IAgentToolOutputAuditProjectionContractProvider>();
         _outcomeCodeProviders = outcomeCodeProviders?.ToArray() ?? Array.Empty<IAgentToolOutputOutcomeCodeProvider>();
     }
 
@@ -154,9 +157,75 @@ public sealed class AgentToolRuntimeSnapshotBuilder
             Governance = governance
         };
 
-        var preparedOutcomeContract = _preparedOutcomeProviders
+        var preparedContracts = _preparedOutcomeProviders
             .Select(provider => provider.Create(tool.ToolName))
-            .FirstOrDefault(contract => contract is not null);
+            .Where(contract => contract is not null)
+            .ToArray();
+        if (preparedContracts.Length > 1)
+            throw new AgentToolConfigurationException(
+                AgentToolStartupDiagnosticCodes.InvalidDescriptorContract,
+                $"Multiple prepared outcome contracts are registered for '{tool.ToolName}'.");
+        var preparedContract = preparedContracts.SingleOrDefault();
+        if (preparedContract is not null
+            && (preparedContract.MaximumBranches is < 1 or > 5
+                || preparedContract.AllowedOutcomeCodes.Count == 0
+                || preparedContract.AllowedOutcomeCodes.Any(string.IsNullOrWhiteSpace)))
+            throw new AgentToolConfigurationException(
+                AgentToolStartupDiagnosticCodes.InvalidDescriptorContract,
+                $"Prepared outcome contract for '{tool.ToolName}' is invalid.");
+        var preparedOutcomeContract = preparedContract is null
+            ? null
+            : preparedContract with
+            {
+                AllowedOutcomeCodes = preparedContract.AllowedOutcomeCodes.ToFrozenSet(StringComparer.Ordinal),
+                MaximumBranches = preparedContract.MaximumBranches
+            };
+
+        var auditProjectors = _auditProjectionProviders
+            .Select(provider => provider.Create(tool.ToolName, contract.OutputType ?? typeof(object)))
+            .Where(projector => projector is not null)
+            .ToArray();
+        if (auditProjectors.Length > 1)
+            throw new AgentToolConfigurationException(
+                AgentToolStartupDiagnosticCodes.InvalidDescriptorContract,
+                $"Multiple output audit projectors are registered for '{tool.ToolName}'.");
+        var auditContracts = _auditProjectionContractProviders
+            .Select(provider => provider.CreateContract(tool.ToolName, contract.OutputType ?? typeof(object)))
+            .Where(contract => contract is not null)
+            .ToArray();
+        if (auditContracts.Length > 1)
+            throw new AgentToolConfigurationException(
+                AgentToolStartupDiagnosticCodes.InvalidDescriptorContract,
+                $"Multiple output audit contracts are registered for '{tool.ToolName}'.");
+        var rawAuditContract = auditContracts.SingleOrDefault();
+        if (rawAuditContract is not null
+            && (rawAuditContract.MaximumFacts is < 1 or > 64
+                || rawAuditContract.Definitions.Count == 0
+                || rawAuditContract.Definitions.Any(definition => string.IsNullOrWhiteSpace(definition.CodePrefix)
+                    || definition.Kind == AgentToolAuditFactKind.Unknown
+                    || definition.ValueEncoding == AgentToolAuditFactValueEncoding.Unknown)))
+            throw new AgentToolConfigurationException(
+                AgentToolStartupDiagnosticCodes.InvalidDescriptorContract,
+                $"Output audit contract for '{tool.ToolName}' is invalid.");
+        var auditContract = rawAuditContract is null
+            ? null
+            : rawAuditContract with
+            {
+                Definitions = rawAuditContract.Definitions.ToArray()
+            };
+        var outcomeProjectors = _outcomeCodeProviders
+            .Select(provider => provider.CreateOutcomeCode(tool.ToolName, contract.OutputType ?? typeof(object)))
+            .Where(projector => projector is not null)
+            .ToArray();
+        if (outcomeProjectors.Length > 1)
+            throw new AgentToolConfigurationException(
+                AgentToolStartupDiagnosticCodes.InvalidDescriptorContract,
+                $"Multiple output outcome projectors are registered for '{tool.ToolName}'.");
+        if (preparedOutcomeContract is not null
+            && (auditProjectors.Length != 1 || outcomeProjectors.Length != 1 || auditContract is null))
+            throw new AgentToolConfigurationException(
+                AgentToolStartupDiagnosticCodes.InvalidDescriptorContract,
+                $"Prepared outcome Tool '{tool.ToolName}' must provide exactly one typed output and outcome projector.");
 
         return new AgentToolRuntimeEntry(
             tool,
@@ -174,10 +243,9 @@ public sealed class AgentToolRuntimeSnapshotBuilder
             inputSchemaHash,
             outputSchemaHash,
             preparedOutcomeContract,
-            _auditProjectionProviders.Select(provider => provider.Create(tool.ToolName, contract.OutputType ?? typeof(object)))
-                .FirstOrDefault(projector => projector is not null),
-            _outcomeCodeProviders.Select(provider => provider.CreateOutcomeCode(tool.ToolName, contract.OutputType ?? typeof(object)))
-                .FirstOrDefault(projector => projector is not null));
+            auditContract,
+            auditProjectors.SingleOrDefault(),
+            outcomeProjectors.SingleOrDefault());
     }
 
     private void EnsureRegistriesBuilt()

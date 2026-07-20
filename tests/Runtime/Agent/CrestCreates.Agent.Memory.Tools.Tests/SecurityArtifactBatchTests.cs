@@ -213,6 +213,71 @@ public sealed class SecurityArtifactBatchTests
             .Where(exception => exception.Code == AgentMemoryOperationFailureCode.IdentityConflict);
     }
 
+    [Fact]
+    public async Task CompressedContextBlockCollisionRejectsTheWholeBatch()
+    {
+        var store = new InMemoryAgentCompressedContextStore();
+        var first = new AgentCompressedContext
+        {
+            ContextId = "context-a", TenantId = "tenant",
+            Blocks = [Block("block-shared", "first")]
+        };
+        await store.CreateCompressedContextAsync(first);
+
+        var duplicateWithinBatch = new AgentCompressedContext
+        {
+            ContextId = "context-b", TenantId = "tenant",
+            Blocks = [Block("block-duplicate", "a"), Block("block-duplicate", "b")]
+        };
+        await FluentActions.Awaiting(() => store.CreateCompressedContextAsync(duplicateWithinBatch).AsTask())
+            .Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(exception => exception.Code == AgentMemoryOperationFailureCode.IdentityConflict);
+
+        var duplicateAcrossContexts = duplicateWithinBatch with
+        {
+            Blocks = [Block("block-shared", "second")]
+        };
+        await FluentActions.Awaiting(() => store.CreateCompressedContextAsync(duplicateAcrossContexts).AsTask())
+            .Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(exception => exception.Code == AgentMemoryOperationFailureCode.IdentityConflict);
+        (await store.GetCompressedContextAsync("tenant", "context-b")).Should().BeNull();
+        (await store.GetCompressedContextBlockAsync("tenant", "block-shared"))!.Content.Should().Be("first");
+    }
+
+    [Fact]
+    public async Task AbortedArtifactBatchIsNeverReturnedAsReused()
+    {
+        var principal = Principal();
+        var handleStore = new AgentMemoryResourceHandleStore();
+        var grantStore = new AgentMemorySourceGrantStore();
+        var key = Key("rollback", "rollback-plan");
+        var handle = Handle(principal, "rollback-handle", DateTimeOffset.UtcNow.AddMinutes(1));
+        var grant = new AgentMemorySourceGrant
+        {
+            GrantId = "rollback-grant",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.ConversationTurn, TenantId = principal.TenantId,
+                SourceId = "conversation", RangeStart = 0, RangeEnd = 0
+            },
+            Principal = principal, ScopeFingerprint = "scope", IssuingInvocationId = principal.ExecutionId,
+            IssuedAt = DateTimeOffset.UtcNow, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(1)
+        };
+        await handleStore.TryIssueBatchAsync(key, [handle], 2);
+        await grantStore.TryIssueBatchAsync(key, [grant], 2);
+        await handleStore.RevokeAsync(handle.HandleId);
+        await grantStore.RevokeAsync(grant.GrantId);
+
+        await FluentActions.Awaiting(() => handleStore.TryIssueBatchAsync(
+                key, [handle with { HandleId = "retry-handle" }], 2).AsTask())
+            .Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(exception => exception.Code == AgentMemoryOperationFailureCode.IdentityConflict);
+        await FluentActions.Awaiting(() => grantStore.TryIssueBatchAsync(
+                key, [grant with { GrantId = "retry-grant" }], 2).AsTask())
+            .Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(exception => exception.Code == AgentMemoryOperationFailureCode.IdentityConflict);
+    }
+
     private static string ScopeFingerprint(AgentMemoryToolPrincipal principal, AgentMemoryToolAccessScope scope)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"memory-scope-v2|{principal.TenantId}|{scope.AllowUnscopedMemory}|{string.Join('|', scope.VisibleDescriptorRefs
@@ -245,5 +310,10 @@ public sealed class SecurityArtifactBatchTests
         HandleId = id, ResourceKind = AgentMemoryResourceKind.Memory, ResourceId = "memory",
         Principal = principal, ScopeFingerprint = "scope", IsUnscoped = true,
         IssuingInvocationId = principal.ExecutionId, IssuedAt = DateTimeOffset.UtcNow, ExpiresAt = expiresAt
+    };
+
+    private static AgentCompressedContextBlock Block(string id, string content) => new()
+    {
+        BlockId = id, TenantId = "tenant", Content = content, CanonicalContentHash = Hash(content)
     };
 }
