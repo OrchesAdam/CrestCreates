@@ -371,8 +371,8 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
             && left.AttemptState == right.AttemptState
             && left.InvocationState == right.InvocationState
             && string.Equals(
-                left.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(left.Outcome),
-                right.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(right.Outcome),
+                left.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(left.Outcome, left.AuditFacts),
+                right.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(right.Outcome, right.AuditFacts),
                 StringComparison.Ordinal)
             && left.AuditFacts.SequenceEqual(right.AuditFacts)
             && string.Equals(left.ReasonCode, right.ReasonCode, StringComparison.Ordinal);
@@ -416,7 +416,7 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
         {
             var supplied = Convert.FromHexString(record.OutcomeHash);
             var computed = Convert.FromHexString(
-                AgentToolGovernanceOutcomeHasher.Compute(record.Outcome));
+                AgentToolGovernanceOutcomeHasher.Compute(record.Outcome, record.AuditFacts));
             return CryptographicOperations.FixedTimeEquals(supplied, computed);
         }
         catch (FormatException)

@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using System.Security.Cryptography;
+using System.Text;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
@@ -74,7 +76,9 @@ internal static class MemoryToolFixtureRunner
             var now = DateTimeOffset.UtcNow;
             var issued = await services.GetRequiredService<IAgentMemoryResourceHandleStore>().TryIssueBatchAsync(
                 new AgentMemorySecurityArtifactBatchKey { OriginKind = AgentMemorySecurityArtifactBatchOriginKind.TrustedHostOperation, ArtifactPurpose = "aot-memory", PreparationOrdinal = 0, ArtifactPlanHash = "aot-memory" },
-                [new AgentMemoryResourceHandle { HandleId = "aot-memory-handle", ResourceKind = AgentMemoryResourceKind.Memory, ResourceId = "aot-memory", Principal = principal, ScopeFingerprint = "aot-scope", IssuingInvocationId = "host", IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime) }],
+                [new AgentMemoryResourceHandle { HandleId = "aot-memory-handle", ResourceKind = AgentMemoryResourceKind.Memory, ResourceId = "aot-memory", Principal = principal,
+                    ScopeFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"memory-scope-v2|{principal.TenantId}|True|"))).ToLowerInvariant(),
+                    IsUnscoped = true, IssuingInvocationId = "host", IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime) }],
                 scope.MaxActiveResourceHandlesPerResource);
 
             execution.Set("aot-build");

@@ -9,19 +9,19 @@ namespace CrestCreates.Agent.Memory.Tools;
 internal sealed class ExpandAgentMemorySourceHandler : AgentMemoryToolHandlerBase, ICapabilityHandler<ExpandAgentMemorySourceInput, ExpandAgentMemorySourceResult>
 {
     private readonly IAgentMemoryToolAccessScopeProvider _scopeProvider;
-    private readonly IAgentMemorySourceGrantStore _grants;
+    private readonly IAgentMemorySourceGrantResolver _grantResolver;
     private readonly IAgentContextSourceExpander _expander;
 
     public ExpandAgentMemorySourceHandler(
         ICapabilityExecutionContextAccessor capabilityContext,
         IAgentExecutionContextAccessor agentExecution,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
-        IAgentMemorySourceGrantStore grants,
+        IAgentMemorySourceGrantResolver grantResolver,
         IAgentContextSourceExpander expander)
         : base(capabilityContext, agentExecution)
     {
         _scopeProvider = scopeProvider;
-        _grants = grants;
+        _grantResolver = grantResolver;
         _expander = expander;
     }
 
@@ -29,19 +29,15 @@ internal sealed class ExpandAgentMemorySourceHandler : AgentMemoryToolHandlerBas
     {
         var principal = Principal;
         var scope = await _scopeProvider.ResolveAsync(principal, ct).ConfigureAwait(false);
-        if (!IsValidScope(scope)) return Unavailable("scope-invalid");
+        if (!IsValidScope(scope)) return Prepare(scope, Unavailable("scope-invalid"));
         if (input.MaximumCharacters <= 0 || input.MaximumCharacters > scope.MaxExpansionCharacters)
-            return Unavailable("budget-invalid");
-        var grant = await _grants.GetAsync(input.GrantId, ct).ConfigureAwait(false);
-        if (grant is null || grant.Principal != principal || grant.State != AgentMemorySecurityArtifactState.Active
-            || grant.ExpiresAt <= DateTimeOffset.UtcNow
-            || !string.Equals(grant.SourceRef.TenantId, principal.TenantId, StringComparison.Ordinal)
-            || grant.SourceRef.DescriptorRefs.Any(item => item.Version is not > 0)
-            || !IsScopeStillAuthorized(grant, scope))
-            return Unavailable("source-unavailable");
+            return Prepare(scope, Unavailable("budget-invalid"));
+        var grant = await _grantResolver.ResolveAsync(input.GrantId, principal, scope, ct).ConfigureAwait(false);
+        if (grant is null)
+            return Prepare(scope, Unavailable("source-unavailable"));
 
         var expanded = await _expander.ExpandAsync(grant.SourceRef, ct).ConfigureAwait(false);
-        return expanded.Status switch
+        var result = expanded.Status switch
         {
             AgentMemorySourceExpansionStatus.Expanded when expanded.SanitizedContent is not null
                 => new ExpandAgentMemorySourceResult
@@ -69,16 +65,7 @@ internal sealed class ExpandAgentMemorySourceHandler : AgentMemoryToolHandlerBas
             },
             _ => Unavailable("source-unavailable")
         };
-    }
-
-    private static bool IsScopeStillAuthorized(AgentMemorySourceGrant grant, AgentMemoryToolAccessScope scope)
-    {
-        if (grant.IsUnscoped)
-            return scope.AllowUnscopedMemory;
-        if (grant.RequiredDescriptorRefs.Any(item => item.Version is not > 0))
-            return false;
-        var visible = scope.VisibleDescriptorRefs.ToHashSet();
-        return grant.RequiredDescriptorRefs.All(visible.Contains);
+        return Prepare(scope, result);
     }
 
     private static ExpandAgentMemorySourceResult Unavailable(string code) => new()
@@ -88,5 +75,23 @@ internal sealed class ExpandAgentMemorySourceHandler : AgentMemoryToolHandlerBas
         CanonicalContentHash = null,
         WasTruncated = false,
         Diagnostics = [Diagnostic(code)]
+    };
+
+    private ExpandAgentMemorySourceResult Prepare(AgentMemoryToolAccessScope scope, ExpandAgentMemorySourceResult result)
+    {
+        AddBranchInvariantFacts(scope, "expand-memory-source");
+        PublishAllowedOutcomes((WireStatus(result.OperationStatus),
+            PrepareOutput(result, AgentMemoryToolJsonSerializerContext.Default.ExpandAgentMemorySourceResult)));
+        return result;
+    }
+
+    private static string WireStatus(AgentMemoryToolOperationStatus status) => status switch
+    {
+        AgentMemoryToolOperationStatus.Completed => "completed",
+        AgentMemoryToolOperationStatus.Unavailable => "unavailable",
+        AgentMemoryToolOperationStatus.Conflict => "conflict",
+        AgentMemoryToolOperationStatus.Redacted => "redacted",
+        AgentMemoryToolOperationStatus.NotExpandable => "not-expandable",
+        _ => throw new InvalidOperationException("Unknown Memory Tool operation status.")
     };
 }

@@ -13,8 +13,15 @@ internal sealed class AgentToolOutputPreflightReceiptSink : IAgentToolOutputPref
             throw new InvalidOperationException("Output preflight receipts may only be published once.");
         if (outcomes.Count == 0)
             throw new ArgumentException("At least one allowed outcome is required.", nameof(outcomes));
+        if (outcomes.Count > 8)
+            throw new ArgumentException("Output preflight outcome sets are bounded to eight branches.", nameof(outcomes));
         if (outcomes.Select(item => item.OutcomeCode).Distinct(StringComparer.Ordinal).Count() != outcomes.Count)
             throw new ArgumentException("Output preflight outcome codes must be unique.", nameof(outcomes));
+        var allowed = new HashSet<string>(["completed", "unavailable", "conflict", "redacted", "not-expandable"], StringComparer.Ordinal);
+        if (outcomes.Any(item => !allowed.Contains(item.OutcomeCode)))
+            throw new ArgumentException("Output preflight outcome code is not an approved Tool status.", nameof(outcomes));
+        if (outcomes.Select(item => $"{item.OutcomeCode}|{item.Receipt.ToolDescriptorId}|{item.Receipt.ToolDescriptorVersion}|{item.Receipt.OutputContractFingerprint}|{item.Receipt.StructuredOutputHash}").Distinct(StringComparer.Ordinal).Count() != outcomes.Count)
+            throw new ArgumentException("Output preflight receipt identities must be unique.", nameof(outcomes));
         if (outcomes.Any(item => item.InternalFacts.Count > 32
             || item.InternalFacts.Any(fact => fact is null || string.IsNullOrWhiteSpace(fact.Code)
                 || fact.Code.Length > 96 || fact.Value?.Length > 256)))

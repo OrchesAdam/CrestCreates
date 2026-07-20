@@ -10,8 +10,7 @@ namespace CrestCreates.Agent.Memory.Tools;
 internal sealed class RejectMemoryCandidateHandler : AgentMemoryToolHandlerBase, ICapabilityHandler<RejectMemoryCandidateInput, RejectMemoryCandidateResult>
 {
     private readonly IAgentMemoryToolAccessScopeProvider _scopeProvider;
-    private readonly IAgentMemoryResourceHandleStore _handles;
-    private readonly IAgentMemoryStore _store;
+    private readonly IAgentMemoryResourceHandleResolver _handleResolver;
     private readonly IAgentMemoryPromotionService _promotion;
     private readonly AgentMemoryCanonicalHashProjector _hashes;
     private readonly TimeProvider _time;
@@ -20,26 +19,22 @@ internal sealed class RejectMemoryCandidateHandler : AgentMemoryToolHandlerBase,
         ICapabilityExecutionContextAccessor capabilityContext,
         IAgentExecutionContextAccessor agentExecution,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
-        IAgentMemoryResourceHandleStore handles,
-        IAgentMemoryStore store,
-        IAgentMemoryPromotionService promotion,
+        IAgentMemoryResourceHandleResolver handleResolver,
+        AgentMemoryToolRuntimeBinding runtimeBinding,
         AgentMemoryCanonicalHashProjector hashes,
         TimeProvider time)
         : base(capabilityContext, agentExecution)
-    { _scopeProvider = scopeProvider; _handles = handles; _store = store; _promotion = promotion; _hashes = hashes; _time = time; }
+    { _scopeProvider = scopeProvider; _handleResolver = handleResolver; _promotion = runtimeBinding.PromotionService; _hashes = hashes; _time = time; }
 
     public async Task<RejectMemoryCandidateResult> ExecuteAsync(RejectMemoryCandidateInput input, CancellationToken ct)
     {
         var principal = Principal;
         var scope = await _scopeProvider.ResolveAsync(principal, ct).ConfigureAwait(false);
-        if (!IsValidScope(scope)) return Unavailable("scope-invalid");
-        var handle = await _handles.GetAsync(input.CandidateHandle, ct).ConfigureAwait(false);
-        if (handle is null || handle.ResourceKind != AgentMemoryResourceKind.Candidate || handle.Principal != principal
-            || handle.State != AgentMemorySecurityArtifactState.Active || handle.ExpiresAt <= _time.GetUtcNow())
-            return Unavailable("candidate-unavailable");
-        var candidate = await _store.GetCandidateAsync(principal.TenantId, handle.ResourceId, ct).ConfigureAwait(false);
-        if (candidate is null) return Unavailable("candidate-unavailable");
-        if (candidate.Status != AgentMemoryStatus.Candidate) return Conflict("candidate-consumed");
+        if (!IsValidScope(scope)) return PrepareOutcome(scope, "reject-memory-candidate", "unavailable", Unavailable("scope-invalid"), AgentMemoryToolJsonSerializerContext.Default.RejectMemoryCandidateResult);
+        var resolved = await _handleResolver.ResolveAsync(input.CandidateHandle, AgentMemoryResourceKind.Candidate, principal, scope, ct).ConfigureAwait(false);
+        if (resolved?.Resource is not AgentMemoryCandidate candidate)
+            return PrepareOutcome(scope, "reject-memory-candidate", "unavailable", Unavailable("candidate-unavailable"), AgentMemoryToolJsonSerializerContext.Default.RejectMemoryCandidateResult);
+        if (candidate.Status != AgentMemoryStatus.Candidate) return PrepareOutcome(scope, "reject-memory-candidate", "conflict", Conflict("candidate-consumed"), AgentMemoryToolJsonSerializerContext.Default.RejectMemoryCandidateResult);
         var completed = new RejectMemoryCandidateResult
         {
             OperationStatus = AgentMemoryToolOperationStatus.Completed,
@@ -52,9 +47,9 @@ internal sealed class RejectMemoryCandidateHandler : AgentMemoryToolHandlerBase,
         var unavailable = Unavailable("candidate-unavailable");
         AddBranchInvariantFacts(scope, "reject-memory-candidate");
         PublishAllowedOutcomes(
-            ("completed", completed, AgentMemoryToolJsonSerializerContext.Default.RejectMemoryCandidateResult),
-            ("conflict", conflict, AgentMemoryToolJsonSerializerContext.Default.RejectMemoryCandidateResult),
-            ("unavailable", unavailable, AgentMemoryToolJsonSerializerContext.Default.RejectMemoryCandidateResult));
+            ("completed", PrepareOutput(completed, AgentMemoryToolJsonSerializerContext.Default.RejectMemoryCandidateResult)),
+            ("conflict", PrepareOutput(conflict, AgentMemoryToolJsonSerializerContext.Default.RejectMemoryCandidateResult)),
+            ("unavailable", PrepareOutput(unavailable, AgentMemoryToolJsonSerializerContext.Default.RejectMemoryCandidateResult)));
         try
         {
             var request = AgentMemoryCurationHandlerHelpers.CreateRequest(principal, Execution, Context, "AgentToolRejection", input.Explanation, _time.GetUtcNow());

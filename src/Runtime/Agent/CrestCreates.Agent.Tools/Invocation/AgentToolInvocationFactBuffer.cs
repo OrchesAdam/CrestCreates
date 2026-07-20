@@ -17,15 +17,21 @@ internal sealed class AgentToolInvocationFactBuffer : IAgentToolInvocationFactBu
             if (requestedMaximum < 0)
                 throw new ArgumentOutOfRangeException(nameof(requestedMaximum));
             _maximum = Math.Min(_maximum, requestedMaximum);
+            var validated = new List<AgentToolAuditFact>(facts.Count);
             foreach (var fact in facts)
             {
                 if (fact is null || string.IsNullOrWhiteSpace(fact.Code)
-                    || fact.Code.Length > 96 || fact.Value?.Length > 256)
+                    || fact.Code.Length > 96 || fact.Value?.Length > 256
+                    || fact.Kind == AgentToolAuditFactKind.Unknown)
                     throw new ArgumentException("Audit fact shape is invalid.", nameof(facts));
-                _facts.Add(fact);
-                if (_facts.Count > _maximum)
-                    throw new InvalidOperationException("Invocation audit fact limit exceeded.");
+                validated.Add(fact);
             }
+            if (validated.Select(item => item.Code).Distinct(StringComparer.Ordinal).Count() != validated.Count
+                || _facts.Select(item => item.Code).Intersect(validated.Select(item => item.Code), StringComparer.Ordinal).Any())
+                throw new ArgumentException("Audit fact names must be unique within an invocation.", nameof(facts));
+            if (_facts.Count + validated.Count > _maximum)
+                throw new InvalidOperationException("Invocation audit fact limit exceeded.");
+            _facts.AddRange(validated);
         }
     }
 

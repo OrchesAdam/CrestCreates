@@ -31,9 +31,18 @@ public interface IAgentToolOutputPreflight<TOutput>
     AgentToolPreparedOutput<TOutput> Prepare(TOutput output);
 }
 
+/// <summary>
+/// Invoker-owned exact preflight bridge. Handlers receive only this operation
+/// through the Capability context; schema and binding configuration remain
+/// outside the Memory Tool module.
+/// </summary>
+public interface IAgentToolOutputPreflightRuntime
+{
+    AgentToolPreparedOutput<TOutput> Prepare<TOutput>(TOutput output, JsonTypeInfo<TOutput> typeInfo);
+}
+
 public interface IAgentToolOutputPreflightReceiptSink
 {
     bool HasPublishedOutcomes { get; }
     void PublishAllowedOutcomes(IReadOnlyList<AgentToolPreparedOutcomeReceipt> outcomes);
-    IReadOnlyList<AgentToolPreparedOutcomeReceipt> Seal();
 }

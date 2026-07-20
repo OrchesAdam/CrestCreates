@@ -13,22 +13,52 @@ public static class AgentMemoryToolServiceCollectionExtensions
     public static IServiceCollection AddAgentMemoryTools(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+        var promotionRegistration = services.LastOrDefault(item => item.ServiceType == typeof(IAgentMemoryPromotionService));
+        if (promotionRegistration is not null && promotionRegistration.Lifetime != ServiceLifetime.Singleton)
+            throw new InvalidOperationException("Memory curation requires a singleton Promotion Service binding.");
         // Explicitly select this module's generated Capability provider. The
         // generated Apply method creates a resolver owned by this Host and
         // registers the seven handlers as scoped services; no process-global
         // resolver state is consulted by the Memory Tool execution path.
         GeneratedHandlerRegistry.Apply(services);
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolJsonContextContributor, AgentMemoryToolJsonContextContributor>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolPreparedOutcomeRequirementProvider, AgentMemoryPreparedOutcomeRequirementProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolModuleSelection, AgentMemoryToolModuleMarker>());
         services.TryAddSingleton<IAgentMemorySecurityArtifactBatchStore, AgentMemorySecurityArtifactBatchStore>();
         services.TryAddSingleton<IAgentMemoryResourceHandleStore, AgentMemoryResourceHandleStore>();
         services.TryAddSingleton<IAgentMemorySourceGrantStore, AgentMemorySourceGrantStore>();
+        services.TryAddSingleton<AgentMemoryResourceHandleResolver>();
+        services.TryAddSingleton<IAgentMemoryResourceHandleResolver>(sp => sp.GetRequiredService<AgentMemoryResourceHandleResolver>());
+        services.TryAddSingleton<IAgentMemorySourceGrantResolver>(sp => sp.GetRequiredService<AgentMemoryResourceHandleResolver>());
         services.TryAddSingleton<IAgentMemoryHistoryResourceHandleIssuer, AgentMemoryHistoryResourceHandleIssuer>();
+        services.TryAddSingleton<AgentMemoryToolRuntimeBinding>(sp =>
+        {
+            var service = sp.GetRequiredService<IAgentMemoryPromotionService>();
+            if (service is not IAgentMemoryCurationServiceCapabilities capabilities)
+                throw new InvalidOperationException("Selected Promotion Service must expose curation capabilities.");
+            return new AgentMemoryToolRuntimeBinding
+            {
+                PromotionService = service,
+                OutcomeGuarantee = capabilities.OutcomeGuarantee
+            };
+        });
         // GeneratedHandlerRegistry.Apply owns the scoped handler registrations
         // and the Host-local resolver; keep one registration authority.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AgentMemoryToolCapabilityGateHostedService>());
         return services;
     }
+}
+
+internal sealed class AgentMemoryPreparedOutcomeRequirementProvider : IAgentToolPreparedOutcomeRequirementProvider
+{
+    public bool RequiresPreparedOutcome(string toolName)
+        => toolName is AgentMemoryToolCapabilityIds.BuildPack
+            or AgentMemoryToolCapabilityIds.ExpandSource
+            or AgentMemoryToolCapabilityIds.CompressHistory
+            or AgentMemoryToolCapabilityIds.ExtractCandidates
+            or AgentMemoryToolCapabilityIds.PromoteCandidate
+            or AgentMemoryToolCapabilityIds.RejectCandidate
+            or AgentMemoryToolCapabilityIds.SupersedeItem;
 }
 
 internal sealed class AgentMemoryToolModuleMarker : IAgentToolModuleSelection
@@ -44,12 +74,8 @@ internal sealed class AgentMemoryToolCapabilityGateHostedService : IHostedServic
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        var service = _services.GetRequiredService<IAgentMemoryPromotionService>();
-        // The guarantee must be exposed by the actual selected promotion
-        // service. A separately registered capability object cannot prove the
-        // behavior of a decorator or replacement service.
-        if (service is not IAgentMemoryCurationServiceCapabilities capabilities
-            || capabilities.OutcomeGuarantee != AgentMemoryCurationOutcomeGuarantee.ConfirmedAtomic)
+        var binding = _services.GetRequiredService<AgentMemoryToolRuntimeBinding>();
+        if (binding.OutcomeGuarantee != AgentMemoryCurationOutcomeGuarantee.ConfirmedAtomic)
         {
             throw new InvalidOperationException(
                 "Memory curation tools require the selected promotion service instance to prove ConfirmedAtomic outcome semantics.");

@@ -24,6 +24,7 @@ public sealed class AgentToolRuntimeSnapshotBuilder
     private readonly AgentToolEffectiveGovernanceDeriver _governance;
     private readonly ICanonicalHashComputer _hashes;
     private readonly AgentToolJsonOptions _json;
+    private readonly IReadOnlyList<IAgentToolPreparedOutcomeRequirementProvider> _preparedOutcomeProviders;
 
     public AgentToolRuntimeSnapshotBuilder(
         IAgentToolRegistry tools,
@@ -35,7 +36,8 @@ public sealed class AgentToolRuntimeSnapshotBuilder
         AgentToolSchemaParityValidator parity,
         AgentToolEffectiveGovernanceDeriver governance,
         ICanonicalHashComputer hashes,
-        AgentToolJsonOptions json)
+        AgentToolJsonOptions json,
+        IEnumerable<IAgentToolPreparedOutcomeRequirementProvider>? preparedOutcomeProviders = null)
     {
         _tools = tools;
         _capabilities = capabilities;
@@ -47,6 +49,7 @@ public sealed class AgentToolRuntimeSnapshotBuilder
         _governance = governance;
         _hashes = hashes;
         _json = json;
+        _preparedOutcomeProviders = preparedOutcomeProviders?.ToArray() ?? Array.Empty<IAgentToolPreparedOutcomeRequirementProvider>();
     }
 
     public AgentToolRuntimeSnapshot Build()
@@ -159,7 +162,8 @@ public sealed class AgentToolRuntimeSnapshotBuilder
             toolHash,
             capabilityHash,
             inputSchemaHash,
-            outputSchemaHash);
+            outputSchemaHash,
+            _preparedOutcomeProviders.Any(provider => provider.RequiresPreparedOutcome(tool.ToolName)));
     }
 
     private void EnsureRegistriesBuilt()

@@ -14,6 +14,7 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
     private readonly IAgentMemoryToolAccessScopeProvider _scopeProvider;
     private readonly IAgentMemoryRetriever _retriever;
     private readonly IAgentMemoryResourceHandleStore _handles;
+    private readonly IAgentMemoryResourceHandleResolver _handleResolver;
     private readonly IAgentMemorySourceGrantStore _grants;
     private readonly TimeProvider _time;
 
@@ -23,6 +24,7 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
         IAgentMemoryToolAccessScopeProvider scopeProvider,
         IAgentMemoryRetriever retriever,
         IAgentMemoryResourceHandleStore handles,
+        IAgentMemoryResourceHandleResolver handleResolver,
         IAgentMemorySourceGrantStore grants,
         TimeProvider time)
         : base(capabilityContext, agentExecution)
@@ -30,6 +32,7 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
         _scopeProvider = scopeProvider;
         _retriever = retriever;
         _handles = handles;
+        _handleResolver = handleResolver;
         _grants = grants;
         _time = time;
     }
@@ -38,18 +41,18 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
     {
         var principal = Principal;
         var scope = await _scopeProvider.ResolveAsync(principal, ct).ConfigureAwait(false);
-        if (!IsValidScope(scope)) return Unavailable("scope-invalid");
+        if (!IsValidScope(scope)) return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("scope-invalid"), AgentMemoryToolJsonSerializerContext.Default.BuildAgentMemoryPackResult);
         if (input.MaximumCount <= 0 || input.CharacterBudget <= 0
             || input.MaximumCount > scope.MaxRecallCount || input.CharacterBudget > scope.MaxRecallCharacters)
-            return Unavailable("budget-invalid");
+            return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("budget-invalid"), AgentMemoryToolJsonSerializerContext.Default.BuildAgentMemoryPackResult);
 
         var memoryIds = new List<string>();
         foreach (var handleId in input.MemoryHandles)
         {
-            var handle = await _handles.GetAsync(handleId, ct).ConfigureAwait(false);
-            if (!IsUsable(handle, principal, AgentMemoryResourceKind.Memory))
-                return Unavailable("resource-unavailable");
-            memoryIds.Add(handle!.ResourceId);
+            var resolved = await _handleResolver.ResolveAsync(handleId, AgentMemoryResourceKind.Memory, principal, scope, ct).ConfigureAwait(false);
+            if (resolved is null)
+                return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("resource-unavailable"), AgentMemoryToolJsonSerializerContext.Default.BuildAgentMemoryPackResult);
+            memoryIds.Add(resolved.Handle.ResourceId);
         }
 
         var query = new AgentMemoryQuery
@@ -71,11 +74,11 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
         };
         var pack = await _retriever.RecallAsync(query, ct).ConfigureAwait(false);
         if (!string.Equals(pack.TenantId, principal.TenantId, StringComparison.Ordinal))
-            return Unavailable("resource-unavailable");
+            return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("resource-unavailable"), AgentMemoryToolJsonSerializerContext.Default.BuildAgentMemoryPackResult);
         var visible = scope.VisibleDescriptorRefs.ToHashSet();
         if (scope.VisibleDescriptorRefs.Any(item => item.Version is not > 0)
             || pack.Memories.Any(memory => !IsVisible(memory, principal.TenantId, visible, scope.AllowUnscopedMemory)))
-            return Unavailable("visibility-unavailable");
+            return PrepareOutcome(scope, "build-memory-pack", "unavailable", Unavailable("visibility-unavailable"), AgentMemoryToolJsonSerializerContext.Default.BuildAgentMemoryPackResult);
 
         var now = _time.GetUtcNow();
         var itemHandles = pack.Memories.Select(memory => new AgentMemoryResourceHandle
@@ -84,26 +87,27 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
             ResourceKind = AgentMemoryResourceKind.Memory,
             ResourceId = memory.MemoryId,
             Principal = principal,
-            ScopeFingerprint = ScopeFingerprint(scope, principal),
-            RequiredDescriptorRefs = memory.DescriptorRefs,
-            IsUnscoped = memory.DescriptorRefs.Count == 0,
+            ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal),
+            RequiredDescriptorRefs = EffectiveDescriptorRefs(memory),
+            IsUnscoped = EffectiveDescriptorRefs(memory).Count == 0,
             IssuingInvocationId = principal.ExecutionId,
             IssuedAt = now,
             ExpiresAt = now.Add(scope.ResourceHandleLifetime)
         }).ToArray();
-        var handleBatch = AgentToolBatchKey(Context, "memory-pack-handles", PlanHash(itemHandles.Select(item => item.ResourceId), scope, principal, "memory-pack-handles"));
         var grantInputs = pack.Memories.SelectMany(memory => memory.SourceRefs.Select(sourceRef => new AgentMemorySourceGrant
         {
             GrantId = AgentMemorySecurityArtifactIdGenerator.Create("grt"),
             SourceRef = sourceRef,
             Principal = principal,
-            ScopeFingerprint = ScopeFingerprint(scope, principal),
+            ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal),
             RequiredDescriptorRefs = memory.DescriptorRefs.Concat(sourceRef.DescriptorRefs).Distinct().ToArray(),
             IsUnscoped = memory.DescriptorRefs.Count == 0 && sourceRef.DescriptorRefs.Count == 0,
             IssuingInvocationId = principal.ExecutionId,
             IssuedAt = now,
             ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
         })).ToArray();
+        var artifactPlanHash = AgentMemoryArtifactPlanProjector.Compute(principal, scope, "memory-pack", itemHandles, grantInputs);
+        var handleBatch = AgentToolBatchKey(Context, "memory-pack-handles", artifactPlanHash);
         AgentMemoryResourceHandleIssueResult? issuedHandles = null;
         AgentMemoryGrantIssueResult? issuedGrantResult = null;
         try
@@ -112,7 +116,7 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
             issuedGrantResult = grantInputs.Length == 0
                 ? null
                 : await _grants.TryIssueBatchAsync(
-                    AgentToolBatchKey(Context, "memory-pack-grants", PlanHash(grantInputs.Select(item => item.SourceRef.SourceId), scope, principal, "memory-pack-grants")),
+                    AgentToolBatchKey(Context, "memory-pack-grants", artifactPlanHash),
                     grantInputs,
                     scope.MaxGrantsPerResource,
                     scope.MaxGrantsPerInvocation,
@@ -124,13 +128,16 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
             throw;
         }
 
-        var handleByResource = issuedHandles!.Handles.ToDictionary(item => item.ResourceId, StringComparer.Ordinal);
-        var issuedGrants = issuedGrantResult?.Grants.ToArray() ?? Array.Empty<AgentMemorySourceGrant>();
-        var grantsBySource = issuedGrants.GroupBy(item => item.SourceRef.SourceId, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.Select(ToGrantDto).ToArray(), StringComparer.Ordinal);
-        AddCommonFacts(scope, pack);
-        return new BuildAgentMemoryPackResult
+        try
         {
+            if (issuedHandles is null || issuedHandles.Handles.Count != pack.Memories.Count)
+                throw new InvalidOperationException("Memory pack handle preparation returned an invalid result.");
+            var handleByResource = issuedHandles.Handles.ToDictionary(item => item.ResourceId, StringComparer.Ordinal);
+            var issuedGrants = issuedGrantResult?.Grants.ToArray() ?? Array.Empty<AgentMemorySourceGrant>();
+            var grantsBySource = issuedGrants.ToLookup(item => item.SourceRef, AgentContextSourceRefCanonicalComparer.Instance);
+            AddBranchInvariantFacts(scope, "build-memory-pack");
+            var result = new BuildAgentMemoryPackResult
+            {
             OperationStatus = AgentMemoryToolOperationStatus.Completed,
             Items = pack.Memories.Select(memory => new AgentMemoryToolItemDto
             {
@@ -142,13 +149,21 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
                 MemoryStatus = AgentMemoryToolProjection.ToToolMemoryStatus(memory.Status),
                 IsAuthoritative = false,
                 Tags = memory.Tags,
-                SourceGrants = memory.SourceRefs.SelectMany(source => grantsBySource.TryGetValue(source.SourceId, out var grants) ? grants : Array.Empty<AgentMemorySourceGrantDto>()).ToArray()
+                SourceGrants = memory.SourceRefs.SelectMany(source => grantsBySource[source].Select(ToGrantDto)).ToArray()
             }).ToArray(),
             ReturnedCount = pack.Memories.Count,
             WasTruncated = pack.WasTruncated,
             IsAuthoritative = false,
             Diagnostics = Array.Empty<AgentMemoryToolDiagnosticDto>()
-        };
+            };
+            PublishAllowedOutcomes(("completed", PrepareOutput(result, AgentMemoryToolJsonSerializerContext.Default.BuildAgentMemoryPackResult)));
+            return result;
+        }
+        catch
+        {
+            await RevokeCreatedArtifactsAsync(_handles, issuedHandles, _grants, issuedGrantResult, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
     }
 
     private BuildAgentMemoryPackResult Unavailable(string code) => new()
@@ -161,12 +176,8 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
         Diagnostics = [Diagnostic(code)]
     };
 
-    private static bool IsUsable(AgentMemoryResourceHandle? handle, AgentMemoryToolPrincipal principal, AgentMemoryResourceKind kind)
-        => handle is not null
-            && handle.ResourceKind == kind
-            && handle.State == AgentMemorySecurityArtifactState.Active
-            && handle.ExpiresAt > DateTimeOffset.UtcNow
-            && handle.Principal == principal;
+    private static IReadOnlyList<DescriptorRef> EffectiveDescriptorRefs(AgentMemoryItem memory)
+        => memory.DescriptorRefs.Concat(memory.SourceRefs.SelectMany(item => item.DescriptorRefs)).Distinct().ToArray();
 
     private static bool IsVisible(
         AgentMemoryItem memory,
@@ -205,34 +216,6 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
         AgentMemoryToolConfidence.High => AgentMemoryConfidence.High,
         _ => throw new InvalidOperationException("Unknown confidence.")
     };
-
-    private void AddCommonFacts(AgentMemoryToolAccessScope scope, AgentMemoryPack pack)
-    {
-        if (Context.Items.TryGetValue(AgentCapabilityContextItemNames.InvocationFactBuffer, out var value)
-            && value is IAgentToolInvocationFactBuffer facts)
-        {
-            facts.AddTrustedFacts([
-                new AgentToolAuditFact { Code = "memory.scope-fingerprint", Value = ScopeFingerprint(scope, Principal) },
-                new AgentToolAuditFact { Code = "memory.pack-complete", Value = pack.WasTruncated ? "false" : "true" }
-            ], scope.MaxAuditFacts);
-        }
-    }
-
-    private static string ScopeFingerprint(AgentMemoryToolAccessScope scope, AgentMemoryToolPrincipal principal)
-    {
-        var payload = $"memory-scope-v2|{principal.TenantId}|{scope.AllowUnscopedMemory}|{string.Join('|', scope.VisibleDescriptorRefs
-            .OrderBy(item => item.Namespace, StringComparer.Ordinal)
-            .ThenBy(item => item.Id, StringComparer.Ordinal)
-            .ThenBy(item => item.Version)
-            .Select(item => $"{item.Namespace}:{item.Id}:{item.Version}"))}";
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
-    }
-
-    private static string PlanHash(IEnumerable<string> values, AgentMemoryToolAccessScope scope, AgentMemoryToolPrincipal principal, string purpose)
-    {
-        var payload = $"memory-artifact-plan-v2|{principal.TenantId}|{principal.UserId}|{principal.AgentId}|{principal.ExecutionId}|{ScopeFingerprint(scope, principal)}|{purpose}|{string.Join('|', values.OrderBy(item => item, StringComparer.Ordinal))}";
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
-    }
 
     private static AgentMemorySourceGrantDto ToGrantDto(AgentMemorySourceGrant grant) => new()
     {

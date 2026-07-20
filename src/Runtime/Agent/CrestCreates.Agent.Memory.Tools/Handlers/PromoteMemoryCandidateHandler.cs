@@ -12,8 +12,8 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
 {
     private readonly IAgentMemoryToolAccessScopeProvider _scopeProvider;
     private readonly IAgentMemoryResourceHandleStore _handles;
+    private readonly IAgentMemoryResourceHandleResolver _handleResolver;
     private readonly IAgentMemorySourceGrantStore _grants;
-    private readonly IAgentMemoryStore _store;
     private readonly IAgentMemoryPromotionService _promotion;
     private readonly IAgentMemoryArtifactIdGenerator _ids;
     private readonly AgentMemoryCanonicalHashProjector _hashes;
@@ -24,45 +24,43 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
         IAgentExecutionContextAccessor agentExecution,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
         IAgentMemoryResourceHandleStore handles,
+        IAgentMemoryResourceHandleResolver handleResolver,
         IAgentMemorySourceGrantStore grants,
-        IAgentMemoryStore store,
-        IAgentMemoryPromotionService promotion,
+        AgentMemoryToolRuntimeBinding runtimeBinding,
         IAgentMemoryArtifactIdGenerator ids,
         AgentMemoryCanonicalHashProjector hashes,
         TimeProvider time)
         : base(capabilityContext, agentExecution)
     {
-        _scopeProvider = scopeProvider; _handles = handles; _grants = grants; _store = store; _promotion = promotion; _ids = ids; _hashes = hashes; _time = time;
+        _scopeProvider = scopeProvider; _handles = handles; _handleResolver = handleResolver; _grants = grants; _promotion = runtimeBinding.PromotionService; _ids = ids; _hashes = hashes; _time = time;
     }
 
     public async Task<PromoteMemoryCandidateResult> ExecuteAsync(PromoteMemoryCandidateInput input, CancellationToken ct)
     {
         var principal = Principal;
         var scope = await _scopeProvider.ResolveAsync(principal, ct).ConfigureAwait(false);
-        if (!IsValidScope(scope)) return Unavailable("scope-invalid");
-        var handle = await _handles.GetAsync(input.CandidateHandle, ct).ConfigureAwait(false);
-        if (!Usable(handle, principal, AgentMemoryResourceKind.Candidate)) return Unavailable("candidate-unavailable");
-        var candidate = await _store.GetCandidateAsync(principal.TenantId, handle!.ResourceId, ct).ConfigureAwait(false);
-        if (candidate is null) return Unavailable("candidate-unavailable");
-        if (candidate.Status != AgentMemoryStatus.Candidate) return Conflict("candidate-consumed");
+        if (!IsValidScope(scope)) return PrepareOutcome(scope, "promote-memory-candidate", "unavailable", Unavailable("scope-invalid"), AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult);
+        var resolved = await _handleResolver.ResolveAsync(input.CandidateHandle, AgentMemoryResourceKind.Candidate, principal, scope, ct).ConfigureAwait(false);
+        if (resolved?.Resource is not AgentMemoryCandidate candidate) return PrepareOutcome(scope, "promote-memory-candidate", "unavailable", Unavailable("candidate-unavailable"), AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult);
+        var handle = resolved.Handle;
+        if (candidate.Status != AgentMemoryStatus.Candidate) return PrepareOutcome(scope, "promote-memory-candidate", "conflict", Conflict("candidate-consumed"), AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult);
         var newMemoryId = _ids.CreateMemoryId();
         var now = _time.GetUtcNow();
         var itemHandle = new AgentMemoryResourceHandle
         {
             HandleId = AgentMemorySecurityArtifactIdGenerator.Create("hnd"), ResourceKind = AgentMemoryResourceKind.Memory,
-            ResourceId = newMemoryId, Principal = principal, ScopeFingerprint = handle.ScopeFingerprint,
-            RequiredDescriptorRefs = candidate.DescriptorRefs, IsUnscoped = candidate.DescriptorRefs.Count == 0,
+            ResourceId = newMemoryId, Principal = principal, ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal),
+            RequiredDescriptorRefs = EffectiveDescriptorRefs(candidate), IsUnscoped = EffectiveDescriptorRefs(candidate).Count == 0,
             IssuingInvocationId = principal.ExecutionId, IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime)
         };
-        var planHash = ArtifactPlanHash(principal, scope, "promote-memory", AgentMemoryResourceKind.Memory,
-            newMemoryId, candidate.DescriptorRefs, candidate.SourceRefs, candidate.DescriptorRefs.Count == 0, scope.ResourceHandleLifetime);
         var grantsInput = candidate.SourceRefs.Select(source => new AgentMemorySourceGrant
         {
             GrantId = AgentMemorySecurityArtifactIdGenerator.Create("grt"), SourceRef = source, Principal = principal,
-            ScopeFingerprint = handle.ScopeFingerprint, RequiredDescriptorRefs = candidate.DescriptorRefs.Concat(source.DescriptorRefs).Distinct().ToArray(),
-            IsUnscoped = candidate.DescriptorRefs.Count == 0 && source.DescriptorRefs.Count == 0,
+            ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal), RequiredDescriptorRefs = EffectiveDescriptorRefs(candidate).Concat(source.DescriptorRefs).Distinct().ToArray(),
+            IsUnscoped = EffectiveDescriptorRefs(candidate).Count == 0 && source.DescriptorRefs.Count == 0,
             IssuingInvocationId = principal.ExecutionId, IssuedAt = now, ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
         }).ToArray();
+        var planHash = AgentMemoryArtifactPlanProjector.Compute(principal, scope, "promote-memory", [itemHandle], grantsInput);
         AgentMemoryResourceHandleIssueResult? preparedHandle = null;
         AgentMemoryGrantIssueResult? preparedGrantResult = null;
         try
@@ -76,7 +74,11 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
             await RevokeCreatedArtifactsAsync(_handles, preparedHandle, _grants, preparedGrantResult, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
+        try
+        {
         var preparedGrants = preparedGrantResult?.Grants.ToArray() ?? Array.Empty<AgentMemorySourceGrant>();
+        if (preparedHandle is null || preparedHandle.Handles.Count != 1)
+            throw new InvalidOperationException("Promotion handle preparation returned an invalid result.");
         var completed = new PromoteMemoryCandidateResult
         {
             OperationStatus = AgentMemoryToolOperationStatus.Completed,
@@ -97,9 +99,9 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
         var unavailable = Unavailable("candidate-unavailable");
         AddBranchInvariantFacts(scope, "promote-memory-candidate");
         PublishAllowedOutcomes(
-            ("completed", completed, AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult),
-            ("conflict", conflict, AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult),
-            ("unavailable", unavailable, AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult));
+            ("completed", PrepareOutput(completed, AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult)),
+            ("conflict", PrepareOutput(conflict, AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult)),
+            ("unavailable", PrepareOutput(unavailable, AgentMemoryToolJsonSerializerContext.Default.PromoteMemoryCandidateResult)));
         AgentMemoryItem memory;
         try
         {
@@ -150,14 +152,19 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
             || !string.Equals(memory.Content, candidate.Content, StringComparison.Ordinal))
         {
             await RevokeCreatedArtifactsAsync(_handles, preparedHandle, _grants, preparedGrantResult, CancellationToken.None).ConfigureAwait(false);
-            throw new InvalidOperationException("Committed promotion graph differs from the preflight result.");
+            throw new AgentMemoryPostCommitIntegrityException("Committed promotion graph differs from the preflight result.");
         }
         return completed;
+        }
+        catch
+        {
+            await RevokeCreatedArtifactsAsync(_handles, preparedHandle, _grants, preparedGrantResult, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
     }
 
-    private static bool Usable(AgentMemoryResourceHandle? handle, AgentMemoryToolPrincipal principal, AgentMemoryResourceKind kind)
-        => handle is not null && handle.ResourceKind == kind && handle.Principal == principal
-            && handle.State == AgentMemorySecurityArtifactState.Active && handle.ExpiresAt > DateTimeOffset.UtcNow;
+    private static IReadOnlyList<Metadata.Abstractions.DescriptorRef> EffectiveDescriptorRefs(AgentMemoryCandidate candidate)
+        => candidate.DescriptorRefs.Concat(candidate.SourceRefs.SelectMany(item => item.DescriptorRefs)).Distinct().ToArray();
     private static PromoteMemoryCandidateResult Unavailable(string code) => new() { OperationStatus = AgentMemoryToolOperationStatus.Unavailable, Item = null, Diagnostics = [Diagnostic(code)] };
     private static PromoteMemoryCandidateResult Conflict(string code) => new() { OperationStatus = AgentMemoryToolOperationStatus.Conflict, Item = null, Diagnostics = [Diagnostic(code)] };
 }

@@ -535,6 +535,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolInvocationOutcome outcome,
         IReadOnlyList<AgentToolPreparedOutcomeReceipt> receipts)
     {
+        if (entry.RequiresPreparedOutcomeSet && receipts.Count == 0)
+            throw new InvalidOperationException("The tool did not publish its required prepared outcome set.");
         if (receipts.Count == 0)
             return Array.Empty<AgentToolAuditFact>();
         if (outcome.StructuredOutput is not { } structured)
@@ -542,15 +544,53 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
 
         var outputHash = ComputeStructuredOutputHash(structured);
         var contractFingerprint = entry.OutputSchemaContractHash ?? entry.ToolContractHash;
+        var outcomeCode = TryGetOperationStatusWire(structured);
         var matches = receipts.Where(item =>
-            string.Equals(item.Receipt.ToolDescriptorId, entry.Descriptor.Id, StringComparison.Ordinal)
+            outcomeCode is not null
+            && string.Equals(item.OutcomeCode, outcomeCode, StringComparison.Ordinal)
+            && string.Equals(item.Receipt.ToolDescriptorId, entry.Descriptor.Id, StringComparison.Ordinal)
             && item.Receipt.ToolDescriptorVersion == entry.Descriptor.Version
             && string.Equals(item.Receipt.OutputContractFingerprint, contractFingerprint, StringComparison.Ordinal)
             && string.Equals(item.Receipt.StructuredOutputHash, outputHash, StringComparison.Ordinal))
             .ToArray();
         if (matches.Length != 1)
             throw new InvalidOperationException("Final output did not match exactly one preflight receipt.");
-        return matches[0].InternalFacts;
+        return matches[0].InternalFacts.Concat(ProjectOutputFacts(structured)).ToArray();
+    }
+
+    private static string? TryGetOperationStatusWire(JsonElement structured)
+    {
+        if (!structured.TryGetProperty("OperationStatus", out var value) || value.ValueKind != JsonValueKind.String)
+            return null;
+        return value.GetString();
+    }
+
+    private static IReadOnlyList<AgentToolAuditFact> ProjectOutputFacts(JsonElement structured)
+    {
+        var facts = new List<AgentToolAuditFact>();
+        AddScalar("OperationStatus", "output.operation-status");
+        AddScalar("ReturnedCount", "output.returned-count");
+        AddScalar("CandidateCount", "output.candidate-count");
+        AddScalar("BlockCount", "output.block-count");
+        AddScalar("WasTruncated", "output.was-truncated");
+        AddScalar("MemoryStatus", "output.memory-status");
+        AddScalar("CandidateStatus", "output.candidate-status");
+        AddScalar("CanonicalContentHash", "output.canonical-content-hash");
+        return facts;
+
+        void AddScalar(string property, string code)
+        {
+            if (!structured.TryGetProperty(property, out var value)) return;
+            string? text = value.ValueKind switch
+            {
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => value.GetRawText(),
+                JsonValueKind.Object when value.TryGetProperty("Value", out var nested) && nested.ValueKind == JsonValueKind.String => nested.GetString(),
+                _ => null
+            };
+            if (!string.IsNullOrWhiteSpace(text) && text.Length <= 256)
+                facts.Add(new AgentToolAuditFact { Code = code, Value = text, Kind = AgentToolAuditFactKind.Output });
+        }
     }
 
     private static string ComputeStructuredOutputHash(JsonElement output)
@@ -777,8 +817,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             && left.AttemptState == right.AttemptState
             && left.InvocationState == right.InvocationState
             && string.Equals(
-                left.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(left.Outcome),
-                right.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(right.Outcome),
+                left.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(left.Outcome, left.AuditFacts),
+                right.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(right.Outcome, right.AuditFacts),
                 StringComparison.Ordinal)
             && string.Equals(left.ReasonCode, right.ReasonCode, StringComparison.Ordinal);
 
@@ -1156,7 +1196,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolApprovalResult approval,
         AgentToolBudgetReservation reservation,
         IAgentToolInvocationFactBuffer factBuffer,
-        IAgentToolOutputPreflightReceiptSink preflightReceipts)
+        AgentToolOutputPreflightReceiptSink preflightReceipts)
     {
         context.CausationId = execution.CausationId;
         context.IdempotencyKey = _idempotency.Build(fingerprint);
@@ -1175,10 +1215,14 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             entry.OutputSchemaContractHash ?? entry.ToolContractHash;
         if (entry.OutputSchema is not null)
         {
-            context.Items[AgentCapabilityContextItemNames.OutputSchemaDescriptor] = entry.OutputSchema;
-            context.Items[AgentCapabilityContextItemNames.OutputSchemaReferences] =
-                _schemaRegistry?.GetAll() ?? Array.Empty<SchemaDescriptor>();
-            context.Items[AgentCapabilityContextItemNames.SchemaValidator] = _schemas;
+            context.Items[AgentCapabilityContextItemNames.OutputPreflightRuntime] =
+                new AgentToolOutputPreflightRuntime(
+                    entry.Descriptor.Id,
+                    entry.Descriptor.Version,
+                    entry.OutputSchemaContractHash ?? entry.ToolContractHash,
+                    entry.OutputSchema,
+                    _schemaRegistry?.GetAll() ?? Array.Empty<SchemaDescriptor>(),
+                    _schemas);
         }
         context.Items[AgentCapabilityContextItemNames.InvocationBindingSnapshot] =
             new AgentToolInvocationBindingSnapshot
@@ -1191,7 +1235,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                     execution.InvocationId),
                 InvocationFingerprint = fingerprint.Value
             };
-        context.Items[AgentCapabilityContextItemNames.InvocationFactBuffer] = factBuffer;
+        context.Items[AgentCapabilityContextItemNames.InvocationFactBuffer] = (IAgentToolInvocationFactSink)factBuffer;
         context.Items[AgentCapabilityContextItemNames.OutputPreflightReceiptSink] = preflightReceipts;
     }
 
@@ -1350,7 +1394,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             AttemptState = attemptState,
             InvocationState = invocationState,
             Outcome = outcome,
-            OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(outcome),
+            OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(outcome, auditFacts ?? Array.Empty<AgentToolAuditFact>()),
             AuditFacts = auditFacts ?? Array.Empty<AgentToolAuditFact>(),
             ReasonCode = reasonCode
         };

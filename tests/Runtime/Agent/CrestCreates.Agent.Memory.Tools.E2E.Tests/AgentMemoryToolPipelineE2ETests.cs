@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.Cryptography;
+using System.Text;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
@@ -148,7 +150,8 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
         var handle = new AgentMemoryResourceHandle
         {
             HandleId = "host-memory-handle", ResourceKind = kind, ResourceId = resourceId, Principal = principal,
-            ScopeFingerprint = "e2e-scope", IsUnscoped = false, IssuingInvocationId = "host", IssuedAt = now,
+            ScopeFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"memory-scope-v2|{principal.TenantId}|True|"))).ToLowerInvariant(),
+            IsUnscoped = true, IssuingInvocationId = "host", IssuedAt = now,
             ExpiresAt = now.Add(scope.ResourceHandleLifetime), RequiredDescriptorRefs = []
         };
         var result = await services.GetRequiredService<IAgentMemoryResourceHandleStore>().TryIssueBatchAsync(

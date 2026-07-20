@@ -47,7 +47,7 @@ internal sealed class AgentMemoryHistoryResourceHandleIssuer : IAgentMemoryHisto
             ResourceKind = resourceKind,
             ResourceId = sourceId,
             Principal = principal,
-            ScopeFingerprint = ComputeScopeFingerprint(principal, scope),
+            ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal),
             IsUnscoped = false,
             IssuingInvocationId = hostBatchKey.HostOperationId,
             IssuedAt = now,
@@ -64,13 +64,4 @@ internal sealed class AgentMemoryHistoryResourceHandleIssuer : IAgentMemoryHisto
         return issued.Handles[0].HandleId;
     }
 
-    private static string ComputeScopeFingerprint(AgentMemoryToolPrincipal principal, AgentMemoryToolAccessScope scope)
-    {
-        var payload = $"memory-scope-v2|{principal.TenantId}|{scope.AllowUnscopedMemory}|"
-            + string.Join(';', scope.VisibleDescriptorRefs.OrderBy(item => item.Namespace, StringComparer.Ordinal)
-                .ThenBy(item => item.Id, StringComparer.Ordinal)
-                .ThenBy(item => item.Version ?? -1)
-                .Select(item => $"{item.Namespace}:{item.Id}:{item.Version}"));
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
-    }
 }

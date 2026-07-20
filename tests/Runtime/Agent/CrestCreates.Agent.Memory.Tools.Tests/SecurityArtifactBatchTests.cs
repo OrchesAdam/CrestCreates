@@ -1,5 +1,10 @@
+using System.Security.Cryptography;
+using System.Text;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Stores;
 using CrestCreates.Agent.Memory.Tools;
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using FluentAssertions;
 using Xunit;
 
@@ -122,6 +127,64 @@ public sealed class SecurityArtifactBatchTests
         var remaining = await store.PrepareAsync(key, [reused]);
         remaining.Should().ContainSingle().Which.ArtifactId.Should().Be("reused");
     }
+
+    [Fact]
+    public async Task HandleResolutionRejectsAHandleAfterTheVisibleScopeShrinks()
+    {
+        var principal = Principal();
+        var descriptor = new DescriptorRef { Namespace = "ns", Id = "descriptor", Version = 1 };
+        var scope = new AgentMemoryToolAccessScope { VisibleDescriptorRefs = [descriptor], AllowUnscopedMemory = false };
+        var candidate = new AgentMemoryCandidate
+        {
+            CandidateId = "candidate", TenantId = principal.TenantId, Kind = AgentMemoryKind.ProjectFact,
+            Content = "content", Confidence = AgentMemoryConfidence.High, Status = AgentMemoryStatus.Candidate,
+            DescriptorRefs = [descriptor], SourceRefs = [], CanonicalContentHash = new CanonicalHash
+            {
+                Value = new string('a', 64), Algorithm = "SHA-256", AlgorithmVersion = "sha256-canonical-json-v1",
+                ArtifactKind = "agent-memory-content", Scope = "TenantVisible", Purpose = "SourceIdentity",
+                ContractVersion = "memory-hash-v2", CanonicalShapeVersion = "memory-content-hash-v2"
+            }
+        };
+        var memory = new InMemoryAgentMemoryStore();
+        await memory.SaveCandidateAsync(candidate);
+        var handle = new AgentMemoryResourceHandle
+        {
+            HandleId = "candidate-handle", ResourceKind = AgentMemoryResourceKind.Candidate,
+            ResourceId = candidate.CandidateId, Principal = principal,
+            ScopeFingerprint = ScopeFingerprint(principal, scope), RequiredDescriptorRefs = [descriptor],
+            IsUnscoped = false, IssuingInvocationId = principal.ExecutionId,
+            IssuedAt = DateTimeOffset.UtcNow, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(1)
+        };
+        var handles = new AgentMemoryResourceHandleStore();
+        await handles.TryIssueBatchAsync(Key("resolver", "resolver-plan"), [handle], 2);
+        var resolver = new AgentMemoryResourceHandleResolver(
+            handles, new AgentMemorySourceGrantStore(), memory, new InMemoryAgentCompressedContextStore(), TimeProvider.System);
+
+        (await resolver.ResolveAsync(handle.HandleId, AgentMemoryResourceKind.Candidate, principal, scope)).Should().NotBeNull();
+        (await resolver.ResolveAsync(handle.HandleId, AgentMemoryResourceKind.Candidate, principal,
+            new AgentMemoryToolAccessScope { AllowUnscopedMemory = false })).Should().BeNull();
+    }
+
+    [Fact]
+    public void SourceRefComparerDoesNotMergeAdjacentRanges()
+    {
+        var first = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.ConversationTurn, TenantId = "tenant", SourceId = "conversation",
+            RangeStart = 0, RangeEnd = 0
+        };
+        var adjacent = first with { RangeStart = 1, RangeEnd = 1 };
+
+        AgentContextSourceRefCanonicalComparer.Instance.Equals(first, adjacent).Should().BeFalse();
+    }
+
+    private static string ScopeFingerprint(AgentMemoryToolPrincipal principal, AgentMemoryToolAccessScope scope)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+            $"memory-scope-v2|{principal.TenantId}|{scope.AllowUnscopedMemory}|{string.Join('|', scope.VisibleDescriptorRefs
+                .OrderBy(item => item.Namespace, StringComparer.Ordinal)
+                .ThenBy(item => item.Id, StringComparer.Ordinal)
+                .ThenBy(item => item.Version)
+                .Select(item => $"{item.Namespace}:{item.Id}:{item.Version}"))}"))).ToLowerInvariant();
 
     private static AgentMemoryToolPrincipal Principal() => new()
     {

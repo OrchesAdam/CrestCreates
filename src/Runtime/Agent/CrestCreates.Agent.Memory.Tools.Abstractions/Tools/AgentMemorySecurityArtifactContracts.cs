@@ -18,13 +18,16 @@ public sealed record AgentMemorySecurityArtifactBatchKey
 
     /// <summary>Returns the idempotency key including the concrete artifact plan.</summary>
     public string ToCanonicalKey()
-        => string.Join("|", OriginKind, LogicalInvocationKeyHash, InvocationFingerprint,
-            ArtifactPurpose, PreparationOrdinal, ArtifactPlanHash);
+        => string.Join("|", OriginKind, Segment(LogicalInvocationKeyHash), Segment(InvocationFingerprint),
+            Segment(ArtifactPurpose), PreparationOrdinal, Segment(ArtifactPlanHash));
 
     /// <summary>Returns the retry identity that deliberately excludes the plan hash.</summary>
     public string ToIdentityKey()
-        => string.Join("|", OriginKind, LogicalInvocationKeyHash, InvocationFingerprint,
-            ArtifactPurpose, PreparationOrdinal);
+        => string.Join("|", OriginKind, Segment(LogicalInvocationKeyHash), Segment(InvocationFingerprint),
+            Segment(ArtifactPurpose), PreparationOrdinal);
+
+    private static string Segment(string? value)
+        => value is null ? "-1:" : $"{value.Length}:{value}";
 }
 
 public sealed record AgentMemoryHostArtifactBatchKey

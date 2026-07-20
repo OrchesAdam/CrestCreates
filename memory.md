@@ -31,7 +31,7 @@ covered by E2E and native fixtures without a second mutation.
 
 Executable evidence:
 
-- Memory Tool contract/security/startup tests: 6 passing, including per-Host
+- Memory Tool contract/security/startup tests: 11 passing, including per-Host
   generated-provider resolver isolation.
 - Generator-backed Memory Tool E2E: Build → exact-range Expand → Host history
   handle → Compress → Extract → Promote → Supersede → replay, 1 passing.
@@ -58,6 +58,16 @@ Indeterminate failures after revoking only batch-created artifacts, enforces
 branch-fact-before-receipt ordering, validates the selected Promotion Service
 directly for ConfirmedAtomic semantics, and covers handle/grant expiry,
 revocation, and quota regressions.
+
+The subsequent implementation review is closed in the same mainline: curation
+handles and source grants are revalidated against the current scope and exact
+descriptor closure, grants are associated by the full canonical SourceRef,
+all seven Memory Tools use the Invoker-owned PreparedOutput preflight and
+required outcome-set gate, every artifact preparation path revokes only
+CreatedByBatch artifacts until commit, governance outcome-v2 hashes validated
+output facts, and a single canonical artifact-plan projector binds full
+resource/provenance plans. MemoryItem and MemoryCandidate expansion fail closed
+on ranged refs. Focused stale-scope and adjacent-range regressions are included.
 
 ### Phase 8f — Agent Tool Projection
 

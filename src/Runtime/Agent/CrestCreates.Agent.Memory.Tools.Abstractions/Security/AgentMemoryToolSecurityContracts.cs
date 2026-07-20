@@ -134,6 +134,23 @@ public interface IAgentMemoryResourceHandleStore
     ValueTask RevokeAsync(string handleId, CancellationToken cancellationToken = default);
 }
 
+public sealed record AgentMemoryResolvedResourceHandle
+{
+    public required AgentMemoryResourceHandle Handle { get; init; }
+    public object? Resource { get; init; }
+    public IReadOnlyList<DescriptorRef> EffectiveDescriptorRefs { get; init; } = Array.Empty<DescriptorRef>();
+}
+
+public interface IAgentMemoryResourceHandleResolver
+{
+    ValueTask<AgentMemoryResolvedResourceHandle?> ResolveAsync(
+        string handleId,
+        AgentMemoryResourceKind expectedKind,
+        AgentMemoryToolPrincipal principal,
+        AgentMemoryToolAccessScope scope,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IAgentMemorySourceGrantStore
 {
     ValueTask<AgentMemoryGrantIssueResult> TryIssueBatchAsync(
@@ -149,6 +166,15 @@ public interface IAgentMemorySourceGrantStore
         CancellationToken cancellationToken);
     ValueTask<AgentMemorySourceGrant?> GetAsync(string grantId, CancellationToken cancellationToken = default);
     ValueTask RevokeAsync(string grantId, CancellationToken cancellationToken = default);
+}
+
+public interface IAgentMemorySourceGrantResolver
+{
+    ValueTask<AgentMemorySourceGrant?> ResolveAsync(
+        string grantId,
+        AgentMemoryToolPrincipal principal,
+        AgentMemoryToolAccessScope scope,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IAgentMemoryHistoryResourceHandleIssuer

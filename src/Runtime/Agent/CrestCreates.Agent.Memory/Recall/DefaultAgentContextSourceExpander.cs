@@ -95,6 +95,8 @@ public sealed class DefaultAgentContextSourceExpander : IAgentContextSourceExpan
 
     private async ValueTask<AgentSourceExpansionResult> ExpandMemoryItemAsync(AgentContextSourceRef sourceRef, CancellationToken cancellationToken)
     {
+        if (sourceRef.RangeStart.HasValue || sourceRef.RangeEnd.HasValue)
+            return NotFound(sourceRef);
         var memory = await _memoryStore.GetMemoryAsync(sourceRef.TenantId, sourceRef.SourceId, cancellationToken);
         if (memory is null)
             return NotFound(sourceRef);
@@ -104,6 +106,8 @@ public sealed class DefaultAgentContextSourceExpander : IAgentContextSourceExpan
 
     private async ValueTask<AgentSourceExpansionResult> ExpandMemoryCandidateAsync(AgentContextSourceRef sourceRef, CancellationToken cancellationToken)
     {
+        if (sourceRef.RangeStart.HasValue || sourceRef.RangeEnd.HasValue)
+            return NotFound(sourceRef);
         var candidate = await _memoryStore.GetCandidateAsync(sourceRef.TenantId, sourceRef.SourceId, cancellationToken);
         if (candidate is null)
             return NotFound(sourceRef);

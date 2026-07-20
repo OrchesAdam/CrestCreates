@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions;
@@ -142,37 +141,6 @@ internal abstract class AgentMemoryToolHandlerBase
                     .ThenBy(item => item.Id, StringComparer.Ordinal)
                     .ThenBy(item => item.Version ?? -1));
 
-    protected static string ArtifactPlanHash(
-        AgentMemoryToolPrincipal principal,
-        AgentMemoryToolAccessScope scope,
-        string purpose,
-        AgentMemoryResourceKind resourceKind,
-        string resourceId,
-        IReadOnlyList<CrestCreates.Metadata.Abstractions.DescriptorRef> descriptorRefs,
-        IReadOnlyList<AgentContextSourceRef> sourceRefs,
-        bool isUnscoped,
-        TimeSpan lifetime)
-    {
-        var descriptors = string.Join(';', descriptorRefs
-            .OrderBy(item => item.Namespace, StringComparer.Ordinal)
-            .ThenBy(item => item.Id, StringComparer.Ordinal)
-            .ThenBy(item => item.Version ?? -1)
-            .Select(item => $"{item.Namespace}:{item.Id}:{item.Version ?? -1}"));
-        var sources = string.Join(';', sourceRefs
-            .Select(SourceRefProjection)
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(item => item, StringComparer.Ordinal));
-        var payload = $"memory-artifact-plan-v2|{resourceKind}|{resourceId}|{principal.TenantId}|{principal.UserId}|{principal.AgentId}|{principal.ExecutionId}|{ScopeFingerprintForPlan(scope, principal)}|{descriptors}|{isUnscoped}|{purpose}|{lifetime.Ticks}|{sources}";
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
-    }
-
-    private static string ScopeFingerprintForPlan(AgentMemoryToolAccessScope scope, AgentMemoryToolPrincipal principal)
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            $"memory-scope-v2|{principal.TenantId}|{scope.AllowUnscopedMemory}|{string.Join(';', scope.VisibleDescriptorRefs.OrderBy(item => item.Namespace, StringComparer.Ordinal).ThenBy(item => item.Id, StringComparer.Ordinal).ThenBy(item => item.Version ?? -1).Select(item => $"{item.Namespace}:{item.Id}:{item.Version ?? -1}"))}"))).ToLowerInvariant();
-
-    private static string SourceRefProjection(AgentContextSourceRef sourceRef)
-        => $"{sourceRef.SourceKind}|{sourceRef.TenantId}|{sourceRef.SourceId}|{sourceRef.RangeStart ?? -1}|{sourceRef.RangeEnd ?? -1}|{sourceRef.CorrelationId ?? string.Empty}|{sourceRef.CausationId ?? string.Empty}|{string.Join(',', sourceRef.DescriptorRefs.OrderBy(item => item.Namespace, StringComparer.Ordinal).ThenBy(item => item.Id, StringComparer.Ordinal).ThenBy(item => item.Version ?? -1).Select(item => $"{item.Namespace}:{item.Id}:{item.Version ?? -1}"))}|{sourceRef.CanonicalContentHash?.Value ?? string.Empty}";
-
     /// <summary>
     /// Adds only branch-invariant, non-resource facts. Result-dependent facts
     /// (status, counts, lifecycle, and content hashes) are projected from the
@@ -181,7 +149,7 @@ internal abstract class AgentMemoryToolHandlerBase
     protected void AddBranchInvariantFacts(AgentMemoryToolAccessScope scope, string operation)
     {
         if (!Context.Items.TryGetValue(AgentCapabilityContextItemNames.InvocationFactBuffer, out var value)
-            || value is not IAgentToolInvocationFactBuffer facts)
+            || value is not IAgentToolInvocationFactSink facts)
             return;
 
         var descriptorProjection = string.Join(';', scope.VisibleDescriptorRefs
@@ -194,8 +162,8 @@ internal abstract class AgentMemoryToolHandlerBase
             .ToLowerInvariant();
         facts.AddTrustedFacts(
         [
-            new AgentToolAuditFact { Code = "memory.scope-fingerprint", Value = scopeFingerprint },
-            new AgentToolAuditFact { Code = "memory.operation", Value = operation }
+            new AgentToolAuditFact { Code = "memory.scope-fingerprint", Value = scopeFingerprint, Kind = AgentToolAuditFactKind.BranchInvariant },
+            new AgentToolAuditFact { Code = "memory.operation", Value = operation, Kind = AgentToolAuditFactKind.BranchInvariant }
         ], scope.MaxAuditFacts);
         Context.Items[AgentCapabilityContextItemNames.BranchInvariantFactsPrepared] = true;
     }
@@ -207,7 +175,7 @@ internal abstract class AgentMemoryToolHandlerBase
     /// new envelope after the domain transition.
     /// </summary>
     protected void PublishAllowedOutcomes<T>(
-        params (string OutcomeCode, T Output, JsonTypeInfo<T> TypeInfo)[] outcomes)
+        params (string OutcomeCode, AgentToolPreparedOutput<T> Prepared)[] outcomes)
     {
         // Branch-invariant facts must be staged before the receipt set. This
         // makes the ordering requirement executable instead of relying on a
@@ -230,36 +198,42 @@ internal abstract class AgentMemoryToolHandlerBase
         for (var index = 0; index < outcomes.Length; index++)
         {
             var outcome = outcomes[index];
-            var json = JsonSerializer.SerializeToElement(outcome.Output, outcome.TypeInfo);
-            if (Context.Items.TryGetValue(AgentCapabilityContextItemNames.OutputSchemaDescriptor, out var schemaValue)
-                && schemaValue is SchemaDescriptor schema
-                && Context.Items.TryGetValue(AgentCapabilityContextItemNames.SchemaValidator, out var validatorValue)
-                && validatorValue is ISchemaValidator validator)
-            {
-                var references = Context.Items.TryGetValue(AgentCapabilityContextItemNames.OutputSchemaReferences, out var refsValue)
-                    && refsValue is IReadOnlyList<SchemaDescriptor> schemas
-                    ? schemas
-                    : Array.Empty<SchemaDescriptor>();
-                if (!validator.Validate(schema, json, references, rejectUnknownProperties: true).IsValid)
-                    throw new InvalidOperationException("Agent Tool output failed exact Schema preflight.");
-            }
-            var outputHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json.GetRawText())))
-                .ToLowerInvariant();
+            if (!string.Equals(outcome.Prepared.Receipt.ToolDescriptorId, descriptorId, StringComparison.Ordinal)
+                || outcome.Prepared.Receipt.ToolDescriptorVersion != descriptorVersion
+                || !string.Equals(outcome.Prepared.Receipt.OutputContractFingerprint, contractFingerprint, StringComparison.Ordinal))
+                throw new InvalidOperationException("Prepared output binding does not match the trusted tool contract.");
             receipts[index] = new AgentToolPreparedOutcomeReceipt
             {
                 OutcomeCode = outcome.OutcomeCode,
-                Receipt = new AgentToolOutputPreflightReceipt
-                {
-                    ToolDescriptorId = descriptorId,
-                    ToolDescriptorVersion = descriptorVersion,
-                    OutputContractFingerprint = contractFingerprint,
-                    StructuredOutputHash = outputHash
-                }
+                Receipt = outcome.Prepared.Receipt,
+                InternalFacts = outcome.Prepared.ProjectedOutputFacts
             };
         }
 
         Context.Items[AgentCapabilityContextItemNames.RequiresOutputPreflightReceipt] = true;
         sink.PublishAllowedOutcomes(receipts);
+    }
+
+    protected TOutput PrepareOutcome<TOutput>(
+        AgentMemoryToolAccessScope scope,
+        string operation,
+        string outcomeCode,
+        TOutput output,
+        JsonTypeInfo<TOutput> typeInfo)
+    {
+        AddBranchInvariantFacts(scope, operation);
+        PublishAllowedOutcomes((outcomeCode, PrepareOutput(output, typeInfo)));
+        return output;
+    }
+
+    protected AgentToolPreparedOutput<TOutput> PrepareOutput<TOutput>(
+        TOutput output,
+        JsonTypeInfo<TOutput> typeInfo)
+    {
+        if (!Context.Items.TryGetValue(AgentCapabilityContextItemNames.OutputPreflightRuntime, out var value)
+            || value is not IAgentToolOutputPreflightRuntime runtime)
+            throw new InvalidOperationException("The shared output preflight runtime is unavailable.");
+        return runtime.Prepare(output, typeInfo);
     }
 
     private static string ComputeLogicalKeyHash(AgentToolLogicalInvocationKey key)

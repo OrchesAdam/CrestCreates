@@ -9,15 +9,28 @@ public sealed record AgentToolAuditFact
 {
     public required string Code { get; init; }
     public string? Value { get; init; }
+    public AgentToolAuditFactKind Kind { get; init; }
+}
+
+public enum AgentToolAuditFactKind
+{
+    Unknown = 0,
+    BranchInvariant = 1,
+    Output = 2,
+    Internal = 3
 }
 
 public sealed record AgentToolInvocationFactSnapshot(
     IReadOnlyList<AgentToolAuditFact> Facts,
     int MaximumFacts);
 
-public interface IAgentToolInvocationFactBuffer
+public interface IAgentToolInvocationFactSink
 {
     void AddTrustedFacts(IReadOnlyList<AgentToolAuditFact> facts, int requestedMaximum);
+}
+
+public interface IAgentToolInvocationFactBuffer : IAgentToolInvocationFactSink
+{
     AgentToolInvocationFactSnapshot Seal();
 }
 

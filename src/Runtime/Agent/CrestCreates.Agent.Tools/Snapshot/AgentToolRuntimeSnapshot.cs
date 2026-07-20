@@ -26,7 +26,8 @@ public sealed record AgentToolRuntimeEntry(
     string ToolContractHash,
     string CapabilityContractHash,
     string? InputSchemaContractHash,
-    string? OutputSchemaContractHash);
+    string? OutputSchemaContractHash,
+    bool RequiresPreparedOutcomeSet);
 
 public sealed class AgentToolRuntimeSnapshot
 {
