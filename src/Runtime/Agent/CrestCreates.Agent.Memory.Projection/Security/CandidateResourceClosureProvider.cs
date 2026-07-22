@@ -27,7 +27,7 @@ internal sealed class CandidateResourceClosureProvider : IAgentMemoryResourceClo
 
         return new AgentMemoryCurrentClosure
         {
-            CurrentDescriptorRefs = candidate.DescriptorRefs ?? Array.Empty<DescriptorRef>(),
+            CurrentDescriptorRefs = EffectiveClosureHelper.ComputeEffectiveClosure(candidate.DescriptorRefs, candidate.SourceRefs),
             TenantId = candidate.TenantId
         };
     }

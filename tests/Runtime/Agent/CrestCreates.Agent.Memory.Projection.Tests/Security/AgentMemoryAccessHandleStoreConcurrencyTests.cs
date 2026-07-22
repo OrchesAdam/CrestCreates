@@ -215,4 +215,173 @@ public class AgentMemoryAccessHandleStoreConcurrencyTests
 
         await Task.WhenAll(tasks);
     }
+
+    [Fact]
+    public async Task ConcurrentDifferentBatches_SameResource_Max1_ExactlyOneSucceeds()
+    {
+        var store = new AgentMemoryAccessHandleStore(TimeProvider.System);
+
+        var batchKey1 = MakeBatchKey("plan-same-res-1") with
+        {
+            OriginBindingHash = MakeHash("binding-same-res-1")
+        };
+        var batchKey2 = MakeBatchKey("plan-same-res-2") with
+        {
+            OriginBindingHash = MakeHash("binding-same-res-2")
+        };
+
+        var handle1 = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "h-same-res-1",
+            ResourceKind = AgentMemoryResourceKind.Context,
+            ResourceId = "same-resource",
+            Principal = MakePrincipal(),
+            ScopeFingerprint = "fp-same-res",
+            IssuingOperationId = "op1",
+            IssuedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
+        };
+        var handle2 = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "h-same-res-2",
+            ResourceKind = AgentMemoryResourceKind.Context,
+            ResourceId = "same-resource",
+            Principal = MakePrincipal(),
+            ScopeFingerprint = "fp-same-res",
+            IssuingOperationId = "op2",
+            IssuedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
+        };
+
+        // maxActivePerResource = 1 — only one should succeed
+        int successCount = 0;
+        int failCount = 0;
+
+        var t1 = Task.Run(async () =>
+        {
+            try
+            {
+                await store.TryIssueBatchAsync(batchKey1, [handle1], maxActivePerResource: 1, maxActivePerOperation: 128);
+                Interlocked.Increment(ref successCount);
+            }
+            catch
+            {
+                Interlocked.Increment(ref failCount);
+            }
+        });
+        var t2 = Task.Run(async () =>
+        {
+            try
+            {
+                await store.TryIssueBatchAsync(batchKey2, [handle2], maxActivePerResource: 1, maxActivePerOperation: 128);
+                Interlocked.Increment(ref successCount);
+            }
+            catch
+            {
+                Interlocked.Increment(ref failCount);
+            }
+        });
+
+        await Task.WhenAll(t1, t2);
+
+        successCount.Should().Be(1);
+        failCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ConcurrentDifferentBatches_SameBinding_Max1_ExactlyOneSucceeds()
+    {
+        var store = new AgentMemoryAccessHandleStore(TimeProvider.System);
+
+        // Same binding hash → shared per-operation quota
+        var sharedBinding = MakeHash("binding-shared-perop");
+        var batchKey1 = MakeBatchKey("plan-bind-1") with
+        {
+            OriginBindingHash = sharedBinding,
+            ArtifactPurpose = "purpose-a"
+        };
+        var batchKey2 = MakeBatchKey("plan-bind-2") with
+        {
+            OriginBindingHash = sharedBinding,
+            ArtifactPurpose = "purpose-b" // different identity → no plan conflict
+        };
+
+        var handle1 = MakeHandle("h-bind-1");
+        var handle2 = MakeHandle("h-bind-2");
+
+        // maxActivePerOperation = 1 — only one should succeed
+        int successCount = 0;
+        int failCount = 0;
+
+        var t1 = Task.Run(async () =>
+        {
+            try
+            {
+                await store.TryIssueBatchAsync(batchKey1, [handle1], maxActivePerResource: 128, maxActivePerOperation: 1);
+                Interlocked.Increment(ref successCount);
+            }
+            catch
+            {
+                Interlocked.Increment(ref failCount);
+            }
+        });
+        var t2 = Task.Run(async () =>
+        {
+            try
+            {
+                await store.TryIssueBatchAsync(batchKey2, [handle2], maxActivePerResource: 128, maxActivePerOperation: 1);
+                Interlocked.Increment(ref successCount);
+            }
+            catch
+            {
+                Interlocked.Increment(ref failCount);
+            }
+        });
+
+        await Task.WhenAll(t1, t2);
+
+        successCount.Should().Be(1);
+        failCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ConcurrentIssueAndRevoke_StateRemainsConsistent()
+    {
+        var store = new AgentMemoryAccessHandleStore(TimeProvider.System);
+
+        // Pre-issue one handle
+        var batchKey1 = MakeBatchKey("plan-issue-revoke-1") with
+        {
+            OriginBindingHash = MakeHash("binding-issue-revoke-1")
+        };
+        var handle1 = MakeHandle("h-issue-revoke-1");
+        await store.TryIssueBatchAsync(batchKey1, [handle1], 64, 128);
+
+        // Concurrently: issue a second handle and revoke the first
+        var batchKey2 = MakeBatchKey("plan-issue-revoke-2") with
+        {
+            OriginBindingHash = MakeHash("binding-issue-revoke-2")
+        };
+        var handle2 = MakeHandle("h-issue-revoke-2");
+
+        var issueTask = Task.Run(async () =>
+        {
+            await store.TryIssueBatchAsync(batchKey2, [handle2], 64, 128);
+        });
+        var revokeTask = Task.Run(async () =>
+        {
+            await store.RevokeAsync("h-issue-revoke-1", AgentMemoryCallerKind.AgentTool);
+        });
+
+        await Task.WhenAll(issueTask, revokeTask);
+
+        // Verify final state: handle1 revoked, handle2 active
+        var h1 = await store.GetAsync("h-issue-revoke-1");
+        h1.Should().NotBeNull();
+        h1!.State.Should().Be(AgentMemorySecurityArtifactState.Revoked);
+
+        var h2 = await store.GetAsync("h-issue-revoke-2");
+        h2.Should().NotBeNull();
+        h2!.State.Should().Be(AgentMemorySecurityArtifactState.Active);
+    }
 }

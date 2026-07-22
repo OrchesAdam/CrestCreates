@@ -77,7 +77,7 @@ internal sealed class AgentMemoryHistoryResourceHandleIssuerAdapter : IAgentMemo
             ResourceId = sourceId,
             Principal = newPrincipal,
             ScopeFingerprint = ComputeScopeFingerprint(scope),
-            RequiredDescriptorRefs = scope.VisibleDescriptorRefs,
+            RequiredDescriptorRefs = [],
             IsUnscoped = false,
             IssuingOperationId = origin.OperationId,
             IssuedAt = now,

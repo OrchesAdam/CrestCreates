@@ -193,4 +193,181 @@ public class AgentMemoryAccessGrantStoreConcurrencyTests
 
         await Task.WhenAll(tasks);
     }
+
+    [Fact]
+    public async Task ConcurrentDifferentBatches_SameResource_Max1_ExactlyOneSucceeds()
+    {
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+
+        var batchKey1 = MakeBatchKey("plan-grant-same-res-1") with
+        {
+            OriginBindingHash = MakeHash("binding-grant-same-res-1")
+        };
+        var batchKey2 = MakeBatchKey("plan-grant-same-res-2") with
+        {
+            OriginBindingHash = MakeHash("binding-grant-same-res-2")
+        };
+
+        var grant1 = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-same-res-1",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.ConversationTurn,
+                TenantId = "t1",
+                SourceId = "same-source"
+            },
+            Principal = MakePrincipal(),
+            ScopeFingerprint = "fp-grant-same-res",
+            IssuingOperationId = "op1",
+            IssuedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
+        };
+        var grant2 = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-same-res-2",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.ConversationTurn,
+                TenantId = "t1",
+                SourceId = "same-source"
+            },
+            Principal = MakePrincipal(),
+            ScopeFingerprint = "fp-grant-same-res",
+            IssuingOperationId = "op2",
+            IssuedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
+        };
+
+        // maxActivePerResource = 1 — only one should succeed
+        int successCount = 0;
+        int failCount = 0;
+
+        var t1 = Task.Run(async () =>
+        {
+            try
+            {
+                await store.TryIssueBatchAsync(batchKey1, [grant1], maxActivePerResource: 1, maxActivePerOperation: 256);
+                Interlocked.Increment(ref successCount);
+            }
+            catch
+            {
+                Interlocked.Increment(ref failCount);
+            }
+        });
+        var t2 = Task.Run(async () =>
+        {
+            try
+            {
+                await store.TryIssueBatchAsync(batchKey2, [grant2], maxActivePerResource: 1, maxActivePerOperation: 256);
+                Interlocked.Increment(ref successCount);
+            }
+            catch
+            {
+                Interlocked.Increment(ref failCount);
+            }
+        });
+
+        await Task.WhenAll(t1, t2);
+
+        successCount.Should().Be(1);
+        failCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ConcurrentDifferentBatches_SameBinding_Max1_ExactlyOneSucceeds()
+    {
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+
+        // Same binding hash → shared per-operation quota
+        var sharedBinding = MakeHash("binding-grant-shared-perop");
+        var batchKey1 = MakeBatchKey("plan-grant-bind-1") with
+        {
+            OriginBindingHash = sharedBinding,
+            ArtifactPurpose = "purpose-a"
+        };
+        var batchKey2 = MakeBatchKey("plan-grant-bind-2") with
+        {
+            OriginBindingHash = sharedBinding,
+            ArtifactPurpose = "purpose-b" // different identity → no plan conflict
+        };
+
+        var grant1 = MakeGrant("g-bind-1");
+        var grant2 = MakeGrant("g-bind-2");
+
+        // maxActivePerOperation = 1 — only one should succeed
+        int successCount = 0;
+        int failCount = 0;
+
+        var t1 = Task.Run(async () =>
+        {
+            try
+            {
+                await store.TryIssueBatchAsync(batchKey1, [grant1], maxActivePerResource: 256, maxActivePerOperation: 1);
+                Interlocked.Increment(ref successCount);
+            }
+            catch
+            {
+                Interlocked.Increment(ref failCount);
+            }
+        });
+        var t2 = Task.Run(async () =>
+        {
+            try
+            {
+                await store.TryIssueBatchAsync(batchKey2, [grant2], maxActivePerResource: 256, maxActivePerOperation: 1);
+                Interlocked.Increment(ref successCount);
+            }
+            catch
+            {
+                Interlocked.Increment(ref failCount);
+            }
+        });
+
+        await Task.WhenAll(t1, t2);
+
+        successCount.Should().Be(1);
+        failCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ConcurrentIssueAndRevoke_StateRemainsConsistent()
+    {
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+
+        // Pre-issue one grant
+        var batchKey1 = MakeBatchKey("plan-grant-issue-revoke-1") with
+        {
+            OriginBindingHash = MakeHash("binding-grant-issue-revoke-1")
+        };
+        var grant1 = MakeGrant("g-issue-revoke-1");
+        await store.TryIssueBatchAsync(batchKey1, [grant1], 64, 256);
+
+        // Concurrently: issue a second grant and revoke the first
+        var batchKey2 = MakeBatchKey("plan-grant-issue-revoke-2") with
+        {
+            OriginBindingHash = MakeHash("binding-grant-issue-revoke-2")
+        };
+        var grant2 = MakeGrant("g-issue-revoke-2");
+
+        var issueTask = Task.Run(async () =>
+        {
+            await store.TryIssueBatchAsync(batchKey2, [grant2], 64, 256);
+        });
+        var revokeTask = Task.Run(async () =>
+        {
+            await store.RevokeAsync("g-issue-revoke-1", AgentMemoryCallerKind.AgentTool);
+        });
+
+        await Task.WhenAll(issueTask, revokeTask);
+
+        // Verify final state: grant1 revoked, grant2 active
+        var g1 = await store.GetAsync("g-issue-revoke-1");
+        g1.Should().NotBeNull();
+        g1!.State.Should().Be(AgentMemorySecurityArtifactState.Revoked);
+
+        var g2 = await store.GetAsync("g-issue-revoke-2");
+        g2.Should().NotBeNull();
+        g2!.State.Should().Be(AgentMemorySecurityArtifactState.Active);
+    }
 }

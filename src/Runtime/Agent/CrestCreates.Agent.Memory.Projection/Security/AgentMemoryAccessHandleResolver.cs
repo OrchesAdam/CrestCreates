@@ -76,9 +76,16 @@ internal sealed class AgentMemoryAccessHandleResolver : IAgentMemoryAccessHandle
         // Resource tenant must match principal tenant
         if (currentClosure.TenantId != principal.TenantId) return null;
 
-        // Exact closure equality: issued closure must match current closure exactly.
-        // Added descriptor → reject. Removed descriptor → reject.
-        if (!handle.IsUnscoped)
+        // ALWAYS compare issued closure with current closure.
+        // Exception: ConversationHistory and TaskHistory are raw history resources
+        // that don't have descriptor closures — only verify existence and tenant.
+        if (handle.ResourceKind is AgentMemoryResourceKind.ConversationHistory
+            or AgentMemoryResourceKind.TaskHistory)
+        {
+            // History resources: closure check is existence + tenant only
+            // (already verified above: currentClosure != null && tenantId match)
+        }
+        else
         {
             var issuedRefs = handle.RequiredDescriptorRefs ?? Array.Empty<DescriptorRef>();
             var currentRefs = currentClosure.CurrentDescriptorRefs;

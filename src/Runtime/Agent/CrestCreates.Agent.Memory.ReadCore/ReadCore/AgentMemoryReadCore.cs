@@ -109,6 +109,7 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
         foreach (var memory in filteredMemories)
         {
             var handleId = Guid.NewGuid().ToString("N");
+            var effectiveClosure = EffectiveClosureHelper.ComputeEffectiveClosure(memory.DescriptorRefs, memory.SourceRefs);
             handles.Add(new AgentMemoryAccessResourceHandle
             {
                 HandleId = handleId,
@@ -116,8 +117,8 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                 ResourceId = memory.MemoryId,
                 Principal = principal,
                 ScopeFingerprint = scopeFingerprint,
-                RequiredDescriptorRefs = memory.DescriptorRefs,
-                IsUnscoped = memory.DescriptorRefs.Count == 0,
+                RequiredDescriptorRefs = effectiveClosure,
+                IsUnscoped = effectiveClosure.Count == 0,
                 IssuingOperationId = origin.OperationId,
                 IssuedAt = now,
                 ExpiresAt = now + handleLifetime,

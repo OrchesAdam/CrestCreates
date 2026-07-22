@@ -67,12 +67,20 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
         AgentMemoryResourceKind sourceKind;
         try
         {
+            // AgentSourceKind → AgentMemoryResourceKind support matrix for grant resolution:
+            // CompressedContextBlock → Context
+            // ConversationTurn       → ConversationHistory
+            // TaskRecord             → TaskHistory
+            // MemoryItem             → Memory
+            // MemoryCandidate        → Candidate
+            // All other SourceKinds  → rejected (fail-closed)
             sourceKind = grant.SourceRef.SourceKind switch
             {
                 AgentSourceKind.CompressedContextBlock => AgentMemoryResourceKind.Context,
                 AgentSourceKind.ConversationTurn => AgentMemoryResourceKind.ConversationHistory,
                 AgentSourceKind.TaskRecord => AgentMemoryResourceKind.TaskHistory,
                 AgentSourceKind.MemoryItem => AgentMemoryResourceKind.Memory,
+                AgentSourceKind.MemoryCandidate => AgentMemoryResourceKind.Candidate,
                 _ => throw new InvalidOperationException($"Unknown source kind: {grant.SourceRef.SourceKind}")
             };
         }
@@ -88,9 +96,8 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
         // SourceRef tenant must match current resource tenant
         if (currentClosure.TenantId != principal.TenantId) return null;
 
-        // Exact closure equality: issued closure must match current closure exactly.
-        // Added descriptor → reject. Removed descriptor → reject.
-        if (!grant.IsUnscoped)
+        // ALWAYS compare issued closure with current closure.
+        // IsUnscoped means issued closure was empty — still must match exactly.
         {
             var issuedRefs = grant.RequiredDescriptorRefs ?? Array.Empty<DescriptorRef>();
             var currentRefs = currentClosure.CurrentDescriptorRefs;

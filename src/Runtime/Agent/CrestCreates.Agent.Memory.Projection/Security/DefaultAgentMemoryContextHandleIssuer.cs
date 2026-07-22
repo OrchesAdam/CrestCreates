@@ -117,15 +117,12 @@ internal sealed class DefaultAgentMemoryContextHandleIssuer : IAgentMemoryContex
     /// <summary>
     /// Computes the effective descriptor closure from a compressed context:
     /// aggregates all DescriptorRefs from all blocks and their source refs.
+    /// Delegates to EffectiveClosureHelper for canonical ordering.
     /// </summary>
     private static IReadOnlyList<DescriptorRef> ComputeEffectiveClosure(
         AgentCompressedContext context)
     {
-        return context.Blocks
-            .SelectMany(b => b.SourceRefs)
-            .SelectMany(sr => sr.DescriptorRefs)
-            .Distinct()
-            .ToArray();
+        return EffectiveClosureHelper.ComputeEffectiveClosureFromBlocks(context.Blocks);
     }
 
     private static void RequireIdentity(string? value, string paramName)

@@ -22,7 +22,7 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
     private readonly ConcurrentDictionary<string, int> _perOperationCount = new(StringComparer.Ordinal); // originBindingHash -> active count
     private readonly ConcurrentDictionary<string, string> _identityPlans = new(StringComparer.Ordinal); // identityKey -> planHash
     private readonly ConcurrentDictionary<string, string> _batchToIdentity = new(StringComparer.Ordinal); // batchCanonicalKey -> identityKey
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _batchLocks = new();
+    private readonly SemaphoreSlim _stateLock = new(1, 1);
     private readonly TimeProvider _timeProvider;
 
     public AgentMemoryAccessHandleStore(TimeProvider timeProvider)
@@ -51,16 +51,14 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
         if (handles.Any(h => h.Principal != firstPrincipal))
             throw new InvalidOperationException("A handle batch must have one trusted principal.");
 
-        var batchLock = _batchLocks.GetOrAdd(batchKey.ToCanonicalKey(), _ => new SemaphoreSlim(1, 1));
-
-        await batchLock.WaitAsync(cancellationToken);
+        await _stateLock.WaitAsync(cancellationToken);
         try
         {
             return TryIssueBatchInternal(batchKey, handles, maxActivePerResource, maxActivePerOperation);
         }
         finally
         {
-            batchLock.Release();
+            _stateLock.Release();
         }
     }
 
@@ -144,49 +142,55 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
         return ValueTask.FromResult<AgentMemoryAccessResourceHandle?>(handle);
     }
 
-    public ValueTask RevokeAsync(
+    public async ValueTask RevokeAsync(
         string handleId,
         AgentMemoryCallerKind expectedCallerKind,
         CancellationToken cancellationToken = default)
     {
-        if (!_handles.TryGetValue(handleId, out var handle))
-            return ValueTask.CompletedTask;
-
-        if (handle.Principal.CallerKind != expectedCallerKind)
-            return ValueTask.CompletedTask;
-
-        // Mark revoked
-        _handles[handleId] = handle with { State = AgentMemorySecurityArtifactState.Revoked };
-
-        // Decrement per-resource count
-        _perResourceCount.AddOrUpdate(MakeResourceKey(handle), 0, (_, c) => Math.Max(0, c - 1));
-
-        // Decrement per-operation count using stored binding hash
-        if (_handleToBindingHash.TryRemove(handleId, out var bindingHash))
+        await _stateLock.WaitAsync(cancellationToken);
+        try
         {
-            _perOperationCount.AddOrUpdate(bindingHash, 0, (_, c) => Math.Max(0, c - 1));
-        }
+            if (!_handles.TryGetValue(handleId, out var handle))
+                return;
 
-        // Remove from batch index and identity plan
-        if (_handleToBatch.TryRemove(handleId, out var batchCanonicalKey))
-        {
-            if (_batchIndex.TryGetValue(batchCanonicalKey, out var batchIds))
+            if (handle.Principal.CallerKind != expectedCallerKind)
+                return;
+
+            // Mark revoked
+            _handles[handleId] = handle with { State = AgentMemorySecurityArtifactState.Revoked };
+
+            // Decrement per-resource count
+            _perResourceCount.AddOrUpdate(MakeResourceKey(handle), 0, (_, c) => Math.Max(0, c - 1));
+
+            // Decrement per-operation count using stored binding hash
+            if (_handleToBindingHash.TryRemove(handleId, out var bindingHash))
             {
-                batchIds.Remove(handleId);
-                if (batchIds.Count == 0)
-                {
-                    _batchIndex.TryRemove(batchCanonicalKey, out _);
+                _perOperationCount.AddOrUpdate(bindingHash, 0, (_, c) => Math.Max(0, c - 1));
+            }
 
-                    // Clean up identity plan using stored identity key
-                    if (_batchToIdentity.TryRemove(batchCanonicalKey, out var identityKey))
+            // Remove from batch index and identity plan
+            if (_handleToBatch.TryRemove(handleId, out var batchCanonicalKey))
+            {
+                if (_batchIndex.TryGetValue(batchCanonicalKey, out var batchIds))
+                {
+                    batchIds.Remove(handleId);
+                    if (batchIds.Count == 0)
                     {
-                        _identityPlans.TryRemove(identityKey, out _);
+                        _batchIndex.TryRemove(batchCanonicalKey, out _);
+
+                        // Clean up identity plan using stored identity key
+                        if (_batchToIdentity.TryRemove(batchCanonicalKey, out var identityKey))
+                        {
+                            _identityPlans.TryRemove(identityKey, out _);
+                        }
                     }
                 }
             }
         }
-
-        return ValueTask.CompletedTask;
+        finally
+        {
+            _stateLock.Release();
+        }
     }
 
     private static string MakeResourceKey(AgentMemoryAccessResourceHandle handle)

@@ -355,4 +355,141 @@ public class AgentMemoryAccessGrantResolverTests
 
         result.Should().BeNull("source resource tenant no longer matches principal tenant");
     }
+
+    [Fact]
+    public async Task ResolveAsync_UnscopedGrant_SourceGainsDescriptor_Rejects()
+    {
+        // Grant was issued with empty RequiredDescriptorRefs (IsUnscoped=true).
+        // Source resource later gains a descriptor.
+        // Resolver should reject because issued closure (empty) != current closure (non-empty).
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1");
+
+        // Scope that allows unscoped memory so the early check passes
+        var scope = MakeScope() with { AllowUnscopedMemory = true };
+        var scopeFp = AgentMemoryScopeFingerprint.Compute(scope);
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-unscoped-gained",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.MemoryItem,
+                TenantId = "t1",
+                SourceId = "src-unscoped"
+            },
+            Principal = principal,
+            ScopeFingerprint = scopeFp,
+            RequiredDescriptorRefs = [], // Empty at issuance
+            IsUnscoped = true,
+            IssuingOperationId = "op-unscoped",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(5),
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-unscoped"),
+            ArtifactPurpose = "test",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-unscoped")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        // Source resource now has a descriptor that wasn't there at issuance time
+        var closureProvider = MakeClosureProvider(
+            descriptorRefs: new[] { DescAlpha });
+
+        var resolver = new AgentMemoryAccessGrantResolver(store, TimeProvider.System, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-unscoped-gained", principal, scope);
+
+        result.Should().BeNull("unscoped grant must be rejected when source gains a descriptor");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_MemoryCandidateSourceKind_Resolved()
+    {
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var resolver = new AgentMemoryAccessGrantResolver(
+            store, TimeProvider.System, MakeClosureProvider());
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1");
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-candidate",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.MemoryCandidate,
+                TenantId = "t1",
+                SourceId = "cand1"
+            },
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            IssuingOperationId = "op-cand",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-cand"),
+            ArtifactPurpose = "test",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-cand")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        var result = await resolver.ResolveAsync("g-candidate", principal, MakeScope());
+
+        result.Should().NotBeNull("MemoryCandidate source kind must resolve to Candidate resource kind");
+        result!.GrantId.Should().Be("g-candidate");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_UnsupportedSourceKind_Rejected()
+    {
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var resolver = new AgentMemoryAccessGrantResolver(
+            store, TimeProvider.System, MakeClosureProvider());
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1");
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-unsupported",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.MetadataContextPack,
+                TenantId = "t1",
+                SourceId = "pkg1"
+            },
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            IssuingOperationId = "op-unsupported",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-unsupported"),
+            ArtifactPurpose = "test",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-unsupported")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        var result = await resolver.ResolveAsync("g-unsupported", principal, MakeScope());
+
+        result.Should().BeNull("unsupported SourceKind must be rejected (fail-closed)");
+    }
 }

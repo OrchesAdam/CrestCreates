@@ -25,11 +25,7 @@ internal sealed class ContextResourceClosureProvider : IAgentMemoryResourceClosu
         var context = await _store.GetCompressedContextAsync(tenantId, resourceId, cancellationToken);
         if (context is null) return null;
 
-        var descriptorRefs = context.Blocks
-            .SelectMany(b => b.SourceRefs)
-            .SelectMany(sr => sr.DescriptorRefs)
-            .Distinct()
-            .ToArray();
+        var descriptorRefs = EffectiveClosureHelper.ComputeEffectiveClosureFromBlocks(context.Blocks);
 
         return new AgentMemoryCurrentClosure
         {
