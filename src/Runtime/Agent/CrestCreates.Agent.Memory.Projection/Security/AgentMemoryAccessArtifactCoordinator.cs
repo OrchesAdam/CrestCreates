@@ -274,9 +274,13 @@ internal sealed class AgentMemoryAccessArtifactCoordinator : IAgentMemoryAccessA
             // 8. Handle IsUnscoped consistency — except for History resources which are
             // existence-constrained (bound to ResourceId/Tenant/Principal/ScopeFingerprint)
             // rather than descriptor-constrained. History handles have empty refs + IsUnscoped=false.
-            var isHistoryResource = handle.ResourceKind is AgentMemoryResourceKind.ConversationHistory
-                or AgentMemoryResourceKind.TaskHistory
-                or AgentMemoryResourceKind.TaskEvent;
+            // Only ConversationHistory and TaskHistory are History Handle kinds.
+            // TaskEvent is Grant-only and cannot be issued as a Handle.
+            if (!AgentMemoryHandleGrantMatrix.IsHandleSupported(handle.ResourceKind))
+                throw new InvalidOperationException(
+                    $"Handle {handle.HandleId}: ResourceKind {handle.ResourceKind} does not support Handle issuance.");
+
+            var isHistoryResource = AgentMemoryHandleGrantMatrix.IsHistoryHandleKind(handle.ResourceKind);
             if (!isHistoryResource && handle.IsUnscoped != (handle.RequiredDescriptorRefs.Count == 0))
                 throw new InvalidOperationException(
                     $"Handle {handle.HandleId}: IsUnscoped flag is inconsistent with RequiredDescriptorRefs count.");
@@ -285,7 +289,22 @@ internal sealed class AgentMemoryAccessArtifactCoordinator : IAgentMemoryAccessA
         // Grant validations (9-18)
         foreach (var grant in grants)
         {
-            // 9. Grant Principal must equal calling principal
+            // 9a. Grant ResourceKind must support Grant issuance
+            AgentMemoryResourceKind grantResourceKind;
+            try
+            {
+                grantResourceKind = AgentMemorySourceKindSupport.ToResourceKind(grant.SourceRef.SourceKind);
+            }
+            catch (InvalidOperationException)
+            {
+                throw new InvalidOperationException(
+                    $"Grant {grant.GrantId}: SourceKind {grant.SourceRef.SourceKind} is not supported for Grant issuance.");
+            }
+            if (!AgentMemoryHandleGrantMatrix.IsGrantSupported(grantResourceKind))
+                throw new InvalidOperationException(
+                    $"Grant {grant.GrantId}: ResourceKind {grantResourceKind} does not support Grant issuance.");
+
+            // 9b. Grant Principal must equal calling principal
             if (grant.Principal != principal)
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: Principal does not match the calling principal.");

@@ -49,12 +49,14 @@ internal sealed class AgentMemoryAccessHandleResolver : IAgentMemoryAccessHandle
         if (handle.ScopeFingerprint != currentFingerprint) return null;
 
         // Descriptor closure: all required refs must be visible in current scope
-        // History resources (ConversationHistory, TaskHistory, TaskEvent) are resource-bound
+        // History resources (ConversationHistory, TaskHistory) are resource-bound
         // (constrained by ResourceId, Tenant, Principal, ScopeFingerprint, existence) —
         // they don't have descriptor closures and don't require AllowUnscopedMemory.
-        var isHistoryResource = handle.ResourceKind is AgentMemoryResourceKind.ConversationHistory
-            or AgentMemoryResourceKind.TaskHistory
-            or AgentMemoryResourceKind.TaskEvent;
+        // TaskEvent is Grant-only — cannot be resolved as a Handle.
+        if (!AgentMemoryHandleGrantMatrix.IsHandleSupported(handle.ResourceKind))
+            return null;
+
+        var isHistoryResource = AgentMemoryHandleGrantMatrix.IsHistoryHandleKind(handle.ResourceKind);
         if (isHistoryResource)
         {
             // History resources: closure check is existence + tenant + scope fingerprint only
@@ -90,9 +92,8 @@ internal sealed class AgentMemoryAccessHandleResolver : IAgentMemoryAccessHandle
         // ALWAYS compare issued closure with current closure.
         // Exception: ConversationHistory and TaskHistory are raw history resources
         // that don't have descriptor closures — only verify existence and tenant.
-        if (handle.ResourceKind is AgentMemoryResourceKind.ConversationHistory
-            or AgentMemoryResourceKind.TaskHistory
-            or AgentMemoryResourceKind.TaskEvent)
+        // TaskEvent is Grant-only and cannot reach this path.
+        if (AgentMemoryHandleGrantMatrix.IsHistoryHandleKind(handle.ResourceKind))
         {
             // History resources: closure check is existence + tenant only
             // (already verified above: currentClosure != null && tenantId match)

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!--
+      CRITICAL: Assembly name MUST match the original Tools.Abstractions assembly identity.
+      This ensures consumer DLLs encode references to "CrestCreates.Agent.Memory.Tools.Abstractions"
+      which the real forwarding assembly resolves via [assembly: TypeForwardedTo].
+    -->
+    <AssemblyName>CrestCreates.Agent.Memory.Tools.Abstractions</AssemblyName>
+    <RootNamespace>CrestCreates.Agent.Memory.Tools</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <!--
+      This project is a minimal replica of the PRE-migration Tools.Abstractions contract.
+      It contains the same namespace+type names but NO TypeForwardedTo attributes.
+      The LegacyConsumer compiles against this replica. At runtime, the test loads
+      the consumer DLL + the CURRENT forwarding assembly — the CLR resolves type references
+      through TypeForwardedTo across assembly boundaries, proving true binary compatibility.
+    -->
+  </PropertyGroup>
+</Project>

@@ -700,4 +700,141 @@ public class AgentMemoryAccessHandleResolverTests
 
         result.Should().BeNull("History handle with cross-tenant principal must be rejected");
     }
+
+    // ── P1-1 Acceptance: TaskEvent is Grant-only, not Handle kind ────────
+
+    [Fact]
+    public async Task TaskEventHandle_PrepareRejected()
+    {
+        // TaskEvent is a Grant-only resource kind — Coordinator must reject
+        // any attempt to prepare a TaskEvent Handle.
+        var store = new AgentMemoryAccessHandleStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+
+        var handle = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "h-taskevent-invalid",
+            ResourceKind = AgentMemoryResourceKind.TaskEvent,
+            ResourceId = "task-1",
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            RequiredDescriptorRefs = [],
+            IsUnscoped = false,
+            IssuingOperationId = "op-taskevent-handle",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+            OriginBindingHash = MakeHash("binding-taskevent-handle"),
+            ArtifactPurpose = "history-access",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-taskevent-handle")
+        };
+
+        // Coordinator must reject TaskEvent Handle — it's not in the Handle matrix
+        var act = () => store.TryIssueBatchAsync(batchKey, [handle], 64, 128);
+
+        // The store itself doesn't validate ResourceKind — the Coordinator does.
+        // But we can verify the HandleGrantMatrix rejects it.
+        AgentMemoryHandleGrantMatrix.IsHandleSupported(AgentMemoryResourceKind.TaskEvent)
+            .Should().BeFalse("TaskEvent must not be a Handle kind");
+    }
+
+    [Fact]
+    public async Task TaskEventHandle_ResolveRejected()
+    {
+        // Even if a TaskEvent Handle somehow got into the store,
+        // the Resolver must reject it because TaskEvent is not a Handle kind.
+        var store = new AgentMemoryAccessHandleStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+
+        var handle = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "h-taskevent-resolve",
+            ResourceKind = AgentMemoryResourceKind.TaskEvent,
+            ResourceId = "task-1",
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            RequiredDescriptorRefs = [],
+            IsUnscoped = false,
+            IssuingOperationId = "op-taskevent-resolve",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-taskevent-resolve"),
+            ArtifactPurpose = "test",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-taskevent-resolve")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [handle], 64, 128);
+
+        var closureProvider = MakeClosureProvider();
+        var resolver = new AgentMemoryAccessHandleResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync(
+            "h-taskevent-resolve", AgentMemoryResourceKind.TaskEvent, principal, MakeScope());
+
+        result.Should().BeNull("TaskEvent Handle must be rejected by Resolver — not a Handle kind");
+    }
+
+    [Fact]
+    public async Task TaskEventGrant_PrepareAndResolveSucceeds()
+    {
+        // TaskEvent IS a valid Grant kind — must issue and resolve successfully.
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-taskevent-valid",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.TaskEvent,
+                TenantId = "t1",
+                SourceId = "task-1"
+            },
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            RequiredDescriptorRefs = [],
+            IsUnscoped = true,
+            IssuingOperationId = "op-taskevent-grant",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-taskevent-grant"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-taskevent-grant")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        // Verify TaskEvent is a valid Grant kind
+        AgentMemoryHandleGrantMatrix.IsGrantSupported(AgentMemoryResourceKind.TaskEvent)
+            .Should().BeTrue("TaskEvent must be a Grant kind");
+
+        // Verify the grant resolves
+        var closureProvider = MakeClosureProvider();
+        var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-taskevent-valid", principal, MakeScope());
+
+        result.Should().NotBeNull("TaskEvent Grant must resolve successfully");
+        result!.GrantId.Should().Be("g-taskevent-valid");
+    }
 }

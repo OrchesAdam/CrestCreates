@@ -536,4 +536,434 @@ public class AgentMemoryAccessGrantResolverTests
         result.Should().NotBeNull("TaskEvent source kind must resolve to AgentMemoryResourceKind.TaskEvent");
         result!.GrantId.Should().Be("g-taskevent");
     }
+
+    // ── P0-1 Acceptance: CompressedContextBlock Grant lifecycle ──────────
+
+    [Fact]
+    public async Task CompressedContextBlock_BlockId_IssuesGrant()
+    {
+        // CompressedContextBlock SourceRef uses BlockId as SourceId.
+        // The Grant must be issued with the Block's own closure, not the parent Context's.
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-ccb-block",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.CompressedContextBlock,
+                TenantId = "t1",
+                SourceId = "block-42"
+            },
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            RequiredDescriptorRefs = [new DescriptorRef("ns", "block-desc", 1)],
+            IsUnscoped = false,
+            IssuingOperationId = "op-ccb",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-ccb"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-ccb")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        // Verify the grant is stored and retrievable
+        var stored = await store.GetAsync("g-ccb-block");
+        stored.Should().NotBeNull("CompressedContextBlock grant must be stored");
+        stored!.SourceRef.SourceId.Should().Be("block-42", "SourceId must be BlockId, not ContextId");
+        stored.SourceRef.SourceKind.Should().Be(AgentSourceKind.CompressedContextBlock);
+    }
+
+    [Fact]
+    public async Task CompressedContextBlock_GrantResolves()
+    {
+        // Grant for CompressedContextBlock must resolve through the GrantResolver
+        // using the Block's own closure (not the parent Context's).
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+        var blockDesc = new DescriptorRef("ns", "block-desc", 1);
+
+        // Scope must include the block's descriptor ref in VisibleDescriptorRefs
+        var scope = MakeScope() with { VisibleDescriptorRefs = [blockDesc] };
+        var scopeFp = AgentMemoryScopeFingerprint.Compute(scope);
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-ccb-resolve",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.CompressedContextBlock,
+                TenantId = "t1",
+                SourceId = "block-99"
+            },
+            Principal = principal,
+            ScopeFingerprint = scopeFp,
+            RequiredDescriptorRefs = [blockDesc],
+            IsUnscoped = false,
+            IssuingOperationId = "op-ccb-resolve",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-ccb-resolve"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-ccb-resolve")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        // Closure provider returns the Block's closure (matching the grant's RequiredDescriptorRefs)
+        var closureProvider = MakeClosureProvider(tenantId: "t1", descriptorRefs: [blockDesc]);
+        var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-ccb-resolve", principal, scope);
+
+        result.Should().NotBeNull("CompressedContextBlock grant must resolve when closure matches");
+        result!.GrantId.Should().Be("g-ccb-resolve");
+    }
+
+    [Fact]
+    public async Task CompressedContextBlock_BlockDeleted_Rejects()
+    {
+        // If the Block no longer exists, the closure provider returns null,
+        // and the grant must be rejected.
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-ccb-deleted",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.CompressedContextBlock,
+                TenantId = "t1",
+                SourceId = "block-deleted"
+            },
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            RequiredDescriptorRefs = [],
+            IsUnscoped = true,
+            IssuingOperationId = "op-ccb-deleted",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-ccb-deleted"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-ccb-deleted")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        // Closure provider returns null → Block doesn't exist
+        var closureProvider = MakeNullClosureProvider();
+        var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-ccb-deleted", principal, MakeScope());
+
+        result.Should().BeNull("Grant for deleted CompressedContextBlock must be rejected");
+    }
+
+    // ── P0-2 Acceptance: Range Contract ──────────────────────────────────
+
+    [Fact]
+    public async Task ConversationTurn_PartialRange_Rejects()
+    {
+        // RangeStart present but RangeEnd missing → must reject (not silently accept)
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-conv-partial",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.ConversationTurn,
+                TenantId = "t1",
+                SourceId = "conv-1",
+                RangeStart = 5
+                // RangeEnd missing → partial range
+            },
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            RequiredDescriptorRefs = [],
+            IsUnscoped = true,
+            IssuingOperationId = "op-conv-partial",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-conv-partial"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-conv-partial")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        // Closure provider returns null because SourceRange.TryResolve rejects partial range
+        var closureProvider = MakeNullClosureProvider();
+        var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-conv-partial", principal, MakeScope());
+
+        result.Should().BeNull("Partial range (only RangeStart) must be rejected");
+    }
+
+    [Fact]
+    public async Task ConversationTurn_NegativeRange_Rejects()
+    {
+        // Negative RangeStart → must reject
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-conv-neg",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.ConversationTurn,
+                TenantId = "t1",
+                SourceId = "conv-1",
+                RangeStart = -1,
+                RangeEnd = 3
+            },
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            RequiredDescriptorRefs = [],
+            IsUnscoped = true,
+            IssuingOperationId = "op-conv-neg",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-conv-neg"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-conv-neg")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        var closureProvider = MakeNullClosureProvider();
+        var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-conv-neg", principal, MakeScope());
+
+        result.Should().BeNull("Negative range must be rejected");
+    }
+
+    [Fact]
+    public async Task ConversationTurn_OutOfBounds_Rejects()
+    {
+        // RangeEnd >= count → must reject (not silently truncate)
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-conv-oob",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.ConversationTurn,
+                TenantId = "t1",
+                SourceId = "conv-1",
+                RangeStart = 0,
+                RangeEnd = 999
+            },
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            RequiredDescriptorRefs = [],
+            IsUnscoped = true,
+            IssuingOperationId = "op-conv-oob",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-conv-oob"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-conv-oob")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        // Closure provider returns null because SourceRange.TryResolve rejects out-of-bounds
+        var closureProvider = MakeNullClosureProvider();
+        var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-conv-oob", principal, MakeScope());
+
+        result.Should().BeNull("Out-of-bounds range must be rejected");
+    }
+
+    [Fact]
+    public async Task TaskEvent_PartialRange_Rejects()
+    {
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-te-partial",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.TaskEvent,
+                TenantId = "t1",
+                SourceId = "task-1",
+                RangeEnd = 5
+                // RangeStart missing → partial range
+            },
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            RequiredDescriptorRefs = [],
+            IsUnscoped = true,
+            IssuingOperationId = "op-te-partial",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-te-partial"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-te-partial")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        var closureProvider = MakeNullClosureProvider();
+        var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-te-partial", principal, MakeScope());
+
+        result.Should().BeNull("Partial range (only RangeEnd) must be rejected for TaskEvent");
+    }
+
+    [Fact]
+    public async Task TaskEvent_NegativeRange_Rejects()
+    {
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-te-neg",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.TaskEvent,
+                TenantId = "t1",
+                SourceId = "task-1",
+                RangeStart = -3,
+                RangeEnd = 2
+            },
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            RequiredDescriptorRefs = [],
+            IsUnscoped = true,
+            IssuingOperationId = "op-te-neg",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-te-neg"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-te-neg")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        var closureProvider = MakeNullClosureProvider();
+        var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-te-neg", principal, MakeScope());
+
+        result.Should().BeNull("Negative range must be rejected for TaskEvent");
+    }
+
+    [Fact]
+    public async Task TaskEvent_OutOfBounds_Rejects()
+    {
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-te-oob",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.TaskEvent,
+                TenantId = "t1",
+                SourceId = "task-1",
+                RangeStart = 0,
+                RangeEnd = 9999
+            },
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            RequiredDescriptorRefs = [],
+            IsUnscoped = true,
+            IssuingOperationId = "op-te-oob",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-te-oob"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-te-oob")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        var closureProvider = MakeNullClosureProvider();
+        var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-te-oob", principal, MakeScope());
+
+        result.Should().BeNull("Out-of-bounds range must be rejected for TaskEvent");
+    }
 }

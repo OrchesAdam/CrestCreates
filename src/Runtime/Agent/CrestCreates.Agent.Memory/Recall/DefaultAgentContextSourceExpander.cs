@@ -41,7 +41,7 @@ public sealed class DefaultAgentContextSourceExpander : IAgentContextSourceExpan
         if (conversation is null)
             return NotFound(sourceRef);
 
-        if (!TryGetRange(sourceRef, conversation.Turns.Count, out var start, out var end))
+        if (!SourceRange.TryResolve(sourceRef, conversation.Turns.Count, out var start, out var end))
             return NotFound(sourceRef);
 
         var turns = start.HasValue
@@ -60,7 +60,7 @@ public sealed class DefaultAgentContextSourceExpander : IAgentContextSourceExpan
 
         if (sourceRef.SourceKind == AgentSourceKind.TaskEvent)
         {
-            if (!TryGetRange(sourceRef, task.Events.Count, out var start, out var end))
+            if (!SourceRange.TryResolve(sourceRef, task.Events.Count, out var start, out var end))
                 return NotFound(sourceRef);
 
             var events = start.HasValue
@@ -147,22 +147,4 @@ public sealed class DefaultAgentContextSourceExpander : IAgentContextSourceExpan
             SourceRefs = [sourceRef]
         }]
     };
-
-    private static bool TryGetRange(
-        AgentContextSourceRef sourceRef,
-        int count,
-        out int? start,
-        out int? end)
-    {
-        start = sourceRef.RangeStart;
-        end = sourceRef.RangeEnd;
-
-        if (!start.HasValue && !end.HasValue)
-            return true;
-        if (!start.HasValue || !end.HasValue)
-            return false;
-        if (start.Value < 0 || end.Value < start.Value || end.Value >= count)
-            return false;
-        return true;
-    }
 }

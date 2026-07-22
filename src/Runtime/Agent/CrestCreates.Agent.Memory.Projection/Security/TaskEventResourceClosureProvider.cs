@@ -2,6 +2,7 @@ using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
+using SourceRange = CrestCreates.Agent.Memory.Abstractions.SourceRange;
 
 namespace CrestCreates.Agent.Memory.Projection.Security;
 
@@ -27,20 +28,30 @@ internal sealed class TaskEventResourceClosureProvider : IAgentMemoryResourceClo
         var task = await _store.GetTaskAsync(tenantId, resourceId, cancellationToken);
         if (task is null) return null;
 
-        // Filter events by RangeStart/RangeEnd if specified.
-        // This must match the Expander's range validation and slicing logic exactly.
-        var events = task.Events.AsEnumerable();
-        if (sourceRef is { RangeStart: not null } || sourceRef is { RangeEnd: not null })
+        // If the source ref specifies an event range, validate it against the same
+        // contract the Expander uses. Invalid range = resource not found (fail-closed).
+        var events = (IReadOnlyList<AgentTaskEvent>)task.Events;
+        if (sourceRef is not null)
         {
-            var start = sourceRef.RangeStart ?? 0;
-            var end = sourceRef.RangeEnd ?? events.Count() - 1;
-            events = events.Skip(start).Take(end - start + 1);
+            if (!SourceRange.TryResolve(sourceRef, events.Count, out var start, out var end))
+                return null;
+
+            if (start.HasValue)
+            {
+                events = events
+                    .Skip(start.Value)
+                    .Take(end!.Value - start.Value + 1)
+                    .ToArray();
+            }
         }
 
         var descriptorRefs = events
             .SelectMany(e => e.SourceRefs)
             .SelectMany(sr => sr.DescriptorRefs)
             .Distinct()
+            .OrderBy(r => r.Namespace, StringComparer.Ordinal)
+            .ThenBy(r => r.Id, StringComparer.Ordinal)
+            .ThenBy(r => r.Version)
             .ToArray();
 
         return new AgentMemoryCurrentClosure

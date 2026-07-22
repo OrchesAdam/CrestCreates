@@ -4,15 +4,15 @@
     <AssemblyName>TypeForwardLegacyConsumer</AssemblyName>
     <IsPackable>false</IsPackable>
     <!--
-      This project simulates a consumer compiled against the OLD
-      CrestCreates.Agent.Memory.Tools.Abstractions assembly (before TypeForward migration).
-      It references the forwarding assembly directly, so at compile time the types
-      resolve through TypeForwardedTo to Projection.Abstractions.
-      The output DLL is then loaded by TypeForwardBinaryCompatibilityTests
-      via AssemblyLoadContext to verify true binary compatibility.
+      This consumer references the PRE-MIGRATION contract replica
+      (TypeForwardLegacyContract), NOT the current forwarding assembly.
+      The LegacyContract project has the same assembly name and type definitions
+      as the original Tools.Abstractions, but WITHOUT [assembly: TypeForwardedTo].
+      The consumer DLL encodes type references to the old assembly identity.
+      At runtime, the current forwarding assembly resolves them via TypeForwardedTo.
     -->
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\..\src\Runtime\Agent\CrestCreates.Agent.Memory.Tools.Abstractions\CrestCreates.Agent.Memory.Tools.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Agent.Memory.TypeForwardLegacyContract\CrestCreates.Agent.Memory.TypeForwardLegacyContract.csproj" />
   </ItemGroup>
 </Project>

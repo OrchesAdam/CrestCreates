@@ -58,9 +58,8 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
             // Fail-closed: unknown source kind is rejected
             return null;
         }
-        var isHistorySource = sourceKind is AgentMemoryResourceKind.ConversationHistory
-            or AgentMemoryResourceKind.TaskHistory
-            or AgentMemoryResourceKind.TaskEvent;
+        var isHistorySource = AgentMemoryHandleGrantMatrix.IsHistoryHandleKind(sourceKind)
+            || sourceKind == AgentMemoryResourceKind.TaskEvent;
         if (isHistorySource)
         {
             // History grants: no descriptor closure check, no AllowUnscopedMemory requirement

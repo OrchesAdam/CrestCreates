@@ -518,8 +518,17 @@ public class TypeForwardBinaryCompatibilityTests
     public void LegacyConsumerFixture_ResolvesForwardedTypesAndInvokesMembers()
     {
         // This test loads a precompiled consumer DLL that was compiled against
-        // the OLD Tools.Abstractions assembly. The consumer instantiates forwarded
-        // DTOs/enums and invokes members, proving true binary compatibility.
+        // the OLD Tools.Abstractions contract replica (LegacyContract project).
+        // The consumer DLL encodes type references to the old assembly identity
+        // (CrestCreates.Agent.Memory.Tools.Abstractions). At runtime, the
+        // AssemblyLoadContext resolves the old assembly reference to the current
+        // forwarding assembly, which then redirects types via TypeForwardedTo
+        // to Projection.Abstractions.
+        //
+        // This validates: pre-migration consumer → current forwarding assembly → current target types
+        // NOT: current source → current forwarding → current target (which is what
+        // a ProjectReference to the forwarding assembly would validate).
+
         var consumerPath = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
             "TypeForwardLegacyConsumer.dll"));
@@ -527,10 +536,33 @@ public class TypeForwardBinaryCompatibilityTests
         if (!File.Exists(consumerPath))
         {
             Assert.Fail($"Legacy consumer DLL not found at: {consumerPath}. " +
-                "Build the TypeForwardLegacyConsumer project before running this test.");
+                "Build the TypeForwardLegacyConsumer project and copy its output before running this test.");
         }
 
-        var context = new AssemblyLoadContext("LegacyConsumerTest", isCollectible: true);
+        // The current forwarding assembly (contains TypeForwardedTo attributes)
+        var forwardingAssemblyPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "CrestCreates.Agent.Memory.Tools.Abstractions.dll"));
+
+        if (!File.Exists(forwardingAssemblyPath))
+        {
+            Assert.Fail($"Forwarding assembly not found at: {forwardingAssemblyPath}. " +
+                "Build CrestCreates.Agent.Memory.Tools.Abstractions before running this test.");
+        }
+
+        // The new target assembly (contains actual type definitions)
+        var newAssemblyPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "CrestCreates.Agent.Memory.Projection.Abstractions.dll"));
+
+        if (!File.Exists(newAssemblyPath))
+        {
+            Assert.Fail($"New target assembly not found at: {newAssemblyPath}. " +
+                "Build CrestCreates.Agent.Memory.Projection.Abstractions before running this test.");
+        }
+
+        var context = new LegacyConsumerLoadContext(
+            forwardingAssemblyPath, newAssemblyPath, consumerPath);
         try
         {
             var consumerAssembly = context.LoadFromAssemblyPath(consumerPath);
@@ -547,6 +579,53 @@ public class TypeForwardBinaryCompatibilityTests
         finally
         {
             context.Unload();
+        }
+    }
+
+    /// <summary>
+    /// Custom AssemblyLoadContext that resolves the old assembly name
+    /// (CrestCreates.Agent.Memory.Tools.Abstractions) to the current forwarding
+    /// assembly. This simulates what happens when a pre-migration consumer DLL
+    /// encounters the current forwarding assembly at runtime.
+    /// </summary>
+    private sealed class LegacyConsumerLoadContext : AssemblyLoadContext
+    {
+        private readonly string _forwardingAssemblyPath;
+        private readonly string _newAssemblyPath;
+        private readonly Assembly? _defaultForwarding;
+        private readonly Assembly? _defaultNew;
+
+        public LegacyConsumerLoadContext(
+            string forwardingAssemblyPath, string newAssemblyPath, string consumerPath)
+            : base("LegacyConsumerTest", isCollectible: true)
+        {
+            _forwardingAssemblyPath = forwardingAssemblyPath;
+            _newAssemblyPath = newAssemblyPath;
+
+            // Pre-load the forwarding and new assemblies into this context
+            // so TypeForwardedTo resolution works when the consumer requests
+            // types from the old assembly name.
+            _defaultForwarding = LoadFromAssemblyPath(forwardingAssemblyPath);
+            _defaultNew = LoadFromAssemblyPath(newAssemblyPath);
+        }
+
+        protected override Assembly? Load(AssemblyName assemblyName)
+        {
+            // When the consumer DLL requests the old assembly by name,
+            // redirect to the current forwarding assembly (which contains
+            // TypeForwardedTo attributes pointing to Projection.Abstractions).
+            if (assemblyName.Name == "CrestCreates.Agent.Memory.Tools.Abstractions")
+            {
+                return _defaultForwarding;
+            }
+
+            if (assemblyName.Name == "CrestCreates.Agent.Memory.Projection.Abstractions")
+            {
+                return _defaultNew;
+            }
+
+            // For other dependencies, use default resolution
+            return null;
         }
     }
 }

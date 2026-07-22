@@ -2,6 +2,7 @@ using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
+using SourceRange = CrestCreates.Agent.Memory.Abstractions.SourceRange;
 
 namespace CrestCreates.Agent.Memory.Projection.Security;
 
@@ -26,19 +27,29 @@ internal sealed class ConversationHistoryResourceClosureProvider : IAgentMemoryR
         var conversation = await _store.GetConversationAsync(tenantId, resourceId, cancellationToken);
         if (conversation is null) return null;
 
-        // If the source ref specifies a turn range, only include descriptors from that range.
-        // Otherwise include all turns.
-        var turns = conversation.Turns.AsEnumerable();
-        if (sourceRef is { RangeStart: not null } || sourceRef is { RangeEnd: not null })
+        // If the source ref specifies a turn range, validate it against the same
+        // contract the Expander uses. Invalid range = resource not found (fail-closed).
+        var turns = (IReadOnlyList<AgentConversationTurn>)conversation.Turns;
+        if (sourceRef is not null)
         {
-            var start = sourceRef.RangeStart ?? 0;
-            var end = sourceRef.RangeEnd ?? turns.Count();
-            turns = turns.Skip(start).Take(end - start + 1);
+            if (!SourceRange.TryResolve(sourceRef, turns.Count, out var start, out var end))
+                return null;
+
+            if (start.HasValue)
+            {
+                turns = turns
+                    .Skip(start.Value)
+                    .Take(end!.Value - start.Value + 1)
+                    .ToArray();
+            }
         }
 
         var descriptorRefs = turns
             .SelectMany(t => t.DescriptorRefs)
             .Distinct()
+            .OrderBy(r => r.Namespace, StringComparer.Ordinal)
+            .ThenBy(r => r.Id, StringComparer.Ordinal)
+            .ThenBy(r => r.Version)
             .ToArray();
 
         return new AgentMemoryCurrentClosure

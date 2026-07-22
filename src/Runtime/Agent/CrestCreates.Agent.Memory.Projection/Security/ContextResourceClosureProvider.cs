@@ -23,36 +23,44 @@ internal sealed class ContextResourceClosureProvider : IAgentMemoryResourceClosu
         AgentContextSourceRef? sourceRef = null,
         CancellationToken cancellationToken = default)
     {
-        // For CompressedContextBlock grants, resourceId is the ContextId
-        // and sourceRef.SourceId may contain a specific BlockId.
-        // Compute closure from the specific block if sourceRef is provided,
-        // otherwise from the entire context.
+        // Handle closure: resourceId is the ContextId, no sourceRef.
+        // Grant closure: sourceRef is provided with the specific source kind and identity.
+        //
+        // CompressedContextBlock grants: sourceRef.SourceId is a BlockId.
+        //   Query the block directly — do NOT assume resourceId == ContextId.
+        // Context grants: resourceId is the ContextId.
+        //   Query the context and compute closure from all blocks.
+
+        if (sourceRef is not null
+            && sourceRef.SourceKind == AgentSourceKind.CompressedContextBlock
+            && !string.IsNullOrEmpty(sourceRef.SourceId))
+        {
+            // Grant closure for a specific CompressedContextBlock.
+            // sourceRef.SourceId is the BlockId — query the block directly.
+            var block = await _store.GetCompressedContextBlockAsync(
+                tenantId, sourceRef.SourceId, cancellationToken);
+            if (block is null) return null;
+
+            var descriptorRefs = EffectiveClosureHelper.ComputeEffectiveClosure(
+                null, block.SourceRefs);
+
+            return new AgentMemoryCurrentClosure
+            {
+                CurrentDescriptorRefs = descriptorRefs,
+                TenantId = tenantId
+            };
+        }
+
+        // Handle closure for Context, or grant closure without specific block.
+        // resourceId is the ContextId.
         var context = await _store.GetCompressedContextAsync(tenantId, resourceId, cancellationToken);
         if (context is null) return null;
 
-        IReadOnlyList<DescriptorRef> descriptorRefs;
-
-        if (sourceRef is not null
-            && !string.IsNullOrEmpty(sourceRef.SourceId)
-            && !string.Equals(sourceRef.SourceId, resourceId, StringComparison.Ordinal))
-        {
-            // sourceRef.SourceId is a BlockId — compute closure from that specific block only
-            var block = context.Blocks?.FirstOrDefault(b =>
-                string.Equals(b.BlockId, sourceRef.SourceId, StringComparison.Ordinal));
-            if (block is null) return null;
-
-            descriptorRefs = EffectiveClosureHelper.ComputeEffectiveClosure(
-                null, block.SourceRefs);
-        }
-        else
-        {
-            // No specific block — compute from entire context
-            descriptorRefs = EffectiveClosureHelper.ComputeEffectiveClosureFromBlocks(context.Blocks);
-        }
+        var contextDescriptorRefs = EffectiveClosureHelper.ComputeEffectiveClosureFromBlocks(context.Blocks);
 
         return new AgentMemoryCurrentClosure
         {
-            CurrentDescriptorRefs = descriptorRefs,
+            CurrentDescriptorRefs = contextDescriptorRefs,
             TenantId = context.TenantId
         };
     }

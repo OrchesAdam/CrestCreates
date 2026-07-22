@@ -22,4 +22,17 @@
     <PackageReference Include="Moq" />
     <PackageReference Include="AutoFixture" />
   </ItemGroup>
+  <!--
+    Build the TypeForwardLegacyConsumer project (which references the pre-migration
+    contract replica, NOT the current forwarding assembly) and copy its output DLL
+    to this test project's output directory. The TypeForward test loads this DLL
+    via AssemblyLoadContext to verify true binary compatibility.
+  -->
+  <Target Name="BuildAndCopyLegacyConsumer" AfterTargets="Build">
+    <MSBuild Projects="..\CrestCreates.Agent.Memory.TypeForwardLegacyConsumer\CrestCreates.Agent.Memory.TypeForwardLegacyConsumer.csproj" Targets="Build" />
+    <ItemGroup>
+      <LegacyConsumerFiles Include="..\CrestCreates.Agent.Memory.TypeForwardLegacyConsumer\bin\$(Configuration)\$(TargetFramework)\TypeForwardLegacyConsumer.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(LegacyConsumerFiles)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>
