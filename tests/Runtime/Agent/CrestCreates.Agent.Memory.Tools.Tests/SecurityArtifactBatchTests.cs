@@ -280,7 +280,7 @@ public sealed class SecurityArtifactBatchTests
 
     private static string ScopeFingerprint(AgentMemoryToolPrincipal principal, AgentMemoryToolAccessScope scope)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            $"memory-scope-v2|{principal.TenantId}|{scope.AllowUnscopedMemory}|{string.Join('|', scope.VisibleDescriptorRefs
+            $"projection-scope-v1|{principal.TenantId}|{scope.AllowUnscopedMemory}|{string.Join('|', scope.VisibleDescriptorRefs
                 .OrderBy(item => item.Namespace, StringComparer.Ordinal)
                 .ThenBy(item => item.Id, StringComparer.Ordinal)
                 .ThenBy(item => item.Version)

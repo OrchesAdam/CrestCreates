@@ -10,10 +10,12 @@ using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Metadata.Registry;
+using CrestCreates.Generated;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Schema;
 using CrestCreates.Schema.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 
 return await CrestCreates.Agent.Tools.AotFixture.AgentToolFixtureRunner.RunAsync();
@@ -62,6 +64,8 @@ namespace CrestCreates.Agent.Tools.AotFixture
                 // service provider; registration is explicit and AOT-safe.
                 builder.Services.AddScoped<FixtureEchoHandler>();
                 builder.Services.AddCapabilityRuntime();
+                builder.Services.AddSingleton<ICapabilityHandlerModule>(GeneratedCapabilityHandlerModule.Instance);
+                GeneratedHandlerRegistry.RegisterServices(builder.Services);
                 builder.Services.AddCrestAgentTools(options =>
                     options.SerializerOptions.TypeInfoResolver = AgentToolFixtureJsonContext.Default);
 

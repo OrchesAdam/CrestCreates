@@ -9,11 +9,19 @@ namespace CrestCreates.Agent.Memory.Tools;
 
 internal static class AgentMemoryToolDescriptorProviders
 {
+    private static int _registered;
+
     [ModuleInitializer]
     internal static void Register()
+        => EnsureRegistered();
+
+    public static void EnsureRegistered()
     {
-        DescriptorProviderRegistry.Register<SchemaDescriptor>(new Schemas());
-        DescriptorProviderRegistry.Register<CapabilityDescriptor>(new Capabilities());
+        if (Interlocked.Exchange(ref _registered, 1) == 0)
+        {
+            DescriptorProviderRegistry.Register<SchemaDescriptor>(new Schemas());
+            DescriptorProviderRegistry.Register<CapabilityDescriptor>(new Capabilities());
+        }
     }
 
     private sealed class Schemas : IDescriptorProvider<SchemaDescriptor>

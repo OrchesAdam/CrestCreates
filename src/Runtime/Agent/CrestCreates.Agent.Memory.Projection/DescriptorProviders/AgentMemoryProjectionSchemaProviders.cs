@@ -13,10 +13,16 @@ namespace CrestCreates.Agent.Memory.Projection.DescriptorProviders;
 /// </summary>
 public static class AgentMemoryProjectionSchemaProviders
 {
+    private static int _registered;
+
     [ModuleInitializer]
     internal static void Register()
+        => EnsureRegistered();
+
+    public static void EnsureRegistered()
     {
-        DescriptorProviderRegistry.Register<SchemaDescriptor>(new Schemas());
+        if (Interlocked.Exchange(ref _registered, 1) == 0)
+            DescriptorProviderRegistry.Register<SchemaDescriptor>(new Schemas());
     }
 
     private sealed class Schemas : IDescriptorProvider<SchemaDescriptor>

@@ -44,12 +44,12 @@ public sealed class AgentMemoryToolStartupTests
         var builder = Host.CreateApplicationBuilder();
         var schemas = new SchemaRegistry(
             new RegistryValidationEngine<SchemaDescriptor>(Array.Empty<IRegistryValidator<SchemaDescriptor>>()));
-        schemas.Build(DescriptorProviderRegistry.GetProviders<SchemaDescriptor>());
         builder.Services.AddSingleton<ISchemaRegistry>(schemas);
         builder.Services.AddAgentMemoryRuntime();
         builder.Services.AddCapabilityRuntime();
         builder.Services.AddCrestAgentTools();
         builder.Services.AddAgentMemoryTools();
+        schemas.Build(DescriptorProviderRegistry.GetProviders<SchemaDescriptor>());
         builder.Services.AddSingleton<IAgentToolInvocationGate, DevelopmentInMemoryAgentToolInvocationGate>();
         builder.Services.AddSingleton<IAgentToolInvocationLeaseAbandoner>(sp =>
             (IAgentToolInvocationLeaseAbandoner)sp.GetRequiredService<IAgentToolInvocationGate>());

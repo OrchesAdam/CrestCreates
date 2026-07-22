@@ -1,6 +1,7 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Projection.DescriptorProviders;
 using CrestCreates.Agent.Memory.ReadCore;
 using CrestCreates.Agent.Memory.Tools.Adapters;
 using CrestCreates.Generated;
@@ -17,6 +18,8 @@ public static class AgentMemoryToolServiceCollectionExtensions
     public static IServiceCollection AddAgentMemoryTools(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+        AgentMemoryProjectionSchemaProviders.EnsureRegistered();
+        AgentMemoryToolDescriptorProviders.EnsureRegistered();
         services.TryAddSingleton<IServiceCollection>(services);
         var promotionRegistration = services.LastOrDefault(item => item.ServiceType == typeof(IAgentMemoryPromotionService));
         if (promotionRegistration is not null && promotionRegistration.Lifetime != ServiceLifetime.Singleton)

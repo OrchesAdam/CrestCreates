@@ -26,6 +26,9 @@ jobs:
       - name: Restore
         run: dotnet restore CrestCreates.slnx
 
+      - name: Bootstrap BuildTasks
+        run: dotnet build src/Tooling/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj --no-restore
+
       - name: Build
         run: dotnet build CrestCreates.slnx --no-restore
 

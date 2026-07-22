@@ -26,6 +26,12 @@ jobs:
       - name: Restore
         run: dotnet restore CrestCreates.slnx
 
+      # BuildTasks is imported by many projects through CrestCreates.Modules.props.
+      # It is not a project dependency in the solution graph, so a clean parallel
+      # solution build can otherwise evaluate consumers before the task assembly exists.
+      - name: Bootstrap BuildTasks
+        run: dotnet build src/Tooling/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj --no-restore
+
       - name: Build
         run: dotnet build CrestCreates.slnx --no-restore
 
