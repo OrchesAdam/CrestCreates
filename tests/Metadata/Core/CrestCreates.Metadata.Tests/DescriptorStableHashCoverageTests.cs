@@ -73,6 +73,7 @@ public sealed class DescriptorStableHashCoverageTests
         {
             new(nameof(SchemaFieldDescriptor.Name), HashFieldCoverage.Contract, "Field identity — referenced by form, validation, mapping"),
             new(nameof(SchemaFieldDescriptor.FieldType), HashFieldCoverage.Contract, "Data type — changes contract"),
+            new(nameof(SchemaFieldDescriptor.ObjectSchema), HashFieldCoverage.ExcludedWithReason, "Nested object references are represented by the Schema v3 canonical hash projection"),
             new(nameof(SchemaFieldDescriptor.IsRequired), HashFieldCoverage.Contract, "Requiredness — changes contract"),
             new(nameof(SchemaFieldDescriptor.IsNullable), HashFieldCoverage.Contract, "Nullability — changes contract"),
             new(nameof(SchemaFieldDescriptor.MaxLength), HashFieldCoverage.Contract, "Length constraint — changes contract"),
