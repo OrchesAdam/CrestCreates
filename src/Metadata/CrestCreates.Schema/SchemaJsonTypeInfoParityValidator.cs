@@ -60,11 +60,13 @@ public sealed class SchemaJsonTypeInfoParityValidator
             // Input presence belongs to Schema validation. JsonTypeInfo.IsRequired
             // would make STJ reject a missing property before the execution pipeline.
             // Output presence must match the serializer contract exactly.
-            if (!input && property.IsRequired != field.IsRequired)
+            if (input ? property.IsRequired : property.IsRequired != field.IsRequired)
             {
                 throw new SchemaJsonContractException(
                     SchemaJsonContractViolation.RequirednessMismatch,
-                    $"Schema and JSON requiredness do not match for '{field.Name}'.");
+                    input
+                        ? $"Input JSON contract must not declare '{field.Name}' as required; presence belongs to Schema validation."
+                        : $"Schema and JSON requiredness do not match for '{field.Name}'.");
             }
 
             var nullable = input ? property.IsSetNullable : property.IsGetNullable;
