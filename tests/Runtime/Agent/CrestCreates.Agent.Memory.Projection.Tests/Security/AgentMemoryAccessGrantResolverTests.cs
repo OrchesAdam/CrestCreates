@@ -85,6 +85,7 @@ public class AgentMemoryAccessGrantResolverTests
                 It.IsAny<AgentMemoryResourceKind>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<AgentContextSourceRef?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(closure);
         return mock.Object;
@@ -97,6 +98,7 @@ public class AgentMemoryAccessGrantResolverTests
                 It.IsAny<AgentMemoryResourceKind>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<AgentContextSourceRef?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((AgentMemoryCurrentClosure?)null);
         return mock.Object;
@@ -491,5 +493,47 @@ public class AgentMemoryAccessGrantResolverTests
         var result = await resolver.ResolveAsync("g-unsupported", principal, MakeScope());
 
         result.Should().BeNull("unsupported SourceKind must be rejected (fail-closed)");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_TaskEventSourceKind_Resolved()
+    {
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var resolver = new AgentMemoryAccessGrantResolver(
+            store, TimeProvider.System, MakeClosureProvider());
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1");
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-taskevent",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.TaskEvent,
+                TenantId = "t1",
+                SourceId = "task1"
+            },
+            Principal = principal,
+            ScopeFingerprint = ScopeFp,
+            IssuingOperationId = "op-event",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-event"),
+            ArtifactPurpose = "test",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-event")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        var result = await resolver.ResolveAsync("g-taskevent", principal, MakeScope());
+
+        result.Should().NotBeNull("TaskEvent source kind must resolve to AgentMemoryResourceKind.TaskEvent");
+        result!.GrantId.Should().Be("g-taskevent");
     }
 }

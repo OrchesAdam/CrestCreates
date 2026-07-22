@@ -132,4 +132,37 @@ public class AgentMemoryAccessGrantStoreTests
         var retrieved = await store.GetAsync("g1");
         retrieved!.State.Should().Be(AgentMemorySecurityArtifactState.Active);
     }
+
+    [Fact]
+    public async Task SameBatch_DuplicateSource_ExceedsQuota()
+    {
+        // Batch with 2 grants for same source, maxGrantsPerResource=1 → throws
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var batchKey = MakeBatchKey();
+        var g1 = MakeGrant("g1");
+        var g2 = MakeGrant("g2");
+
+        var act = async () => await store.TryIssueBatchAsync(batchKey, [g1, g2], maxActivePerResource: 1, maxActivePerOperation: 256);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task SameBatch_DuplicateSource_WithinQuota()
+    {
+        // Batch with 2 grants for same source, maxGrantsPerResource=2 → succeeds
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var batchKey = MakeBatchKey();
+        var g1 = MakeGrant("g1");
+        var g2 = MakeGrant("g2");
+
+        var result = await store.TryIssueBatchAsync(batchKey, [g1, g2], maxActivePerResource: 2, maxActivePerOperation: 256);
+        result.ReusedExisting.Should().BeFalse();
+        result.Grants.Should().HaveCount(2);
+
+        // Both grants should be retrievable
+        var r1 = await store.GetAsync("g1");
+        var r2 = await store.GetAsync("g2");
+        r1.Should().NotBeNull();
+        r2.Should().NotBeNull();
+    }
 }

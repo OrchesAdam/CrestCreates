@@ -21,7 +21,11 @@ public sealed record McpToolRuntimeEntry(
     string ToolContractHash,
     string CapabilityContractHash,
     string? InputSchemaContractHash,
-    string? OutputSchemaContractHash);
+    string? OutputSchemaContractHash)
+{
+    public IReadOnlyList<SchemaDescriptor>? InputSchemaClosure { get; init; }
+    public IReadOnlyList<SchemaDescriptor>? OutputSchemaClosure { get; init; }
+}
 
 public sealed class McpToolRuntimeSnapshot
 {

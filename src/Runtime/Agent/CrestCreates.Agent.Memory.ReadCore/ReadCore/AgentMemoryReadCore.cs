@@ -94,7 +94,11 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
         var visibleRefs = scope.VisibleDescriptorRefs;
         var filteredMemories = pack.Memories
             .Where(m => m.TenantId == principal.TenantId)
-            .Where(m => IsVisibleInScope(m.DescriptorRefs, visibleRefs, scope.AllowUnscopedMemory))
+            .Where(m =>
+            {
+                var effectiveClosure = EffectiveClosureHelper.ComputeEffectiveClosure(m.DescriptorRefs, m.SourceRefs);
+                return IsVisibleInScope(effectiveClosure, visibleRefs, scope.AllowUnscopedMemory);
+            })
             .ToList();
 
         // Create resource handles + source grants
@@ -128,6 +132,11 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
             {
                 foreach (var sourceRef in memory.SourceRefs)
                 {
+                    // Unsupported SourceKind: skip — grants are only issued for the closed-world
+                    // support matrix defined in AgentMemorySourceKindSupport.
+                    if (!AgentMemorySourceKindSupport.IsGrantSupported(sourceRef.SourceKind))
+                        continue;
+
                     // Cross-tenant SourceRef: skip — Coordinator would reject the grant anyway,
                     // and including it would cause the entire PrepareAsync to fail, losing valid grants.
                     if (!string.Equals(sourceRef.TenantId, principal.TenantId, StringComparison.Ordinal))
@@ -140,8 +149,8 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                         SourceRef = sourceRef,
                         Principal = principal,
                         ScopeFingerprint = scopeFingerprint,
-                        RequiredDescriptorRefs = sourceRef.DescriptorRefs,
-                        IsUnscoped = sourceRef.DescriptorRefs?.Count == 0,
+                        RequiredDescriptorRefs = effectiveClosure,
+                        IsUnscoped = effectiveClosure.Count == 0,
                         IssuingOperationId = origin.OperationId,
                         IssuedAt = now,
                         ExpiresAt = now + grantLifetime,
@@ -254,7 +263,7 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                 .Select(s =>
                 {
                     grantLookup.TryGetValue(
-                        $"{s.SourceId}:{s.RangeStart}:{s.RangeEnd}",
+                        $"{s.TenantId}:{s.SourceKind}:{s.SourceId}:{s.RangeStart}:{s.RangeEnd}",
                         out var grant);
                     return new AgentMemorySourceGrantDto
                     {
@@ -305,6 +314,6 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
 
     private static string GrantKey(AgentMemoryAccessSourceGrant grant)
     {
-        return $"{grant.SourceRef.SourceId}:{grant.SourceRef.RangeStart}:{grant.SourceRef.RangeEnd}";
+        return $"{grant.SourceRef.TenantId}:{grant.SourceRef.SourceKind}:{grant.SourceRef.SourceId}:{grant.SourceRef.RangeStart}:{grant.SourceRef.RangeEnd}";
     }
 }

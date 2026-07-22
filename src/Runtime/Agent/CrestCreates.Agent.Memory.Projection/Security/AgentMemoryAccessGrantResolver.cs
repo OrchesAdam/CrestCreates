@@ -67,22 +67,7 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
         AgentMemoryResourceKind sourceKind;
         try
         {
-            // AgentSourceKind → AgentMemoryResourceKind support matrix for grant resolution:
-            // CompressedContextBlock → Context
-            // ConversationTurn       → ConversationHistory
-            // TaskRecord             → TaskHistory
-            // MemoryItem             → Memory
-            // MemoryCandidate        → Candidate
-            // All other SourceKinds  → rejected (fail-closed)
-            sourceKind = grant.SourceRef.SourceKind switch
-            {
-                AgentSourceKind.CompressedContextBlock => AgentMemoryResourceKind.Context,
-                AgentSourceKind.ConversationTurn => AgentMemoryResourceKind.ConversationHistory,
-                AgentSourceKind.TaskRecord => AgentMemoryResourceKind.TaskHistory,
-                AgentSourceKind.MemoryItem => AgentMemoryResourceKind.Memory,
-                AgentSourceKind.MemoryCandidate => AgentMemoryResourceKind.Candidate,
-                _ => throw new InvalidOperationException($"Unknown source kind: {grant.SourceRef.SourceKind}")
-            };
+            sourceKind = AgentMemorySourceKindSupport.ToResourceKind(grant.SourceRef.SourceKind);
         }
         catch (InvalidOperationException)
         {
@@ -90,7 +75,8 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
             return null;
         }
         var currentClosure = await _closureProvider.GetCurrentClosureAsync(
-            sourceKind, principal.TenantId, grant.SourceRef.SourceId, cancellationToken);
+            sourceKind, principal.TenantId, grant.SourceRef.SourceId,
+            sourceRef: grant.SourceRef, cancellationToken);
         if (currentClosure is null) return null;
 
         // SourceRef tenant must match current resource tenant

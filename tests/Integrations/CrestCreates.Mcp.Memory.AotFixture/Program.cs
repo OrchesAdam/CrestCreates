@@ -73,28 +73,61 @@ internal static class McpMemoryAotFixtureRunner
             var invoker = scope.ServiceProvider.GetRequiredService<IMcpToolInvoker>();
 
             var hostContext = new McpToolHostContext("aot-fixture", "Production");
+            var allSucceeded = true;
+
             var ctxRecallResult = await InvokeSafeAsync(invoker, hostContext,
                 "ctx_recall", new RecallAgentContextInput { ContextHandle = "test-handle", MaximumCharacters = 100 });
-            Console.WriteLine($"ctx_recall: {(!ctxRecallResult.IsError ? "OK" : $"FAIL (error={ctxRecallResult.ErrorCode})")}");
+            if (ctxRecallResult.IsError)
+            {
+                Console.Error.WriteLine($"FAIL: ctx_recall (error={ctxRecallResult.ErrorCode})");
+                allSucceeded = false;
+            }
+            else
+                Console.WriteLine("ctx_recall: OK");
 
             var ctxExpandResult = await InvokeSafeAsync(invoker, hostContext,
                 "ctx_expand", new ExpandAgentMemorySourceInput { GrantId = "test-grant", MaximumCharacters = 100 });
-            Console.WriteLine($"ctx_expand: {(!ctxExpandResult.IsError ? "OK" : $"FAIL (error={ctxExpandResult.ErrorCode})")}");
+            if (ctxExpandResult.IsError)
+            {
+                Console.Error.WriteLine($"FAIL: ctx_expand (error={ctxExpandResult.ErrorCode})");
+                allSucceeded = false;
+            }
+            else
+                Console.WriteLine("ctx_expand: OK");
 
             var memoryRecallResult = await InvokeSafeAsync(invoker, hostContext,
                 "memory_recall", new BuildAgentMemoryPackInput { MaximumCount = 10, CharacterBudget = 1000 });
-            Console.WriteLine($"memory_recall: {(!memoryRecallResult.IsError ? "OK" : $"FAIL (error={memoryRecallResult.ErrorCode})")}");
+            if (memoryRecallResult.IsError)
+            {
+                Console.Error.WriteLine($"FAIL: memory_recall (error={memoryRecallResult.ErrorCode})");
+                allSucceeded = false;
+            }
+            else
+                Console.WriteLine("memory_recall: OK");
 
             var memoryExpandResult = await InvokeSafeAsync(invoker, hostContext,
                 "memory_source_expand", new ExpandAgentMemorySourceInput { GrantId = "test-grant", MaximumCharacters = 100 });
-            Console.WriteLine($"memory_source_expand: {(!memoryExpandResult.IsError ? "OK" : $"FAIL (error={memoryExpandResult.ErrorCode})")}");
+            if (memoryExpandResult.IsError)
+            {
+                Console.Error.WriteLine($"FAIL: memory_source_expand (error={memoryExpandResult.ErrorCode})");
+                allSucceeded = false;
+            }
+            else
+                Console.WriteLine("memory_source_expand: OK");
+
+            if (!allSucceeded)
+            {
+                Console.Error.WriteLine("AOT_FIXTURE_FAILED");
+                return 1;
+            }
 
             Console.WriteLine("MCP_MEMORY_NATIVEAOT_PIPELINE_OK");
             return 0;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            Console.Error.WriteLine("UNHANDLED EXCEPTION IN AOT FIXTURE:");
+            Console.Error.WriteLine(ex.ToString());
             return 1;
         }
     }

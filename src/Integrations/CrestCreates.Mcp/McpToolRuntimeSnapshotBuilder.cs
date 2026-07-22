@@ -152,7 +152,11 @@ public sealed class McpToolRuntimeSnapshotBuilder
                 ContractHash(tool),
                 ContractHash(capability),
                 inputSchema is null ? null : ContractHash(inputSchema),
-                outputSchema is null ? null : ContractHash(outputSchema)));
+                outputSchema is null ? null : ContractHash(outputSchema))
+            {
+                InputSchemaClosure = inputClosure,
+                OutputSchemaClosure = outputClosure
+            });
         }
 
         try

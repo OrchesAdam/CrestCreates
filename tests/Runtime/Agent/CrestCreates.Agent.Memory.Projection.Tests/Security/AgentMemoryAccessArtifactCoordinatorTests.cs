@@ -112,6 +112,8 @@ public class AgentMemoryAccessArtifactCoordinatorTests
             ResourceId = "res1",
             Principal = principal,
             ScopeFingerprint = scopeFingerprint,
+            RequiredDescriptorRefs = Array.Empty<DescriptorRef>(),
+            IsUnscoped = true,
             IssuingOperationId = origin.OperationId,
             IssuedAt = now,
             ExpiresAt = now.AddMinutes(30)
@@ -149,6 +151,8 @@ public class AgentMemoryAccessArtifactCoordinatorTests
             ResourceId = "res2",
             Principal = principal,
             ScopeFingerprint = scopeFingerprint,
+            RequiredDescriptorRefs = Array.Empty<DescriptorRef>(),
+            IsUnscoped = true,
             IssuingOperationId = origin.OperationId,
             IssuedAt = now,
             ExpiresAt = now.AddMinutes(30)
@@ -238,6 +242,8 @@ public class AgentMemoryAccessArtifactCoordinatorTests
             ResourceId = "res1",
             Principal = principal,
             ScopeFingerprint = scopeFingerprint,
+            RequiredDescriptorRefs = Array.Empty<DescriptorRef>(),
+            IsUnscoped = true,
             IssuingOperationId = origin.OperationId,
             IssuedAt = now,
             ExpiresAt = now // ExpiresAt <= IssuedAt — invalid
@@ -273,6 +279,8 @@ public class AgentMemoryAccessArtifactCoordinatorTests
             ResourceId = "res3",
             Principal = principal,
             ScopeFingerprint = scopeFingerprint,
+            RequiredDescriptorRefs = Array.Empty<DescriptorRef>(),
+            IsUnscoped = true,
             IssuingOperationId = origin.OperationId,
             IssuedAt = now,
             ExpiresAt = now.AddMinutes(30)
@@ -341,6 +349,8 @@ public class AgentMemoryAccessArtifactCoordinatorTests
                 HandleId = "h-selfcomp-1", ResourceKind = AgentMemoryResourceKind.Memory,
                 ResourceId = "res-1", Principal = principal,
                 ScopeFingerprint = scopeFingerprint,
+                RequiredDescriptorRefs = Array.Empty<DescriptorRef>(),
+                IsUnscoped = true,
                 IssuingOperationId = origin.OperationId,
                 IssuedAt = TimeProvider.System.GetUtcNow(),
                 ExpiresAt = TimeProvider.System.GetUtcNow().AddMinutes(30)
@@ -369,5 +379,94 @@ public class AgentMemoryAccessArtifactCoordinatorTests
         revokedHandle.Should().NotBeNull();
         revokedHandle!.State.Should().Be(AgentMemorySecurityArtifactState.Revoked,
             "self-compensation must revoke created handles");
+    }
+
+    [Fact]
+    public async Task Coordinator_HandleRefsNotSubsetOfScope_Rejected()
+    {
+        var timeProvider = TimeProvider.System;
+        var batchStore = new AgentMemoryAccessArtifactBatchStore();
+        var handleStore = new AgentMemoryAccessHandleStore(timeProvider);
+        var grantStore = new AgentMemoryAccessGrantStore(timeProvider);
+        var lifetimePolicy = new DefaultAgentMemoryArtifactLifetimePolicy(new AgentMemoryProjectionSecurityOptions());
+        var coordinator = new AgentMemoryAccessArtifactCoordinator(
+            handleStore, grantStore, batchStore, lifetimePolicy, timeProvider, MakeOptions());
+
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var now = timeProvider.GetUtcNow();
+
+        // Scope only allows descriptor "ns/visible1"
+        var scope = MakeScope() with
+        {
+            VisibleDescriptorRefs = new[] { new DescriptorRef("ns", "visible1") }
+        };
+        var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
+
+        // Handle has RequiredDescriptorRefs containing a ref NOT in scope
+        var handle = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "h-hidden-ref",
+            ResourceKind = AgentMemoryResourceKind.Memory,
+            ResourceId = "res-hidden",
+            Principal = principal,
+            ScopeFingerprint = scopeFingerprint,
+            RequiredDescriptorRefs = new DescriptorRef[]
+            {
+                new("ns", "visible1", 1),
+                new("ns", "secret1", 1) // NOT in scope.VisibleDescriptorRefs
+            },
+            IssuingOperationId = origin.OperationId,
+            IssuedAt = now,
+            ExpiresAt = now.AddMinutes(30)
+        };
+
+        var act = async () => await coordinator.PrepareAsync(
+            principal, origin, scope, "test", 0, [handle], []);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*subset*");
+    }
+
+    [Fact]
+    public async Task Coordinator_HandleIsUnscopedInconsistent_Rejected()
+    {
+        var timeProvider = TimeProvider.System;
+        var batchStore = new AgentMemoryAccessArtifactBatchStore();
+        var handleStore = new AgentMemoryAccessHandleStore(timeProvider);
+        var grantStore = new AgentMemoryAccessGrantStore(timeProvider);
+        var lifetimePolicy = new DefaultAgentMemoryArtifactLifetimePolicy(new AgentMemoryProjectionSecurityOptions());
+        var coordinator = new AgentMemoryAccessArtifactCoordinator(
+            handleStore, grantStore, batchStore, lifetimePolicy, timeProvider, MakeOptions());
+
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope() with
+        {
+            VisibleDescriptorRefs = new[] { new DescriptorRef("ns", "visible1", 1) }
+        };
+        var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
+        var now = timeProvider.GetUtcNow();
+
+        // IsUnscoped = true but RequiredDescriptorRefs.Count > 0 — inconsistent
+        var handle = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "h-unscoped-inconsistent",
+            ResourceKind = AgentMemoryResourceKind.Memory,
+            ResourceId = "res-1",
+            Principal = principal,
+            ScopeFingerprint = scopeFingerprint,
+            RequiredDescriptorRefs = new DescriptorRef[] { new("ns", "visible1", 1) },
+            IsUnscoped = true, // Inconsistent: has RequiredDescriptorRefs but claims unscoped
+            IssuingOperationId = origin.OperationId,
+            IssuedAt = now,
+            ExpiresAt = now.AddMinutes(30)
+        };
+
+        var act = async () => await coordinator.PrepareAsync(
+            principal, origin, scope, "test", 0, [handle], []);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*IsUnscoped*");
     }
 }

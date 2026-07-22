@@ -1,3 +1,4 @@
+using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.Tools;
@@ -74,6 +75,7 @@ public class CrossInterfaceCredentialVisibilityTests
                 It.IsAny<AgentMemoryResourceKind>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
+                It.IsAny<AgentContextSourceRef?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(closure);
         return mock.Object;

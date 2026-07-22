@@ -42,6 +42,7 @@ public static class ProjectionSecurityServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentMemoryResourceClosureProvider, ContextResourceClosureProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentMemoryResourceClosureProvider, ConversationHistoryResourceClosureProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentMemoryResourceClosureProvider, TaskHistoryResourceClosureProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentMemoryResourceClosureProvider, TaskEventResourceClosureProvider>());
 
         return services;
     }

@@ -81,11 +81,14 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
             && !string.Equals(existingPlan, batchKey.ArtifactPlanHash.Value, StringComparison.Ordinal))
             throw new InvalidOperationException("Security artifact batch plan conflicts with an existing preparation.");
 
-        foreach (var grant in grants)
+        // Per-resource quota check — group by resource key to handle duplicates within batch
+        var incomingByResource = grants
+            .GroupBy(g => MakeResourceKey(g))
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        foreach (var (resourceKey, incomingCount) in incomingByResource)
         {
-            var resourceKey = $"{grant.SourceRef.SourceKind}:{grant.SourceRef.SourceId}:{grant.ScopeFingerprint}";
             var active = _perResourceCount.GetValueOrDefault(resourceKey, 0);
-            if (active + 1 > maxActivePerResource)
+            if (active + incomingCount > maxActivePerResource)
                 throw new InvalidOperationException("Active source grant quota is exhausted.");
         }
 
@@ -101,8 +104,7 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
             grantIds.Add(grant.GrantId);
             _grantToBatch[grant.GrantId] = key;
             _grantToBindingHash[grant.GrantId] = bindingHash;
-            var resourceKey = $"{grant.SourceRef.SourceKind}:{grant.SourceRef.SourceId}:{grant.ScopeFingerprint}";
-            _perResourceCount.AddOrUpdate(resourceKey, 1, (_, c) => c + 1);
+            _perResourceCount.AddOrUpdate(MakeResourceKey(grant), 1, (_, c) => c + 1);
         }
 
         _batchIndex[key] = grantIds;
@@ -151,8 +153,7 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
             _grants[grantId] = grant with { State = AgentMemorySecurityArtifactState.Revoked };
 
             // Decrement per-resource count
-            var resourceKey = $"{grant.SourceRef.SourceKind}:{grant.SourceRef.SourceId}:{grant.ScopeFingerprint}";
-            _perResourceCount.AddOrUpdate(resourceKey, 0, (_, c) => Math.Max(0, c - 1));
+            _perResourceCount.AddOrUpdate(MakeResourceKey(grant), 0, (_, c) => Math.Max(0, c - 1));
 
             // Decrement per-operation count using stored binding hash
             if (_grantToBindingHash.TryRemove(grantId, out var bindingHash))
@@ -184,4 +185,7 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
             _stateLock.Release();
         }
     }
+
+    private static string MakeResourceKey(AgentMemoryAccessSourceGrant grant)
+        => $"{grant.SourceRef.SourceKind}:{grant.SourceRef.SourceId}:{grant.ScopeFingerprint}";
 }

@@ -10,7 +10,8 @@ public enum AgentMemoryResourceKind
     Candidate = 2,
     Memory = 3,
     ConversationHistory = 4,
-    TaskHistory = 5
+    TaskHistory = 5,
+    TaskEvent = 6
 }
 
 public enum AgentMemorySecurityArtifactState

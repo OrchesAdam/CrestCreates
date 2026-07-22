@@ -265,37 +265,47 @@ internal sealed class AgentMemoryAccessArtifactCoordinator : IAgentMemoryAccessA
             if (handle.RequiredDescriptorRefs.Any(item => item.Version is not > 0))
                 throw new InvalidOperationException(
                     $"Handle {handle.HandleId}: RequiredDescriptorRefs must all have Version > 0.");
+
+            // 7. Handle RequiredDescriptorRefs must be subset of scope.VisibleDescriptorRefs
+            if (!IsSubsetOf(handle.RequiredDescriptorRefs, scope.VisibleDescriptorRefs))
+                throw new InvalidOperationException(
+                    $"Handle {handle.HandleId}: RequiredDescriptorRefs are not a subset of scope VisibleDescriptorRefs.");
+
+            // 8. Handle IsUnscoped == (RequiredDescriptorRefs.Count == 0) — consistency check
+            if (handle.IsUnscoped != (handle.RequiredDescriptorRefs.Count == 0))
+                throw new InvalidOperationException(
+                    $"Handle {handle.HandleId}: IsUnscoped flag is inconsistent with RequiredDescriptorRefs count.");
         }
 
-        // Grant validations (7-16)
+        // Grant validations (9-18)
         foreach (var grant in grants)
         {
-            // 7. Grant Principal must equal calling principal
+            // 9. Grant Principal must equal calling principal
             if (grant.Principal != principal)
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: Principal does not match the calling principal.");
 
-            // 8. Grant ScopeFingerprint must match computed fingerprint
+            // 10. Grant ScopeFingerprint must match computed fingerprint
             if (!string.Equals(grant.ScopeFingerprint, scopeFingerprint, StringComparison.Ordinal))
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: ScopeFingerprint does not match the computed scope fingerprint.");
 
-            // 9. Grant IssuingOperationId must equal origin.OperationId
+            // 11. Grant IssuingOperationId must equal origin.OperationId
             if (!string.Equals(grant.IssuingOperationId, origin.OperationId, StringComparison.Ordinal))
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: IssuingOperationId does not match origin OperationId.");
 
-            // 10. Grant SourceRef.TenantId == principal.TenantId
+            // 12. Grant SourceRef.TenantId == principal.TenantId
             if (!string.Equals(grant.SourceRef.TenantId, principal.TenantId, StringComparison.Ordinal))
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: SourceRef TenantId does not match principal TenantId.");
 
-            // 11. Grant ExpiresAt > IssuedAt
+            // 13. Grant ExpiresAt > IssuedAt
             if (grant.ExpiresAt <= grant.IssuedAt)
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: ExpiresAt must be after IssuedAt.");
 
-            // 12. Grant RequiredDescriptorRefs and SourceRef.DescriptorRefs — all must have Version > 0
+            // 14. Grant RequiredDescriptorRefs and SourceRef.DescriptorRefs — all must have Version > 0
             if (grant.RequiredDescriptorRefs.Any(item => item.Version is not > 0))
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: RequiredDescriptorRefs must all have Version > 0.");
@@ -303,28 +313,28 @@ internal sealed class AgentMemoryAccessArtifactCoordinator : IAgentMemoryAccessA
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: SourceRef.DescriptorRefs must all have Version > 0.");
 
-            // 13. Grant RequiredDescriptorRefs must be subset of scope.VisibleDescriptorRefs
+            // 15. Grant RequiredDescriptorRefs must be subset of scope.VisibleDescriptorRefs
             if (!IsSubsetOf(grant.RequiredDescriptorRefs, scope.VisibleDescriptorRefs))
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: RequiredDescriptorRefs are not a subset of scope VisibleDescriptorRefs.");
 
-            // 14. Grant SourceRef.DescriptorRefs must be subset of grant.RequiredDescriptorRefs
+            // 16. Grant SourceRef.DescriptorRefs must be subset of grant.RequiredDescriptorRefs
             if (!IsSubsetOf(grant.SourceRef.DescriptorRefs, grant.RequiredDescriptorRefs))
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: SourceRef.DescriptorRefs are not a subset of RequiredDescriptorRefs.");
 
-            // 15. Grant IsUnscoped == (RequiredDescriptorRefs.Count == 0) — consistency check
+            // 17. Grant IsUnscoped == (RequiredDescriptorRefs.Count == 0) — consistency check
             if (grant.IsUnscoped != (grant.RequiredDescriptorRefs.Count == 0))
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: IsUnscoped flag is inconsistent with RequiredDescriptorRefs count.");
 
-            // 16. If grant.IsUnscoped && !scope.AllowUnscopedMemory — reject unscoped grant in scoped context
+            // 18. If grant.IsUnscoped && !scope.AllowUnscopedMemory — reject unscoped grant in scoped context
             if (grant.IsUnscoped && !scope.AllowUnscopedMemory)
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: Unscoped grant not allowed when scope prohibits unscoped memory.");
         }
 
-        // TrustedHostOperation specific validations (17-23)
+        // TrustedHostOperation specific validations (19-25)
         if (origin.Kind == AgentMemoryArtifactOriginKind.TrustedHostOperation)
         {
             ValidateTrustedHostOperation(principal, origin, scopeFingerprint, handles, grants);
@@ -366,38 +376,39 @@ internal sealed class AgentMemoryAccessArtifactCoordinator : IAgentMemoryAccessA
                 $"Unsupported handle ResourceKind for TrustedHostOperation: {resourceKind}")
         };
 
-        // Handle validations specific to TrustedHostOperation (17-20)
+        // Handle validations specific to TrustedHostOperation (19-22)
         foreach (var handle in handles)
         {
-            // 17. Handle ResourceKind must match expected kind (already verified — single kind for batch)
-            // 18. Handle ResourceId must match (already verified)
+            // 19. Handle ResourceKind must match expected kind (already verified — single kind for batch)
+            // 20. Handle ResourceId must match (already verified)
 
-            // 19. Handle RequiredDescriptorRefs.Count == 0 — host handles are unscoped
+            // 21. Handle RequiredDescriptorRefs.Count == 0 — host handles are unscoped
             if (handle.RequiredDescriptorRefs.Count != 0)
                 throw new InvalidOperationException(
                     $"Handle {handle.HandleId}: TrustedHostOperation handles must have zero RequiredDescriptorRefs (are unscoped).");
 
-            // 20. Handle IsUnscoped == false — host handles have resource binding
-            if (handle.IsUnscoped)
+            // 22. Handle IsUnscoped must be true — host handles have no descriptor closure
+            // (existence-constrained, not descriptor-constrained; IsUnscoped == (RequiredDescriptorRefs.Count == 0) is consistent)
+            if (!handle.IsUnscoped)
                 throw new InvalidOperationException(
-                    $"Handle {handle.HandleId}: TrustedHostOperation handles must have IsUnscoped=false (have resource binding).");
+                    $"Handle {handle.HandleId}: TrustedHostOperation handles must have IsUnscoped=true (existence-constrained, no descriptor closure).");
         }
 
-        // Grant validations specific to TrustedHostOperation (21-23)
+        // Grant validations specific to TrustedHostOperation (23-25)
         foreach (var grant in grants)
         {
-            // 21. Grant SourceRef.SourceKind must match expected kind
+            // 23. Grant SourceRef.SourceKind must match expected kind
             if (grant.SourceRef.SourceKind != expectedGrantSourceKind)
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: SourceRef.SourceKind {grant.SourceRef.SourceKind} does not match expected {expectedGrantSourceKind} for handle ResourceKind {resourceKind}.");
 
-            // 22. Grant SourceRef.SourceId must match the common handle ResourceId
+            // 24. Grant SourceRef.SourceId must match the common handle ResourceId
             if (!string.Equals(grant.SourceRef.SourceId, resourceId, StringComparison.Ordinal))
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: SourceRef.SourceId does not match the common handle ResourceId '{resourceId}'.");
         }
 
-        // 23. Validate host operation fingerprint canonical hash profile
+        // 25. Validate host operation fingerprint canonical hash profile
         ValidateHostFingerprint(origin.BindingHash);
     }
 

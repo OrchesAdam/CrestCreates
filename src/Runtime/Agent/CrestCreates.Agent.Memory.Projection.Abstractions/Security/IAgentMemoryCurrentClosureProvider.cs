@@ -1,3 +1,4 @@
+using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
 
@@ -13,6 +14,7 @@ public interface IAgentMemoryCurrentClosureProvider
         AgentMemoryResourceKind resourceKind,
         string tenantId,
         string resourceId,
+        AgentContextSourceRef? sourceRef = null,
         CancellationToken cancellationToken = default);
 }
 

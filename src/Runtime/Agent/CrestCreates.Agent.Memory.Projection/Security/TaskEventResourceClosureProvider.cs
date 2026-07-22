@@ -5,17 +5,17 @@ using CrestCreates.Metadata.Abstractions;
 
 namespace CrestCreates.Agent.Memory.Projection.Security;
 
-internal sealed class TaskHistoryResourceClosureProvider : IAgentMemoryResourceClosureProvider
+internal sealed class TaskEventResourceClosureProvider : IAgentMemoryResourceClosureProvider
 {
     private readonly IAgentTaskHistoryStore _store;
 
-    public TaskHistoryResourceClosureProvider(
+    public TaskEventResourceClosureProvider(
         IAgentTaskHistoryStore store)
     {
         _store = store;
     }
 
-    public string ResourceKind => AgentMemoryResourceKind.TaskHistory.ToString();
+    public string ResourceKind => AgentMemoryResourceKind.TaskEvent.ToString();
 
     public async ValueTask<AgentMemoryCurrentClosure?> GetCurrentClosureAsync(
         string tenantId,
@@ -23,12 +23,19 @@ internal sealed class TaskHistoryResourceClosureProvider : IAgentMemoryResourceC
         AgentContextSourceRef? sourceRef = null,
         CancellationToken cancellationToken = default)
     {
+        // resourceId is the TaskId that owns the event(s).
         var task = await _store.GetTaskAsync(tenantId, resourceId, cancellationToken);
         if (task is null) return null;
 
+        var descriptorRefs = task.Events
+            .SelectMany(e => e.SourceRefs)
+            .SelectMany(sr => sr.DescriptorRefs)
+            .Distinct()
+            .ToArray();
+
         return new AgentMemoryCurrentClosure
         {
-            CurrentDescriptorRefs = Array.Empty<DescriptorRef>(),
+            CurrentDescriptorRefs = descriptorRefs,
             TenantId = task.TenantId
         };
     }

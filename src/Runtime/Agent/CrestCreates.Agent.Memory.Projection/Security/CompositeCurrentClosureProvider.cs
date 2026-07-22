@@ -1,3 +1,4 @@
+using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.Tools;
 
@@ -23,11 +24,12 @@ internal sealed class CompositeCurrentClosureProvider : IAgentMemoryCurrentClosu
         AgentMemoryResourceKind resourceKind,
         string tenantId,
         string resourceId,
-        CancellationToken ct)
+        AgentContextSourceRef? sourceRef = null,
+        CancellationToken ct = default)
     {
         if (!_providers.TryGetValue(resourceKind.ToString(), out var provider))
             return ValueTask.FromResult<AgentMemoryCurrentClosure?>(null);
 
-        return provider.GetCurrentClosureAsync(tenantId, resourceId, ct);
+        return provider.GetCurrentClosureAsync(tenantId, resourceId, sourceRef, ct);
     }
 }

@@ -87,12 +87,14 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
             && !string.Equals(existingPlan, batchKey.ArtifactPlanHash.Value, StringComparison.Ordinal))
             throw new InvalidOperationException("Security artifact batch plan conflicts with an existing preparation.");
 
-        // Per-resource quota check
-        foreach (var handle in handles)
+        // Per-resource quota check — group by resource key to handle duplicates within batch
+        var incomingByResource = handles
+            .GroupBy(h => MakeResourceKey(h))
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        foreach (var (resourceKey, incomingCount) in incomingByResource)
         {
-            var resourceKey = MakeResourceKey(handle);
             var active = _perResourceCount.GetValueOrDefault(resourceKey, 0);
-            if (active + 1 > maxActivePerResource)
+            if (active + incomingCount > maxActivePerResource)
                 throw new InvalidOperationException("Active resource handle quota is exhausted.");
         }
 

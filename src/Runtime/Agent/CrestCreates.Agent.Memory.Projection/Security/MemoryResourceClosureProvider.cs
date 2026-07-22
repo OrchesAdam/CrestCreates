@@ -20,6 +20,7 @@ internal sealed class MemoryResourceClosureProvider : IAgentMemoryResourceClosur
     public async ValueTask<AgentMemoryCurrentClosure?> GetCurrentClosureAsync(
         string tenantId,
         string resourceId,
+        AgentContextSourceRef? sourceRef = null,
         CancellationToken cancellationToken = default)
     {
         var memory = await _store.GetMemoryAsync(tenantId, resourceId, cancellationToken);

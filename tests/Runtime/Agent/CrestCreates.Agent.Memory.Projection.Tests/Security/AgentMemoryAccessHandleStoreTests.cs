@@ -181,4 +181,37 @@ public class AgentMemoryAccessHandleStoreTests
         var act = async () => await store2.TryIssueBatchAsync(ba2, [MakeHandle("ha2")], 64, 1);
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
+
+    [Fact]
+    public async Task SameBatch_DuplicateResource_ExceedsQuota()
+    {
+        // Batch with 2 handles for same resource, maxActivePerResource=1 → throws
+        var store = new AgentMemoryAccessHandleStore(TimeProvider.System);
+        var batchKey = MakeBatchKey();
+        var h1 = MakeHandle("h1") with { ResourceId = "shared-resource" };
+        var h2 = MakeHandle("h2") with { ResourceId = "shared-resource" };
+
+        var act = async () => await store.TryIssueBatchAsync(batchKey, [h1, h2], maxActivePerResource: 1, maxActivePerOperation: 128);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task SameBatch_DuplicateResource_WithinQuota()
+    {
+        // Batch with 2 handles for same resource, maxActivePerResource=2 → succeeds
+        var store = new AgentMemoryAccessHandleStore(TimeProvider.System);
+        var batchKey = MakeBatchKey();
+        var h1 = MakeHandle("h1") with { ResourceId = "shared-resource" };
+        var h2 = MakeHandle("h2") with { ResourceId = "shared-resource" };
+
+        var result = await store.TryIssueBatchAsync(batchKey, [h1, h2], maxActivePerResource: 2, maxActivePerOperation: 128);
+        result.ReusedExisting.Should().BeFalse();
+        result.Handles.Should().HaveCount(2);
+
+        // Both handles should be retrievable
+        var r1 = await store.GetAsync("h1");
+        var r2 = await store.GetAsync("h2");
+        r1.Should().NotBeNull();
+        r2.Should().NotBeNull();
+    }
 }

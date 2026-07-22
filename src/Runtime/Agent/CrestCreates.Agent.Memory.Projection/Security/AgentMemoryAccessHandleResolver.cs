@@ -70,7 +70,8 @@ internal sealed class AgentMemoryAccessHandleResolver : IAgentMemoryAccessHandle
         // Live closure revalidation: resource must still exist with compatible descriptors
         // Use explicit principal tenant, not ambient context
         var currentClosure = await _closureProvider.GetCurrentClosureAsync(
-            handle.ResourceKind, principal.TenantId, handle.ResourceId, cancellationToken);
+            handle.ResourceKind, principal.TenantId, handle.ResourceId,
+            sourceRef: null, cancellationToken: cancellationToken);
         if (currentClosure is null) return null; // Resource deleted
 
         // Resource tenant must match principal tenant
@@ -80,7 +81,8 @@ internal sealed class AgentMemoryAccessHandleResolver : IAgentMemoryAccessHandle
         // Exception: ConversationHistory and TaskHistory are raw history resources
         // that don't have descriptor closures — only verify existence and tenant.
         if (handle.ResourceKind is AgentMemoryResourceKind.ConversationHistory
-            or AgentMemoryResourceKind.TaskHistory)
+            or AgentMemoryResourceKind.TaskHistory
+            or AgentMemoryResourceKind.TaskEvent)
         {
             // History resources: closure check is existence + tenant only
             // (already verified above: currentClosure != null && tenantId match)

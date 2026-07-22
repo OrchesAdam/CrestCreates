@@ -140,7 +140,7 @@ public sealed class McpToolInvoker : IMcpToolInvoker
                 "MCP_TOOL_MISSING_OUTPUT",
                 "The tool produced an invalid server result.");
 
-        var validation = _schemaValidator.Validate(entry.OutputSchema, serialized.Value, rejectUnknownProperties: true);
+        var validation = _schemaValidator.Validate(entry.OutputSchema, serialized.Value, entry.OutputSchemaClosure ?? Array.Empty<SchemaDescriptor>(), rejectUnknownProperties: true);
         if (!validation.IsValid)
             throw new McpToolContractViolationException(
                 "MCP_TOOL_OUTPUT_SCHEMA_VIOLATION",

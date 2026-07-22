@@ -20,6 +20,7 @@ internal sealed class CandidateResourceClosureProvider : IAgentMemoryResourceClo
     public async ValueTask<AgentMemoryCurrentClosure?> GetCurrentClosureAsync(
         string tenantId,
         string resourceId,
+        AgentContextSourceRef? sourceRef = null,
         CancellationToken cancellationToken = default)
     {
         var candidate = await _store.GetCandidateAsync(tenantId, resourceId, cancellationToken);
