@@ -8,8 +8,8 @@ namespace CrestCreates.Agent.Memory.Projection.Abstractions;
 /// </summary>
 public sealed record RecallAgentContextInput
 {
-    public required string ContextHandle { get; init; }
-    public required int MaximumCharacters { get; init; }
+    public string ContextHandle { get; init; } = string.Empty;
+    public int MaximumCharacters { get; init; }
 }
 
 /// <summary>

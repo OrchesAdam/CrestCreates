@@ -60,6 +60,18 @@ public sealed class McpToolRuntimeSnapshotBuilder
                 "MCP dependency registries must be built before the runtime snapshot.");
         }
         var serializerOptions = new JsonSerializerOptions(_json.SerializerOptions);
+        // JsonSerializerOptions copy construction does not reliably preserve a
+        // standalone TypeInfoResolver once the resolver chain is accessed. Keep
+        // the application-owned source-generated context in the composed chain
+        // before appending contributor contexts.
+        if (_json.SerializerOptions.TypeInfoResolver is { } applicationResolver
+            && !serializerOptions.TypeInfoResolverChain.Contains(applicationResolver)
+            && (serializerOptions.TypeInfoResolverChain.Count == 0 || applicationResolver is JsonSerializerContext))
+        {
+            if (serializerOptions.TypeInfoResolverChain.Count == 0)
+                serializerOptions.TypeInfoResolver = applicationResolver;
+            serializerOptions.TypeInfoResolverChain.Insert(0, applicationResolver);
+        }
 
         // 1. Validate JSON options constraints (non-resolver rules) upfront.
         ValidateInputConstraintOptions(serializerOptions);
@@ -208,7 +220,21 @@ public sealed class McpToolRuntimeSnapshotBuilder
             return null;
         try
         {
-            return options.GetTypeInfo(type);
+            var typeInfo = options.GetTypeInfo(type);
+            if (typeInfo is not null)
+                return typeInfo;
+
+            // Source-generated contexts can expose their metadata through the
+            // context instance even when a copied options resolver chain does
+            // not return it through GetTypeInfo(Type).
+            foreach (var resolver in options.TypeInfoResolverChain.OfType<JsonSerializerContext>())
+            {
+                typeInfo = resolver.GetTypeInfo(type);
+                if (typeInfo is not null)
+                    return typeInfo;
+            }
+
+            return null;
         }
         catch (NotSupportedException)
         {

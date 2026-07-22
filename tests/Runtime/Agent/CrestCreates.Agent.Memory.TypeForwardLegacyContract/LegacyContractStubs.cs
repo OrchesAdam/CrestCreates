@@ -126,15 +126,15 @@ public sealed record BuildAgentMemoryPackInput
     public IReadOnlyList<string> MemoryHandles { get; init; } = Array.Empty<string>();
     public IReadOnlyList<AgentMemoryToolKind> Kinds { get; init; } = Array.Empty<AgentMemoryToolKind>();
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
-    public required int MaximumCount { get; init; }
-    public required int CharacterBudget { get; init; }
+    public int MaximumCount { get; init; }
+    public int CharacterBudget { get; init; }
     public AgentMemoryToolConfidence MinimumConfidence { get; init; } = AgentMemoryToolConfidence.Unspecified;
 }
 
 public sealed record ExpandAgentMemorySourceInput
 {
-    public required string GrantId { get; init; }
-    public required int MaximumCharacters { get; init; }
+    public string GrantId { get; init; } = string.Empty;
+    public int MaximumCharacters { get; init; }
 }
 
 public sealed record BuildAgentMemoryPackResult
