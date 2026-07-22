@@ -6,6 +6,9 @@ using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.CanonicalHashing;
+using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Projection.DescriptorProviders;
+using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Authorization.Abstractions;
@@ -31,6 +34,8 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
     [Fact]
     public async Task Memory_tools_execute_the_generated_pipeline_end_to_end()
     {
+        // Force-load Projection assembly so its ModuleInitializer registers shared read schemas
+        _ = typeof(AgentMemoryProjectionSchemaProviders).IsPublic;
         var schemas = new SchemaRegistry(new RegistryValidationEngine<SchemaDescriptor>([]));
         schemas.Build(DescriptorProviderRegistry.GetProviders<SchemaDescriptor>());
         var execution = new FixtureExecutionContextAccessor();
@@ -157,19 +162,30 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
 
     private static async Task<string> IssueHandleAsync(IServiceProvider services, AgentMemoryToolPrincipal principal, AgentMemoryResourceKind kind, string resourceId, string purpose)
     {
-        var scope = await services.GetRequiredService<IAgentMemoryToolAccessScopeProvider>().ResolveAsync(principal);
-        var now = DateTimeOffset.UtcNow;
-        var handle = new AgentMemoryResourceHandle
+        var newPrincipal = new AgentMemoryAccessPrincipal
         {
-            HandleId = "host-memory-handle", ResourceKind = kind, ResourceId = resourceId, Principal = principal,
-            ScopeFingerprint = "eac86eaf6789ce6e0d4b76d4457bfa33d4f980d1eab5d7ac6213b54abf0014bd",
-            IsUnscoped = true, IssuingInvocationId = "host", IssuedAt = now,
-            ExpiresAt = now.Add(scope.ResourceHandleLifetime), RequiredDescriptorRefs = []
+            TenantId = principal.TenantId, UserId = principal.UserId,
+            CallerKind = AgentMemoryCallerKind.AgentTool, CallerId = principal.AgentId,
+            SecurityContextId = principal.ExecutionId
         };
-        var result = await services.GetRequiredService<IAgentMemoryResourceHandleStore>().TryIssueBatchAsync(
-            new AgentMemorySecurityArtifactBatchKey { OriginKind = AgentMemorySecurityArtifactBatchOriginKind.TrustedHostOperation, OriginBindingHash = TestHash("host-origin"), ArtifactPurpose = purpose, PreparationOrdinal = 0, ArtifactPlanHash = TestHash(purpose) },
-            [handle], scope.MaxActiveResourceHandlesPerResource);
-        return result.Handles[0].HandleId;
+        var origin = new AgentMemoryArtifactOrigin
+        {
+            Kind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OperationId = "e2e-tool-invocation",
+            BindingHash = TestHash("e2e-tool-origin")
+        };
+        var scope = await services.GetRequiredService<IAgentMemoryAccessScopeProvider>().ResolveAsync(newPrincipal);
+        var now = DateTimeOffset.UtcNow;
+        var handle = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = Guid.NewGuid().ToString("N"), ResourceKind = kind, ResourceId = resourceId, Principal = newPrincipal,
+            ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope),
+            IsUnscoped = scope.AllowUnscopedMemory, IssuingOperationId = "e2e-tool-invocation", IssuedAt = now,
+            ExpiresAt = now.Add(scope.ResourceHandleLifetime), RequiredDescriptorRefs = scope.VisibleDescriptorRefs
+        };
+        var prepared = await services.GetRequiredService<IAgentMemoryAccessArtifactCoordinator>().PrepareAsync(
+            newPrincipal, origin, scope, purpose, 0, [handle], []);
+        return prepared.Handles!.Handles[0].HandleId;
     }
 
     private static CanonicalHash MemoryHash() => new()

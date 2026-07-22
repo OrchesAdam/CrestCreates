@@ -43,6 +43,9 @@ internal sealed class DefaultAgentMemoryContextHandleIssuer : IAgentMemoryContex
         var lifetime = _lifetimePolicy.GetHandleLifetime(principal, origin, scope, purpose);
 
         var handleId = Guid.NewGuid().ToString("N");
+        // TrustedHostOperation handles always have resource binding (IsUnscoped=false)
+        var isUnscoped = origin.Kind != AgentMemoryArtifactOriginKind.TrustedHostOperation
+            && scope.AllowUnscopedMemory;
         var handle = new AgentMemoryAccessResourceHandle
         {
             HandleId = handleId,
@@ -51,7 +54,7 @@ internal sealed class DefaultAgentMemoryContextHandleIssuer : IAgentMemoryContex
             Principal = principal,
             ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope),
             RequiredDescriptorRefs = scope.VisibleDescriptorRefs,
-            IsUnscoped = scope.AllowUnscopedMemory,
+            IsUnscoped = isUnscoped,
             IssuingOperationId = origin.OperationId,
             IssuedAt = now,
             ExpiresAt = now + lifetime,

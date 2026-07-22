@@ -64,14 +64,23 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
         if (grant.Principal.TenantId != scope.TenantId) return null;
 
         // Live closure revalidation for the source resource
-        var sourceKind = grant.SourceRef.SourceKind switch
+        AgentMemoryResourceKind sourceKind;
+        try
         {
-            AgentSourceKind.CompressedContextBlock => AgentMemoryResourceKind.Context,
-            AgentSourceKind.ConversationTurn => AgentMemoryResourceKind.ConversationHistory,
-            AgentSourceKind.TaskRecord => AgentMemoryResourceKind.TaskHistory,
-            AgentSourceKind.MemoryItem => AgentMemoryResourceKind.Memory,
-            _ => AgentMemoryResourceKind.Context
-        };
+            sourceKind = grant.SourceRef.SourceKind switch
+            {
+                AgentSourceKind.CompressedContextBlock => AgentMemoryResourceKind.Context,
+                AgentSourceKind.ConversationTurn => AgentMemoryResourceKind.ConversationHistory,
+                AgentSourceKind.TaskRecord => AgentMemoryResourceKind.TaskHistory,
+                AgentSourceKind.MemoryItem => AgentMemoryResourceKind.Memory,
+                _ => throw new InvalidOperationException($"Unknown source kind: {grant.SourceRef.SourceKind}")
+            };
+        }
+        catch (InvalidOperationException)
+        {
+            // Fail-closed: unknown source kind is rejected
+            return null;
+        }
         var currentClosure = await _closureProvider.GetCurrentClosureAsync(
             sourceKind, grant.SourceRef.SourceId, cancellationToken);
         if (currentClosure is null) return null;

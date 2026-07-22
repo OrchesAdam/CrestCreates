@@ -127,6 +127,11 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
             {
                 foreach (var sourceRef in memory.SourceRefs)
                 {
+                    // Cross-tenant SourceRef: skip — Coordinator would reject the grant anyway,
+                    // and including it would cause the entire PrepareAsync to fail, losing valid grants.
+                    if (!string.Equals(sourceRef.TenantId, principal.TenantId, StringComparison.Ordinal))
+                        continue;
+
                     var grantId = Guid.NewGuid().ToString("N");
                     grants.Add(new AgentMemoryAccessSourceGrant
                     {

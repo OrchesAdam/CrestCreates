@@ -52,9 +52,11 @@ internal sealed class AgentMemoryAccessArtifactBatchStore : IAgentMemoryAccessAr
         CancellationToken cancellationToken = default)
     {
         var key = batchKey.ToCanonicalKey();
-        var artifactIds = artifacts
+        // Match by logical identity (ResourceKind+ResourceId) not random ArtifactId,
+        // because retries generate new GUIDs that won't match stored entries.
+        var createdResourceKeys = artifacts
             .Where(a => a.Disposition == PreparedArtifactDisposition.CreatedByBatch)
-            .Select(a => a.ArtifactId)
+            .Select(a => $"{a.ResourceKind}:{a.ResourceId}")
             .ToHashSet(StringComparer.Ordinal);
 
         lock (_gate)
@@ -63,7 +65,7 @@ internal sealed class AgentMemoryAccessArtifactBatchStore : IAgentMemoryAccessAr
             {
                 var retained = existing.Where(a =>
                     a.Disposition == PreparedArtifactDisposition.ReusedExisting
-                    || !artifactIds.Contains(a.ArtifactId)).ToArray();
+                    || !createdResourceKeys.Contains($"{a.ResourceKind}:{a.ResourceId}")).ToArray();
                 _batches[key] = retained;
             }
         }

@@ -17,9 +17,11 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
     private readonly ConcurrentDictionary<string, AgentMemoryAccessResourceHandle> _handles = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, HashSet<string>> _batchIndex = new(StringComparer.Ordinal); // batchKey -> handleIds
     private readonly ConcurrentDictionary<string, string> _handleToBatch = new(StringComparer.Ordinal); // handleId -> batchKey
+    private readonly ConcurrentDictionary<string, string> _handleToBindingHash = new(StringComparer.Ordinal); // handleId -> originBindingHash value
     private readonly ConcurrentDictionary<string, int> _perResourceCount = new(StringComparer.Ordinal); // $"{ResourceKind}:{ResourceId}:{ScopeFingerprint}" -> active count
     private readonly ConcurrentDictionary<string, int> _perOperationCount = new(StringComparer.Ordinal); // originBindingHash -> active count
     private readonly ConcurrentDictionary<string, string> _identityPlans = new(StringComparer.Ordinal); // identityKey -> planHash
+    private readonly ConcurrentDictionary<string, string> _batchToIdentity = new(StringComparer.Ordinal); // batchCanonicalKey -> identityKey
     private readonly TimeProvider _timeProvider;
 
     public AgentMemoryAccessHandleStore(TimeProvider timeProvider)
@@ -91,11 +93,13 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
             _handles[handle.HandleId] = handle;
             handleIds.Add(handle.HandleId);
             _handleToBatch[handle.HandleId] = key;
+            _handleToBindingHash[handle.HandleId] = bindingHash;
             _perResourceCount.AddOrUpdate(MakeResourceKey(handle), 1, (_, c) => c + 1);
         }
 
         _batchIndex[key] = handleIds;
         _identityPlans[identity] = batchKey.ArtifactPlanHash.Value;
+        _batchToIdentity[key] = identity;
         _perOperationCount.AddOrUpdate(bindingHash, handles.Count, (_, c) => c + handles.Count);
 
         return ValueTask.FromResult(new AgentMemoryAccessHandleIssueResult
@@ -139,139 +143,32 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
         // Decrement per-resource count
         _perResourceCount.AddOrUpdate(MakeResourceKey(handle), 0, (_, c) => Math.Max(0, c - 1));
 
-        // Remove from batch index and identity plan
-        if (_handleToBatch.TryRemove(handleId, out var batchKey))
+        // Decrement per-operation count using stored binding hash
+        if (_handleToBindingHash.TryRemove(handleId, out var bindingHash))
         {
-            if (_batchIndex.TryGetValue(batchKey, out var batchIds))
+            _perOperationCount.AddOrUpdate(bindingHash, 0, (_, c) => Math.Max(0, c - 1));
+        }
+
+        // Remove from batch index and identity plan
+        if (_handleToBatch.TryRemove(handleId, out var batchCanonicalKey))
+        {
+            if (_batchIndex.TryGetValue(batchCanonicalKey, out var batchIds))
             {
                 batchIds.Remove(handleId);
                 if (batchIds.Count == 0)
                 {
-                    // Batch is now empty — remove batch entry and identity plan
-                    _batchIndex.TryRemove(batchKey, out _);
+                    _batchIndex.TryRemove(batchCanonicalKey, out _);
 
-                    // Reconstruct identity key from batch key components
-                    // The identity key is the batch key's ToIdentityKey()
-                    // We stored batchKey as ToCanonicalKey(), not ToIdentityKey()
-                    // So rebuild: parse batchKey and extract identity components
-                    // Fallback: scan identity plans and remove non-matching ones
-                    // Better: track identity key alongside batch
-                    RemoveIdentityPlanForBatch(batchKey);
+                    // Clean up identity plan using stored identity key
+                    if (_batchToIdentity.TryRemove(batchCanonicalKey, out var identityKey))
+                    {
+                        _identityPlans.TryRemove(identityKey, out _);
+                    }
                 }
             }
         }
 
-        // Decrement per-operation count
-        // The handle's IssuingOperationId is part of the origin binding
-        // Use the origin binding hash from the handle's stored context
-        // Since we don't store bindingHash per handle, iterate perOperationCount
-        // and decrement all — or track it per handle
-        // For simplicity, we use the handle's IssuingOperationId to derive the binding
-        // But we need the OriginBindingHash which is in the batchKey.
-        // Since we've already removed the handle from batchIndex, use the batchKey to
-        // get the binding hash from the OriginBindingHash
-        if (batchKey != null)
-        {
-            // Extract origin binding hash from batchKey-like format
-            // The batchKey contains OriginBindingHash field reference
-            // We need to match the binding hash used at issue time
-            // Since batchKey is the canonical key (ToCanonicalKey()), it starts with
-            // OriginKind|Segment(BindingHash)|...
-            // Parse out the binding hash value
-            DecrementPerOpFromBatchKey(batchKey);
-        }
-
         return ValueTask.CompletedTask;
-    }
-
-    private void RemoveIdentityPlanForBatch(string batchCanonicalKey)
-    {
-        // The batch canonical key is: OriginKind|Segment(BindingHash)|Segment(Purpose)|Ordinal|Segment(PlanHash)
-        // The identity key is:       OriginKind|Segment(BindingHash)|Segment(Purpose)|Ordinal
-        // Strip the last pipe-segment (the PlanHash segment)
-        var lastPipe = batchCanonicalKey.LastIndexOf('|');
-        if (lastPipe > 0)
-        {
-            // But actually the PlanHash segment has multiple | inside it (from Segment())
-            // We need to find the 5th pipe (OriginKind=1, Segments=4)
-            var pipes = new List<int>();
-            for (int i = 0; i < batchCanonicalKey.Length; i++)
-            {
-                if (batchCanonicalKey[i] == '|') pipes.Add(i);
-            }
-            // The identity key ends after the PreparationOrdinal (5th segment including OriginKind)
-            // Actually: OriginKind|Segment(BindingHash)|Segment(Purpose)|PreparationOrdinal|Segment(PlanHash)
-            // That's 4 pipes for identity, 5 pipes for canonical
-            // The 5th pipe is the last segment divider before PlanHash
-            // We need everything up to the 5th pipe
-            if (pipes.Count >= 5)
-            {
-                var identityKey = batchCanonicalKey.Substring(0, pipes[4]);
-                _identityPlans.TryRemove(identityKey, out _);
-            }
-            else if (pipes.Count >= 4)
-            {
-                // Edge case: PlanHash segment might not contain pipes itself
-                var identityKey = batchCanonicalKey.Substring(0, pipes[3]);
-                _identityPlans.TryRemove(identityKey, out _);
-            }
-        }
-    }
-
-    private void DecrementPerOpFromBatchKey(string batchCanonicalKey)
-    {
-        // Parse the batch key to find the origin binding hash
-        // Format: OriginKind|BindingHashSegment|PurposeSegment|Ordinal|PlanHashSegment
-        // The BindingHash is the second pipe-delimited segment
-        var firstPipe = batchCanonicalKey.IndexOf('|');
-        if (firstPipe < 0) return;
-
-        var afterOrigin = batchCanonicalKey.Substring(firstPipe + 1);
-        // The binding hash segment starts with a length prefix: "N:value:..."
-        // We need the raw value (everything up to the next top-level pipe that isn't inside a segment)
-        // Actually, each Segment is LengthPrefixed: "N:content" where N is the content length
-        // So we can parse: read number N, skip ':', read N chars, then the next char should be '|'
-        var colonIdx = afterOrigin.IndexOf(':');
-        if (colonIdx < 0) return;
-
-        var lengthStr = afterOrigin.Substring(0, colonIdx);
-        if (!int.TryParse(lengthStr, out var segmentLength)) return;
-
-        // Skip length + ':' + segment content
-        var skipTo = colonIdx + 1 + segmentLength;
-        if (skipTo + 1 >= afterOrigin.Length) return;
-
-        // The next char should be '|' (or end)
-        var afterBindingHash = afterOrigin.Substring(skipTo + 1); // skip the '|' after binding
-        // Now parse the purpose segment similarly
-        var purposeColon = afterBindingHash.IndexOf(':');
-        if (purposeColon < 0) return;
-        if (!int.TryParse(afterBindingHash.Substring(0, purposeColon), out var purposeLength)) return;
-
-        // Skip purpose segment content + '|'
-        var afterPurpose = afterBindingHash.Substring(purposeColon + 1 + purposeLength + 1);
-        // Now parse PreparationOrdinal
-        var ordinalPipe = afterPurpose.IndexOf('|');
-        if (ordinalPipe < 0)
-        {
-            // If no more pipes, the ordinal extends to end — shouldn't happen
-            return;
-        }
-
-        // We have: OriginKind|BindingHashSegment|PurposeSegment|Ordinal|PlanHashSegment
-        // So the binding hash is the second segment
-        // The binding hash value is what we use for perOperationCount
-        // We can extract just the binding hash value from the segment
-        // But we actually need the raw binding hash VALUE (everything between
-        // the first length: and the first | after the segment)
-
-        // Simpler approach: just decrement all perOperationCounts by scanning
-        // This is a revocation path (not hot), so scanning is acceptable
-        foreach (var key in _perOperationCount.Keys.ToArray())
-        {
-            _perOperationCount.AddOrUpdate(key, 0, (_, c) => Math.Max(0, c - 1));
-            break; // Only decrement once — we can't identify which binding
-        }
     }
 
     private static string MakeResourceKey(AgentMemoryAccessResourceHandle handle)

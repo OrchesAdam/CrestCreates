@@ -7,11 +7,14 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../CrestCreates.Agent.Memory.Projection.Abstractions/CrestCreates.Agent.Memory.Projection.Abstractions.csproj" />
+    <ProjectReference Include="../CrestCreates.Agent.Memory.Abstractions/CrestCreates.Agent.Memory.Abstractions.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
+    <ProjectReference Include="../../../Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="CrestCreates.Agent.Memory.Projection.Tests" />
     <InternalsVisibleTo Include="CrestCreates.Agent.Memory.ReadCore" />
     <InternalsVisibleTo Include="CrestCreates.Agent.Memory.ReadCore.Tests" />
+    <InternalsVisibleTo Include="CrestCreates.Agent.Memory.Tools.E2E.Tests" />
   </ItemGroup>
 </Project>

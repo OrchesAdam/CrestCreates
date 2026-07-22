@@ -13,9 +13,11 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
     private readonly ConcurrentDictionary<string, AgentMemoryAccessSourceGrant> _grants = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, HashSet<string>> _batchIndex = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _grantToBatch = new(StringComparer.Ordinal); // grantId -> batchKey
+    private readonly ConcurrentDictionary<string, string> _grantToBindingHash = new(StringComparer.Ordinal); // grantId -> originBindingHash value
     private readonly ConcurrentDictionary<string, int> _perResourceCount = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _perOperationCount = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _identityPlans = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _batchToIdentity = new(StringComparer.Ordinal); // batchCanonicalKey -> identityKey
     private readonly TimeProvider _timeProvider;
 
     public AgentMemoryAccessGrantStore(TimeProvider timeProvider)
@@ -82,12 +84,14 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
             _grants[grant.GrantId] = grant;
             grantIds.Add(grant.GrantId);
             _grantToBatch[grant.GrantId] = key;
+            _grantToBindingHash[grant.GrantId] = bindingHash;
             var resourceKey = $"{grant.SourceRef.SourceKind}:{grant.SourceRef.SourceId}:{grant.ScopeFingerprint}";
             _perResourceCount.AddOrUpdate(resourceKey, 1, (_, c) => c + 1);
         }
 
         _batchIndex[key] = grantIds;
         _identityPlans[identity] = batchKey.ArtifactPlanHash.Value;
+        _batchToIdentity[key] = identity;
         _perOperationCount.AddOrUpdate(bindingHash, grants.Count, (_, c) => c + grants.Count);
 
         return ValueTask.FromResult(new AgentMemoryAccessGrantIssueResult
@@ -131,50 +135,31 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
         var resourceKey = $"{grant.SourceRef.SourceKind}:{grant.SourceRef.SourceId}:{grant.ScopeFingerprint}";
         _perResourceCount.AddOrUpdate(resourceKey, 0, (_, c) => Math.Max(0, c - 1));
 
-        // Remove from batch index and identity plan
-        if (_grantToBatch.TryRemove(grantId, out var batchKey))
+        // Decrement per-operation count using stored binding hash
+        if (_grantToBindingHash.TryRemove(grantId, out var bindingHash))
         {
-            if (_batchIndex.TryGetValue(batchKey, out var batchIds))
+            _perOperationCount.AddOrUpdate(bindingHash, 0, (_, c) => Math.Max(0, c - 1));
+        }
+
+        // Remove from batch index and identity plan
+        if (_grantToBatch.TryRemove(grantId, out var batchCanonicalKey))
+        {
+            if (_batchIndex.TryGetValue(batchCanonicalKey, out var batchIds))
             {
                 batchIds.Remove(grantId);
                 if (batchIds.Count == 0)
                 {
-                    _batchIndex.TryRemove(batchKey, out _);
-                    RemoveIdentityPlanForBatch(batchKey);
+                    _batchIndex.TryRemove(batchCanonicalKey, out _);
+
+                    // Clean up identity plan using stored identity key
+                    if (_batchToIdentity.TryRemove(batchCanonicalKey, out var identityKey))
+                    {
+                        _identityPlans.TryRemove(identityKey, out _);
+                    }
                 }
             }
         }
 
-        // Decrement per-operation count (best-effort by batch key parsing)
-        if (batchKey != null)
-        {
-            DecrementPerOpCount();
-        }
-
         return ValueTask.CompletedTask;
-    }
-
-    private void RemoveIdentityPlanForBatch(string batchCanonicalKey)
-    {
-        var pipes = new System.Collections.Generic.List<int>();
-        for (int i = 0; i < batchCanonicalKey.Length; i++)
-        {
-            if (batchCanonicalKey[i] == '|') pipes.Add(i);
-        }
-        if (pipes.Count >= 4)
-        {
-            var identityKey = batchCanonicalKey.Substring(0, pipes[Math.Min(3, pipes.Count - 1)]);
-            _identityPlans.TryRemove(identityKey, out _);
-        }
-    }
-
-    private void DecrementPerOpCount()
-    {
-        // Best-effort: decrement a single per-operation counter
-        foreach (var key in _perOperationCount.Keys.ToArray())
-        {
-            _perOperationCount.AddOrUpdate(key, 0, (_, c) => Math.Max(0, c - 1));
-            break;
-        }
     }
 }

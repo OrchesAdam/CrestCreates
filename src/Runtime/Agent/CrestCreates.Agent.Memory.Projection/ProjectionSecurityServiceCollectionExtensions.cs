@@ -36,6 +36,13 @@ public static class ProjectionSecurityServiceCollectionExtensions
         services.TryAddSingleton<IAgentMemoryContextHandleIssuer, DefaultAgentMemoryContextHandleIssuer>();
         services.TryAddSingleton<IAgentMemoryCurrentClosureProvider, CompositeCurrentClosureProvider>();
 
+        // Resource closure providers for live descriptor revalidation
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentMemoryResourceClosureProvider, MemoryResourceClosureProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentMemoryResourceClosureProvider, CandidateResourceClosureProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentMemoryResourceClosureProvider, ContextResourceClosureProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentMemoryResourceClosureProvider, ConversationHistoryResourceClosureProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentMemoryResourceClosureProvider, TaskHistoryResourceClosureProvider>());
+
         return services;
     }
 }

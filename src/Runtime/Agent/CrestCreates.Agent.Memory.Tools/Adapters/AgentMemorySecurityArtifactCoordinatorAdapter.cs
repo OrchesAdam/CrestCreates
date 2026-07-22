@@ -242,11 +242,11 @@ internal sealed class AgentMemorySecurityArtifactCoordinatorAdapter : IAgentMemo
                 Value = Convert.ToHexString(sha256.ComputeHash(raw)).ToLowerInvariant(),
                 Algorithm = "SHA-256",
                 AlgorithmVersion = "sha256-canonical-json-v1",
-                ArtifactKind = "agent-memory-security-artifact-origin-binding",
+                ArtifactKind = "agent-memory-host-operation",
                 Scope = "TenantVisible",
                 Purpose = "SourceBinding",
                 ContractVersion = "memory-security-artifact-v2",
-                CanonicalShapeVersion = "agent-tool-origin-binding-v3",
+                CanonicalShapeVersion = "agent-memory-host-operation-v1",
             };
         }
     }
