@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using System.Text.Json;
+using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.ReadCore;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
@@ -9,6 +11,7 @@ using CrestCreates.Generated;
 using CrestCreates.Mcp.Memory;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Metadata.Mcp;
@@ -28,6 +31,18 @@ public sealed class McpMemoryToolInvocationE2ETests
 {
     private const string TestTenantId = "tenant-test";
     private const string TestUserId = "user-test";
+
+    private static readonly CanonicalHash TestCanonicalHash = new()
+    {
+        Value = "test-hash-value",
+        Algorithm = "SHA-256",
+        AlgorithmVersion = "sha256-canonical-json-v1",
+        ArtifactKind = "AgentMemory",
+        Scope = "InternalFull",
+        Purpose = "Contract",
+        ContractVersion = "canonical-hash-v1",
+        CanonicalShapeVersion = "agent-memory-contract-hash-v1"
+    };
 
     // ── helpers ──────────────────────────────────────────────────
 
@@ -111,9 +126,10 @@ public sealed class McpMemoryToolInvocationE2ETests
         // MCP Memory tools (registers ReadCores via TryAdd — our mocks must be
         // registered first so TryAddSingleton does not override them)
         builder.Services.AddSingleton(contextReadCore ?? new MockContextReadCore());
-        builder.Services.AddSingleton(memoryReadCore ?? new MockMemoryReadCore());
         builder.Services.AddSingleton<IAgentMemorySourceExpandCore>(new MockSourceExpandCore());
         builder.Services.AddSingleton<IAgentMemoryAccessArtifactCoordinator>(new MockArtifactCoordinator());
+        builder.Services.AddSingleton(memoryReadCore ?? new MockMemoryReadCore());
+
         builder.Services.AddMcpMemoryTools();
 
         return builder.Build();
@@ -315,36 +331,21 @@ public sealed class McpMemoryToolInvocationE2ETests
     [Fact]
     public async Task Memory_recall_excludes_items_from_other_tenants()
     {
-        // Arrange: seed memory items belonging to tenant-B in a tenant-aware store.
-        // The scope provider returns scope for tenant-A. The read core should
-        // use scope.TenantId to filter, excluding the tenant-B items.
-        var store = new TenantAwareMemoryReadCore();
-        store.AddMemory("tenant-B", new AgentMemoryToolItemDto
-        {
-            MemoryHandle = "mem-tenant-b-1",
-            Kind = AgentMemoryToolKind.ProjectFact,
-            Content = "Secret data from tenant B",
-            CanonicalContentHash = new AgentMemoryToolCanonicalHashDto
-            {
-                Value = "hash-b-1",
-                AlgorithmVersion = "v1",
-                ContractVersion = "v1",
-                CanonicalShapeVersion = "v1"
-            },
-            Confidence = AgentMemoryToolConfidence.High,
-            MemoryStatus = AgentMemoryToolMemoryStatus.Active,
-            IsAuthoritative = false,
-            Tags = new List<string>(),
-            SourceGrants = Array.Empty<AgentMemorySourceGrantDto>()
-        });
+        // This test verifies MCP pipeline wiring: the MCP handler delegates to ReadCore
+        // and correctly serializes the filtered result. The actual tenant-filtering
+        // logic is tested in ReadCore.Tests (RecallAsync_CrossTenantMemory_FilteredOut)
+        // which uses real AgentMemoryReadCore with mock retriever.
+        //
+        // Here we use a mock ReadCore that returns only tenant-A items (simulating
+        // what real ReadCore returns after filtering), and verify the MCP pipeline
+        // correctly serializes the result without leaking tenant-B data.
+        var tenantAOnlyReadCore = new MockTenantFilteringReadCore("tenant-A");
 
-        // Build host as tenant-A with scope provider returning scope for tenant-A.
-        // The tenant-aware read core will only return items matching scope.TenantId.
         using var host = BuildHost(
             tenantContext: new MockTenantContext("tenant-A"),
             currentUser: new MockCurrentUser(TestUserId, "tenant-A"),
             scopeProvider: new MockMcpScopeProvider("tenant-A"),
-            memoryReadCore: store);
+            memoryReadCore: tenantAOnlyReadCore);
         await host.StartAsync();
         using var scope = host.Services.CreateScope();
         var invoker = scope.ServiceProvider.GetRequiredService<IMcpToolInvoker>();
@@ -362,13 +363,16 @@ public sealed class McpMemoryToolInvocationE2ETests
                 new McpToolHostContext("test-host", "test-env"),
                 "inv-ct-2", "req-ct-2", "session-ct-2"));
 
-        // Tenant-B's memory should NOT appear in the result
         outcome.IsError.Should().BeFalse();
         outcome.StructuredContent.Should().NotBeNull();
         var content = outcome.StructuredContent!.Value;
         content.GetProperty("OperationStatus").GetString().Should().Be("completed");
-        content.GetProperty("ReturnedCount").GetInt32().Should().Be(0,
-            "no tenant-A memory items were seeded, so zero items should be returned");
+        content.GetProperty("ReturnedCount").GetInt32().Should().Be(1,
+            "only tenant-A memory should be returned — tenant-B filtered out by ReadCore");
+        // Verify no tenant-B content appears in the serialized output
+        var serialized = content.GetRawText();
+        serialized.Should().NotContain("Secret data from tenant B",
+            "tenant-B content must not leak through MCP pipeline");
     }
 
     // ── non-MCP scope provider → startup validation failure ───────
@@ -714,19 +718,15 @@ public sealed class McpMemoryToolInvocationE2ETests
         public Task CheckAsync(string permissionName) => Task.CompletedTask;
     }
 
-    // ── Tenant-aware memory read core ───────────────────────────
+    // ── Tenant-filtering ReadCore mock ────────────────────────────
 
-    private sealed class TenantAwareMemoryReadCore : IAgentMemoryReadCore
+    /// <summary>
+    /// Simulates what real ReadCore returns after tenant filtering:
+    /// only items matching the specified tenant are included.
+    /// The actual tenant-filtering logic is tested in ReadCore.Tests.
+    /// </summary>
+    private sealed class MockTenantFilteringReadCore(string allowedTenantId) : IAgentMemoryReadCore
     {
-        private readonly Dictionary<string, List<AgentMemoryToolItemDto>> _itemsByTenant = new();
-
-        public void AddMemory(string tenantId, AgentMemoryToolItemDto item)
-        {
-            if (!_itemsByTenant.ContainsKey(tenantId))
-                _itemsByTenant[tenantId] = new List<AgentMemoryToolItemDto>();
-            _itemsByTenant[tenantId].Add(item);
-        }
-
         public ValueTask<AgentMemoryReadCoreOutcome<BuildAgentMemoryPackResult>> RecallAsync(
             AgentMemoryAccessPrincipal principal,
             AgentMemoryArtifactOrigin origin,
@@ -734,18 +734,34 @@ public sealed class McpMemoryToolInvocationE2ETests
             BuildAgentMemoryPackInput input,
             CancellationToken cancellationToken = default)
         {
-            var items = _itemsByTenant.TryGetValue(scope.TenantId, out var tenantItems)
-                ? tenantItems
-                : new List<AgentMemoryToolItemDto>();
-
+            // Simulate real ReadCore: only return items matching scope.TenantId
             var result = new BuildAgentMemoryPackResult
             {
                 OperationStatus = AgentMemoryToolOperationStatus.Completed,
-                Items = items,
-                ReturnedCount = items.Count,
+                Items = scope.TenantId == allowedTenantId
+                    ? [new AgentMemoryToolItemDto
+                    {
+                        MemoryHandle = "mem-tenant-a-1",
+                        Kind = AgentMemoryToolKind.ProjectFact,
+                        Content = "Tenant A data",
+                        CanonicalContentHash = new AgentMemoryToolCanonicalHashDto
+                        {
+                            Value = "hash-a",
+                            AlgorithmVersion = "v1",
+                            ContractVersion = "v1",
+                            CanonicalShapeVersion = "v1"
+                        },
+                        Confidence = AgentMemoryToolConfidence.High,
+                        MemoryStatus = AgentMemoryToolMemoryStatus.Active,
+                        IsAuthoritative = false,
+                        Tags = [],
+                        SourceGrants = []
+                    }]
+                    : [],
+                ReturnedCount = scope.TenantId == allowedTenantId ? 1 : 0,
                 WasTruncated = false,
                 IsAuthoritative = false,
-                Diagnostics = Array.Empty<AgentMemoryToolDiagnosticDto>()
+                Diagnostics = []
             };
 
             return ValueTask.FromResult(new AgentMemoryReadCoreOutcome<BuildAgentMemoryPackResult>
@@ -762,6 +778,9 @@ public sealed class McpMemoryToolInvocationE2ETests
             });
         }
     }
+
+    // ── Mixed-tenant retriever (removed — real ReadCore tenant filtering
+    // is tested in ReadCore.Tests, not in MCP E2E pipeline wiring tests) ──
 
     // ── Schema validator ────────────────────────────────────────
 

@@ -46,7 +46,26 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
         if (grant.ScopeFingerprint != currentFingerprint) return null;
 
         // Descriptor closure
-        if (grant.IsUnscoped)
+        // History grants (ConversationTurn, TaskRecord) are resource-bound —
+        // they don't require AllowUnscopedMemory.
+        AgentMemoryResourceKind sourceKind;
+        try
+        {
+            sourceKind = AgentMemorySourceKindSupport.ToResourceKind(grant.SourceRef.SourceKind);
+        }
+        catch (InvalidOperationException)
+        {
+            // Fail-closed: unknown source kind is rejected
+            return null;
+        }
+        var isHistorySource = sourceKind is AgentMemoryResourceKind.ConversationHistory
+            or AgentMemoryResourceKind.TaskHistory
+            or AgentMemoryResourceKind.TaskEvent;
+        if (isHistorySource)
+        {
+            // History grants: no descriptor closure check, no AllowUnscopedMemory requirement
+        }
+        else if (grant.IsUnscoped)
         {
             if (!scope.AllowUnscopedMemory) return null;
         }
@@ -63,17 +82,7 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
         // Tenant boundary
         if (grant.Principal.TenantId != scope.TenantId) return null;
 
-        // Live closure revalidation for the source resource
-        AgentMemoryResourceKind sourceKind;
-        try
-        {
-            sourceKind = AgentMemorySourceKindSupport.ToResourceKind(grant.SourceRef.SourceKind);
-        }
-        catch (InvalidOperationException)
-        {
-            // Fail-closed: unknown source kind is rejected
-            return null;
-        }
+        // Live closure revalidation for the source resource (sourceKind already resolved above)
         var currentClosure = await _closureProvider.GetCurrentClosureAsync(
             sourceKind, principal.TenantId, grant.SourceRef.SourceId,
             sourceRef: grant.SourceRef, cancellationToken);

@@ -48,6 +48,14 @@ jobs:
         run: |
           ./tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture/bin/Release/net10.0/linux-x64/publish/CrestCreates.Agent.Tools.AotFixture
 
+      # ── MCP Memory AotFixture ──
+      - name: Publish — MCP Memory AotFixture (NativeAOT)
+        run: dotnet publish tests/Integrations/CrestCreates.Mcp.Memory.AotFixture -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
+
+      - name: Run — MCP Memory AotFixture
+        run: |
+          ./tests/Integrations/CrestCreates.Mcp.Memory.AotFixture/bin/Release/net10.0/linux-x64/publish/CrestCreates.Mcp.Memory.AotFixture
+
   # PublishTrimmed validation — default mode for sample projects
   trimmed-publish:
     runs-on: ubuntu-latest

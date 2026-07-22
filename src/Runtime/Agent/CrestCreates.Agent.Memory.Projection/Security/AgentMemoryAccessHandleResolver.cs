@@ -49,8 +49,18 @@ internal sealed class AgentMemoryAccessHandleResolver : IAgentMemoryAccessHandle
         if (handle.ScopeFingerprint != currentFingerprint) return null;
 
         // Descriptor closure: all required refs must be visible in current scope
-        // Unscoped handles are only allowed if scope explicitly allows unscoped
-        if (handle.IsUnscoped)
+        // History resources (ConversationHistory, TaskHistory, TaskEvent) are resource-bound
+        // (constrained by ResourceId, Tenant, Principal, ScopeFingerprint, existence) —
+        // they don't have descriptor closures and don't require AllowUnscopedMemory.
+        var isHistoryResource = handle.ResourceKind is AgentMemoryResourceKind.ConversationHistory
+            or AgentMemoryResourceKind.TaskHistory
+            or AgentMemoryResourceKind.TaskEvent;
+        if (isHistoryResource)
+        {
+            // History resources: closure check is existence + tenant + scope fingerprint only
+            // (already verified above: currentClosure != null && tenantId match && fingerprint match)
+        }
+        else if (handle.IsUnscoped)
         {
             if (!scope.AllowUnscopedMemory) return null;
         }

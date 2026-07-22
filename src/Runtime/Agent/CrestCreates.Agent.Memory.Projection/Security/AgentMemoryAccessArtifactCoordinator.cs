@@ -271,8 +271,13 @@ internal sealed class AgentMemoryAccessArtifactCoordinator : IAgentMemoryAccessA
                 throw new InvalidOperationException(
                     $"Handle {handle.HandleId}: RequiredDescriptorRefs are not a subset of scope VisibleDescriptorRefs.");
 
-            // 8. Handle IsUnscoped == (RequiredDescriptorRefs.Count == 0) — consistency check
-            if (handle.IsUnscoped != (handle.RequiredDescriptorRefs.Count == 0))
+            // 8. Handle IsUnscoped consistency — except for History resources which are
+            // existence-constrained (bound to ResourceId/Tenant/Principal/ScopeFingerprint)
+            // rather than descriptor-constrained. History handles have empty refs + IsUnscoped=false.
+            var isHistoryResource = handle.ResourceKind is AgentMemoryResourceKind.ConversationHistory
+                or AgentMemoryResourceKind.TaskHistory
+                or AgentMemoryResourceKind.TaskEvent;
+            if (!isHistoryResource && handle.IsUnscoped != (handle.RequiredDescriptorRefs.Count == 0))
                 throw new InvalidOperationException(
                     $"Handle {handle.HandleId}: IsUnscoped flag is inconsistent with RequiredDescriptorRefs count.");
         }
@@ -387,11 +392,11 @@ internal sealed class AgentMemoryAccessArtifactCoordinator : IAgentMemoryAccessA
                 throw new InvalidOperationException(
                     $"Handle {handle.HandleId}: TrustedHostOperation handles must have zero RequiredDescriptorRefs (are unscoped).");
 
-            // 22. Handle IsUnscoped must be true — host handles have no descriptor closure
-            // (existence-constrained, not descriptor-constrained; IsUnscoped == (RequiredDescriptorRefs.Count == 0) is consistent)
-            if (!handle.IsUnscoped)
+            // 22. Handle IsUnscoped == false — host handles are resource-bound (existence-constrained),
+            // not unscoped (they have ResourceId/Tenant/Principal/ScopeFingerprint binding).
+            if (handle.IsUnscoped)
                 throw new InvalidOperationException(
-                    $"Handle {handle.HandleId}: TrustedHostOperation handles must have IsUnscoped=true (existence-constrained, no descriptor closure).");
+                    $"Handle {handle.HandleId}: TrustedHostOperation handles must have IsUnscoped=false (resource-bound, existence-constrained).");
         }
 
         // Grant validations specific to TrustedHostOperation (23-25)

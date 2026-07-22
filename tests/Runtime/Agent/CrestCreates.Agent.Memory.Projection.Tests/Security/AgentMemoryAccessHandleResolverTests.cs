@@ -555,4 +555,149 @@ public class AgentMemoryAccessHandleResolverTests
 
         result.Should().BeNull("handle with DescriptorRefs not fully in scope must be rejected");
     }
+
+    // ── P0-2 acceptance: History Handle IsUnscoped=false, no AllowUnscopedMemory required ──
+
+    [Fact]
+    public async Task HistoryHandle_AllowUnscopedFalse_IssuesAndResolves()
+    {
+        // History Handle: RequiredDescriptorRefs=[], IsUnscoped=false
+        // Scope: AllowUnscopedMemory=false → must still resolve (History is resource-bound, not unscoped)
+        var store = new AgentMemoryAccessHandleStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1");
+        var scope = MakeScope(); // AllowUnscopedMemory=false
+        var scopeFp = AgentMemoryScopeFingerprint.Compute(scope);
+
+        var handle = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "h-history-1",
+            ResourceKind = AgentMemoryResourceKind.ConversationHistory,
+            ResourceId = "conv-1",
+            Principal = principal,
+            ScopeFingerprint = scopeFp,
+            RequiredDescriptorRefs = [],
+            IsUnscoped = false, // History handles: empty refs + IsUnscoped=false
+            IssuingOperationId = "op-history-1",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+            OriginBindingHash = MakeHash("binding-history-1"),
+            ArtifactPurpose = "history-access",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-history-1")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [handle], 64, 128);
+
+        var closureProvider = MakeClosureProvider(descriptorRefs: []);
+        var resolver = new AgentMemoryAccessHandleResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync(
+            "h-history-1", AgentMemoryResourceKind.ConversationHistory, principal, scope);
+
+        result.Should().NotBeNull("History handle with IsUnscoped=false must resolve even when AllowUnscopedMemory=false");
+        result!.Handle.HandleId.Should().Be("h-history-1");
+    }
+
+    [Fact]
+    public async Task HistoryHandle_ResourceDeleted_Rejects()
+    {
+        // History handle for a resource that no longer exists → must reject
+        var store = new AgentMemoryAccessHandleStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1");
+        var scope = MakeScope();
+        var scopeFp = AgentMemoryScopeFingerprint.Compute(scope);
+
+        var handle = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "h-history-deleted",
+            ResourceKind = AgentMemoryResourceKind.ConversationHistory,
+            ResourceId = "conv-deleted",
+            Principal = principal,
+            ScopeFingerprint = scopeFp,
+            RequiredDescriptorRefs = [],
+            IsUnscoped = false,
+            IssuingOperationId = "op-history-deleted",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+            OriginBindingHash = MakeHash("binding-history-deleted"),
+            ArtifactPurpose = "history-access",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-history-deleted")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [handle], 64, 128);
+
+        // Closure provider returns null → resource doesn't exist
+        var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosureProvider
+            .Setup(p => p.GetCurrentClosureAsync(
+                AgentMemoryResourceKind.ConversationHistory, "t1", "conv-deleted",
+                It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.FromResult<AgentMemoryCurrentClosure?>(null));
+
+        var resolver = new AgentMemoryAccessHandleResolver(store, timeProvider, mockClosureProvider.Object);
+
+        var result = await resolver.ResolveAsync(
+            "h-history-deleted", AgentMemoryResourceKind.ConversationHistory, principal, scope);
+
+        result.Should().BeNull("History handle for deleted resource must be rejected");
+    }
+
+    [Fact]
+    public async Task HistoryHandle_CrossTenant_Rejects()
+    {
+        // History handle issued for tenant-A, resolved with tenant-B principal → must reject
+        var store = new AgentMemoryAccessHandleStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principalA = MakePrincipal("u1", "t1");
+        var principalB = MakePrincipal("u2", "t2");
+        var scopeA = MakeScopeWithTenant("t1");
+        var scopeB = MakeScopeWithTenant("t2");
+        var scopeFpA = AgentMemoryScopeFingerprint.Compute(scopeA);
+
+        var handle = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "h-history-xt",
+            ResourceKind = AgentMemoryResourceKind.TaskHistory,
+            ResourceId = "task-1",
+            Principal = principalA,
+            ScopeFingerprint = scopeFpA,
+            RequiredDescriptorRefs = [],
+            IsUnscoped = false,
+            IssuingOperationId = "op-history-xt",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+            OriginBindingHash = MakeHash("binding-history-xt"),
+            ArtifactPurpose = "history-access",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-history-xt")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [handle], 64, 128);
+
+        var closureProvider = MakeClosureProvider(tenantId: "t2", descriptorRefs: []);
+        var resolver = new AgentMemoryAccessHandleResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync(
+            "h-history-xt", AgentMemoryResourceKind.TaskHistory, principalB, scopeB);
+
+        result.Should().BeNull("History handle with cross-tenant principal must be rejected");
+    }
 }

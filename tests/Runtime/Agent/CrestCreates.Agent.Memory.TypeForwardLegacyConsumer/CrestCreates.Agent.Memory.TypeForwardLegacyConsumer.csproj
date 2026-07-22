@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>TypeForwardLegacyConsumer</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!--
+      This project simulates a consumer compiled against the OLD
+      CrestCreates.Agent.Memory.Tools.Abstractions assembly (before TypeForward migration).
+      It references the forwarding assembly directly, so at compile time the types
+      resolve through TypeForwardedTo to Projection.Abstractions.
+      The output DLL is then loaded by TypeForwardBinaryCompatibilityTests
+      via AssemblyLoadContext to verify true binary compatibility.
+    -->
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\src\Runtime\Agent\CrestCreates.Agent.Memory.Tools.Abstractions\CrestCreates.Agent.Memory.Tools.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

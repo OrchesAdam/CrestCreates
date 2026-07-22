@@ -67,6 +67,32 @@ public class AgentMemoryReadCoreTests
             ResourceHandleLifetime = TimeSpan.FromMinutes(30)
         };
 
+    private static AgentMemoryAccessScope MakeScopeWithVisibleRefs(DescriptorRef[] visibleRefs, bool allowUnscoped = false)
+        => new()
+        {
+            TenantId = "t1",
+            VisibleDescriptorRefs = visibleRefs,
+            AllowUnscopedMemory = allowUnscoped,
+            MaxVisibleDescriptorRefs = 64,
+            MaxRecallCount = 10,
+            MaxRecallCharacters = 50_000,
+            MaxExpansionCharacters = 16_000,
+            MaxContextRecallCharacters = 48_000,
+            MaxCompressedBlockCount = 64,
+            MaxCompressedBlockCharacters = 8_000,
+            MaxCandidateCount = 64,
+            MaxCandidateCharacters = 8_000,
+            MaxSourceRefsPerArtifact = 64,
+            MaxGrantsPerResource = 64,
+            MaxGrantsPerOperation = 256,
+            MaxResourceHandlesPerOperation = 128,
+            MaxActiveResourceHandlesPerResource = 64,
+            MaxAuditFacts = 32,
+            MaxTagsPerResource = 32,
+            ExpansionGrantLifetime = TimeSpan.FromMinutes(10),
+            ResourceHandleLifetime = TimeSpan.FromMinutes(30)
+        };
+
     private static CanonicalHash MakeContentHash()
         => new()
         {
@@ -132,7 +158,7 @@ public class AgentMemoryReadCoreTests
 
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, mockHandleResolver.Object,
-            mockCoordinator.Object, lifetimePolicy, timeProvider);
+            mockCoordinator.Object, lifetimePolicy, Mock.Of<IAgentMemoryCurrentClosureProvider>(), timeProvider);
 
         var outcome = await core.RecallAsync(principal, origin, scope, input);
 
@@ -152,6 +178,7 @@ public class AgentMemoryReadCoreTests
             Mock.Of<IAgentMemoryAccessHandleResolver>(),
             Mock.Of<IAgentMemoryAccessArtifactCoordinator>(),
             Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(),
             TimeProvider.System);
 
         var act = async () => await core.RecallAsync(MakePrincipal(), MakeOrigin(), scope, input);
@@ -169,6 +196,7 @@ public class AgentMemoryReadCoreTests
             Mock.Of<IAgentMemoryAccessHandleResolver>(),
             Mock.Of<IAgentMemoryAccessArtifactCoordinator>(),
             Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(),
             TimeProvider.System);
 
         var act = async () => await core.RecallAsync(MakePrincipal(), MakeOrigin(), scope, input);
@@ -188,6 +216,7 @@ public class AgentMemoryReadCoreTests
             Mock.Of<IAgentMemoryAccessHandleResolver>(),
             Mock.Of<IAgentMemoryAccessArtifactCoordinator>(),
             Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(),
             TimeProvider.System);
 
         var act = async () => await core.RecallAsync(MakePrincipal(), MakeOrigin(), scope, input);
@@ -207,6 +236,7 @@ public class AgentMemoryReadCoreTests
             Mock.Of<IAgentMemoryAccessHandleResolver>(),
             Mock.Of<IAgentMemoryAccessArtifactCoordinator>(),
             Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(),
             TimeProvider.System);
 
         var act = async () => await core.RecallAsync(MakePrincipal(), MakeOrigin(), scope, input);
@@ -237,6 +267,7 @@ public class AgentMemoryReadCoreTests
             mockResolver.Object,
             Mock.Of<IAgentMemoryAccessArtifactCoordinator>(),
             Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(),
             TimeProvider.System);
 
         var act = async () => await core.RecallAsync(principal, origin, scope, input);
@@ -276,7 +307,7 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            TimeProvider.System);
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
 
         var outcome = await core.RecallAsync(principal, origin, scope, input);
         outcome.Result.Items.Should().HaveCount(1); // Kept even with different refs
@@ -326,7 +357,7 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            TimeProvider.System);
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
 
         var outcome = await core.RecallAsync(principal, origin, scope, input);
         outcome.Result.Items.Should().BeEmpty("cross-tenant memory must be filtered out");
@@ -389,18 +420,18 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            TimeProvider.System);
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
 
         var outcome = await core.RecallAsync(principal, origin, scope, input);
         outcome.Result.Items.Should().BeEmpty("memory with invisible SourceRef descriptor must be filtered out");
     }
 
     [Fact]
-    public async Task Grant_UsesEffectiveClosure_NotSourceRefOnly()
+    public async Task Grant_UsesPerSourceClosure_NotParentMemoryClosure()
     {
-        // Grant's RequiredDescriptorRefs should use the parent memory's effective closure
-        // (union of memory.DescriptorRefs + all SourceRef.DescriptorRefs), not just the
-        // grant's own SourceRef.DescriptorRefs.
+        // Grant's RequiredDescriptorRefs should use the individual source resource's closure
+        // (resolved via IAgentMemoryCurrentClosureProvider), not the parent memory's effective closure.
+        // This ensures issuance closure matches resolution closure exactly.
         var principal = MakePrincipal();
         var origin = MakeOrigin();
         var scope = MakeScope();
@@ -430,6 +461,18 @@ public class AgentMemoryReadCoreTests
         mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory], WasTruncated = false });
 
+        // Mock closure provider: source resource has only descSrc in its closure
+        var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosureProvider
+            .Setup(p => p.GetCurrentClosureAsync(
+                AgentMemoryResourceKind.Memory, "t1", "src-eff",
+                It.IsAny<AgentContextSourceRef>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure
+            {
+                CurrentDescriptorRefs = new[] { descSrc },
+                TenantId = "t1"
+            });
+
         IReadOnlyList<AgentMemoryAccessSourceGrant>? capturedGrants = null;
         var mockCoordinator = new Mock<IAgentMemoryAccessArtifactCoordinator>();
         mockCoordinator
@@ -456,18 +499,18 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System);
 
         var outcome = await core.RecallAsync(principal, origin, scope, input);
 
         capturedGrants.Should().NotBeNull();
         capturedGrants.Should().HaveCount(1);
         var grant = capturedGrants![0];
-        // The grant's RequiredDescriptorRefs should be the effective closure
-        // (union of memory.DescriptorRefs + sourceRef.DescriptorRefs), not just sourceRef.DescriptorRefs
-        grant.RequiredDescriptorRefs.Should().Contain(descMem);
+        // The grant's RequiredDescriptorRefs should be the source resource's closure,
+        // NOT the parent memory's effective closure (which would include descMem).
         grant.RequiredDescriptorRefs.Should().Contain(descSrc);
-        grant.RequiredDescriptorRefs.Should().HaveCount(2);
+        grant.RequiredDescriptorRefs.Should().NotContain(descMem, "grant uses source closure, not parent memory closure");
+        grant.RequiredDescriptorRefs.Should().HaveCount(1);
     }
 
     [Fact]
@@ -537,10 +580,19 @@ public class AgentMemoryReadCoreTests
                 Receipt = new AgentMemoryArtifactBatchReceipt { HandleBatch = null, GrantBatch = null }
             });
 
+        var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosureProvider
+            .Setup(p => p.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AgentContextSourceRef>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure
+            {
+                CurrentDescriptorRefs = Array.Empty<DescriptorRef>(),
+                TenantId = "t1"
+            });
+
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System);
 
         var outcome = await core.RecallAsync(principal, origin, scope, input);
 
@@ -601,12 +653,173 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            TimeProvider.System);
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
 
         var outcome = await core.RecallAsync(principal, origin, scope, input);
 
         // No grant should be created for the unsupported SourceKind
         capturedGrants.Should().NotBeNull();
         capturedGrants.Should().BeEmpty("unsupported SourceKind must not issue grants");
+    }
+
+    // ── P0-1 acceptance: Source Grant uses per-source closure, not parent Memory closure ──
+
+    [Fact]
+    public async Task MultiSourceMemory_EachGrantUsesOwnClosure_AndResolves()
+    {
+        // Memory: DescriptorRefs=[A], Source1 refs=[B], Source2 refs=[C]
+        // Scope must include all effective closure refs [A,B,C] for visibility
+        // Each grant must use its own source's closure, not the parent memory's [A,B,C]
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var descA = new DescriptorRef("ns", "A");
+        var descB = new DescriptorRef("ns", "B");
+        var descC = new DescriptorRef("ns", "C");
+        var scope = MakeScopeWithVisibleRefs(new[] { descA, descB, descC });
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+
+        var memory = MakeMemory("m1") with
+        {
+            DescriptorRefs = [descA],
+            SourceRefs =
+            [
+                new AgentContextSourceRef { SourceKind = AgentSourceKind.ConversationTurn, TenantId = "t1", SourceId = "s1", DescriptorRefs = [descB] },
+                new AgentContextSourceRef { SourceKind = AgentSourceKind.TaskRecord, TenantId = "t1", SourceId = "s2", DescriptorRefs = [descC] }
+            ]
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory], WasTruncated = false });
+
+        IReadOnlyList<AgentMemoryAccessSourceGrant>? capturedGrants = null;
+        var mockCoordinator = new Mock<IAgentMemoryAccessArtifactCoordinator>();
+        mockCoordinator
+            .Setup(c => c.PrepareAsync(
+                It.IsAny<AgentMemoryAccessPrincipal>(), It.IsAny<AgentMemoryArtifactOrigin>(),
+                It.IsAny<AgentMemoryAccessScope>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<AgentMemoryAccessPrincipal, AgentMemoryArtifactOrigin, AgentMemoryAccessScope,
+                string, int, IReadOnlyList<AgentMemoryAccessResourceHandle>, IReadOnlyList<AgentMemoryAccessSourceGrant>, CancellationToken>(
+                (_, _, _, _, _, _, grants, _) => capturedGrants = grants)
+            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
+            {
+                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
+                Grants = new AgentMemoryAccessGrantIssueResult { Grants = [], ReusedExisting = false },
+                CompensationToken = null,
+                Receipt = new AgentMemoryArtifactBatchReceipt { HandleBatch = null, GrantBatch = null }
+            });
+
+        // Closure provider returns per-resource closure (simulating real closure resolution)
+        var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosureProvider
+            .Setup(p => p.GetCurrentClosureAsync(
+                It.IsAny<AgentMemoryResourceKind>(), "t1", It.IsAny<string>(),
+                It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .Returns<AgentMemoryResourceKind, string, string, AgentContextSourceRef?, CancellationToken>(
+                (_, _, _, sourceRef, _) => ValueTask.FromResult<AgentMemoryCurrentClosure?>(new()
+                {
+                    // Each source gets its own closure, NOT [A,B,C]
+                    CurrentDescriptorRefs = sourceRef?.SourceKind == AgentSourceKind.ConversationTurn
+                        ? new[] { descB }
+                        : sourceRef?.SourceKind == AgentSourceKind.TaskRecord
+                            ? new[] { descC }
+                            : new[] { descA },
+                    TenantId = "t1"
+                }));
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosureProvider.Object, TimeProvider.System);
+
+        var outcome = await core.RecallAsync(principal, origin, scope, input);
+
+        // Diagnostic: check if coordinator was called (visibility filtering may have excluded the memory)
+        outcome.Should().NotBeNull("ReadCore should return a result");
+        outcome.Result.Should().NotBeNull("ReadCore result should not be null");
+
+        capturedGrants.Should().NotBeNull();
+        capturedGrants.Should().HaveCount(2);
+        // Grant for Source1 (ConversationTurn) must have closure [B], not [A,B,C]
+        capturedGrants.Should().Contain(g =>
+            g.SourceRef.SourceKind == AgentSourceKind.ConversationTurn &&
+            g.RequiredDescriptorRefs.SequenceEqual(new[] { descB }));
+        // Grant for Source2 (TaskRecord) must have closure [C], not [A,B,C]
+        capturedGrants.Should().Contain(g =>
+            g.SourceRef.SourceKind == AgentSourceKind.TaskRecord &&
+            g.RequiredDescriptorRefs.SequenceEqual(new[] { descC }));
+    }
+
+    [Fact]
+    public async Task MemoryLevelDescriptor_DoesNotPolluteSourceGrant()
+    {
+        // Memory: DescriptorRefs=[A], Source1 refs=[] (no descriptors)
+        // Grant for Source1 must have empty closure, NOT [A] from parent memory
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var descA = new DescriptorRef("ns", "A");
+        var scope = MakeScopeWithVisibleRefs(new[] { descA });
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+
+        var memory = MakeMemory("m1") with
+        {
+            DescriptorRefs = [descA],
+            SourceRefs =
+            [
+                new AgentContextSourceRef { SourceKind = AgentSourceKind.ConversationTurn, TenantId = "t1", SourceId = "s1", DescriptorRefs = [] }
+            ]
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory], WasTruncated = false });
+
+        IReadOnlyList<AgentMemoryAccessSourceGrant>? capturedGrants = null;
+        var mockCoordinator = new Mock<IAgentMemoryAccessArtifactCoordinator>();
+        mockCoordinator
+            .Setup(c => c.PrepareAsync(
+                It.IsAny<AgentMemoryAccessPrincipal>(), It.IsAny<AgentMemoryArtifactOrigin>(),
+                It.IsAny<AgentMemoryAccessScope>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<AgentMemoryAccessPrincipal, AgentMemoryArtifactOrigin, AgentMemoryAccessScope,
+                string, int, IReadOnlyList<AgentMemoryAccessResourceHandle>, IReadOnlyList<AgentMemoryAccessSourceGrant>, CancellationToken>(
+                (_, _, _, _, _, _, grants, _) => capturedGrants = grants)
+            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
+            {
+                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
+                Grants = new AgentMemoryAccessGrantIssueResult { Grants = [], ReusedExisting = false },
+                CompensationToken = null,
+                Receipt = new AgentMemoryArtifactBatchReceipt { HandleBatch = null, GrantBatch = null }
+            });
+
+        var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosureProvider
+            .Setup(p => p.GetCurrentClosureAsync(
+                It.IsAny<AgentMemoryResourceKind>(), "t1", It.IsAny<string>(),
+                It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .Returns<AgentMemoryResourceKind, string, string, AgentContextSourceRef?, CancellationToken>(
+                (_, _, _, sourceRef, _) => ValueTask.FromResult<AgentMemoryCurrentClosure?>(new()
+                {
+                    CurrentDescriptorRefs = sourceRef?.DescriptorRefs ?? new[] { descA },
+                    TenantId = "t1"
+                }));
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosureProvider.Object, TimeProvider.System);
+
+        var outcome = await core.RecallAsync(principal, origin, scope, input);
+
+        capturedGrants.Should().NotBeNull();
+        capturedGrants.Should().HaveCount(1);
+        // Source1's grant must have empty closure — memory-level [A] must NOT pollute it
+        capturedGrants[0].RequiredDescriptorRefs.Should().BeEmpty(
+            "source grant must use its own source closure, not parent memory's descriptor");
     }
 }

@@ -16,6 +16,7 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
     private readonly IAgentMemoryAccessHandleResolver _handleResolver;
     private readonly IAgentMemoryAccessArtifactCoordinator _coordinator;
     private readonly IAgentMemoryArtifactLifetimePolicy _lifetimePolicy;
+    private readonly IAgentMemoryCurrentClosureProvider _closureProvider;
     private readonly TimeProvider _timeProvider;
 
     public AgentMemoryReadCore(
@@ -23,12 +24,14 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
         IAgentMemoryAccessHandleResolver handleResolver,
         IAgentMemoryAccessArtifactCoordinator coordinator,
         IAgentMemoryArtifactLifetimePolicy lifetimePolicy,
+        IAgentMemoryCurrentClosureProvider closureProvider,
         TimeProvider timeProvider)
     {
         _retriever = retriever;
         _handleResolver = handleResolver;
         _coordinator = coordinator;
         _lifetimePolicy = lifetimePolicy;
+        _closureProvider = closureProvider;
         _timeProvider = timeProvider;
     }
 
@@ -142,6 +145,28 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                     if (!string.Equals(sourceRef.TenantId, principal.TenantId, StringComparison.Ordinal))
                         continue;
 
+                    // Compute per-source closure using the same provider the Resolver uses.
+                    // This ensures issuance closure matches resolution closure exactly.
+                    AgentMemoryResourceKind sourceResourceKind;
+                    try
+                    {
+                        sourceResourceKind = AgentMemorySourceKindSupport.ToResourceKind(sourceRef.SourceKind);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // Unsupported SourceKind — skip
+                        continue;
+                    }
+
+                    var sourceClosure = await _closureProvider.GetCurrentClosureAsync(
+                        sourceResourceKind, principal.TenantId, sourceRef.SourceId,
+                        sourceRef: sourceRef, cancellationToken: cancellationToken);
+
+                    // Source not found or cross-tenant — skip
+                    if (sourceClosure is null) continue;
+                    if (!string.Equals(sourceClosure.TenantId, principal.TenantId, StringComparison.Ordinal)) continue;
+
+                    var sourceClosureRefs = sourceClosure.CurrentDescriptorRefs;
                     var grantId = Guid.NewGuid().ToString("N");
                     grants.Add(new AgentMemoryAccessSourceGrant
                     {
@@ -149,8 +174,8 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                         SourceRef = sourceRef,
                         Principal = principal,
                         ScopeFingerprint = scopeFingerprint,
-                        RequiredDescriptorRefs = effectiveClosure,
-                        IsUnscoped = effectiveClosure.Count == 0,
+                        RequiredDescriptorRefs = sourceClosureRefs,
+                        IsUnscoped = sourceClosureRefs.Count == 0,
                         IssuingOperationId = origin.OperationId,
                         IssuedAt = now,
                         ExpiresAt = now + grantLifetime,

@@ -460,16 +460,17 @@ public class TypeForwardBinaryCompatibilityTests
         // against the old assembly name.
         var oldAssemblyPath = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..",
+            "..", "..", "..", "..", "..", "..", "..",
             "src", "Runtime", "Agent", "CrestCreates.Agent.Memory.Tools.Abstractions",
             "bin", "Debug", "net10.0",
             "CrestCreates.Agent.Memory.Tools.Abstractions.dll"));
 
         if (!File.Exists(oldAssemblyPath))
         {
-            // Old assembly may not be built; this test validates the path exists
-            // and that CI builds the old assembly before running tests.
-            return;
+            // The forwarding assembly must be built before this test runs.
+            // CI must build Tools.Abstractions before running Projection.Tests.
+            Assert.Fail($"Old forwarding assembly not found at: {oldAssemblyPath}. " +
+                "Build CrestCreates.Agent.Memory.Tools.Abstractions before running this test.");
         }
 
         var context = new AssemblyLoadContext("TypeForwardBinaryTest", isCollectible: true);
@@ -478,29 +479,70 @@ public class TypeForwardBinaryCompatibilityTests
             var oldAssembly = context.LoadFromAssemblyPath(oldAssemblyPath);
 
             // Verify TypeForwarded types can be resolved from the old assembly
-            // The resolved type should actually live in the new assembly, not the old one
-            var principalType = oldAssembly.GetType(
-                "CrestCreates.Agent.Memory.Tools.AgentMemoryAccessPrincipal");
-            Assert.NotNull(principalType);
-            Assert.NotEqual(oldAssembly, principalType!.Assembly);
-            Assert.Contains(
-                "CrestCreates.Agent.Memory.Projection.Abstractions",
-                principalType.Assembly.GetName().Name);
-
-            // Also verify a few more key types
+            // The resolved type should actually live in the new assembly, not the old one.
+            // Only test types that are actually in the TypeForward list.
             var statusType = oldAssembly.GetType(
                 "CrestCreates.Agent.Memory.Tools.AgentMemoryToolOperationStatus");
             Assert.NotNull(statusType);
-            Assert.Contains(
+            Assert.NotEqual(oldAssembly, statusType!.Assembly);
+            Assert.Equal(
                 "CrestCreates.Agent.Memory.Projection.Abstractions",
-                statusType!.Assembly.GetName().Name);
+                statusType.Assembly.GetName().Name);
 
             var inputType = oldAssembly.GetType(
                 "CrestCreates.Agent.Memory.Tools.BuildAgentMemoryPackInput");
             Assert.NotNull(inputType);
-            Assert.Contains(
+            Assert.Equal(
                 "CrestCreates.Agent.Memory.Projection.Abstractions",
                 inputType!.Assembly.GetName().Name);
+
+            var kindType = oldAssembly.GetType(
+                "CrestCreates.Agent.Memory.Tools.AgentMemoryToolKind");
+            Assert.NotNull(kindType);
+            Assert.Equal(
+                "CrestCreates.Agent.Memory.Projection.Abstractions",
+                kindType!.Assembly.GetName().Name);
+
+            // Verify that a type NOT in the TypeForward list is NOT resolvable
+            var principalType = oldAssembly.GetType(
+                "CrestCreates.Agent.Memory.Tools.AgentMemoryAccessPrincipal");
+            Assert.Null(principalType);
+        }
+        finally
+        {
+            context.Unload();
+        }
+    }
+
+    [Fact]
+    public void LegacyConsumerFixture_ResolvesForwardedTypesAndInvokesMembers()
+    {
+        // This test loads a precompiled consumer DLL that was compiled against
+        // the OLD Tools.Abstractions assembly. The consumer instantiates forwarded
+        // DTOs/enums and invokes members, proving true binary compatibility.
+        var consumerPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "TypeForwardLegacyConsumer.dll"));
+
+        if (!File.Exists(consumerPath))
+        {
+            Assert.Fail($"Legacy consumer DLL not found at: {consumerPath}. " +
+                "Build the TypeForwardLegacyConsumer project before running this test.");
+        }
+
+        var context = new AssemblyLoadContext("LegacyConsumerTest", isCollectible: true);
+        try
+        {
+            var consumerAssembly = context.LoadFromAssemblyPath(consumerPath);
+            var validatorType = consumerAssembly.GetType("TypeForwardLegacyConsumer.TypeForwardValidator");
+            Assert.NotNull(validatorType);
+
+            // Invoke ValidateAll() — returns true if all forwarded types resolve and members invoke correctly
+            var validateMethod = validatorType!.GetMethod("ValidateAll", BindingFlags.Public | BindingFlags.Static);
+            Assert.NotNull(validateMethod);
+
+            var result = (bool)validateMethod!.Invoke(null, null)!;
+            Assert.True(result, "Legacy consumer binary must resolve all forwarded types and invoke members successfully");
         }
         finally
         {

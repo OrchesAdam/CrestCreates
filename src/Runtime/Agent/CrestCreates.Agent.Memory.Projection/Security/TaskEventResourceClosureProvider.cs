@@ -27,7 +27,17 @@ internal sealed class TaskEventResourceClosureProvider : IAgentMemoryResourceClo
         var task = await _store.GetTaskAsync(tenantId, resourceId, cancellationToken);
         if (task is null) return null;
 
-        var descriptorRefs = task.Events
+        // Filter events by RangeStart/RangeEnd if specified.
+        // This must match the Expander's range validation and slicing logic exactly.
+        var events = task.Events.AsEnumerable();
+        if (sourceRef is { RangeStart: not null } || sourceRef is { RangeEnd: not null })
+        {
+            var start = sourceRef.RangeStart ?? 0;
+            var end = sourceRef.RangeEnd ?? events.Count() - 1;
+            events = events.Skip(start).Take(end - start + 1);
+        }
+
+        var descriptorRefs = events
             .SelectMany(e => e.SourceRefs)
             .SelectMany(sr => sr.DescriptorRefs)
             .Distinct()

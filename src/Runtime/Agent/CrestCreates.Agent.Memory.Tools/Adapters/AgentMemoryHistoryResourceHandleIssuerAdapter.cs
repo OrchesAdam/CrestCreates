@@ -78,7 +78,7 @@ internal sealed class AgentMemoryHistoryResourceHandleIssuerAdapter : IAgentMemo
             Principal = newPrincipal,
             ScopeFingerprint = ComputeScopeFingerprint(scope),
             RequiredDescriptorRefs = [],
-            IsUnscoped = true, // Consistent with empty refs; Resolver treats History+Unscoped as existence-only
+            IsUnscoped = false, // History is resource-bound, not unscoped; exempt from consistency formula
             IssuingOperationId = origin.OperationId,
             IssuedAt = now,
             ExpiresAt = now + lifetime,
