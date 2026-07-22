@@ -26,6 +26,11 @@ jobs:
       - name: Restore
         run: dotnet restore CrestCreates.slnx
 
+      # This binary-compatibility fixture is built by the projection test's
+      # custom target, so it is not part of the solution restore graph.
+      - name: Restore legacy compatibility fixture
+        run: dotnet restore tests/Runtime/Agent/CrestCreates.Agent.Memory.TypeForwardLegacyConsumer/CrestCreates.Agent.Memory.TypeForwardLegacyConsumer.csproj
+
       - name: Bootstrap BuildTasks
         run: dotnet build src/Tooling/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj --no-restore
 
