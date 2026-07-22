@@ -33,4 +33,10 @@ jobs:
         run: dotnet build CrestCreates.slnx --no-restore
 
       - name: Test
-        run: dotnet test CrestCreates.slnx --no-build
+        # Keep service-backed integration suites out of the default CI gate.
+        # They require PostgreSQL, Kafka, or RabbitMQ containers and belong in
+        # an explicitly provisioned integration workflow.
+        run: >-
+          dotnet test CrestCreates.slnx --no-build
+          --filter
+          "FullyQualifiedName!~CrestCreates.IntegrationTests&FullyQualifiedName!~SaaSHelpdesk.Tests&FullyQualifiedName!~CrestCreates.EventBus.Kafka.Tests.Integration&FullyQualifiedName!~CrestCreates.EventBus.RabbitMQ.Tests.Integration"

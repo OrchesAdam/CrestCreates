@@ -61,7 +61,6 @@ jobs:
       - name: Test — Framework / Web
         run: |
           dotnet test tests/Framework/Web/CrestCreates.Web.Tests --no-build
-          dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --no-build
 
       - name: Test — Framework / Modules
         run: |
