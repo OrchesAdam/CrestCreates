@@ -238,6 +238,7 @@
     <Project Path="tests/Integrations/CrestCreates.Mcp.Memory.Tests/CrestCreates.Mcp.Memory.Tests.csproj" />
     <Project Path="tests/Integrations/CrestCreates.Mcp.AotFixture.Tests/CrestCreates.Mcp.AotFixture.Tests.csproj" />
     <Project Path="tests/Integrations/CrestCreates.Mcp.AotFixture/CrestCreates.Mcp.AotFixture.csproj" />
+    <Project Path="tests/Integrations/CrestCreates.Mcp.Memory.AotFixture.Tests/CrestCreates.Mcp.Memory.AotFixture.Tests.csproj" />
     <Project Path="tests/Integrations/CrestCreates.Mcp.Memory.AotFixture/CrestCreates.Mcp.Memory.AotFixture.csproj" />
   </Folder>
   <Folder Name="/tests/Metadata/" />
