@@ -211,15 +211,8 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
         services.AddAgentMemoryRuntime();
 
         // ── Agent Control Plane ────────────────────────────────────────────
-        services.AddAgentControlPlane(AgentToolAuthorizationOptions.DevelopmentDefaults);
-
-        // ── Activation Services ────────────────────────────────────────────
-        services.TryAddSingleton<IDescriptorActivationPolicyProvider, DefaultDescriptorActivationPolicyProvider>();
-        services.TryAddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
-        services.TryAddSingleton<IRuntimeActivationGate, InMemoryRuntimeActivationGate>();
-        services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
-        services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
-        services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
+        services.AddAgentControlPlane(AgentToolAuthorizationOptions.DevelopmentDefaults)
+            .AddAgentControlPlaneInMemoryStubs();
 
         // ── Phase 7f Authoring ─────────────────────────────────────────────
         services.TryAddSingleton<CrestCreates.Agent.Authoring.Abstractions.Authoring.IDescriptorAuthoringAgent, FakeCompanyCertificationAuthoringAgent>();
