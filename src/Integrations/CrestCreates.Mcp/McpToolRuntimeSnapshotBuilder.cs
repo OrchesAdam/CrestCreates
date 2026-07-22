@@ -59,19 +59,21 @@ public sealed class McpToolRuntimeSnapshotBuilder
                 "MCP_SNAPSHOT_NOT_READY",
                 "MCP dependency registries must be built before the runtime snapshot.");
         }
+        var configuredResolvers = _json.SerializerOptions.TypeInfoResolverChain.ToArray();
+        var configuredResolver = _json.SerializerOptions.TypeInfoResolver;
         var serializerOptions = new JsonSerializerOptions(_json.SerializerOptions);
         // JsonSerializerOptions copy construction does not reliably preserve a
         // standalone TypeInfoResolver once the resolver chain is accessed. Keep
         // the application-owned source-generated context in the composed chain
         // before appending contributor contexts.
-        if (_json.SerializerOptions.TypeInfoResolver is { } applicationResolver
-            && !serializerOptions.TypeInfoResolverChain.Contains(applicationResolver)
-            && (serializerOptions.TypeInfoResolverChain.Count == 0 || applicationResolver is JsonSerializerContext))
-        {
-            if (serializerOptions.TypeInfoResolverChain.Count == 0)
-                serializerOptions.TypeInfoResolver = applicationResolver;
+        var applicationResolvers = configuredResolvers
+            .Append(configuredResolver)
+            .OfType<JsonSerializerContext>()
+            .Distinct()
+            .Where(resolver => !serializerOptions.TypeInfoResolverChain.Contains(resolver))
+            .ToArray();
+        foreach (var applicationResolver in applicationResolvers)
             serializerOptions.TypeInfoResolverChain.Insert(0, applicationResolver);
-        }
 
         // 1. Validate JSON options constraints (non-resolver rules) upfront.
         ValidateInputConstraintOptions(serializerOptions);
@@ -220,7 +222,15 @@ public sealed class McpToolRuntimeSnapshotBuilder
             return null;
         try
         {
-            var typeInfo = options.GetTypeInfo(type);
+            JsonTypeInfo? typeInfo;
+            try
+            {
+                typeInfo = options.GetTypeInfo(type);
+            }
+            catch (NotSupportedException)
+            {
+                typeInfo = null;
+            }
             if (typeInfo is not null)
                 return typeInfo;
 
