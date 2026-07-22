@@ -11,29 +11,11 @@ public sealed record AgentMemoryToolPrincipal
     public required string ExecutionId { get; init; }
 }
 
-public enum AgentMemoryResourceKind
-{
-    Unknown = 0,
-    Context = 1,
-    Candidate = 2,
-    Memory = 3,
-    ConversationHistory = 4,
-    TaskHistory = 5
-}
-
 public enum AgentMemoryHistorySourceKind
 {
     Unknown = 0,
     Conversation = 1,
     Task = 2
-}
-
-public enum AgentMemorySecurityArtifactState
-{
-    Unknown = 0,
-    Active = 1,
-    Revoked = 2,
-    Expired = 3
 }
 
 public sealed record AgentMemoryResourceHandle

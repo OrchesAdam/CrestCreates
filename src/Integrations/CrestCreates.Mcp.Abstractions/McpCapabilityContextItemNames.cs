@@ -9,4 +9,6 @@ public static class McpCapabilityContextItemNames
     public const string SessionId = "McpSessionId";
     public const string HostId = "McpHostId";
     public const string InvocationId = "McpInvocationId";
+    public const string CapabilityId = "McpCapabilityId";
+    public const string CapabilityVersion = "McpCapabilityVersion";
 }

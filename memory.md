@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-20 (Phase 8d+ post-approval audit closure)
+Last Updated: 2026-07-21 (Phase 8d+ architecture review closure)
 
 ## Purpose
 
@@ -68,6 +68,66 @@ CreatedByBatch artifacts until commit, governance outcome-v2 hashes validated
 output facts, and a single canonical artifact-plan projector binds full
 resource/provenance plans. MemoryItem and MemoryCandidate expansion fail closed
 on ranged refs. Focused stale-scope and adjacent-range regressions are included.
+
+AOT tier: Memory Tools runtime is Tier 2 (NativeAOT-verified). The linux-x64 fixture
+publishes with PublishAot, completes native link, and executes the original binary.
+Memory.Llm is Tier 3 (separately scoped, no AOT claim inherited).
+
+Platform capabilities introduced by 8d+:
+
+- Schema v3 bounded nested projection: `FieldType = "object"`, bounded
+  object/object-collection graphs, direct `SchemaDescriptor.References`,
+  deterministic `$defs/$ref`, root depth zero, cycle/limit rejection.
+  Canonical shape versions: `schema-contract-hash-v3`, `schema-definition-hash-v3`.
+- Composable source-generated Agent Tool JSON contexts:
+  `IAgentToolJsonContextContributor` with stable Id/Order/ModuleId,
+  normalized frozen Options profile, deterministic contributor order,
+  per-root ownership, and nested CLR metadata equivalence contracts.
+- DI-safe generated Capability handler activation: `GeneratedHandlerRegistry`
+  with `Apply(IServiceCollection)` for Host-local provider selection and
+  scoped handler DI registration. Process-global `ModuleInitializer`
+  registration is discovery metadata only.
+- Governance outcome v2: `agent-tool-governance-outcome-v2` hashes Kind, Code,
+  safe issue code/path, and validated facts only. Excludes Message,
+  StructuredOutput, explanation, and every content field. v1 is historical
+  read-only.
+- Bounded prepared-outcome publication: curation handlers publish one immutable
+  set of unique outcome codes and receipts before mutation; final Invoker
+  preflight must match exactly one receipt by Tool/version, contract
+  fingerprint, and structured-output hash.
+- Plan-bound security artifact infrastructure: dual-origin (Agent Tool + Host)
+  batch preparation, idempotent retry, changed-plan conflict, quota checks,
+  CreatedByBatch/ReusedExisting rollback rules, and ArtifactPlanHash.
+
+Known architectural items (from architecture review, 2026-07-21):
+
+- Dependency direction: the runtime project references concrete `Agent.Tools`
+  and `Agent.Memory` (not their Abstractions) because the adapter needs shared
+  infrastructure (runtime snapshots, fact buffers, invocation gate, promotion
+  service, canonical hash) that lives in the concrete projects. The spec's
+  allowed-dependency list should be updated to reflect this. The Abstractions
+  project references `Agent.Tools.Abstractions` (not in the original spec
+  allowed set) because its contracts inherit from `IAgentToolJsonContextContributor`,
+  `AgentToolAuditFactKind`, and `IAgentToolInvocationFactSink` defined there.
+- Dual handler registration: `HandlerInvokerSourceGenerator` emits both a
+  `[ModuleInitializer] Register()` (process-global discovery metadata) and an
+  `Apply(IServiceCollection)` (Host-local DI registration). The ModuleInitializer
+  path must remain discovery-only and never become an executable resolver
+  fallback. If it registers callable resolver entries, that is a dual-path
+  violation requiring closure.
+- Missing boundary tests: `Agent.Memory.Tools.Abstractions` and
+  `Agent.Memory.Tools` have no entries in `DependencyBoundaryTests.cs`. Adding
+  boundary tests for both projects (enforcing no ControlPlane, DescriptorDraft,
+  HumanTask, DynamicApi, ASP.NET Core, MCP, concrete ORM, mutable registry
+  references) is recommended.
+- Development in-memory stores (SecurityArtifactBatchStore, ResourceHandleStore,
+  SourceGrantStore) grow without bound — handles/grants are lazily marked
+  Expired on read but entries are never evicted. These are development-only
+  stores; production implementations must handle eviction, size limits, and
+  expired-entry cleanup.
+
+Spec: `docs/superpowers/specs/2026-07-17-phase-8dplus-governed-agent-memory-tool-projection-design.md`
+Plan: `docs/superpowers/plans/2026-07-20-phase-8dplus-governed-agent-memory-tool-projection.md`
 
 ### Phase 8f — Agent Tool Projection
 

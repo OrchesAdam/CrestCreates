@@ -6,7 +6,9 @@ public enum AgentMemorySecurityArtifactBatchOriginKind
 {
     Unknown = 0,
     AgentToolInvocation = 1,
-    TrustedHostOperation = 2
+    TrustedHostOperation = 2,
+    McpInvocation = 3,
+    McpSessionOperation = 4
 }
 
 public sealed record AgentMemorySecurityArtifactBatchKey
@@ -41,19 +43,8 @@ public sealed record AgentMemoryHostArtifactBatchKey
     public required string ArtifactPurpose { get; init; }
 }
 
-public enum AgentMemorySecurityArtifactKind
-{
-    Unknown = 0,
-    ResourceHandle = 1,
-    SourceGrant = 2
-}
-
-public enum PreparedArtifactDisposition
-{
-    Unknown = 0,
-    CreatedByBatch = 1,
-    ReusedExisting = 2
-}
+// AgentMemorySecurityArtifactKind and PreparedArtifactDisposition are now TypeForwarded
+// from Projection.Abstractions (namespace preserved as CrestCreates.Agent.Memory.Tools).
 
 /// <summary>
 /// Immutable prepared-artifact snapshot. Batch rollback matches ArtifactId

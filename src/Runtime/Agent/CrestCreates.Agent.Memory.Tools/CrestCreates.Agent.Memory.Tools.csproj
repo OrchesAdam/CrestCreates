@@ -9,6 +9,9 @@
     <ProjectReference Include="../CrestCreates.Agent.Memory.Tools.Abstractions/CrestCreates.Agent.Memory.Tools.Abstractions.csproj" />
     <ProjectReference Include="../CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj" />
     <ProjectReference Include="../CrestCreates.Agent.Memory/CrestCreates.Agent.Memory.csproj" />
+    <ProjectReference Include="../CrestCreates.Agent.Memory.Projection.Abstractions/CrestCreates.Agent.Memory.Projection.Abstractions.csproj" />
+    <ProjectReference Include="../CrestCreates.Agent.Memory.Projection/CrestCreates.Agent.Memory.Projection.csproj" />
+    <ProjectReference Include="../CrestCreates.Agent.Memory.ReadCore/CrestCreates.Agent.Memory.ReadCore.csproj" />
     <ProjectReference Include="../../Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
     <ProjectReference Include="../../../Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj"
                       OutputItemType="Analyzer"

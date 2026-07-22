@@ -31,23 +31,17 @@ internal static class Definitions
 {
     private static VersionedDescriptorRef<SchemaDescriptor> Ref(string id) => new(id, 1);
 
+    // Shared read schemas (canonical-hash, source-grant, diagnostic, block, item,
+    // build-pack-input/output, expand-source-input/output) are owned by
+    // Agent.Memory.Projection. Only write-specific schemas stay here.
     public static readonly IReadOnlyList<SchemaDescriptor> AllSchemas =
     [
-        Schema("canonical-hash", ("Value", "string", true, false), ("AlgorithmVersion", "string", true, false), ("ContractVersion", "string", true, false), ("CanonicalShapeVersion", "string", true, false)),
-        Schema("source-grant", ("GrantId", "string", true, false), ("SourceKind", "string", true, false), ("ExpiresAt", "datetime", true, false)),
-        Schema("diagnostic", ("Code", "string", true, false), ("Severity", "string", true, false)),
-        Schema("block", ("Content", "string", true, false), ("CanonicalContentHash", "object", true, false), ("SourceGrants", "object", false, false)),
         Schema("candidate", ("CandidateHandle", "string", true, false), ("Kind", "string", true, false), ("Content", "string", true, false), ("CanonicalContentHash", "object", true, false), ("Confidence", "string", true, false), ("CandidateStatus", "string", true, false), ("IsAuthoritative", "bool", false, false), ("SourceGrants", "object", false, false)),
-        Schema("item", ("MemoryHandle", "string", true, false), ("Kind", "string", true, false), ("Content", "string", true, false), ("CanonicalContentHash", "object", true, false), ("Confidence", "string", true, false), ("MemoryStatus", "string", true, false), ("IsAuthoritative", "bool", false, false), ("Tags", "string", false, false), ("SourceGrants", "object", false, false)),
-        Schema("build-pack-input", ("MemoryHandles", "string", false, false), ("Kinds", "string", false, false), ("Tags", "string", false, false), ("MaximumCount", "int", true, false), ("CharacterBudget", "int", true, false), ("MinimumConfidence", "string", false, false)),
-        Schema("expand-source-input", ("GrantId", "string", true, false), ("MaximumCharacters", "int", true, false)),
         Schema("compress-history-input", ("HistorySourceHandle", "string", true, false)),
         Schema("extract-candidates-input", ("ContextHandle", "string", true, false)),
         Schema("promote-candidate-input", ("CandidateHandle", "string", true, false), ("Explanation", "string", false, true)),
         Schema("reject-candidate-input", ("CandidateHandle", "string", true, false), ("Explanation", "string", false, true)),
         Schema("supersede-item-input", ("MemoryHandle", "string", true, false), ("ReplacementCandidateHandle", "string", true, false), ("Explanation", "string", false, true)),
-        Schema("build-pack-output", ("OperationStatus", "string", true, false), ("Items", "object", false, false), ("ReturnedCount", "int", false, false), ("WasTruncated", "bool", false, false), ("IsAuthoritative", "bool", false, false), ("Diagnostics", "object", false, false)),
-        Schema("expand-source-output", ("OperationStatus", "string", true, false), ("SanitizedContent", "string", false, true), ("CanonicalContentHash", "object", false, true), ("WasTruncated", "bool", false, false), ("Diagnostics", "object", false, false)),
         Schema("compress-history-output", ("OperationStatus", "string", true, false), ("ContextHandle", "string", false, true), ("SourceKind", "string", false, true), ("Blocks", "object", false, false), ("BlockCount", "int", false, false), ("Diagnostics", "object", false, false)),
         Schema("extract-candidates-output", ("OperationStatus", "string", true, false), ("ContextHandle", "string", false, true), ("Candidates", "object", false, false), ("CandidateCount", "int", false, false), ("Diagnostics", "object", false, false)),
         Schema("promote-candidate-output", ("OperationStatus", "string", true, false), ("Item", "object", false, true), ("Diagnostics", "object", false, false)),

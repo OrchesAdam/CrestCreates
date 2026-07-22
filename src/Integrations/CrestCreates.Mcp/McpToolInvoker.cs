@@ -164,6 +164,8 @@ public sealed class McpToolInvoker : IMcpToolInvoker
         execution.Items[McpCapabilityContextItemNames.SessionId] = call.SessionId;
         execution.Items[McpCapabilityContextItemNames.HostId] = call.Host.HostId;
         execution.Items[McpCapabilityContextItemNames.InvocationId] = call.InvocationId;
+        execution.Items[McpCapabilityContextItemNames.CapabilityId] = entry.Capability.Id;
+        execution.Items[McpCapabilityContextItemNames.CapabilityVersion] = entry.Capability.Version;
     }
 
     private static JsonElement NormalizeArguments(JsonElement? arguments)

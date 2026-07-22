@@ -1,4 +1,5 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Tools;
 
 namespace CrestCreates.Agent.Memory.Tools;
@@ -7,6 +8,14 @@ public sealed record AgentMemoryPreparedSecurityArtifacts
 {
     public required AgentMemoryResourceHandleIssueResult? Handles { get; init; }
     public required AgentMemoryGrantIssueResult? Grants { get; init; }
+
+    /// <summary>
+    /// Bridged compensation token from the canonical Coordinator.
+    /// Not part of the public API contract — used by the adapter to implement
+    /// RevokeCreatedAsync(prepared) without AsyncLocal concurrency issues.
+    /// Callers must not read, serialize, or construct this field.
+    /// </summary>
+    public AgentMemoryArtifactCompensationToken? BridgedCompensationToken { get; init; }
 }
 
 /// <summary>

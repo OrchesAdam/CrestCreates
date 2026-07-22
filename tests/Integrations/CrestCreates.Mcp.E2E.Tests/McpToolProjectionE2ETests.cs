@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Generated;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
@@ -12,6 +13,7 @@ using CrestCreates.Schema;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Xunit;
 
@@ -42,6 +44,10 @@ public sealed class McpToolProjectionE2ETests
         builder.Services.AddSingleton<ISchemaRegistry>(schemas);
         builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
         builder.Services.AddCapabilityRuntime();
+        builder.Services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<ICapabilityHandlerModule>(
+                GeneratedCapabilityHandlerModule.Instance));
+        GeneratedHandlerRegistry.RegisterServices(builder.Services);
         builder.Services.AddInMemoryCapabilityAudit();
         builder.Services.AddCrestMcpToolProjection(options =>
             options.SerializerOptions.TypeInfoResolver = E2EJsonContext.Default);

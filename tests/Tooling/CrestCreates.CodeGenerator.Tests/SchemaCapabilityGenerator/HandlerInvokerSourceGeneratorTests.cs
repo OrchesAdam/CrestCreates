@@ -19,6 +19,7 @@ public class HandlerInvokerSourceGeneratorTests
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Capability.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Capability.Abstractions
 {
@@ -33,6 +34,16 @@ namespace CrestCreates.Capability.Abstractions
 
         [System.Obsolete]
         public static void SetResolver(ICapabilityHandlerResolver resolver) { }
+
+        public static void RegisterDefinition(string providerId, System.Action<CapabilityHandlerResolver> apply) { }
+        public static void ApplyDefinition(string providerId, CapabilityHandlerResolver resolver) { }
+        public static void ApplyLegacyRegistrations(CapabilityHandlerResolver target) { }
+    }
+
+    public interface ICapabilityHandlerModule
+    {
+        string Id { get; }
+        void Apply(CapabilityHandlerResolver resolver);
     }
 }
 
@@ -82,11 +93,14 @@ namespace MyApp
         generated!.SourceText.Should().Contain("CapabilityHandlerResolverProvider.RegisterDefinition(");
         generated.SourceText.Should().Contain("CapabilityHandlerResolverProvider.ApplyDefinition(");
         generated.SourceText.Should().Contain("internal static void Apply(IServiceCollection services)");
-        generated.SourceText.Should().Contain("services.AddScoped<");
+        generated.SourceText.Should().Contain("internal static void RegisterServices(IServiceCollection services)");
+        generated.SourceText.Should().Contain("services.TryAddScoped<");
         generated.SourceText.Should().NotContain("CapabilityHandlerResolverProvider.SetResolver(");
-        generated.SourceText.Should().Contain("new CapabilityHandlerResolver()");
+        generated.SourceText.Should().NotContain("new CapabilityHandlerResolver()");
+        generated.SourceText.Should().Contain("GeneratedCapabilityHandlerModule");
         generated.SourceText.Should().Contain("ICapabilityContextAwareHandlerInvoker");
         generated.SourceText.Should().Contain("context.ServiceProvider.GetRequiredService<MyApp.TestHandler>()");
         generated.SourceText.Should().NotContain("new MyApp.TestHandler()");
+        generated.SourceText.Should().Contain("[Obsolete(");
     }
 }

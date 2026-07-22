@@ -162,7 +162,7 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
         var handle = new AgentMemoryResourceHandle
         {
             HandleId = "host-memory-handle", ResourceKind = kind, ResourceId = resourceId, Principal = principal,
-            ScopeFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"memory-scope-v2|{principal.TenantId}|True|"))).ToLowerInvariant(),
+            ScopeFingerprint = "eac86eaf6789ce6e0d4b76d4457bfa33d4f980d1eab5d7ac6213b54abf0014bd",
             IsUnscoped = true, IssuingInvocationId = "host", IssuedAt = now,
             ExpiresAt = now.Add(scope.ResourceHandleLifetime), RequiredDescriptorRefs = []
         };
@@ -197,7 +197,20 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
     private sealed class FixtureScopeProvider : IAgentMemoryToolAccessScopeProvider
     {
         public ValueTask<AgentMemoryToolAccessScope> ResolveAsync(AgentMemoryToolPrincipal principal, CancellationToken cancellationToken = default)
-            => ValueTask.FromResult(new AgentMemoryToolAccessScope { AllowUnscopedMemory = true });
+            => ValueTask.FromResult(new AgentMemoryToolAccessScope
+            {
+                AllowUnscopedMemory = true,
+                MaxRecallCount = 32,
+                MaxRecallCharacters = 32_000,
+                MaxExpansionCharacters = 16_000,
+                MaxActiveResourceHandlesPerResource = 64,
+                MaxGrantsPerResource = 64,
+                MaxResourceHandlesPerInvocation = 128,
+                MaxGrantsPerInvocation = 256,
+                VisibleDescriptorRefs = Array.Empty<DescriptorRef>(),
+                ResourceHandleLifetime = TimeSpan.FromMinutes(5),
+                ExpansionGrantLifetime = TimeSpan.FromMinutes(5),
+            });
     }
 
     private sealed class FixtureModuleSelection : IAgentToolModuleSelection { public string ModuleId => "fixture-json"; }

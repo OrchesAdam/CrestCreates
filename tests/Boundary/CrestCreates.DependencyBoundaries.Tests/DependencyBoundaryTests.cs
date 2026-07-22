@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Xml.Linq;
 using Xunit;
 
@@ -531,6 +532,87 @@ public class DependencyBoundaryTests
             "src/Framework/Api/CrestCreates.DynamicApi.Abstractions",
             "CrestCreates.DynamicApi.Abstractions must not reference Domain.Shared; projection attributes are compile-time only.",
             new[] { "CrestCreates.Domain.Shared" });
+    }
+
+    [Fact]
+    public void ProjectionAbstractions_DoesNotReferenceAgentMemoryTools()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.Memory.Projection.Abstractions",
+            "Projection.Abstractions must not reference Agent.Memory.Tools or Agent.Memory.Tools.Abstractions.",
+            new[]
+            {
+                "CrestCreates.Agent.Memory.Tools.Abstractions",
+                "CrestCreates.Agent.Memory.Tools/CrestCreates.Agent.Memory.Tools.csproj",
+            });
+    }
+
+    [Fact]
+    public void ProjectionAbstractions_DoesNotReferenceCapabilityOrMcp()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.Memory.Projection.Abstractions",
+            "Projection.Abstractions must not reference Capability or MCP.",
+            new[]
+            {
+                "CrestCreates.Capability.Abstractions",
+                "CrestCreates.Capability/CrestCreates.Capability.csproj",
+                "CrestCreates.Mcp",
+            });
+    }
+
+    [Fact]
+    public void Projection_DoesNotReferenceAgentMemoryTools()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.Memory.Projection",
+            "Projection implementation must not reference Agent.Memory.Tools or Agent.Memory.Tools.Abstractions.",
+            new[]
+            {
+                "CrestCreates.Agent.Memory.Tools.Abstractions",
+                "CrestCreates.Agent.Memory.Tools/CrestCreates.Agent.Memory.Tools.csproj",
+            });
+    }
+
+    [Fact]
+    public void ReadCore_DoesNotReferenceAgentMemoryTools()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Runtime/Agent/CrestCreates.Agent.Memory.ReadCore",
+            "ReadCore must not reference Agent.Memory.Tools or Agent.Memory.Tools.Abstractions.",
+            new[]
+            {
+                "CrestCreates.Agent.Memory.Tools.Abstractions",
+                "CrestCreates.Agent.Memory.Tools/CrestCreates.Agent.Memory.Tools.csproj",
+            });
+    }
+
+    [Fact]
+    public void McpMemory_DoesNotReferenceAgentMemoryToolsOrAbstractions()
+    {
+        AssertNoDirectProjectReferences(
+            "src/Integrations/CrestCreates.Mcp.Memory",
+            "Mcp.Memory must not reference Agent.Memory.Tools, Agent.Memory.Tools.Abstractions, or Agent.Memory.Abstractions.",
+            new[]
+            {
+                "CrestCreates.Agent.Memory.Tools.Abstractions",
+                "CrestCreates.Agent.Memory.Tools/CrestCreates.Agent.Memory.Tools.csproj",
+                "CrestCreates.Agent.Memory.Abstractions",
+            });
+    }
+
+    [Fact]
+    public void Tools_ReferencesProjectionAndReadCore()
+    {
+        // Tools adapters must reference Projection and ReadCore
+        var repoRoot = FindRepoRoot();
+        var projectPath = repoRoot.Combine("src/Runtime/Agent/CrestCreates.Agent.Memory.Tools/CrestCreates.Agent.Memory.Tools.csproj").FullName;
+
+        var document = XDocument.Load(projectPath);
+        var refs = ReadProjectReferences(projectPath).ToList();
+
+        Assert.Contains(refs, r => r.Contains("CrestCreates.Agent.Memory.Projection/CrestCreates.Agent.Memory.Projection.csproj"));
+        Assert.Contains(refs, r => r.Contains("CrestCreates.Agent.Memory.ReadCore/CrestCreates.Agent.Memory.ReadCore.csproj"));
     }
 
     private static void AssertNoDirectProjectReferences(

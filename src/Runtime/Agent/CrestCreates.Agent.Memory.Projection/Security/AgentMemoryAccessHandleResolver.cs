@@ -1,0 +1,92 @@
+using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Tools;
+using CrestCreates.Metadata.Abstractions;
+
+namespace CrestCreates.Agent.Memory.Projection.Security;
+
+/// <summary>
+/// Projection-neutral handle resolver. Validates Principal, scope fingerprint,
+/// descriptor closure, live resource existence, and tenant boundary on every resolution.
+/// </summary>
+internal sealed class AgentMemoryAccessHandleResolver : IAgentMemoryAccessHandleResolver
+{
+    private readonly IAgentMemoryAccessHandleStore _handleStore;
+    private readonly TimeProvider _timeProvider;
+    private readonly IAgentMemoryCurrentClosureProvider _closureProvider;
+
+    public AgentMemoryAccessHandleResolver(
+        IAgentMemoryAccessHandleStore handleStore,
+        TimeProvider timeProvider,
+        IAgentMemoryCurrentClosureProvider closureProvider)
+    {
+        _handleStore = handleStore;
+        _timeProvider = timeProvider;
+        _closureProvider = closureProvider;
+    }
+
+    public async ValueTask<AgentMemoryAccessResolvedResource?> ResolveAsync(
+        string handleId,
+        AgentMemoryResourceKind expectedKind,
+        AgentMemoryAccessPrincipal principal,
+        AgentMemoryAccessScope scope,
+        CancellationToken cancellationToken = default)
+    {
+        var handle = await _handleStore.GetAsync(handleId, cancellationToken);
+        if (handle is null) return null;
+
+        // Full Principal record equality
+        if (handle.Principal != principal) return null;
+
+        // Kind match
+        if (handle.ResourceKind != expectedKind) return null;
+
+        // Active state (read-purified: store returns expired state view without persisting)
+        if (handle.State != AgentMemorySecurityArtifactState.Active) return null;
+        if (handle.ExpiresAt <= _timeProvider.GetUtcNow()) return null;
+
+        // Scope fingerprint must match current scope
+        var currentFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
+        if (handle.ScopeFingerprint != currentFingerprint) return null;
+
+        // Descriptor closure: all required refs must be visible in current scope
+        // Unscoped handles are only allowed if scope explicitly allows unscoped
+        if (handle.IsUnscoped)
+        {
+            if (!scope.AllowUnscopedMemory) return null;
+        }
+        else
+        {
+            if (handle.RequiredDescriptorRefs is { Count: > 0 })
+            {
+                var visibleSet = new HashSet<DescriptorRef>(scope.VisibleDescriptorRefs);
+                if (!handle.RequiredDescriptorRefs.All(r => visibleSet.Contains(r)))
+                    return null;
+            }
+        }
+
+        // Tenant boundary
+        if (handle.Principal.TenantId != scope.TenantId) return null;
+
+        // Live closure revalidation: resource must still exist with compatible descriptors
+        var currentClosure = await _closureProvider.GetCurrentClosureAsync(
+            handle.ResourceKind, handle.ResourceId, cancellationToken);
+        if (currentClosure is null) return null; // Resource deleted
+
+        // Current closure must be a superset of the handle's required refs
+        if (!handle.IsUnscoped && handle.RequiredDescriptorRefs is { Count: > 0 })
+        {
+            var currentSet = new HashSet<DescriptorRef>(currentClosure.CurrentDescriptorRefs);
+            if (!handle.RequiredDescriptorRefs.All(r => currentSet.Contains(r)))
+                return null; // Resource gained new descriptors not in handle's closure
+        }
+
+        // Resource tenant must match principal tenant
+        if (currentClosure.TenantId != principal.TenantId) return null;
+
+        return new AgentMemoryAccessResolvedResource
+        {
+            Handle = handle,
+            EffectiveDescriptorRefs = handle.RequiredDescriptorRefs
+        };
+    }
+}

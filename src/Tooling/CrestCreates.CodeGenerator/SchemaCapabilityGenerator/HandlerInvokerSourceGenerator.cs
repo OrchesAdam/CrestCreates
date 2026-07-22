@@ -130,29 +130,32 @@ public sealed class HandlerInvokerSourceGenerator : IIncrementalGenerator
         sb.AppendLine("        });");
         sb.AppendLine("    }");
 
-        // Explicit host selection path. ModuleInitializer registration above is
-        // retained only for older compatibility consumers; new modules call
-        // Apply(IServiceCollection) from their Add* extension so each Host gets
-        // an isolated resolver and scoped handler registrations.
+        // Explicit host selection path.
         sb.AppendLine();
-        sb.AppendLine("    internal static void Apply(IServiceCollection services)");
+        sb.AppendLine("    /// <summary>");
+        sb.AppendLine("    /// Registers handler DI services only. Does NOT register");
+        sb.AppendLine("    /// ICapabilityHandlerModule — the caller is responsible for that.");
+        sb.AppendLine("    /// </summary>");
+        sb.AppendLine("    internal static void RegisterServices(IServiceCollection services)");
         sb.AppendLine("    {");
-        sb.AppendLine("        var resolver = new CapabilityHandlerResolver();");
-        sb.AppendLine("        services.RemoveAll<CapabilityHandlerResolver>();");
-        sb.AppendLine("        services.RemoveAll<ICapabilityHandlerResolver>();");
-        sb.AppendLine("        services.AddSingleton(resolver);");
-        sb.AppendLine("        services.AddSingleton<ICapabilityHandlerResolver>(resolver);");
-
-        sb.AppendLine("        CapabilityHandlerResolverProvider.ApplyDefinition(ProviderId, resolver);");
         foreach (var handler in validHandlers)
         {
             if (handler == null) continue;
             var fullName = string.IsNullOrEmpty(handler.HandlerNamespace)
                 ? handler.HandlerTypeName
                 : $"{handler.HandlerNamespace}.{handler.HandlerTypeName}";
-            sb.AppendLine($"        services.AddScoped<{fullName}>();");
+            sb.AppendLine($"        services.TryAddScoped<{fullName}>();");
         }
-
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    [Obsolete(\"Use module registration and RegisterServices(IServiceCollection).\")]");
+        sb.AppendLine("    internal static void Apply(IServiceCollection services)");
+        sb.AppendLine("    {");
+        sb.AppendLine("        services.TryAddEnumerable(");
+        sb.AppendLine("            ServiceDescriptor.Singleton<ICapabilityHandlerModule>(");
+        sb.AppendLine("                GeneratedCapabilityHandlerModule.Instance));");
+        sb.AppendLine();
+        sb.AppendLine("        RegisterServices(services);");
         sb.AppendLine("    }");
 
         // Emit invoker wrapper classes
@@ -182,6 +185,21 @@ public sealed class HandlerInvokerSourceGenerator : IIncrementalGenerator
             sb.AppendLine("    }");
         }
 
+        sb.AppendLine("}");
+
+        sb.AppendLine();
+        sb.AppendLine($"internal sealed class GeneratedCapabilityHandlerModule : ICapabilityHandlerModule");
+        sb.AppendLine("{");
+        sb.AppendLine($"    internal const string ProviderId = \"{escapedProviderId}\";");
+        sb.AppendLine();
+        sb.AppendLine("    internal static GeneratedCapabilityHandlerModule Instance { get; } = new();");
+        sb.AppendLine();
+        sb.AppendLine("    private GeneratedCapabilityHandlerModule() { }");
+        sb.AppendLine();
+        sb.AppendLine("    public string Id => ProviderId;");
+        sb.AppendLine();
+        sb.AppendLine("    public void Apply(CapabilityHandlerResolver resolver)");
+        sb.AppendLine("        => CapabilityHandlerResolverProvider.ApplyDefinition(ProviderId, resolver);");
         sb.AppendLine("}");
 
         spc.AddSource("GeneratedHandlerRegistry.g.cs", sb.ToString());

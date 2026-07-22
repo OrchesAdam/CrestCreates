@@ -53,10 +53,28 @@ public static class CapabilityServiceCollectionExtensions
         // selected generated modules replace this registration with a Host-
         // owned resolver through their generated Apply(IServiceCollection)
         // method before the Host is built.
-        var concreteResolver = CapabilityHandlerResolverProvider.GetConcreteResolver();
-        var interfaceResolver = CapabilityHandlerResolverProvider.GetResolver();
-        services.TryAddSingleton<CapabilityHandlerResolver>(_ => concreteResolver);
-        services.TryAddSingleton<ICapabilityHandlerResolver>(_ => interfaceResolver);
+        //
+        // New pattern: ICapabilityHandlerModule instances are collected and
+        // the composed resolver is built from them in alphabetical order by Id.
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<ICapabilityHandlerModule>(
+                LegacyCapabilityHandlerModule.Instance));
+
+        services.TryAddSingleton<CapabilityHandlerResolver>(sp =>
+        {
+            var resolver = new CapabilityHandlerResolver();
+            var modules = sp.GetServices<ICapabilityHandlerModule>()
+                .OrderBy(m => m.Id, StringComparer.Ordinal)
+                .ToList();
+            foreach (var module in modules)
+            {
+                module.Apply(resolver);
+            }
+            return resolver;
+        });
+
+        services.TryAddSingleton<ICapabilityHandlerResolver>(sp =>
+            sp.GetRequiredService<CapabilityHandlerResolver>());
 
         return services;
     }

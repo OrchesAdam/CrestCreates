@@ -1,4 +1,8 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Projection;
+using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.ReadCore;
+using CrestCreates.Agent.Memory.Tools.Adapters;
 using CrestCreates.Generated;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Agent.Tools;
@@ -17,25 +21,40 @@ public static class AgentMemoryToolServiceCollectionExtensions
         var promotionRegistration = services.LastOrDefault(item => item.ServiceType == typeof(IAgentMemoryPromotionService));
         if (promotionRegistration is not null && promotionRegistration.Lifetime != ServiceLifetime.Singleton)
             throw new InvalidOperationException("Memory curation requires a singleton Promotion Service binding.");
-        // Explicitly select this module's generated Capability provider. The
-        // generated Apply method creates a resolver owned by this Host and
-        // registers the seven handlers as scoped services; no process-global
-        // resolver state is consulted by the Memory Tool execution path.
-        GeneratedHandlerRegistry.Apply(services);
+
+        // Tool-level JSON context, audit, outcome providers
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolJsonContextContributor, AgentMemoryToolJsonContextContributor>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolPreparedOutcomeRequirementProvider, AgentMemoryPreparedOutcomeRequirementProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolOutputAuditProjectionProvider, AgentMemoryToolAuditProjectionProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolOutputAuditProjectionContractProvider, AgentMemoryToolAuditProjectionProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolOutputOutcomeCodeProvider, AgentMemoryToolAuditProjectionProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IAgentToolModuleSelection, AgentMemoryToolModuleMarker>());
+
+        // Canonical security infrastructure from Projection
+        services.AddAgentMemoryProjectionSecurity();
+        services.AddAgentMemoryReadCore();
+
+        // TimeProvider — host can override, default is System
+        services.TryAddSingleton(TimeProvider.System);
+
+        // Capability module + handler DI (new composable pattern)
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<ICapabilityHandlerModule>(
+                GeneratedCapabilityHandlerModule.Instance));
+        GeneratedHandlerRegistry.RegisterServices(services);
+
+        // Old-interface adapters wrapping canonical stores
         services.TryAddSingleton<IAgentMemorySecurityArtifactBatchStore, AgentMemorySecurityArtifactBatchStore>();
-        services.TryAddSingleton<IAgentMemoryResourceHandleStore, AgentMemoryResourceHandleStore>();
-        services.TryAddSingleton<IAgentMemorySourceGrantStore, AgentMemorySourceGrantStore>();
-        services.TryAddSingleton<IAgentMemorySecurityArtifactCoordinator, AgentMemorySecurityArtifactCoordinator>();
-        services.TryAddSingleton<AgentMemoryResourceHandleResolver>();
-        services.TryAddSingleton<IAgentMemoryResourceHandleResolver>(sp => sp.GetRequiredService<AgentMemoryResourceHandleResolver>());
-        services.TryAddSingleton<IAgentMemorySourceGrantResolver>(sp => sp.GetRequiredService<AgentMemoryResourceHandleResolver>());
-        services.TryAddSingleton<IAgentMemoryHistoryResourceHandleIssuer, AgentMemoryHistoryResourceHandleIssuer>();
+        services.TryAddSingleton<IAgentMemoryResourceHandleStore, AgentMemoryResourceHandleStoreAdapter>();
+        services.TryAddSingleton<IAgentMemorySourceGrantStore, AgentMemorySourceGrantStoreAdapter>();
+        services.TryAddSingleton<IAgentMemorySecurityArtifactCoordinator, AgentMemorySecurityArtifactCoordinatorAdapter>();
+        services.TryAddSingleton<IAgentMemoryResourceHandleResolver, AgentMemoryResourceHandleResolverAdapter>();
+        services.TryAddSingleton<IAgentMemorySourceGrantResolver, AgentMemorySourceGrantResolverAdapter>();
+        services.TryAddSingleton<IAgentMemoryHistoryResourceHandleIssuer, AgentMemoryHistoryResourceHandleIssuerAdapter>();
+
+        // Legacy scope provider adapter
+        services.TryAddSingleton<IAgentMemoryAccessScopeProvider, LegacyAgentMemoryAccessScopeProviderAdapter>();
+
         services.TryAddSingleton<AgentMemoryToolRuntimeBinding>(sp =>
         {
             var finalRegistrations = sp.GetRequiredService<IServiceCollection>()
@@ -52,8 +71,6 @@ public static class AgentMemoryToolServiceCollectionExtensions
                 OutcomeGuarantee = capabilities.OutcomeGuarantee
             };
         });
-        // GeneratedHandlerRegistry.Apply owns the scoped handler registrations
-        // and the Host-local resolver; keep one registration authority.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AgentMemoryToolCapabilityGateHostedService>());
         return services;
     }

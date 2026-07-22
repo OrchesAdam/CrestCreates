@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CrestCreates.Mcp.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
@@ -40,6 +41,7 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
             schemas.Object,
             new McpJsonSchemaProjector(),
             new McpToolSchemaParityValidator(),
+            new McpToolSchemaClosureResolver(schemas.Object),
             new DefaultCanonicalHashComputer(),
             new McpJsonOptions
             {
@@ -47,7 +49,8 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
                 {
                     TypeInfoResolver = McpTestJsonContext.Default
                 }
-            });
+            },
+            Array.Empty<IMcpToolJsonContextContributor>());
 
         var snapshot = builder.Build();
 
@@ -102,6 +105,7 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
             schemas.Object,
             new McpJsonSchemaProjector(),
             new McpToolSchemaParityValidator(),
+            new McpToolSchemaClosureResolver(schemas.Object),
             new DefaultCanonicalHashComputer(),
             new McpJsonOptions
             {
@@ -109,7 +113,8 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
                 {
                     TypeInfoResolver = McpTestJsonContext.Default
                 }
-            });
+            },
+            Array.Empty<IMcpToolJsonContextContributor>());
 
         var action = () => builder.Build();
 
@@ -131,8 +136,10 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
             schemas.Object,
             new McpJsonSchemaProjector(),
             new McpToolSchemaParityValidator(),
+            new McpToolSchemaClosureResolver(schemas.Object),
             new DefaultCanonicalHashComputer(),
-            new McpJsonOptions { SerializerOptions = new JsonSerializerOptions() });
+            new McpJsonOptions { SerializerOptions = new JsonSerializerOptions() },
+            Array.Empty<IMcpToolJsonContextContributor>());
 
         var action = () => builder.Build();
 
@@ -160,8 +167,10 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
             schemas.Object,
             new McpJsonSchemaProjector(),
             new McpToolSchemaParityValidator(),
+            new McpToolSchemaClosureResolver(schemas.Object),
             new DefaultCanonicalHashComputer(),
-            new McpJsonOptions { SerializerOptions = options });
+            new McpJsonOptions { SerializerOptions = options },
+            Array.Empty<IMcpToolJsonContextContributor>());
 
         var action = () => builder.Build();
 
@@ -187,8 +196,10 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
             schemas.Object,
             new McpJsonSchemaProjector(),
             new McpToolSchemaParityValidator(),
+            new McpToolSchemaClosureResolver(schemas.Object),
             new DefaultCanonicalHashComputer(),
-            new McpJsonOptions { SerializerOptions = options });
+            new McpJsonOptions { SerializerOptions = options },
+            Array.Empty<IMcpToolJsonContextContributor>());
 
         var action = () => builder.Build();
 
@@ -229,8 +240,10 @@ public sealed class McpToolRuntimeSnapshotBuilderTests
             schemas.Object,
             new McpJsonSchemaProjector(),
             new McpToolSchemaParityValidator(),
+            new McpToolSchemaClosureResolver(schemas.Object),
             new DefaultCanonicalHashComputer(),
-            new McpJsonOptions { SerializerOptions = new JsonSerializerOptions { TypeInfoResolver = McpTestJsonContext.Default } });
+            new McpJsonOptions { SerializerOptions = new JsonSerializerOptions { TypeInfoResolver = McpTestJsonContext.Default } },
+            Array.Empty<IMcpToolJsonContextContributor>());
 
         var action = () => builder.Build();
 

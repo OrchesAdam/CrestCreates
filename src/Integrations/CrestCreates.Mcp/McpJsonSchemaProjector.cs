@@ -6,25 +6,38 @@ namespace CrestCreates.Mcp;
 
 public interface IMcpJsonSchemaProjector
 {
+    // Root-only overloads (backward compat)
     JsonElement ProjectInput(SchemaDescriptor? schema);
-
     JsonElement? ProjectOutput(SchemaDescriptor? schema);
+
+    // Closure-aware overloads
+    JsonElement ProjectInput(SchemaDescriptor? schema, IReadOnlyList<SchemaDescriptor> referencedSchemas);
+    JsonElement? ProjectOutput(SchemaDescriptor? schema, IReadOnlyList<SchemaDescriptor> referencedSchemas);
 }
 
 public sealed class McpJsonSchemaProjector : IMcpJsonSchemaProjector
 {
     private static readonly SchemaJsonContractProjector Projector = new();
 
-    public JsonElement ProjectInput(SchemaDescriptor? schema) => Project(schema);
+    // Root-only overloads delegate to closure overload with empty list
+    public JsonElement ProjectInput(SchemaDescriptor? schema)
+        => ProjectInput(schema, Array.Empty<SchemaDescriptor>());
 
     public JsonElement? ProjectOutput(SchemaDescriptor? schema)
-        => schema is null ? null : Project(schema);
+        => schema is null ? null : ProjectOutput(schema, Array.Empty<SchemaDescriptor>());
 
-    private static JsonElement Project(SchemaDescriptor? schema)
+    // Closure-aware overloads
+    public JsonElement ProjectInput(SchemaDescriptor? schema, IReadOnlyList<SchemaDescriptor> referencedSchemas)
+        => Project(schema, referencedSchemas);
+
+    public JsonElement? ProjectOutput(SchemaDescriptor? schema, IReadOnlyList<SchemaDescriptor> referencedSchemas)
+        => schema is null ? null : Project(schema, referencedSchemas);
+
+    private static JsonElement Project(SchemaDescriptor? schema, IReadOnlyList<SchemaDescriptor> referencedSchemas)
     {
         try
         {
-            return Projector.ProjectObject(schema);
+            return Projector.ProjectObject(schema, referencedSchemas);
         }
         catch (SchemaJsonContractException exception)
         {

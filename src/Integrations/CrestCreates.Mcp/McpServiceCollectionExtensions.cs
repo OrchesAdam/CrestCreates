@@ -26,6 +26,7 @@ public static class McpServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IDescriptorRelationshipExtractor, McpToolRelationshipExtractor>());
         services.TryAddSingleton<IMcpJsonSchemaProjector, McpJsonSchemaProjector>();
         services.TryAddSingleton<McpToolSchemaParityValidator>();
+        services.TryAddSingleton<McpToolSchemaClosureResolver>();
         services.TryAddSingleton<McpToolRuntimeSnapshotBuilder>();
         services.TryAddSingleton<McpToolRuntimeSnapshotProvider>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, McpToolProjectionStartupValidator>());

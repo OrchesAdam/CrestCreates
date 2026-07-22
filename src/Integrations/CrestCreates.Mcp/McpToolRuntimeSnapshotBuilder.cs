@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using CrestCreates.Mcp.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
@@ -21,8 +22,10 @@ public sealed class McpToolRuntimeSnapshotBuilder
     private readonly ISchemaRegistry _schemas;
     private readonly IMcpJsonSchemaProjector _projector;
     private readonly McpToolSchemaParityValidator _parity;
+    private readonly McpToolSchemaClosureResolver _closureResolver;
     private readonly ICanonicalHashComputer _hashes;
     private readonly McpJsonOptions _json;
+    private readonly IEnumerable<IMcpToolJsonContextContributor> _contributors;
 
     public McpToolRuntimeSnapshotBuilder(
         IMcpToolRegistry tools,
@@ -30,16 +33,20 @@ public sealed class McpToolRuntimeSnapshotBuilder
         ISchemaRegistry schemas,
         IMcpJsonSchemaProjector projector,
         McpToolSchemaParityValidator parity,
+        McpToolSchemaClosureResolver closureResolver,
         ICanonicalHashComputer hashes,
-        McpJsonOptions json)
+        McpJsonOptions json,
+        IEnumerable<IMcpToolJsonContextContributor> contributors)
     {
         _tools = tools;
         _capabilities = capabilities;
         _schemas = schemas;
         _projector = projector;
         _parity = parity;
+        _closureResolver = closureResolver;
         _hashes = hashes;
         _json = json;
+        _contributors = contributors;
     }
 
     public McpToolRuntimeSnapshot Build()
@@ -55,6 +62,29 @@ public sealed class McpToolRuntimeSnapshotBuilder
         var serializerOptions = new JsonSerializerOptions(_json.SerializerOptions);
         ValidateResolvers(serializerOptions);
         ValidateInputConstraintOptions(serializerOptions);
+
+        // Compose contributor-supplied JSON contexts before freezing options.
+        // 1. Validate contributor ID uniqueness
+        var contributorIds = new HashSet<string>();
+        foreach (var contributor in _contributors)
+        {
+            if (!contributorIds.Add(contributor.ContributorId))
+                throw new McpToolConfigurationException("MCP115",
+                    $"Duplicate MCP JSON context contributor ID: {contributor.ContributorId}");
+        }
+
+        // 2. Execute contributors — each contributor adds its source-generated
+        //    JsonSerializerContext to the resolver chain and its JsonTypeInfo
+        //    entries to the binding map.
+        var contextBuilder = new McpJsonContextBuilder();
+        foreach (var contributor in _contributors.OrderBy(c => c.ContributorId, StringComparer.Ordinal))
+        {
+            contributor.Contribute(contextBuilder, serializerOptions);
+        }
+
+        // 3. Build the binding map (freezes the builder).
+        _ = contextBuilder.Build();
+
         serializerOptions.MakeReadOnly();
 
         var entries = new List<McpToolRuntimeEntry>();
@@ -70,18 +100,23 @@ public sealed class McpToolRuntimeSnapshotBuilder
 
             ValidateSchemaTypePresence(inputSchema, binding.InputType, "input");
             ValidateSchemaTypePresence(outputSchema, binding.OutputType, "output");
+
+            // Resolve schema closures for transitive references
+            var inputClosure = _closureResolver.Resolve(inputSchema);
+            var outputClosure = _closureResolver.Resolve(outputSchema);
+
             if (inputSchema is not null && inputTypeInfo is not null)
-                _parity.ValidateInput(inputSchema, inputTypeInfo);
+                _parity.ValidateInput(inputSchema, inputTypeInfo, inputClosure);
             if (outputSchema is not null && outputTypeInfo is not null)
-                _parity.ValidateOutput(outputSchema, outputTypeInfo);
+                _parity.ValidateOutput(outputSchema, outputTypeInfo, outputClosure);
 
             var annotations = BuildAnnotations(capability, tool.AnnotationOverrides);
             var contract = new McpToolContract(
                 tool.ToolName,
                 tool.Title,
                 tool.Description,
-                _projector.ProjectInput(inputSchema),
-                _projector.ProjectOutput(outputSchema),
+                _projector.ProjectInput(inputSchema, inputClosure),
+                _projector.ProjectOutput(outputSchema, outputClosure),
                 annotations);
             entries.Add(new McpToolRuntimeEntry(
                 tool,

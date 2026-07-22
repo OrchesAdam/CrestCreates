@@ -50,4 +50,14 @@ public static class CapabilityHandlerResolverProvider
         // Compatibility no-op.
         // Old generated code will be replaced in the same phase.
     }
+
+    /// <summary>
+    /// Copies all Register()-added invokers from the process-wide static resolver
+    /// to a target resolver. Used by LegacyCapabilityHandlerModule.
+    /// Does NOT copy RegisterDefinition entries.
+    /// </summary>
+    public static void ApplyLegacyRegistrations(CapabilityHandlerResolver target)
+    {
+        Resolver.CopyRegistrationsTo(target);
+    }
 }

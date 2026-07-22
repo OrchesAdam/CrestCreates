@@ -27,4 +27,17 @@ public sealed class CapabilityHandlerResolver : ICapabilityHandlerResolver
     {
         _invokers.Clear();
     }
+
+    /// <summary>
+    /// Copies all registered invokers to another resolver instance.
+    /// Used by LegacyCapabilityHandlerModule to migrate compat registrations.
+    /// Only copies Register()-added invokers, NOT RegisterDefinition entries.
+    /// </summary>
+    internal void CopyRegistrationsTo(CapabilityHandlerResolver target)
+    {
+        foreach (var pair in _invokers.OrderBy(item => item.Key, StringComparer.Ordinal))
+        {
+            target.Register(pair.Key, pair.Value);
+        }
+    }
 }
