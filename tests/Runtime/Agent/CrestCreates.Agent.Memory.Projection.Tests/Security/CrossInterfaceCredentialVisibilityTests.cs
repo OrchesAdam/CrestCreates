@@ -73,6 +73,7 @@ public class CrossInterfaceCredentialVisibilityTests
         mock.Setup(p => p.GetCurrentClosureAsync(
                 It.IsAny<AgentMemoryResourceKind>(),
                 It.IsAny<string>(),
+                It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(closure);
         return mock.Object;

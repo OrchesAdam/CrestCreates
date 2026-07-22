@@ -11,6 +11,7 @@ public interface IAgentMemoryCurrentClosureProvider
 {
     ValueTask<AgentMemoryCurrentClosure?> GetCurrentClosureAsync(
         AgentMemoryResourceKind resourceKind,
+        string tenantId,
         string resourceId,
         CancellationToken cancellationToken = default);
 }

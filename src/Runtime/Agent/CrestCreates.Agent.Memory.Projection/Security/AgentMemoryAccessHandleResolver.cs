@@ -68,25 +68,37 @@ internal sealed class AgentMemoryAccessHandleResolver : IAgentMemoryAccessHandle
         if (handle.Principal.TenantId != scope.TenantId) return null;
 
         // Live closure revalidation: resource must still exist with compatible descriptors
+        // Use explicit principal tenant, not ambient context
         var currentClosure = await _closureProvider.GetCurrentClosureAsync(
-            handle.ResourceKind, handle.ResourceId, cancellationToken);
+            handle.ResourceKind, principal.TenantId, handle.ResourceId, cancellationToken);
         if (currentClosure is null) return null; // Resource deleted
-
-        // Current closure must be a superset of the handle's required refs
-        if (!handle.IsUnscoped && handle.RequiredDescriptorRefs is { Count: > 0 })
-        {
-            var currentSet = new HashSet<DescriptorRef>(currentClosure.CurrentDescriptorRefs);
-            if (!handle.RequiredDescriptorRefs.All(r => currentSet.Contains(r)))
-                return null; // Resource gained new descriptors not in handle's closure
-        }
 
         // Resource tenant must match principal tenant
         if (currentClosure.TenantId != principal.TenantId) return null;
+
+        // Exact closure equality: issued closure must match current closure exactly.
+        // Added descriptor → reject. Removed descriptor → reject.
+        if (!handle.IsUnscoped)
+        {
+            var issuedRefs = handle.RequiredDescriptorRefs ?? Array.Empty<DescriptorRef>();
+            var currentRefs = currentClosure.CurrentDescriptorRefs;
+            if (!CanonicalRefSetEquals(issuedRefs, currentRefs))
+                return null;
+        }
 
         return new AgentMemoryAccessResolvedResource
         {
             Handle = handle,
             EffectiveDescriptorRefs = handle.RequiredDescriptorRefs
         };
+    }
+
+    private static bool CanonicalRefSetEquals(
+        IReadOnlyList<DescriptorRef> a, IReadOnlyList<DescriptorRef> b)
+    {
+        if (a.Count != b.Count) return false;
+        var setA = new HashSet<DescriptorRef>(a);
+        var setB = new HashSet<DescriptorRef>(b);
+        return setA.SetEquals(setB);
     }
 }

@@ -9,6 +9,7 @@ public interface IAgentMemoryResourceClosureProvider
     string ResourceKind { get; }
 
     ValueTask<AgentMemoryCurrentClosure?> GetCurrentClosureAsync(
+        string tenantId,
         string resourceId,
         CancellationToken cancellationToken = default);
 }

@@ -60,30 +60,54 @@ public sealed class McpToolRuntimeSnapshotBuilder
                 "MCP dependency registries must be built before the runtime snapshot.");
         }
         var serializerOptions = new JsonSerializerOptions(_json.SerializerOptions);
-        ValidateResolvers(serializerOptions);
+
+        // 1. Validate JSON options constraints (non-resolver rules) upfront.
         ValidateInputConstraintOptions(serializerOptions);
 
-        // Compose contributor-supplied JSON contexts before freezing options.
-        // 1. Validate contributor ID uniqueness
+        // 2. Validate contributor ID uniqueness.
         var contributorIds = new HashSet<string>();
-        foreach (var contributor in _contributors)
+        var contributorContexts = new List<JsonSerializerContext>();
+        foreach (var contributor in _contributors.OrderBy(c => c.ContributorId, StringComparer.Ordinal))
         {
             if (!contributorIds.Add(contributor.ContributorId))
                 throw new McpToolConfigurationException("MCP115",
                     $"Duplicate MCP JSON context contributor ID: {contributor.ContributorId}");
         }
 
-        // 2. Execute contributors — each contributor adds its source-generated
-        //    JsonSerializerContext to the resolver chain and its JsonTypeInfo
-        //    entries to the binding map.
+        // 2b. Validate binding root type uniqueness across all contributors.
+        var bindingRoots = new HashSet<Type>();
+        foreach (var contributor in _contributors)
+        {
+            foreach (var rootType in contributor.BindingRootTypes)
+            {
+                if (!bindingRoots.Add(rootType))
+                    throw new McpToolConfigurationException("MCP116",
+                        $"Duplicate MCP JSON binding root type: {rootType.Name} (claimed by contributor {contributor.ContributorId})");
+            }
+        }
+
+        // 3. Execute contributors — each creates a standalone source-generated context
+        //    (using a separate JsonSerializerOptions, so the application's resolver is
+        //    never overwritten) and contributes its JsonTypeInfo entries to the binding map.
         var contextBuilder = new McpJsonContextBuilder();
         foreach (var contributor in _contributors.OrderBy(c => c.ContributorId, StringComparer.Ordinal))
         {
-            contributor.Contribute(contextBuilder, serializerOptions);
+            var context = contributor.CreateContext();
+            contributorContexts.Add(context);
+            contributor.Contribute(contextBuilder);
         }
 
-        // 3. Build the binding map (freezes the builder).
-        _ = contextBuilder.Build();
+        // 4. Build the binding map (freezes the builder) — keep the result.
+        var contextBuildResult = contextBuilder.Build();
+
+        // 5. Append each contributor's standalone source-generated context to the
+        //    shared options' resolver chain (alongside the application's own context).
+        //    This must happen BEFORE options.MakeReadOnly().
+        foreach (var context in contributorContexts)
+            serializerOptions.TypeInfoResolverChain.Add(context);
+
+        // 6. Validate the final resolver chain after composition.
+        ValidateResolvers(serializerOptions);
 
         serializerOptions.MakeReadOnly();
 

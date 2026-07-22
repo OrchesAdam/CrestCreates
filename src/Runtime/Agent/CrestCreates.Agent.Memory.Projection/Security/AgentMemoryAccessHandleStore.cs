@@ -22,6 +22,7 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
     private readonly ConcurrentDictionary<string, int> _perOperationCount = new(StringComparer.Ordinal); // originBindingHash -> active count
     private readonly ConcurrentDictionary<string, string> _identityPlans = new(StringComparer.Ordinal); // identityKey -> planHash
     private readonly ConcurrentDictionary<string, string> _batchToIdentity = new(StringComparer.Ordinal); // batchCanonicalKey -> identityKey
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _batchLocks = new();
     private readonly TimeProvider _timeProvider;
 
     public AgentMemoryAccessHandleStore(TimeProvider timeProvider)
@@ -29,7 +30,7 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
         _timeProvider = timeProvider;
     }
 
-    public ValueTask<AgentMemoryAccessHandleIssueResult> TryIssueBatchAsync(
+    public async ValueTask<AgentMemoryAccessHandleIssueResult> TryIssueBatchAsync(
         AgentMemoryAccessArtifactBatchKey batchKey,
         IReadOnlyList<AgentMemoryAccessResourceHandle> handles,
         int maxActivePerResource,
@@ -44,7 +45,31 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
             throw new InvalidOperationException("Resource handle quota is exhausted.");
         if (maxActivePerOperation < handles.Count)
             throw new InvalidOperationException("Operation handle quota is exhausted.");
+        if (handles.Select(h => h.HandleId).Distinct(StringComparer.Ordinal).Count() != handles.Count)
+            throw new InvalidOperationException("Handle ids must be unique within a batch.");
+        var firstPrincipal = handles[0].Principal;
+        if (handles.Any(h => h.Principal != firstPrincipal))
+            throw new InvalidOperationException("A handle batch must have one trusted principal.");
 
+        var batchLock = _batchLocks.GetOrAdd(batchKey.ToCanonicalKey(), _ => new SemaphoreSlim(1, 1));
+
+        await batchLock.WaitAsync(cancellationToken);
+        try
+        {
+            return TryIssueBatchInternal(batchKey, handles, maxActivePerResource, maxActivePerOperation);
+        }
+        finally
+        {
+            batchLock.Release();
+        }
+    }
+
+    private AgentMemoryAccessHandleIssueResult TryIssueBatchInternal(
+        AgentMemoryAccessArtifactBatchKey batchKey,
+        IReadOnlyList<AgentMemoryAccessResourceHandle> handles,
+        int maxActivePerResource,
+        int maxActivePerOperation)
+    {
         var key = batchKey.ToCanonicalKey();
         var identity = batchKey.ToIdentityKey();
 
@@ -52,24 +77,17 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
         if (_batchIndex.TryGetValue(key, out var existingIds))
         {
             var existing = existingIds.Select(id => _handles[id]).ToArray();
-            return ValueTask.FromResult(new AgentMemoryAccessHandleIssueResult
+            return new AgentMemoryAccessHandleIssueResult
             {
                 Handles = existing,
                 ReusedExisting = true
-            });
+            };
         }
 
         // Check plan conflict
         if (_identityPlans.TryGetValue(identity, out var existingPlan)
             && !string.Equals(existingPlan, batchKey.ArtifactPlanHash.Value, StringComparison.Ordinal))
             throw new InvalidOperationException("Security artifact batch plan conflicts with an existing preparation.");
-
-        if (handles.Select(h => h.HandleId).Distinct(StringComparer.Ordinal).Count() != handles.Count)
-            throw new InvalidOperationException("Handle ids must be unique within a batch.");
-
-        var firstPrincipal = handles[0].Principal;
-        if (handles.Any(h => h.Principal != firstPrincipal))
-            throw new InvalidOperationException("A handle batch must have one trusted principal.");
 
         // Per-resource quota check
         foreach (var handle in handles)
@@ -102,11 +120,11 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
         _batchToIdentity[key] = identity;
         _perOperationCount.AddOrUpdate(bindingHash, handles.Count, (_, c) => c + handles.Count);
 
-        return ValueTask.FromResult(new AgentMemoryAccessHandleIssueResult
+        return new AgentMemoryAccessHandleIssueResult
         {
             Handles = handles.ToArray(),
             ReusedExisting = false
-        });
+        };
     }
 
     public ValueTask<AgentMemoryAccessResourceHandle?> GetAsync(

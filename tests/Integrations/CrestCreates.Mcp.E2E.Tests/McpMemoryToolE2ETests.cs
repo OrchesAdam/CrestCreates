@@ -173,6 +173,67 @@ public sealed class McpMemoryToolE2ETests
     }
 
     [Fact]
+    public async Task Mcp_memory_tools_are_discoverable_in_snapshot()
+    {
+        var snapshot = BuildMemoryToolSnapshot();
+        var entries = snapshot.Entries;
+
+        entries.Should().ContainKey("ctx_recall");
+        entries.Should().ContainKey("ctx_expand");
+        entries.Should().ContainKey("memory_recall");
+        entries.Should().ContainKey("memory_source_expand");
+    }
+
+    [Fact]
+    public async Task All_four_memory_tools_are_in_snapshot()
+    {
+        var snapshot = BuildMemoryToolSnapshot();
+        var memoryToolNames = snapshot.Entries.Keys
+            .Where(k => k is "ctx_recall" or "ctx_expand" or "memory_recall" or "memory_source_expand")
+            .OrderBy(n => n)
+            .ToList();
+
+        memoryToolNames.Should().HaveCount(4);
+        memoryToolNames.Should().Equal("ctx_expand", "ctx_recall", "memory_recall", "memory_source_expand");
+    }
+
+    [Fact]
+    public async Task Ctx_recall_input_schema_is_valid()
+    {
+        var snapshot = BuildMemoryToolSnapshot();
+        var entry = snapshot.Entries["ctx_recall"];
+        entry.InputSchema.Should().NotBeNull();
+        entry.InputSchema!.Fields.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Ctx_expand_input_schema_is_valid()
+    {
+        var snapshot = BuildMemoryToolSnapshot();
+        var entry = snapshot.Entries["ctx_expand"];
+        entry.InputSchema.Should().NotBeNull();
+        entry.InputSchema!.Fields.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Memory_recall_input_schema_is_valid()
+    {
+        var snapshot = BuildMemoryToolSnapshot();
+        var entry = snapshot.Entries["memory_recall"];
+        entry.InputSchema.Should().NotBeNull();
+        entry.InputSchema!.Fields.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Memory_source_expand_input_schema_is_valid()
+    {
+        var snapshot = BuildMemoryToolSnapshot();
+        var entry = snapshot.Entries["memory_source_expand"];
+        entry.InputSchema.Should().NotBeNull();
+        entry.InputSchema!.Fields.Should().NotBeEmpty();
+    }
+
+    [Fact]
     public void Scope_provider_validator_passes_with_mcp_capable_provider()
     {
         var mockProvider = new MockMcpScopeProvider();
@@ -190,10 +251,92 @@ public sealed class McpMemoryToolE2ETests
         report.HasErrors.Should().BeTrue();
     }
 
+    private static McpToolRuntimeSnapshot BuildMemoryToolSnapshot()
+    {
+        TriggerMcpMemoryAssembly();
+
+        // Collect ALL descriptors from every registered provider, deduplicate by
+        // (Id, Version) key, then build registries. This avoids duplicate-key
+        // failures when multiple test classes register the same descriptor providers
+        // on the global DescriptorProviderRegistry across test executions.
+
+        var schemaProviders = DescriptorProviderRegistry.GetProviders<SchemaDescriptor>();
+        var allSchemas = DedupDescriptors(schemaProviders);
+
+        var capabilityProviders = DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>();
+        var allCapabilities = DedupDescriptors(capabilityProviders);
+
+        // Merge Echo descriptors locally (idempotent due to dedup).
+        var echoSchemas = new SchemaDescriptor[] { EchoSchema("e2e.input"), EchoSchema("e2e.output") };
+        var echoCapabilities = new CapabilityDescriptor[]
+        {
+            new()
+            {
+                Id = "e2e.echo", Name = "Echo", Version = 2, State = DescriptorState.Active,
+                CapabilityKind = CapabilityKind.Command,
+                InputSchema = new VersionedDescriptorRef<SchemaDescriptor>("e2e.input", 1),
+                OutputSchema = new VersionedDescriptorRef<SchemaDescriptor>("e2e.output", 1)
+            }
+        };
+
+        allSchemas = Dedup(allSchemas.Concat(echoSchemas));
+        allCapabilities = Dedup(allCapabilities.Concat(echoCapabilities));
+
+        var schemas = new SchemaRegistry(new RegistryValidationEngine<SchemaDescriptor>([]));
+        schemas.Build(new[] { new SnapshotProvider<SchemaDescriptor>(allSchemas) });
+        var capabilities = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>([]));
+        capabilities.Build(new[] { new SnapshotProvider<CapabilityDescriptor>(allCapabilities) });
+
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<IAgentMemoryAccessScopeProvider>(new MockMcpScopeProvider());
+        builder.Services.AddSingleton<ISchemaRegistry>(schemas);
+        builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
+        builder.Services.AddCapabilityRuntime();
+        builder.Services.AddCrestMcpToolProjection(options =>
+        {
+            options.SerializerOptions.TypeInfoResolver = MemoryE2EJsonContext.Default;
+        });
+        builder.Services.AddMcpMemoryTools();
+
+        using var host = builder.Build();
+
+        var toolRegistry = host.Services.GetRequiredService<McpToolRegistry>();
+        toolRegistry.Build(DescriptorProviderRegistry.GetProviders<McpToolDescriptor>());
+
+        var snapshotBuilder = host.Services.GetRequiredService<McpToolRuntimeSnapshotBuilder>();
+        return snapshotBuilder.Build();
+    }
+
+    private static List<T> DedupDescriptors<T>(IEnumerable<IDescriptorProvider<T>> providers)
+        where T : class, IDescriptor, IVersionedDescriptor
+        => Dedup(providers.SelectMany(p => p.GetDescriptors()));
+
+    private static List<T> Dedup<T>(IEnumerable<T> descriptors)
+        where T : IDescriptor, IVersionedDescriptor
+        => descriptors
+            .GroupBy(d => new DescriptorKey(d.Namespace, d.Id, d.Version))
+            .Select(g => g.First())
+            .ToList();
+
     private static void TriggerMcpMemoryAssembly()
     {
         var services = new ServiceCollection();
         McpMemoryServiceCollectionExtensions.AddMcpMemoryTools(services);
+    }
+
+    private static SchemaDescriptor EchoSchema(string id) => new()
+    {
+        Id = id,
+        Name = id,
+        Version = 1,
+        State = DescriptorState.Active,
+        Fields = [new SchemaFieldDescriptor { Name = "value", FieldType = "string", IsRequired = true }]
+    };
+
+    private sealed class SnapshotProvider<T>(IReadOnlyList<T> descriptors) : IDescriptorProvider<T>
+        where T : IDescriptor
+    {
+        public IReadOnlyList<T> GetDescriptors() => descriptors;
     }
 
     private sealed class MockMcpScopeProvider : IAgentMemoryAccessScopeProvider, IAgentMemoryAccessScopeProviderCapabilities

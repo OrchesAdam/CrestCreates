@@ -21,12 +21,13 @@ internal sealed class CompositeCurrentClosureProvider : IAgentMemoryCurrentClosu
 
     public ValueTask<AgentMemoryCurrentClosure?> GetCurrentClosureAsync(
         AgentMemoryResourceKind resourceKind,
+        string tenantId,
         string resourceId,
         CancellationToken ct)
     {
         if (!_providers.TryGetValue(resourceKind.ToString(), out var provider))
             return ValueTask.FromResult<AgentMemoryCurrentClosure?>(null);
 
-        return provider.GetCurrentClosureAsync(resourceId, ct);
+        return provider.GetCurrentClosureAsync(tenantId, resourceId, ct);
     }
 }

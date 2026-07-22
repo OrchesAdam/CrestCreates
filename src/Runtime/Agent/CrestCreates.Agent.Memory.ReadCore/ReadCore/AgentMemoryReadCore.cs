@@ -117,7 +117,7 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                 Principal = principal,
                 ScopeFingerprint = scopeFingerprint,
                 RequiredDescriptorRefs = memory.DescriptorRefs,
-                IsUnscoped = scope.AllowUnscopedMemory,
+                IsUnscoped = memory.DescriptorRefs.Count == 0,
                 IssuingOperationId = origin.OperationId,
                 IssuedAt = now,
                 ExpiresAt = now + handleLifetime,
@@ -140,7 +140,7 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                         Principal = principal,
                         ScopeFingerprint = scopeFingerprint,
                         RequiredDescriptorRefs = sourceRef.DescriptorRefs,
-                        IsUnscoped = scope.AllowUnscopedMemory,
+                        IsUnscoped = sourceRef.DescriptorRefs?.Count == 0,
                         IssuingOperationId = origin.OperationId,
                         IssuedAt = now,
                         ExpiresAt = now + grantLifetime,
@@ -157,11 +157,15 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
             grants: grants,
             cancellationToken);
 
-        // Build lookups from the prepared artifacts
-        var handleLookup = handles.ToDictionary(
-            h => h.ResourceId, h => h.HandleId, StringComparer.Ordinal);
-        var grantLookup = grants.ToDictionary(
-            g => GrantKey(g), g => g, StringComparer.Ordinal);
+        // Build lookups from the prepared artifacts (not local handles/grants).
+        // On retry the Coordinator returns the first-issued artifacts from the
+        // store; using local lists would map resources to IDs never persisted.
+        var handleLookup = (prepared.Handles?.Handles ?? [])
+            .Where(h => h is not null)
+            .ToDictionary(h => h.ResourceId, h => h.HandleId, StringComparer.Ordinal);
+        var grantLookup = (prepared.Grants?.Grants ?? [])
+            .Where(g => g is not null)
+            .ToDictionary(g => GrantKey(g), g => g, StringComparer.Ordinal);
 
         // Build result using Coordinator-confirmed artifacts
         var result = new BuildAgentMemoryPackResult
@@ -242,20 +246,23 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                 AgentMemoryStatus.Archived => AgentMemoryToolMemoryStatus.Archived,
                 _ => AgentMemoryToolMemoryStatus.Unknown
             },
-            IsAuthoritative = memory.IsAuthoritative,
+            IsAuthoritative = false,
             Tags = memory.Tags,
-            SourceGrants = memory.SourceRefs.Select(s =>
-            {
-                grantLookup.TryGetValue(
-                    $"{s.SourceId}:{s.RangeStart}:{s.RangeEnd}",
-                    out var grant);
-                return new AgentMemorySourceGrantDto
+            SourceGrants = memory.SourceRefs
+                .Where(s => string.Equals(s.TenantId, memory.TenantId, StringComparison.Ordinal))
+                .Select(s =>
                 {
-                    GrantId = grant?.GrantId ?? string.Empty,
-                    SourceKind = MapSourceKind(s.SourceKind),
-                    ExpiresAt = grant?.ExpiresAt ?? DateTimeOffset.MaxValue,
-                };
-            }).ToList()
+                    grantLookup.TryGetValue(
+                        $"{s.SourceId}:{s.RangeStart}:{s.RangeEnd}",
+                        out var grant);
+                    return new AgentMemorySourceGrantDto
+                    {
+                        GrantId = grant?.GrantId ?? string.Empty,
+                        SourceKind = MapSourceKind(s.SourceKind),
+                        ExpiresAt = grant?.ExpiresAt ?? DateTimeOffset.MaxValue,
+                    };
+                }).Where(g => !string.IsNullOrEmpty(g.GrantId)) // Only include actual issued grants
+                .ToList()
         };
     }
 

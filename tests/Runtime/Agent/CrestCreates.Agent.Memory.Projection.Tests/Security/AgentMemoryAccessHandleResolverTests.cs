@@ -85,6 +85,7 @@ public class AgentMemoryAccessHandleResolverTests
         mock.Setup(p => p.GetCurrentClosureAsync(
                 It.IsAny<AgentMemoryResourceKind>(),
                 It.IsAny<string>(),
+                It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(closure);
         return mock.Object;
@@ -95,6 +96,7 @@ public class AgentMemoryAccessHandleResolverTests
         var mock = new Mock<IAgentMemoryCurrentClosureProvider>();
         mock.Setup(p => p.GetCurrentClosureAsync(
                 It.IsAny<AgentMemoryResourceKind>(),
+                It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((AgentMemoryCurrentClosure?)null);

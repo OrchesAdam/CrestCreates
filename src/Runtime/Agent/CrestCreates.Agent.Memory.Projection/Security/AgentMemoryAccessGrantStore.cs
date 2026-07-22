@@ -18,6 +18,7 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
     private readonly ConcurrentDictionary<string, int> _perOperationCount = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _identityPlans = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _batchToIdentity = new(StringComparer.Ordinal); // batchCanonicalKey -> identityKey
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _batchLocks = new();
     private readonly TimeProvider _timeProvider;
 
     public AgentMemoryAccessGrantStore(TimeProvider timeProvider)
@@ -25,7 +26,7 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
         _timeProvider = timeProvider;
     }
 
-    public ValueTask<AgentMemoryAccessGrantIssueResult> TryIssueBatchAsync(
+    public async ValueTask<AgentMemoryAccessGrantIssueResult> TryIssueBatchAsync(
         AgentMemoryAccessArtifactBatchKey batchKey,
         IReadOnlyList<AgentMemoryAccessSourceGrant> grants,
         int maxActivePerResource,
@@ -40,30 +41,47 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
             throw new InvalidOperationException("Source grant quota is exhausted.");
         if (maxActivePerOperation < grants.Count)
             throw new InvalidOperationException("Operation grant quota is exhausted.");
+        if (grants.Select(g => g.GrantId).Distinct(StringComparer.Ordinal).Count() != grants.Count)
+            throw new InvalidOperationException("Grant ids must be unique within a batch.");
+        var firstPrincipal = grants[0].Principal;
+        if (grants.Any(g => g.Principal != firstPrincipal))
+            throw new InvalidOperationException("A grant batch must have one trusted principal.");
 
+        var batchLock = _batchLocks.GetOrAdd(batchKey.ToCanonicalKey(), _ => new SemaphoreSlim(1, 1));
+
+        await batchLock.WaitAsync(cancellationToken);
+        try
+        {
+            return TryIssueBatchInternal(batchKey, grants, maxActivePerResource, maxActivePerOperation);
+        }
+        finally
+        {
+            batchLock.Release();
+        }
+    }
+
+    private AgentMemoryAccessGrantIssueResult TryIssueBatchInternal(
+        AgentMemoryAccessArtifactBatchKey batchKey,
+        IReadOnlyList<AgentMemoryAccessSourceGrant> grants,
+        int maxActivePerResource,
+        int maxActivePerOperation)
+    {
         var key = batchKey.ToCanonicalKey();
         var identity = batchKey.ToIdentityKey();
 
         if (_batchIndex.TryGetValue(key, out var existingIds))
         {
             var existing = existingIds.Select(id => _grants[id]).ToArray();
-            return ValueTask.FromResult(new AgentMemoryAccessGrantIssueResult
+            return new AgentMemoryAccessGrantIssueResult
             {
                 Grants = existing,
                 ReusedExisting = true
-            });
+            };
         }
 
         if (_identityPlans.TryGetValue(identity, out var existingPlan)
             && !string.Equals(existingPlan, batchKey.ArtifactPlanHash.Value, StringComparison.Ordinal))
             throw new InvalidOperationException("Security artifact batch plan conflicts with an existing preparation.");
-
-        if (grants.Select(g => g.GrantId).Distinct(StringComparer.Ordinal).Count() != grants.Count)
-            throw new InvalidOperationException("Grant ids must be unique within a batch.");
-
-        var firstPrincipal = grants[0].Principal;
-        if (grants.Any(g => g.Principal != firstPrincipal))
-            throw new InvalidOperationException("A grant batch must have one trusted principal.");
 
         foreach (var grant in grants)
         {
@@ -94,11 +112,11 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
         _batchToIdentity[key] = identity;
         _perOperationCount.AddOrUpdate(bindingHash, grants.Count, (_, c) => c + grants.Count);
 
-        return ValueTask.FromResult(new AgentMemoryAccessGrantIssueResult
+        return new AgentMemoryAccessGrantIssueResult
         {
             Grants = grants.ToArray(),
             ReusedExisting = false
-        });
+        };
     }
 
     public ValueTask<AgentMemoryAccessSourceGrant?> GetAsync(

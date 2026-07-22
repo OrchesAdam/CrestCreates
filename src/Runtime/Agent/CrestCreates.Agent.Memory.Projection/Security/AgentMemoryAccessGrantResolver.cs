@@ -82,20 +82,31 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
             return null;
         }
         var currentClosure = await _closureProvider.GetCurrentClosureAsync(
-            sourceKind, grant.SourceRef.SourceId, cancellationToken);
+            sourceKind, principal.TenantId, grant.SourceRef.SourceId, cancellationToken);
         if (currentClosure is null) return null;
 
         // SourceRef tenant must match current resource tenant
         if (currentClosure.TenantId != principal.TenantId) return null;
 
-        // Current closure must be a superset of the grant's required refs
-        if (!grant.IsUnscoped && grant.RequiredDescriptorRefs is { Count: > 0 })
+        // Exact closure equality: issued closure must match current closure exactly.
+        // Added descriptor → reject. Removed descriptor → reject.
+        if (!grant.IsUnscoped)
         {
-            var currentSet = new HashSet<DescriptorRef>(currentClosure.CurrentDescriptorRefs);
-            if (!grant.RequiredDescriptorRefs.All(r => currentSet.Contains(r)))
+            var issuedRefs = grant.RequiredDescriptorRefs ?? Array.Empty<DescriptorRef>();
+            var currentRefs = currentClosure.CurrentDescriptorRefs;
+            if (!CanonicalRefSetEquals(issuedRefs, currentRefs))
                 return null;
         }
 
         return grant;
+    }
+
+    private static bool CanonicalRefSetEquals(
+        IReadOnlyList<DescriptorRef> a, IReadOnlyList<DescriptorRef> b)
+    {
+        if (a.Count != b.Count) return false;
+        var setA = new HashSet<DescriptorRef>(a);
+        var setB = new HashSet<DescriptorRef>(b);
+        return setA.SetEquals(setB);
     }
 }

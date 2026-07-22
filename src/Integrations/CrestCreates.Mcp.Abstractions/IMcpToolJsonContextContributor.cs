@@ -1,5 +1,4 @@
-using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
+using System.Text.Json.Serialization;
 
 namespace CrestCreates.Mcp.Abstractions;
 
@@ -16,9 +15,22 @@ public interface IMcpToolJsonContextContributor
     string ContributorId { get; }
 
     /// <summary>
-    /// Contribute JsonTypeInfo entries to the builder and add source-generated
-    /// JsonSerializerContext instances to the MCP JSON resolver chain.
+    /// The set of root CLR types owned by this contributor.
+    /// No two contributors may claim the same binding root type.
+    /// </summary>
+    IReadOnlySet<Type> BindingRootTypes { get; }
+
+    /// <summary>
+    /// Contribute JsonTypeInfo entries to the binding builder.
     /// Each entry maps a binding key to a JsonTypeInfo for input/output resolution.
     /// </summary>
-    void Contribute(McpJsonContextBuilder builder, JsonSerializerOptions options);
+    void Contribute(McpJsonContextBuilder builder);
+
+    /// <summary>
+    /// Creates a standalone source-generated JsonSerializerContext for this contributor.
+    /// The context must NOT be created with the shared JsonSerializerOptions —
+    /// doing so would overwrite the application's TypeInfoResolver. The caller
+    /// is responsible for adding the returned context to the shared options' resolver chain.
+    /// </summary>
+    JsonSerializerContext CreateContext();
 }
