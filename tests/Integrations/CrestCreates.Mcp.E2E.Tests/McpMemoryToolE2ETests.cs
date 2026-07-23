@@ -121,13 +121,14 @@ public sealed class McpMemoryToolE2ETests
         var recallInput = new RecallAgentContextInput
         {
             ContextHandle = "ctx-test-1",
-            MaximumCharacters = 1000
+            MaximumBlockCount = 10,
+            CharacterBudget = 1000
         };
         var recallJson = JsonSerializer.Serialize(recallInput, options);
         var recallDeserialized = JsonSerializer.Deserialize<RecallAgentContextInput>(recallJson, options);
         recallDeserialized.Should().NotBeNull();
         recallDeserialized!.ContextHandle.Should().Be("ctx-test-1");
-        recallDeserialized.MaximumCharacters.Should().Be(1000);
+        recallDeserialized.CharacterBudget.Should().Be(1000);
 
         // Verify memory_recall input serialization
         var buildInput = new BuildAgentMemoryPackInput

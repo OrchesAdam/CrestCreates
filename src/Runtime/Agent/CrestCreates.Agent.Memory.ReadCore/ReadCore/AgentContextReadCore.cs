@@ -2,26 +2,37 @@ using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.Tools;
+using CrestCreates.Metadata.Abstractions;
 
 namespace CrestCreates.Agent.Memory.ReadCore;
 
 /// <summary>
 /// Shared context recall core. Protocol-neutral.
-/// Read-only — resolves existing handle, reads through it, no new artifacts.
+/// Resolves a context handle, selects blocks within budget/range,
+/// and issues source grants per block for ctx_expand follow-up.
 /// </summary>
 internal sealed class AgentContextReadCore : IAgentContextReadCore
 {
     private readonly IAgentMemoryAccessHandleResolver _handleResolver;
     private readonly IAgentCompressedContextStore _contextStore;
+    private readonly IAgentMemoryAccessArtifactCoordinator _coordinator;
+    private readonly IAgentMemoryArtifactLifetimePolicy _lifetimePolicy;
+    private readonly IAgentMemoryCurrentClosureProvider _closureProvider;
     private readonly TimeProvider _timeProvider;
 
     public AgentContextReadCore(
         IAgentMemoryAccessHandleResolver handleResolver,
         IAgentCompressedContextStore contextStore,
+        IAgentMemoryAccessArtifactCoordinator coordinator,
+        IAgentMemoryArtifactLifetimePolicy lifetimePolicy,
+        IAgentMemoryCurrentClosureProvider closureProvider,
         TimeProvider timeProvider)
     {
         _handleResolver = handleResolver;
         _contextStore = contextStore;
+        _coordinator = coordinator;
+        _lifetimePolicy = lifetimePolicy;
+        _closureProvider = closureProvider;
         _timeProvider = timeProvider;
     }
 
@@ -32,83 +43,295 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
         RecallAgentContextInput input,
         CancellationToken cancellationToken = default)
     {
-        // Validate budget
-        if (input.MaximumCharacters <= 0)
-            throw new AgentMemoryReadCoreException("budget-invalid", "MaximumCharacters must be positive");
-        if (input.MaximumCharacters > scope.MaxContextRecallCharacters)
-            throw new AgentMemoryReadCoreException("budget-invalid", "MaximumCharacters exceeds scope limit");
+        ValidateBudget(input, scope);
 
-        // Resolve context handle
         var resolved = await _handleResolver.ResolveAsync(
             input.ContextHandle, AgentMemoryResourceKind.Context, principal, scope, cancellationToken);
         if (resolved is null)
             throw new AgentMemoryReadCoreException("resource-unavailable", "Context handle not resolvable");
 
-        // Retrieve compressed context
         var context = await _contextStore.GetCompressedContextAsync(
             principal.TenantId, resolved.Handle.ResourceId, cancellationToken);
         if (context is null)
             throw new AgentMemoryReadCoreException("resource-unavailable", "Context not found");
 
-        // Aggregate content from blocks
-        var content = context.Blocks is { Count: > 0 }
-            ? string.Join("\n", context.Blocks.Select(b => b.Content ?? string.Empty))
-            : string.Empty;
-        var wasTruncated = content.Length > input.MaximumCharacters;
-        if (wasTruncated)
-            content = content[..input.MaximumCharacters];
+        if (!string.Equals(context.TenantId, principal.TenantId, StringComparison.Ordinal))
+            throw new AgentMemoryReadCoreException("resource-unavailable", "Context tenant mismatch");
 
-        // Build result — read-only, no new artifacts
-        var result = new RecallAgentContextResult
+        var allBlocks = context.Blocks ?? Array.Empty<AgentCompressedContextBlock>();
+        var selectedBlocks = SelectBlocks(allBlocks, input);
+
+        // Apply character budget: consume blocks in order, truncate final block if needed
+        var budgetedBlocks = ApplyCharacterBudget(selectedBlocks, input.CharacterBudget, out var wasTruncated);
+
+        // Apply block count limit
+        if (input.MaximumBlockCount > 0 && budgetedBlocks.Count > input.MaximumBlockCount)
         {
-            OperationStatus = AgentMemoryToolOperationStatus.Completed,
-            SanitizedContent = content,
-            CanonicalContentHash = context.CanonicalOutputHash is not null
-                ? new AgentMemoryToolCanonicalHashDto
+            budgetedBlocks = budgetedBlocks.Take(input.MaximumBlockCount).ToList();
+            wasTruncated = true;
+        }
+
+        // Issue source grants per block
+        var now = _timeProvider.GetUtcNow();
+        var grantLifetime = _lifetimePolicy.GetGrantLifetime(principal, origin, scope, "ctx-recall");
+        var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
+
+        var grants = new List<AgentMemoryAccessSourceGrant>();
+        var blockGrantMapping = new List<(int BlockIndex, List<AgentMemorySourceGrantDto> GrantDtos)>();
+
+        for (var i = 0; i < budgetedBlocks.Count; i++)
+        {
+            var block = budgetedBlocks[i];
+            var blockGrants = new List<AgentMemorySourceGrantDto>();
+
+            if (block.SourceRefs is { Count: > 0 })
+            {
+                foreach (var sourceRef in block.SourceRefs)
                 {
-                    Value = context.CanonicalOutputHash.Value,
-                    AlgorithmVersion = context.CanonicalOutputHash.AlgorithmVersion,
-                    ContractVersion = context.CanonicalOutputHash.ContractVersion,
-                    CanonicalShapeVersion = context.CanonicalOutputHash.CanonicalShapeVersion
-                }
-                : null,
-            WasTruncated = wasTruncated,
-            BlockCount = context.Blocks?.Count ?? 0,
-            Blocks = context.Blocks?.Select(b => new AgentMemoryToolBlockDto
-            {
-                Content = b.Content ?? string.Empty,
-                CanonicalContentHash = b.CanonicalContentHash is not null
-                    ? new AgentMemoryToolCanonicalHashDto
-                    {
-                        Value = b.CanonicalContentHash.Value,
-                        AlgorithmVersion = b.CanonicalContentHash.AlgorithmVersion,
-                        ContractVersion = b.CanonicalContentHash.ContractVersion,
-                        CanonicalShapeVersion = b.CanonicalContentHash.CanonicalShapeVersion
-                    }
-                    : new AgentMemoryToolCanonicalHashDto
-                    {
-                        Value = string.Empty,
-                        AlgorithmVersion = "v1",
-                        ContractVersion = "v1",
-                        CanonicalShapeVersion = "v1"
-                    },
-                SourceGrants = new List<AgentMemorySourceGrantDto>()
-            }).ToList() ?? new List<AgentMemoryToolBlockDto>(),
-            Diagnostics = new List<AgentMemoryToolDiagnosticDto>()
-        };
+                    if (!AgentMemorySourceKindSupport.IsGrantSupported(sourceRef.SourceKind))
+                        continue;
 
-        // No new artifacts created — read-only operation
-        return new AgentMemoryReadCoreOutcome<RecallAgentContextResult>
+                    if (!string.Equals(sourceRef.TenantId, principal.TenantId, StringComparison.Ordinal))
+                        continue;
+
+                    if (!AgentMemoryHandleGrantMatrix.IsRangeAllowed(sourceRef))
+                        continue;
+
+                    AgentMemoryResourceKind sourceResourceKind;
+                    try
+                    {
+                        sourceResourceKind = AgentMemorySourceKindSupport.ToResourceKind(sourceRef.SourceKind);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        continue;
+                    }
+
+                    var sourceClosure = await _closureProvider.GetCurrentClosureAsync(
+                        sourceResourceKind, principal.TenantId, sourceRef.SourceId,
+                        sourceRef: sourceRef, cancellationToken: cancellationToken);
+
+                    if (sourceClosure is null) continue;
+                    if (!string.Equals(sourceClosure.TenantId, principal.TenantId, StringComparison.Ordinal)) continue;
+
+                    var sourceClosureRefs = sourceClosure.CurrentDescriptorRefs;
+                    var scopeBinding = AgentMemoryHandleGrantMatrix.GetScopeBinding(sourceRef.SourceKind);
+                    var isUnscoped = scopeBinding == AgentMemoryHandleGrantMatrix.GrantScopeBinding.DescriptorBound
+                        && sourceClosureRefs.Count == 0;
+
+                    var closurePolicy = AgentMemoryHandleGrantMatrix.GetClosurePolicy(sourceRef.SourceKind);
+                    var requiredDescriptorRefs = closurePolicy == AgentMemoryHandleGrantMatrix.GrantClosurePolicy.Exact
+                        ? sourceClosureRefs
+                        : Array.Empty<DescriptorRef>();
+
+                    var grantId = Guid.NewGuid().ToString("N");
+                    grants.Add(new AgentMemoryAccessSourceGrant
+                    {
+                        GrantId = grantId,
+                        SourceRef = sourceRef,
+                        Principal = principal,
+                        ScopeFingerprint = scopeFingerprint,
+                        RequiredDescriptorRefs = requiredDescriptorRefs,
+                        IsUnscoped = isUnscoped,
+                        IssuingOperationId = origin.OperationId,
+                        IssuedAt = now,
+                        ExpiresAt = now + grantLifetime,
+                    });
+
+                    blockGrants.Add(new AgentMemorySourceGrantDto
+                    {
+                        GrantId = grantId,
+                        SourceKind = MapSourceKind(sourceRef.SourceKind),
+                        ExpiresAt = now + grantLifetime,
+                    });
+                }
+            }
+
+            blockGrantMapping.Add((i, blockGrants));
+        }
+
+        // Prepare artifacts via Coordinator
+        var prepared = await _coordinator.PrepareAsync(
+            principal, origin, scope, "ctx-recall",
+            preparationOrdinal: 0,
+            handles: Array.Empty<AgentMemoryAccessResourceHandle>(),
+            grants: grants,
+            cancellationToken);
+
+        // Build grant lookup from Coordinator-confirmed artifacts
+        var grantLookup = (prepared.Grants?.Grants ?? [])
+            .Where(g => g is not null)
+            .ToDictionary(g => GrantKey(g), g => g, StringComparer.Ordinal);
+
+        try
         {
-            Result = result,
-            ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope),
-            MaximumAuditFacts = scope.MaxAuditFacts,
-            Receipt = new AgentMemoryArtifactBatchReceipt
+            // Map blocks to DTOs with Coordinator-confirmed grants
+            var blockDtos = new List<AgentMemoryToolBlockDto>();
+            for (var i = 0; i < budgetedBlocks.Count; i++)
             {
-                HandleBatch = null,
-                GrantBatch = null
-            },
-            CompensationToken = null
-        };
+                var block = budgetedBlocks[i];
+                var mapping = blockGrantMapping.FirstOrDefault(m => m.BlockIndex == i);
+                var confirmedGrants = mapping.GrantDtos
+                    .Select(dto =>
+                    {
+                        // Replace with Coordinator-confirmed GrantId
+                        var grant = grants.FirstOrDefault(g => g.SourceRef != null
+                            && g.SourceRef.SourceKind == MapToolSourceKind(dto.SourceKind)
+                            && g.SourceRef.SourceId != null);
+                        if (grant != null && grantLookup.TryGetValue(GrantKey(grant), out var confirmed))
+                            return new AgentMemorySourceGrantDto
+                            {
+                                GrantId = confirmed.GrantId,
+                                SourceKind = dto.SourceKind,
+                                ExpiresAt = confirmed.ExpiresAt,
+                            };
+                        return dto;
+                    })
+                    .Where(g => !string.IsNullOrEmpty(g.GrantId))
+                    .ToList();
+
+                blockDtos.Add(new AgentMemoryToolBlockDto
+                {
+                    Content = block.Content ?? string.Empty,
+                    CanonicalContentHash = block.CanonicalContentHash is not null
+                        ? new AgentMemoryToolCanonicalHashDto
+                        {
+                            Value = block.CanonicalContentHash.Value,
+                            AlgorithmVersion = block.CanonicalContentHash.AlgorithmVersion,
+                            ContractVersion = block.CanonicalContentHash.ContractVersion,
+                            CanonicalShapeVersion = block.CanonicalContentHash.CanonicalShapeVersion
+                        }
+                        : new AgentMemoryToolCanonicalHashDto
+                        {
+                            Value = string.Empty,
+                            AlgorithmVersion = "v1",
+                            ContractVersion = "v1",
+                            CanonicalShapeVersion = "v1"
+                        },
+                    SourceGrants = confirmedGrants
+                });
+            }
+
+            var result = new RecallAgentContextResult
+            {
+                OperationStatus = AgentMemoryToolOperationStatus.Completed,
+                WasTruncated = wasTruncated,
+                BlockCount = allBlocks.Count,
+                Blocks = blockDtos,
+                Diagnostics = new List<AgentMemoryToolDiagnosticDto>()
+            };
+
+            return new AgentMemoryReadCoreOutcome<RecallAgentContextResult>
+            {
+                Result = result,
+                ScopeFingerprint = scopeFingerprint,
+                MaximumAuditFacts = scope.MaxAuditFacts,
+                Receipt = prepared.Receipt,
+                CompensationToken = prepared.CompensationToken
+            };
+        }
+        catch
+        {
+            if (prepared.CompensationToken is not null)
+                await _coordinator.RevokeCreatedAsync(prepared.CompensationToken, CancellationToken.None);
+
+            throw;
+        }
+    }
+
+    private static void ValidateBudget(RecallAgentContextInput input, AgentMemoryAccessScope scope)
+    {
+        if (input.CharacterBudget <= 0)
+            throw new AgentMemoryReadCoreException("budget-invalid", "CharacterBudget must be positive");
+        if (input.CharacterBudget > scope.MaxContextRecallCharacters)
+            throw new AgentMemoryReadCoreException("budget-invalid", "CharacterBudget exceeds scope limit");
+        if (input.MaximumBlockCount < 0)
+            throw new AgentMemoryReadCoreException("budget-invalid", "MaximumBlockCount must be non-negative");
+        if (input.StartBlockIndex < 0)
+            throw new AgentMemoryReadCoreException("budget-invalid", "StartBlockIndex must be non-negative");
+        if (input.EndBlockIndexExclusive.HasValue && input.EndBlockIndexExclusive.Value < input.StartBlockIndex)
+            throw new AgentMemoryReadCoreException("budget-invalid", "EndBlockIndexExclusive must be >= StartBlockIndex");
+    }
+
+    private static List<AgentCompressedContextBlock> SelectBlocks(
+        IReadOnlyList<AgentCompressedContextBlock> allBlocks,
+        RecallAgentContextInput input)
+    {
+        var start = input.StartBlockIndex;
+        var end = input.EndBlockIndexExclusive ?? allBlocks.Count;
+
+        if (start >= allBlocks.Count)
+            return new List<AgentCompressedContextBlock>();
+
+        if (end > allBlocks.Count)
+            end = allBlocks.Count;
+
+        return allBlocks.Skip(start).Take(end - start).ToList();
+    }
+
+    private static List<AgentCompressedContextBlock> ApplyCharacterBudget(
+        List<AgentCompressedContextBlock> blocks,
+        int characterBudget,
+        out bool wasTruncated)
+    {
+        wasTruncated = false;
+        var result = new List<AgentCompressedContextBlock>();
+        var remaining = characterBudget;
+
+        foreach (var block in blocks)
+        {
+            var content = block.Content ?? string.Empty;
+            if (remaining <= 0)
+            {
+                wasTruncated = true;
+                break;
+            }
+
+            if (content.Length <= remaining)
+            {
+                result.Add(block);
+                remaining -= content.Length;
+            }
+            else
+            {
+                result.Add(block with { Content = content[..remaining] });
+                remaining = 0;
+                wasTruncated = true;
+            }
+        }
+
+        return result;
+    }
+
+    private static AgentMemoryToolSourceKind MapSourceKind(AgentSourceKind kind) => kind switch
+    {
+        AgentSourceKind.ConversationTurn => AgentMemoryToolSourceKind.ConversationTurn,
+        AgentSourceKind.TaskRecord => AgentMemoryToolSourceKind.TaskRecord,
+        AgentSourceKind.TaskEvent => AgentMemoryToolSourceKind.TaskEvent,
+        AgentSourceKind.CompressedContextBlock => AgentMemoryToolSourceKind.CompressedContextBlock,
+        AgentSourceKind.MemoryCandidate => AgentMemoryToolSourceKind.MemoryCandidate,
+        AgentSourceKind.MemoryItem => AgentMemoryToolSourceKind.MemoryItem,
+        AgentSourceKind.MetadataContextPack => AgentMemoryToolSourceKind.MetadataContextPack,
+        AgentSourceKind.ReviewReport => AgentMemoryToolSourceKind.ReviewReport,
+        AgentSourceKind.FixProposal => AgentMemoryToolSourceKind.FixProposal,
+        AgentSourceKind.PackagePreview => AgentMemoryToolSourceKind.PackagePreview,
+        AgentSourceKind.ActivationRequest => AgentMemoryToolSourceKind.ActivationRequest,
+        _ => AgentMemoryToolSourceKind.Unknown
+    };
+
+    private static AgentSourceKind MapToolSourceKind(AgentMemoryToolSourceKind kind) => kind switch
+    {
+        AgentMemoryToolSourceKind.ConversationTurn => AgentSourceKind.ConversationTurn,
+        AgentMemoryToolSourceKind.TaskRecord => AgentSourceKind.TaskRecord,
+        AgentMemoryToolSourceKind.TaskEvent => AgentSourceKind.TaskEvent,
+        AgentMemoryToolSourceKind.CompressedContextBlock => AgentSourceKind.CompressedContextBlock,
+        AgentMemoryToolSourceKind.MemoryCandidate => AgentSourceKind.MemoryCandidate,
+        AgentMemoryToolSourceKind.MemoryItem => AgentSourceKind.MemoryItem,
+        _ => AgentSourceKind.ConversationTurn
+    };
+
+    private static string GrantKey(AgentMemoryAccessSourceGrant grant)
+    {
+        return $"{grant.SourceRef.TenantId}:{grant.SourceRef.SourceKind}:{grant.SourceRef.SourceId}:{grant.SourceRef.RangeStart}:{grant.SourceRef.RangeEnd}";
     }
 }

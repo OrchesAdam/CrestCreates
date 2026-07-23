@@ -9,17 +9,22 @@ namespace CrestCreates.Agent.Memory.Projection.Abstractions;
 public sealed record RecallAgentContextInput
 {
     public string ContextHandle { get; init; } = string.Empty;
-    public int MaximumCharacters { get; init; }
+    public int MaximumBlockCount { get; init; }
+    public int CharacterBudget { get; init; }
+    public int StartBlockIndex { get; init; }
+    public int? EndBlockIndexExclusive { get; init; }
 }
 
 /// <summary>
 /// Protocol-neutral context recall result.
+/// Budget invariant: sum of Block.Content lengths &lt;= CharacterBudget.
+/// Block count invariant: Blocks.Count &lt;= MaximumBlockCount.
+/// No top-level SanitizedContent — content lives only in Blocks,
+/// each carrying its own SourceGrants for ctx_expand follow-up.
 /// </summary>
 public sealed record RecallAgentContextResult
 {
     public required AgentMemoryToolOperationStatus OperationStatus { get; init; }
-    public string? SanitizedContent { get; init; }
-    public AgentMemoryToolCanonicalHashDto? CanonicalContentHash { get; init; }
     public bool WasTruncated { get; init; }
     public IReadOnlyList<AgentMemoryToolBlockDto> Blocks { get; init; } = Array.Empty<AgentMemoryToolBlockDto>();
     public int BlockCount { get; init; }

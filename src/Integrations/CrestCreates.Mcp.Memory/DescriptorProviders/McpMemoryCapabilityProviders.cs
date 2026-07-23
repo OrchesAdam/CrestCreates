@@ -39,7 +39,10 @@ internal static class McpMemorySchemas
             Fields =
             [
                 new SchemaFieldDescriptor { Name = "ContextHandle", FieldType = "string", IsRequired = true },
-                new SchemaFieldDescriptor { Name = "MaximumCharacters", FieldType = "int", IsRequired = true }
+                new SchemaFieldDescriptor { Name = "MaximumBlockCount", FieldType = "int", IsRequired = true },
+                new SchemaFieldDescriptor { Name = "CharacterBudget", FieldType = "int", IsRequired = true },
+                new SchemaFieldDescriptor { Name = "StartBlockIndex", FieldType = "int", IsRequired = false, IsNullable = false },
+                new SchemaFieldDescriptor { Name = "EndBlockIndexExclusive", FieldType = "int", IsRequired = false, IsNullable = true }
             ]
         },
         new SchemaDescriptor
@@ -48,8 +51,6 @@ internal static class McpMemorySchemas
             Fields =
             [
                 new SchemaFieldDescriptor { Name = "OperationStatus", FieldType = "string", IsRequired = true, IsNullable = false },
-                new SchemaFieldDescriptor { Name = "SanitizedContent", FieldType = "string", IsRequired = false, IsNullable = true },
-                new SchemaFieldDescriptor { Name = "CanonicalContentHash", FieldType = "object", IsRequired = false, IsNullable = true, ObjectSchema = Ref("canonical-hash") },
                 new SchemaFieldDescriptor { Name = "WasTruncated", FieldType = "bool", IsRequired = false, IsNullable = false },
                 new SchemaFieldDescriptor { Name = "Blocks", FieldType = "object", IsRequired = false, IsNullable = false, ObjectSchema = Ref("block"), IsCollection = true },
                 new SchemaFieldDescriptor { Name = "BlockCount", FieldType = "int", IsRequired = false, IsNullable = false },

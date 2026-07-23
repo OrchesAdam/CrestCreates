@@ -164,7 +164,8 @@ public sealed class McpMemoryToolInvocationE2ETests
         using var arguments = CreateArguments(new
         {
             ContextHandle = "ctx-test-1",
-            MaximumCharacters = 1000
+            MaximumBlockCount = 10,
+            CharacterBudget = 1000
         });
 
         var outcome = await invoker.InvokeAsync(
@@ -181,7 +182,7 @@ public sealed class McpMemoryToolInvocationE2ETests
         outcome.StructuredContent.Should().NotBeNull();
         var content = outcome.StructuredContent!.Value;
         content.GetProperty("OperationStatus").GetString().Should().Be("completed");
-        content.GetProperty("SanitizedContent").GetString().Should().Be("test-context-content");
+        content.TryGetProperty("Blocks", out _).Should().BeTrue();
     }
 
     // ── ctx_expand ───────────────────────────────────────────────
@@ -524,15 +525,8 @@ public sealed class McpMemoryToolInvocationE2ETests
             var result = new RecallAgentContextResult
             {
                 OperationStatus = AgentMemoryToolOperationStatus.Completed,
-                SanitizedContent = "test-context-content",
-                CanonicalContentHash = new AgentMemoryToolCanonicalHashDto
-                {
-                    Value = "abc123",
-                    AlgorithmVersion = "v1",
-                    ContractVersion = "v1",
-                    CanonicalShapeVersion = "v1"
-                },
                 WasTruncated = false,
+                BlockCount = 1,
                 Blocks = new List<AgentMemoryToolBlockDto>
                 {
                     new()
@@ -547,7 +541,6 @@ public sealed class McpMemoryToolInvocationE2ETests
                         }
                     }
                 },
-                BlockCount = 1,
                 Diagnostics = Array.Empty<AgentMemoryToolDiagnosticDto>()
             };
 

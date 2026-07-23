@@ -134,10 +134,8 @@ public class McpMemoryRegistryBuildTests
 
         var output = registry.GetByVersion("ctx-recall-output", 1)!;
 
-        output.Fields.Should().HaveCount(7);
+        output.Fields.Should().HaveCount(5);
         output.Fields.Should().Contain(f => f.Name == "OperationStatus" && f.FieldType == "string" && f.IsRequired);
-        output.Fields.Should().Contain(f => f.Name == "SanitizedContent" && f.FieldType == "string" && f.IsNullable);
-        output.Fields.Should().Contain(f => f.Name == "CanonicalContentHash" && f.FieldType == "object" && f.IsNullable && f.ObjectSchema!.Value.Id == "canonical-hash");
         output.Fields.Should().Contain(f => f.Name == "WasTruncated" && f.FieldType == "bool");
         output.Fields.Should().Contain(f => f.Name == "Blocks" && f.FieldType == "object" && f.IsCollection && f.ObjectSchema!.Value.Id == "block");
         output.Fields.Should().Contain(f => f.Name == "BlockCount" && f.FieldType == "int");

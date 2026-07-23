@@ -643,4 +643,251 @@ public sealed class CompositionContractTests
         expanded.Should().NotBeNull();
         expanded.Status.Should().Be(AgentMemorySourceExpansionStatus.Expanded);
     }
+
+    private (
+        AgentContextReadCore contextCore,
+        AgentMemoryAccessHandleResolver handleResolver,
+        AgentMemoryAccessGrantResolver grantResolver,
+        DefaultAgentContextSourceExpander expander,
+        InMemoryAgentCompressedContextStore contextStore,
+        AgentMemoryAccessHandleStore handleStore,
+        AgentMemoryAccessGrantStore grantStore,
+        List<AgentMemoryAccessSourceGrant> capturedGrants)
+        BuildContextPipeline()
+    {
+        var sanitizerMock = new Mock<IAgentMemoryContentSanitizer>();
+        sanitizerMock
+            .Setup(s => s.Sanitize(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<AgentContextSourceRef>>()))
+            .Returns((string tenant, string content, IReadOnlyList<AgentContextSourceRef> refs) =>
+                new SanitizedAgentContent
+                {
+                    SanitizedContent = content,
+                    CanonicalContentHash = MakeContentHash(),
+                    Rejected = false
+                });
+        var conversationStore = new InMemoryAgentConversationStore(sanitizerMock.Object);
+        var taskStore = new InMemoryAgentTaskHistoryStore(sanitizerMock.Object);
+        var contextStore = new InMemoryAgentCompressedContextStore();
+        var memoryStore = new InMemoryAgentMemoryStore();
+
+        var handleStore = new AgentMemoryAccessHandleStore(TimeProvider.System);
+        var grantStore = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var batchStore = new AgentMemoryAccessArtifactBatchStore();
+        var securityOptions = new AgentMemoryProjectionSecurityOptions();
+        var lifetimePolicy = new DefaultAgentMemoryArtifactLifetimePolicy(securityOptions);
+        var options = Microsoft.Extensions.Options.Options.Create(securityOptions);
+        var realCoordinator = new AgentMemoryAccessArtifactCoordinator(
+            handleStore, grantStore, batchStore, lifetimePolicy, TimeProvider.System, options);
+
+        var capturedGrants = new List<AgentMemoryAccessSourceGrant>();
+        var mockCoordinator = new Mock<IAgentMemoryAccessArtifactCoordinator>();
+        mockCoordinator
+            .Setup(c => c.PrepareAsync(
+                It.IsAny<AgentMemoryAccessPrincipal>(), It.IsAny<AgentMemoryArtifactOrigin>(),
+                It.IsAny<AgentMemoryAccessScope>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<AgentMemoryAccessPrincipal, AgentMemoryArtifactOrigin, AgentMemoryAccessScope,
+                string, int, IReadOnlyList<AgentMemoryAccessResourceHandle>, IReadOnlyList<AgentMemoryAccessSourceGrant>, CancellationToken>(
+                (_, _, _, _, _, _, grants, _) => capturedGrants.AddRange(grants))
+            .Returns((AgentMemoryAccessPrincipal p, AgentMemoryArtifactOrigin o, AgentMemoryAccessScope s,
+                string label, int ordinal, IReadOnlyList<AgentMemoryAccessResourceHandle> h,
+                IReadOnlyList<AgentMemoryAccessSourceGrant> g, CancellationToken ct) =>
+                realCoordinator.PrepareAsync(p, o, s, label, ordinal, h, g, ct));
+
+        var closureProviders = new List<IAgentMemoryResourceClosureProvider>
+        {
+            new ConversationHistoryResourceClosureProvider(conversationStore),
+            new TaskHistoryResourceClosureProvider(taskStore),
+            new TaskEventResourceClosureProvider(taskStore),
+            new ContextResourceClosureProvider(contextStore),
+            new MemoryResourceClosureProvider(memoryStore),
+            new CandidateResourceClosureProvider(memoryStore),
+        };
+        var currentClosureProvider = new CompositeCurrentClosureProvider(closureProviders);
+        var handleResolver = new AgentMemoryAccessHandleResolver(handleStore, TimeProvider.System, currentClosureProvider);
+        var grantResolver = new AgentMemoryAccessGrantResolver(grantStore, TimeProvider.System, currentClosureProvider);
+
+        var contextCore = new AgentContextReadCore(
+            handleResolver, contextStore, mockCoordinator.Object,
+            lifetimePolicy, currentClosureProvider, TimeProvider.System);
+
+        var expander = new DefaultAgentContextSourceExpander(
+            conversationStore, taskStore, contextStore, memoryStore);
+
+        return (contextCore, handleResolver, grantResolver, expander,
+            contextStore, handleStore, grantStore, capturedGrants);
+    }
+
+    [Fact]
+    public async Task CtxRecall_IssuesGrantPerExpandableSource_ThenExpandSucceeds()
+    {
+        var (contextCore, handleResolver, grantResolver, expander,
+            contextStore, handleStore, grantStore, capturedGrants)
+            = BuildContextPipeline();
+
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var descA = Desc("A");
+        var scope = MakeScope([descA]);
+
+        var blockSourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.CompressedContextBlock,
+            TenantId = "t1", SourceId = "nested-block-1",
+            DescriptorRefs = new[] { descA }
+        };
+
+        var context = new AgentCompressedContext
+        {
+            ContextId = "ctx-1", TenantId = "t1",
+            Blocks = new[]
+            {
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "nested-block-1", TenantId = "t1", Content = "nested content",
+                    CanonicalContentHash = MakeContentHash(),
+                    SourceRefs = new[] { blockSourceRef }
+                }
+            }
+        };
+        await contextStore.SaveCompressedContextAsync(context);
+
+        var handleFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
+        var handleOrigin = MakeOrigin() with { OperationId = "op-handle-0" };
+        var handle = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "handle-ctx-1",
+            ResourceKind = AgentMemoryResourceKind.Context,
+            ResourceId = "ctx-1",
+            Principal = principal,
+            ScopeFingerprint = handleFingerprint,
+            RequiredDescriptorRefs = new[] { descA },
+            IsUnscoped = false,
+            IssuingOperationId = handleOrigin.OperationId,
+            IssuedAt = TimeProvider.System.GetUtcNow(),
+            ExpiresAt = TimeProvider.System.GetUtcNow().AddMinutes(30)
+        };
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+            OriginBindingHash = MakeContentHash(),
+            ArtifactPurpose = "test-handle",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeContentHash()
+        };
+        var issueResult = await handleStore.TryIssueBatchAsync(batchKey, new[] { handle }, 64, 128, CancellationToken.None);
+        issueResult.Handles.Should().NotBeNull();
+        issueResult.Handles.Should().HaveCount(1);
+        issueResult.Handles[0].HandleId.Should().Be("handle-ctx-1");
+
+        var storedHandle = await handleStore.GetAsync("handle-ctx-1", CancellationToken.None);
+        storedHandle.Should().NotBeNull();
+        storedHandle!.State.Should().Be(AgentMemorySecurityArtifactState.Active);
+
+        var directResolve = await handleResolver.ResolveAsync("handle-ctx-1", AgentMemoryResourceKind.Context, principal, scope, CancellationToken.None);
+        directResolve.Should().NotBeNull("because handle is valid and principal/scope match");
+
+        var input = new RecallAgentContextInput
+        {
+            ContextHandle = "handle-ctx-1",
+            MaximumBlockCount = 10,
+            CharacterBudget = 10_000
+        };
+
+        var outcome = await contextCore.RecallContextAsync(principal, origin, scope, input);
+        outcome.Should().NotBeNull();
+        outcome.Result.OperationStatus.Should().Be(AgentMemoryToolOperationStatus.Completed);
+        outcome.Result.Blocks.Should().HaveCount(1);
+        capturedGrants.Should().ContainSingle();
+
+        var grant = capturedGrants[0];
+        var resolved = await grantResolver.ResolveAsync(grant.GrantId, principal, scope, CancellationToken.None);
+        resolved.Should().NotBeNull();
+
+        var expandRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.CompressedContextBlock,
+            TenantId = "t1", SourceId = "nested-block-1"
+        };
+        var expanded = await expander.ExpandAsync(expandRef, CancellationToken.None);
+        expanded.Should().NotBeNull();
+        expanded.Status.Should().Be(AgentMemorySourceExpansionStatus.Expanded);
+    }
+
+    [Fact]
+    public async Task CtxRecall_GrantUsedByDifferentSession_Rejects()
+    {
+        var (contextCore, handleResolver, grantResolver, expander,
+            contextStore, handleStore, grantStore, capturedGrants)
+            = BuildContextPipeline();
+
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var descA = Desc("A");
+        var scope = MakeScope([descA]);
+
+        var blockSourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.CompressedContextBlock,
+            TenantId = "t1", SourceId = "nested-block-1",
+            DescriptorRefs = new[] { descA }
+        };
+
+        var context = new AgentCompressedContext
+        {
+            ContextId = "ctx-1", TenantId = "t1",
+            Blocks = new[]
+            {
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "nested-block-1", TenantId = "t1", Content = "nested content",
+                    CanonicalContentHash = MakeContentHash(),
+                    SourceRefs = new[] { blockSourceRef }
+                }
+            }
+        };
+        await contextStore.SaveCompressedContextAsync(context);
+
+        var handleFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
+        var handleOrigin = MakeOrigin() with { OperationId = "op-handle-0" };
+        var handle = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "handle-ctx-2",
+            ResourceKind = AgentMemoryResourceKind.Context,
+            ResourceId = "ctx-1",
+            Principal = principal,
+            ScopeFingerprint = handleFingerprint,
+            RequiredDescriptorRefs = new[] { descA },
+            IsUnscoped = false,
+            IssuingOperationId = handleOrigin.OperationId,
+            IssuedAt = TimeProvider.System.GetUtcNow(),
+            ExpiresAt = TimeProvider.System.GetUtcNow().AddMinutes(30)
+        };
+        var batchKey2 = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+            OriginBindingHash = MakeContentHash(),
+            ArtifactPurpose = "test-handle-2",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeContentHash()
+        };
+        await handleStore.TryIssueBatchAsync(batchKey2, new[] { handle }, 64, 128, CancellationToken.None);
+
+        var input = new RecallAgentContextInput
+        {
+            ContextHandle = "handle-ctx-2",
+            MaximumBlockCount = 10,
+            CharacterBudget = 10_000
+        };
+
+        var outcome = await contextCore.RecallContextAsync(principal, origin, scope, input);
+        capturedGrants.Should().ContainSingle();
+
+        var grant = capturedGrants[0];
+        var foreignPrincipal = MakePrincipal() with { SecurityContextId = "different-session" };
+        var resolved = await grantResolver.ResolveAsync(grant.GrantId, foreignPrincipal, scope, CancellationToken.None);
+        resolved.Should().BeNull();
+    }
 }

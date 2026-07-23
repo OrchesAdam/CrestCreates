@@ -238,7 +238,7 @@ internal static class McpMemoryAotFixtureRunner
 
             // ctx_recall with real handle.
             var ctxRecallResult = await InvokeToolAsync(invoker, hostContext,
-                "ctx_recall", new RecallAgentContextInput { ContextHandle = handleId, MaximumCharacters = 100 });
+                "ctx_recall", new RecallAgentContextInput { ContextHandle = handleId, MaximumBlockCount = 10, CharacterBudget = 100 });
             if (ctxRecallResult.IsError)
             {
                 Console.Error.WriteLine($"FAIL: ctx_recall (error={ctxRecallResult.ErrorCode})");
