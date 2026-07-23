@@ -313,7 +313,8 @@ public sealed class McpMemoryToolInvocationE2ETests
         using var arguments = CreateArguments(new
         {
             ContextHandle = "ctx-test-1",
-            MaximumCharacters = 1000
+            MaximumBlockCount = 10,
+            CharacterBudget = 1000
         });
 
         var outcome = await invoker.InvokeAsync(
