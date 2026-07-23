@@ -64,9 +64,8 @@ public sealed class McpMemoryToolE2ETests
         capabilities.Build(DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>());
 
         capabilities.GetByVersion("mcp.ctx_recall", 1).Should().NotBeNull();
-        capabilities.GetByVersion("mcp.ctx_expand", 1).Should().NotBeNull();
+        capabilities.GetByVersion("mcp-memory:agent.source.expand", 1).Should().NotBeNull();
         capabilities.GetByVersion("mcp.memory_recall", 1).Should().NotBeNull();
-        capabilities.GetByVersion("mcp.memory_source_expand", 1).Should().NotBeNull();
     }
 
     [Fact]

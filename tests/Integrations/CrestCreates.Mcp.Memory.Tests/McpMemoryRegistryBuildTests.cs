@@ -83,7 +83,7 @@ public class McpMemoryRegistryBuildTests
     }
 
     [Fact]
-    public void Capability_registry_contains_all_4_mcp_memory_capabilities()
+    public void Capability_registry_contains_all_3_mcp_memory_capabilities()
     {
         EnsureModulesLoaded();
 
@@ -92,9 +92,8 @@ public class McpMemoryRegistryBuildTests
         registry.Build(DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>());
 
         registry.GetByVersion("mcp.ctx_recall", 1).Should().NotBeNull();
-        registry.GetByVersion("mcp.ctx_expand", 1).Should().NotBeNull();
+        registry.GetByVersion("mcp-memory:agent.source.expand", 1).Should().NotBeNull();
         registry.GetByVersion("mcp.memory_recall", 1).Should().NotBeNull();
-        registry.GetByVersion("mcp.memory_source_expand", 1).Should().NotBeNull();
     }
 
     [Fact]
@@ -106,17 +105,13 @@ public class McpMemoryRegistryBuildTests
         var registry = new CapabilityRegistry(engine);
         registry.Build(DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>());
 
-        var ctxExpanded = registry.GetByVersion("mcp.ctx_expand", 1)!;
-        ctxExpanded.InputSchema!.Value.Id.Should().Be("expand-source-input");
-        ctxExpanded.OutputSchema!.Value.Id.Should().Be("expand-source-output");
+        var sourceExpand = registry.GetByVersion("mcp-memory:agent.source.expand", 1)!;
+        sourceExpand.InputSchema!.Value.Id.Should().Be("expand-source-input");
+        sourceExpand.OutputSchema!.Value.Id.Should().Be("expand-source-output");
 
         var memoryRecall = registry.GetByVersion("mcp.memory_recall", 1)!;
         memoryRecall.InputSchema!.Value.Id.Should().Be("build-pack-input");
         memoryRecall.OutputSchema!.Value.Id.Should().Be("build-pack-output");
-
-        var sourceExpand = registry.GetByVersion("mcp.memory_source_expand", 1)!;
-        sourceExpand.InputSchema!.Value.Id.Should().Be("expand-source-input");
-        sourceExpand.OutputSchema!.Value.Id.Should().Be("expand-source-output");
 
         var ctxRecall = registry.GetByVersion("mcp.ctx_recall", 1)!;
         ctxRecall.InputSchema!.Value.Id.Should().Be("ctx-recall-input");

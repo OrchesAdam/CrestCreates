@@ -19,7 +19,8 @@ public static partial class McpMemoryTools
     public sealed class CtxRecall { }
 
     [McpToolSpec(
-        "mcp.ctx_expand",
+        "mcp-memory:agent.source.expand",
+        DescriptorId = "mcp-tool:ctx_expand",
         InputType = typeof(ExpandAgentMemorySourceInput),
         OutputType = typeof(ExpandAgentMemorySourceResult),
         ToolName = "ctx_expand",
@@ -41,7 +42,8 @@ public static partial class McpMemoryTools
     public sealed class MemoryRecall { }
 
     [McpToolSpec(
-        "mcp.memory_source_expand",
+        "mcp-memory:agent.source.expand",
+        DescriptorId = "mcp-tool:memory_source_expand",
         InputType = typeof(ExpandAgentMemorySourceInput),
         OutputType = typeof(ExpandAgentMemorySourceResult),
         ToolName = "memory_source_expand",

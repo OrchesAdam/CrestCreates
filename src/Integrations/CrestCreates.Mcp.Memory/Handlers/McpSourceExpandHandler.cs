@@ -6,19 +6,15 @@ using CrestCreates.Mcp.Memory.Security;
 
 namespace CrestCreates.Mcp.Memory.Handlers;
 
-/// <summary>
-/// memory_source_expand: resolves a source grant and expands the raw source content.
-/// Zero artifact writes — no handles, no grants, no compensation token.
-/// </summary>
-[CapabilityName("mcp.memory_source_expand")]
-internal sealed class MemorySourceExpandHandler : ICapabilityHandler<ExpandAgentMemorySourceInput, ExpandAgentMemorySourceResult>
+[CapabilityName("mcp-memory:agent.source.expand")]
+internal sealed class McpSourceExpandHandler : ICapabilityHandler<ExpandAgentMemorySourceInput, ExpandAgentMemorySourceResult>
 {
     private readonly IAgentMemorySourceExpandCore _readCore;
     private readonly IAgentMemoryAccessScopeProvider _scopeProvider;
     private readonly McpMemoryArtifactOriginFactory _originFactory;
     private readonly ICapabilityExecutionContextAccessor _contextAccessor;
 
-    public MemorySourceExpandHandler(
+    public McpSourceExpandHandler(
         IAgentMemorySourceExpandCore readCore,
         IAgentMemoryAccessScopeProvider scopeProvider,
         McpMemoryArtifactOriginFactory originFactory,

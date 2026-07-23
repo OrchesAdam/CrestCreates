@@ -77,14 +77,14 @@ internal static class McpMemoryCapabilities
             RiskLevel = CapabilityRiskLevel.Low,
             ProjectionKind = CapabilityProjectionKind.Native
         },
-        // ctx_expand
+        // source_expand (shared by ctx_expand + memory_source_expand)
         new CapabilityDescriptor
         {
-            Id = "mcp.ctx_expand", Name = "ctx_expand", Version = 1, State = DescriptorState.Active,
+            Id = "mcp-memory:agent.source.expand", Name = "source_expand", Version = 1, State = DescriptorState.Active,
             CapabilityKind = CapabilityKind.Query,
             InputSchema = Ref("expand-source-input"),
             OutputSchema = Ref("expand-source-output"),
-            Permissions = ["Mcp.CtxExpand"],
+            Permissions = ["Mcp.SourceExpand"],
             RiskLevel = CapabilityRiskLevel.Medium,
             ProjectionKind = CapabilityProjectionKind.Native
         },
@@ -99,16 +99,5 @@ internal static class McpMemoryCapabilities
             RiskLevel = CapabilityRiskLevel.Low,
             ProjectionKind = CapabilityProjectionKind.Native
         },
-        // memory_source_expand
-        new CapabilityDescriptor
-        {
-            Id = "mcp.memory_source_expand", Name = "memory_source_expand", Version = 1, State = DescriptorState.Active,
-            CapabilityKind = CapabilityKind.Query,
-            InputSchema = Ref("expand-source-input"),
-            OutputSchema = Ref("expand-source-output"),
-            Permissions = ["Mcp.MemorySourceExpand"],
-            RiskLevel = CapabilityRiskLevel.Medium,
-            ProjectionKind = CapabilityProjectionKind.Native
-        }
     ];
 }
