@@ -93,6 +93,12 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
         // Recall
         var pack = await _retriever.RecallAsync(query, cancellationToken);
 
+        // Pack TenantId boundary — the entire pack must belong to the principal's tenant.
+        // Individual item filtering is insufficient: a foreign-tenant pack containing
+        // local-tenant items would pass item-level checks but violate pack-level integrity.
+        if (!string.Equals(pack.TenantId, principal.TenantId, StringComparison.Ordinal))
+            throw new AgentMemoryReadCoreException("tenant-boundary", "Pack TenantId does not match principal TenantId");
+
         // TenantId boundary — every memory must belong to the principal's tenant
         var visibleRefs = scope.VisibleDescriptorRefs;
         var filteredMemories = pack.Memories
@@ -214,35 +220,44 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
             grants: grants,
             cancellationToken);
 
-        // Build lookups from the prepared artifacts (not local handles/grants).
-        // On retry the Coordinator returns the first-issued artifacts from the
-        // store; using local lists would map resources to IDs never persisted.
-        var handleLookup = (prepared.Handles?.Handles ?? [])
-            .Where(h => h is not null)
-            .ToDictionary(h => h.ResourceId, h => h.HandleId, StringComparer.Ordinal);
-        var grantLookup = (prepared.Grants?.Grants ?? [])
-            .Where(g => g is not null)
-            .ToDictionary(g => GrantKey(g), g => g, StringComparer.Ordinal);
-
-        // Build result using Coordinator-confirmed artifacts
-        var result = new BuildAgentMemoryPackResult
+        try
         {
-            OperationStatus = AgentMemoryToolOperationStatus.Completed,
-            Items = filteredMemories.Select(m => MapToDto(m, handleLookup, grantLookup)).ToList(),
-            ReturnedCount = filteredMemories.Count,
-            WasTruncated = pack.WasTruncated,
-            IsAuthoritative = false,
-            Diagnostics = new List<AgentMemoryToolDiagnosticDto>()
-        };
+            // Build lookups from the prepared artifacts (not local handles/grants).
+            // On retry the Coordinator returns the first-issued artifacts from the
+            // store; using local lists would map resources to IDs never persisted.
+            var handleLookup = (prepared.Handles?.Handles ?? [])
+                .Where(h => h is not null)
+                .ToDictionary(h => h.ResourceId, h => h.HandleId, StringComparer.Ordinal);
+            var grantLookup = (prepared.Grants?.Grants ?? [])
+                .Where(g => g is not null)
+                .ToDictionary(g => GrantKey(g), g => g, StringComparer.Ordinal);
 
-        return new AgentMemoryReadCoreOutcome<BuildAgentMemoryPackResult>
+            // Build result using Coordinator-confirmed artifacts
+            var result = new BuildAgentMemoryPackResult
+            {
+                OperationStatus = AgentMemoryToolOperationStatus.Completed,
+                Items = filteredMemories.Select(m => MapToDto(m, handleLookup, grantLookup)).ToList(),
+                ReturnedCount = filteredMemories.Count,
+                WasTruncated = pack.WasTruncated,
+                IsAuthoritative = false,
+                Diagnostics = new List<AgentMemoryToolDiagnosticDto>()
+            };
+
+            return new AgentMemoryReadCoreOutcome<BuildAgentMemoryPackResult>
+            {
+                Result = result,
+                ScopeFingerprint = scopeFingerprint,
+                MaximumAuditFacts = scope.MaxAuditFacts,
+                Receipt = prepared.Receipt,
+                CompensationToken = prepared.CompensationToken
+            };
+        }
+        catch
         {
-            Result = result,
-            ScopeFingerprint = scopeFingerprint,
-            MaximumAuditFacts = scope.MaxAuditFacts,
-            Receipt = prepared.Receipt,
-            CompensationToken = prepared.CompensationToken
-        };
+            if (prepared.CompensationToken is not null)
+                await _coordinator.RevokeCreatedAsync(prepared.CompensationToken, CancellationToken.None);
+            throw;
+        }
     }
 
     private static bool IsVisibleInScope(

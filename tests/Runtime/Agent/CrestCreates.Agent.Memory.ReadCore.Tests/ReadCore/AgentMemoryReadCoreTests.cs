@@ -1258,4 +1258,213 @@ public class AgentMemoryReadCoreTests
             });
         return mock;
     }
+
+    [Fact]
+    public async Task RecallAsync_ForeignTenantPack_RejectsEntirePack()
+    {
+        var principal = MakePrincipal();
+        var scope = MakeScope();
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+        var memory = MakeMemory("m1");
+        memory = memory with { TenantId = "t1" };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "foreign-tenant", Memories = [memory], WasTruncated = false, IsAuthoritative = true });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            Mock.Of<IAgentMemoryAccessArtifactCoordinator>(), Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
+
+        var act = async () => await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        var ex = await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
+        ex.And.Code.Should().Be("tenant-boundary");
+    }
+
+    [Fact]
+    public async Task RecallAsync_DuplicateHandleResourceId_MappingFails_ArtifactsRevoked()
+    {
+        var principal = MakePrincipal();
+        var scope = MakeScope();
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+        var descA = new DescriptorRef("ns", "visible1");
+        var memory1 = MakeMemory("same-id", [descA]);
+        var memory2 = MakeMemory("same-id", [descA]);
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory1, memory2], WasTruncated = false, IsAuthoritative = true });
+
+        var revoked = false;
+        var token = new AgentMemoryArtifactCompensationToken { TokenId = "revoke-tok" };
+        var handle1 = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "h1", ResourceId = "same-id", ResourceKind = AgentMemoryResourceKind.Memory,
+            Principal = principal, ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope),
+            RequiredDescriptorRefs = [descA], IsUnscoped = false,
+            IssuingOperationId = "op1", IssuedAt = DateTimeOffset.UtcNow, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
+        };
+        var handle2 = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "h2", ResourceId = "same-id", ResourceKind = AgentMemoryResourceKind.Memory,
+            Principal = principal, ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope),
+            RequiredDescriptorRefs = [descA], IsUnscoped = false,
+            IssuingOperationId = "op1", IssuedAt = DateTimeOffset.UtcNow, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
+        };
+        var mockCoordinator = new Mock<IAgentMemoryAccessArtifactCoordinator>();
+        mockCoordinator
+            .Setup(c => c.PrepareAsync(
+                It.IsAny<AgentMemoryAccessPrincipal>(), It.IsAny<AgentMemoryArtifactOrigin>(),
+                It.IsAny<AgentMemoryAccessScope>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
+            {
+                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [handle1, handle2], ReusedExisting = false },
+                Grants = null,
+                CompensationToken = token,
+                Receipt = new AgentMemoryArtifactBatchReceipt
+                {
+                    HandleBatch = new AgentMemoryArtifactBatchReceipt.BatchReceipt { BatchHash = "h", Count = 2, ReusedExisting = false },
+                    GrantBatch = null
+                }
+            });
+        mockCoordinator
+            .Setup(c => c.RevokeCreatedAsync(token, It.IsAny<CancellationToken>()))
+            .Callback(() => revoked = true)
+            .Returns(ValueTask.CompletedTask);
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
+
+        var act = async () => await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        await act.Should().ThrowAsync<ArgumentException>();
+        revoked.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RecallAsync_DuplicateGrantKey_MappingFails_ArtifactsRevoked()
+    {
+        var principal = MakePrincipal();
+        var scope = MakeScope();
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+        var descA = new DescriptorRef("ns", "visible1");
+        var sourceRef = new AgentContextSourceRef { SourceKind = AgentSourceKind.MemoryItem, SourceId = "s1", TenantId = "t1" };
+        var memory = MakeMemory("m1", [descA]) with { SourceRefs = [sourceRef] };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory], WasTruncated = false, IsAuthoritative = true });
+
+        var revoked = false;
+        var token = new AgentMemoryArtifactCompensationToken { TokenId = "revoke-tok" };
+        var sameGrant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g1",
+            SourceRef = sourceRef,
+            Principal = principal,
+            ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope),
+            RequiredDescriptorRefs = [descA],
+            IsUnscoped = false,
+            IssuingOperationId = "op1",
+            IssuedAt = DateTimeOffset.UtcNow,
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10)
+        };
+        var mockCoordinator = new Mock<IAgentMemoryAccessArtifactCoordinator>();
+        mockCoordinator
+            .Setup(c => c.PrepareAsync(
+                It.IsAny<AgentMemoryAccessPrincipal>(), It.IsAny<AgentMemoryArtifactOrigin>(),
+                It.IsAny<AgentMemoryAccessScope>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
+            {
+                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
+                Grants = new AgentMemoryAccessGrantIssueResult { Grants = [sameGrant, sameGrant], ReusedExisting = false },
+                CompensationToken = token,
+                Receipt = new AgentMemoryArtifactBatchReceipt
+                {
+                    HandleBatch = null,
+                    GrantBatch = new AgentMemoryArtifactBatchReceipt.BatchReceipt { BatchHash = "h", Count = 2, ReusedExisting = false }
+                }
+            });
+        mockCoordinator
+            .Setup(c => c.RevokeCreatedAsync(token, It.IsAny<CancellationToken>()))
+            .Callback(() => revoked = true)
+            .Returns(ValueTask.CompletedTask);
+
+        var mockClosure = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosure.Setup(c => c.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure { CurrentDescriptorRefs = [descA], TenantId = "t1" });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosure.Object, TimeProvider.System);
+
+        var act = async () => await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        await act.Should().ThrowAsync<ArgumentException>();
+        revoked.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RecallAsync_ReusedArtifacts_MappingFails_ReusedArtifactsRemainActive()
+    {
+        var principal = MakePrincipal();
+        var scope = MakeScope();
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+        var descA = new DescriptorRef("ns", "visible1");
+        var memory = MakeMemory("m1", [descA]);
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory], WasTruncated = false, IsAuthoritative = true });
+
+        var token = new AgentMemoryArtifactCompensationToken { TokenId = "revoke-tok" };
+        var revoked = false;
+        var mockCoordinator = new Mock<IAgentMemoryAccessArtifactCoordinator>();
+        var handle = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "h1", ResourceId = "m1", ResourceKind = AgentMemoryResourceKind.Memory,
+            Principal = principal, ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope),
+            RequiredDescriptorRefs = [descA], IsUnscoped = false,
+            IssuingOperationId = "op1", IssuedAt = DateTimeOffset.UtcNow, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
+        };
+        mockCoordinator
+            .Setup(c => c.PrepareAsync(
+                It.IsAny<AgentMemoryAccessPrincipal>(), It.IsAny<AgentMemoryArtifactOrigin>(),
+                It.IsAny<AgentMemoryAccessScope>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
+            {
+                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [handle], ReusedExisting = true },
+                Grants = null,
+                CompensationToken = token,
+                Receipt = new AgentMemoryArtifactBatchReceipt
+                {
+                    HandleBatch = new AgentMemoryArtifactBatchReceipt.BatchReceipt { BatchHash = "h", Count = 1, ReusedExisting = true },
+                    GrantBatch = null
+                }
+            });
+        mockCoordinator
+            .Setup(c => c.RevokeCreatedAsync(token, It.IsAny<CancellationToken>()))
+            .Callback(() => revoked = true)
+            .Returns(ValueTask.CompletedTask);
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
+
+        var outcome = await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        outcome.Result.OperationStatus.Should().Be(AgentMemoryToolOperationStatus.Completed);
+        revoked.Should().BeFalse();
+    }
 }
