@@ -1,6 +1,7 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Security;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
 
@@ -71,18 +72,19 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
             wasTruncated = true;
         }
 
-        // Issue source grants per block
+        // Build unique grant plan: one grant per unique SourceKey, regardless of how many
+        // blocks reference it. This prevents orphaned grants and quota exhaustion.
         var now = _timeProvider.GetUtcNow();
         var grantLifetime = _lifetimePolicy.GetGrantLifetime(principal, origin, scope, "ctx-recall");
         var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
 
-        var grants = new List<AgentMemoryAccessSourceGrant>();
-        var blockGrantMapping = new List<(int BlockIndex, List<AgentMemorySourceGrantDto> GrantDtos)>();
+        var grantPlan = new Dictionary<AgentMemorySourceKey, AgentMemoryAccessSourceGrant>();
+        var blockSourceKeys = new List<(int BlockIndex, List<AgentMemorySourceKey> SourceKeys)>();
 
         for (var i = 0; i < budgetedBlocks.Count; i++)
         {
             var block = budgetedBlocks[i];
-            var blockGrants = new List<AgentMemorySourceGrantDto>();
+            var keys = new List<AgentMemorySourceKey>();
 
             if (block.SourceRefs is { Count: > 0 })
             {
@@ -107,6 +109,23 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
                         continue;
                     }
 
+                    var sourceKey = new AgentMemorySourceKey(
+                        sourceRef.TenantId, sourceRef.SourceKind, sourceRef.SourceId,
+                        sourceRef.RangeStart, sourceRef.RangeEnd);
+
+                    if (grantPlan.TryGetValue(sourceKey, out var existingGrant))
+                    {
+                        var existingDescs = existingGrant.SourceRef.DescriptorRefs ?? Array.Empty<DescriptorRef>();
+                        var newDescs = sourceRef.DescriptorRefs ?? Array.Empty<DescriptorRef>();
+                        if (existingDescs.Count != newDescs.Count
+                            || !new HashSet<DescriptorRef>(existingDescs).SetEquals(newDescs))
+                            throw new AgentMemoryReadCoreException("conflicting-source-descriptors",
+                                $"SourceKey {sourceKey} has conflicting DescriptorRefs across references");
+
+                        keys.Add(sourceKey);
+                        continue;
+                    }
+
                     var sourceClosure = await _closureProvider.GetCurrentClosureAsync(
                         sourceResourceKind, principal.TenantId, sourceRef.SourceId,
                         sourceRef: sourceRef, cancellationToken: cancellationToken);
@@ -124,10 +143,9 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
                         ? sourceClosureRefs
                         : Array.Empty<DescriptorRef>();
 
-                    var grantId = Guid.NewGuid().ToString("N");
-                    grants.Add(new AgentMemoryAccessSourceGrant
+                    grantPlan[sourceKey] = new AgentMemoryAccessSourceGrant
                     {
-                        GrantId = grantId,
+                        GrantId = Guid.NewGuid().ToString("N"),
                         SourceRef = sourceRef,
                         Principal = principal,
                         ScopeFingerprint = scopeFingerprint,
@@ -136,21 +154,17 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
                         IssuingOperationId = origin.OperationId,
                         IssuedAt = now,
                         ExpiresAt = now + grantLifetime,
-                    });
+                    };
 
-                    blockGrants.Add(new AgentMemorySourceGrantDto
-                    {
-                        GrantId = grantId,
-                        SourceKind = MapSourceKind(sourceRef.SourceKind),
-                        ExpiresAt = now + grantLifetime,
-                    });
+                    keys.Add(sourceKey);
                 }
             }
 
-            blockGrantMapping.Add((i, blockGrants));
+            blockSourceKeys.Add((i, keys));
         }
 
-        // Prepare artifacts via Coordinator
+        // Prepare artifacts via Coordinator — one grant per unique SourceKey
+        var grants = grantPlan.Values.ToList();
         var prepared = await _coordinator.PrepareAsync(
             principal, origin, scope, "ctx-recall",
             preparationOrdinal: 0,
@@ -160,54 +174,64 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
 
         try
         {
-            // Build grant lookup from Coordinator-confirmed artifacts by exact SourceKey
+            // Build confirmed grant lookup by SourceKey
             var confirmedGrants = prepared.Grants?.Grants ?? [];
-            var grantLookup = new Dictionary<string, AgentMemoryAccessSourceGrant>(StringComparer.Ordinal);
+            var confirmedByKey = new Dictionary<AgentMemorySourceKey, AgentMemoryAccessSourceGrant>();
             foreach (var g in confirmedGrants)
             {
                 if (g is null) continue;
-                grantLookup[GrantKey(g)] = g;
+                var key = new AgentMemorySourceKey(
+                    g.SourceRef.TenantId, g.SourceRef.SourceKind, g.SourceRef.SourceId,
+                    g.SourceRef.RangeStart, g.SourceRef.RangeEnd);
+                if (confirmedByKey.ContainsKey(key))
+                    throw new AgentMemoryReadCoreException("grant-contract",
+                        $"Coordinator returned duplicate confirmed grant for SourceKey {key}");
+                confirmedByKey[key] = g;
             }
 
-            // Canonicalize: same SourceKey referenced by multiple blocks shares one grant
-            var sourceKeyToGrantDto = new Dictionary<string, AgentMemorySourceGrantDto>(StringComparer.Ordinal);
+            // Contract: every requested SourceKey must have a confirmed grant
+            foreach (var requestedKey in grantPlan.Keys)
+            {
+                if (!confirmedByKey.ContainsKey(requestedKey))
+                    throw new AgentMemoryReadCoreException("grant-contract",
+                        $"Coordinator did not confirm grant for SourceKey {requestedKey}");
+            }
+
+            // Contract: no extra confirmed grants beyond the plan
+            foreach (var confirmedKey in confirmedByKey.Keys)
+            {
+                if (!grantPlan.ContainsKey(confirmedKey))
+                    throw new AgentMemoryReadCoreException("grant-contract",
+                        $"Coordinator returned unexpected confirmed grant for SourceKey {confirmedKey}");
+            }
 
             // Map blocks to DTOs with Coordinator-confirmed grants
+            var sourceKeyToGrantDto = new Dictionary<AgentMemorySourceKey, AgentMemorySourceGrantDto>();
             var blockDtos = new List<AgentMemoryToolBlockDto>();
+
             for (var i = 0; i < budgetedBlocks.Count; i++)
             {
                 var block = budgetedBlocks[i];
-                var mapping = blockGrantMapping.FirstOrDefault(m => m.BlockIndex == i);
+                var mapping = blockSourceKeys.FirstOrDefault(m => m.BlockIndex == i);
                 var confirmedBlockGrants = new List<AgentMemorySourceGrantDto>();
 
-                if (block.SourceRefs is { Count: > 0 })
+                foreach (var sourceKey in mapping.SourceKeys)
                 {
-                    foreach (var sourceRef in block.SourceRefs)
+                    if (sourceKeyToGrantDto.TryGetValue(sourceKey, out var sharedDto))
                     {
-                        if (!AgentMemorySourceKindSupport.IsGrantSupported(sourceRef.SourceKind))
-                            continue;
-                        if (!string.Equals(sourceRef.TenantId, principal.TenantId, StringComparison.Ordinal))
-                            continue;
-
-                        var sourceKey = SourceKey(sourceRef);
-                        if (sourceKeyToGrantDto.TryGetValue(sourceKey, out var sharedDto))
-                        {
-                            confirmedBlockGrants.Add(sharedDto);
-                            continue;
-                        }
-
-                        if (!grantLookup.TryGetValue(sourceKey, out var confirmedGrant))
-                            continue;
-
-                        var dto = new AgentMemorySourceGrantDto
-                        {
-                            GrantId = confirmedGrant.GrantId,
-                            SourceKind = MapSourceKind(sourceRef.SourceKind),
-                            ExpiresAt = confirmedGrant.ExpiresAt,
-                        };
-                        sourceKeyToGrantDto[sourceKey] = dto;
-                        confirmedBlockGrants.Add(dto);
+                        confirmedBlockGrants.Add(sharedDto);
+                        continue;
                     }
+
+                    var confirmedGrant = confirmedByKey[sourceKey];
+                    var dto = new AgentMemorySourceGrantDto
+                    {
+                        GrantId = confirmedGrant.GrantId,
+                        SourceKind = MapSourceKind(sourceKey.SourceKind),
+                        ExpiresAt = confirmedGrant.ExpiresAt,
+                    };
+                    sourceKeyToGrantDto[sourceKey] = dto;
+                    confirmedBlockGrants.Add(dto);
                 }
 
                 blockDtos.Add(new AgentMemoryToolBlockDto
@@ -345,11 +369,4 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
         AgentSourceKind.ActivationRequest => AgentMemoryToolSourceKind.ActivationRequest,
         _ => AgentMemoryToolSourceKind.Unknown
     };
-
-    private static string GrantKey(AgentMemoryAccessSourceGrant grant) => SourceKey(grant.SourceRef);
-
-    private static string SourceKey(AgentContextSourceRef sourceRef)
-    {
-        return $"{sourceRef.TenantId}:{(int)sourceRef.SourceKind}:{sourceRef.SourceId}:{sourceRef.RangeStart}:{sourceRef.RangeEnd}";
-    }
 }

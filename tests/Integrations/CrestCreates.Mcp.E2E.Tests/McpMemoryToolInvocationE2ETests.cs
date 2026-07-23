@@ -4,6 +4,7 @@ using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.ReadCore;
+using CrestCreates.Agent.Memory.Stores;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
@@ -847,6 +848,12 @@ public sealed class McpMemoryToolInvocationE2ETests
 
         builder.Services.AddSingleton<ICanonicalHashComputer>(new StubCanonicalHashComputer());
         builder.Services.AddAgentMemoryRuntime();
+
+        var countingStore = new CountingCompressedContextStore();
+        builder.Services.RemoveAll<IAgentCompressedContextStore>();
+        builder.Services.AddSingleton<IAgentCompressedContextStore>(countingStore);
+        builder.Services.AddSingleton(countingStore);
+
         builder.Services.AddMcpMemoryTools();
 
         return builder.Build();
@@ -974,6 +981,11 @@ public sealed class McpMemoryToolInvocationE2ETests
         expandOutcome.IsError.Should().BeFalse(because: "code={0}, text={1}",
             expandOutcome.ErrorCode ?? "(null)",
             expandOutcome.Content.FirstOrDefault() is McpToolTextContent t2 ? t2.Text : "(no text)");
+
+        expandOutcome.StructuredContent.Should().NotBeNull();
+        var expandResult = expandOutcome.StructuredContent!.Value;
+        expandResult.GetProperty("SanitizedContent").GetString().Should().Be("context-block-content",
+            "expand must return the actual block content from the seeded context");
     }
 
     [Fact]
@@ -1044,6 +1056,220 @@ public sealed class McpMemoryToolInvocationE2ETests
     }
 
     [Fact]
+    public async Task Mcp_CtxRecall_SameSourceAcrossBlocks_OneGrantIssued()
+    {
+        using var host = BuildRealHost();
+        await host.StartAsync();
+        using var s = host.Services.CreateScope();
+        var sp = s.ServiceProvider;
+
+        var contextStore = sp.GetRequiredService<IAgentCompressedContextStore>();
+        var conversationStore = sp.GetRequiredService<IAgentConversationStore>();
+        var descA = new DescriptorRef { Namespace = "test", Id = "descA", Version = 1 };
+        var sharedSourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.ConversationTurn,
+            TenantId = TestTenantId,
+            SourceId = "shared-conv-1",
+            DescriptorRefs = [descA]
+        };
+        var conversation = new AgentConversationRecord
+        {
+            ConversationId = "shared-conv-1",
+            TenantId = TestTenantId,
+            Turns =
+            [
+                new AgentConversationTurn
+                {
+                    TurnId = "turn-1",
+                    TenantId = TestTenantId,
+                    Role = AgentConversationRole.User,
+                    Content = "turn-content",
+                    DescriptorRefs = [descA]
+                }
+            ]
+        };
+        await conversationStore.SaveConversationAsync(conversation);
+        var context = new AgentCompressedContext
+        {
+            ContextId = "ctx-dedup",
+            TenantId = TestTenantId,
+            Blocks =
+            [
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "dedup-block-1",
+                    TenantId = TestTenantId,
+                    Content = "block-1-content",
+                    CanonicalContentHash = MakeStubHash(),
+                    SourceRefs = [sharedSourceRef]
+                },
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "dedup-block-2",
+                    TenantId = TestTenantId,
+                    Content = "block-2-content",
+                    CanonicalContentHash = MakeStubHash(),
+                    SourceRefs = [sharedSourceRef]
+                }
+            ]
+        };
+        await contextStore.SaveCompressedContextAsync(context);
+
+        var handleIssuer = sp.GetRequiredService<IAgentMemoryContextHandleIssuer>();
+        var principal = new AgentMemoryAccessPrincipal
+        {
+            TenantId = TestTenantId,
+            UserId = TestUserId,
+            CallerKind = AgentMemoryCallerKind.Mcp,
+            CallerId = "test-host",
+            SecurityContextId = "session-dedup"
+        };
+        var origin = new AgentMemoryArtifactOrigin
+        {
+            Kind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+            OperationId = "test-op-dedup",
+            BindingHash = MakeStubHash()
+        };
+        var handleResult = await handleIssuer.IssueForCallerAsync(principal, origin, "ctx-dedup");
+
+        var invoker = sp.GetRequiredService<IMcpToolInvoker>();
+
+        using var recallArgs = CreateArguments(new
+        {
+            ContextHandle = handleResult.HandleId,
+            MaximumBlockCount = 10,
+            CharacterBudget = 1000
+        });
+
+        var outcome = await invoker.InvokeAsync(
+            "ctx_recall",
+            recallArgs.RootElement,
+            new McpToolCallContext(
+                new McpToolHostContext("test-host", "test-env"),
+                "inv-dedup", "req-dedup", "session-dedup"));
+
+        outcome.IsError.Should().BeFalse();
+        var result = outcome.StructuredContent!.Value;
+        var blocks = result.GetProperty("Blocks");
+        blocks.GetArrayLength().Should().Be(2);
+
+        var grant1 = blocks[0].GetProperty("SourceGrants")[0].GetProperty("GrantId").GetString();
+        var grant2 = blocks[1].GetProperty("SourceGrants")[0].GetProperty("GrantId").GetString();
+        grant1.Should().Be(grant2, "same SourceKey across two blocks must share one deduplicated Grant");
+    }
+
+    [Fact]
+    public async Task Mcp_CtxExpand_DifferentSourceId_ContentDoesNotCrossSource()
+    {
+        using var host = BuildRealHost();
+        await host.StartAsync();
+        using var s = host.Services.CreateScope();
+        var sp = s.ServiceProvider;
+
+        var contextStore = sp.GetRequiredService<IAgentCompressedContextStore>();
+        var descA = new DescriptorRef { Namespace = "test", Id = "descA", Version = 1 };
+        var context = new AgentCompressedContext
+        {
+            ContextId = "ctx-two-src",
+            TenantId = TestTenantId,
+            Blocks =
+            [
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "src-block-a",
+                    TenantId = TestTenantId,
+                    Content = "content-from-source-a",
+                    CanonicalContentHash = MakeStubHash(),
+                    SourceRefs = [new AgentContextSourceRef
+                    {
+                        SourceKind = AgentSourceKind.CompressedContextBlock,
+                        TenantId = TestTenantId,
+                        SourceId = "src-block-a",
+                        DescriptorRefs = [descA]
+                    }]
+                },
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "src-block-b",
+                    TenantId = TestTenantId,
+                    Content = "content-from-source-b",
+                    CanonicalContentHash = MakeStubHash(),
+                    SourceRefs = [new AgentContextSourceRef
+                    {
+                        SourceKind = AgentSourceKind.CompressedContextBlock,
+                        TenantId = TestTenantId,
+                        SourceId = "src-block-b",
+                        DescriptorRefs = [descA]
+                    }]
+                }
+            ]
+        };
+        await contextStore.SaveCompressedContextAsync(context);
+
+        var handleIssuer = sp.GetRequiredService<IAgentMemoryContextHandleIssuer>();
+        var principal = new AgentMemoryAccessPrincipal
+        {
+            TenantId = TestTenantId,
+            UserId = TestUserId,
+            CallerKind = AgentMemoryCallerKind.Mcp,
+            CallerId = "test-host",
+            SecurityContextId = "session-two-src"
+        };
+        var origin = new AgentMemoryArtifactOrigin
+        {
+            Kind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+            OperationId = "test-op-two-src",
+            BindingHash = MakeStubHash()
+        };
+        var handleResult = await handleIssuer.IssueForCallerAsync(principal, origin, "ctx-two-src");
+
+        var invoker = sp.GetRequiredService<IMcpToolInvoker>();
+
+        using var recallArgs = CreateArguments(new
+        {
+            ContextHandle = handleResult.HandleId,
+            MaximumBlockCount = 10,
+            CharacterBudget = 1000
+        });
+
+        var recallOutcome = await invoker.InvokeAsync(
+            "ctx_recall",
+            recallArgs.RootElement,
+            new McpToolCallContext(
+                new McpToolHostContext("test-host", "test-env"),
+                "inv-recall-two", "req-recall-two", "session-two-src"));
+
+        recallOutcome.IsError.Should().BeFalse();
+        var blocks = recallOutcome.StructuredContent!.Value.GetProperty("Blocks");
+        var grantA = blocks[0].GetProperty("SourceGrants")[0].GetProperty("GrantId").GetString();
+        var grantB = blocks[1].GetProperty("SourceGrants")[0].GetProperty("GrantId").GetString();
+        grantA.Should().NotBe(grantB, "different SourceIds must produce different Grants");
+
+        using var expandArgsA = CreateArguments(new { GrantId = grantA, MaximumCharacters = 2000 });
+        var expandA = await invoker.InvokeAsync(
+            "ctx_expand", expandArgsA.RootElement,
+            new McpToolCallContext(
+                new McpToolHostContext("test-host", "test-env"),
+                "inv-expand-a", "req-expand-a", "session-two-src"));
+
+        expandA.IsError.Should().BeFalse();
+        expandA.StructuredContent!.Value.GetProperty("SanitizedContent").GetString()
+            .Should().Be("content-from-source-a", "expand must return content from the correct source");
+
+        using var expandArgsB = CreateArguments(new { GrantId = grantB, MaximumCharacters = 2000 });
+        var expandB = await invoker.InvokeAsync(
+            "ctx_expand", expandArgsB.RootElement,
+            new McpToolCallContext(
+                new McpToolHostContext("test-host", "test-env"),
+                "inv-expand-b", "req-expand-b", "session-two-src"));
+
+        expandB.IsError.Should().BeFalse();
+        expandB.StructuredContent!.Value.GetProperty("SanitizedContent").GetString()
+            .Should().Be("content-from-source-b", "expand must return content from the correct source, not cross-source");
+    }
+
+    [Fact]
     public async Task Mcp_CrossTenantContextHandle_UnifiedUnavailable()
     {
         using var host = BuildRealHost();
@@ -1077,10 +1303,38 @@ public sealed class McpMemoryToolInvocationE2ETests
             CharacterBudget = 1000
         });
 
-        var foreignOutcome = await InvokeWithForeignTenantAsync(
-            "ctx_recall", foreignArgs.RootElement, "foreign-session");
+        var foreignOutcome = await InvokeWithForeignTenantInSameStoreAsync(
+            sp, "ctx_recall", foreignArgs.RootElement, "foreign-session-3");
 
-        foreignOutcome.IsError.Should().BeTrue();
+        foreignOutcome.IsError.Should().BeTrue("handle belongs to different tenant — must be unavailable");
+    }
+
+    private static async Task<McpToolInvocationOutcome> InvokeWithForeignTenantInSameStoreAsync(
+        IServiceProvider rootSp, string toolName, JsonElement arguments, string sessionId)
+    {
+        var foreignScope = rootSp.CreateScope();
+        var foreignSp = new ForeignTenantServiceProvider(foreignScope.ServiceProvider);
+
+        var invoker = foreignSp.GetRequiredService<IMcpToolInvoker>();
+        return await invoker.InvokeAsync(
+            toolName,
+            arguments,
+            new McpToolCallContext(
+                new McpToolHostContext("test-host", "test-env"),
+                "inv-foreign", "req-foreign-req", sessionId));
+    }
+
+    private sealed class ForeignTenantServiceProvider(IServiceProvider inner) : IServiceProvider
+    {
+        private readonly MockTenantContext _foreignTenant = new("foreign-tenant");
+        private readonly MockCurrentUser _foreignUser = new("foreign-user", "foreign-tenant");
+
+        public object? GetService(Type serviceType)
+        {
+            if (serviceType == typeof(ITenantContext)) return _foreignTenant;
+            if (serviceType == typeof(ICurrentUser)) return _foreignUser;
+            return inner.GetService(serviceType);
+        }
     }
 
     private static async Task<McpToolInvocationOutcome> InvokeWithForeignTenantAsync(
@@ -1188,6 +1442,9 @@ public sealed class McpMemoryToolInvocationE2ETests
         };
         var handleResult = await handleIssuer.IssueForCallerAsync(principal, origin, "real-ctx-4");
 
+        var countingStore = sp.GetRequiredService<CountingCompressedContextStore>();
+        countingStore.ResetReadCount();
+
         var invoker = sp.GetRequiredService<IMcpToolInvoker>();
 
         using var recallArgs = CreateArguments(new
@@ -1205,6 +1462,9 @@ public sealed class McpMemoryToolInvocationE2ETests
                 "inv-budget", "req-budget", "session-real-4"));
 
         outcome.IsError.Should().BeTrue();
+
+        var storeAfter = sp.GetRequiredService<CountingCompressedContextStore>();
+        storeAfter.ReadCount.Should().Be(0, "budget validation must reject before any store access");
     }
 
     private static CanonicalHash MakeStubHash() => new()
@@ -1262,6 +1522,34 @@ public sealed class McpMemoryToolInvocationE2ETests
                 ExpansionGrantLifetime = TimeSpan.FromMinutes(30),
                 ResourceHandleLifetime = TimeSpan.FromMinutes(30)
             });
+        }
+    }
+
+    private sealed class CountingCompressedContextStore : IAgentCompressedContextStore
+    {
+        private readonly InMemoryAgentCompressedContextStore _inner = new();
+        private int _readCount;
+
+        public int ReadCount => _readCount;
+
+        public void ResetReadCount() => Interlocked.Exchange(ref _readCount, 0);
+
+        public ValueTask SaveCompressedContextAsync(AgentCompressedContext context, CancellationToken cancellationToken = default)
+            => _inner.SaveCompressedContextAsync(context, cancellationToken);
+
+        public ValueTask CreateCompressedContextAsync(AgentCompressedContext context, CancellationToken cancellationToken = default)
+            => _inner.CreateCompressedContextAsync(context, cancellationToken);
+
+        public ValueTask<AgentCompressedContext?> GetCompressedContextAsync(string tenantId, string contextId, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _readCount);
+            return _inner.GetCompressedContextAsync(tenantId, contextId, cancellationToken);
+        }
+
+        public ValueTask<AgentCompressedContextBlock?> GetCompressedContextBlockAsync(string tenantId, string blockId, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _readCount);
+            return _inner.GetCompressedContextBlockAsync(tenantId, blockId, cancellationToken);
         }
     }
 }

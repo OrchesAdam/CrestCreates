@@ -1,5 +1,6 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.ReadCore;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
@@ -1027,7 +1028,7 @@ public class AgentContextReadCoreTests
     {
         var principal = MakePrincipal();
         var scope = MakeScope();
-        var descA = new DescriptorRef { Namespace = "ns", Id = "A" };
+        var descA = new DescriptorRef { Namespace = "ns", Id = "A", Version = 1 };
 
         var sourceRef = new AgentContextSourceRef
         {
@@ -1100,12 +1101,11 @@ public class AgentContextReadCoreTests
             CharacterBudget = 10_000
         };
 
-        var outcome = await core.RecallContextAsync(principal, MakeOrigin(), scope, input);
-        outcome.Result.Blocks.Should().HaveCount(1);
-        outcome.Result.Blocks[0].SourceGrants.Should().BeEmpty();
+        var act = async () => await core.RecallContextAsync(principal, MakeOrigin(), scope, input);
+        await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
 
         mockCoordinator.Verify(c => c.RevokeCreatedAsync(
-            compensationToken, It.IsAny<CancellationToken>()), Times.Never);
+            compensationToken, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -1159,5 +1159,261 @@ public class AgentContextReadCoreTests
 
         var confirmedGrantIds = capturedGrants.Select(g => g.GrantId).ToList();
         returnedGrantIds.Should().BeSubsetOf(confirmedGrantIds);
+    }
+
+    [Fact]
+    public async Task CtxRecall_SameSourceAcrossBlocks_CoordinatorReceivesOneGrant()
+    {
+        var principal = MakePrincipal();
+        var scope = MakeScope();
+        var descA = new DescriptorRef { Namespace = "ns", Id = "A", Version = 1 };
+        var sourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.CompressedContextBlock,
+            TenantId = "t1", SourceId = "shared-source",
+            DescriptorRefs = new[] { descA }
+        };
+
+        var context = new AgentCompressedContext
+        {
+            ContextId = "ctx-1", TenantId = "t1",
+            Blocks = new[]
+            {
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "block-1", TenantId = "t1", Content = "content-1",
+                    CanonicalContentHash = MakeHash(), SourceRefs = new[] { sourceRef }
+                },
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "block-2", TenantId = "t1", Content = "content-2",
+                    CanonicalContentHash = MakeHash(), SourceRefs = new[] { sourceRef }
+                }
+            }
+        };
+
+        var capturedGrants = new List<AgentMemoryAccessSourceGrant>();
+        var mockCoordinator = MakeCapturingCoordinator(capturedGrants);
+
+        var core = CreateCore(
+            mockResolver: MakeResolveSuccessMock(principal, handleId: "h1"),
+            mockStore: MakeStoreMock(context),
+            mockCoordinator: mockCoordinator,
+            mockClosure: MakeClosureMock([descA]));
+
+        var input = new RecallAgentContextInput
+        {
+            ContextHandle = "h1",
+            MaximumBlockCount = 10,
+            CharacterBudget = 10_000
+        };
+
+        await core.RecallContextAsync(principal, MakeOrigin(), scope, input);
+        capturedGrants.Should().HaveCount(1, "same SourceKey across two blocks must produce exactly one Grant");
+    }
+
+    [Fact]
+    public async Task CtxRecall_SameSourceAcrossBlocks_ReceiptCountIsOne()
+    {
+        var principal = MakePrincipal();
+        var scope = MakeScope();
+        var descA = new DescriptorRef { Namespace = "ns", Id = "A", Version = 1 };
+        var sourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.CompressedContextBlock,
+            TenantId = "t1", SourceId = "shared-source",
+            DescriptorRefs = new[] { descA }
+        };
+
+        var context = new AgentCompressedContext
+        {
+            ContextId = "ctx-1", TenantId = "t1",
+            Blocks = new[]
+            {
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "block-1", TenantId = "t1", Content = "content-1",
+                    CanonicalContentHash = MakeHash(), SourceRefs = new[] { sourceRef }
+                },
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "block-2", TenantId = "t1", Content = "content-2",
+                    CanonicalContentHash = MakeHash(), SourceRefs = new[] { sourceRef }
+                }
+            }
+        };
+
+        var capturedGrants = new List<AgentMemoryAccessSourceGrant>();
+        var mockCoordinator = MakeCapturingCoordinator(capturedGrants);
+
+        var core = CreateCore(
+            mockResolver: MakeResolveSuccessMock(principal, handleId: "h1"),
+            mockStore: MakeStoreMock(context),
+            mockCoordinator: mockCoordinator,
+            mockClosure: MakeClosureMock([descA]));
+
+        var input = new RecallAgentContextInput
+        {
+            ContextHandle = "h1",
+            MaximumBlockCount = 10,
+            CharacterBudget = 10_000
+        };
+
+        var outcome = await core.RecallContextAsync(principal, MakeOrigin(), scope, input);
+        outcome.Receipt.GrantBatch.Should().NotBeNull();
+        outcome.Receipt.GrantBatch!.Count.Should().Be(1, "Receipt must reflect exactly one Grant for deduplicated SourceKey");
+    }
+
+    [Fact]
+    public async Task CtxRecall_SameSourceAcrossBlocks_BothBlocksReuseGrant()
+    {
+        var principal = MakePrincipal();
+        var scope = MakeScope();
+        var descA = new DescriptorRef { Namespace = "ns", Id = "A", Version = 1 };
+        var sourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.CompressedContextBlock,
+            TenantId = "t1", SourceId = "shared-source",
+            DescriptorRefs = new[] { descA }
+        };
+
+        var context = new AgentCompressedContext
+        {
+            ContextId = "ctx-1", TenantId = "t1",
+            Blocks = new[]
+            {
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "block-1", TenantId = "t1", Content = "content-1",
+                    CanonicalContentHash = MakeHash(), SourceRefs = new[] { sourceRef }
+                },
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "block-2", TenantId = "t1", Content = "content-2",
+                    CanonicalContentHash = MakeHash(), SourceRefs = new[] { sourceRef }
+                }
+            }
+        };
+
+        var capturedGrants = new List<AgentMemoryAccessSourceGrant>();
+        var mockCoordinator = MakeCapturingCoordinator(capturedGrants);
+
+        var core = CreateCore(
+            mockResolver: MakeResolveSuccessMock(principal, handleId: "h1"),
+            mockStore: MakeStoreMock(context),
+            mockCoordinator: mockCoordinator,
+            mockClosure: MakeClosureMock([descA]));
+
+        var input = new RecallAgentContextInput
+        {
+            ContextHandle = "h1",
+            MaximumBlockCount = 10,
+            CharacterBudget = 10_000
+        };
+
+        var outcome = await core.RecallContextAsync(principal, MakeOrigin(), scope, input);
+        outcome.Result.Blocks.Should().HaveCount(2);
+        var grantId1 = outcome.Result.Blocks[0].SourceGrants.FirstOrDefault()?.GrantId;
+        var grantId2 = outcome.Result.Blocks[1].SourceGrants.FirstOrDefault()?.GrantId;
+        grantId1.Should().NotBeNullOrEmpty();
+        grantId1.Should().Be(grantId2, "both blocks must share the same deduplicated Grant");
+    }
+
+    [Fact]
+    public async Task CtxRecall_ExtraConfirmedGrant_ThrowsAndCompensates()
+    {
+        var principal = MakePrincipal();
+        var scope = MakeScope();
+        var descA = new DescriptorRef { Namespace = "ns", Id = "A", Version = 1 };
+        var sourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.CompressedContextBlock,
+            TenantId = "t1", SourceId = "source-1",
+            DescriptorRefs = new[] { descA }
+        };
+
+        var context = new AgentCompressedContext
+        {
+            ContextId = "ctx-1", TenantId = "t1",
+            Blocks = new[]
+            {
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "block-1", TenantId = "t1", Content = "content-1",
+                    CanonicalContentHash = MakeHash(), SourceRefs = new[] { sourceRef }
+                }
+            }
+        };
+
+        var compensationToken = new AgentMemoryArtifactCompensationToken { TokenId = "comp-extra" };
+        var extraSourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.CompressedContextBlock,
+            TenantId = "t1", SourceId = "unexpected-source",
+            DescriptorRefs = new[] { descA }
+        };
+        var extraGrant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-extra",
+            SourceRef = extraSourceRef,
+            Principal = principal,
+            ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope),
+            RequiredDescriptorRefs = [descA],
+            IsUnscoped = false,
+            IssuingOperationId = "op1",
+            IssuedAt = DateTimeOffset.UtcNow,
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10)
+        };
+
+        var mockCoordinator = new Mock<IAgentMemoryAccessArtifactCoordinator>();
+        mockCoordinator.Setup(c => c.PrepareAsync(
+                It.IsAny<AgentMemoryAccessPrincipal>(), It.IsAny<AgentMemoryArtifactOrigin>(),
+                It.IsAny<AgentMemoryAccessScope>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentMemoryAccessPrincipal p, AgentMemoryArtifactOrigin o, AgentMemoryAccessScope s,
+                string op, int ordinal, IReadOnlyList<AgentMemoryAccessResourceHandle> handles,
+                IReadOnlyList<AgentMemoryAccessSourceGrant> grants, CancellationToken ct) =>
+                new AgentMemoryAccessPreparedArtifacts
+                {
+                    Handles = handles.Count > 0
+                        ? new AgentMemoryAccessHandleIssueResult { Handles = handles.ToList(), ReusedExisting = false }
+                        : null,
+                    Grants = new AgentMemoryAccessGrantIssueResult
+                    {
+                        Grants = grants.Concat([extraGrant]).ToList(),
+                        ReusedExisting = false
+                    },
+                    CompensationToken = compensationToken,
+                    Receipt = new AgentMemoryArtifactBatchReceipt
+                    {
+                        HandleBatch = null,
+                        GrantBatch = new AgentMemoryArtifactBatchReceipt.BatchReceipt
+                        {
+                            BatchHash = "g-extra", Count = grants.Count + 1, ReusedExisting = false
+                        }
+                    }
+                });
+        mockCoordinator.Setup(c => c.RevokeCreatedAsync(compensationToken, It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.CompletedTask)
+            .Verifiable();
+
+        var core = CreateCore(
+            mockResolver: MakeResolveSuccessMock(principal, handleId: "h1"),
+            mockStore: MakeStoreMock(context),
+            mockCoordinator: mockCoordinator,
+            mockClosure: MakeClosureMock([descA]));
+
+        var input = new RecallAgentContextInput
+        {
+            ContextHandle = "h1",
+            MaximumBlockCount = 10,
+            CharacterBudget = 10_000
+        };
+
+        var act = async () => await core.RecallContextAsync(principal, MakeOrigin(), scope, input);
+        await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
+        mockCoordinator.Verify(c => c.RevokeCreatedAsync(compensationToken, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

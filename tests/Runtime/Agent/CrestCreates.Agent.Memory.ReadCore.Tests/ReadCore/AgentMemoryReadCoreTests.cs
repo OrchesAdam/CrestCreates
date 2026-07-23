@@ -488,13 +488,24 @@ public class AgentMemoryReadCoreTests
             .Callback<AgentMemoryAccessPrincipal, AgentMemoryArtifactOrigin, AgentMemoryAccessScope,
                 string, int, IReadOnlyList<AgentMemoryAccessResourceHandle>, IReadOnlyList<AgentMemoryAccessSourceGrant>, CancellationToken>(
                 (_, _, _, _, _, _, grants, _) => capturedGrants = grants)
-            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
-            {
-                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
-                Grants = new AgentMemoryAccessGrantIssueResult { Grants = [], ReusedExisting = false },
-                CompensationToken = null,
-                Receipt = new AgentMemoryArtifactBatchReceipt { HandleBatch = null, GrantBatch = null }
-            });
+            .ReturnsAsync((AgentMemoryAccessPrincipal p, AgentMemoryArtifactOrigin o, AgentMemoryAccessScope s,
+                string op, int ordinal, IReadOnlyList<AgentMemoryAccessResourceHandle> handles,
+                IReadOnlyList<AgentMemoryAccessSourceGrant> grants, CancellationToken ct) =>
+                new AgentMemoryAccessPreparedArtifacts
+                {
+                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
+                    Grants = new AgentMemoryAccessGrantIssueResult { Grants = grants.ToList(), ReusedExisting = false },
+                    CompensationToken = grants.Count > 0
+                        ? new AgentMemoryArtifactCompensationToken { TokenId = "comp-" + Guid.NewGuid().ToString("N") }
+                        : null,
+                    Receipt = new AgentMemoryArtifactBatchReceipt
+                    {
+                        HandleBatch = null,
+                        GrantBatch = grants.Count > 0
+                            ? new AgentMemoryArtifactBatchReceipt.BatchReceipt { BatchHash = "g1", Count = grants.Count, ReusedExisting = false }
+                            : null
+                    }
+                });
 
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
@@ -506,8 +517,6 @@ public class AgentMemoryReadCoreTests
         capturedGrants.Should().NotBeNull();
         capturedGrants.Should().HaveCount(1);
         var grant = capturedGrants![0];
-        // The grant's RequiredDescriptorRefs should be the source resource's closure,
-        // NOT the parent memory's effective closure (which would include descMem).
         grant.RequiredDescriptorRefs.Should().Contain(descSrc);
         grant.RequiredDescriptorRefs.Should().NotContain(descMem, "grant uses source closure, not parent memory closure");
         grant.RequiredDescriptorRefs.Should().HaveCount(1);
@@ -516,8 +525,6 @@ public class AgentMemoryReadCoreTests
     [Fact]
     public async Task GrantKey_IncludesTenantIdAndSourceKind()
     {
-        // Two source refs with the same SourceId but different SourceKind (and within same tenant)
-        // must not collide. Under old GrantKey format they would have the same key.
         var principal = MakePrincipal();
         var origin = MakeOrigin();
         var scope = MakeScope(allowUnscoped: true) with { VisibleDescriptorRefs = Array.Empty<DescriptorRef>() };
@@ -568,15 +575,26 @@ public class AgentMemoryReadCoreTests
                 It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
                 It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<AgentMemoryAccessPrincipal, AgentMemoryArtifactOrigin, AgentMemoryAccessScope,
-                string, int, IReadOnlyList<AgentMemoryAccessResourceHandle>, IReadOnlyList<AgentMemoryAccessSourceGrant>, CancellationToken>(
-                (_, _, _, _, _, _, grants, _) => capturedGrants = grants)
-            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
+            .ReturnsAsync((AgentMemoryAccessPrincipal p, AgentMemoryArtifactOrigin o, AgentMemoryAccessScope s,
+                string op, int ordinal, IReadOnlyList<AgentMemoryAccessResourceHandle> handles,
+                IReadOnlyList<AgentMemoryAccessSourceGrant> grants, CancellationToken ct) =>
             {
-                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
-                Grants = new AgentMemoryAccessGrantIssueResult { Grants = [], ReusedExisting = false },
-                CompensationToken = null,
-                Receipt = new AgentMemoryArtifactBatchReceipt { HandleBatch = null, GrantBatch = null }
+                capturedGrants = grants;
+                return new AgentMemoryAccessPreparedArtifacts
+                {
+                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
+                    Grants = new AgentMemoryAccessGrantIssueResult { Grants = grants.ToList(), ReusedExisting = false },
+                    CompensationToken = grants.Count > 0
+                        ? new AgentMemoryArtifactCompensationToken { TokenId = "comp-" + Guid.NewGuid().ToString("N") }
+                        : null,
+                    Receipt = new AgentMemoryArtifactBatchReceipt
+                    {
+                        HandleBatch = null,
+                        GrantBatch = grants.Count > 0
+                            ? new AgentMemoryArtifactBatchReceipt.BatchReceipt { BatchHash = "g1", Count = grants.Count, ReusedExisting = false }
+                            : null
+                    }
+                };
             });
 
         var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
@@ -595,7 +613,6 @@ public class AgentMemoryReadCoreTests
 
         var outcome = await core.RecallAsync(principal, origin, scope, input);
 
-        // Both source refs should produce grants — no collision
         capturedGrants.Should().NotBeNull();
         capturedGrants.Should().HaveCount(2, "grants with different SourceKind must not collide");
         capturedGrants.Should().Contain(g => g.SourceRef.SourceKind == AgentSourceKind.ConversationTurn);
@@ -700,15 +717,26 @@ public class AgentMemoryReadCoreTests
                 It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
                 It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<AgentMemoryAccessPrincipal, AgentMemoryArtifactOrigin, AgentMemoryAccessScope,
-                string, int, IReadOnlyList<AgentMemoryAccessResourceHandle>, IReadOnlyList<AgentMemoryAccessSourceGrant>, CancellationToken>(
-                (_, _, _, _, _, _, grants, _) => capturedGrants = grants)
-            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
+            .ReturnsAsync((AgentMemoryAccessPrincipal p, AgentMemoryArtifactOrigin o, AgentMemoryAccessScope s,
+                string op, int ordinal, IReadOnlyList<AgentMemoryAccessResourceHandle> handles,
+                IReadOnlyList<AgentMemoryAccessSourceGrant> grants, CancellationToken ct) =>
             {
-                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
-                Grants = new AgentMemoryAccessGrantIssueResult { Grants = [], ReusedExisting = false },
-                CompensationToken = null,
-                Receipt = new AgentMemoryArtifactBatchReceipt { HandleBatch = null, GrantBatch = null }
+                capturedGrants = grants;
+                return new AgentMemoryAccessPreparedArtifacts
+                {
+                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
+                    Grants = new AgentMemoryAccessGrantIssueResult { Grants = grants.ToList(), ReusedExisting = false },
+                    CompensationToken = grants.Count > 0
+                        ? new AgentMemoryArtifactCompensationToken { TokenId = "comp-" + Guid.NewGuid().ToString("N") }
+                        : null,
+                    Receipt = new AgentMemoryArtifactBatchReceipt
+                    {
+                        HandleBatch = null,
+                        GrantBatch = grants.Count > 0
+                            ? new AgentMemoryArtifactBatchReceipt.BatchReceipt { BatchHash = "g1", Count = grants.Count, ReusedExisting = false }
+                            : null
+                    }
+                };
             });
 
         // Closure provider returns per-resource closure (simulating real closure resolution)
@@ -785,15 +813,26 @@ public class AgentMemoryReadCoreTests
                 It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
                 It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<AgentMemoryAccessPrincipal, AgentMemoryArtifactOrigin, AgentMemoryAccessScope,
-                string, int, IReadOnlyList<AgentMemoryAccessResourceHandle>, IReadOnlyList<AgentMemoryAccessSourceGrant>, CancellationToken>(
-                (_, _, _, _, _, _, grants, _) => capturedGrants = grants)
-            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
+            .ReturnsAsync((AgentMemoryAccessPrincipal p, AgentMemoryArtifactOrigin o, AgentMemoryAccessScope s,
+                string op, int ordinal, IReadOnlyList<AgentMemoryAccessResourceHandle> handles,
+                IReadOnlyList<AgentMemoryAccessSourceGrant> grants, CancellationToken ct) =>
             {
-                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
-                Grants = new AgentMemoryAccessGrantIssueResult { Grants = [], ReusedExisting = false },
-                CompensationToken = null,
-                Receipt = new AgentMemoryArtifactBatchReceipt { HandleBatch = null, GrantBatch = null }
+                capturedGrants = grants;
+                return new AgentMemoryAccessPreparedArtifacts
+                {
+                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
+                    Grants = new AgentMemoryAccessGrantIssueResult { Grants = grants.ToList(), ReusedExisting = false },
+                    CompensationToken = grants.Count > 0
+                        ? new AgentMemoryArtifactCompensationToken { TokenId = "comp-" + Guid.NewGuid().ToString("N") }
+                        : null,
+                    Receipt = new AgentMemoryArtifactBatchReceipt
+                    {
+                        HandleBatch = null,
+                        GrantBatch = grants.Count > 0
+                            ? new AgentMemoryArtifactBatchReceipt.BatchReceipt { BatchHash = "g1", Count = grants.Count, ReusedExisting = false }
+                            : null
+                    }
+                };
             });
 
         var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
@@ -1246,15 +1285,46 @@ public class AgentMemoryReadCoreTests
                 It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
                 It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<AgentMemoryAccessPrincipal, AgentMemoryArtifactOrigin, AgentMemoryAccessScope,
-                string, int, IReadOnlyList<AgentMemoryAccessResourceHandle>, IReadOnlyList<AgentMemoryAccessSourceGrant>, CancellationToken>(
-                (_, _, _, _, _, _, grants, _) => capture.Grants = grants)
-            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
+            .ReturnsAsync((AgentMemoryAccessPrincipal p, AgentMemoryArtifactOrigin o, AgentMemoryAccessScope s,
+                string op, int ordinal, IReadOnlyList<AgentMemoryAccessResourceHandle> handles,
+                IReadOnlyList<AgentMemoryAccessSourceGrant> grants, CancellationToken ct) =>
             {
-                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
-                Grants = new AgentMemoryAccessGrantIssueResult { Grants = [], ReusedExisting = false },
-                CompensationToken = null,
-                Receipt = new AgentMemoryArtifactBatchReceipt { HandleBatch = null, GrantBatch = null }
+                capture.Grants = grants;
+                return new AgentMemoryAccessPreparedArtifacts
+                {
+                    Handles = handles.Count > 0
+                        ? new AgentMemoryAccessHandleIssueResult
+                        {
+                            Handles = handles.ToList(),
+                            ReusedExisting = false
+                        }
+                        : new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
+                    Grants = grants.Count > 0
+                        ? new AgentMemoryAccessGrantIssueResult
+                        {
+                            Grants = grants.ToList(),
+                            ReusedExisting = false
+                        }
+                        : new AgentMemoryAccessGrantIssueResult { Grants = [], ReusedExisting = false },
+                    CompensationToken = grants.Count > 0
+                        ? new AgentMemoryArtifactCompensationToken { TokenId = "comp-" + Guid.NewGuid().ToString("N") }
+                        : null,
+                    Receipt = new AgentMemoryArtifactBatchReceipt
+                    {
+                        HandleBatch = handles.Count > 0
+                            ? new AgentMemoryArtifactBatchReceipt.BatchReceipt
+                            {
+                                BatchHash = "batch-h1", Count = handles.Count, ReusedExisting = false
+                            }
+                            : null,
+                        GrantBatch = grants.Count > 0
+                            ? new AgentMemoryArtifactBatchReceipt.BatchReceipt
+                            {
+                                BatchHash = "batch-g1", Count = grants.Count, ReusedExisting = false
+                            }
+                            : null
+                    }
+                };
             });
         return mock;
     }
@@ -1347,12 +1417,12 @@ public class AgentMemoryReadCoreTests
     }
 
     [Fact]
-    public async Task RecallAsync_DuplicateGrantKey_MappingFails_ArtifactsRevoked()
+    public async Task RecallAsync_DuplicateConfirmedSourceKey_ThrowsAndCompensates()
     {
         var principal = MakePrincipal();
         var scope = MakeScope();
         var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
-        var descA = new DescriptorRef("ns", "visible1");
+        var descA = new DescriptorRef("ns", "visible1", Version: 1);
         var sourceRef = new AgentContextSourceRef { SourceKind = AgentSourceKind.MemoryItem, SourceId = "s1", TenantId = "t1" };
         var memory = MakeMemory("m1", [descA]) with { SourceRefs = [sourceRef] };
 
@@ -1362,7 +1432,7 @@ public class AgentMemoryReadCoreTests
 
         var revoked = false;
         var token = new AgentMemoryArtifactCompensationToken { TokenId = "revoke-tok" };
-        var sameGrant = new AgentMemoryAccessSourceGrant
+        var grant1 = new AgentMemoryAccessSourceGrant
         {
             GrantId = "g1",
             SourceRef = sourceRef,
@@ -1374,6 +1444,7 @@ public class AgentMemoryReadCoreTests
             IssuedAt = DateTimeOffset.UtcNow,
             ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10)
         };
+        var grant2 = grant1 with { GrantId = "g2" };
         var mockCoordinator = new Mock<IAgentMemoryAccessArtifactCoordinator>();
         mockCoordinator
             .Setup(c => c.PrepareAsync(
@@ -1385,7 +1456,7 @@ public class AgentMemoryReadCoreTests
             .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
             {
                 Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
-                Grants = new AgentMemoryAccessGrantIssueResult { Grants = [sameGrant, sameGrant], ReusedExisting = false },
+                Grants = new AgentMemoryAccessGrantIssueResult { Grants = [grant1, grant2], ReusedExisting = false },
                 CompensationToken = token,
                 Receipt = new AgentMemoryArtifactBatchReceipt
                 {
@@ -1408,7 +1479,7 @@ public class AgentMemoryReadCoreTests
             mockClosure.Object, TimeProvider.System);
 
         var act = async () => await core.RecallAsync(principal, MakeOrigin(), scope, input);
-        await act.Should().ThrowAsync<ArgumentException>();
+        await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         revoked.Should().BeTrue();
     }
 
@@ -1466,5 +1537,218 @@ public class AgentMemoryReadCoreTests
         var outcome = await core.RecallAsync(principal, MakeOrigin(), scope, input);
         outcome.Result.OperationStatus.Should().Be(AgentMemoryToolOperationStatus.Completed);
         revoked.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RecallAsync_SameSourceAcrossItems_Succeeds()
+    {
+        var principal = MakePrincipal();
+        var descA = new DescriptorRef("ns", "A", 1);
+        var scope = MakeScopeWithVisibleRefs(new[] { descA });
+        var sharedSourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.ConversationTurn,
+            TenantId = "t1", SourceId = "conv-1",
+            DescriptorRefs = new[] { descA }
+        };
+
+        var pack = new AgentMemoryPack
+        {
+            TenantId = "t1",
+            Memories = new[]
+            {
+                MakeMemory("m1", new[] { descA }) with { SourceRefs = new[] { sharedSourceRef } },
+                MakeMemory("m2", new[] { descA }) with { SourceRefs = new[] { sharedSourceRef } }
+            }
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pack);
+
+        var grantCapture = new GrantCapture();
+        var mockCoordinator = MakeCoordinatorCapturingGrants(grantCapture);
+        var mockClosure = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosure.Setup(c => c.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure { TenantId = "t1", CurrentDescriptorRefs = new[] { descA } });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosure.Object, TimeProvider.System);
+
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 10, CharacterBudget = 10_000 };
+        var outcome = await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        outcome.Result.OperationStatus.Should().Be(AgentMemoryToolOperationStatus.Completed);
+    }
+
+    [Fact]
+    public async Task RecallAsync_SameSourceAcrossItems_CoordinatorReceivesOneGrant()
+    {
+        var principal = MakePrincipal();
+        var descA = new DescriptorRef("ns", "A", 1);
+        var scope = MakeScopeWithVisibleRefs(new[] { descA });
+        var sharedSourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.ConversationTurn,
+            TenantId = "t1", SourceId = "conv-1",
+            DescriptorRefs = new[] { descA }
+        };
+
+        var pack = new AgentMemoryPack
+        {
+            TenantId = "t1",
+            Memories = new[]
+            {
+                MakeMemory("m1", new[] { descA }) with { SourceRefs = new[] { sharedSourceRef } },
+                MakeMemory("m2", new[] { descA }) with { SourceRefs = new[] { sharedSourceRef } }
+            }
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pack);
+
+        var grantCapture = new GrantCapture();
+        var mockCoordinator = MakeCoordinatorCapturingGrants(grantCapture);
+        var mockClosure = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosure.Setup(c => c.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure { TenantId = "t1", CurrentDescriptorRefs = new[] { descA } });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosure.Object, TimeProvider.System);
+
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 10, CharacterBudget = 10_000 };
+        await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        grantCapture.Grants.Should().HaveCount(1, "same SourceKey across two items must produce exactly one Grant");
+    }
+
+    [Fact]
+    public async Task RecallAsync_SameSourceAcrossItems_BothItemsReuseGrant()
+    {
+        var principal = MakePrincipal();
+        var descA = new DescriptorRef("ns", "A", 1);
+        var scope = MakeScopeWithVisibleRefs(new[] { descA });
+        var sharedSourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.ConversationTurn,
+            TenantId = "t1", SourceId = "conv-1",
+            DescriptorRefs = new[] { descA }
+        };
+
+        var pack = new AgentMemoryPack
+        {
+            TenantId = "t1",
+            Memories = new[]
+            {
+                MakeMemory("m1", new[] { descA }) with { SourceRefs = new[] { sharedSourceRef } },
+                MakeMemory("m2", new[] { descA }) with { SourceRefs = new[] { sharedSourceRef } }
+            }
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pack);
+
+        var grantCapture = new GrantCapture();
+        var mockCoordinator = MakeCoordinatorCapturingGrants(grantCapture);
+        var mockClosure = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosure.Setup(c => c.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure { TenantId = "t1", CurrentDescriptorRefs = new[] { descA } });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosure.Object, TimeProvider.System);
+
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 10, CharacterBudget = 10_000 };
+        var outcome = await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        outcome.Result.Items.Should().HaveCount(2);
+        var grantId1 = outcome.Result.Items[0].SourceGrants.FirstOrDefault()?.GrantId;
+        var grantId2 = outcome.Result.Items[1].SourceGrants.FirstOrDefault()?.GrantId;
+        grantId1.Should().NotBeNullOrEmpty();
+        grantId1.Should().Be(grantId2, "both items must share the same deduplicated Grant");
+    }
+
+    [Fact]
+    public async Task RecallAsync_ConflictingDescriptorRefsForSameSourceKey_RejectsBeforePrepare()
+    {
+        var principal = MakePrincipal();
+        var descA = new DescriptorRef("ns", "A", 1);
+        var descB = new DescriptorRef("ns", "B", 1);
+        var scope = MakeScopeWithVisibleRefs(new[] { descA, descB });
+        var sourceRef1 = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.ConversationTurn,
+            TenantId = "t1", SourceId = "conv-1",
+            DescriptorRefs = new[] { descA }
+        };
+        var sourceRef2 = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.ConversationTurn,
+            TenantId = "t1", SourceId = "conv-1",
+            DescriptorRefs = new[] { descB }
+        };
+
+        var pack = new AgentMemoryPack
+        {
+            TenantId = "t1",
+            Memories = new[]
+            {
+                MakeMemory("m1", new[] { descA }) with { SourceRefs = new[] { sourceRef1 } },
+                MakeMemory("m2", new[] { descB }) with { SourceRefs = new[] { sourceRef2 } }
+            }
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pack);
+
+        var coordinatorCalled = false;
+        var mockCoordinator = new Mock<IAgentMemoryAccessArtifactCoordinator>();
+        mockCoordinator.Setup(c => c.PrepareAsync(
+                It.IsAny<AgentMemoryAccessPrincipal>(), It.IsAny<AgentMemoryArtifactOrigin>(),
+                It.IsAny<AgentMemoryAccessScope>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback(() => coordinatorCalled = true)
+            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
+            {
+                Handles = null,
+                Grants = new AgentMemoryAccessGrantIssueResult { Grants = [], ReusedExisting = false },
+                CompensationToken = null,
+                Receipt = new AgentMemoryArtifactBatchReceipt
+                {
+                    HandleBatch = null,
+                    GrantBatch = null
+                }
+            });
+
+        var mockClosure = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosure.Setup(c => c.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentMemoryResourceKind kind, string tenantId, string resourceId,
+                AgentContextSourceRef? sourceRef, CancellationToken ct) =>
+                new AgentMemoryCurrentClosure
+                {
+                    TenantId = tenantId,
+                    CurrentDescriptorRefs = sourceRef?.DescriptorRefs ?? Array.Empty<DescriptorRef>()
+                });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosure.Object, TimeProvider.System);
+
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 10, CharacterBudget = 10_000 };
+        var act = async () => await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
+        coordinatorCalled.Should().BeFalse("conflicting descriptor refs must reject before Coordinator is called");
     }
 }

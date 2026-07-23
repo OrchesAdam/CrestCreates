@@ -1,5 +1,6 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
@@ -110,14 +111,15 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
             })
             .ToList();
 
-        // Create resource handles + source grants
+        // Create resource handles + source grants (deduplicated by unique SourceKey)
         var now = _timeProvider.GetUtcNow();
         var handleLifetime = _lifetimePolicy.GetHandleLifetime(principal, origin, scope, "memory-pack");
         var grantLifetime = _lifetimePolicy.GetGrantLifetime(principal, origin, scope, "memory-pack");
         var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
 
         var handles = new List<AgentMemoryAccessResourceHandle>();
-        var grants = new List<AgentMemoryAccessSourceGrant>();
+        var grantPlan = new Dictionary<AgentMemorySourceKey, AgentMemoryAccessSourceGrant>();
+        var memorySourceKeys = new List<(string MemoryId, List<AgentMemorySourceKey> SourceKeys)>();
 
         foreach (var memory in filteredMemories)
         {
@@ -137,28 +139,21 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                 ExpiresAt = now + handleLifetime,
             });
 
+            var keys = new List<AgentMemorySourceKey>();
+
             if (memory.SourceRefs is { Count: > 0 })
             {
                 foreach (var sourceRef in memory.SourceRefs)
                 {
-                    // Unsupported SourceKind: skip — grants are only issued for the closed-world
-                    // support matrix defined in AgentMemorySourceKindSupport.
                     if (!AgentMemorySourceKindSupport.IsGrantSupported(sourceRef.SourceKind))
                         continue;
 
-                    // Cross-tenant SourceRef: skip — Coordinator would reject the grant anyway,
-                    // and including it would cause the entire PrepareAsync to fail, losing valid grants.
                     if (!string.Equals(sourceRef.TenantId, principal.TenantId, StringComparison.Ordinal))
                         continue;
 
-                    // RangePolicy: NoRange SourceKinds must not carry RangeStart/RangeEnd.
-                    // If they do, the Expander would reject the expansion — credential contract
-                    // must match the authorized operation's actual contract.
                     if (!AgentMemoryHandleGrantMatrix.IsRangeAllowed(sourceRef))
                         continue;
 
-                    // Compute per-source closure using the same provider the Resolver uses.
-                    // This ensures issuance closure matches resolution closure exactly.
                     AgentMemoryResourceKind sourceResourceKind;
                     try
                     {
@@ -166,7 +161,23 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                     }
                     catch (InvalidOperationException)
                     {
-                        // Unsupported SourceKind — skip
+                        continue;
+                    }
+
+                    var sourceKey = new AgentMemorySourceKey(
+                        sourceRef.TenantId, sourceRef.SourceKind, sourceRef.SourceId,
+                        sourceRef.RangeStart, sourceRef.RangeEnd);
+
+                    if (grantPlan.TryGetValue(sourceKey, out var existingGrant))
+                    {
+                        var existingDescs = existingGrant.SourceRef.DescriptorRefs ?? Array.Empty<DescriptorRef>();
+                        var newDescs = sourceRef.DescriptorRefs ?? Array.Empty<DescriptorRef>();
+                        if (existingDescs.Count != newDescs.Count
+                            || !new HashSet<DescriptorRef>(existingDescs).SetEquals(newDescs))
+                            throw new AgentMemoryReadCoreException("conflicting-source-descriptors",
+                                $"SourceKey {sourceKey} has conflicting DescriptorRefs across references");
+
+                        keys.Add(sourceKey);
                         continue;
                     }
 
@@ -174,31 +185,22 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                         sourceResourceKind, principal.TenantId, sourceRef.SourceId,
                         sourceRef: sourceRef, cancellationToken: cancellationToken);
 
-                    // Source not found or cross-tenant — skip
                     if (sourceClosure is null) continue;
                     if (!string.Equals(sourceClosure.TenantId, principal.TenantId, StringComparison.Ordinal)) continue;
 
                     var sourceClosureRefs = sourceClosure.CurrentDescriptorRefs;
-
-                    // ScopeBinding determines IsUnscoped:
-                    // ResourceBound: IsUnscoped=false always (existence-constrained, not descriptor-constrained)
-                    // DescriptorBound: IsUnscoped == (refs.Count == 0)
                     var scopeBinding = AgentMemoryHandleGrantMatrix.GetScopeBinding(sourceRef.SourceKind);
                     var isUnscoped = scopeBinding == AgentMemoryHandleGrantMatrix.GrantScopeBinding.DescriptorBound
                         && sourceClosureRefs.Count == 0;
 
-                    // ClosurePolicy determines RequiredDescriptorRefs:
-                    // Exact: RequiredDescriptorRefs = issuance-time live closure (for revalidation at resolve time)
-                    // ExistenceOnly: RequiredDescriptorRefs = [] (no closure comparison at resolve time)
                     var closurePolicy = AgentMemoryHandleGrantMatrix.GetClosurePolicy(sourceRef.SourceKind);
                     var requiredDescriptorRefs = closurePolicy == AgentMemoryHandleGrantMatrix.GrantClosurePolicy.Exact
                         ? sourceClosureRefs
                         : Array.Empty<DescriptorRef>();
 
-                    var grantId = Guid.NewGuid().ToString("N");
-                    grants.Add(new AgentMemoryAccessSourceGrant
+                    grantPlan[sourceKey] = new AgentMemoryAccessSourceGrant
                     {
-                        GrantId = grantId,
+                        GrantId = Guid.NewGuid().ToString("N"),
                         SourceRef = sourceRef,
                         Principal = principal,
                         ScopeFingerprint = scopeFingerprint,
@@ -207,12 +209,17 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                         IssuingOperationId = origin.OperationId,
                         IssuedAt = now,
                         ExpiresAt = now + grantLifetime,
-                    });
+                    };
+
+                    keys.Add(sourceKey);
                 }
             }
+
+            memorySourceKeys.Add((memory.MemoryId, keys));
         }
 
-        // Prepare artifacts via Coordinator
+        // Prepare artifacts via Coordinator — one grant per unique SourceKey
+        var grants = grantPlan.Values.ToList();
         var prepared = await _coordinator.PrepareAsync(
             principal, origin, scope, "memory-pack",
             preparationOrdinal: 0,
@@ -222,21 +229,97 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
 
         try
         {
-            // Build lookups from the prepared artifacts (not local handles/grants).
-            // On retry the Coordinator returns the first-issued artifacts from the
-            // store; using local lists would map resources to IDs never persisted.
+            // Build confirmed grant lookup by SourceKey
+            var confirmedGrants = prepared.Grants?.Grants ?? [];
+            var confirmedByKey = new Dictionary<AgentMemorySourceKey, AgentMemoryAccessSourceGrant>();
+            foreach (var g in confirmedGrants)
+            {
+                if (g is null) continue;
+                var key = new AgentMemorySourceKey(
+                    g.SourceRef.TenantId, g.SourceRef.SourceKind, g.SourceRef.SourceId,
+                    g.SourceRef.RangeStart, g.SourceRef.RangeEnd);
+                if (confirmedByKey.ContainsKey(key))
+                    throw new AgentMemoryReadCoreException("grant-contract",
+                        $"Coordinator returned duplicate confirmed grant for SourceKey {key}");
+                confirmedByKey[key] = g;
+            }
+
+            // Contract: every requested SourceKey must have a confirmed grant
+            foreach (var requestedKey in grantPlan.Keys)
+            {
+                if (!confirmedByKey.ContainsKey(requestedKey))
+                    throw new AgentMemoryReadCoreException("grant-contract",
+                        $"Coordinator did not confirm grant for SourceKey {requestedKey}");
+            }
+
+            // Contract: no extra confirmed grants beyond the plan
+            foreach (var confirmedKey in confirmedByKey.Keys)
+            {
+                if (!grantPlan.ContainsKey(confirmedKey))
+                    throw new AgentMemoryReadCoreException("grant-contract",
+                        $"Coordinator returned unexpected confirmed grant for SourceKey {confirmedKey}");
+            }
+
+            // Build handle lookup from confirmed artifacts
             var handleLookup = (prepared.Handles?.Handles ?? [])
                 .Where(h => h is not null)
                 .ToDictionary(h => h.ResourceId, h => h.HandleId, StringComparer.Ordinal);
-            var grantLookup = (prepared.Grants?.Grants ?? [])
-                .Where(g => g is not null)
-                .ToDictionary(g => GrantKey(g), g => g, StringComparer.Ordinal);
+
+            // Build grant DTO lookup by SourceKey for reuse across memories
+            var grantDtoLookup = new Dictionary<AgentMemorySourceKey, AgentMemorySourceGrantDto>();
 
             // Build result using Coordinator-confirmed artifacts
             var result = new BuildAgentMemoryPackResult
             {
                 OperationStatus = AgentMemoryToolOperationStatus.Completed,
-                Items = filteredMemories.Select(m => MapToDto(m, handleLookup, grantLookup)).ToList(),
+                Items = filteredMemories.Select(m =>
+                {
+                    var entry = memorySourceKeys.FirstOrDefault(e => e.MemoryId == m.MemoryId);
+                    var sourceGrants = new List<AgentMemorySourceGrantDto>();
+                    foreach (var sourceKey in entry.SourceKeys)
+                    {
+                        if (grantDtoLookup.TryGetValue(sourceKey, out var sharedDto))
+                        {
+                            sourceGrants.Add(sharedDto);
+                            continue;
+                        }
+
+                        var confirmedGrant = confirmedByKey[sourceKey];
+                        var dto = new AgentMemorySourceGrantDto
+                        {
+                            GrantId = confirmedGrant.GrantId,
+                            SourceKind = MapSourceKind(sourceKey.SourceKind),
+                            ExpiresAt = confirmedGrant.ExpiresAt,
+                        };
+                        grantDtoLookup[sourceKey] = dto;
+                        sourceGrants.Add(dto);
+                    }
+
+                    return new AgentMemoryToolItemDto
+                    {
+                        MemoryHandle = handleLookup.GetValueOrDefault(m.MemoryId, string.Empty),
+                        Kind = MapToolKind(m.Kind),
+                        Content = m.Content,
+                        CanonicalContentHash = new AgentMemoryToolCanonicalHashDto
+                        {
+                            Value = m.CanonicalContentHash.Value,
+                            AlgorithmVersion = m.CanonicalContentHash.AlgorithmVersion,
+                            ContractVersion = m.CanonicalContentHash.ContractVersion,
+                            CanonicalShapeVersion = m.CanonicalContentHash.CanonicalShapeVersion
+                        },
+                        Confidence = MapConfidence(m.Confidence),
+                        MemoryStatus = m.Status switch
+                        {
+                            AgentMemoryStatus.Active => AgentMemoryToolMemoryStatus.Active,
+                            AgentMemoryStatus.Superseded => AgentMemoryToolMemoryStatus.Superseded,
+                            AgentMemoryStatus.Archived => AgentMemoryToolMemoryStatus.Archived,
+                            _ => AgentMemoryToolMemoryStatus.Unknown
+                        },
+                        IsAuthoritative = false,
+                        Tags = m.Tags,
+                        SourceGrants = sourceGrants
+                    };
+                }).ToList(),
                 ReturnedCount = filteredMemories.Count,
                 WasTruncated = pack.WasTruncated,
                 IsAuthoritative = false,
@@ -293,51 +376,6 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
         _ => throw new AgentMemoryReadCoreException("confidence-invalid", $"Unknown confidence value: {confidence}")
     };
 
-    private static AgentMemoryToolItemDto MapToDto(
-        AgentMemoryItem memory,
-        IReadOnlyDictionary<string, string> handleLookup,
-        IReadOnlyDictionary<string, AgentMemoryAccessSourceGrant> grantLookup)
-    {
-        return new AgentMemoryToolItemDto
-        {
-            MemoryHandle = handleLookup.GetValueOrDefault(memory.MemoryId, string.Empty),
-            Kind = MapToolKind(memory.Kind),
-            Content = memory.Content,
-            CanonicalContentHash = new AgentMemoryToolCanonicalHashDto
-            {
-                Value = memory.CanonicalContentHash.Value,
-                AlgorithmVersion = memory.CanonicalContentHash.AlgorithmVersion,
-                ContractVersion = memory.CanonicalContentHash.ContractVersion,
-                CanonicalShapeVersion = memory.CanonicalContentHash.CanonicalShapeVersion
-            },
-            Confidence = MapConfidence(memory.Confidence),
-            MemoryStatus = memory.Status switch
-            {
-                AgentMemoryStatus.Active => AgentMemoryToolMemoryStatus.Active,
-                AgentMemoryStatus.Superseded => AgentMemoryToolMemoryStatus.Superseded,
-                AgentMemoryStatus.Archived => AgentMemoryToolMemoryStatus.Archived,
-                _ => AgentMemoryToolMemoryStatus.Unknown
-            },
-            IsAuthoritative = false,
-            Tags = memory.Tags,
-            SourceGrants = memory.SourceRefs
-                .Where(s => string.Equals(s.TenantId, memory.TenantId, StringComparison.Ordinal))
-                .Select(s =>
-                {
-                    grantLookup.TryGetValue(
-                        $"{s.TenantId}:{s.SourceKind}:{s.SourceId}:{s.RangeStart}:{s.RangeEnd}",
-                        out var grant);
-                    return new AgentMemorySourceGrantDto
-                    {
-                        GrantId = grant?.GrantId ?? string.Empty,
-                        SourceKind = MapSourceKind(s.SourceKind),
-                        ExpiresAt = grant?.ExpiresAt ?? DateTimeOffset.MaxValue,
-                    };
-                }).Where(g => !string.IsNullOrEmpty(g.GrantId)) // Only include actual issued grants
-                .ToList()
-        };
-    }
-
     private static AgentMemoryToolKind MapToolKind(AgentMemoryKind kind) => kind switch
     {
         AgentMemoryKind.Preference => AgentMemoryToolKind.Preference,
@@ -373,9 +411,4 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
         AgentSourceKind.ActivationRequest => AgentMemoryToolSourceKind.ActivationRequest,
         _ => AgentMemoryToolSourceKind.Unknown
     };
-
-    private static string GrantKey(AgentMemoryAccessSourceGrant grant)
-    {
-        return $"{grant.SourceRef.TenantId}:{grant.SourceRef.SourceKind}:{grant.SourceRef.SourceId}:{grant.SourceRef.RangeStart}:{grant.SourceRef.RangeEnd}";
-    }
 }
