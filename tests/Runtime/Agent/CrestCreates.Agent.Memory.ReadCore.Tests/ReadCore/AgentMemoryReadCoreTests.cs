@@ -742,14 +742,14 @@ public class AgentMemoryReadCoreTests
 
         capturedGrants.Should().NotBeNull();
         capturedGrants.Should().HaveCount(2);
-        // Grant for Source1 (ConversationTurn) must have closure [B], not [A,B,C]
+        // Grant for Source1 (ConversationTurn, ClosurePolicy=Exact) must have closure [B], not [A,B,C]
         capturedGrants.Should().Contain(g =>
             g.SourceRef.SourceKind == AgentSourceKind.ConversationTurn &&
             g.RequiredDescriptorRefs.SequenceEqual(new[] { descB }));
-        // Grant for Source2 (TaskRecord) must have closure [C], not [A,B,C]
+        // Grant for Source2 (TaskRecord, ClosurePolicy=ExistenceOnly) must have empty RequiredDescriptorRefs
         capturedGrants.Should().Contain(g =>
             g.SourceRef.SourceKind == AgentSourceKind.TaskRecord &&
-            g.RequiredDescriptorRefs.SequenceEqual(new[] { descC }));
+            g.RequiredDescriptorRefs.Count == 0);
     }
 
     [Fact]

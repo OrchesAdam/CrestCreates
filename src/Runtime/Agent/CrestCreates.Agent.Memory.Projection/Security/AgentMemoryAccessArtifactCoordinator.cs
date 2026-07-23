@@ -347,11 +347,11 @@ internal sealed class AgentMemoryAccessArtifactCoordinator : IAgentMemoryAccessA
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: SourceRef.DescriptorRefs are not a subset of RequiredDescriptorRefs.");
 
-            // 17. Grant IsUnscoped consistency — depends on BindingMode:
-            // ResourceBound: RequiredDescriptorRefs=[], IsUnscoped=false (existence-constrained)
+            // 17. Grant IsUnscoped consistency — depends on ScopeBinding:
+            // ResourceBound: IsUnscoped=false (existence-constrained)
             // DescriptorBound: IsUnscoped == (RequiredDescriptorRefs.Count == 0)
-            var grantBindingMode = AgentMemoryHandleGrantMatrix.GetGrantBindingMode(grant.SourceRef.SourceKind);
-            if (grantBindingMode == AgentMemoryHandleGrantMatrix.GrantBindingMode.ResourceBound)
+            var scopeBinding = AgentMemoryHandleGrantMatrix.GetScopeBinding(grant.SourceRef.SourceKind);
+            if (scopeBinding == AgentMemoryHandleGrantMatrix.GrantScopeBinding.ResourceBound)
             {
                 if (grant.IsUnscoped)
                     throw new InvalidOperationException(

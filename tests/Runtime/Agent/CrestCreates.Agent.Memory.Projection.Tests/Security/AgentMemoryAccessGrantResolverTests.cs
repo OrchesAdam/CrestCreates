@@ -966,4 +966,295 @@ public class AgentMemoryAccessGrantResolverTests
 
         result.Should().BeNull("Out-of-bounds range must be rejected for TaskEvent");
     }
+
+    // ── P0 Acceptance: ScopeBinding + ClosurePolicy orthogonality ──────────
+
+    [Fact]
+    public async Task ConversationTurn_VisibleA_ThenGainsHiddenB_ResolveRejects()
+    {
+        // ConversationTurn: ScopeBinding=ResourceBound, ClosurePolicy=Exact
+        // Grant issued with closure=[A]. Source later gains descriptor [B].
+        // Exact closure policy: issuance closure must equal current live closure.
+        // [A] != [A,B] → reject.
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+        var descA = new DescriptorRef("ns", "A", 1);
+
+        var scope = MakeScope() with { VisibleDescriptorRefs = [descA] };
+        var scopeFp = AgentMemoryScopeFingerprint.Compute(scope);
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-conv-drift",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.ConversationTurn,
+                TenantId = "t1",
+                SourceId = "conv-drift",
+                RangeStart = 0,
+                RangeEnd = 1
+            },
+            Principal = principal,
+            ScopeFingerprint = scopeFp,
+            RequiredDescriptorRefs = [descA],   // Issued closure = [A]
+            IsUnscoped = false,                 // ResourceBound → always false
+            IssuingOperationId = "op-conv-drift",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-conv-drift"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-conv-drift")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        // Current live closure = [A, B] — source gained hidden descriptor B
+        var descB = new DescriptorRef("ns", "B", 1);
+        var closureProvider = MakeClosureProvider(tenantId: "t1", descriptorRefs: [descA, descB]);
+        var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-conv-drift", principal, scope);
+
+        result.Should().BeNull(
+            "ConversationTurn with Exact ClosurePolicy must reject when current closure differs from issuance closure");
+    }
+
+    [Fact]
+    public async Task TaskEvent_VisibleA_ThenGainsHiddenB_ResolveRejects()
+    {
+        // TaskEvent: ScopeBinding=ResourceBound, ClosurePolicy=Exact
+        // Same scenario as ConversationTurn — descriptor drift must be caught.
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+        var descA = new DescriptorRef("ns", "A", 1);
+
+        var scope = MakeScope() with { VisibleDescriptorRefs = [descA] };
+        var scopeFp = AgentMemoryScopeFingerprint.Compute(scope);
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-te-drift",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.TaskEvent,
+                TenantId = "t1",
+                SourceId = "task-drift",
+                RangeStart = 0,
+                RangeEnd = 1
+            },
+            Principal = principal,
+            ScopeFingerprint = scopeFp,
+            RequiredDescriptorRefs = [descA],   // Issued closure = [A]
+            IsUnscoped = false,                 // ResourceBound → always false
+            IssuingOperationId = "op-te-drift",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-te-drift"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-te-drift")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        // Current live closure = [A, B] — source gained hidden descriptor B
+        var descB = new DescriptorRef("ns", "B", 1);
+        var closureProvider = MakeClosureProvider(tenantId: "t1", descriptorRefs: [descA, descB]);
+        var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-te-drift", principal, scope);
+
+        result.Should().BeNull(
+            "TaskEvent with Exact ClosurePolicy must reject when current closure differs from issuance closure");
+    }
+
+    [Fact]
+    public async Task ConversationTurn_ExactClosure_RemainsUnchanged_ResolveSucceeds()
+    {
+        // ConversationTurn: ClosurePolicy=Exact
+        // Issuance closure = [A], current closure still = [A] → resolve succeeds.
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+        var descA = new DescriptorRef("ns", "A", 1);
+
+        var scope = MakeScope() with { VisibleDescriptorRefs = [descA] };
+        var scopeFp = AgentMemoryScopeFingerprint.Compute(scope);
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-conv-stable",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.ConversationTurn,
+                TenantId = "t1",
+                SourceId = "conv-stable",
+                RangeStart = 0,
+                RangeEnd = 1
+            },
+            Principal = principal,
+            ScopeFingerprint = scopeFp,
+            RequiredDescriptorRefs = [descA],
+            IsUnscoped = false,
+            IssuingOperationId = "op-conv-stable",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-conv-stable"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-conv-stable")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        // Current closure unchanged = [A]
+        var closureProvider = MakeClosureProvider(tenantId: "t1", descriptorRefs: [descA]);
+        var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-conv-stable", principal, scope);
+
+        result.Should().NotBeNull(
+            "ConversationTurn with Exact ClosurePolicy must succeed when closure unchanged");
+        result!.GrantId.Should().Be("g-conv-stable");
+    }
+
+    [Fact]
+    public async Task TaskRecord_EmptyClosure_ResourceExists_ResolveSucceeds()
+    {
+        // TaskRecord: ScopeBinding=ResourceBound, ClosurePolicy=ExistenceOnly
+        // No descriptor closure comparison — only validate resource existence + identity.
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+
+        var scope = MakeScope();
+        var scopeFp = AgentMemoryScopeFingerprint.Compute(scope);
+
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-tr-exist",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.TaskRecord,
+                TenantId = "t1",
+                SourceId = "task-exist"
+                // No range — TaskRecord is NoRange
+            },
+            Principal = principal,
+            ScopeFingerprint = scopeFp,
+            RequiredDescriptorRefs = [],         // ExistenceOnly → always empty
+            IsUnscoped = false,                  // ResourceBound → always false
+            IssuingOperationId = "op-tr-exist",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-tr-exist"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-tr-exist")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+        // Resource exists (closure provider returns a result with empty refs)
+        var closureProvider = MakeClosureProvider(tenantId: "t1", descriptorRefs: []);
+        var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+        var result = await resolver.ResolveAsync("g-tr-exist", principal, scope);
+
+        result.Should().NotBeNull(
+            "TaskRecord with ExistenceOnly ClosurePolicy must succeed when resource exists");
+        result!.GrantId.Should().Be("g-tr-exist");
+    }
+
+    [Fact]
+    public async Task ResourceBoundExact_IsUnscopedAlwaysFalse()
+    {
+        // Resource-bound grants (ConversationTurn, TaskEvent, TaskRecord) must always
+        // have IsUnscoped=false, regardless of closure content.
+        // This is the ScopeBinding contract: ResourceBound → IsUnscoped=false.
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var timeProvider = TimeProvider.System;
+        var principal = MakePrincipal("u1", "t1");
+        var descA = new DescriptorRef("ns", "A", 1);
+
+        var resourceBoundKinds = new[]
+        {
+            AgentSourceKind.ConversationTurn,
+            AgentSourceKind.TaskEvent,
+            AgentSourceKind.TaskRecord
+        };
+
+        foreach (var kind in resourceBoundKinds)
+        {
+            var scope = kind == AgentSourceKind.TaskRecord
+                ? MakeScope()
+                : MakeScope() with { VisibleDescriptorRefs = [descA] };
+            var scopeFp = AgentMemoryScopeFingerprint.Compute(scope);
+
+            var grant = new AgentMemoryAccessSourceGrant
+            {
+                GrantId = $"g-rb-{kind}",
+                SourceRef = new AgentContextSourceRef
+                {
+                    SourceKind = kind,
+                    TenantId = "t1",
+                    SourceId = $"src-{kind}",
+                    RangeStart = kind == AgentSourceKind.TaskRecord ? null : 0,
+                    RangeEnd = kind == AgentSourceKind.TaskRecord ? null : 1
+                },
+                Principal = principal,
+                ScopeFingerprint = scopeFp,
+                RequiredDescriptorRefs = kind == AgentSourceKind.TaskRecord ? [] : [descA],
+                IsUnscoped = false,  // ResourceBound → always false
+                IssuingOperationId = $"op-rb-{kind}",
+                IssuedAt = timeProvider.GetUtcNow(),
+                ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+            };
+
+            var batchKey = new AgentMemoryAccessArtifactBatchKey
+            {
+                OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+                OriginBindingHash = MakeHash($"binding-rb-{kind}"),
+                ArtifactPurpose = "source-expand",
+                PreparationOrdinal = 0,
+                ArtifactPlanHash = MakeHash($"plan-rb-{kind}")
+            };
+
+            await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+
+            var closureProvider = MakeClosureProvider(tenantId: "t1",
+                descriptorRefs: kind == AgentSourceKind.TaskRecord ? [] : [descA]);
+            var resolver = new AgentMemoryAccessGrantResolver(store, timeProvider, closureProvider);
+
+            var result = await resolver.ResolveAsync($"g-rb-{kind}", principal, scope);
+
+            result.Should().NotBeNull(
+                $"ResourceBound+Exact/ExistenceOnly grant for {kind} must resolve with IsUnscoped=false");
+            result!.IsUnscoped.Should().BeFalse(
+                $"ResourceBound grant for {kind} must always have IsUnscoped=false");
+        }
+    }
 }

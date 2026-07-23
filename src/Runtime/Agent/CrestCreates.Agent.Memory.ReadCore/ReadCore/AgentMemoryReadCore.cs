@@ -174,12 +174,20 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
 
                     var sourceClosureRefs = sourceClosure.CurrentDescriptorRefs;
 
-                    // BindingMode determines IsUnscoped:
+                    // ScopeBinding determines IsUnscoped:
                     // ResourceBound: IsUnscoped=false always (existence-constrained, not descriptor-constrained)
                     // DescriptorBound: IsUnscoped == (refs.Count == 0)
-                    var bindingMode = AgentMemoryHandleGrantMatrix.GetGrantBindingMode(sourceRef.SourceKind);
-                    var isUnscoped = bindingMode == AgentMemoryHandleGrantMatrix.GrantBindingMode.DescriptorBound
+                    var scopeBinding = AgentMemoryHandleGrantMatrix.GetScopeBinding(sourceRef.SourceKind);
+                    var isUnscoped = scopeBinding == AgentMemoryHandleGrantMatrix.GrantScopeBinding.DescriptorBound
                         && sourceClosureRefs.Count == 0;
+
+                    // ClosurePolicy determines RequiredDescriptorRefs:
+                    // Exact: RequiredDescriptorRefs = issuance-time live closure (for revalidation at resolve time)
+                    // ExistenceOnly: RequiredDescriptorRefs = [] (no closure comparison at resolve time)
+                    var closurePolicy = AgentMemoryHandleGrantMatrix.GetClosurePolicy(sourceRef.SourceKind);
+                    var requiredDescriptorRefs = closurePolicy == AgentMemoryHandleGrantMatrix.GrantClosurePolicy.Exact
+                        ? sourceClosureRefs
+                        : Array.Empty<DescriptorRef>();
 
                     var grantId = Guid.NewGuid().ToString("N");
                     grants.Add(new AgentMemoryAccessSourceGrant
@@ -188,7 +196,7 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                         SourceRef = sourceRef,
                         Principal = principal,
                         ScopeFingerprint = scopeFingerprint,
-                        RequiredDescriptorRefs = sourceClosureRefs,
+                        RequiredDescriptorRefs = requiredDescriptorRefs,
                         IsUnscoped = isUnscoped,
                         IssuingOperationId = origin.OperationId,
                         IssuedAt = now,

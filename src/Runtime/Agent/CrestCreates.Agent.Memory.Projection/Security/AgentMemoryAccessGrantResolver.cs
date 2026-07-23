@@ -45,12 +45,23 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
         var currentFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
         if (grant.ScopeFingerprint != currentFingerprint) return null;
 
-        // Descriptor closure — depends on BindingMode
-        var grantBindingMode = AgentMemoryHandleGrantMatrix.GetGrantBindingMode(grant.SourceRef.SourceKind);
-        if (grantBindingMode == AgentMemoryHandleGrantMatrix.GrantBindingMode.ResourceBound)
+        // Descriptor closure — depends on ScopeBinding and ClosurePolicy
+        var scopeBinding = AgentMemoryHandleGrantMatrix.GetScopeBinding(grant.SourceRef.SourceKind);
+        var closurePolicy = AgentMemoryHandleGrantMatrix.GetClosurePolicy(grant.SourceRef.SourceKind);
+
+        if (scopeBinding == AgentMemoryHandleGrantMatrix.GrantScopeBinding.ResourceBound)
         {
-            // Resource-bound grants: no descriptor closure check, no AllowUnscopedMemory requirement.
-            // They are existence-constrained (bound by ResourceId/Tenant/Principal/ScopeFingerprint).
+            // Resource-bound grants: IsUnscoped=false, no AllowUnscopedMemory requirement.
+            // Closure comparison depends on ClosurePolicy:
+            //   Exact: RequiredDescriptorRefs ⊆ scope.VisibleDescriptorRefs
+            //   ExistenceOnly: no descriptor check
+            if (closurePolicy == AgentMemoryHandleGrantMatrix.GrantClosurePolicy.Exact
+                && grant.RequiredDescriptorRefs is { Count: > 0 })
+            {
+                var visibleSet = new HashSet<DescriptorRef>(scope.VisibleDescriptorRefs);
+                if (!grant.RequiredDescriptorRefs.All(r => visibleSet.Contains(r)))
+                    return null;
+            }
         }
         else if (grant.IsUnscoped)
         {
@@ -89,10 +100,10 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
         // SourceRef tenant must match current resource tenant
         if (currentClosure.TenantId != principal.TenantId) return null;
 
-        // Closure comparison depends on BindingMode:
-        // ResourceBound: only validate existence (resource found + tenant match) — no descriptor comparison.
-        // DescriptorBound: ALWAYS compare issued closure with current closure.
-        if (grantBindingMode == AgentMemoryHandleGrantMatrix.GrantBindingMode.DescriptorBound)
+        // Closure comparison depends on ClosurePolicy:
+        // Exact: ALWAYS compare issued closure with current live closure.
+        // ExistenceOnly: only validate resource existence (found + tenant match).
+        if (closurePolicy == AgentMemoryHandleGrantMatrix.GrantClosurePolicy.Exact)
         {
             var issuedRefs = grant.RequiredDescriptorRefs ?? Array.Empty<DescriptorRef>();
             var currentRefs = currentClosure.CurrentDescriptorRefs;

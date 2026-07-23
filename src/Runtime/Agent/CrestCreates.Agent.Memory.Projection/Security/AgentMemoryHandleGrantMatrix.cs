@@ -12,17 +12,31 @@ namespace CrestCreates.Agent.Memory.Projection.Security;
 internal static class AgentMemoryHandleGrantMatrix
 {
     /// <summary>
-    /// Binding mode determines how IsUnscoped is derived for a Grant.
+    /// Scope binding determines how IsUnscoped is derived for a Grant.
     /// ResourceBound: RequiredDescriptorRefs=[], IsUnscoped=false — existence-constrained
     ///   (bound by ResourceId/Tenant/Principal/ScopeFingerprint), not descriptor-constrained.
     ///   Does NOT require AllowUnscopedMemory.
     /// DescriptorBound: IsUnscoped == (RequiredDescriptorRefs.Count == 0).
     ///   When unscoped, requires AllowUnscopedMemory.
     /// </summary>
-    public enum GrantBindingMode
+    public enum GrantScopeBinding
     {
         ResourceBound,
         DescriptorBound
+    }
+
+    /// <summary>
+    /// Closure policy determines how descriptor closure is validated at resolution time.
+    /// Exact: issuance-time live closure must exactly equal current live closure.
+    ///   RequiredDescriptorRefs = issuance-time live closure.
+    ///   Any descriptor drift (addition or removal) invalidates the grant.
+    /// ExistenceOnly: no descriptor closure comparison — only validate resource existence,
+    ///   tenant, principal, and ScopeFingerprint. RequiredDescriptorRefs = [].
+    /// </summary>
+    public enum GrantClosurePolicy
+    {
+        Exact,
+        ExistenceOnly
     }
 
     /// <summary>
@@ -77,19 +91,35 @@ internal static class AgentMemoryHandleGrantMatrix
     };
 
     /// <summary>
-    /// Returns the Grant binding mode for a given SourceKind.
-    /// Resource-bound grants: RequiredDescriptorRefs=[], IsUnscoped=false.
-    /// Descriptor-bound grants: IsUnscoped == (RequiredDescriptorRefs.Count == 0).
+    /// Returns the ScopeBinding for a given SourceKind.
+    /// Resource-bound: IsUnscoped=false always.
+    /// Descriptor-bound: IsUnscoped == (RequiredDescriptorRefs.Count == 0).
     /// </summary>
-    public static GrantBindingMode GetGrantBindingMode(AgentSourceKind sourceKind) => sourceKind switch
+    public static GrantScopeBinding GetScopeBinding(AgentSourceKind sourceKind) => sourceKind switch
     {
-        AgentSourceKind.ConversationTurn => GrantBindingMode.ResourceBound,
-        AgentSourceKind.TaskRecord => GrantBindingMode.ResourceBound,
-        AgentSourceKind.TaskEvent => GrantBindingMode.ResourceBound,
-        AgentSourceKind.CompressedContextBlock => GrantBindingMode.DescriptorBound,
-        AgentSourceKind.MemoryItem => GrantBindingMode.DescriptorBound,
-        AgentSourceKind.MemoryCandidate => GrantBindingMode.DescriptorBound,
-        _ => GrantBindingMode.DescriptorBound // Unknown → safest default
+        AgentSourceKind.ConversationTurn => GrantScopeBinding.ResourceBound,
+        AgentSourceKind.TaskRecord => GrantScopeBinding.ResourceBound,
+        AgentSourceKind.TaskEvent => GrantScopeBinding.ResourceBound,
+        AgentSourceKind.CompressedContextBlock => GrantScopeBinding.DescriptorBound,
+        AgentSourceKind.MemoryItem => GrantScopeBinding.DescriptorBound,
+        AgentSourceKind.MemoryCandidate => GrantScopeBinding.DescriptorBound,
+        _ => GrantScopeBinding.DescriptorBound // Unknown → safest default
+    };
+
+    /// <summary>
+    /// Returns the ClosurePolicy for a given SourceKind.
+    /// Exact: issuance closure must equal current live closure.
+    /// ExistenceOnly: only validate resource existence + identity, no closure comparison.
+    /// </summary>
+    public static GrantClosurePolicy GetClosurePolicy(AgentSourceKind sourceKind) => sourceKind switch
+    {
+        AgentSourceKind.ConversationTurn => GrantClosurePolicy.Exact,
+        AgentSourceKind.TaskEvent => GrantClosurePolicy.Exact,
+        AgentSourceKind.TaskRecord => GrantClosurePolicy.ExistenceOnly,
+        AgentSourceKind.CompressedContextBlock => GrantClosurePolicy.Exact,
+        AgentSourceKind.MemoryItem => GrantClosurePolicy.Exact,
+        AgentSourceKind.MemoryCandidate => GrantClosurePolicy.Exact,
+        _ => GrantClosurePolicy.Exact // Unknown → safest default (fail-closed)
     };
 
     /// <summary>
