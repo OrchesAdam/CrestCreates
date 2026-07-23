@@ -65,7 +65,7 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
         var budgetedBlocks = ApplyCharacterBudget(selectedBlocks, input.CharacterBudget, out var wasTruncated);
 
         // Apply block count limit
-        if (input.MaximumBlockCount > 0 && budgetedBlocks.Count > input.MaximumBlockCount)
+        if (budgetedBlocks.Count > input.MaximumBlockCount)
         {
             budgetedBlocks = budgetedBlocks.Take(input.MaximumBlockCount).ToList();
             wasTruncated = true;
@@ -158,37 +158,57 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
             grants: grants,
             cancellationToken);
 
-        // Build grant lookup from Coordinator-confirmed artifacts
-        var grantLookup = (prepared.Grants?.Grants ?? [])
-            .Where(g => g is not null)
-            .ToDictionary(g => GrantKey(g), g => g, StringComparer.Ordinal);
-
         try
         {
+            // Build grant lookup from Coordinator-confirmed artifacts by exact SourceKey
+            var confirmedGrants = prepared.Grants?.Grants ?? [];
+            var grantLookup = new Dictionary<string, AgentMemoryAccessSourceGrant>(StringComparer.Ordinal);
+            foreach (var g in confirmedGrants)
+            {
+                if (g is null) continue;
+                grantLookup[GrantKey(g)] = g;
+            }
+
+            // Canonicalize: same SourceKey referenced by multiple blocks shares one grant
+            var sourceKeyToGrantDto = new Dictionary<string, AgentMemorySourceGrantDto>(StringComparer.Ordinal);
+
             // Map blocks to DTOs with Coordinator-confirmed grants
             var blockDtos = new List<AgentMemoryToolBlockDto>();
             for (var i = 0; i < budgetedBlocks.Count; i++)
             {
                 var block = budgetedBlocks[i];
                 var mapping = blockGrantMapping.FirstOrDefault(m => m.BlockIndex == i);
-                var confirmedGrants = mapping.GrantDtos
-                    .Select(dto =>
+                var confirmedBlockGrants = new List<AgentMemorySourceGrantDto>();
+
+                if (block.SourceRefs is { Count: > 0 })
+                {
+                    foreach (var sourceRef in block.SourceRefs)
                     {
-                        // Replace with Coordinator-confirmed GrantId
-                        var grant = grants.FirstOrDefault(g => g.SourceRef != null
-                            && g.SourceRef.SourceKind == MapToolSourceKind(dto.SourceKind)
-                            && g.SourceRef.SourceId != null);
-                        if (grant != null && grantLookup.TryGetValue(GrantKey(grant), out var confirmed))
-                            return new AgentMemorySourceGrantDto
-                            {
-                                GrantId = confirmed.GrantId,
-                                SourceKind = dto.SourceKind,
-                                ExpiresAt = confirmed.ExpiresAt,
-                            };
-                        return dto;
-                    })
-                    .Where(g => !string.IsNullOrEmpty(g.GrantId))
-                    .ToList();
+                        if (!AgentMemorySourceKindSupport.IsGrantSupported(sourceRef.SourceKind))
+                            continue;
+                        if (!string.Equals(sourceRef.TenantId, principal.TenantId, StringComparison.Ordinal))
+                            continue;
+
+                        var sourceKey = SourceKey(sourceRef);
+                        if (sourceKeyToGrantDto.TryGetValue(sourceKey, out var sharedDto))
+                        {
+                            confirmedBlockGrants.Add(sharedDto);
+                            continue;
+                        }
+
+                        if (!grantLookup.TryGetValue(sourceKey, out var confirmedGrant))
+                            continue;
+
+                        var dto = new AgentMemorySourceGrantDto
+                        {
+                            GrantId = confirmedGrant.GrantId,
+                            SourceKind = MapSourceKind(sourceRef.SourceKind),
+                            ExpiresAt = confirmedGrant.ExpiresAt,
+                        };
+                        sourceKeyToGrantDto[sourceKey] = dto;
+                        confirmedBlockGrants.Add(dto);
+                    }
+                }
 
                 blockDtos.Add(new AgentMemoryToolBlockDto
                 {
@@ -208,7 +228,7 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
                             ContractVersion = "v1",
                             CanonicalShapeVersion = "v1"
                         },
-                    SourceGrants = confirmedGrants
+                    SourceGrants = confirmedBlockGrants
                 });
             }
 
@@ -245,12 +265,19 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
             throw new AgentMemoryReadCoreException("budget-invalid", "CharacterBudget must be positive");
         if (input.CharacterBudget > scope.MaxContextRecallCharacters)
             throw new AgentMemoryReadCoreException("budget-invalid", "CharacterBudget exceeds scope limit");
-        if (input.MaximumBlockCount < 0)
-            throw new AgentMemoryReadCoreException("budget-invalid", "MaximumBlockCount must be non-negative");
+        if (input.MaximumBlockCount <= 0)
+            throw new AgentMemoryReadCoreException("budget-invalid", "MaximumBlockCount must be positive");
+        if (input.MaximumBlockCount > scope.MaxCompressedBlockCount)
+            throw new AgentMemoryReadCoreException("budget-invalid", "MaximumBlockCount exceeds scope limit");
         if (input.StartBlockIndex < 0)
             throw new AgentMemoryReadCoreException("budget-invalid", "StartBlockIndex must be non-negative");
-        if (input.EndBlockIndexExclusive.HasValue && input.EndBlockIndexExclusive.Value < input.StartBlockIndex)
-            throw new AgentMemoryReadCoreException("budget-invalid", "EndBlockIndexExclusive must be >= StartBlockIndex");
+        if (input.EndBlockIndexExclusive.HasValue)
+        {
+            if (input.EndBlockIndexExclusive.Value <= input.StartBlockIndex)
+                throw new AgentMemoryReadCoreException("budget-invalid", "EndBlockIndexExclusive must be greater than StartBlockIndex");
+            if (input.EndBlockIndexExclusive.Value - input.StartBlockIndex > scope.MaxCompressedBlockCount)
+                throw new AgentMemoryReadCoreException("budget-invalid", "Block range span exceeds scope limit");
+        }
     }
 
     private static List<AgentCompressedContextBlock> SelectBlocks(
@@ -319,19 +346,10 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
         _ => AgentMemoryToolSourceKind.Unknown
     };
 
-    private static AgentSourceKind MapToolSourceKind(AgentMemoryToolSourceKind kind) => kind switch
-    {
-        AgentMemoryToolSourceKind.ConversationTurn => AgentSourceKind.ConversationTurn,
-        AgentMemoryToolSourceKind.TaskRecord => AgentSourceKind.TaskRecord,
-        AgentMemoryToolSourceKind.TaskEvent => AgentSourceKind.TaskEvent,
-        AgentMemoryToolSourceKind.CompressedContextBlock => AgentSourceKind.CompressedContextBlock,
-        AgentMemoryToolSourceKind.MemoryCandidate => AgentSourceKind.MemoryCandidate,
-        AgentMemoryToolSourceKind.MemoryItem => AgentSourceKind.MemoryItem,
-        _ => AgentSourceKind.ConversationTurn
-    };
+    private static string GrantKey(AgentMemoryAccessSourceGrant grant) => SourceKey(grant.SourceRef);
 
-    private static string GrantKey(AgentMemoryAccessSourceGrant grant)
+    private static string SourceKey(AgentContextSourceRef sourceRef)
     {
-        return $"{grant.SourceRef.TenantId}:{grant.SourceRef.SourceKind}:{grant.SourceRef.SourceId}:{grant.SourceRef.RangeStart}:{grant.SourceRef.RangeEnd}";
+        return $"{sourceRef.TenantId}:{(int)sourceRef.SourceKind}:{sourceRef.SourceId}:{sourceRef.RangeStart}:{sourceRef.RangeEnd}";
     }
 }
