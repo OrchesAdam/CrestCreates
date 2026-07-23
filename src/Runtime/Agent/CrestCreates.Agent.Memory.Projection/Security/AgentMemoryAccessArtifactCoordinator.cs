@@ -413,11 +413,12 @@ internal sealed class AgentMemoryAccessArtifactCoordinator : IAgentMemoryAccessA
         if (handles.Any(h => h.ResourceKind != resourceKind))
             throw new InvalidOperationException("TrustedHostOperation handles must all have the same ResourceKind.");
 
-        // ResourceKind must be ConversationHistory or TaskHistory
+        // ResourceKind must be ConversationHistory, TaskHistory, or Context
         if (resourceKind is not AgentMemoryResourceKind.ConversationHistory
-            and not AgentMemoryResourceKind.TaskHistory)
+            and not AgentMemoryResourceKind.TaskHistory
+            and not AgentMemoryResourceKind.Context)
             throw new InvalidOperationException(
-                $"TrustedHostOperation handle ResourceKind must be ConversationHistory or TaskHistory, got {resourceKind}.");
+                $"TrustedHostOperation handle ResourceKind must be ConversationHistory, TaskHistory, or Context, got {resourceKind}.");
 
         // All handles must share the same ResourceId
         var resourceId = handles[0].ResourceId;
@@ -428,6 +429,7 @@ internal sealed class AgentMemoryAccessArtifactCoordinator : IAgentMemoryAccessA
         {
             AgentMemoryResourceKind.ConversationHistory => AgentSourceKind.ConversationTurn,
             AgentMemoryResourceKind.TaskHistory => AgentSourceKind.TaskRecord,
+            AgentMemoryResourceKind.Context => AgentSourceKind.CompressedContextBlock,
             _ => throw new InvalidOperationException(
                 $"Unsupported handle ResourceKind for TrustedHostOperation: {resourceKind}")
         };
@@ -438,16 +440,23 @@ internal sealed class AgentMemoryAccessArtifactCoordinator : IAgentMemoryAccessA
             // 19. Handle ResourceKind must match expected kind (already verified — single kind for batch)
             // 20. Handle ResourceId must match (already verified)
 
-            // 21. Handle RequiredDescriptorRefs.Count == 0 — host handles are unscoped
-            if (handle.RequiredDescriptorRefs.Count != 0)
-                throw new InvalidOperationException(
-                    $"Handle {handle.HandleId}: TrustedHostOperation handles must have zero RequiredDescriptorRefs (are unscoped).");
+            // 21. History handles (ConversationHistory/TaskHistory) are unscoped
+            // (existence-constrained); Context handles carry descriptor closures.
+            if (AgentMemoryHandleGrantMatrix.IsHistoryHandleKind(handle.ResourceKind))
+            {
+                if (handle.RequiredDescriptorRefs.Count != 0)
+                    throw new InvalidOperationException(
+                        $"Handle {handle.HandleId}: TrustedHostOperation history handles must have zero RequiredDescriptorRefs (are unscoped).");
+            }
 
-            // 22. Handle IsUnscoped == false — host handles are resource-bound (existence-constrained),
-            // not unscoped (they have ResourceId/Tenant/Principal/ScopeFingerprint binding).
-            if (handle.IsUnscoped)
-                throw new InvalidOperationException(
-                    $"Handle {handle.HandleId}: TrustedHostOperation handles must have IsUnscoped=false (resource-bound, existence-constrained).");
+            // 22. Handle IsUnscoped: history handles are resource-bound (IsUnscoped=false),
+            // Context handles are descriptor-bound (IsUnscoped depends on closure).
+            if (AgentMemoryHandleGrantMatrix.IsHistoryHandleKind(handle.ResourceKind))
+            {
+                if (handle.IsUnscoped)
+                    throw new InvalidOperationException(
+                        $"Handle {handle.HandleId}: TrustedHostOperation history handles must have IsUnscoped=false (resource-bound, existence-constrained).");
+            }
         }
 
         // Grant validations specific to TrustedHostOperation (23-25)

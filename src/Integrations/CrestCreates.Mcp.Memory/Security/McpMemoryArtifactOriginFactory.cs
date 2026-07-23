@@ -1,7 +1,32 @@
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Capability.Abstractions;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace CrestCreates.Mcp.Memory.Security;
+
+internal sealed record McpInvocationBindingComponents
+{
+    [JsonPropertyName("tenantId")] public required string TenantId { get; init; }
+    [JsonPropertyName("userId")] public required string UserId { get; init; }
+    [JsonPropertyName("hostId")] public required string HostId { get; init; }
+    [JsonPropertyName("sessionId")] public required string SessionId { get; init; }
+    [JsonPropertyName("invocationId")] public required string InvocationId { get; init; }
+    [JsonPropertyName("requestId")] public required string RequestId { get; init; }
+    [JsonPropertyName("toolDescriptorId")] public required string ToolDescriptorId { get; init; }
+    [JsonPropertyName("toolDescriptorVersion")] public required int ToolDescriptorVersion { get; init; }
+    [JsonPropertyName("capabilityId")] public required string CapabilityId { get; init; }
+    [JsonPropertyName("capabilityVersion")] public required int CapabilityVersion { get; init; }
+}
+
+internal sealed record McpSessionBindingComponents
+{
+    [JsonPropertyName("tenantId")] public required string TenantId { get; init; }
+    [JsonPropertyName("userId")] public required string UserId { get; init; }
+    [JsonPropertyName("hostId")] public required string HostId { get; init; }
+    [JsonPropertyName("securityContextId")] public required string SecurityContextId { get; init; }
+    [JsonPropertyName("sessionOperationId")] public required string SessionOperationId { get; init; }
+}
 
 /// <summary>
 /// Centralized MCP Origin and Principal construction.
@@ -47,22 +72,23 @@ internal sealed class McpMemoryArtifactOriginFactory
         CapabilityExecutionContext context)
     {
         using var sha256 = System.Security.Cryptography.SHA256.Create();
-        var components = new[]
+        var components = new McpInvocationBindingComponents
         {
-            RequireIdentity(context.TenantId, nameof(context.TenantId)),
-            RequireIdentity(context.UserId, nameof(context.UserId)),
-            RequireItem(context, McpCapabilityContextItemNames.HostId),
-            RequireItem(context, McpCapabilityContextItemNames.SessionId),
-            RequireItem(context, McpCapabilityContextItemNames.InvocationId),
-            RequireItem(context, McpCapabilityContextItemNames.RequestId),
-            RequireItem(context, McpCapabilityContextItemNames.ToolDescriptorId),
-            RequirePositiveVersion(GetItem(context, McpCapabilityContextItemNames.ToolDescriptorVersion),
-                nameof(McpCapabilityContextItemNames.ToolDescriptorVersion)).ToString(),
-            RequireItem(context, McpCapabilityContextItemNames.CapabilityId),
-            RequirePositiveVersion(GetItem(context, McpCapabilityContextItemNames.CapabilityVersion),
-                nameof(McpCapabilityContextItemNames.CapabilityVersion)).ToString(),
+            TenantId = RequireIdentity(context.TenantId, nameof(context.TenantId)),
+            UserId = RequireIdentity(context.UserId, nameof(context.UserId)),
+            HostId = RequireItem(context, McpCapabilityContextItemNames.HostId),
+            SessionId = RequireItem(context, McpCapabilityContextItemNames.SessionId),
+            InvocationId = RequireItem(context, McpCapabilityContextItemNames.InvocationId),
+            RequestId = RequireItem(context, McpCapabilityContextItemNames.RequestId),
+            ToolDescriptorId = RequireItem(context, McpCapabilityContextItemNames.ToolDescriptorId),
+            ToolDescriptorVersion = RequirePositiveVersion(GetItem(context, McpCapabilityContextItemNames.ToolDescriptorVersion),
+                nameof(McpCapabilityContextItemNames.ToolDescriptorVersion)),
+            CapabilityId = RequireItem(context, McpCapabilityContextItemNames.CapabilityId),
+            CapabilityVersion = RequirePositiveVersion(GetItem(context, McpCapabilityContextItemNames.CapabilityVersion),
+                nameof(McpCapabilityContextItemNames.CapabilityVersion)),
         };
-        var raw = System.Text.Encoding.UTF8.GetBytes($"mcp-binding|{string.Join('|', components)}");
+        var json = JsonSerializer.Serialize(components, McpMemoryBindingJsonContext.Default.McpInvocationBindingComponents);
+        var raw = System.Text.Encoding.UTF8.GetBytes(json);
         return new CrestCreates.Metadata.Abstractions.CanonicalHashing.CanonicalHash
         {
             Value = Convert.ToHexString(sha256.ComputeHash(raw)).ToLowerInvariant(),
@@ -72,7 +98,7 @@ internal sealed class McpMemoryArtifactOriginFactory
             Scope = "TenantVisible",
             Purpose = "SourceBinding",
             ContractVersion = "memory-security-artifact-v2",
-            CanonicalShapeVersion = "mcp-invocation-binding-v1",
+            CanonicalShapeVersion = "mcp-invocation-binding-v2",
         };
     }
 
@@ -80,8 +106,16 @@ internal sealed class McpMemoryArtifactOriginFactory
         AgentMemoryAccessPrincipal principal, string sessionOperationId)
     {
         using var sha256 = System.Security.Cryptography.SHA256.Create();
-        var raw = System.Text.Encoding.UTF8.GetBytes(
-            $"mcp-session|{principal.TenantId}|{principal.UserId}|{principal.CallerId}|{principal.SecurityContextId}|{sessionOperationId}");
+        var components = new McpSessionBindingComponents
+        {
+            TenantId = principal.TenantId,
+            UserId = principal.UserId,
+            HostId = principal.CallerId,
+            SecurityContextId = principal.SecurityContextId,
+            SessionOperationId = sessionOperationId,
+        };
+        var json = JsonSerializer.Serialize(components, McpMemoryBindingJsonContext.Default.McpSessionBindingComponents);
+        var raw = System.Text.Encoding.UTF8.GetBytes(json);
         return new CrestCreates.Metadata.Abstractions.CanonicalHashing.CanonicalHash
         {
             Value = Convert.ToHexString(sha256.ComputeHash(raw)).ToLowerInvariant(),
@@ -91,7 +125,7 @@ internal sealed class McpMemoryArtifactOriginFactory
             Scope = "TenantVisible",
             Purpose = "SourceBinding",
             ContractVersion = "memory-security-artifact-v2",
-            CanonicalShapeVersion = "mcp-session-binding-v1",
+            CanonicalShapeVersion = "mcp-session-binding-v2",
         };
     }
 

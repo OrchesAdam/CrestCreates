@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
+using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.ReadCore;
@@ -779,4 +780,488 @@ public sealed class McpMemoryToolInvocationE2ETests
     // ── Schema validator ────────────────────────────────────────
 
     // Uses the real SchemaValidator with closure-aware validation.
+
+    // ══════════════════════════════════════════════════════════════
+    // Real-chain E2E tests (P1-4)
+    // ══════════════════════════════════════════════════════════════
+
+    private static IHost BuildRealHost()
+    {
+        TriggerAssemblies();
+
+        var allSchemas = Dedup(DescriptorProviderRegistry.GetProviders<SchemaDescriptor>());
+        var allCapabilities = Dedup(DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>());
+
+        var echoSchemas = new SchemaDescriptor[]
+        {
+            new()
+            {
+                Id = "e2e.input", Name = "e2e.input", Version = 1, State = DescriptorState.Active,
+                Fields = [new SchemaFieldDescriptor { Name = "value", FieldType = "string", IsRequired = true }]
+            },
+            new()
+            {
+                Id = "e2e.output", Name = "e2e.output", Version = 1, State = DescriptorState.Active,
+                Fields = [new SchemaFieldDescriptor { Name = "value", FieldType = "string", IsRequired = true }]
+            }
+        };
+        var echoCapabilities = new CapabilityDescriptor[]
+        {
+            new()
+            {
+                Id = "e2e.echo", Name = "Echo", Version = 2, State = DescriptorState.Active,
+                CapabilityKind = CapabilityKind.Command,
+                InputSchema = new VersionedDescriptorRef<SchemaDescriptor>("e2e.input", 1),
+                OutputSchema = new VersionedDescriptorRef<SchemaDescriptor>("e2e.output", 1)
+            }
+        };
+
+        allSchemas = Dedup(allSchemas.Concat(echoSchemas));
+        allCapabilities = Dedup(allCapabilities.Concat(echoCapabilities));
+
+        var schemas = new SchemaRegistry(new RegistryValidationEngine<SchemaDescriptor>([]));
+        schemas.Build(new[] { new SnapshotProvider<SchemaDescriptor>(allSchemas) });
+        var capabilities = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>([]));
+        capabilities.Build(new[] { new SnapshotProvider<CapabilityDescriptor>(allCapabilities) });
+
+        var builder = Host.CreateApplicationBuilder();
+
+        builder.Services.AddSingleton<ISchemaRegistry>(schemas);
+        builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
+
+        builder.Services.AddCapabilityRuntime();
+        builder.Services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<ICapabilityHandlerModule>(
+                GeneratedCapabilityHandlerModule.Instance));
+        GeneratedHandlerRegistry.RegisterServices(builder.Services);
+
+        builder.Services.AddSingleton<ISchemaValidator>(new SchemaValidator());
+        builder.Services.AddCrestMcpToolProjection(options =>
+            options.SerializerOptions.TypeInfoResolver = MemoryE2EJsonContext.Default);
+
+        builder.Services.AddSingleton<IAgentMemoryAccessScopeProvider>(new RealChainScopeProvider(TestTenantId));
+        builder.Services.AddSingleton<ITenantContext>(new MockTenantContext(TestTenantId));
+        builder.Services.AddSingleton<ICurrentUser>(new MockCurrentUser(TestUserId, TestTenantId));
+        builder.Services.AddSingleton<IPermissionChecker>(new AllowAllPermissionChecker());
+        builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
+
+        builder.Services.AddSingleton<ICanonicalHashComputer>(new StubCanonicalHashComputer());
+        builder.Services.AddAgentMemoryRuntime();
+        builder.Services.AddMcpMemoryTools();
+
+        return builder.Build();
+    }
+
+    private static async Task SeedContextAsync(IServiceProvider services, string contextId, string tenantId)
+    {
+        var contextStore = services.GetRequiredService<IAgentCompressedContextStore>();
+        var descA = new DescriptorRef { Namespace = "test", Id = "descA", Version = 1 };
+        var block = new AgentCompressedContextBlock
+        {
+            BlockId = $"{contextId}-block-1",
+            TenantId = tenantId,
+            Content = "context-block-content",
+            CanonicalContentHash = MakeStubHash(),
+            SourceRefs = [new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.CompressedContextBlock,
+                TenantId = tenantId,
+                SourceId = $"{contextId}-block-1",
+                DescriptorRefs = [descA]
+            }]
+        };
+        var context = new AgentCompressedContext
+        {
+            ContextId = contextId,
+            TenantId = tenantId,
+            Blocks = [block]
+        };
+        await contextStore.SaveCompressedContextAsync(context);
+    }
+
+    private static async Task SeedMemoryAsync(IServiceProvider services, string memoryId, string tenantId)
+    {
+        var memoryStore = services.GetRequiredService<IAgentMemoryStore>();
+        var descA = new DescriptorRef { Namespace = "test", Id = "descA", Version = 1 };
+        var memory = new AgentMemoryItem
+        {
+            MemoryId = memoryId,
+            TenantId = tenantId,
+            Kind = AgentMemoryKind.ProjectFact,
+            Content = "memory-content",
+            CanonicalContentHash = MakeStubHash(),
+            PromotedAt = DateTimeOffset.UtcNow,
+            DescriptorRefs = [descA],
+            Confidence = AgentMemoryConfidence.High,
+            Status = AgentMemoryStatus.Active
+        };
+        await memoryStore.SaveMemoryAsync(memory);
+    }
+
+    [Fact]
+    public async Task Mcp_CtxRecallThenExpand_SameSession_Succeeds()
+    {
+        using var host = BuildRealHost();
+        await host.StartAsync();
+        using var s = host.Services.CreateScope();
+        var sp = s.ServiceProvider;
+
+        await SeedContextAsync(sp, "real-ctx-1", TestTenantId);
+
+        var handleIssuer = sp.GetRequiredService<IAgentMemoryContextHandleIssuer>();
+        var scopeProvider = sp.GetRequiredService<IAgentMemoryAccessScopeProvider>();
+        var principal = new AgentMemoryAccessPrincipal
+        {
+            TenantId = TestTenantId,
+            UserId = TestUserId,
+            CallerKind = AgentMemoryCallerKind.Mcp,
+            CallerId = "test-host",
+            SecurityContextId = "session-real-1"
+        };
+        var scope = await scopeProvider.ResolveAsync(principal);
+        var origin = new AgentMemoryArtifactOrigin
+        {
+            Kind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+            OperationId = "test-op-1",
+            BindingHash = MakeStubHash()
+        };
+        var handleResult = await handleIssuer.IssueForCallerAsync(principal, origin, "real-ctx-1");
+
+        var invoker = sp.GetRequiredService<IMcpToolInvoker>();
+
+        using var recallArgs = CreateArguments(new
+        {
+            ContextHandle = handleResult.HandleId,
+            MaximumBlockCount = 10,
+            CharacterBudget = 1000
+        });
+
+        var recallOutcome = await invoker.InvokeAsync(
+            "ctx_recall",
+            recallArgs.RootElement,
+            new McpToolCallContext(
+                new McpToolHostContext("test-host", "test-env"),
+                "inv-recall-1", "req-recall-1", "session-real-1"));
+
+        recallOutcome.IsError.Should().BeFalse(because: "code={0}, text={1}",
+            recallOutcome.ErrorCode ?? "(null)",
+            recallOutcome.Content.FirstOrDefault() is McpToolTextContent t ? t.Text : "(no text)");
+
+        recallOutcome.StructuredContent.Should().NotBeNull();
+        var recallContent = recallOutcome.StructuredContent!.Value;
+        recallContent.GetProperty("OperationStatus").GetString().Should().Be("completed");
+
+        var blocks = recallContent.GetProperty("Blocks");
+        blocks.GetArrayLength().Should().BeGreaterThan(0);
+        var firstBlock = blocks[0];
+        var sourceGrants = firstBlock.GetProperty("SourceGrants");
+        sourceGrants.GetArrayLength().Should().BeGreaterThan(0);
+        var grantId = sourceGrants[0].GetProperty("GrantId").GetString();
+
+        using var expandArgs = CreateArguments(new
+        {
+            GrantId = grantId,
+            MaximumCharacters = 2000
+        });
+
+        var expandOutcome = await invoker.InvokeAsync(
+            "ctx_expand",
+            expandArgs.RootElement,
+            new McpToolCallContext(
+                new McpToolHostContext("test-host", "test-env"),
+                "inv-expand-1", "req-expand-1", "session-real-1"));
+
+        expandOutcome.IsError.Should().BeFalse(because: "code={0}, text={1}",
+            expandOutcome.ErrorCode ?? "(null)",
+            expandOutcome.Content.FirstOrDefault() is McpToolTextContent t2 ? t2.Text : "(no text)");
+    }
+
+    [Fact]
+    public async Task Mcp_CtxRecallThenExpand_DifferentSession_Unavailable()
+    {
+        using var host = BuildRealHost();
+        await host.StartAsync();
+        using var s = host.Services.CreateScope();
+        var sp = s.ServiceProvider;
+
+        await SeedContextAsync(sp, "real-ctx-2", TestTenantId);
+
+        var handleIssuer = sp.GetRequiredService<IAgentMemoryContextHandleIssuer>();
+        var scopeProvider = sp.GetRequiredService<IAgentMemoryAccessScopeProvider>();
+        var principal = new AgentMemoryAccessPrincipal
+        {
+            TenantId = TestTenantId,
+            UserId = TestUserId,
+            CallerKind = AgentMemoryCallerKind.Mcp,
+            CallerId = "test-host",
+            SecurityContextId = "session-real-2"
+        };
+        var scope = await scopeProvider.ResolveAsync(principal);
+        var origin = new AgentMemoryArtifactOrigin
+        {
+            Kind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+            OperationId = "test-op-2",
+            BindingHash = MakeStubHash()
+        };
+        var handleResult = await handleIssuer.IssueForCallerAsync(principal, origin, "real-ctx-2");
+
+        var invoker = sp.GetRequiredService<IMcpToolInvoker>();
+
+        using var recallArgs = CreateArguments(new
+        {
+            ContextHandle = handleResult.HandleId,
+            MaximumBlockCount = 10,
+            CharacterBudget = 1000
+        });
+
+        var recallOutcome = await invoker.InvokeAsync(
+            "ctx_recall",
+            recallArgs.RootElement,
+            new McpToolCallContext(
+                new McpToolHostContext("test-host", "test-env"),
+                "inv-recall-2", "req-recall-2", "session-real-2"));
+
+        recallOutcome.IsError.Should().BeFalse();
+        var recallContent = recallOutcome.StructuredContent!.Value;
+        var blocks = recallContent.GetProperty("Blocks");
+        var sourceGrants = blocks[0].GetProperty("SourceGrants");
+        var grantId = sourceGrants[0].GetProperty("GrantId").GetString();
+
+        using var expandArgs = CreateArguments(new
+        {
+            GrantId = grantId,
+            MaximumCharacters = 2000
+        });
+
+        var expandOutcome = await invoker.InvokeAsync(
+            "ctx_expand",
+            expandArgs.RootElement,
+            new McpToolCallContext(
+                new McpToolHostContext("test-host", "test-env"),
+                "inv-expand-2", "req-expand-2", "session-different"));
+
+        expandOutcome.IsError.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Mcp_CrossTenantContextHandle_UnifiedUnavailable()
+    {
+        using var host = BuildRealHost();
+        await host.StartAsync();
+        using var s = host.Services.CreateScope();
+        var sp = s.ServiceProvider;
+
+        await SeedContextAsync(sp, "real-ctx-3", TestTenantId);
+
+        var handleIssuer = sp.GetRequiredService<IAgentMemoryContextHandleIssuer>();
+        var principal = new AgentMemoryAccessPrincipal
+        {
+            TenantId = TestTenantId,
+            UserId = TestUserId,
+            CallerKind = AgentMemoryCallerKind.Mcp,
+            CallerId = "test-host",
+            SecurityContextId = "session-real-3"
+        };
+        var origin = new AgentMemoryArtifactOrigin
+        {
+            Kind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+            OperationId = "test-op-3",
+            BindingHash = MakeStubHash()
+        };
+        var handleResult = await handleIssuer.IssueForCallerAsync(principal, origin, "real-ctx-3");
+
+        using var foreignArgs = CreateArguments(new
+        {
+            ContextHandle = handleResult.HandleId,
+            MaximumBlockCount = 10,
+            CharacterBudget = 1000
+        });
+
+        var foreignOutcome = await InvokeWithForeignTenantAsync(
+            "ctx_recall", foreignArgs.RootElement, "foreign-session");
+
+        foreignOutcome.IsError.Should().BeTrue();
+    }
+
+    private static async Task<McpToolInvocationOutcome> InvokeWithForeignTenantAsync(
+        string toolName, JsonElement arguments, string sessionId)
+    {
+        TriggerAssemblies();
+
+        var allSchemas = Dedup(DescriptorProviderRegistry.GetProviders<SchemaDescriptor>());
+        var allCapabilities = Dedup(DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>());
+
+        var echoSchemas = new SchemaDescriptor[]
+        {
+            new()
+            {
+                Id = "e2e.input", Name = "e2e.input", Version = 1, State = DescriptorState.Active,
+                Fields = [new SchemaFieldDescriptor { Name = "value", FieldType = "string", IsRequired = true }]
+            },
+            new()
+            {
+                Id = "e2e.output", Name = "e2e.output", Version = 1, State = DescriptorState.Active,
+                Fields = [new SchemaFieldDescriptor { Name = "value", FieldType = "string", IsRequired = true }]
+            }
+        };
+        var echoCapabilities = new CapabilityDescriptor[]
+        {
+            new()
+            {
+                Id = "e2e.echo", Name = "Echo", Version = 2, State = DescriptorState.Active,
+                CapabilityKind = CapabilityKind.Command,
+                InputSchema = new VersionedDescriptorRef<SchemaDescriptor>("e2e.input", 1),
+                OutputSchema = new VersionedDescriptorRef<SchemaDescriptor>("e2e.output", 1)
+            }
+        };
+
+        allSchemas = Dedup(allSchemas.Concat(echoSchemas));
+        allCapabilities = Dedup(allCapabilities.Concat(echoCapabilities));
+
+        var schemas = new SchemaRegistry(new RegistryValidationEngine<SchemaDescriptor>([]));
+        schemas.Build(new[] { new SnapshotProvider<SchemaDescriptor>(allSchemas) });
+        var capabilities = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>([]));
+        capabilities.Build(new[] { new SnapshotProvider<CapabilityDescriptor>(allCapabilities) });
+
+        var builder = Host.CreateApplicationBuilder();
+
+        builder.Services.AddSingleton<ISchemaRegistry>(schemas);
+        builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
+
+        builder.Services.AddCapabilityRuntime();
+        builder.Services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<ICapabilityHandlerModule>(
+                GeneratedCapabilityHandlerModule.Instance));
+        GeneratedHandlerRegistry.RegisterServices(builder.Services);
+
+        builder.Services.AddSingleton<ISchemaValidator>(new SchemaValidator());
+        builder.Services.AddCrestMcpToolProjection(options =>
+            options.SerializerOptions.TypeInfoResolver = MemoryE2EJsonContext.Default);
+
+        builder.Services.AddSingleton<IAgentMemoryAccessScopeProvider>(new RealChainScopeProvider("foreign-tenant"));
+        builder.Services.AddSingleton<ITenantContext>(new MockTenantContext("foreign-tenant"));
+        builder.Services.AddSingleton<ICurrentUser>(new MockCurrentUser("foreign-user", "foreign-tenant"));
+        builder.Services.AddSingleton<IPermissionChecker>(new AllowAllPermissionChecker());
+        builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
+
+        builder.Services.AddSingleton<ICanonicalHashComputer>(new StubCanonicalHashComputer());
+        builder.Services.AddAgentMemoryRuntime();
+        builder.Services.AddMcpMemoryTools();
+
+        using var foreignHost = builder.Build();
+        await foreignHost.StartAsync();
+        using var fs = foreignHost.Services.CreateScope();
+        var foreignInvoker = fs.ServiceProvider.GetRequiredService<IMcpToolInvoker>();
+
+        return await foreignInvoker.InvokeAsync(
+            toolName,
+            arguments,
+            new McpToolCallContext(
+                new McpToolHostContext("test-host", "test-env"),
+                "inv-foreign", "req-foreign-req", sessionId));
+    }
+
+    [Fact]
+    public async Task Mcp_CtxRecall_BudgetViolation_NoRuntimeStoreCalls()
+    {
+        using var host = BuildRealHost();
+        await host.StartAsync();
+        using var s = host.Services.CreateScope();
+        var sp = s.ServiceProvider;
+
+        await SeedContextAsync(sp, "real-ctx-4", TestTenantId);
+
+        var handleIssuer = sp.GetRequiredService<IAgentMemoryContextHandleIssuer>();
+        var principal = new AgentMemoryAccessPrincipal
+        {
+            TenantId = TestTenantId,
+            UserId = TestUserId,
+            CallerKind = AgentMemoryCallerKind.Mcp,
+            CallerId = "test-host",
+            SecurityContextId = "session-real-4"
+        };
+        var origin = new AgentMemoryArtifactOrigin
+        {
+            Kind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+            OperationId = "test-op-4",
+            BindingHash = MakeStubHash()
+        };
+        var handleResult = await handleIssuer.IssueForCallerAsync(principal, origin, "real-ctx-4");
+
+        var invoker = sp.GetRequiredService<IMcpToolInvoker>();
+
+        using var recallArgs = CreateArguments(new
+        {
+            ContextHandle = handleResult.HandleId,
+            MaximumBlockCount = 10,
+            CharacterBudget = 0
+        });
+
+        var outcome = await invoker.InvokeAsync(
+            "ctx_recall",
+            recallArgs.RootElement,
+            new McpToolCallContext(
+                new McpToolHostContext("test-host", "test-env"),
+                "inv-budget", "req-budget", "session-real-4"));
+
+        outcome.IsError.Should().BeTrue();
+    }
+
+    private static CanonicalHash MakeStubHash() => new()
+    {
+        Value = new string('a', 64),
+        Algorithm = "SHA-256",
+        AlgorithmVersion = "sha256-canonical-json-v1",
+        ArtifactKind = "agent-memory-host-operation",
+        Scope = "TenantVisible",
+        Purpose = "HostOperation",
+        ContractVersion = "memory-security-artifact-v2",
+        CanonicalShapeVersion = "agent-memory-host-operation-v1"
+    };
+
+    private sealed class StubCanonicalHashComputer : ICanonicalHashComputer
+    {
+        public CanonicalHash ComputeContractHash(IDescriptor descriptor, CanonicalHashScope scope) => MakeStubHash();
+        public CanonicalHash ComputeDefinitionHash(IDescriptor descriptor, CanonicalHashScope scope) => MakeStubHash();
+        public CanonicalHash ComputeFromProjection(CanonicalHashProjectionResult projection) => MakeStubHash();
+    }
+
+    private sealed class RealChainScopeProvider(string ownerTenantId)
+        : IAgentMemoryAccessScopeProvider, IAgentMemoryAccessScopeProviderCapabilities
+    {
+        private static readonly DescriptorRef[] VisibleRefs =
+            [new DescriptorRef { Namespace = "test", Id = "descA", Version = 1 }];
+
+        public bool Supports(AgentMemoryCallerKind callerKind) => callerKind == AgentMemoryCallerKind.Mcp;
+
+        public ValueTask<AgentMemoryAccessScope> ResolveAsync(
+            AgentMemoryAccessPrincipal principal,
+            CancellationToken ct = default)
+        {
+            return ValueTask.FromResult(new AgentMemoryAccessScope
+            {
+                TenantId = ownerTenantId,
+                VisibleDescriptorRefs = VisibleRefs,
+                AllowUnscopedMemory = false,
+                MaxVisibleDescriptorRefs = 100,
+                MaxRecallCount = 100,
+                MaxRecallCharacters = 100000,
+                MaxExpansionCharacters = 100000,
+                MaxContextRecallCharacters = 100000,
+                MaxCompressedBlockCount = 100,
+                MaxCompressedBlockCharacters = 100000,
+                MaxCandidateCount = 100,
+                MaxCandidateCharacters = 100000,
+                MaxSourceRefsPerArtifact = 100,
+                MaxGrantsPerResource = 100,
+                MaxGrantsPerOperation = 100,
+                MaxResourceHandlesPerOperation = 100,
+                MaxActiveResourceHandlesPerResource = 100,
+                MaxAuditFacts = 100,
+                MaxTagsPerResource = 100,
+                ExpansionGrantLifetime = TimeSpan.FromMinutes(30),
+                ResourceHandleLifetime = TimeSpan.FromMinutes(30)
+            });
+        }
+    }
 }

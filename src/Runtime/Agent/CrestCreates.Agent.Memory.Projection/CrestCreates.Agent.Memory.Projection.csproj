@@ -17,5 +17,6 @@
     <InternalsVisibleTo Include="CrestCreates.Agent.Memory.ReadCore.Tests" />
     <InternalsVisibleTo Include="CrestCreates.Agent.Memory.Tools.E2E.Tests" />
     <InternalsVisibleTo Include="CrestCreates.Mcp.Memory.AotFixture" />
+    <InternalsVisibleTo Include="CrestCreates.Mcp.E2E.Tests" />
   </ItemGroup>
 </Project>
