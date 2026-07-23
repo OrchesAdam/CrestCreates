@@ -4,18 +4,25 @@ using CrestCreates.Agent.Memory.Tools;
 namespace CrestCreates.Agent.Memory.Projection.Security;
 
 /// <summary>
-/// Explicit Handle/Grant support matrix with BindingMode and RangePolicy.
+/// Explicit Handle/Grant support matrix with three orthogonal dimensions:
+/// ScopeBinding, ClosurePolicy, and RangePolicy.
 /// Centralizes which ResourceKinds can be issued as Handles vs Grants,
-/// how their descriptor binding works, and whether ranges are supported.
+/// and how their credential semantics work.
 /// Coordinator, Issuer, Resolver, and Expander must all consult this matrix.
+/// 
+/// ScopeBinding only controls IsUnscoped and AllowUnscopedMemory.
+/// ClosurePolicy controls RequiredDescriptorRefs and live closure revalidation.
+/// RangePolicy controls range legality.
 /// </summary>
 internal static class AgentMemoryHandleGrantMatrix
 {
     /// <summary>
     /// Scope binding determines how IsUnscoped is derived for a Grant.
-    /// ResourceBound: RequiredDescriptorRefs=[], IsUnscoped=false — existence-constrained
+    /// ResourceBound: IsUnscoped=false always — existence-constrained
     ///   (bound by ResourceId/Tenant/Principal/ScopeFingerprint), not descriptor-constrained.
     ///   Does NOT require AllowUnscopedMemory.
+    ///   Note: ResourceBound grants may still have non-empty RequiredDescriptorRefs
+    ///   when ClosurePolicy=Exact (e.g., ConversationTurn, TaskEvent).
     /// DescriptorBound: IsUnscoped == (RequiredDescriptorRefs.Count == 0).
     ///   When unscoped, requires AllowUnscopedMemory.
     /// </summary>

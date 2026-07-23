@@ -483,4 +483,164 @@ public sealed class CompositionContractTests
         expanded.Should().NotBeNull();
         expanded.Status.Should().Be(AgentMemorySourceExpansionStatus.Expanded);
     }
+
+    [Fact]
+    public async Task TaskRecord_WithSourceDescriptor_RealCoordinator_PreparesAndResolves()
+    {
+        // TaskRecord: ScopeBinding=ResourceBound, ClosurePolicy=ExistenceOnly
+        // SourceRef.DescriptorRefs=[C] but RequiredDescriptorRefs=[] (ExistenceOnly)
+        // Real Coordinator must accept this — ExistenceOnly does not require
+        // SourceRef.DescriptorRefs ⊆ RequiredDescriptorRefs.
+        var (core, grantResolver, expander,
+            conversationStore, taskStore, contextStore, memoryStore, capturedGrants)
+            = BuildPipeline(out var retrieverMock);
+
+        var descA = Desc("A");
+        var descC = Desc("C");
+
+        // Seed a task record with descriptor [C]
+        var taskRecord = new AgentTaskRecord
+        {
+            TaskId = "task-tr-1",
+            TenantId = "t1",
+            Title = "Test Task",
+            Events = Array.Empty<AgentTaskEvent>()
+        };
+        await taskStore.SaveTaskAsync(taskRecord);
+
+        // Memory with TaskRecord source ref carrying descriptor [C]
+        var memory = new AgentMemoryItem
+        {
+            MemoryId = "m-tr-1",
+            TenantId = "t1",
+            Kind = AgentMemoryKind.ProjectFact,
+            Content = "task-derived fact",
+            CanonicalContentHash = MakeContentHash(),
+            PromotedAt = DateTimeOffset.UtcNow,
+            DescriptorRefs = new[] { descA }, // Memory-level descriptor
+            SourceRefs = new[]
+            {
+                new AgentContextSourceRef
+                {
+                    SourceKind = AgentSourceKind.TaskRecord,
+                    TenantId = "t1",
+                    SourceId = "task-tr-1",
+                    DescriptorRefs = new[] { descC } // Source carries [C]
+                }
+            },
+            Confidence = AgentMemoryConfidence.High,
+            Status = AgentMemoryStatus.Active
+        };
+
+        retrieverMock
+            .Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack
+            {
+                TenantId = "t1",
+                Memories = [memory],
+                WasTruncated = false
+            });
+
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope([descA, descC]); // Both A and C visible
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+
+        // Issue — real Coordinator must accept ExistenceOnly grant with empty RequiredDescriptorRefs
+        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        outcome.Should().NotBeNull();
+        capturedGrants.Should().ContainSingle();
+
+        var grant = capturedGrants[0];
+        grant.SourceRef.SourceKind.Should().Be(AgentSourceKind.TaskRecord);
+        grant.RequiredDescriptorRefs.Should().BeEmpty("TaskRecord is ExistenceOnly — RequiredDescriptorRefs must be empty");
+        grant.IsUnscoped.Should().BeFalse("TaskRecord is ResourceBound — IsUnscoped must be false");
+
+        // Resolve — real GrantResolver must succeed with ExistenceOnly
+        var resolved = await grantResolver.ResolveAsync(grant.GrantId, principal, scope, CancellationToken.None);
+        resolved.Should().NotBeNull("ExistenceOnly grant must resolve when resource exists");
+        resolved!.IsUnscoped.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task TaskRecord_WithSourceDescriptor_IssueResolveExpand_Composition()
+    {
+        // Full Issue → Resolve → Expand chain for TaskRecord with source descriptors.
+        // Validates that ExistenceOnly grants work through the entire pipeline.
+        var (core, grantResolver, expander,
+            conversationStore, taskStore, contextStore, memoryStore, capturedGrants)
+            = BuildPipeline(out var retrieverMock);
+
+        var descA = Desc("A");
+        var descC = Desc("C");
+
+        // Seed a task record
+        var taskRecord = new AgentTaskRecord
+        {
+            TaskId = "task-tr-2",
+            TenantId = "t1",
+            Title = "Composition Task",
+            Events = Array.Empty<AgentTaskEvent>()
+        };
+        await taskStore.SaveTaskAsync(taskRecord);
+
+        var memory = new AgentMemoryItem
+        {
+            MemoryId = "m-tr-2",
+            TenantId = "t1",
+            Kind = AgentMemoryKind.ProjectFact,
+            Content = "composition fact",
+            CanonicalContentHash = MakeContentHash(),
+            PromotedAt = DateTimeOffset.UtcNow,
+            DescriptorRefs = new[] { descA },
+            SourceRefs = new[]
+            {
+                new AgentContextSourceRef
+                {
+                    SourceKind = AgentSourceKind.TaskRecord,
+                    TenantId = "t1",
+                    SourceId = "task-tr-2",
+                    DescriptorRefs = new[] { descC }
+                }
+            },
+            Confidence = AgentMemoryConfidence.High,
+            Status = AgentMemoryStatus.Active
+        };
+
+        retrieverMock
+            .Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack
+            {
+                TenantId = "t1",
+                Memories = [memory],
+                WasTruncated = false
+            });
+
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope([descA, descC]);
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+
+        // Issue
+        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        outcome.Should().NotBeNull();
+        capturedGrants.Should().ContainSingle();
+
+        var grant = capturedGrants[0];
+
+        // Resolve
+        var resolved = await grantResolver.ResolveAsync(grant.GrantId, principal, scope, CancellationToken.None);
+        resolved.Should().NotBeNull();
+
+        // Expand — TaskRecord is NoRange, so no range needed
+        var expandRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.TaskRecord,
+            TenantId = "t1",
+            SourceId = "task-tr-2"
+        };
+        var expanded = await expander.ExpandAsync(expandRef, CancellationToken.None);
+        expanded.Should().NotBeNull();
+        expanded.Status.Should().Be(AgentMemorySourceExpansionStatus.Expanded);
+    }
 }

@@ -337,15 +337,34 @@ internal sealed class AgentMemoryAccessArtifactCoordinator : IAgentMemoryAccessA
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: SourceRef.DescriptorRefs must all have Version > 0.");
 
-            // 15. Grant RequiredDescriptorRefs must be subset of scope.VisibleDescriptorRefs
-            if (!IsSubsetOf(grant.RequiredDescriptorRefs, scope.VisibleDescriptorRefs))
-                throw new InvalidOperationException(
-                    $"Grant {grant.GrantId}: RequiredDescriptorRefs are not a subset of scope VisibleDescriptorRefs.");
+            // 15-16. Grant descriptor validation — branches by ClosurePolicy:
+            // All grants: SourceRef.DescriptorRefs ⊆ scope.VisibleDescriptorRefs
+            // Exact: RequiredDescriptorRefs ⊆ scope.VisibleDescriptorRefs
+            //        SourceRef.DescriptorRefs ⊆ RequiredDescriptorRefs
+            // ExistenceOnly: RequiredDescriptorRefs must be empty
+            //               (no SourceRef.DescriptorRefs ⊆ RequiredDescriptorRefs check)
+            var closurePolicy = AgentMemoryHandleGrantMatrix.GetClosurePolicy(grant.SourceRef.SourceKind);
 
-            // 16. Grant SourceRef.DescriptorRefs must be subset of grant.RequiredDescriptorRefs
-            if (!IsSubsetOf(grant.SourceRef.DescriptorRefs, grant.RequiredDescriptorRefs))
+            if (!IsSubsetOf(grant.SourceRef.DescriptorRefs, scope.VisibleDescriptorRefs))
                 throw new InvalidOperationException(
-                    $"Grant {grant.GrantId}: SourceRef.DescriptorRefs are not a subset of RequiredDescriptorRefs.");
+                    $"Grant {grant.GrantId}: SourceRef.DescriptorRefs are not a subset of scope VisibleDescriptorRefs.");
+
+            if (closurePolicy == AgentMemoryHandleGrantMatrix.GrantClosurePolicy.Exact)
+            {
+                if (!IsSubsetOf(grant.RequiredDescriptorRefs, scope.VisibleDescriptorRefs))
+                    throw new InvalidOperationException(
+                        $"Grant {grant.GrantId}: RequiredDescriptorRefs are not a subset of scope VisibleDescriptorRefs.");
+
+                if (!IsSubsetOf(grant.SourceRef.DescriptorRefs, grant.RequiredDescriptorRefs))
+                    throw new InvalidOperationException(
+                        $"Grant {grant.GrantId}: SourceRef.DescriptorRefs are not a subset of RequiredDescriptorRefs.");
+            }
+            else // ExistenceOnly
+            {
+                if (grant.RequiredDescriptorRefs.Count != 0)
+                    throw new InvalidOperationException(
+                        $"Grant {grant.GrantId}: ExistenceOnly grant must have empty RequiredDescriptorRefs.");
+            }
 
             // 17. Grant IsUnscoped consistency — depends on ScopeBinding:
             // ResourceBound: IsUnscoped=false (existence-constrained)

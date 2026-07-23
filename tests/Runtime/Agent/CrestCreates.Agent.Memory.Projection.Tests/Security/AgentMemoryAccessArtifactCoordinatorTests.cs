@@ -1,3 +1,4 @@
+using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.Tools;
@@ -468,5 +469,134 @@ public class AgentMemoryAccessArtifactCoordinatorTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*IsUnscoped*");
+    }
+
+    // ── P0 Acceptance: ExistenceOnly vs Exact ClosurePolicy in Coordinator ──
+
+    private static AgentMemoryAccessSourceGrant MakeGrant(
+        string grantId,
+        AgentSourceKind sourceKind,
+        AgentMemoryAccessPrincipal principal,
+        string scopeFingerprint,
+        DescriptorRef[] requiredDescriptorRefs,
+        DescriptorRef[] sourceRefDescriptorRefs,
+        string operationId,
+        int? rangeStart = null,
+        int? rangeEnd = null)
+        => new()
+        {
+            GrantId = grantId,
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = sourceKind,
+                TenantId = principal.TenantId,
+                SourceId = $"src-{grantId}",
+                DescriptorRefs = sourceRefDescriptorRefs,
+                RangeStart = rangeStart,
+                RangeEnd = rangeEnd
+            },
+            Principal = principal,
+            ScopeFingerprint = scopeFingerprint,
+            RequiredDescriptorRefs = requiredDescriptorRefs,
+            IsUnscoped = false, // ResourceBound → always false
+            IssuingOperationId = operationId,
+            IssuedAt = TimeProvider.System.GetUtcNow(),
+            ExpiresAt = TimeProvider.System.GetUtcNow().AddMinutes(30)
+        };
+
+    [Fact]
+    public async Task ExistenceOnly_WithNonEmptyRequiredRefs_CoordinatorRejects()
+    {
+        // TaskRecord is ExistenceOnly — RequiredDescriptorRefs must be empty
+        var timeProvider = TimeProvider.System;
+        var batchStore = new AgentMemoryAccessArtifactBatchStore();
+        var handleStore = new AgentMemoryAccessHandleStore(timeProvider);
+        var grantStore = new AgentMemoryAccessGrantStore(timeProvider);
+        var lifetimePolicy = new DefaultAgentMemoryArtifactLifetimePolicy(new AgentMemoryProjectionSecurityOptions());
+        var coordinator = new AgentMemoryAccessArtifactCoordinator(
+            handleStore, grantStore, batchStore, lifetimePolicy, timeProvider, MakeOptions());
+
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope();
+        var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
+
+        var grant = MakeGrant(
+            "g-exist-nonempty", AgentSourceKind.TaskRecord, principal, scopeFingerprint,
+            requiredDescriptorRefs: [new DescriptorRef("ns", "A", 1)], // Non-empty — invalid for ExistenceOnly
+            sourceRefDescriptorRefs: [],
+            operationId: origin.OperationId);
+
+        var act = async () => await coordinator.PrepareAsync(
+            principal, origin, scope, "test", 0, [], [grant]);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*ExistenceOnly*empty RequiredDescriptorRefs*");
+    }
+
+    [Fact]
+    public async Task ExistenceOnly_SourceDescriptorOutsideScope_CoordinatorRejects()
+    {
+        // All grants: SourceRef.DescriptorRefs ⊆ scope.VisibleDescriptorRefs
+        // Even ExistenceOnly grants must have their source descriptors visible in scope.
+        var timeProvider = TimeProvider.System;
+        var batchStore = new AgentMemoryAccessArtifactBatchStore();
+        var handleStore = new AgentMemoryAccessHandleStore(timeProvider);
+        var grantStore = new AgentMemoryAccessGrantStore(timeProvider);
+        var lifetimePolicy = new DefaultAgentMemoryArtifactLifetimePolicy(new AgentMemoryProjectionSecurityOptions());
+        var coordinator = new AgentMemoryAccessArtifactCoordinator(
+            handleStore, grantStore, batchStore, lifetimePolicy, timeProvider, MakeOptions());
+
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope() with { VisibleDescriptorRefs = [new DescriptorRef("ns", "visible1", 1)] };
+        var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
+
+        var grant = MakeGrant(
+            "g-exist-outside", AgentSourceKind.TaskRecord, principal, scopeFingerprint,
+            requiredDescriptorRefs: [], // ExistenceOnly → empty
+            sourceRefDescriptorRefs: [new DescriptorRef("ns", "hidden1", 1)], // NOT in scope
+            operationId: origin.OperationId);
+
+        var act = async () => await coordinator.PrepareAsync(
+            principal, origin, scope, "test", 0, [], [grant]);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*SourceRef.DescriptorRefs*subset*VisibleDescriptorRefs*");
+    }
+
+    [Fact]
+    public async Task Exact_SourceDescriptorNotInRequiredClosure_CoordinatorRejects()
+    {
+        // Exact: SourceRef.DescriptorRefs ⊆ RequiredDescriptorRefs
+        // If a source has descriptor [B] but RequiredDescriptorRefs only has [A], reject.
+        var timeProvider = TimeProvider.System;
+        var batchStore = new AgentMemoryAccessArtifactBatchStore();
+        var handleStore = new AgentMemoryAccessHandleStore(timeProvider);
+        var grantStore = new AgentMemoryAccessGrantStore(timeProvider);
+        var lifetimePolicy = new DefaultAgentMemoryArtifactLifetimePolicy(new AgentMemoryProjectionSecurityOptions());
+        var coordinator = new AgentMemoryAccessArtifactCoordinator(
+            handleStore, grantStore, batchStore, lifetimePolicy, timeProvider, MakeOptions());
+
+        var descA = new DescriptorRef("ns", "A", 1);
+        var descB = new DescriptorRef("ns", "B", 1);
+
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope() with { VisibleDescriptorRefs = [descA, descB] };
+        var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
+
+        var grant = MakeGrant(
+            "g-exact-mismatch", AgentSourceKind.ConversationTurn, principal, scopeFingerprint,
+            requiredDescriptorRefs: [descA], // Only [A] in required closure
+            sourceRefDescriptorRefs: [descB], // Source has [B] — not in required closure
+            operationId: origin.OperationId,
+            rangeStart: 0, rangeEnd: 1);
+
+        var act = async () => await coordinator.PrepareAsync(
+            principal, origin, scope, "test", 0, [], [grant]);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*SourceRef.DescriptorRefs*subset*RequiredDescriptorRefs*");
     }
 }
