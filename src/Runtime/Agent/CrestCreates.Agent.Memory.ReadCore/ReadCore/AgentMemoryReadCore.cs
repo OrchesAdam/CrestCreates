@@ -145,6 +145,12 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                     if (!string.Equals(sourceRef.TenantId, principal.TenantId, StringComparison.Ordinal))
                         continue;
 
+                    // RangePolicy: NoRange SourceKinds must not carry RangeStart/RangeEnd.
+                    // If they do, the Expander would reject the expansion — credential contract
+                    // must match the authorized operation's actual contract.
+                    if (!AgentMemoryHandleGrantMatrix.IsRangeAllowed(sourceRef))
+                        continue;
+
                     // Compute per-source closure using the same provider the Resolver uses.
                     // This ensures issuance closure matches resolution closure exactly.
                     AgentMemoryResourceKind sourceResourceKind;
@@ -167,6 +173,14 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                     if (!string.Equals(sourceClosure.TenantId, principal.TenantId, StringComparison.Ordinal)) continue;
 
                     var sourceClosureRefs = sourceClosure.CurrentDescriptorRefs;
+
+                    // BindingMode determines IsUnscoped:
+                    // ResourceBound: IsUnscoped=false always (existence-constrained, not descriptor-constrained)
+                    // DescriptorBound: IsUnscoped == (refs.Count == 0)
+                    var bindingMode = AgentMemoryHandleGrantMatrix.GetGrantBindingMode(sourceRef.SourceKind);
+                    var isUnscoped = bindingMode == AgentMemoryHandleGrantMatrix.GrantBindingMode.DescriptorBound
+                        && sourceClosureRefs.Count == 0;
+
                     var grantId = Guid.NewGuid().ToString("N");
                     grants.Add(new AgentMemoryAccessSourceGrant
                     {
@@ -175,7 +189,7 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                         Principal = principal,
                         ScopeFingerprint = scopeFingerprint,
                         RequiredDescriptorRefs = sourceClosureRefs,
-                        IsUnscoped = sourceClosureRefs.Count == 0,
+                        IsUnscoped = isUnscoped,
                         IssuingOperationId = origin.OperationId,
                         IssuedAt = now,
                         ExpiresAt = now + grantLifetime,

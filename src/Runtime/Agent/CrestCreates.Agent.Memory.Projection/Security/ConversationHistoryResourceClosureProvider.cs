@@ -45,7 +45,7 @@ internal sealed class ConversationHistoryResourceClosureProvider : IAgentMemoryR
         }
 
         var descriptorRefs = turns
-            .SelectMany(t => t.DescriptorRefs)
+            .SelectMany(t => EffectiveClosureHelper.ComputeEffectiveClosure(t.DescriptorRefs, t.SourceRefs))
             .Distinct()
             .OrderBy(r => r.Namespace, StringComparer.Ordinal)
             .ThenBy(r => r.Id, StringComparer.Ordinal)

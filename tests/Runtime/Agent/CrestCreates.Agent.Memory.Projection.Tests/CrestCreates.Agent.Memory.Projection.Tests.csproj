@@ -23,10 +23,22 @@
     <PackageReference Include="AutoFixture" />
   </ItemGroup>
   <!--
+    Copy frozen TypeForward fixture DLLs (checked-in pre-compiled binaries with SHA-256 manifest)
+    to the test output directory. These DLLs represent the immutable pre-migration contract
+    and must NOT be rebuilt from source during normal test runs.
+  -->
+  <ItemGroup>
+    <None Include="TypeForward\Fixtures\**\*" Link="TypeForward\Fixtures\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <!--
     Build the TypeForwardLegacyConsumer project (which references the pre-migration
     contract replica, NOT the current forwarding assembly) and copy its output DLL
-    to this test project's output directory. The TypeForward test loads this DLL
+    to the test project's output directory. The TypeForward test loads this DLL
     via AssemblyLoadContext to verify true binary compatibility.
+    
+    NOTE: The frozen fixture DLLs in TypeForward/Fixtures/ take precedence for the
+    LegacyConsumerFixture test. The BuildAndCopyLegacyConsumer target is kept for
+    development convenience (rebuilding fixtures after contract changes).
   -->
   <Target Name="BuildAndCopyLegacyConsumer" AfterTargets="Build">
     <MSBuild Projects="..\CrestCreates.Agent.Memory.TypeForwardLegacyConsumer\CrestCreates.Agent.Memory.TypeForwardLegacyConsumer.csproj" Targets="Build" />

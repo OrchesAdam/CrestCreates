@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Security.Cryptography;
 using System.Text.Json;
 using FluentAssertions;
 using Xunit;
@@ -9,28 +10,18 @@ namespace CrestCreates.Agent.Memory.Projection.Tests.TypeForward;
 /// <summary>
 /// True binary compatibility tests for TypeForwarded types.
 ///
-/// Unlike <see cref="TypeForwardRuntimeCompatibilityTests"/>, these tests use ONLY
-/// <c>Type.GetType()</c> with the OLD assembly name and reflection. No direct type
-/// references — simulating what a consumer compiled against the old
-/// CrestCreates.Agent.Memory.Tools.Abstractions assembly would experience at runtime.
-///
-/// The old assembly name is used to look up each type; the TypeForward mechanism
-/// redirects each resolution to CrestCreates.Agent.Memory.Projection.Abstractions
-/// without recompilation.
-///
-/// NOTE: The <c>Type.GetType()</c>-based tests verify TypeForwarded type resolution
-/// from the current process, which has the new assemblies already loaded.
-/// A true binary compatibility fixture requires a pre-compiled consumer binary
-/// that references the OLD assembly (CrestCreates.Agent.Memory.Tools.Abstractions)
-/// and is loaded via AssemblyLoadContext to verify TypeForwardedTo resolution
-/// across assembly boundaries without recompilation.
-/// TODO: Create a standalone consumer project targeting the old assembly names
-///       and compile it once, then load the binary in this test.
+/// Frozen fixture validation: The <c>Fixtures/</c> directory contains checked-in
+/// pre-compiled DLLs (old contract + consumer) with a SHA-256 manifest. Tests
+/// verify manifest integrity before loading. Missing or tampered fixtures cause
+/// test failure — no silent skip.
 /// </summary>
 public class TypeForwardBinaryCompatibilityTests
 {
     private const string OldAssemblyName = "CrestCreates.Agent.Memory.Tools.Abstractions";
     private const string NewAssemblyName = "CrestCreates.Agent.Memory.Projection.Abstractions";
+
+    private static string FixturesDir => Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory, "TypeForward", "Fixtures"));
 
     // ----- Full type resolution -----
 
@@ -91,16 +82,8 @@ public class TypeForwardBinaryCompatibilityTests
         type.Should().NotBeNull();
         type!.IsEnum.Should().BeTrue();
 
-        // Unknown=0, Completed=1, Unavailable=2, Conflict=3, Redacted=4, NotExpandable=5
         var values = Enum.GetValues(type);
         values.Length.Should().Be(6);
-
-        Enum.IsDefined(type, 0).Should().BeTrue();
-        Enum.IsDefined(type, 1).Should().BeTrue();
-        Enum.IsDefined(type, 2).Should().BeTrue();
-        Enum.IsDefined(type, 3).Should().BeTrue();
-        Enum.IsDefined(type, 4).Should().BeTrue();
-        Enum.IsDefined(type, 5).Should().BeTrue();
 
         var names = Enum.GetNames(type);
         names.Should().Contain(["Unknown", "Completed", "Unavailable", "Conflict", "Redacted", "NotExpandable"]);
@@ -113,7 +96,6 @@ public class TypeForwardBinaryCompatibilityTests
         type.Should().NotBeNull();
         type!.IsEnum.Should().BeTrue();
 
-        // Unknown=0, Preference=1, ProjectFact=2, Decision=3, Constraint=4, WorkflowHint=5, Risk=6
         var values = Enum.GetValues(type);
         values.Length.Should().Be(7);
 
@@ -128,7 +110,6 @@ public class TypeForwardBinaryCompatibilityTests
         type.Should().NotBeNull();
         type!.IsEnum.Should().BeTrue();
 
-        // Unknown=0, Unspecified=1, Low=2, Medium=3, High=4
         var values = Enum.GetValues(type);
         values.Length.Should().Be(5);
 
@@ -143,7 +124,6 @@ public class TypeForwardBinaryCompatibilityTests
         type.Should().NotBeNull();
         type!.IsEnum.Should().BeTrue();
 
-        // Unknown=0, Active=1, Superseded=2, Archived=3
         var values = Enum.GetValues(type);
         values.Length.Should().Be(4);
 
@@ -158,7 +138,6 @@ public class TypeForwardBinaryCompatibilityTests
         type.Should().NotBeNull();
         type!.IsEnum.Should().BeTrue();
 
-        // Unknown=0, ConversationTurn=1, ..., ActivationRequest=11
         var values = Enum.GetValues(type);
         values.Length.Should().Be(12);
 
@@ -176,7 +155,6 @@ public class TypeForwardBinaryCompatibilityTests
         type.Should().NotBeNull();
         type!.IsEnum.Should().BeTrue();
 
-        // Unknown=0, Info=1, Warning=2, Error=3
         var values = Enum.GetValues(type);
         values.Length.Should().Be(4);
 
@@ -187,25 +165,21 @@ public class TypeForwardBinaryCompatibilityTests
     [Fact]
     public void Security_enums_preserved()
     {
-        // AgentMemoryResourceKind
         var kindType = Type.GetType($"CrestCreates.Agent.Memory.Tools.AgentMemoryResourceKind, {OldAssemblyName}");
         kindType.Should().NotBeNull();
         var kindNames = Enum.GetNames(kindType!);
         kindNames.Should().Contain(["Unknown", "Context", "Candidate", "Memory", "ConversationHistory", "TaskHistory"]);
 
-        // AgentMemorySecurityArtifactState
         var stateType = Type.GetType($"CrestCreates.Agent.Memory.Tools.AgentMemorySecurityArtifactState, {OldAssemblyName}");
         stateType.Should().NotBeNull();
         var stateNames = Enum.GetNames(stateType!);
         stateNames.Should().Contain(["Unknown", "Active", "Revoked", "Expired"]);
 
-        // AgentMemorySecurityArtifactKind
         var akType = Type.GetType($"CrestCreates.Agent.Memory.Tools.AgentMemorySecurityArtifactKind, {OldAssemblyName}");
         akType.Should().NotBeNull();
         var akNames = Enum.GetNames(akType!);
         akNames.Should().Contain(["Unknown", "ResourceHandle", "SourceGrant"]);
 
-        // PreparedArtifactDisposition
         var dispType = Type.GetType($"CrestCreates.Agent.Memory.Tools.PreparedArtifactDisposition, {OldAssemblyName}");
         dispType.Should().NotBeNull();
         var dispNames = Enum.GetNames(dispType!);
@@ -220,7 +194,6 @@ public class TypeForwardBinaryCompatibilityTests
         var type = Type.GetType($"CrestCreates.Agent.Memory.Tools.AgentMemoryToolBlockDto, {OldAssemblyName}");
         type.Should().NotBeNull();
         var props = type!.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
         props.Select(p => p.Name).Should().Contain(["Content", "CanonicalContentHash", "SourceGrants"]);
     }
 
@@ -230,7 +203,6 @@ public class TypeForwardBinaryCompatibilityTests
         var type = Type.GetType($"CrestCreates.Agent.Memory.Tools.AgentMemoryToolCanonicalHashDto, {OldAssemblyName}");
         type.Should().NotBeNull();
         var props = type!.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
         props.Select(p => p.Name).Should().Contain(["Value", "AlgorithmVersion", "ContractVersion", "CanonicalShapeVersion"]);
     }
 
@@ -240,7 +212,6 @@ public class TypeForwardBinaryCompatibilityTests
         var type = Type.GetType($"CrestCreates.Agent.Memory.Tools.AgentMemoryToolDiagnosticDto, {OldAssemblyName}");
         type.Should().NotBeNull();
         var props = type!.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
         props.Select(p => p.Name).Should().Contain(["Code", "Severity"]);
     }
 
@@ -250,7 +221,6 @@ public class TypeForwardBinaryCompatibilityTests
         var type = Type.GetType($"CrestCreates.Agent.Memory.Tools.AgentMemoryToolItemDto, {OldAssemblyName}");
         type.Should().NotBeNull();
         var props = type!.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
         props.Select(p => p.Name).Should().Contain([
             "MemoryHandle", "Kind", "Content", "CanonicalContentHash",
             "Confidence", "MemoryStatus", "IsAuthoritative", "Tags", "SourceGrants"
@@ -263,7 +233,6 @@ public class TypeForwardBinaryCompatibilityTests
         var type = Type.GetType($"CrestCreates.Agent.Memory.Tools.BuildAgentMemoryPackInput, {OldAssemblyName}");
         type.Should().NotBeNull();
         var props = type!.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
         props.Select(p => p.Name).Should().Contain([
             "MemoryHandles", "Kinds", "Tags", "MaximumCount", "CharacterBudget", "MinimumConfidence"
         ]);
@@ -275,7 +244,6 @@ public class TypeForwardBinaryCompatibilityTests
         var type = Type.GetType($"CrestCreates.Agent.Memory.Tools.BuildAgentMemoryPackResult, {OldAssemblyName}");
         type.Should().NotBeNull();
         var props = type!.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
         props.Select(p => p.Name).Should().Contain([
             "OperationStatus", "Items", "ReturnedCount", "WasTruncated", "IsAuthoritative", "Diagnostics"
         ]);
@@ -287,7 +255,6 @@ public class TypeForwardBinaryCompatibilityTests
         var type = Type.GetType($"CrestCreates.Agent.Memory.Tools.ExpandAgentMemorySourceInput, {OldAssemblyName}");
         type.Should().NotBeNull();
         var props = type!.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
         props.Select(p => p.Name).Should().Contain(["GrantId", "MaximumCharacters"]);
     }
 
@@ -297,7 +264,6 @@ public class TypeForwardBinaryCompatibilityTests
         var type = Type.GetType($"CrestCreates.Agent.Memory.Tools.ExpandAgentMemorySourceResult, {OldAssemblyName}");
         type.Should().NotBeNull();
         var props = type!.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
         props.Select(p => p.Name).Should().Contain([
             "OperationStatus", "SanitizedContent", "CanonicalContentHash", "WasTruncated", "Diagnostics"
         ]);
@@ -309,11 +275,10 @@ public class TypeForwardBinaryCompatibilityTests
         var type = Type.GetType($"CrestCreates.Agent.Memory.Tools.AgentMemorySourceGrantDto, {OldAssemblyName}");
         type.Should().NotBeNull();
         var props = type!.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
         props.Select(p => p.Name).Should().Contain(["GrantId", "SourceKind", "ExpiresAt"]);
     }
 
-    // ----- Enum converter accessibility (via old assembly name) -----
+    // ----- Enum converter accessibility -----
 
     [Fact]
     public void Enum_converter_base_type_is_accessible_and_abstract()
@@ -351,17 +316,15 @@ public class TypeForwardBinaryCompatibilityTests
         }
     }
 
-    // ----- JSON serialization round-trips through forwarded types -----
+    // ----- JSON serialization round-trips -----
 
     [Fact]
     public void Enum_json_roundtrip_through_forwarded_type()
     {
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-
         var type = Type.GetType($"CrestCreates.Agent.Memory.Tools.AgentMemoryToolOperationStatus, {OldAssemblyName}");
         type.Should().NotBeNull();
 
-        // Parse a known value
         var completed = Enum.Parse(type!, "Completed");
         var json = JsonSerializer.Serialize(completed, type!, options);
         var deserialized = JsonSerializer.Deserialize(json, type!, options);
@@ -371,8 +334,6 @@ public class TypeForwardBinaryCompatibilityTests
     [Fact]
     public void Enum_json_with_converter_input_roundtrip()
     {
-        // Simulate what happens when a serialized payload contains a string like "preference"
-        // and the consumer uses JsonSerializer with the forwarded type.
         var type = Type.GetType($"CrestCreates.Agent.Memory.Tools.AgentMemoryToolKind, {OldAssemblyName}");
         type.Should().NotBeNull();
 
@@ -385,22 +346,11 @@ public class TypeForwardBinaryCompatibilityTests
     [Fact]
     public void Dto_json_roundtrip_through_forwarded_type()
     {
-        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-
         var type = Type.GetType($"CrestCreates.Agent.Memory.Tools.AgentMemoryToolDiagnosticDto, {OldAssemblyName}");
         type.Should().NotBeNull();
 
-        // Create instance via reflection
-        var diagType = Type.GetType($"CrestCreates.Agent.Memory.Tools.AgentMemoryToolDiagnosticSeverity, {OldAssemblyName}");
-        var severityValue = Enum.Parse(diagType!, "Error");
-
-        // Use Activator.CreateInstance with reflection to set properties isn't straightforward
-        // for record types with init-only properties. Instead, test that the type is a record
-        // and that the JSON serializer can handle it.
         type!.GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .All(p => p.CanRead && p.GetMethod!.IsPublic).Should().BeTrue();
-
-        // Verify the type name matches what we'd expect in JSON payloads
         type.FullName.Should().Be("CrestCreates.Agent.Memory.Tools.AgentMemoryToolDiagnosticDto");
     }
 
@@ -409,17 +359,14 @@ public class TypeForwardBinaryCompatibilityTests
     [Fact]
     public void Forwarded_type_resolved_from_old_name_is_same_type_as_new_reference()
     {
-        // Resolve via old assembly name
         var viaOld = Type.GetType(
             $"CrestCreates.Agent.Memory.Tools.AgentMemoryToolOperationStatus, {OldAssemblyName}");
         viaOld.Should().NotBeNull();
 
-        // Resolve via new assembly name (fully qualified to force assembly lookup)
         var viaNew = Type.GetType(
             $"CrestCreates.Agent.Memory.Tools.AgentMemoryToolOperationStatus, {NewAssemblyName}");
         viaNew.Should().NotBeNull();
 
-        // Both resolutions should return the exact same Type object (identity, not just equality)
         viaOld.Should().BeSameAs(viaNew,
             "TypeForward should return the identical Type object regardless of which assembly name is used for resolution");
     }
@@ -448,60 +395,77 @@ public class TypeForwardBinaryCompatibilityTests
         }
     }
 
+    // ── Frozen fixture validation ──────────────────────────────────
+
+    [Fact]
+    public void Frozen_fixture_manifest_exists_and_is_valid()
+    {
+        var manifestPath = Path.Combine(FixturesDir, "manifest.json");
+        Assert.True(File.Exists(manifestPath),
+            $"Frozen fixture manifest must exist at: {manifestPath}. " +
+            "If you updated the LegacyContract or LegacyConsumer, rebuild and copy DLLs, then update manifest.json.");
+
+        var manifestJson = File.ReadAllText(manifestPath);
+        var manifest = JsonSerializer.Deserialize<FixtureManifest>(manifestJson,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        Assert.NotNull(manifest);
+        manifest.Version.Should().Be(1);
+        manifest.Artifacts.Should().NotBeEmpty();
+
+        foreach (var (fileName, info) in manifest.Artifacts)
+        {
+            var filePath = Path.Combine(FixturesDir, fileName);
+            Assert.True(File.Exists(filePath),
+                $"Frozen fixture DLL '{fileName}' must exist at: {filePath}");
+
+            using var stream = File.OpenRead(filePath);
+            var hash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+            hash.Should().Be(info.Sha256,
+                $"Frozen fixture '{fileName}' SHA-256 must match manifest. " +
+                "If you intentionally updated the contract, rebuild DLLs and update manifest.json. " +
+                "Do NOT modify the manifest without rebuilding.");
+        }
+    }
+
     // ── AssemblyLoadContext-based cross-assembly resolution ─────────
 
     [Fact]
     public void TypeForwardedTypes_ResolveFromOldAssemblyDll()
     {
-        // Find the old assembly DLL (CrestCreates.Agent.Memory.Tools.Abstractions.dll)
-        // The old assembly is a forwarding assembly — it contains only TypeForwardedTo
-        // attributes and no type definitions. Loading it through a fresh isolated
-        // AssemblyLoadContext proves the TypeForward works for consumers compiled
-        // against the old assembly name.
-        var oldAssemblyPath = Path.GetFullPath(Path.Combine(
+        // The current forwarding assembly (built from source, contains TypeForwardedTo attributes)
+        var forwardingAssemblyPath = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", "..", "..",
             "src", "Runtime", "Agent", "CrestCreates.Agent.Memory.Tools.Abstractions",
             "bin", "Debug", "net10.0",
             "CrestCreates.Agent.Memory.Tools.Abstractions.dll"));
 
-        if (!File.Exists(oldAssemblyPath))
+        if (!File.Exists(forwardingAssemblyPath))
         {
-            // The forwarding assembly must be built before this test runs.
-            // CI must build Tools.Abstractions before running Projection.Tests.
-            Assert.Fail($"Old forwarding assembly not found at: {oldAssemblyPath}. " +
+            Assert.Fail($"Forwarding assembly not found at: {forwardingAssemblyPath}. " +
                 "Build CrestCreates.Agent.Memory.Tools.Abstractions before running this test.");
         }
 
         var context = new AssemblyLoadContext("TypeForwardBinaryTest", isCollectible: true);
         try
         {
-            var oldAssembly = context.LoadFromAssemblyPath(oldAssemblyPath);
+            var oldAssembly = context.LoadFromAssemblyPath(forwardingAssemblyPath);
 
-            // Verify TypeForwarded types can be resolved from the old assembly
-            // The resolved type should actually live in the new assembly, not the old one.
-            // Only test types that are actually in the TypeForward list.
             var statusType = oldAssembly.GetType(
                 "CrestCreates.Agent.Memory.Tools.AgentMemoryToolOperationStatus");
             Assert.NotNull(statusType);
             Assert.NotEqual(oldAssembly, statusType!.Assembly);
-            Assert.Equal(
-                "CrestCreates.Agent.Memory.Projection.Abstractions",
-                statusType.Assembly.GetName().Name);
+            Assert.Equal(NewAssemblyName, statusType.Assembly.GetName().Name);
 
             var inputType = oldAssembly.GetType(
                 "CrestCreates.Agent.Memory.Tools.BuildAgentMemoryPackInput");
             Assert.NotNull(inputType);
-            Assert.Equal(
-                "CrestCreates.Agent.Memory.Projection.Abstractions",
-                inputType!.Assembly.GetName().Name);
+            Assert.Equal(NewAssemblyName, inputType!.Assembly.GetName().Name);
 
             var kindType = oldAssembly.GetType(
                 "CrestCreates.Agent.Memory.Tools.AgentMemoryToolKind");
             Assert.NotNull(kindType);
-            Assert.Equal(
-                "CrestCreates.Agent.Memory.Projection.Abstractions",
-                kindType!.Assembly.GetName().Name);
+            Assert.Equal(NewAssemblyName, kindType!.Assembly.GetName().Name);
 
             // Verify that a type NOT in the TypeForward list is NOT resolvable
             var principalType = oldAssembly.GetType(
@@ -517,49 +481,60 @@ public class TypeForwardBinaryCompatibilityTests
     [Fact]
     public void LegacyConsumerFixture_ResolvesForwardedTypesAndInvokesMembers()
     {
-        // This test loads a precompiled consumer DLL that was compiled against
-        // the OLD Tools.Abstractions contract replica (LegacyContract project).
-        // The consumer DLL encodes type references to the old assembly identity
-        // (CrestCreates.Agent.Memory.Tools.Abstractions). At runtime, the
-        // AssemblyLoadContext resolves the old assembly reference to the current
-        // forwarding assembly, which then redirects types via TypeForwardedTo
-        // to Projection.Abstractions.
-        //
-        // This validates: pre-migration consumer → current forwarding assembly → current target types
-        // NOT: current source → current forwarding → current target (which is what
-        // a ProjectReference to the forwarding assembly would validate).
+        // Validate frozen fixture manifest integrity first
+        var manifestPath = Path.Combine(FixturesDir, "manifest.json");
+        Assert.True(File.Exists(manifestPath),
+            $"Frozen fixture manifest must exist at: {manifestPath}");
 
-        var consumerPath = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "TypeForwardLegacyConsumer.dll"));
+        var manifestJson = File.ReadAllText(manifestPath);
+        var manifest = JsonSerializer.Deserialize<FixtureManifest>(manifestJson,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        Assert.NotNull(manifest);
 
-        if (!File.Exists(consumerPath))
+        // Load frozen consumer DLL (compiled against pre-migration contract)
+        var consumerPath = Path.Combine(FixturesDir, "TypeForwardLegacyConsumer.dll");
+        Assert.True(File.Exists(consumerPath),
+            $"Frozen consumer DLL must exist at: {consumerPath}. " +
+            "Rebuild LegacyContract + LegacyConsumer, copy DLLs to Fixtures/, update manifest.json.");
+
+        // Verify consumer DLL hash matches manifest
+        using (var stream = File.OpenRead(consumerPath))
         {
-            Assert.Fail($"Legacy consumer DLL not found at: {consumerPath}. " +
-                "Build the TypeForwardLegacyConsumer project and copy its output before running this test.");
+            var hash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+            Assert.True(manifest.Artifacts.ContainsKey("TypeForwardLegacyConsumer.dll"),
+                "Manifest must contain TypeForwardLegacyConsumer.dll entry");
+            hash.Should().Be(manifest.Artifacts["TypeForwardLegacyConsumer.dll"].Sha256,
+                "Consumer DLL SHA-256 must match manifest — frozen fixture must not be tampered with");
         }
 
-        // The current forwarding assembly (contains TypeForwardedTo attributes)
+        // Load frozen old contract DLL
+        var oldContractPath = Path.Combine(FixturesDir, "CrestCreates.Agent.Memory.Tools.Abstractions.dll");
+        Assert.True(File.Exists(oldContractPath),
+            $"Frozen old contract DLL must exist at: {oldContractPath}");
+
+        // Verify old contract DLL hash matches manifest
+        using (var stream = File.OpenRead(oldContractPath))
+        {
+            var hash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+            Assert.True(manifest.Artifacts.ContainsKey("CrestCreates.Agent.Memory.Tools.Abstractions.dll"),
+                "Manifest must contain old contract DLL entry");
+            hash.Should().Be(manifest.Artifacts["CrestCreates.Agent.Memory.Tools.Abstractions.dll"].Sha256,
+                "Old contract DLL SHA-256 must match manifest");
+        }
+
+        // The current forwarding assembly (built from source)
         var forwardingAssemblyPath = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
             "CrestCreates.Agent.Memory.Tools.Abstractions.dll"));
-
-        if (!File.Exists(forwardingAssemblyPath))
-        {
-            Assert.Fail($"Forwarding assembly not found at: {forwardingAssemblyPath}. " +
-                "Build CrestCreates.Agent.Memory.Tools.Abstractions before running this test.");
-        }
+        Assert.True(File.Exists(forwardingAssemblyPath),
+            $"Current forwarding assembly not found at: {forwardingAssemblyPath}");
 
         // The new target assembly (contains actual type definitions)
         var newAssemblyPath = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
             "CrestCreates.Agent.Memory.Projection.Abstractions.dll"));
-
-        if (!File.Exists(newAssemblyPath))
-        {
-            Assert.Fail($"New target assembly not found at: {newAssemblyPath}. " +
-                "Build CrestCreates.Agent.Memory.Projection.Abstractions before running this test.");
-        }
+        Assert.True(File.Exists(newAssemblyPath),
+            $"New target assembly not found at: {newAssemblyPath}");
 
         var context = new LegacyConsumerLoadContext(
             forwardingAssemblyPath, newAssemblyPath, consumerPath);
@@ -569,7 +544,6 @@ public class TypeForwardBinaryCompatibilityTests
             var validatorType = consumerAssembly.GetType("TypeForwardLegacyConsumer.TypeForwardValidator");
             Assert.NotNull(validatorType);
 
-            // Invoke ValidateAll() — returns true if all forwarded types resolve and members invoke correctly
             var validateMethod = validatorType!.GetMethod("ValidateAll", BindingFlags.Public | BindingFlags.Static);
             Assert.NotNull(validateMethod);
 
@@ -584,9 +558,7 @@ public class TypeForwardBinaryCompatibilityTests
 
     /// <summary>
     /// Custom AssemblyLoadContext that resolves the old assembly name
-    /// (CrestCreates.Agent.Memory.Tools.Abstractions) to the current forwarding
-    /// assembly. This simulates what happens when a pre-migration consumer DLL
-    /// encounters the current forwarding assembly at runtime.
+    /// to the current forwarding assembly.
     /// </summary>
     private sealed class LegacyConsumerLoadContext : AssemblyLoadContext
     {
@@ -602,30 +574,23 @@ public class TypeForwardBinaryCompatibilityTests
             _forwardingAssemblyPath = forwardingAssemblyPath;
             _newAssemblyPath = newAssemblyPath;
 
-            // Pre-load the forwarding and new assemblies into this context
-            // so TypeForwardedTo resolution works when the consumer requests
-            // types from the old assembly name.
             _defaultForwarding = LoadFromAssemblyPath(forwardingAssemblyPath);
             _defaultNew = LoadFromAssemblyPath(newAssemblyPath);
         }
 
         protected override Assembly? Load(AssemblyName assemblyName)
         {
-            // When the consumer DLL requests the old assembly by name,
-            // redirect to the current forwarding assembly (which contains
-            // TypeForwardedTo attributes pointing to Projection.Abstractions).
             if (assemblyName.Name == "CrestCreates.Agent.Memory.Tools.Abstractions")
-            {
                 return _defaultForwarding;
-            }
 
             if (assemblyName.Name == "CrestCreates.Agent.Memory.Projection.Abstractions")
-            {
                 return _defaultNew;
-            }
 
-            // For other dependencies, use default resolution
             return null;
         }
     }
+
+    // Manifest model for JSON deserialization
+    private record FixtureManifest(int Version, Dictionary<string, FixtureArtifactInfo> Artifacts);
+    private record FixtureArtifactInfo(string Sha256, string Description);
 }

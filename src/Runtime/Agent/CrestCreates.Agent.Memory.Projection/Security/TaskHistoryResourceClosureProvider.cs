@@ -23,6 +23,10 @@ internal sealed class TaskHistoryResourceClosureProvider : IAgentMemoryResourceC
         AgentContextSourceRef? sourceRef = null,
         CancellationToken cancellationToken = default)
     {
+        // RangePolicy: TaskRecord is NoRange — reject if sourceRef carries a range
+        if (sourceRef is not null && !AgentMemoryHandleGrantMatrix.IsRangeAllowed(sourceRef))
+            return null;
+
         var task = await _store.GetTaskAsync(tenantId, resourceId, cancellationToken);
         if (task is null) return null;
 

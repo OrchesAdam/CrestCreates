@@ -35,6 +35,10 @@ internal sealed class ContextResourceClosureProvider : IAgentMemoryResourceClosu
             && sourceRef.SourceKind == AgentSourceKind.CompressedContextBlock
             && !string.IsNullOrEmpty(sourceRef.SourceId))
         {
+            // RangePolicy: CompressedContextBlock is NoRange — reject if sourceRef carries a range
+            if (!AgentMemoryHandleGrantMatrix.IsRangeAllowed(sourceRef))
+                return null;
+
             // Grant closure for a specific CompressedContextBlock.
             // sourceRef.SourceId is the BlockId — query the block directly.
             var block = await _store.GetCompressedContextBlockAsync(

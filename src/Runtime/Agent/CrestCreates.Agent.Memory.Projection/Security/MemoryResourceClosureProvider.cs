@@ -23,6 +23,10 @@ internal sealed class MemoryResourceClosureProvider : IAgentMemoryResourceClosur
         AgentContextSourceRef? sourceRef = null,
         CancellationToken cancellationToken = default)
     {
+        // RangePolicy: MemoryItem is NoRange — reject if sourceRef carries a range
+        if (sourceRef is not null && !AgentMemoryHandleGrantMatrix.IsRangeAllowed(sourceRef))
+            return null;
+
         var memory = await _store.GetMemoryAsync(tenantId, resourceId, cancellationToken);
         if (memory is null) return null;
 

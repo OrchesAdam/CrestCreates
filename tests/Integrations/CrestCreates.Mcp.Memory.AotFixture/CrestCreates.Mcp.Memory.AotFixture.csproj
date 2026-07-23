@@ -18,6 +18,7 @@
     <ProjectReference Include="../../../src/Integrations/CrestCreates.Mcp/CrestCreates.Mcp.csproj" />
     <ProjectReference Include="../../../src/Integrations/CrestCreates.Mcp.Memory/CrestCreates.Mcp.Memory.csproj" />
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Memory/CrestCreates.Agent.Memory.csproj" />
+    <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Memory.Projection/CrestCreates.Agent.Memory.Projection.csproj" />
     <ProjectReference Include="../../../src/Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />

@@ -347,12 +347,25 @@ internal sealed class AgentMemoryAccessArtifactCoordinator : IAgentMemoryAccessA
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: SourceRef.DescriptorRefs are not a subset of RequiredDescriptorRefs.");
 
-            // 17. Grant IsUnscoped == (RequiredDescriptorRefs.Count == 0) — consistency check
-            if (grant.IsUnscoped != (grant.RequiredDescriptorRefs.Count == 0))
-                throw new InvalidOperationException(
-                    $"Grant {grant.GrantId}: IsUnscoped flag is inconsistent with RequiredDescriptorRefs count.");
+            // 17. Grant IsUnscoped consistency — depends on BindingMode:
+            // ResourceBound: RequiredDescriptorRefs=[], IsUnscoped=false (existence-constrained)
+            // DescriptorBound: IsUnscoped == (RequiredDescriptorRefs.Count == 0)
+            var grantBindingMode = AgentMemoryHandleGrantMatrix.GetGrantBindingMode(grant.SourceRef.SourceKind);
+            if (grantBindingMode == AgentMemoryHandleGrantMatrix.GrantBindingMode.ResourceBound)
+            {
+                if (grant.IsUnscoped)
+                    throw new InvalidOperationException(
+                        $"Grant {grant.GrantId}: Resource-bound grant must have IsUnscoped=false.");
+            }
+            else
+            {
+                if (grant.IsUnscoped != (grant.RequiredDescriptorRefs.Count == 0))
+                    throw new InvalidOperationException(
+                        $"Grant {grant.GrantId}: IsUnscoped flag is inconsistent with RequiredDescriptorRefs count.");
+            }
 
-            // 18. If grant.IsUnscoped && !scope.AllowUnscopedMemory — reject unscoped grant in scoped context
+            // 18. If grant.IsUnscoped && !scope.AllowUnscopedMemory — reject unscoped grant in scoped context.
+            // Resource-bound grants with IsUnscoped=false are NOT subject to this check.
             if (grant.IsUnscoped && !scope.AllowUnscopedMemory)
                 throw new InvalidOperationException(
                     $"Grant {grant.GrantId}: Unscoped grant not allowed when scope prohibits unscoped memory.");

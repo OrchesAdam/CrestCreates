@@ -535,9 +535,8 @@ public class AgentMemoryReadCoreTests
         {
             SourceKind = AgentSourceKind.TaskRecord,
             TenantId = "t1",
-            SourceId = "same-id",
-            RangeStart = 0,
-            RangeEnd = 1
+            SourceId = "same-id"
+            // No Range — TaskRecord is NoRange per RangePolicy
         };
         var memory = new AgentMemoryItem
         {
@@ -821,5 +820,442 @@ public class AgentMemoryReadCoreTests
         // Source1's grant must have empty closure — memory-level [A] must NOT pollute it
         capturedGrants[0].RequiredDescriptorRefs.Should().BeEmpty(
             "source grant must use its own source closure, not parent memory's descriptor");
+    }
+
+    [Fact]
+    public async Task ConversationTurn_EmptyClosure_AllowUnscopedFalse_PreparesAndResolves()
+    {
+        // Resource-bound Grant: empty source closure + IsUnscoped=false must work even when AllowUnscopedMemory=false
+        // The memory itself must have a visible descriptor to pass visibility filtering
+        var descA = new DescriptorRef { Id = "desc-a", Version = 1 };
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope(allowUnscoped: false) with { VisibleDescriptorRefs = new[] { descA } };
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+
+        var sourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.ConversationTurn,
+            TenantId = "t1",
+            SourceId = "conv-1",
+            RangeStart = 0,
+            RangeEnd = 1
+        };
+        var memory = new AgentMemoryItem
+        {
+            MemoryId = "m1", TenantId = "t1", Kind = AgentMemoryKind.ProjectFact,
+            Content = "test", CanonicalContentHash = MakeContentHash(),
+            PromotedAt = DateTimeOffset.UtcNow,
+            DescriptorRefs = new[] { descA },  // Memory has visible descriptor
+            SourceRefs = new[] { sourceRef },   // But source has empty closure
+            Confidence = AgentMemoryConfidence.High, Status = AgentMemoryStatus.Active
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory], WasTruncated = false });
+
+        var grantCapture = new GrantCapture();
+        var mockCoordinator = MakeCoordinatorCapturingGrants(grantCapture);
+
+        var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosureProvider
+            .Setup(p => p.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(), "t1", It.IsAny<string>(),
+                It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure { CurrentDescriptorRefs = Array.Empty<DescriptorRef>(), TenantId = "t1" });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosureProvider.Object, TimeProvider.System);
+
+        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        grantCapture.Grants.Should().NotBeNull();
+        grantCapture.Grants.Should().ContainSingle(g =>
+            g.RequiredDescriptorRefs.Count == 0 && g.IsUnscoped == false,
+            "ConversationTurn is ResourceBound: empty closure + IsUnscoped=false must be accepted even when AllowUnscopedMemory=false");
+    }
+
+    [Fact]
+    public async Task TaskRecord_EmptyClosure_AllowUnscopedFalse_PreparesAndResolves()
+    {
+        var descA = new DescriptorRef { Id = "desc-a", Version = 1 };
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope(allowUnscoped: false) with { VisibleDescriptorRefs = new[] { descA } };
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+
+        var sourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.TaskRecord,
+            TenantId = "t1",
+            SourceId = "task-1"
+            // No Range — TaskRecord is NoRange
+        };
+        var memory = new AgentMemoryItem
+        {
+            MemoryId = "m1", TenantId = "t1", Kind = AgentMemoryKind.ProjectFact,
+            Content = "test", CanonicalContentHash = MakeContentHash(),
+            PromotedAt = DateTimeOffset.UtcNow,
+            DescriptorRefs = new[] { descA },
+            SourceRefs = new[] { sourceRef },
+            Confidence = AgentMemoryConfidence.High, Status = AgentMemoryStatus.Active
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory], WasTruncated = false });
+
+        var grantCapture = new GrantCapture();
+        var mockCoordinator = MakeCoordinatorCapturingGrants(grantCapture);
+
+        var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosureProvider
+            .Setup(p => p.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(), "t1", It.IsAny<string>(),
+                It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure { CurrentDescriptorRefs = Array.Empty<DescriptorRef>(), TenantId = "t1" });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosureProvider.Object, TimeProvider.System);
+
+        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        grantCapture.Grants.Should().NotBeNull();
+        grantCapture.Grants.Should().ContainSingle(g =>
+            g.RequiredDescriptorRefs.Count == 0 && g.IsUnscoped == false,
+            "TaskRecord is ResourceBound: empty closure + IsUnscoped=false must be accepted even when AllowUnscopedMemory=false");
+    }
+
+    [Fact]
+    public async Task TaskEvent_EmptyClosure_AllowUnscopedFalse_PreparesAndResolves()
+    {
+        var descA = new DescriptorRef { Id = "desc-a", Version = 1 };
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope(allowUnscoped: false) with { VisibleDescriptorRefs = new[] { descA } };
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+
+        var sourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.TaskEvent,
+            TenantId = "t1",
+            SourceId = "task-1",
+            RangeStart = 0,
+            RangeEnd = 1
+        };
+        var memory = new AgentMemoryItem
+        {
+            MemoryId = "m1", TenantId = "t1", Kind = AgentMemoryKind.ProjectFact,
+            Content = "test", CanonicalContentHash = MakeContentHash(),
+            PromotedAt = DateTimeOffset.UtcNow,
+            DescriptorRefs = new[] { descA },
+            SourceRefs = new[] { sourceRef },
+            Confidence = AgentMemoryConfidence.High, Status = AgentMemoryStatus.Active
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory], WasTruncated = false });
+
+        var grantCapture = new GrantCapture();
+        var mockCoordinator = MakeCoordinatorCapturingGrants(grantCapture);
+
+        var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosureProvider
+            .Setup(p => p.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(), "t1", It.IsAny<string>(),
+                It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure { CurrentDescriptorRefs = Array.Empty<DescriptorRef>(), TenantId = "t1" });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosureProvider.Object, TimeProvider.System);
+
+        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        grantCapture.Grants.Should().NotBeNull();
+        grantCapture.Grants.Should().ContainSingle(g =>
+            g.RequiredDescriptorRefs.Count == 0 && g.IsUnscoped == false,
+            "TaskEvent is ResourceBound: empty closure + IsUnscoped=false must be accepted even when AllowUnscopedMemory=false");
+    }
+
+    [Fact]
+    public async Task DescriptorBoundGrant_EmptyClosure_AllowUnscopedFalse_Rejects()
+    {
+        // Descriptor-bound Grant with empty closure: IsUnscoped=true, must be rejected when AllowUnscopedMemory=false
+        var descA = new DescriptorRef { Id = "desc-a", Version = 1 };
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope(allowUnscoped: false) with { VisibleDescriptorRefs = new[] { descA } };
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+
+        var sourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.MemoryItem,
+            TenantId = "t1",
+            SourceId = "mem-1"
+            // No Range — MemoryItem is NoRange
+        };
+        var memory = new AgentMemoryItem
+        {
+            MemoryId = "m1", TenantId = "t1", Kind = AgentMemoryKind.ProjectFact,
+            Content = "test", CanonicalContentHash = MakeContentHash(),
+            PromotedAt = DateTimeOffset.UtcNow,
+            DescriptorRefs = new[] { descA },
+            SourceRefs = new[] { sourceRef },
+            Confidence = AgentMemoryConfidence.High, Status = AgentMemoryStatus.Active
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory], WasTruncated = false });
+
+        var grantCapture = new GrantCapture();
+        var mockCoordinator = MakeCoordinatorCapturingGrants(grantCapture);
+
+        // Override: Coordinator rejects IsUnscoped=true when AllowUnscopedMemory=false
+        mockCoordinator
+            .Setup(c => c.PrepareAsync(
+                It.IsAny<AgentMemoryAccessPrincipal>(), It.IsAny<AgentMemoryArtifactOrigin>(),
+                It.IsAny<AgentMemoryAccessScope>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Descriptor-bound grant with IsUnscoped=true rejected when AllowUnscopedMemory=false"));
+
+        var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosureProvider
+            .Setup(p => p.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(), "t1", It.IsAny<string>(),
+                It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure { CurrentDescriptorRefs = Array.Empty<DescriptorRef>(), TenantId = "t1" });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosureProvider.Object, TimeProvider.System);
+
+        // Coordinator rejection propagates — Descriptor-bound grant with empty closure + AllowUnscopedMemory=false is invalid
+        await Assert.ThrowsAsync<InvalidOperationException>(() => core.RecallAsync(principal, origin, scope, input).AsTask());
+    }
+
+    [Fact]
+    public async Task TaskRecord_WithRange_DoesNotIssueGrant()
+    {
+        // TaskRecord is NoRange — any Range in SourceRef must prevent Grant issuance
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope(allowUnscoped: true) with { VisibleDescriptorRefs = Array.Empty<DescriptorRef>() };
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+
+        var sourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.TaskRecord,
+            TenantId = "t1",
+            SourceId = "task-1",
+            RangeStart = 0,  // Invalid: TaskRecord is NoRange
+            RangeEnd = 2
+        };
+        var memory = new AgentMemoryItem
+        {
+            MemoryId = "m1", TenantId = "t1", Kind = AgentMemoryKind.ProjectFact,
+            Content = "test", CanonicalContentHash = MakeContentHash(),
+            PromotedAt = DateTimeOffset.UtcNow,
+            DescriptorRefs = Array.Empty<DescriptorRef>(),
+            SourceRefs = new[] { sourceRef },
+            Confidence = AgentMemoryConfidence.High, Status = AgentMemoryStatus.Active
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory], WasTruncated = false });
+
+        var grantCapture = new GrantCapture();
+        var mockCoordinator = MakeCoordinatorCapturingGrants(grantCapture);
+
+        var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosureProvider
+            .Setup(p => p.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(), "t1", It.IsAny<string>(),
+                It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure { CurrentDescriptorRefs = Array.Empty<DescriptorRef>(), TenantId = "t1" });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosureProvider.Object, TimeProvider.System);
+
+        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        grantCapture.Grants.Should().BeNullOrEmpty("TaskRecord with Range must not issue Grant");
+    }
+
+    [Fact]
+    public async Task CompressedContextBlock_WithRange_DoesNotIssueGrant()
+    {
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope(allowUnscoped: true) with { VisibleDescriptorRefs = Array.Empty<DescriptorRef>() };
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+
+        var sourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.CompressedContextBlock,
+            TenantId = "t1",
+            SourceId = "block-1",
+            RangeStart = 0,  // Invalid: CompressedContextBlock is NoRange
+            RangeEnd = 5
+        };
+        var memory = new AgentMemoryItem
+        {
+            MemoryId = "m1", TenantId = "t1", Kind = AgentMemoryKind.ProjectFact,
+            Content = "test", CanonicalContentHash = MakeContentHash(),
+            PromotedAt = DateTimeOffset.UtcNow,
+            DescriptorRefs = Array.Empty<DescriptorRef>(),
+            SourceRefs = new[] { sourceRef },
+            Confidence = AgentMemoryConfidence.High, Status = AgentMemoryStatus.Active
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory], WasTruncated = false });
+
+        var grantCapture = new GrantCapture();
+        var mockCoordinator = MakeCoordinatorCapturingGrants(grantCapture);
+
+        var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosureProvider
+            .Setup(p => p.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(), "t1", It.IsAny<string>(),
+                It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure { CurrentDescriptorRefs = Array.Empty<DescriptorRef>(), TenantId = "t1" });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosureProvider.Object, TimeProvider.System);
+
+        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        grantCapture.Grants.Should().BeNullOrEmpty("CompressedContextBlock with Range must not issue Grant");
+    }
+
+    [Fact]
+    public async Task MemoryItem_WithRange_DoesNotIssueGrant()
+    {
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope(allowUnscoped: true) with { VisibleDescriptorRefs = Array.Empty<DescriptorRef>() };
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+
+        var sourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.MemoryItem,
+            TenantId = "t1",
+            SourceId = "mem-1",
+            RangeStart = 0,  // Invalid: MemoryItem is NoRange
+            RangeEnd = 3
+        };
+        var memory = new AgentMemoryItem
+        {
+            MemoryId = "m1", TenantId = "t1", Kind = AgentMemoryKind.ProjectFact,
+            Content = "test", CanonicalContentHash = MakeContentHash(),
+            PromotedAt = DateTimeOffset.UtcNow,
+            DescriptorRefs = Array.Empty<DescriptorRef>(),
+            SourceRefs = new[] { sourceRef },
+            Confidence = AgentMemoryConfidence.High, Status = AgentMemoryStatus.Active
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory], WasTruncated = false });
+
+        var grantCapture = new GrantCapture();
+        var mockCoordinator = MakeCoordinatorCapturingGrants(grantCapture);
+
+        var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosureProvider
+            .Setup(p => p.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(), "t1", It.IsAny<string>(),
+                It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure { CurrentDescriptorRefs = Array.Empty<DescriptorRef>(), TenantId = "t1" });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosureProvider.Object, TimeProvider.System);
+
+        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        grantCapture.Grants.Should().BeNullOrEmpty("MemoryItem with Range must not issue Grant");
+    }
+
+    [Fact]
+    public async Task MemoryCandidate_WithRange_DoesNotIssueGrant()
+    {
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope(allowUnscoped: true) with { VisibleDescriptorRefs = Array.Empty<DescriptorRef>() };
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+
+        var sourceRef = new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.MemoryCandidate,
+            TenantId = "t1",
+            SourceId = "cand-1",
+            RangeStart = 1,  // Invalid: MemoryCandidate is NoRange
+            RangeEnd = 2
+        };
+        var memory = new AgentMemoryItem
+        {
+            MemoryId = "m1", TenantId = "t1", Kind = AgentMemoryKind.ProjectFact,
+            Content = "test", CanonicalContentHash = MakeContentHash(),
+            PromotedAt = DateTimeOffset.UtcNow,
+            DescriptorRefs = Array.Empty<DescriptorRef>(),
+            SourceRefs = new[] { sourceRef },
+            Confidence = AgentMemoryConfidence.High, Status = AgentMemoryStatus.Active
+        };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack { TenantId = "t1", Memories = [memory], WasTruncated = false });
+
+        var grantCapture = new GrantCapture();
+        var mockCoordinator = MakeCoordinatorCapturingGrants(grantCapture);
+
+        var mockClosureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        mockClosureProvider
+            .Setup(p => p.GetCurrentClosureAsync(It.IsAny<AgentMemoryResourceKind>(), "t1", It.IsAny<string>(),
+                It.IsAny<AgentContextSourceRef?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure { CurrentDescriptorRefs = Array.Empty<DescriptorRef>(), TenantId = "t1" });
+
+        var core = new AgentMemoryReadCore(
+            mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
+            mockClosureProvider.Object, TimeProvider.System);
+
+        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        grantCapture.Grants.Should().BeNullOrEmpty("MemoryCandidate with Range must not issue Grant");
+    }
+
+    private sealed class GrantCapture
+    {
+        public IReadOnlyList<AgentMemoryAccessSourceGrant>? Grants { get; set; }
+    }
+
+    private Mock<IAgentMemoryAccessArtifactCoordinator> MakeCoordinatorCapturingGrants(GrantCapture capture)
+    {
+        var mock = new Mock<IAgentMemoryAccessArtifactCoordinator>();
+        mock
+            .Setup(c => c.PrepareAsync(
+                It.IsAny<AgentMemoryAccessPrincipal>(), It.IsAny<AgentMemoryArtifactOrigin>(),
+                It.IsAny<AgentMemoryAccessScope>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<AgentMemoryAccessPrincipal, AgentMemoryArtifactOrigin, AgentMemoryAccessScope,
+                string, int, IReadOnlyList<AgentMemoryAccessResourceHandle>, IReadOnlyList<AgentMemoryAccessSourceGrant>, CancellationToken>(
+                (_, _, _, _, _, _, grants, _) => capture.Grants = grants)
+            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
+            {
+                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
+                Grants = new AgentMemoryAccessGrantIssueResult { Grants = [], ReusedExisting = false },
+                CompensationToken = null,
+                Receipt = new AgentMemoryArtifactBatchReceipt { HandleBatch = null, GrantBatch = null }
+            });
+        return mock;
     }
 }

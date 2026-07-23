@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "description": "Frozen pre-migration contract DLLs for TypeForward binary compatibility testing. These DLLs must NOT be rebuilt from source — they represent the immutable pre-migration Tools.Abstractions contract.",
+  "artifacts": {
+    "CrestCreates.Agent.Memory.Tools.Abstractions.dll": {
+      "sha256": "d88d25595b274a7babe43c4f566bd8b79f5cef1857902da46984c46c6477c696",
+      "description": "Pre-migration Tools.Abstractions contract replica (no TypeForwardedTo attributes)"
+    },
+    "TypeForwardLegacyConsumer.dll": {
+      "sha256": "977d257f0dbe55a019822b002f53dede35ae06bfe337081ccc8ba1c38fe5653f",
+      "description": "Consumer compiled against pre-migration Tools.Abstractions — validates TypeForwardedTo resolution at runtime"
+    }
+  }
+}

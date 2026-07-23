@@ -45,24 +45,12 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
         var currentFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
         if (grant.ScopeFingerprint != currentFingerprint) return null;
 
-        // Descriptor closure
-        // History grants (ConversationTurn, TaskRecord) are resource-bound —
-        // they don't require AllowUnscopedMemory.
-        AgentMemoryResourceKind sourceKind;
-        try
+        // Descriptor closure — depends on BindingMode
+        var grantBindingMode = AgentMemoryHandleGrantMatrix.GetGrantBindingMode(grant.SourceRef.SourceKind);
+        if (grantBindingMode == AgentMemoryHandleGrantMatrix.GrantBindingMode.ResourceBound)
         {
-            sourceKind = AgentMemorySourceKindSupport.ToResourceKind(grant.SourceRef.SourceKind);
-        }
-        catch (InvalidOperationException)
-        {
-            // Fail-closed: unknown source kind is rejected
-            return null;
-        }
-        var isHistorySource = AgentMemoryHandleGrantMatrix.IsHistoryHandleKind(sourceKind)
-            || sourceKind == AgentMemoryResourceKind.TaskEvent;
-        if (isHistorySource)
-        {
-            // History grants: no descriptor closure check, no AllowUnscopedMemory requirement
+            // Resource-bound grants: no descriptor closure check, no AllowUnscopedMemory requirement.
+            // They are existence-constrained (bound by ResourceId/Tenant/Principal/ScopeFingerprint).
         }
         else if (grant.IsUnscoped)
         {
@@ -81,7 +69,18 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
         // Tenant boundary
         if (grant.Principal.TenantId != scope.TenantId) return null;
 
-        // Live closure revalidation for the source resource (sourceKind already resolved above)
+        // Live closure revalidation for the source resource
+        AgentMemoryResourceKind sourceKind;
+        try
+        {
+            sourceKind = AgentMemorySourceKindSupport.ToResourceKind(grant.SourceRef.SourceKind);
+        }
+        catch (InvalidOperationException)
+        {
+            // Fail-closed: unknown source kind is rejected
+            return null;
+        }
+
         var currentClosure = await _closureProvider.GetCurrentClosureAsync(
             sourceKind, principal.TenantId, grant.SourceRef.SourceId,
             sourceRef: grant.SourceRef, cancellationToken);
@@ -90,8 +89,10 @@ internal sealed class AgentMemoryAccessGrantResolver : IAgentMemoryAccessGrantRe
         // SourceRef tenant must match current resource tenant
         if (currentClosure.TenantId != principal.TenantId) return null;
 
-        // ALWAYS compare issued closure with current closure.
-        // IsUnscoped means issued closure was empty — still must match exactly.
+        // Closure comparison depends on BindingMode:
+        // ResourceBound: only validate existence (resource found + tenant match) — no descriptor comparison.
+        // DescriptorBound: ALWAYS compare issued closure with current closure.
+        if (grantBindingMode == AgentMemoryHandleGrantMatrix.GrantBindingMode.DescriptorBound)
         {
             var issuedRefs = grant.RequiredDescriptorRefs ?? Array.Empty<DescriptorRef>();
             var currentRefs = currentClosure.CurrentDescriptorRefs;
