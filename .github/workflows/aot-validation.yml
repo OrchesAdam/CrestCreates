@@ -1,9 +1,9 @@
 name: AOT Validation
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 18 * * *"
+# Disabled: the fixture workflow currently contains long-running host
+# processes and a trimmed publish path that requires a separate BuildTasks
+# bootstrap. Keep the definition for a future repair without scheduling it.
+on: []
 
 concurrency:
   group: aot-validation
