@@ -1,6 +1,6 @@
 # Agent Memory & Context Compression Runtime — Usage Guide
 
-> **Date:** 2026-06-29 | **Status:** Implemented | **Phase 7e+ (#43)**
+> **Date:** 2026-07-24 | **Status:** Implemented | **Phase 7e+ (#43), Phase 8c+ (#54)**
 
 ## 1. 快速开始 (Quick Start)
 
@@ -886,3 +886,90 @@ public async Task FullMainChain_ConversationToAuthoringContext()
 | `SourceExpander_ResolvesConversationSource` | 展开对话来源 |
 | `SourceExpander_ReturnsNotFoundForMissingSource` | 来源不存在返回 NotFound |
 | `Expander_ReturnsSanitizedContent` | 展开返回脱敏内容 |
+
+---
+
+## 10. MCP Tool Projection (Phase 8c+)
+
+### 10.1 概述
+
+Phase 8c+ 将 Context Recall 和 Memory Recall 暴露为 MCP 工具，通过安全凭证模型控制资源访问。所有模型可见的资源标识符均为 Opaque Handle。
+
+### 10.2 可用工具
+
+| 工具 | 用途 | 凭证发行 |
+|------|------|----------|
+| `ctx_recall` | 召回压缩上下文块 | Handle (Context) + Grant (CompressedContextBlock) |
+| `memory_recall` | 召回记忆项 | Handle (Memory) + Grant (per SourceRef) |
+| `ctx_expand` | 展开上下文来源内容 | 无（消费已有 Grant） |
+| `memory_source_expand` | 展开记忆来源内容 | 无（消费已有 Grant） |
+
+### 10.3 DI 注册
+
+```csharp
+// 基础运行时
+services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
+services.AddAgentMemoryRuntime();
+
+// MCP 工具（包含 Projection Security + ReadCore）
+services.AddMcpMemoryTools();
+```
+
+`AddMcpMemoryTools()` 内部注册：
+- `AddAgentMemoryProjectionSecurity()` — Coordinator、HandleResolver、GrantResolver、ClosureProviders、Stores
+- `AddAgentMemoryReadCore()` — ContextReadCore、MemoryReadCore、SourceExpandCore
+
+所有注册使用 `TryAddSingleton`，允许消费者提前替换实现。
+
+### 10.4 安全凭证流程
+
+```text
+ctx_recall:
+  1. 验证预算（CharacterBudget, MaximumBlockCount, BlockRange）
+  2. 解析 Context Handle → 验证 Principal/Scope/Tenant/Expiry
+  3. 读取 Context → 可见性过滤
+  4. 为每个唯一 SourceKey 构建 Grant Plan
+  5. Coordinator.PrepareAsync → 发行 Handle + Grant
+  6. 验证 Confirmed Set == Requested Set
+  7. 映射到 DTO → 返回 Opaque Handle + Grant
+
+memory_recall:
+  1. 验证预算（CharacterBudget, MaximumCount）
+  2. 验证 pack.TenantId == principal.TenantId
+  3. 可见性过滤
+  4. 为每个 Memory 构建 Handle Plan + 为每个唯一 SourceKey 构建 Grant Plan
+  5. Coordinator.PrepareAsync → 发行 Handle + Grant
+  6. 验证 Confirmed Set == Requested Set
+  7. 映射到 DTO → 返回 Opaque Handle + Grant
+
+ctx_expand / memory_source_expand:
+  1. 解析 Source Grant → 验证 Principal/Scope/Tenant/Expiry/Closure
+  2. 展开来源内容 → 脱敏
+  3. 返回 SanitizedContent
+  无凭证发行
+```
+
+### 10.5 跨调用凭证复用
+
+同一 Session 内，先 `ctx_recall` 发行的 Grant 可被后续 `ctx_expand` 复用：
+- Principal 匹配（TenantId + UserId + CallerKind + CallerId + SecurityContextId）
+- Grant 未过期、未撤销
+- 实时闭包与发行时一致（Exact ClosurePolicy）
+
+跨 Session 或跨 Tenant 的 Grant 不可复用 → `Unavailable`。
+
+### 10.6 关键测试覆盖
+
+| 测试 | 验证行为 |
+|------|---------|
+| `Mcp_CtxRecallThenExpand_SameSession` | 同 Session ctx_recall → ctx_expand 成功，内容正确 |
+| `Mcp_CtxRecallThenExpand_DifferentSession` | 跨 Session Grant 不可用 |
+| `Mcp_CrossTenantHandleExists_SameSessionSameUser_Unavailable` | 共享 Store + 不同 Tenant → 不可达 |
+| `Mcp_CtxRecall_BudgetViolation_NoRuntimeStoreCalls` | 预算违规不访问 Store |
+| `Mcp_CtxRecall_SameSourceAcrossBlocks_OneGrantIssued` | 跨 Block SourceKey 去重 |
+| `MemoryRecall_MissingConfirmedHandle_ThrowsAndCompensates` | Handle 缺失 → 补偿 |
+| `MemoryRecall_ExtraConfirmedHandle_ThrowsAndCompensates` | 额外 Handle → 补偿 |
+| `MemoryRecall_DuplicateConfirmedResourceId_ThrowsAndCompensates` | 重复 Handle → 补偿 |
+| `MemoryRecall_ConfirmedHandlePrincipalMismatch_ThrowsAndCompensates` | Principal 不一致 → 补偿 |
+| `RecallAsync_SameSourceAcrossItems_CoordinatorReceivesOneGrant` | 跨 Item SourceKey 去重 |
+| `RecallAsync_ConflictingDescriptorRefsForSameSourceKey_RejectsBeforePrepare` | 冲突 DescriptorRefs → 拒绝 |

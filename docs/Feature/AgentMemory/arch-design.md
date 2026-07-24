@@ -1,6 +1,6 @@
 # Agent Memory & Context Compression Runtime — Architecture Design
 
-> **Date:** 2026-06-29 | **Status:** Implemented | **Phase 7e+ (#43)**
+> **Date:** 2026-07-24 | **Status:** Implemented | **Phase 7e+ (#43), Phase 8c+ (#54)**
 
 ## 1. 概述 (Overview)
 
@@ -542,12 +542,152 @@ SHA256.HashData(Encoding.UTF8.GetBytes(content)) → lowercased hex string
 
 ---
 
-## 14. 未来阶段 (Future Phases)
+## 14. 安全凭证模型 (Security Credential Model) — Phase 8c+
+
+Phase 8c+ 为 Memory Recall 和 Context Recall 建立了完整的凭证发行与验证主链，确保模型只能通过不可伪造的 Opaque Handle 和 Source Grant 访问受保护资源。
+
+### 14.1 核心不变量
+
+```text
+一次 Recall 操作中:
+  Unique SourceKey 数量
+  = Coordinator 接收的 Grant 数量
+  = GrantStore 新增或复用的 Grant 数量
+  = Receipt 中的 Grant Count
+  = 输出中不同 GrantId 的数量
+
+Requested MemoryId Set
+  = Coordinator 接收的 Handle 数量
+  = Confirmed Handle ResourceId Set
+  = 输出中非空 MemoryHandle 的数量
+```
+
+违反任何等式 → `handle-contract` / `grant-contract` 异常 → `RevokeCreatedAsync` 补偿 → 不返回部分 Completed Result。
+
+### 14.2 凭证类型
+
+| 凭证 | 用途 | 发行者 | 生命周期 |
+|------|------|--------|----------|
+| Resource Handle | 授权访问特定资源（Context、Memory、Conversation、Task） | `IAgentMemoryContextHandleIssuer` / Coordinator | Active → Expired/Revoked |
+| Source Grant | 授权展开特定来源内容 | Coordinator | Active → Expired/Revoked |
+
+所有凭证均为 Opaque — 客户端不可解析、不可伪造、不可推断。
+
+### 14.3 Handle/Grant 支持矩阵
+
+| 资源类型 | Handle | Grant | ScopeBinding | ClosurePolicy | RangePolicy |
+|----------|--------|-------|-------------|---------------|-------------|
+| ConversationHistory | ✓ | ✓ | ResourceBound | Exact | NoRange |
+| TaskHistory | ✓ | ✓ | ResourceBound | Exact | NoRange |
+| Context | ✓ | ✓ | DescriptorBound | Exact | NoRange |
+| Memory | ✓ | ✓ | DescriptorBound | Exact | NoRange |
+| Candidate | ✓ | ✓ | DescriptorBound | Exact | NoRange |
+| TaskEvent | ✗ | ✓ | ResourceBound | Exact | IndexedRange |
+| CompressedContextBlock | ✗ | ✓ | DescriptorBound | Exact | NoRange |
+| ConversationTurn | ✗ | ✓ | ResourceBound | Exact | IndexedRange |
+
+**ScopeBinding** 正交维度：
+- `ResourceBound` → `IsUnscoped = false`（始终），不受 Descriptor 闭包数量影响
+- `DescriptorBound` → `IsUnscoped = (refs.Count == 0)`
+
+**ClosurePolicy** 正交维度：
+- `Exact` → 发行时闭包 == 当前实时闭包，闭包漂移拒绝
+- `ExistenceOnly` → 只验证 ResourceId/Tenant/Principal/ScopeFingerprint，不比较闭包
+
+**RangePolicy** 维度：
+- `NoRange` → 拒绝任何 RangeStart/RangeEnd
+- `IndexedRange` → 通过 `SourceRange.TryResolve` 验证
+
+### 14.4 SourceKey 去重
+
+`AgentMemorySourceKey` 是源身份值对象：
+
+```csharp
+readonly record struct AgentMemorySourceKey(
+    string TenantId,
+    AgentSourceKind SourceKind,
+    string SourceId,
+    int? RangeStart,
+    int? RangeEnd);
+```
+
+在调用 Coordinator 前，ReadCore 从所有 Block/Memory Item 的 SourceRefs 构建唯一 SourceKey → Grant Plan。相同 SourceKey 只创建一张 Grant。相同 SourceKey 携带不同 DescriptorRefs 时 fail-closed 拒绝。
+
+### 14.5 Coordinator 结果验证
+
+`AgentMemoryPreparedArtifactContractVerifier` 对 Handle 和 Grant 执行完全相同的验证：
+
+| 验证 | Handle | Grant |
+|------|--------|-------|
+| Requested Set == Confirmed Set | ✓ | ✓ |
+| 无缺失 Confirmed | ✓ | ✓ |
+| 无额外 Confirmed | ✓ | ✓ |
+| 无重复 ResourceId/SourceKey | ✓ | ✓ |
+| Principal 一致 | ✓ | ✓ |
+| ScopeFingerprint 一致 | ✓ | — |
+| ResourceKind 一致 | ✓ | ✓ |
+| Descriptor 闭包一致 | ✓ | ✓ |
+| Unscoped 语义一致 | ✓ | ✓ |
+
+任何不一致 → `throw` → `RevokeCreatedAsync` → 不返回部分结果。
+
+### 14.6 补偿边界
+
+`IAgentMemoryAccessArtifactCoordinator.RevokeCreatedAsync` 覆盖三个失败窗口：
+
+1. **Prepare → DTO 映射失败**：`ToDictionary` 重复键、映射异常
+2. **ReadCore → 审计/预检包装失败**
+3. **ReadCore → MCP 结果映射失败**
+
+补偿令牌 `AgentMemoryArtifactCompensationToken` 使用不可伪造的 TokenId，仅撤销本次批次新创建的 Artifact（CreatedByBatch），不撤销复用的已有 Artifact。
+
+### 14.7 跨租户隔离
+
+- Memory ReadCore 验证 `pack.TenantId == principal.TenantId`（pack 级别，先于 item 级别）
+- Context ReadCore 验证 Context 和 Block 的 TenantId
+- HandleResolver / GrantResolver 验证凭证的 TenantId
+- MCP E2E 测试使用共享 Handle Store + 不同 TenantId 的两个独立 Host，证明仅 TenantId 不同时凭证不可达
+
+### 14.8 预算验证（Fail-Closed）
+
+所有预算验证在 Handle Resolver、Context Store、Coordinator 之前执行：
+
+- `CharacterBudget <= 0` → 拒绝
+- `CharacterBudget > scope.MaxContextRecallCharacters` → 拒绝
+- `MaximumBlockCount <= 0` → 拒绝
+- `MaximumBlockCount > scope.MaxCompressedBlockCount` → 拒绝
+- `EndBlockIndexExclusive <= StartBlockIndex` → 拒绝
+- `RangeSpan > scope.MaxCompressedBlockCount` → 拒绝
+
+### 14.9 Scope 指纹
+
+`AgentMemoryScopeFingerprint` 使用 `projection-scope-v2` 格式：AOT 友好的长度前缀二进制编码，SHA-256 哈希。Tenant、AllowUnscoped、descriptor 数量和每个 sorted descriptor 字段均有结构边界，不会发生分隔符碰撞。无 v1 回退。
+
+### 14.10 项目归属
+
+| 项目 | 安全相关内容 |
+|------|-------------|
+| `Agent.Memory.Projection.Abstractions` | `AgentMemorySourceKey`, `AgentMemoryAccessScope`, `AgentMemoryAccessPrincipal`, `IAgentMemoryAccessArtifactCoordinator`, `IAgentMemoryAccessHandleResolver`, `IAgentMemoryAccessGrantResolver`, Handle/Grant Stores, ScopeFingerprint, HandleGrantMatrix |
+| `Agent.Memory.Projection` | Coordinator, HandleResolver, GrantResolver, ClosureProviders, LifetimePolicy, ScopeProvider, HandleGrantMatrix 默认实现 |
+| `Agent.Memory.ReadCore` | ReadCore (Context/Memory/Expand), `AgentMemoryPreparedArtifactContractVerifier` |
+| `Mcp.Memory` | MCP Tool Handlers, Schema Descriptors, DI 注册 |
+
+### 14.11 可执行证据
+
+- Projection security tests: 199 passing
+- ReadCore contract/composition tests: 86 passing
+- MCP Memory unit tests: 27 passing; real MCP E2E tests: 28 passing
+- Dependency boundary tests: 46 passing
+- linux-x64 NativeAOT publish-link-run fixtures: MCP Memory 1 passing
+
+---
+
+## 15. 未来阶段 (Future Phases)
 
 | Phase | 能力 | 状态 |
 |-------|------|------|
 | **7e+** | Agent Memory & Context Compression Runtime（合约、存储、默认实现、JSON Context、DI） | **Implemented (#43)** |
-| 7e+-2 | Memory 工具暴露至 Agent Control Plane（`SaveConversationToMemory`、`RecallMemories` 等 Tool） | Future |
+| **8c+** | MCP Context/Memory Tool Projection（安全凭证模型、Handle/Grant 矩阵、SourceKey 去重、Coordinator 合约验证、跨租户隔离、Scope 指纹 v2） | **Implemented (#54)** |
 | 7e+-3 | LLM 驱动的候选项提取（替换 `DefaultAgentMemoryExtractor` 为 LLM 适配器） | Future |
 | 7e+-4 | Vector 搜索与嵌入排序 | Future |
 | 7e+-5 | 生产级持久化提供者（EFCore / FreeSql） | Future |
