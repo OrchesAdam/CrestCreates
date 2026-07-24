@@ -1,7 +1,8 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Tools;
+using CrestCreates.Metadata.Abstractions;
 
-namespace CrestCreates.Agent.Memory.Projection.Security;
+namespace CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 
 /// <summary>
 /// Explicit Handle/Grant support matrix with three orthogonal dimensions:
@@ -14,7 +15,7 @@ namespace CrestCreates.Agent.Memory.Projection.Security;
 /// ClosurePolicy controls RequiredDescriptorRefs and live closure revalidation.
 /// RangePolicy controls range legality.
 /// </summary>
-internal static class AgentMemoryHandleGrantMatrix
+public static class AgentMemoryHandleGrantMatrix
 {
     /// <summary>
     /// Scope binding determines how IsUnscoped is derived for a Grant.
@@ -128,6 +129,27 @@ internal static class AgentMemoryHandleGrantMatrix
         AgentSourceKind.MemoryCandidate => GrantClosurePolicy.Exact,
         _ => GrantClosurePolicy.Exact // Unknown → safest default (fail-closed)
     };
+
+    /// <summary>
+    /// Projects the live source closure into the immutable grant binding.
+    /// Existence-only sources deliberately do not carry descriptor closure.
+    /// </summary>
+    public static IReadOnlyList<DescriptorRef> GetRequiredDescriptorRefs(
+        AgentSourceKind sourceKind,
+        IReadOnlyList<DescriptorRef> currentDescriptorRefs)
+        => GetClosurePolicy(sourceKind) == GrantClosurePolicy.Exact
+            ? currentDescriptorRefs
+            : Array.Empty<DescriptorRef>();
+
+    /// <summary>
+    /// Derives IsUnscoped from the source-kind binding contract.
+    /// Resource-bound grants are never unscoped, even with an empty closure.
+    /// </summary>
+    public static bool IsUnscopedGrant(
+        AgentSourceKind sourceKind,
+        IReadOnlyList<DescriptorRef> requiredDescriptorRefs)
+        => GetScopeBinding(sourceKind) == GrantScopeBinding.DescriptorBound
+            && requiredDescriptorRefs.Count == 0;
 
     /// <summary>
     /// Returns the Range policy for a given SourceKind.

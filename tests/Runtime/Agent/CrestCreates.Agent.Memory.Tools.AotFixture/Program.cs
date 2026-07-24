@@ -7,6 +7,8 @@ using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.CanonicalHashing;
+using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Authorization.Abstractions;
@@ -72,17 +74,45 @@ internal static class MemoryToolFixtureRunner
                 MemoryId = "aot-memory", TenantId = principal.TenantId, Kind = AgentMemoryKind.ProjectFact, Content = "first",
                 CanonicalContentHash = Hash(), PromotedAt = DateTimeOffset.UtcNow, Confidence = AgentMemoryConfidence.High, SourceRefs = [source]
             });
-            var scope = await services.GetRequiredService<IAgentMemoryToolAccessScopeProvider>().ResolveAsync(principal);
+            var accessPrincipal = new AgentMemoryAccessPrincipal
+            {
+                TenantId = principal.TenantId,
+                UserId = principal.UserId,
+                CallerKind = AgentMemoryCallerKind.AgentTool,
+                CallerId = principal.AgentId,
+                SecurityContextId = principal.ExecutionId
+            };
+            var accessScope = await services.GetRequiredService<IAgentMemoryAccessScopeProvider>()
+                .ResolveAsync(accessPrincipal);
             var now = DateTimeOffset.UtcNow;
-            var issued = await services.GetRequiredService<IAgentMemoryResourceHandleStore>().TryIssueBatchAsync(
-                new AgentMemorySecurityArtifactBatchKey { OriginKind = AgentMemorySecurityArtifactBatchOriginKind.TrustedHostOperation, OriginBindingHash = TestHash("aot-origin"), ArtifactPurpose = "aot-memory", PreparationOrdinal = 0, ArtifactPlanHash = TestHash("aot-memory") },
-                [new AgentMemoryResourceHandle { HandleId = "aot-memory-handle", ResourceKind = AgentMemoryResourceKind.Memory, ResourceId = "aot-memory", Principal = principal,
-                    ScopeFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"memory-scope-v2|{principal.TenantId}|True|"))).ToLowerInvariant(),
-                    IsUnscoped = true, IssuingInvocationId = "host", IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime) }],
-                scope.MaxActiveResourceHandlesPerResource);
+            var issued = await services.GetRequiredService<IAgentMemoryAccessArtifactCoordinator>()
+                .PrepareAsync(
+                    accessPrincipal,
+                    new AgentMemoryArtifactOrigin
+                    {
+                        Kind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+                        OperationId = "aot-seed-memory",
+                        BindingHash = TestHash("aot-origin")
+                    },
+                    accessScope,
+                    "aot-memory",
+                    0,
+                    [new AgentMemoryAccessResourceHandle
+                    {
+                        HandleId = "aot-memory-handle",
+                        ResourceKind = AgentMemoryResourceKind.Memory,
+                        ResourceId = "aot-memory",
+                        Principal = accessPrincipal,
+                        ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(accessScope),
+                        IsUnscoped = true,
+                        IssuingOperationId = "aot-seed-memory",
+                        IssuedAt = now,
+                        ExpiresAt = now.Add(accessScope.ResourceHandleLifetime)
+                    }],
+                    []);
 
             execution.Set("aot-build");
-            var build = await InvokeAsync(services, AgentMemoryToolCapabilityIds.BuildPack, new BuildInput { MemoryHandles = [issued.Handles[0].HandleId], Kinds = [], Tags = [], MaximumCount = 4, CharacterBudget = 1024, MinimumConfidence = "unknown" }, FixtureJsonContext.Default.BuildInput);
+            var build = await InvokeAsync(services, AgentMemoryToolCapabilityIds.BuildPack, new BuildInput { MemoryHandles = [issued.Handles!.Handles[0].HandleId], Kinds = [], Tags = [], MaximumCount = 4, CharacterBudget = 1024, MinimumConfidence = "unknown" }, FixtureJsonContext.Default.BuildInput);
             if (!build.IsSuccess) return 2;
             var grant = build.StructuredOutput!.Value.GetProperty("Items")[0].GetProperty("SourceGrants")[0].GetProperty("GrantId").GetString();
             execution.Set("aot-expand");

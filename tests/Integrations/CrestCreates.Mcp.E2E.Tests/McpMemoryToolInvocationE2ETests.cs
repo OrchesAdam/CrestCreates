@@ -786,7 +786,10 @@ public sealed class McpMemoryToolInvocationE2ETests
     // Real-chain E2E tests (P1-4)
     // ══════════════════════════════════════════════════════════════
 
-    private static IHost BuildRealHost()
+    private static IHost BuildRealHost(
+        string tenantId = TestTenantId,
+        string userId = TestUserId,
+        IAgentMemoryAccessHandleStore? sharedHandleStore = null)
     {
         TriggerAssemblies();
 
@@ -840,14 +843,18 @@ public sealed class McpMemoryToolInvocationE2ETests
         builder.Services.AddCrestMcpToolProjection(options =>
             options.SerializerOptions.TypeInfoResolver = MemoryE2EJsonContext.Default);
 
-        builder.Services.AddSingleton<IAgentMemoryAccessScopeProvider>(new RealChainScopeProvider(TestTenantId));
-        builder.Services.AddSingleton<ITenantContext>(new MockTenantContext(TestTenantId));
-        builder.Services.AddSingleton<ICurrentUser>(new MockCurrentUser(TestUserId, TestTenantId));
+        builder.Services.AddSingleton<IAgentMemoryAccessScopeProvider>(new RealChainScopeProvider(tenantId));
+        builder.Services.AddSingleton<ITenantContext>(new MockTenantContext(tenantId));
+        builder.Services.AddSingleton<ICurrentUser>(new MockCurrentUser(userId, tenantId));
         builder.Services.AddSingleton<IPermissionChecker>(new AllowAllPermissionChecker());
         builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
 
         builder.Services.AddSingleton<ICanonicalHashComputer>(new StubCanonicalHashComputer());
         builder.Services.AddAgentMemoryRuntime();
+        if (sharedHandleStore is not null)
+        {
+            builder.Services.AddSingleton(sharedHandleStore);
+        }
 
         var countingStore = new CountingCompressedContextStore();
         builder.Services.RemoveAll<IAgentCompressedContextStore>();
@@ -1270,149 +1277,100 @@ public sealed class McpMemoryToolInvocationE2ETests
     }
 
     [Fact]
-    public async Task Mcp_CrossTenantContextHandle_UnifiedUnavailable()
+    public async Task Mcp_CrossTenantHandleExists_SameSessionSameUser_Unavailable()
     {
-        using var host = BuildRealHost();
-        await host.StartAsync();
-        using var s = host.Services.CreateScope();
-        var sp = s.ServiceProvider;
+        var observation = await RunCrossTenantSharedHandleStoreScenarioAsync();
 
-        await SeedContextAsync(sp, "real-ctx-3", TestTenantId);
+        observation.HandleExisted.Should().BeTrue();
+        observation.Outcome.IsError.Should().BeTrue(
+            "the same existing handle must be unavailable when only TenantId differs");
+    }
 
-        var handleIssuer = sp.GetRequiredService<IAgentMemoryContextHandleIssuer>();
-        var principal = new AgentMemoryAccessPrincipal
-        {
-            TenantId = TestTenantId,
-            UserId = TestUserId,
-            CallerKind = AgentMemoryCallerKind.Mcp,
-            CallerId = "test-host",
-            SecurityContextId = "session-real-3"
-        };
-        var origin = new AgentMemoryArtifactOrigin
-        {
-            Kind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
-            OperationId = "test-op-3",
-            BindingHash = MakeStubHash()
-        };
-        var handleResult = await handleIssuer.IssueForCallerAsync(principal, origin, "real-ctx-3");
+    [Fact]
+    public async Task Mcp_CrossTenantHandleExists_HandleStoreWasRead()
+    {
+        var observation = await RunCrossTenantSharedHandleStoreScenarioAsync();
 
-        using var foreignArgs = CreateArguments(new
+        observation.HandleExisted.Should().BeTrue();
+        observation.HandleStoreReadCount.Should().BeGreaterThan(0,
+            "the foreign Host must resolve against Host A's shared canonical Handle Store");
+    }
+
+    [Fact]
+    public async Task Mcp_CrossTenantRejection_ContextStoreWasNotRead()
+    {
+        var observation = await RunCrossTenantSharedHandleStoreScenarioAsync();
+
+        observation.Outcome.IsError.Should().BeTrue();
+        observation.ContextStoreReadCount.Should().Be(0,
+            "tenant rejection must happen at Handle resolution before Context Store access");
+    }
+
+    private static async Task<CrossTenantSharedStoreObservation>
+        RunCrossTenantSharedHandleStoreScenarioAsync()
+    {
+        const string tenantA = "tenant-A";
+        const string tenantB = "tenant-B";
+        const string sharedUserId = "shared-user";
+        const string sharedSessionId = "shared-session";
+        const string sharedHostId = "test-host";
+
+        using var hostA = BuildRealHost(tenantA, sharedUserId);
+        await hostA.StartAsync();
+        using var scopeA = hostA.Services.CreateScope();
+        var servicesA = scopeA.ServiceProvider;
+
+        await SeedContextAsync(servicesA, "cross-tenant-context", tenantA);
+
+        var issuer = servicesA.GetRequiredService<IAgentMemoryContextHandleIssuer>();
+        var issued = await issuer.IssueForCallerAsync(
+            new AgentMemoryAccessPrincipal
+            {
+                TenantId = tenantA,
+                UserId = sharedUserId,
+                CallerKind = AgentMemoryCallerKind.Mcp,
+                CallerId = sharedHostId,
+                SecurityContextId = sharedSessionId
+            },
+            new AgentMemoryArtifactOrigin
+            {
+                Kind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+                OperationId = "cross-tenant-issue",
+                BindingHash = MakeStubHash()
+            },
+            "cross-tenant-context");
+
+        var canonicalStore = servicesA.GetRequiredService<IAgentMemoryAccessHandleStore>();
+        var storedHandle = await canonicalStore.GetAsync(issued.HandleId);
+        var countingHandleStore = new CountingAgentMemoryAccessHandleStore(canonicalStore);
+
+        using var hostB = BuildRealHost(tenantB, sharedUserId, countingHandleStore);
+        await hostB.StartAsync();
+        using var scopeB = hostB.Services.CreateScope();
+        var servicesB = scopeB.ServiceProvider;
+        var contextStore = servicesB.GetRequiredService<CountingCompressedContextStore>();
+        contextStore.ResetReadCount();
+
+        using var arguments = CreateArguments(new
         {
-            ContextHandle = handleResult.HandleId,
+            ContextHandle = issued.HandleId,
             MaximumBlockCount = 10,
             CharacterBudget = 1000
         });
-
-        var foreignOutcome = await InvokeWithForeignTenantInSameStoreAsync(
-            sp, "ctx_recall", foreignArgs.RootElement, "foreign-session-3");
-
-        foreignOutcome.IsError.Should().BeTrue("handle belongs to different tenant — must be unavailable");
-    }
-
-    private static async Task<McpToolInvocationOutcome> InvokeWithForeignTenantInSameStoreAsync(
-        IServiceProvider rootSp, string toolName, JsonElement arguments, string sessionId)
-    {
-        var foreignScope = rootSp.CreateScope();
-        var foreignSp = new ForeignTenantServiceProvider(foreignScope.ServiceProvider);
-
-        var invoker = foreignSp.GetRequiredService<IMcpToolInvoker>();
-        return await invoker.InvokeAsync(
-            toolName,
-            arguments,
+        var outcome = await servicesB.GetRequiredService<IMcpToolInvoker>().InvokeAsync(
+            "ctx_recall",
+            arguments.RootElement,
             new McpToolCallContext(
-                new McpToolHostContext("test-host", "test-env"),
-                "inv-foreign", "req-foreign-req", sessionId));
-    }
+                new McpToolHostContext(sharedHostId, "test-env"),
+                "cross-tenant-invocation",
+                "cross-tenant-request",
+                sharedSessionId));
 
-    private sealed class ForeignTenantServiceProvider(IServiceProvider inner) : IServiceProvider
-    {
-        private readonly MockTenantContext _foreignTenant = new("foreign-tenant");
-        private readonly MockCurrentUser _foreignUser = new("foreign-user", "foreign-tenant");
-
-        public object? GetService(Type serviceType)
-        {
-            if (serviceType == typeof(ITenantContext)) return _foreignTenant;
-            if (serviceType == typeof(ICurrentUser)) return _foreignUser;
-            return inner.GetService(serviceType);
-        }
-    }
-
-    private static async Task<McpToolInvocationOutcome> InvokeWithForeignTenantAsync(
-        string toolName, JsonElement arguments, string sessionId)
-    {
-        TriggerAssemblies();
-
-        var allSchemas = Dedup(DescriptorProviderRegistry.GetProviders<SchemaDescriptor>());
-        var allCapabilities = Dedup(DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>());
-
-        var echoSchemas = new SchemaDescriptor[]
-        {
-            new()
-            {
-                Id = "e2e.input", Name = "e2e.input", Version = 1, State = DescriptorState.Active,
-                Fields = [new SchemaFieldDescriptor { Name = "value", FieldType = "string", IsRequired = true }]
-            },
-            new()
-            {
-                Id = "e2e.output", Name = "e2e.output", Version = 1, State = DescriptorState.Active,
-                Fields = [new SchemaFieldDescriptor { Name = "value", FieldType = "string", IsRequired = true }]
-            }
-        };
-        var echoCapabilities = new CapabilityDescriptor[]
-        {
-            new()
-            {
-                Id = "e2e.echo", Name = "Echo", Version = 2, State = DescriptorState.Active,
-                CapabilityKind = CapabilityKind.Command,
-                InputSchema = new VersionedDescriptorRef<SchemaDescriptor>("e2e.input", 1),
-                OutputSchema = new VersionedDescriptorRef<SchemaDescriptor>("e2e.output", 1)
-            }
-        };
-
-        allSchemas = Dedup(allSchemas.Concat(echoSchemas));
-        allCapabilities = Dedup(allCapabilities.Concat(echoCapabilities));
-
-        var schemas = new SchemaRegistry(new RegistryValidationEngine<SchemaDescriptor>([]));
-        schemas.Build(new[] { new SnapshotProvider<SchemaDescriptor>(allSchemas) });
-        var capabilities = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>([]));
-        capabilities.Build(new[] { new SnapshotProvider<CapabilityDescriptor>(allCapabilities) });
-
-        var builder = Host.CreateApplicationBuilder();
-
-        builder.Services.AddSingleton<ISchemaRegistry>(schemas);
-        builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
-
-        builder.Services.AddCapabilityRuntime();
-        builder.Services.TryAddEnumerable(
-            ServiceDescriptor.Singleton<ICapabilityHandlerModule>(
-                GeneratedCapabilityHandlerModule.Instance));
-        GeneratedHandlerRegistry.RegisterServices(builder.Services);
-
-        builder.Services.AddSingleton<ISchemaValidator>(new SchemaValidator());
-        builder.Services.AddCrestMcpToolProjection(options =>
-            options.SerializerOptions.TypeInfoResolver = MemoryE2EJsonContext.Default);
-
-        builder.Services.AddSingleton<IAgentMemoryAccessScopeProvider>(new RealChainScopeProvider("foreign-tenant"));
-        builder.Services.AddSingleton<ITenantContext>(new MockTenantContext("foreign-tenant"));
-        builder.Services.AddSingleton<ICurrentUser>(new MockCurrentUser("foreign-user", "foreign-tenant"));
-        builder.Services.AddSingleton<IPermissionChecker>(new AllowAllPermissionChecker());
-        builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
-
-        builder.Services.AddSingleton<ICanonicalHashComputer>(new StubCanonicalHashComputer());
-        builder.Services.AddAgentMemoryRuntime();
-        builder.Services.AddMcpMemoryTools();
-
-        using var foreignHost = builder.Build();
-        await foreignHost.StartAsync();
-        using var fs = foreignHost.Services.CreateScope();
-        var foreignInvoker = fs.ServiceProvider.GetRequiredService<IMcpToolInvoker>();
-
-        return await foreignInvoker.InvokeAsync(
-            toolName,
-            arguments,
-            new McpToolCallContext(
-                new McpToolHostContext("test-host", "test-env"),
-                "inv-foreign", "req-foreign-req", sessionId));
+        return new CrossTenantSharedStoreObservation(
+            outcome,
+            storedHandle is { State: AgentMemorySecurityArtifactState.Active },
+            countingHandleStore.ReadCount,
+            contextStore.ReadCount);
     }
 
     [Fact]
@@ -1523,6 +1481,47 @@ public sealed class McpMemoryToolInvocationE2ETests
                 ResourceHandleLifetime = TimeSpan.FromMinutes(30)
             });
         }
+    }
+
+    private sealed record CrossTenantSharedStoreObservation(
+        McpToolInvocationOutcome Outcome,
+        bool HandleExisted,
+        int HandleStoreReadCount,
+        int ContextStoreReadCount);
+
+    private sealed class CountingAgentMemoryAccessHandleStore(
+        IAgentMemoryAccessHandleStore inner) : IAgentMemoryAccessHandleStore
+    {
+        private int _readCount;
+
+        public int ReadCount => Volatile.Read(ref _readCount);
+
+        public ValueTask<AgentMemoryAccessHandleIssueResult> TryIssueBatchAsync(
+            AgentMemoryAccessArtifactBatchKey batchKey,
+            IReadOnlyList<AgentMemoryAccessResourceHandle> handles,
+            int maxActivePerResource,
+            int maxActivePerOperation,
+            CancellationToken cancellationToken = default)
+            => inner.TryIssueBatchAsync(
+                batchKey,
+                handles,
+                maxActivePerResource,
+                maxActivePerOperation,
+                cancellationToken);
+
+        public ValueTask<AgentMemoryAccessResourceHandle?> GetAsync(
+            string handleId,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _readCount);
+            return inner.GetAsync(handleId, cancellationToken);
+        }
+
+        public ValueTask RevokeAsync(
+            string handleId,
+            AgentMemoryCallerKind expectedCallerKind,
+            CancellationToken cancellationToken = default)
+            => inner.RevokeAsync(handleId, expectedCallerKind, cancellationToken);
     }
 
     private sealed class CountingCompressedContextStore : IAgentCompressedContextStore

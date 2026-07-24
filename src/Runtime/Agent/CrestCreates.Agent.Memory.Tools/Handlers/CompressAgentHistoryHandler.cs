@@ -1,7 +1,9 @@
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Metadata.Abstractions;
 
 namespace CrestCreates.Agent.Memory.Tools;
 
@@ -139,12 +141,26 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
             IsUnscoped = !context.Blocks.SelectMany(block => block.SourceRefs.SelectMany(source => source.DescriptorRefs)).Any(),
             IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId, IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime)
         };
-        var grantInputs = context.Blocks.SelectMany(block => block.SourceRefs.Select(sourceRef => new AgentMemorySourceGrant
+        var grantInputs = context.Blocks.SelectMany(block => block.SourceRefs.Select(sourceRef =>
         {
-            GrantId = AgentMemorySecurityArtifactIdGenerator.Create("grt"), SourceRef = sourceRef, Principal = principal,
-            ScopeFingerprint = scopeFingerprint, RequiredDescriptorRefs = sourceRef.DescriptorRefs,
-            IsUnscoped = sourceRef.DescriptorRefs.Count == 0, IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId,
-            IssuedAt = now, ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
+            var requiredDescriptorRefs = AgentMemoryHandleGrantMatrix.GetRequiredDescriptorRefs(
+                sourceRef.SourceKind,
+                sourceRef.DescriptorRefs);
+
+            return new AgentMemorySourceGrant
+            {
+                GrantId = AgentMemorySecurityArtifactIdGenerator.Create("grt"),
+                SourceRef = sourceRef,
+                Principal = principal,
+                ScopeFingerprint = scopeFingerprint,
+                RequiredDescriptorRefs = requiredDescriptorRefs,
+                IsUnscoped = AgentMemoryHandleGrantMatrix.IsUnscopedGrant(
+                    sourceRef.SourceKind,
+                    requiredDescriptorRefs),
+                IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId,
+                IssuedAt = now,
+                ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
+            };
         })).ToArray();
         AgentMemoryPreparedSecurityArtifacts? prepared = null;
         try

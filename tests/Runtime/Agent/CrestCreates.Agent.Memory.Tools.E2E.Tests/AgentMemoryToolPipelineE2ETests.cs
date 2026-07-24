@@ -7,6 +7,7 @@ using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.CanonicalHashing;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Projection.DescriptorProviders;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.Tools;
@@ -113,7 +114,8 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
             principal, AgentMemoryHistorySourceKind.Conversation, conversation.ConversationId);
         execution.Set("compress-1");
         var compressed = await InvokeAsync(services, AgentMemoryToolCapabilityIds.CompressHistory, new { HistorySourceHandle = historyHandle });
-        compressed.IsSuccess.Should().BeTrue(compressed.Message);
+        compressed.IsSuccess.Should().BeTrue(
+            $"{compressed.Kind}/{compressed.Code}: {compressed.Message}; output={compressed.StructuredOutput?.GetRawText()}");
         var contextHandle = compressed.StructuredOutput!.Value.GetProperty("ContextHandle").GetString();
 
         execution.Set("extract-1");

@@ -117,7 +117,7 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
         var grantLifetime = _lifetimePolicy.GetGrantLifetime(principal, origin, scope, "memory-pack");
         var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope);
 
-        var handles = new List<AgentMemoryAccessResourceHandle>();
+        var handlePlan = new Dictionary<string, AgentMemoryAccessResourceHandle>(StringComparer.Ordinal);
         var grantPlan = new Dictionary<AgentMemorySourceKey, AgentMemoryAccessSourceGrant>();
         var memorySourceKeys = new List<(string MemoryId, List<AgentMemorySourceKey> SourceKeys)>();
 
@@ -125,7 +125,7 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
         {
             var handleId = Guid.NewGuid().ToString("N");
             var effectiveClosure = EffectiveClosureHelper.ComputeEffectiveClosure(memory.DescriptorRefs, memory.SourceRefs);
-            handles.Add(new AgentMemoryAccessResourceHandle
+            var plannedHandle = new AgentMemoryAccessResourceHandle
             {
                 HandleId = handleId,
                 ResourceKind = AgentMemoryResourceKind.Memory,
@@ -137,7 +137,13 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                 IssuingOperationId = origin.OperationId,
                 IssuedAt = now,
                 ExpiresAt = now + handleLifetime,
-            });
+            };
+            if (!handlePlan.TryAdd(memory.MemoryId, plannedHandle))
+            {
+                throw new AgentMemoryReadCoreException(
+                    "handle-contract",
+                    $"Recall returned duplicate MemoryId {memory.MemoryId}");
+            }
 
             var keys = new List<AgentMemorySourceKey>();
 
@@ -188,15 +194,12 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                     if (sourceClosure is null) continue;
                     if (!string.Equals(sourceClosure.TenantId, principal.TenantId, StringComparison.Ordinal)) continue;
 
-                    var sourceClosureRefs = sourceClosure.CurrentDescriptorRefs;
-                    var scopeBinding = AgentMemoryHandleGrantMatrix.GetScopeBinding(sourceRef.SourceKind);
-                    var isUnscoped = scopeBinding == AgentMemoryHandleGrantMatrix.GrantScopeBinding.DescriptorBound
-                        && sourceClosureRefs.Count == 0;
-
-                    var closurePolicy = AgentMemoryHandleGrantMatrix.GetClosurePolicy(sourceRef.SourceKind);
-                    var requiredDescriptorRefs = closurePolicy == AgentMemoryHandleGrantMatrix.GrantClosurePolicy.Exact
-                        ? sourceClosureRefs
-                        : Array.Empty<DescriptorRef>();
+                    var requiredDescriptorRefs = AgentMemoryHandleGrantMatrix.GetRequiredDescriptorRefs(
+                        sourceRef.SourceKind,
+                        sourceClosure.CurrentDescriptorRefs);
+                    var isUnscoped = AgentMemoryHandleGrantMatrix.IsUnscopedGrant(
+                        sourceRef.SourceKind,
+                        requiredDescriptorRefs);
 
                     grantPlan[sourceKey] = new AgentMemoryAccessSourceGrant
                     {
@@ -223,47 +226,18 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
         var prepared = await _coordinator.PrepareAsync(
             principal, origin, scope, "memory-pack",
             preparationOrdinal: 0,
-            handles: handles,
+            handles: handlePlan.Values.ToList(),
             grants: grants,
             cancellationToken);
 
         try
         {
-            // Build confirmed grant lookup by SourceKey
-            var confirmedGrants = prepared.Grants?.Grants ?? [];
-            var confirmedByKey = new Dictionary<AgentMemorySourceKey, AgentMemoryAccessSourceGrant>();
-            foreach (var g in confirmedGrants)
-            {
-                if (g is null) continue;
-                var key = new AgentMemorySourceKey(
-                    g.SourceRef.TenantId, g.SourceRef.SourceKind, g.SourceRef.SourceId,
-                    g.SourceRef.RangeStart, g.SourceRef.RangeEnd);
-                if (confirmedByKey.ContainsKey(key))
-                    throw new AgentMemoryReadCoreException("grant-contract",
-                        $"Coordinator returned duplicate confirmed grant for SourceKey {key}");
-                confirmedByKey[key] = g;
-            }
-
-            // Contract: every requested SourceKey must have a confirmed grant
-            foreach (var requestedKey in grantPlan.Keys)
-            {
-                if (!confirmedByKey.ContainsKey(requestedKey))
-                    throw new AgentMemoryReadCoreException("grant-contract",
-                        $"Coordinator did not confirm grant for SourceKey {requestedKey}");
-            }
-
-            // Contract: no extra confirmed grants beyond the plan
-            foreach (var confirmedKey in confirmedByKey.Keys)
-            {
-                if (!grantPlan.ContainsKey(confirmedKey))
-                    throw new AgentMemoryReadCoreException("grant-contract",
-                        $"Coordinator returned unexpected confirmed grant for SourceKey {confirmedKey}");
-            }
-
-            // Build handle lookup from confirmed artifacts
-            var handleLookup = (prepared.Handles?.Handles ?? [])
-                .Where(h => h is not null)
-                .ToDictionary(h => h.ResourceId, h => h.HandleId, StringComparer.Ordinal);
+            var confirmedByKey = AgentMemoryPreparedArtifactContractVerifier.VerifyGrants(
+                grantPlan,
+                prepared.Grants?.Grants);
+            var confirmedHandlesByResourceId = AgentMemoryPreparedArtifactContractVerifier.VerifyHandles(
+                handlePlan,
+                prepared.Handles?.Handles);
 
             // Build grant DTO lookup by SourceKey for reuse across memories
             var grantDtoLookup = new Dictionary<AgentMemorySourceKey, AgentMemorySourceGrantDto>();
@@ -297,7 +271,7 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
 
                     return new AgentMemoryToolItemDto
                     {
-                        MemoryHandle = handleLookup.GetValueOrDefault(m.MemoryId, string.Empty),
+                        MemoryHandle = confirmedHandlesByResourceId[m.MemoryId].HandleId,
                         Kind = MapToolKind(m.Kind),
                         Content = m.Content,
                         CanonicalContentHash = new AgentMemoryToolCanonicalHashDto

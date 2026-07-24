@@ -133,15 +133,12 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
                     if (sourceClosure is null) continue;
                     if (!string.Equals(sourceClosure.TenantId, principal.TenantId, StringComparison.Ordinal)) continue;
 
-                    var sourceClosureRefs = sourceClosure.CurrentDescriptorRefs;
-                    var scopeBinding = AgentMemoryHandleGrantMatrix.GetScopeBinding(sourceRef.SourceKind);
-                    var isUnscoped = scopeBinding == AgentMemoryHandleGrantMatrix.GrantScopeBinding.DescriptorBound
-                        && sourceClosureRefs.Count == 0;
-
-                    var closurePolicy = AgentMemoryHandleGrantMatrix.GetClosurePolicy(sourceRef.SourceKind);
-                    var requiredDescriptorRefs = closurePolicy == AgentMemoryHandleGrantMatrix.GrantClosurePolicy.Exact
-                        ? sourceClosureRefs
-                        : Array.Empty<DescriptorRef>();
+                    var requiredDescriptorRefs = AgentMemoryHandleGrantMatrix.GetRequiredDescriptorRefs(
+                        sourceRef.SourceKind,
+                        sourceClosure.CurrentDescriptorRefs);
+                    var isUnscoped = AgentMemoryHandleGrantMatrix.IsUnscopedGrant(
+                        sourceRef.SourceKind,
+                        requiredDescriptorRefs);
 
                     grantPlan[sourceKey] = new AgentMemoryAccessSourceGrant
                     {
@@ -174,36 +171,9 @@ internal sealed class AgentContextReadCore : IAgentContextReadCore
 
         try
         {
-            // Build confirmed grant lookup by SourceKey
-            var confirmedGrants = prepared.Grants?.Grants ?? [];
-            var confirmedByKey = new Dictionary<AgentMemorySourceKey, AgentMemoryAccessSourceGrant>();
-            foreach (var g in confirmedGrants)
-            {
-                if (g is null) continue;
-                var key = new AgentMemorySourceKey(
-                    g.SourceRef.TenantId, g.SourceRef.SourceKind, g.SourceRef.SourceId,
-                    g.SourceRef.RangeStart, g.SourceRef.RangeEnd);
-                if (confirmedByKey.ContainsKey(key))
-                    throw new AgentMemoryReadCoreException("grant-contract",
-                        $"Coordinator returned duplicate confirmed grant for SourceKey {key}");
-                confirmedByKey[key] = g;
-            }
-
-            // Contract: every requested SourceKey must have a confirmed grant
-            foreach (var requestedKey in grantPlan.Keys)
-            {
-                if (!confirmedByKey.ContainsKey(requestedKey))
-                    throw new AgentMemoryReadCoreException("grant-contract",
-                        $"Coordinator did not confirm grant for SourceKey {requestedKey}");
-            }
-
-            // Contract: no extra confirmed grants beyond the plan
-            foreach (var confirmedKey in confirmedByKey.Keys)
-            {
-                if (!grantPlan.ContainsKey(confirmedKey))
-                    throw new AgentMemoryReadCoreException("grant-contract",
-                        $"Coordinator returned unexpected confirmed grant for SourceKey {confirmedKey}");
-            }
+            var confirmedByKey = AgentMemoryPreparedArtifactContractVerifier.VerifyGrants(
+                grantPlan,
+                prepared.Grants?.Grants);
 
             // Map blocks to DTOs with Coordinator-confirmed grants
             var sourceKeyToGrantDto = new Dictionary<AgentMemorySourceKey, AgentMemorySourceGrantDto>();

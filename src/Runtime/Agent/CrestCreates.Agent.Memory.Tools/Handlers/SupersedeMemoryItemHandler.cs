@@ -1,6 +1,7 @@
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.CanonicalHashing;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Capability.Abstractions;
 
@@ -50,12 +51,25 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
             IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId, IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime)
         };
         AgentMemoryPreparedSecurityArtifacts? prepared = null;
-        var grantInputs = replacement.SourceRefs.Select(source => new AgentMemorySourceGrant
+        var grantInputs = replacement.SourceRefs.Select(source =>
         {
-            GrantId = AgentMemorySecurityArtifactIdGenerator.Create("grt"), SourceRef = source, Principal = principal,
-            ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal), RequiredDescriptorRefs = EffectiveDescriptorRefs(replacement).Concat(source.DescriptorRefs).Distinct().ToArray(),
-            IsUnscoped = EffectiveDescriptorRefs(replacement).Count == 0 && source.DescriptorRefs.Count == 0,
-            IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId, IssuedAt = now, ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
+            var requiredDescriptorRefs = AgentMemoryHandleGrantMatrix.GetRequiredDescriptorRefs(
+                source.SourceKind,
+                source.DescriptorRefs);
+            return new AgentMemorySourceGrant
+            {
+                GrantId = AgentMemorySecurityArtifactIdGenerator.Create("grt"),
+                SourceRef = source,
+                Principal = principal,
+                ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal),
+                RequiredDescriptorRefs = requiredDescriptorRefs,
+                IsUnscoped = AgentMemoryHandleGrantMatrix.IsUnscopedGrant(
+                    source.SourceKind,
+                    requiredDescriptorRefs),
+                IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId,
+                IssuedAt = now,
+                ExpiresAt = now.Add(scope.ExpansionGrantLifetime)
+            };
         }).ToArray();
         try
         {

@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
-using System.Text;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
@@ -197,22 +195,4 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
 
     private static string MakeResourceKey(AgentMemoryAccessResourceHandle handle)
         => $"{handle.ResourceKind}:{handle.ResourceId}:{handle.ScopeFingerprint}";
-}
-
-/// <summary>
-/// Computes a stable scope fingerprint for the projection access scope.
-/// </summary>
-internal static class AgentMemoryScopeFingerprint
-{
-    public static string Compute(AgentMemoryAccessScope scope)
-    {
-        var sb = new StringBuilder();
-        sb.Append($"projection-scope-v1|{scope.TenantId}|{scope.AllowUnscopedMemory}|");
-        var ordered = scope.VisibleDescriptorRefs
-            .OrderBy(r => r.Namespace, StringComparer.Ordinal)
-            .ThenBy(r => r.Id, StringComparer.Ordinal)
-            .ThenBy(r => r.Version);
-        sb.Append(string.Join('|', ordered.Select(r => $"{r.Namespace}:{r.Id}:{r.Version}")));
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()))).ToLowerInvariant();
-    }
 }

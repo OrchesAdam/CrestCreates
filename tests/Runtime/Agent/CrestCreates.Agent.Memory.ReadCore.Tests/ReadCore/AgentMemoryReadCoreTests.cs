@@ -1,11 +1,13 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.ReadCore;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using FluentAssertions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -140,17 +142,20 @@ public class AgentMemoryReadCoreTests
                 It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
                 It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
-            {
-                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
-                Grants = null,
-                CompensationToken = new AgentMemoryArtifactCompensationToken { TokenId = "tok1" },
-                Receipt = new AgentMemoryArtifactBatchReceipt
+            .ReturnsAsync((AgentMemoryAccessPrincipal p, AgentMemoryArtifactOrigin o, AgentMemoryAccessScope s,
+                string purpose, int ordinal, IReadOnlyList<AgentMemoryAccessResourceHandle> handles,
+                IReadOnlyList<AgentMemoryAccessSourceGrant> grants, CancellationToken ct) =>
+                new AgentMemoryAccessPreparedArtifacts
                 {
-                    HandleBatch = new AgentMemoryArtifactBatchReceipt.BatchReceipt { BatchHash = "h", Count = 1, ReusedExisting = false },
-                    GrantBatch = null
-                }
-            });
+                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = handles.ToList(), ReusedExisting = false },
+                    Grants = null,
+                    CompensationToken = new AgentMemoryArtifactCompensationToken { TokenId = "tok1" },
+                    Receipt = new AgentMemoryArtifactBatchReceipt
+                    {
+                        HandleBatch = new AgentMemoryArtifactBatchReceipt.BatchReceipt { BatchHash = "h", Count = handles.Count, ReusedExisting = false },
+                        GrantBatch = null
+                    }
+                });
 
         var mockHandleResolver = new Mock<IAgentMemoryAccessHandleResolver>();
         var lifetimePolicy = new DefaultAgentMemoryArtifactLifetimePolicy(new AgentMemoryProjectionSecurityOptions());
@@ -296,13 +301,16 @@ public class AgentMemoryReadCoreTests
                 It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
                 It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
-            {
-                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
-                Grants = null,
-                CompensationToken = null,
-                Receipt = new AgentMemoryArtifactBatchReceipt { HandleBatch = null, GrantBatch = null }
-            });
+            .ReturnsAsync((AgentMemoryAccessPrincipal p, AgentMemoryArtifactOrigin o, AgentMemoryAccessScope s,
+                string purpose, int ordinal, IReadOnlyList<AgentMemoryAccessResourceHandle> handles,
+                IReadOnlyList<AgentMemoryAccessSourceGrant> grants, CancellationToken ct) =>
+                new AgentMemoryAccessPreparedArtifacts
+                {
+                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = handles.ToList(), ReusedExisting = false },
+                    Grants = null,
+                    CompensationToken = null,
+                    Receipt = new AgentMemoryArtifactBatchReceipt { HandleBatch = null, GrantBatch = null }
+                });
 
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
@@ -493,7 +501,7 @@ public class AgentMemoryReadCoreTests
                 IReadOnlyList<AgentMemoryAccessSourceGrant> grants, CancellationToken ct) =>
                 new AgentMemoryAccessPreparedArtifacts
                 {
-                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
+                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = handles.ToList(), ReusedExisting = false },
                     Grants = new AgentMemoryAccessGrantIssueResult { Grants = grants.ToList(), ReusedExisting = false },
                     CompensationToken = grants.Count > 0
                         ? new AgentMemoryArtifactCompensationToken { TokenId = "comp-" + Guid.NewGuid().ToString("N") }
@@ -582,7 +590,7 @@ public class AgentMemoryReadCoreTests
                 capturedGrants = grants;
                 return new AgentMemoryAccessPreparedArtifacts
                 {
-                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
+                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = handles.ToList(), ReusedExisting = false },
                     Grants = new AgentMemoryAccessGrantIssueResult { Grants = grants.ToList(), ReusedExisting = false },
                     CompensationToken = grants.Count > 0
                         ? new AgentMemoryArtifactCompensationToken { TokenId = "comp-" + Guid.NewGuid().ToString("N") }
@@ -658,13 +666,16 @@ public class AgentMemoryReadCoreTests
             .Callback<AgentMemoryAccessPrincipal, AgentMemoryArtifactOrigin, AgentMemoryAccessScope,
                 string, int, IReadOnlyList<AgentMemoryAccessResourceHandle>, IReadOnlyList<AgentMemoryAccessSourceGrant>, CancellationToken>(
                 (_, _, _, _, _, _, grants, _) => capturedGrants = grants)
-            .ReturnsAsync(new AgentMemoryAccessPreparedArtifacts
-            {
-                Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
-                Grants = new AgentMemoryAccessGrantIssueResult { Grants = [], ReusedExisting = false },
-                CompensationToken = null,
-                Receipt = new AgentMemoryArtifactBatchReceipt { HandleBatch = null, GrantBatch = null }
-            });
+            .ReturnsAsync((AgentMemoryAccessPrincipal p, AgentMemoryArtifactOrigin o, AgentMemoryAccessScope s,
+                string purpose, int ordinal, IReadOnlyList<AgentMemoryAccessResourceHandle> handles,
+                IReadOnlyList<AgentMemoryAccessSourceGrant> grants, CancellationToken ct) =>
+                new AgentMemoryAccessPreparedArtifacts
+                {
+                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = handles.ToList(), ReusedExisting = false },
+                    Grants = new AgentMemoryAccessGrantIssueResult { Grants = [], ReusedExisting = false },
+                    CompensationToken = null,
+                    Receipt = new AgentMemoryArtifactBatchReceipt { HandleBatch = null, GrantBatch = null }
+                });
 
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
@@ -724,7 +735,7 @@ public class AgentMemoryReadCoreTests
                 capturedGrants = grants;
                 return new AgentMemoryAccessPreparedArtifacts
                 {
-                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
+                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = handles.ToList(), ReusedExisting = false },
                     Grants = new AgentMemoryAccessGrantIssueResult { Grants = grants.ToList(), ReusedExisting = false },
                     CompensationToken = grants.Count > 0
                         ? new AgentMemoryArtifactCompensationToken { TokenId = "comp-" + Guid.NewGuid().ToString("N") }
@@ -820,7 +831,7 @@ public class AgentMemoryReadCoreTests
                 capturedGrants = grants;
                 return new AgentMemoryAccessPreparedArtifacts
                 {
-                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = [], ReusedExisting = false },
+                    Handles = new AgentMemoryAccessHandleIssueResult { Handles = handles.ToList(), ReusedExisting = false },
                     Grants = new AgentMemoryAccessGrantIssueResult { Grants = grants.ToList(), ReusedExisting = false },
                     CompensationToken = grants.Count > 0
                         ? new AgentMemoryArtifactCompensationToken { TokenId = "comp-" + Guid.NewGuid().ToString("N") }
@@ -1353,7 +1364,7 @@ public class AgentMemoryReadCoreTests
     }
 
     [Fact]
-    public async Task RecallAsync_DuplicateHandleResourceId_MappingFails_ArtifactsRevoked()
+    public async Task RecallAsync_DuplicateMemoryId_RejectsBeforePrepare()
     {
         var principal = MakePrincipal();
         var scope = MakeScope();
@@ -1412,8 +1423,9 @@ public class AgentMemoryReadCoreTests
             Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
 
         var act = async () => await core.RecallAsync(principal, MakeOrigin(), scope, input);
-        await act.Should().ThrowAsync<ArgumentException>();
-        revoked.Should().BeTrue();
+        var exception = await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
+        exception.And.Code.Should().Be("handle-contract");
+        revoked.Should().BeFalse("the invalid handle plan is rejected before any artifact is prepared");
     }
 
     [Fact]
@@ -1751,4 +1763,252 @@ public class AgentMemoryReadCoreTests
         await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         coordinatorCalled.Should().BeFalse("conflicting descriptor refs must reject before Coordinator is called");
     }
+
+    [Fact]
+    public async Task MemoryRecall_MissingConfirmedHandle_ThrowsAndCompensates()
+    {
+        var scenario = await RunHandleContractScenarioAsync(_ => []);
+
+        scenario.Exception.Should().NotBeNull();
+        scenario.Exception!.Code.Should().Be("handle-contract");
+        scenario.Revoked.Should().BeTrue();
+        scenario.Outcome.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task MemoryRecall_ExtraConfirmedHandle_ThrowsAndCompensates()
+    {
+        var scenario = await RunHandleContractScenarioAsync(planned =>
+        [
+            .. planned,
+            planned[0] with { HandleId = "confirmed-extra", ResourceId = "memory-extra" }
+        ]);
+
+        scenario.Exception.Should().NotBeNull();
+        scenario.Exception!.Code.Should().Be("handle-contract");
+        scenario.Revoked.Should().BeTrue();
+        scenario.Outcome.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task MemoryRecall_DuplicateConfirmedResourceId_ThrowsAndCompensates()
+    {
+        var scenario = await RunHandleContractScenarioAsync(planned =>
+        [
+            planned[0] with { HandleId = "confirmed-first" },
+            planned[0] with { HandleId = "confirmed-duplicate" }
+        ]);
+
+        scenario.Exception.Should().NotBeNull();
+        scenario.Exception!.Code.Should().Be("handle-contract");
+        scenario.Revoked.Should().BeTrue();
+        scenario.Outcome.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task MemoryRecall_ConfirmedHandlePrincipalMismatch_ThrowsAndCompensates()
+    {
+        var scenario = await RunHandleContractScenarioAsync(planned =>
+        [
+            planned[0] with
+            {
+                HandleId = "confirmed-principal-mismatch",
+                Principal = planned[0].Principal with { TenantId = "foreign-tenant" }
+            }
+        ]);
+
+        scenario.Exception.Should().NotBeNull();
+        scenario.Exception!.Code.Should().Be("handle-contract");
+        scenario.Revoked.Should().BeTrue();
+        scenario.Outcome.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task MemoryRecall_AllReturnedItemsHaveNonEmptyCanonicalHandle()
+    {
+        var scenario = await RunHandleContractScenarioAsync(planned =>
+        [
+            planned[0] with { HandleId = "confirmed-canonical-handle" }
+        ]);
+
+        scenario.Exception.Should().BeNull();
+        scenario.Outcome.Should().NotBeNull();
+        scenario.Outcome!.Result.Items.Should().ContainSingle();
+        scenario.Outcome.Result.Items[0].MemoryHandle.Should().Be("confirmed-canonical-handle");
+        scenario.Outcome.Result.Items.Should().OnlyContain(item =>
+            !string.IsNullOrWhiteSpace(item.MemoryHandle));
+    }
+
+    [Fact]
+    public async Task MemoryRecall_NoActiveStoredHandleIsAbsentFromOutput()
+    {
+        var principal = MakePrincipal();
+        var descriptor = new DescriptorRef("ns", "visible", 1);
+        var scope = MakeScopeWithVisibleRefs([descriptor]);
+        var retriever = new Mock<IAgentMemoryRetriever>();
+        retriever
+            .Setup(item => item.RecallAsync(
+                It.IsAny<AgentMemoryQuery>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack
+            {
+                TenantId = principal.TenantId,
+                Memories =
+                [
+                    MakeMemory("memory-stored-a", [descriptor]),
+                    MakeMemory("memory-stored-b", [descriptor])
+                ]
+            });
+
+        var timeProvider = TimeProvider.System;
+        var handleStore = new AgentMemoryAccessHandleStore(timeProvider);
+        var options = new AgentMemoryProjectionSecurityOptions();
+        var coordinator = new AgentMemoryAccessArtifactCoordinator(
+            handleStore,
+            new AgentMemoryAccessGrantStore(timeProvider),
+            new AgentMemoryAccessArtifactBatchStore(),
+            new DefaultAgentMemoryArtifactLifetimePolicy(options),
+            timeProvider,
+            Options.Create(options));
+        var core = new AgentMemoryReadCore(
+            retriever.Object,
+            Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            coordinator,
+            new DefaultAgentMemoryArtifactLifetimePolicy(options),
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(),
+            timeProvider);
+
+        var outcome = await core.RecallAsync(
+            principal,
+            MakeOrigin(),
+            scope,
+            new BuildAgentMemoryPackInput
+            {
+                MaximumCount = 5,
+                CharacterBudget = 10_000
+            });
+
+        var outputHandles = outcome.Result.Items
+            .Select(item => item.MemoryHandle)
+            .ToHashSet(StringComparer.Ordinal);
+        outputHandles.Should().HaveCount(2);
+        outcome.Receipt.HandleBatch.Should().NotBeNull();
+        outcome.Receipt.HandleBatch!.Count.Should().Be(outputHandles.Count);
+        foreach (var handleId in outputHandles)
+        {
+            var stored = await handleStore.GetAsync(handleId);
+            stored.Should().NotBeNull();
+            stored!.State.Should().Be(AgentMemorySecurityArtifactState.Active);
+        }
+    }
+
+    private static async Task<HandleContractScenario> RunHandleContractScenarioAsync(
+        Func<IReadOnlyList<AgentMemoryAccessResourceHandle>, IReadOnlyList<AgentMemoryAccessResourceHandle>>
+            confirmHandles)
+    {
+        var principal = MakePrincipal();
+        var scope = MakeScope();
+        var memory = MakeMemory("memory-contract");
+        var input = new BuildAgentMemoryPackInput
+        {
+            MaximumCount = 5,
+            CharacterBudget = 10_000
+        };
+
+        var retriever = new Mock<IAgentMemoryRetriever>();
+        retriever
+            .Setup(item => item.RecallAsync(
+                It.IsAny<AgentMemoryQuery>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack
+            {
+                TenantId = principal.TenantId,
+                Memories = [memory],
+                WasTruncated = false
+            });
+
+        var revoked = false;
+        IReadOnlyList<AgentMemoryAccessResourceHandle> confirmedHandles = [];
+        var compensationToken = new AgentMemoryArtifactCompensationToken
+        {
+            TokenId = "handle-contract-compensation"
+        };
+        var coordinator = new Mock<IAgentMemoryAccessArtifactCoordinator>();
+        coordinator
+            .Setup(item => item.PrepareAsync(
+                It.IsAny<AgentMemoryAccessPrincipal>(),
+                It.IsAny<AgentMemoryArtifactOrigin>(),
+                It.IsAny<AgentMemoryAccessScope>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessResourceHandle>>(),
+                It.IsAny<IReadOnlyList<AgentMemoryAccessSourceGrant>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((
+                AgentMemoryAccessPrincipal p,
+                AgentMemoryArtifactOrigin o,
+                AgentMemoryAccessScope s,
+                string purpose,
+                int ordinal,
+                IReadOnlyList<AgentMemoryAccessResourceHandle> handles,
+                IReadOnlyList<AgentMemoryAccessSourceGrant> grants,
+                CancellationToken ct) =>
+            {
+                confirmedHandles = confirmHandles(handles);
+                return new AgentMemoryAccessPreparedArtifacts
+                {
+                    Handles = new AgentMemoryAccessHandleIssueResult
+                    {
+                        Handles = confirmedHandles,
+                        ReusedExisting = false
+                    },
+                    Grants = new AgentMemoryAccessGrantIssueResult
+                    {
+                        Grants = grants,
+                        ReusedExisting = false
+                    },
+                    CompensationToken = compensationToken,
+                    Receipt = new AgentMemoryArtifactBatchReceipt
+                    {
+                        HandleBatch = new AgentMemoryArtifactBatchReceipt.BatchReceipt
+                        {
+                            BatchHash = "handle-contract-batch",
+                            Count = confirmedHandles.Count,
+                            ReusedExisting = false
+                        },
+                        GrantBatch = null
+                    }
+                };
+            });
+        coordinator
+            .Setup(item => item.RevokeCreatedAsync(
+                compensationToken,
+                It.IsAny<CancellationToken>()))
+            .Callback(() => revoked = true)
+            .Returns(ValueTask.CompletedTask);
+
+        var core = new AgentMemoryReadCore(
+            retriever.Object,
+            Mock.Of<IAgentMemoryAccessHandleResolver>(),
+            coordinator.Object,
+            new DefaultAgentMemoryArtifactLifetimePolicy(new AgentMemoryProjectionSecurityOptions()),
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(),
+            TimeProvider.System);
+
+        try
+        {
+            var outcome = await core.RecallAsync(principal, MakeOrigin(), scope, input);
+            return new HandleContractScenario(outcome, null, revoked, confirmedHandles);
+        }
+        catch (AgentMemoryReadCoreException exception)
+        {
+            return new HandleContractScenario(null, exception, revoked, confirmedHandles);
+        }
+    }
+
+    private sealed record HandleContractScenario(
+        AgentMemoryReadCoreOutcome<BuildAgentMemoryPackResult>? Outcome,
+        AgentMemoryReadCoreException? Exception,
+        bool Revoked,
+        IReadOnlyList<AgentMemoryAccessResourceHandle> ConfirmedHandles);
 }

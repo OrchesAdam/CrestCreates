@@ -1,10 +1,13 @@
+using System.Security.Claims;
 using System.Text.Json;
 using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.Stores;
 using CrestCreates.Agent.Memory.Tools;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Mcp;
@@ -16,6 +19,7 @@ using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Metadata.Registry;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Schema;
 using CrestCreates.Schema.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
@@ -56,6 +60,9 @@ internal static class McpMemoryAotFixtureRunner
             builder.Services.AddSingleton<ISchemaRegistry>(schemas);
             builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
             builder.Services.AddSingleton<IAgentMemoryAccessScopeProvider>(new AotScopeProvider());
+            builder.Services.AddSingleton<ITenantContext>(new AotTenantContext("aot-tenant"));
+            builder.Services.AddSingleton<ICurrentUser>(new AotCurrentUser("aot-user", "aot-tenant"));
+            builder.Services.AddSingleton<IPermissionChecker, AotPermissionChecker>();
             builder.Services.AddAgentMemoryRuntime();
             builder.Services.AddCapabilityRuntime();
             builder.Services.AddCrestMcpToolProjection(options =>
@@ -115,6 +122,34 @@ internal static class McpMemoryAotFixtureRunner
             };
             await conversationStore.SaveConversationAsync(conversation);
 
+            // Seed a real compressed context for ctx_recall.
+            var compressedContextStore = host.Services.GetRequiredService<IAgentCompressedContextStore>();
+            await compressedContextStore.SaveCompressedContextAsync(new AgentCompressedContext
+            {
+                ContextId = "aot-context",
+                TenantId = tenantId,
+                Blocks =
+                [
+                    new AgentCompressedContextBlock
+                    {
+                        BlockId = "aot-context-block",
+                        TenantId = tenantId,
+                        Content = "Compressed context from AOT fixture",
+                        CanonicalContentHash = contentHash,
+                        SourceRefs =
+                        [
+                            new AgentContextSourceRef
+                            {
+                                SourceKind = AgentSourceKind.ConversationTurn,
+                                TenantId = tenantId,
+                                SourceId = "aot-conv",
+                                DescriptorRefs = [descA]
+                            }
+                        ]
+                    }
+                ]
+            });
+
             // Seed memory with a ConversationTurn source ref.
             var memoryStore = host.Services.GetRequiredService<IAgentMemoryStore>();
             var memory = new AgentMemoryItem
@@ -148,7 +183,7 @@ internal static class McpMemoryAotFixtureRunner
                 TenantId = tenantId,
                 UserId = "aot-user",
                 CallerKind = AgentMemoryCallerKind.Mcp,
-                CallerId = "aot-fixture-host",
+                CallerId = "aot-fixture",
                 SecurityContextId = "aot-session"
             };
             var origin = new AgentMemoryArtifactOrigin
@@ -190,7 +225,7 @@ internal static class McpMemoryAotFixtureRunner
             {
                 HandleId = Guid.NewGuid().ToString("N"),
                 ResourceKind = AgentMemoryResourceKind.Context,
-                ResourceId = "aot-conv",
+                ResourceId = "aot-context",
                 Principal = principal,
                 RequiredDescriptorRefs = new[] { descA },
                 IsUnscoped = false,
@@ -316,8 +351,49 @@ internal static class McpMemoryAotFixtureRunner
             hostContext,
             InvocationId: $"inv-{toolName}",
             RequestId: $"req-{toolName}",
-            SessionId: $"session-{toolName}");
+            SessionId: "aot-session");
         return await invoker.InvokeAsync(toolName, json, callContext, CancellationToken.None);
+    }
+
+    private sealed class AotTenantContext(string tenantId) : ITenantContext
+    {
+        public string? CurrentTenantId => tenantId;
+    }
+
+    private sealed class AotCurrentUser(string userId, string tenantId) : ICurrentUser
+    {
+        public string Id => userId;
+        public string UserName => userId;
+        public bool IsAuthenticated => true;
+        public string TenantId => tenantId;
+        public string[] Roles => [];
+        public Guid? OrganizationId => null;
+        public IReadOnlyList<Guid> OrganizationIds => [];
+        public int DataScopeValue => 0;
+        public bool IsSuperAdmin => false;
+        public string FindClaimValue(string claimType) => string.Empty;
+        public string[] FindClaimValues(string claimType) => [];
+        public bool IsInRole(string roleName) => false;
+        public bool IsInOrganization(Guid orgId) => false;
+    }
+
+    private sealed class AotPermissionChecker : IPermissionChecker
+    {
+        public Task<bool> IsGrantedAsync(string permissionName) => Task.FromResult(true);
+
+        public Task<bool> IsGrantedAsync(ClaimsPrincipal principal, string permissionName)
+            => Task.FromResult(true);
+
+        public Task<MultiplePermissionGrantResult> IsGrantedAsync(string[] permissionNames)
+            => Task.FromResult(new MultiplePermissionGrantResult(
+                permissionNames.ToDictionary(permission => permission, _ => true)));
+
+        public Task<MultiplePermissionGrantResult> IsGrantedAsync(
+            ClaimsPrincipal principal,
+            string[] permissionNames)
+            => IsGrantedAsync(permissionNames);
+
+        public Task CheckAsync(string permissionName) => Task.CompletedTask;
     }
 
     private sealed class AotScopeProvider : IAgentMemoryAccessScopeProvider, IAgentMemoryAccessScopeProviderCapabilities

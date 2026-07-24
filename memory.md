@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-21 (Phase 8d+ architecture review closure)
+Last Updated: 2026-07-24 (Phase 8c+ Memory credential contract review closure)
 
 ## Purpose
 
@@ -13,6 +13,45 @@ This file records the current platform status for CrestCreates so future threads
 No approved-but-unimplemented design is currently recorded here.
 
 ## Completed Features
+
+### Phase 8c+ — MCP Context/Memory Projection Review Closure
+
+Status: Implemented; the remaining Memory Handle artifact-contract blocker and
+the ambiguous cross-tenant MCP proof are closed on the canonical Projection /
+ReadCore / MCP mainline.
+
+Memory Recall now constructs Handle and Grant plans before Coordinator
+preparation and passes both through one exact-set verifier. Requested keys,
+Coordinator-confirmed keys, and caller-visible credentials must be equal.
+Missing, extra, duplicate, empty, or binding-mismatched artifacts fail with the
+typed `handle-contract` / `grant-contract` error, revoke batch-created
+artifacts, and never return a partial Completed result. Confirmed Handles are
+bound to the planned Principal, ScopeFingerprint, ResourceKind, descriptor
+closure, and unscoped semantics; output mapping has no empty-string fallback.
+
+The Handle/Grant support matrix and canonical projection scope fingerprint now
+live in `Projection.Abstractions` as the single contract used by Coordinator,
+Resolvers, ReadCore, and Memory Tool handlers. The concrete Projection copy and
+handler-local grant-binding variants were removed.
+
+Cross-tenant MCP coverage uses two independently built Hosts with one shared
+canonical Handle Store. Host, Session, and UserId remain identical while only
+TenantId changes. The tests prove the Handle existed, the shared Handle Store
+was read, the result was unified unavailable, and the Context Store was not
+read.
+
+Executable evidence:
+
+- Projection security tests: 185 passing.
+- ReadCore contract/composition tests: 85 passing.
+- MCP Memory unit tests: 27 passing; real MCP E2E tests: 28 passing.
+- Dependency boundary tests: 46 passing; Capability tests: 142 passing;
+  Memory Tool tests: 15 passing; generated Memory Tool E2E: 1 passing.
+- linux-x64 NativeAOT publish-link-run fixtures: Memory Tools 1 passing and
+  MCP Memory 1 passing. Both fixtures use canonical security preparation and
+  real runtime resources rather than direct legacy store writes or mismatched
+  Principal fields.
+- Canonical full solution build completes with 0 errors.
 
 ### Phase 8d+ — Governed Agent Memory Tool Projection
 

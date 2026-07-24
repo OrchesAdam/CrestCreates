@@ -33,30 +33,30 @@ public sealed record AgentMemoryToolCandidateDto
 
 public sealed record CompressAgentHistoryInput
 {
-    public required string HistorySourceHandle { get; init; }
+    public string HistorySourceHandle { get; init; } = string.Empty;
 }
 
 public sealed record ExtractMemoryCandidatesInput
 {
-    public required string ContextHandle { get; init; }
+    public string ContextHandle { get; init; } = string.Empty;
 }
 
 public sealed record PromoteMemoryCandidateInput
 {
-    public required string CandidateHandle { get; init; }
+    public string CandidateHandle { get; init; } = string.Empty;
     public string? Explanation { get; init; }
 }
 
 public sealed record RejectMemoryCandidateInput
 {
-    public required string CandidateHandle { get; init; }
+    public string CandidateHandle { get; init; } = string.Empty;
     public string? Explanation { get; init; }
 }
 
 public sealed record SupersedeMemoryItemInput
 {
-    public required string MemoryHandle { get; init; }
-    public required string ReplacementCandidateHandle { get; init; }
+    public string MemoryHandle { get; init; } = string.Empty;
+    public string ReplacementCandidateHandle { get; init; } = string.Empty;
     public string? Explanation { get; init; }
 }
 

@@ -1,4 +1,5 @@
 using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
 
@@ -109,7 +110,7 @@ internal sealed class AgentMemoryAccessHandleResolver : IAgentMemoryAccessHandle
         return new AgentMemoryAccessResolvedResource
         {
             Handle = handle,
-            EffectiveDescriptorRefs = handle.RequiredDescriptorRefs
+            EffectiveDescriptorRefs = handle.RequiredDescriptorRefs ?? Array.Empty<DescriptorRef>()
         };
     }
 

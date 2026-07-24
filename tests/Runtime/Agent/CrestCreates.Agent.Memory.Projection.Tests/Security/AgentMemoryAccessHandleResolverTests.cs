@@ -1,5 +1,6 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
