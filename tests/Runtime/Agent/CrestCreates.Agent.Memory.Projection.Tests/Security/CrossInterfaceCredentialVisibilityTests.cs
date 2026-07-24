@@ -1,5 +1,6 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
@@ -12,7 +13,7 @@ namespace CrestCreates.Agent.Memory.Projection.Tests.Security;
 
 public class CrossInterfaceCredentialVisibilityTests
 {
-    private static readonly string ScopeFp = "c53e1dcef4caa99ad1e1a241661278d78220a035a812af8466c9093f4d45dd6e";
+    private static string ScopeFp => AgentMemoryScopeFingerprint.Compute(MakeScope());
     private static AgentMemoryAccessPrincipal MakeNewPrincipal(
         AgentMemoryCallerKind kind = AgentMemoryCallerKind.AgentTool)
         => new()

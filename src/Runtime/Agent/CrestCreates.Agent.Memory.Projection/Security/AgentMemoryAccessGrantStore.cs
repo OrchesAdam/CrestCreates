@@ -5,19 +5,23 @@ using CrestCreates.Agent.Memory.Tools;
 namespace CrestCreates.Agent.Memory.Projection.Security;
 
 /// <summary>
-/// In-memory source grant store. Same read-purification semantics as HandleStore.
-/// Revocation fully cleans batch index, identity plan, and per-operation counters.
+/// In-memory source grant store. Reads project expiry without mutation. An
+/// issuance retry atomically replaces an incomplete, non-active, or expired
+/// batch after cleaning its identity and quota accounting.
 /// </summary>
 internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
 {
     private readonly ConcurrentDictionary<string, AgentMemoryAccessSourceGrant> _grants = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, HashSet<string>> _batchIndex = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, int> _batchExpectedCount = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _grantToBatch = new(StringComparer.Ordinal); // grantId -> batchKey
     private readonly ConcurrentDictionary<string, string> _grantToBindingHash = new(StringComparer.Ordinal); // grantId -> originBindingHash value
+    private readonly ConcurrentDictionary<string, string> _grantToResourceKey = new(StringComparer.Ordinal); // grantId -> quota resource key
     private readonly ConcurrentDictionary<string, int> _perResourceCount = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _perOperationCount = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _identityPlans = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _batchToIdentity = new(StringComparer.Ordinal); // batchCanonicalKey -> identityKey
+    private readonly ConcurrentDictionary<string, string> _identityToBatch = new(StringComparer.Ordinal); // identityKey -> batchCanonicalKey
     private readonly SemaphoreSlim _stateLock = new(1, 1);
     private readonly TimeProvider _timeProvider;
 
@@ -66,15 +70,45 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
     {
         var key = batchKey.ToCanonicalKey();
         var identity = batchKey.ToIdentityKey();
+        var now = _timeProvider.GetUtcNow();
+
+        if (grants.Any(grant =>
+                grant.State != AgentMemorySecurityArtifactState.Active
+                || grant.ExpiresAt <= now))
+        {
+            throw new InvalidOperationException("Only active, unexpired source grants can be issued.");
+        }
 
         if (_batchIndex.TryGetValue(key, out var existingIds))
         {
-            var existing = existingIds.Select(id => _grants[id]).ToArray();
-            return new AgentMemoryAccessGrantIssueResult
+            if (TryGetReusableBatch(key, existingIds, now, out var existing)
+                && existing.Count == grants.Count)
             {
-                Grants = existing,
-                ReusedExisting = true
-            };
+                return new AgentMemoryAccessGrantIssueResult
+                {
+                    Grants = existing,
+                    ReusedExisting = true
+                };
+            }
+
+            RemoveBatchInternal(key, existingIds);
+        }
+        else if (_identityToBatch.TryGetValue(identity, out var identityBatchKey))
+        {
+            if (_batchIndex.TryGetValue(identityBatchKey, out var identityBatchIds))
+            {
+                if (TryGetReusableBatch(identityBatchKey, identityBatchIds, now, out _))
+                {
+                    throw new InvalidOperationException(
+                        "Security artifact batch plan conflicts with an existing preparation.");
+                }
+
+                RemoveBatchInternal(identityBatchKey, identityBatchIds);
+            }
+            else
+            {
+                RemoveBatchIdentityInternal(identityBatchKey, identity);
+            }
         }
 
         if (_identityPlans.TryGetValue(identity, out var existingPlan)
@@ -104,12 +138,16 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
             grantIds.Add(grant.GrantId);
             _grantToBatch[grant.GrantId] = key;
             _grantToBindingHash[grant.GrantId] = bindingHash;
-            _perResourceCount.AddOrUpdate(MakeResourceKey(grant), 1, (_, c) => c + 1);
+            var resourceKey = MakeResourceKey(grant);
+            _grantToResourceKey[grant.GrantId] = resourceKey;
+            _perResourceCount.AddOrUpdate(resourceKey, 1, (_, c) => c + 1);
         }
 
         _batchIndex[key] = grantIds;
+        _batchExpectedCount[key] = grants.Count;
         _identityPlans[identity] = batchKey.ArtifactPlanHash.Value;
         _batchToIdentity[key] = identity;
+        _identityToBatch[identity] = key;
         _perOperationCount.AddOrUpdate(bindingHash, grants.Count, (_, c) => c + grants.Count);
 
         return new AgentMemoryAccessGrantIssueResult
@@ -152,13 +190,13 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
             // Mark revoked
             _grants[grantId] = grant with { State = AgentMemorySecurityArtifactState.Revoked };
 
-            // Decrement per-resource count
-            _perResourceCount.AddOrUpdate(MakeResourceKey(grant), 0, (_, c) => Math.Max(0, c - 1));
+            if (_grantToResourceKey.TryRemove(grantId, out var resourceKey))
+                DecrementCounter(_perResourceCount, resourceKey);
 
             // Decrement per-operation count using stored binding hash
             if (_grantToBindingHash.TryRemove(grantId, out var bindingHash))
             {
-                _perOperationCount.AddOrUpdate(bindingHash, 0, (_, c) => Math.Max(0, c - 1));
+                DecrementCounter(_perOperationCount, bindingHash);
             }
 
             // Remove from batch index and identity plan
@@ -170,11 +208,13 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
                     if (batchIds.Count == 0)
                     {
                         _batchIndex.TryRemove(batchCanonicalKey, out _);
+                        _batchExpectedCount.TryRemove(batchCanonicalKey, out _);
 
                         // Clean up identity plan using stored identity key
                         if (_batchToIdentity.TryRemove(batchCanonicalKey, out var identityKey))
                         {
                             _identityPlans.TryRemove(identityKey, out _);
+                            _identityToBatch.TryRemove(identityKey, out _);
                         }
                     }
                 }
@@ -188,4 +228,74 @@ internal sealed class AgentMemoryAccessGrantStore : IAgentMemoryAccessGrantStore
 
     private static string MakeResourceKey(AgentMemoryAccessSourceGrant grant)
         => $"{grant.SourceRef.SourceKind}:{grant.SourceRef.SourceId}:{grant.ScopeFingerprint}";
+
+    private bool TryGetReusableBatch(
+        string batchCanonicalKey,
+        HashSet<string> existingIds,
+        DateTimeOffset now,
+        out IReadOnlyList<AgentMemoryAccessSourceGrant> existing)
+    {
+        if (!_batchExpectedCount.TryGetValue(batchCanonicalKey, out var expectedCount)
+            || existingIds.Count != expectedCount)
+        {
+            existing = [];
+            return false;
+        }
+
+        var artifacts = new List<AgentMemoryAccessSourceGrant>(existingIds.Count);
+        foreach (var grantId in existingIds)
+        {
+            if (!_grants.TryGetValue(grantId, out var grant)
+                || grant.State != AgentMemorySecurityArtifactState.Active
+                || grant.ExpiresAt <= now)
+            {
+                existing = [];
+                return false;
+            }
+
+            artifacts.Add(grant);
+        }
+
+        existing = artifacts;
+        return true;
+    }
+
+    private void RemoveBatchInternal(string batchCanonicalKey, HashSet<string> grantIds)
+    {
+        foreach (var grantId in grantIds.ToArray())
+        {
+            _grants.TryRemove(grantId, out _);
+            if (_grantToResourceKey.TryRemove(grantId, out var resourceKey))
+                DecrementCounter(_perResourceCount, resourceKey);
+            if (_grantToBindingHash.TryRemove(grantId, out var bindingHash))
+                DecrementCounter(_perOperationCount, bindingHash);
+
+            _grantToBatch.TryRemove(grantId, out _);
+        }
+
+        _batchIndex.TryRemove(batchCanonicalKey, out _);
+        _batchExpectedCount.TryRemove(batchCanonicalKey, out _);
+        if (_batchToIdentity.TryGetValue(batchCanonicalKey, out var identityKey))
+            RemoveBatchIdentityInternal(batchCanonicalKey, identityKey);
+    }
+
+    private void RemoveBatchIdentityInternal(string batchCanonicalKey, string identityKey)
+    {
+        _batchToIdentity.TryRemove(batchCanonicalKey, out _);
+        _identityToBatch.TryRemove(identityKey, out _);
+        _identityPlans.TryRemove(identityKey, out _);
+    }
+
+    private static void DecrementCounter(
+        ConcurrentDictionary<string, int> counters,
+        string key)
+    {
+        if (!counters.TryGetValue(key, out var current))
+            return;
+
+        if (current <= 1)
+            counters.TryRemove(key, out _);
+        else
+            counters[key] = current - 1;
+    }
 }

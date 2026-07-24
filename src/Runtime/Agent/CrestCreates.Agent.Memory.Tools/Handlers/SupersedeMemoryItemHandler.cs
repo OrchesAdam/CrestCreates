@@ -46,7 +46,7 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
         var newHandle = new AgentMemoryResourceHandle
         {
             HandleId = AgentMemorySecurityArtifactIdGenerator.Create("hnd"), ResourceKind = AgentMemoryResourceKind.Memory,
-            ResourceId = newMemoryId, Principal = principal, ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal),
+            ResourceId = newMemoryId, Principal = principal, ScopeFingerprint = AgentMemoryToolScopeFingerprint.Compute(scope, principal),
             RequiredDescriptorRefs = EffectiveDescriptorRefs(replacement), IsUnscoped = EffectiveDescriptorRefs(replacement).Count == 0,
             IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId, IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime)
         };
@@ -61,7 +61,7 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
                 GrantId = AgentMemorySecurityArtifactIdGenerator.Create("grt"),
                 SourceRef = source,
                 Principal = principal,
-                ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal),
+                ScopeFingerprint = AgentMemoryToolScopeFingerprint.Compute(scope, principal),
                 RequiredDescriptorRefs = requiredDescriptorRefs,
                 IsUnscoped = AgentMemoryHandleGrantMatrix.IsUnscopedGrant(
                     source.SourceKind,

@@ -214,4 +214,141 @@ public class AgentMemoryAccessHandleStoreTests
         r1.Should().NotBeNull();
         r2.Should().NotBeNull();
     }
+
+    [Fact]
+    public async Task HandleStore_ReissueExpiredBatch_CreatesFreshHandles()
+    {
+        var now = new DateTimeOffset(2026, 7, 24, 0, 0, 0, TimeSpan.Zero);
+        var timeProvider = new MutableTimeProvider(now);
+        var store = new AgentMemoryAccessHandleStore(timeProvider);
+        var batchKey = MakeBatchKey();
+        var expiredHandle = MakeHandle("h-expired") with
+        {
+            ResourceId = "shared-resource",
+            IssuedAt = now,
+            ExpiresAt = now.AddMinutes(1)
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [expiredHandle], 1, 1);
+        timeProvider.Advance(TimeSpan.FromMinutes(2));
+        var freshHandle = expiredHandle with
+        {
+            HandleId = "h-fresh",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var result = await store.TryIssueBatchAsync(batchKey, [freshHandle], 1, 1);
+
+        result.ReusedExisting.Should().BeFalse();
+        result.Handles.Should().ContainSingle()
+            .Which.HandleId.Should().Be(freshHandle.HandleId);
+        (await store.GetAsync(expiredHandle.HandleId)).Should().BeNull();
+        (await store.GetAsync(freshHandle.HandleId))!.State
+            .Should().Be(AgentMemorySecurityArtifactState.Active);
+    }
+
+    [Fact]
+    public async Task ReusedBatch_NonActiveArtifact_NotReturned()
+    {
+        var now = new DateTimeOffset(2026, 7, 24, 0, 0, 0, TimeSpan.Zero);
+        var timeProvider = new MutableTimeProvider(now);
+        var store = new AgentMemoryAccessHandleStore(timeProvider);
+        var batchKey = MakeBatchKey();
+        var first = MakeHandle("h-first") with
+        {
+            ResourceId = "resource-1",
+            IssuedAt = now,
+            ExpiresAt = now.AddMinutes(30)
+        };
+        var second = MakeHandle("h-second") with
+        {
+            ResourceId = "resource-2",
+            IssuedAt = now,
+            ExpiresAt = now.AddMinutes(30)
+        };
+        await store.TryIssueBatchAsync(batchKey, [first, second], 1, 2);
+        await store.RevokeAsync(first.HandleId, AgentMemoryCallerKind.AgentTool);
+
+        var replacements = new[]
+        {
+            first with { HandleId = "h-first-fresh" },
+            second with { HandleId = "h-second-fresh" }
+        };
+        var result = await store.TryIssueBatchAsync(batchKey, replacements, 1, 2);
+
+        result.ReusedExisting.Should().BeFalse();
+        result.Handles.Select(handle => handle.HandleId)
+            .Should().BeEquivalentTo("h-first-fresh", "h-second-fresh");
+        result.Handles.Should().OnlyContain(handle =>
+            handle.State == AgentMemorySecurityArtifactState.Active);
+        (await store.GetAsync(second.HandleId)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExpiredBatch_CountersAndIdentityPlanAreCleaned()
+    {
+        var now = new DateTimeOffset(2026, 7, 24, 0, 0, 0, TimeSpan.Zero);
+        var timeProvider = new MutableTimeProvider(now);
+        var store = new AgentMemoryAccessHandleStore(timeProvider);
+        var originalKey = MakeBatchKey();
+        var original = MakeHandle("h-original") with
+        {
+            ResourceId = "quota-resource",
+            IssuedAt = now,
+            ExpiresAt = now.AddMinutes(1)
+        };
+        await store.TryIssueBatchAsync(originalKey, [original], 1, 1);
+        timeProvider.Advance(TimeSpan.FromMinutes(2));
+
+        var changedPlanKey = originalKey with { ArtifactPlanHash = MakeHash("plan2") };
+        var replacement = original with
+        {
+            HandleId = "h-replacement",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var result = await store.TryIssueBatchAsync(changedPlanKey, [replacement], 1, 1);
+
+        result.ReusedExisting.Should().BeFalse();
+        result.Handles.Should().ContainSingle()
+            .Which.HandleId.Should().Be(replacement.HandleId);
+    }
+
+    [Fact]
+    public async Task RevokeAsync_RepeatedCall_DoesNotReleaseAnotherActiveHandleQuota()
+    {
+        var store = new AgentMemoryAccessHandleStore(TimeProvider.System);
+        var sharedResource = "shared-quota-resource";
+        var first = MakeHandle("h-quota-first") with { ResourceId = sharedResource };
+        var second = MakeHandle("h-quota-second") with { ResourceId = sharedResource };
+        await store.TryIssueBatchAsync(MakeBatchKey(), [first, second], 2, 2);
+
+        await store.RevokeAsync(first.HandleId, AgentMemoryCallerKind.AgentTool);
+        await store.RevokeAsync(first.HandleId, AgentMemoryCallerKind.AgentTool);
+
+        var otherBatch = MakeBatchKey() with
+        {
+            OriginBindingHash = MakeHash("binding2"),
+            ArtifactPlanHash = MakeHash("plan2")
+        };
+        var act = async () => await store.TryIssueBatchAsync(
+            otherBatch,
+            [MakeHandle("h-quota-third") with { ResourceId = sharedResource }],
+            1,
+            2);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*resource handle quota*");
+    }
+
+    private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = utcNow;
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+
+        public void Advance(TimeSpan duration) => _utcNow += duration;
+    }
 }

@@ -132,7 +132,7 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
         context = context with { ContextId = _ids.CreateContextId(), TenantId = principal.TenantId, Blocks = normalizedBlocks };
 
         var now = _time.GetUtcNow();
-        var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal);
+        var scopeFingerprint = AgentMemoryToolScopeFingerprint.Compute(scope, principal);
         var contextHandle = new AgentMemoryResourceHandle
         {
             HandleId = AgentMemorySecurityArtifactIdGenerator.Create("hnd"), ResourceKind = AgentMemoryResourceKind.Context,

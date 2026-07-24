@@ -20,7 +20,7 @@ internal static class AgentMemoryHostArtifactBatchProjector
             "memory-host-origin-v2", hostKey.HostOperationId, hostKey.OperationFingerprint,
             hostKey.ArtifactPurpose, principal.TenantId, principal.UserId, principal.AgentId,
             principal.ExecutionId, sourceKind.ToString(), sourceId,
-            AgentMemoryScopeFingerprint.Compute(scope, principal));
+            AgentMemoryToolScopeFingerprint.Compute(scope, principal));
         var bindingHash = Hash(binding, "agent-memory-host-origin-binding", "SourceBinding", "memory-host-origin-v2");
         var plan = AgentMemoryArtifactPlanProjector.Compute(principal, scope, hostKey.ArtifactPurpose, handles, grants);
         return new AgentMemorySecurityArtifactBatchKey

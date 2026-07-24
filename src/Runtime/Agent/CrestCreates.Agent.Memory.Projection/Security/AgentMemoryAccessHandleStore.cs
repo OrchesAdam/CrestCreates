@@ -6,20 +6,24 @@ using CrestCreates.Metadata.Abstractions;
 namespace CrestCreates.Agent.Memory.Projection.Security;
 
 /// <summary>
-/// In-memory handle store. Entries are lazily expired on read and intentionally
-/// not evicted; durable providers must implement bounded retention and cleanup.
-/// Revocation fully cleans batch index, identity plan, and per-operation counters.
+/// In-memory handle store. Reads project expiry without mutation. An issuance
+/// retry atomically replaces an incomplete, non-active, or expired batch after
+/// cleaning its identity and quota accounting. Durable providers must also
+/// implement bounded background retention.
 /// </summary>
 internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleStore
 {
     private readonly ConcurrentDictionary<string, AgentMemoryAccessResourceHandle> _handles = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, HashSet<string>> _batchIndex = new(StringComparer.Ordinal); // batchKey -> handleIds
+    private readonly ConcurrentDictionary<string, int> _batchExpectedCount = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _handleToBatch = new(StringComparer.Ordinal); // handleId -> batchKey
     private readonly ConcurrentDictionary<string, string> _handleToBindingHash = new(StringComparer.Ordinal); // handleId -> originBindingHash value
+    private readonly ConcurrentDictionary<string, string> _handleToResourceKey = new(StringComparer.Ordinal); // handleId -> quota resource key
     private readonly ConcurrentDictionary<string, int> _perResourceCount = new(StringComparer.Ordinal); // $"{ResourceKind}:{ResourceId}:{ScopeFingerprint}" -> active count
     private readonly ConcurrentDictionary<string, int> _perOperationCount = new(StringComparer.Ordinal); // originBindingHash -> active count
     private readonly ConcurrentDictionary<string, string> _identityPlans = new(StringComparer.Ordinal); // identityKey -> planHash
     private readonly ConcurrentDictionary<string, string> _batchToIdentity = new(StringComparer.Ordinal); // batchCanonicalKey -> identityKey
+    private readonly ConcurrentDictionary<string, string> _identityToBatch = new(StringComparer.Ordinal); // identityKey -> batchCanonicalKey
     private readonly SemaphoreSlim _stateLock = new(1, 1);
     private readonly TimeProvider _timeProvider;
 
@@ -68,19 +72,47 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
     {
         var key = batchKey.ToCanonicalKey();
         var identity = batchKey.ToIdentityKey();
+        var now = _timeProvider.GetUtcNow();
 
-        // Check for existing batch idempotency
-        if (_batchIndex.TryGetValue(key, out var existingIds))
+        if (handles.Any(handle =>
+                handle.State != AgentMemorySecurityArtifactState.Active
+                || handle.ExpiresAt <= now))
         {
-            var existing = existingIds.Select(id => _handles[id]).ToArray();
-            return new AgentMemoryAccessHandleIssueResult
-            {
-                Handles = existing,
-                ReusedExisting = true
-            };
+            throw new InvalidOperationException("Only active, unexpired resource handles can be issued.");
         }
 
-        // Check plan conflict
+        if (_batchIndex.TryGetValue(key, out var existingIds))
+        {
+            if (TryGetReusableBatch(key, existingIds, now, out var existing)
+                && existing.Count == handles.Count)
+            {
+                return new AgentMemoryAccessHandleIssueResult
+                {
+                    Handles = existing,
+                    ReusedExisting = true
+                };
+            }
+
+            RemoveBatchInternal(key, existingIds);
+        }
+        else if (_identityToBatch.TryGetValue(identity, out var identityBatchKey))
+        {
+            if (_batchIndex.TryGetValue(identityBatchKey, out var identityBatchIds))
+            {
+                if (TryGetReusableBatch(identityBatchKey, identityBatchIds, now, out _))
+                {
+                    throw new InvalidOperationException(
+                        "Security artifact batch plan conflicts with an existing preparation.");
+                }
+
+                RemoveBatchInternal(identityBatchKey, identityBatchIds);
+            }
+            else
+            {
+                RemoveBatchIdentityInternal(identityBatchKey, identity);
+            }
+        }
+
         if (_identityPlans.TryGetValue(identity, out var existingPlan)
             && !string.Equals(existingPlan, batchKey.ArtifactPlanHash.Value, StringComparison.Ordinal))
             throw new InvalidOperationException("Security artifact batch plan conflicts with an existing preparation.");
@@ -110,12 +142,16 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
             handleIds.Add(handle.HandleId);
             _handleToBatch[handle.HandleId] = key;
             _handleToBindingHash[handle.HandleId] = bindingHash;
-            _perResourceCount.AddOrUpdate(MakeResourceKey(handle), 1, (_, c) => c + 1);
+            var resourceKey = MakeResourceKey(handle);
+            _handleToResourceKey[handle.HandleId] = resourceKey;
+            _perResourceCount.AddOrUpdate(resourceKey, 1, (_, c) => c + 1);
         }
 
         _batchIndex[key] = handleIds;
+        _batchExpectedCount[key] = handles.Count;
         _identityPlans[identity] = batchKey.ArtifactPlanHash.Value;
         _batchToIdentity[key] = identity;
+        _identityToBatch[identity] = key;
         _perOperationCount.AddOrUpdate(bindingHash, handles.Count, (_, c) => c + handles.Count);
 
         return new AgentMemoryAccessHandleIssueResult
@@ -159,13 +195,13 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
             // Mark revoked
             _handles[handleId] = handle with { State = AgentMemorySecurityArtifactState.Revoked };
 
-            // Decrement per-resource count
-            _perResourceCount.AddOrUpdate(MakeResourceKey(handle), 0, (_, c) => Math.Max(0, c - 1));
+            if (_handleToResourceKey.TryRemove(handleId, out var resourceKey))
+                DecrementCounter(_perResourceCount, resourceKey);
 
             // Decrement per-operation count using stored binding hash
             if (_handleToBindingHash.TryRemove(handleId, out var bindingHash))
             {
-                _perOperationCount.AddOrUpdate(bindingHash, 0, (_, c) => Math.Max(0, c - 1));
+                DecrementCounter(_perOperationCount, bindingHash);
             }
 
             // Remove from batch index and identity plan
@@ -177,11 +213,13 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
                     if (batchIds.Count == 0)
                     {
                         _batchIndex.TryRemove(batchCanonicalKey, out _);
+                        _batchExpectedCount.TryRemove(batchCanonicalKey, out _);
 
                         // Clean up identity plan using stored identity key
                         if (_batchToIdentity.TryRemove(batchCanonicalKey, out var identityKey))
                         {
                             _identityPlans.TryRemove(identityKey, out _);
+                            _identityToBatch.TryRemove(identityKey, out _);
                         }
                     }
                 }
@@ -195,4 +233,74 @@ internal sealed class AgentMemoryAccessHandleStore : IAgentMemoryAccessHandleSto
 
     private static string MakeResourceKey(AgentMemoryAccessResourceHandle handle)
         => $"{handle.ResourceKind}:{handle.ResourceId}:{handle.ScopeFingerprint}";
+
+    private bool TryGetReusableBatch(
+        string batchCanonicalKey,
+        HashSet<string> existingIds,
+        DateTimeOffset now,
+        out IReadOnlyList<AgentMemoryAccessResourceHandle> existing)
+    {
+        if (!_batchExpectedCount.TryGetValue(batchCanonicalKey, out var expectedCount)
+            || existingIds.Count != expectedCount)
+        {
+            existing = [];
+            return false;
+        }
+
+        var artifacts = new List<AgentMemoryAccessResourceHandle>(existingIds.Count);
+        foreach (var handleId in existingIds)
+        {
+            if (!_handles.TryGetValue(handleId, out var handle)
+                || handle.State != AgentMemorySecurityArtifactState.Active
+                || handle.ExpiresAt <= now)
+            {
+                existing = [];
+                return false;
+            }
+
+            artifacts.Add(handle);
+        }
+
+        existing = artifacts;
+        return true;
+    }
+
+    private void RemoveBatchInternal(string batchCanonicalKey, HashSet<string> handleIds)
+    {
+        foreach (var handleId in handleIds.ToArray())
+        {
+            _handles.TryRemove(handleId, out _);
+            if (_handleToResourceKey.TryRemove(handleId, out var resourceKey))
+                DecrementCounter(_perResourceCount, resourceKey);
+            if (_handleToBindingHash.TryRemove(handleId, out var bindingHash))
+                DecrementCounter(_perOperationCount, bindingHash);
+
+            _handleToBatch.TryRemove(handleId, out _);
+        }
+
+        _batchIndex.TryRemove(batchCanonicalKey, out _);
+        _batchExpectedCount.TryRemove(batchCanonicalKey, out _);
+        if (_batchToIdentity.TryGetValue(batchCanonicalKey, out var identityKey))
+            RemoveBatchIdentityInternal(batchCanonicalKey, identityKey);
+    }
+
+    private void RemoveBatchIdentityInternal(string batchCanonicalKey, string identityKey)
+    {
+        _batchToIdentity.TryRemove(batchCanonicalKey, out _);
+        _identityToBatch.TryRemove(identityKey, out _);
+        _identityPlans.TryRemove(identityKey, out _);
+    }
+
+    private static void DecrementCounter(
+        ConcurrentDictionary<string, int> counters,
+        string key)
+    {
+        if (!counters.TryGetValue(key, out var current))
+            return;
+
+        if (current <= 1)
+            counters.TryRemove(key, out _);
+        else
+            counters[key] = current - 1;
+    }
 }

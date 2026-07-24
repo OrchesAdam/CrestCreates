@@ -48,7 +48,7 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
         var itemHandle = new AgentMemoryResourceHandle
         {
             HandleId = AgentMemorySecurityArtifactIdGenerator.Create("hnd"), ResourceKind = AgentMemoryResourceKind.Memory,
-            ResourceId = newMemoryId, Principal = principal, ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal),
+            ResourceId = newMemoryId, Principal = principal, ScopeFingerprint = AgentMemoryToolScopeFingerprint.Compute(scope, principal),
             RequiredDescriptorRefs = EffectiveDescriptorRefs(candidate), IsUnscoped = EffectiveDescriptorRefs(candidate).Count == 0,
             IssuingInvocationId = InvocationBinding.LogicalKey.InvocationId, IssuedAt = now, ExpiresAt = now.Add(scope.ResourceHandleLifetime)
         };
@@ -62,7 +62,7 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
                 GrantId = AgentMemorySecurityArtifactIdGenerator.Create("grt"),
                 SourceRef = source,
                 Principal = principal,
-                ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal),
+                ScopeFingerprint = AgentMemoryToolScopeFingerprint.Compute(scope, principal),
                 RequiredDescriptorRefs = requiredDescriptorRefs,
                 IsUnscoped = AgentMemoryHandleGrantMatrix.IsUnscopedGrant(
                     source.SourceKind,

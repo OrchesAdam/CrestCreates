@@ -30,7 +30,7 @@ internal static class AgentMemoryArtifactPlanProjector
             writer.WriteString("user", principal.UserId);
             writer.WriteString("agent", principal.AgentId);
             writer.WriteString("execution", principal.ExecutionId);
-            writer.WriteString("scope", AgentMemoryScopeFingerprint.Compute(scope, principal));
+            writer.WriteString("scope", AgentMemoryToolScopeFingerprint.Compute(scope, principal));
             writer.WriteStartArray("handles");
             foreach (var handle in handles.OrderBy(HandleCanonical, StringComparer.Ordinal))
             {

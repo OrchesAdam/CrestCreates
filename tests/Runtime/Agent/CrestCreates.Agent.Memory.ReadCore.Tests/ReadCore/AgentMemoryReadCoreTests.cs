@@ -1902,6 +1902,86 @@ public class AgentMemoryReadCoreTests
         }
     }
 
+    [Fact]
+    public async Task Recall_RetryAfterCredentialExpiry_ReturnsUsableCredentials()
+    {
+        var now = new DateTimeOffset(2026, 7, 24, 0, 0, 0, TimeSpan.Zero);
+        var timeProvider = new MutableTimeProvider(now);
+        var principal = MakePrincipal();
+        var descriptor = new DescriptorRef("ns", "visible", 1);
+        var scope = MakeScopeWithVisibleRefs([descriptor]);
+        var memory = MakeMemory("memory-expiry-retry", [descriptor]);
+        var retriever = new Mock<IAgentMemoryRetriever>();
+        retriever
+            .Setup(item => item.RecallAsync(
+                It.IsAny<AgentMemoryQuery>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryPack
+            {
+                TenantId = principal.TenantId,
+                Memories = [memory]
+            });
+        var closureProvider = new Mock<IAgentMemoryCurrentClosureProvider>();
+        closureProvider
+            .Setup(item => item.GetCurrentClosureAsync(
+                AgentMemoryResourceKind.Memory,
+                principal.TenantId,
+                memory.MemoryId,
+                It.IsAny<AgentContextSourceRef?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentMemoryCurrentClosure
+            {
+                TenantId = principal.TenantId,
+                CurrentDescriptorRefs = [descriptor]
+            });
+
+        var handleStore = new AgentMemoryAccessHandleStore(timeProvider);
+        var options = new AgentMemoryProjectionSecurityOptions();
+        var lifetimePolicy = new DefaultAgentMemoryArtifactLifetimePolicy(options);
+        var coordinator = new AgentMemoryAccessArtifactCoordinator(
+            handleStore,
+            new AgentMemoryAccessGrantStore(timeProvider),
+            new AgentMemoryAccessArtifactBatchStore(),
+            lifetimePolicy,
+            timeProvider,
+            Options.Create(options));
+        var resolver = new AgentMemoryAccessHandleResolver(
+            handleStore,
+            timeProvider,
+            closureProvider.Object);
+        var core = new AgentMemoryReadCore(
+            retriever.Object,
+            resolver,
+            coordinator,
+            lifetimePolicy,
+            closureProvider.Object,
+            timeProvider);
+        var input = new BuildAgentMemoryPackInput
+        {
+            MaximumCount = 5,
+            CharacterBudget = 10_000
+        };
+
+        var first = await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        var firstHandle = first.Result.Items.Single().MemoryHandle;
+        timeProvider.Advance(scope.ResourceHandleLifetime + TimeSpan.FromSeconds(1));
+
+        var retry = await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        var retryHandle = retry.Result.Items.Single().MemoryHandle;
+        var resolved = await resolver.ResolveAsync(
+            retryHandle,
+            AgentMemoryResourceKind.Memory,
+            principal,
+            scope);
+
+        retry.Result.OperationStatus.Should().Be(AgentMemoryToolOperationStatus.Completed);
+        retryHandle.Should().NotBeNullOrWhiteSpace();
+        retryHandle.Should().NotBe(firstHandle);
+        retry.Receipt.HandleBatch!.ReusedExisting.Should().BeFalse();
+        (await handleStore.GetAsync(firstHandle)).Should().BeNull();
+        resolved.Should().NotBeNull();
+    }
+
     private static async Task<HandleContractScenario> RunHandleContractScenarioAsync(
         Func<IReadOnlyList<AgentMemoryAccessResourceHandle>, IReadOnlyList<AgentMemoryAccessResourceHandle>>
             confirmHandles)
@@ -2011,4 +2091,13 @@ public class AgentMemoryReadCoreTests
         AgentMemoryReadCoreException? Exception,
         bool Revoked,
         IReadOnlyList<AgentMemoryAccessResourceHandle> ConfirmedHandles);
+
+    private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = utcNow;
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+
+        public void Advance(TimeSpan duration) => _utcNow += duration;
+    }
 }

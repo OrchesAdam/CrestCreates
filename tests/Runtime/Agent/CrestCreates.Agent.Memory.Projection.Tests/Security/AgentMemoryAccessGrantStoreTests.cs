@@ -165,4 +165,137 @@ public class AgentMemoryAccessGrantStoreTests
         r1.Should().NotBeNull();
         r2.Should().NotBeNull();
     }
+
+    [Fact]
+    public async Task GrantStore_ReissueExpiredBatch_CreatesFreshGrants()
+    {
+        var now = new DateTimeOffset(2026, 7, 24, 0, 0, 0, TimeSpan.Zero);
+        var timeProvider = new MutableTimeProvider(now);
+        var store = new AgentMemoryAccessGrantStore(timeProvider);
+        var batchKey = MakeBatchKey();
+        var expiredGrant = MakeGrant("g-expired") with
+        {
+            IssuedAt = now,
+            ExpiresAt = now.AddMinutes(1)
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [expiredGrant], 1, 1);
+        timeProvider.Advance(TimeSpan.FromMinutes(2));
+        var freshGrant = expiredGrant with
+        {
+            GrantId = "g-fresh",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var result = await store.TryIssueBatchAsync(batchKey, [freshGrant], 1, 1);
+
+        result.ReusedExisting.Should().BeFalse();
+        result.Grants.Should().ContainSingle()
+            .Which.GrantId.Should().Be(freshGrant.GrantId);
+        (await store.GetAsync(expiredGrant.GrantId)).Should().BeNull();
+        (await store.GetAsync(freshGrant.GrantId))!.State
+            .Should().Be(AgentMemorySecurityArtifactState.Active);
+    }
+
+    [Fact]
+    public async Task ReusedBatch_NonActiveArtifact_NotReturned()
+    {
+        var now = new DateTimeOffset(2026, 7, 24, 0, 0, 0, TimeSpan.Zero);
+        var timeProvider = new MutableTimeProvider(now);
+        var store = new AgentMemoryAccessGrantStore(timeProvider);
+        var batchKey = MakeBatchKey();
+        var first = MakeGrant("g-first") with
+        {
+            IssuedAt = now,
+            ExpiresAt = now.AddMinutes(30)
+        };
+        var second = MakeGrant("g-second") with
+        {
+            SourceRef = MakeGrant("unused").SourceRef with { SourceId = "src2" },
+            IssuedAt = now,
+            ExpiresAt = now.AddMinutes(30)
+        };
+        await store.TryIssueBatchAsync(batchKey, [first, second], 1, 2);
+        await store.RevokeAsync(first.GrantId, AgentMemoryCallerKind.AgentTool);
+
+        var replacements = new[]
+        {
+            first with { GrantId = "g-first-fresh" },
+            second with { GrantId = "g-second-fresh" }
+        };
+        var result = await store.TryIssueBatchAsync(batchKey, replacements, 1, 2);
+
+        result.ReusedExisting.Should().BeFalse();
+        result.Grants.Select(grant => grant.GrantId)
+            .Should().BeEquivalentTo("g-first-fresh", "g-second-fresh");
+        result.Grants.Should().OnlyContain(grant =>
+            grant.State == AgentMemorySecurityArtifactState.Active);
+        (await store.GetAsync(second.GrantId)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExpiredBatch_CountersAndIdentityPlanAreCleaned()
+    {
+        var now = new DateTimeOffset(2026, 7, 24, 0, 0, 0, TimeSpan.Zero);
+        var timeProvider = new MutableTimeProvider(now);
+        var store = new AgentMemoryAccessGrantStore(timeProvider);
+        var originalKey = MakeBatchKey();
+        var original = MakeGrant("g-original") with
+        {
+            IssuedAt = now,
+            ExpiresAt = now.AddMinutes(1)
+        };
+        await store.TryIssueBatchAsync(originalKey, [original], 1, 1);
+        timeProvider.Advance(TimeSpan.FromMinutes(2));
+
+        var changedPlanKey = originalKey with { ArtifactPlanHash = MakeHash("plan2") };
+        var replacement = original with
+        {
+            GrantId = "g-replacement",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+
+        var result = await store.TryIssueBatchAsync(changedPlanKey, [replacement], 1, 1);
+
+        result.ReusedExisting.Should().BeFalse();
+        result.Grants.Should().ContainSingle()
+            .Which.GrantId.Should().Be(replacement.GrantId);
+    }
+
+    [Fact]
+    public async Task RevokeAsync_RepeatedCall_DoesNotReleaseAnotherActiveGrantQuota()
+    {
+        var store = new AgentMemoryAccessGrantStore(TimeProvider.System);
+        var first = MakeGrant("g-quota-first");
+        var second = MakeGrant("g-quota-second");
+        await store.TryIssueBatchAsync(MakeBatchKey(), [first, second], 2, 2);
+
+        await store.RevokeAsync(first.GrantId, AgentMemoryCallerKind.AgentTool);
+        await store.RevokeAsync(first.GrantId, AgentMemoryCallerKind.AgentTool);
+
+        var otherBatch = MakeBatchKey() with
+        {
+            OriginBindingHash = MakeHash("binding2"),
+            ArtifactPlanHash = MakeHash("plan2")
+        };
+        var act = async () => await store.TryIssueBatchAsync(
+            otherBatch,
+            [MakeGrant("g-quota-third")],
+            1,
+            2);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*source grant quota*");
+    }
+
+    private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = utcNow;
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+
+        public void Advance(TimeSpan duration) => _utcNow += duration;
+    }
 }

@@ -13,7 +13,7 @@ namespace CrestCreates.Agent.Memory.Projection.Tests.Security;
 
 public class AgentMemoryAccessHandleResolverTests
 {
-    private static readonly string ScopeFp = "c53e1dcef4caa99ad1e1a241661278d78220a035a812af8466c9093f4d45dd6e";
+    private static string ScopeFp => AgentMemoryScopeFingerprint.Compute(MakeScope());
 
     private static readonly DescriptorRef DescAlpha = new("ns", "alpha", 1);
     private static readonly DescriptorRef DescBeta = new("ns", "beta", 1);
@@ -837,5 +837,57 @@ public class AgentMemoryAccessHandleResolverTests
 
         result.Should().NotBeNull("TaskEvent Grant must resolve successfully");
         result!.GrantId.Should().Be("g-taskevent-valid");
+    }
+
+    [Fact]
+    public async Task HistoryHandle_CollidingLegacyShapes_CannotCrossScope()
+    {
+        var timeProvider = TimeProvider.System;
+        var store = new AgentMemoryAccessHandleStore(timeProvider);
+        var principal = MakePrincipal();
+        var scopeA = MakeScope() with
+        {
+            VisibleDescriptorRefs = [new DescriptorRef("a", "b:c", 1)]
+        };
+        var scopeB = MakeScope() with
+        {
+            VisibleDescriptorRefs = [new DescriptorRef("a:b", "c", 1)]
+        };
+        var handle = new AgentMemoryAccessResourceHandle
+        {
+            HandleId = "h-legacy-shape-boundary",
+            ResourceKind = AgentMemoryResourceKind.TaskHistory,
+            ResourceId = "task-legacy-shape",
+            Principal = principal,
+            ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scopeA),
+            RequiredDescriptorRefs = [],
+            IsUnscoped = false,
+            IssuingOperationId = "op-legacy-shape",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.TrustedHostOperation,
+            OriginBindingHash = MakeHash("binding-legacy-shape"),
+            ArtifactPurpose = "history-access",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-legacy-shape")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [handle], 64, 128);
+        var resolver = new AgentMemoryAccessHandleResolver(
+            store,
+            timeProvider,
+            MakeClosureProvider(descriptorRefs: []));
+
+        var result = await resolver.ResolveAsync(
+            handle.HandleId,
+            AgentMemoryResourceKind.TaskHistory,
+            principal,
+            scopeB);
+
+        result.Should().BeNull(
+            "a history handle must retain the exact logical scope identity");
     }
 }

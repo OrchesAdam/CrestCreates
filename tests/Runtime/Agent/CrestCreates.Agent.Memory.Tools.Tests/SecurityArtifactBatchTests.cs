@@ -1,6 +1,5 @@
-using System.Security.Cryptography;
-using System.Text;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Stores;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
@@ -279,12 +278,10 @@ public sealed class SecurityArtifactBatchTests
     }
 
     private static string ScopeFingerprint(AgentMemoryToolPrincipal principal, AgentMemoryToolAccessScope scope)
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            $"projection-scope-v1|{principal.TenantId}|{scope.AllowUnscopedMemory}|{string.Join('|', scope.VisibleDescriptorRefs
-                .OrderBy(item => item.Namespace, StringComparer.Ordinal)
-                .ThenBy(item => item.Id, StringComparer.Ordinal)
-                .ThenBy(item => item.Version)
-                .Select(item => $"{item.Namespace}:{item.Id}:{item.Version}"))}"))).ToLowerInvariant();
+        => AgentMemoryScopeFingerprint.Compute(
+            principal.TenantId,
+            scope.AllowUnscopedMemory,
+            scope.VisibleDescriptorRefs);
 
     private static AgentMemoryToolPrincipal Principal() => new()
     {

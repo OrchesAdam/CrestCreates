@@ -13,7 +13,7 @@ namespace CrestCreates.Agent.Memory.Projection.Tests.Security;
 
 public class AgentMemoryAccessGrantResolverTests
 {
-    private static readonly string ScopeFp = "c53e1dcef4caa99ad1e1a241661278d78220a035a812af8466c9093f4d45dd6e";
+    private static string ScopeFp => AgentMemoryScopeFingerprint.Compute(MakeScope());
 
     private static readonly DescriptorRef DescAlpha = new("ns", "alpha", 1);
     private static readonly DescriptorRef DescBeta = new("ns", "beta", 1);
@@ -1257,5 +1257,57 @@ public class AgentMemoryAccessGrantResolverTests
             result!.IsUnscoped.Should().BeFalse(
                 $"ResourceBound grant for {kind} must always have IsUnscoped=false");
         }
+    }
+
+    [Fact]
+    public async Task TaskRecordGrant_CollidingLegacyShapes_CannotCrossScope()
+    {
+        var timeProvider = TimeProvider.System;
+        var store = new AgentMemoryAccessGrantStore(timeProvider);
+        var principal = MakePrincipal();
+        var scopeA = MakeScope() with
+        {
+            VisibleDescriptorRefs = [new DescriptorRef("a", "b:c", 1)]
+        };
+        var scopeB = MakeScope() with
+        {
+            VisibleDescriptorRefs = [new DescriptorRef("a:b", "c", 1)]
+        };
+        var grant = new AgentMemoryAccessSourceGrant
+        {
+            GrantId = "g-legacy-shape-boundary",
+            SourceRef = new AgentContextSourceRef
+            {
+                SourceKind = AgentSourceKind.TaskRecord,
+                TenantId = principal.TenantId,
+                SourceId = "task-legacy-shape"
+            },
+            Principal = principal,
+            ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scopeA),
+            RequiredDescriptorRefs = [],
+            IsUnscoped = false,
+            IssuingOperationId = "op-legacy-shape",
+            IssuedAt = timeProvider.GetUtcNow(),
+            ExpiresAt = timeProvider.GetUtcNow().AddMinutes(30)
+        };
+        var batchKey = new AgentMemoryAccessArtifactBatchKey
+        {
+            OriginKind = AgentMemoryArtifactOriginKind.AgentToolInvocation,
+            OriginBindingHash = MakeHash("binding-legacy-shape"),
+            ArtifactPurpose = "source-expand",
+            PreparationOrdinal = 0,
+            ArtifactPlanHash = MakeHash("plan-legacy-shape")
+        };
+
+        await store.TryIssueBatchAsync(batchKey, [grant], 64, 256);
+        var resolver = new AgentMemoryAccessGrantResolver(
+            store,
+            timeProvider,
+            MakeClosureProvider(descriptorRefs: []));
+
+        var result = await resolver.ResolveAsync(grant.GrantId, principal, scopeB);
+
+        result.Should().BeNull(
+            "a resource-bound existence-only grant must retain the exact logical scope identity");
     }
 }

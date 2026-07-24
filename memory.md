@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-24 (Phase 8c+ Memory credential contract review closure)
+Last Updated: 2026-07-24 (Phase 8c+ scope identity and credential retry closure)
 
 ## Purpose
 
@@ -40,10 +40,26 @@ TenantId changes. The tests prove the Handle existed, the shared Handle Store
 was read, the result was unified unavailable, and the Context Store was not
 read.
 
+Projection scope identity is now `projection-scope-v2`: one AOT-friendly
+length-prefixed binary encoding in `Projection.Abstractions`, hashed with
+SHA-256. Tenant, AllowUnscoped, descriptor count, and every sorted descriptor
+field have structural boundaries, so delimiter placement cannot collide.
+Legacy Memory Tool entry points delegate to this implementation. There is no
+v1 fallback: short-lived v1 credentials fail scope comparison, and durable
+providers must purge/reissue them during deployment.
+
+Canonical Handle and Grant Stores reuse an idempotent batch only when its
+confirmed artifact set is complete, Active, and unexpired. A missing,
+non-Active, or expired member causes lock-protected cleanup of the old batch
+index, identity plan, active quota counters, and remaining invalid artifacts,
+followed by fresh issuance. Store reads remain mutation-free; cleanup occurs
+only on the issuance write path. Recall retries after credential expiry now
+return newly issued credentials that resolve successfully.
+
 Executable evidence:
 
-- Projection security tests: 185 passing.
-- ReadCore contract/composition tests: 85 passing.
+- Projection security tests: 199 passing.
+- ReadCore contract/composition tests: 86 passing.
 - MCP Memory unit tests: 27 passing; real MCP E2E tests: 28 passing.
 - Dependency boundary tests: 46 passing; Capability tests: 142 passing;
   Memory Tool tests: 15 passing; generated Memory Tool E2E: 1 passing.

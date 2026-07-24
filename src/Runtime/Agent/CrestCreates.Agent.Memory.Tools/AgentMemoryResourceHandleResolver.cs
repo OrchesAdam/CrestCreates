@@ -72,7 +72,7 @@ public sealed class AgentMemoryResourceHandleResolver : IAgentMemoryResourceHand
             or AgentMemoryResourceKind.Context) && resource is null)
             return null;
         if ((expectedKind is AgentMemoryResourceKind.ConversationHistory or AgentMemoryResourceKind.TaskHistory)
-            && !string.Equals(handle.ScopeFingerprint, AgentMemoryScopeFingerprint.Compute(scope, principal), StringComparison.Ordinal))
+            && !string.Equals(handle.ScopeFingerprint, AgentMemoryToolScopeFingerprint.Compute(scope, principal), StringComparison.Ordinal))
             return null;
         if (expectedKind is AgentMemoryResourceKind.ConversationHistory or AgentMemoryResourceKind.TaskHistory)
             return new AgentMemoryResolvedResourceHandle { Handle = handle };
@@ -110,7 +110,7 @@ public sealed class AgentMemoryResourceHandleResolver : IAgentMemoryResourceHand
     {
         var required = EffectiveRefs(grant.RequiredDescriptorRefs);
         var sourceRefs = EffectiveRefs(grant.SourceRef.DescriptorRefs);
-        if (!string.Equals(grant.ScopeFingerprint, AgentMemoryScopeFingerprint.Compute(scope, principal), StringComparison.Ordinal)
+        if (!string.Equals(grant.ScopeFingerprint, AgentMemoryToolScopeFingerprint.Compute(scope, principal), StringComparison.Ordinal)
             || grant.IsUnscoped != (required.Count == 0)
             || required.Any(item => item.Version is not > 0)
             || sourceRefs.Any(item => !required.Contains(item)))
@@ -144,7 +144,7 @@ public sealed class AgentMemoryResourceHandleResolver : IAgentMemoryResourceHand
         AgentMemoryToolAccessScope scope,
         AgentMemoryToolPrincipal principal)
     {
-        if (!string.Equals(scopeFingerprint, AgentMemoryScopeFingerprint.Compute(scope, principal), StringComparison.Ordinal))
+        if (!string.Equals(scopeFingerprint, AgentMemoryToolScopeFingerprint.Compute(scope, principal), StringComparison.Ordinal))
             return false;
         if (!DescriptorRefsEqual(requiredRefs, effectiveRefs))
             return false;
@@ -163,9 +163,11 @@ public sealed class AgentMemoryResourceHandleResolver : IAgentMemoryResourceHand
             .SequenceEqual(right.OrderBy(item => item.Namespace, StringComparer.Ordinal).ThenBy(item => item.Id, StringComparer.Ordinal).ThenBy(item => item.Version));
 }
 
-internal static class AgentMemoryScopeFingerprint
+internal static class AgentMemoryToolScopeFingerprint
 {
     public static string Compute(AgentMemoryToolAccessScope scope, AgentMemoryToolPrincipal principal)
-        => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
-            $"projection-scope-v1|{principal.TenantId}|{scope.AllowUnscopedMemory}|{string.Join('|', scope.VisibleDescriptorRefs.OrderBy(item => item.Namespace, StringComparer.Ordinal).ThenBy(item => item.Id, StringComparer.Ordinal).ThenBy(item => item.Version).Select(item => $"{item.Namespace}:{item.Id}:{item.Version}"))}"))).ToLowerInvariant();
+        => Projection.Abstractions.Security.AgentMemoryScopeFingerprint.Compute(
+            principal.TenantId,
+            scope.AllowUnscopedMemory,
+            scope.VisibleDescriptorRefs);
 }

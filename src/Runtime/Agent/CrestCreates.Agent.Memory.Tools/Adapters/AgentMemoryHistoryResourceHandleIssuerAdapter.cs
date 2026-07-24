@@ -1,6 +1,6 @@
 using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Tools;
-using CrestCreates.Metadata.Abstractions;
 
 namespace CrestCreates.Agent.Memory.Tools.Adapters;
 
@@ -76,7 +76,7 @@ internal sealed class AgentMemoryHistoryResourceHandleIssuerAdapter : IAgentMemo
             ResourceKind = resourceKind,
             ResourceId = sourceId,
             Principal = newPrincipal,
-            ScopeFingerprint = ComputeScopeFingerprint(scope),
+            ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope),
             RequiredDescriptorRefs = [],
             IsUnscoped = false, // History is resource-bound, not unscoped; exempt from consistency formula
             IssuingOperationId = origin.OperationId,
@@ -95,19 +95,5 @@ internal sealed class AgentMemoryHistoryResourceHandleIssuerAdapter : IAgentMemo
             ?? throw new InvalidOperationException("History handle issuance failed");
 
         return issuedHandle.HandleId;
-    }
-
-    private static string ComputeScopeFingerprint(AgentMemoryAccessScope scope)
-    {
-        var sb = new System.Text.StringBuilder();
-        sb.Append($"projection-scope-v1|{scope.TenantId}|{scope.AllowUnscopedMemory}|");
-        var ordered = scope.VisibleDescriptorRefs
-            .OrderBy(r => r.Namespace, StringComparer.Ordinal)
-            .ThenBy(r => r.Id, StringComparer.Ordinal)
-            .ThenBy(r => r.Version);
-        sb.Append(string.Join('|', ordered.Select(r => $"{r.Namespace}:{r.Id}:{r.Version}")));
-        return Convert.ToHexString(
-            System.Security.Cryptography.SHA256.HashData(
-                System.Text.Encoding.UTF8.GetBytes(sb.ToString()))).ToLowerInvariant();
     }
 }

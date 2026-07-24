@@ -163,7 +163,7 @@ internal sealed class AgentMemorySecurityArtifactCoordinator : IAgentMemorySecur
             || !string.Equals(key.ExecutionId, principal.ExecutionId, StringComparison.Ordinal))
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.TenantMismatch, "Invocation binding and artifact principal do not match.");
 
-        var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal);
+        var scopeFingerprint = AgentMemoryToolScopeFingerprint.Compute(scope, principal);
         if (handles.Any(handle => handle.Principal != principal
             || !string.Equals(handle.ScopeFingerprint, scopeFingerprint, StringComparison.Ordinal)
             || !string.Equals(handle.IssuingInvocationId, key.InvocationId, StringComparison.Ordinal)
@@ -210,7 +210,7 @@ internal sealed class AgentMemorySecurityArtifactCoordinator : IAgentMemorySecur
             AgentMemoryHistorySourceKind.Task => AgentMemoryResourceKind.TaskHistory,
             _ => throw new InvalidOperationException("Host history source kind is unsupported.")
         };
-        var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal);
+        var scopeFingerprint = AgentMemoryToolScopeFingerprint.Compute(scope, principal);
         if (handles.Any(handle => handle.ResourceKind != expectedKind
             || !string.Equals(handle.ResourceId, sourceId, StringComparison.Ordinal)
             || handle.Principal != principal

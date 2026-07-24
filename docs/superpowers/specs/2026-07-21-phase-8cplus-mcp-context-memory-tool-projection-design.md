@@ -616,7 +616,31 @@ MaxContextRecallCharacters = old.MaxRecallCharacters
 
 This is the correct mapping because `MaxRecallCharacters` is the existing total character budget for memory recall, and context recall character budget should use the same limit. The alternative of computing `MaxCompressedBlockCount * MaxCompressedBlockCharacters` would over-estimate the budget (blocks may not all be full-length).
 
-**Scope fingerprint stability**: The current `memory-scope-v2` fingerprint shape includes only Tenant, AllowUnscoped, and VisibleDescriptorRefs. The new projection-neutral `AgentMemoryAccessScope` preserves this fingerprint shape exactly. `CallerId` and `SecurityContextId` are validated through Principal equality separately — they are NOT folded into the fingerprint. This ensures existing durable Handle/Grant entries remain valid after the refactoring.
+**Scope fingerprint identity**: `projection-scope-v2` includes only Tenant,
+AllowUnscoped, and VisibleDescriptorRefs. `CallerId` and `SecurityContextId` are
+validated through Principal equality separately and are not folded into the
+fingerprint.
+
+The v2 preimage is a canonical, length-prefixed binary sequence:
+
+1. encoding-version UTF-8 byte length and bytes;
+2. tenant UTF-8 byte length and bytes;
+3. one AllowUnscoped byte;
+4. descriptor count;
+5. for each descriptor sorted by Namespace, Id, and Version: Namespace byte
+   length and bytes, Id byte length and bytes, Version-present byte, and
+   little-endian Int32 Version.
+
+A null descriptor Namespace or Id uses length `-1`, keeping it distinct from
+an empty string. SHA-256 is computed over this binary sequence. Delimiter
+characters in any string therefore cannot alter field boundaries.
+
+There is one implementation in `Projection.Abstractions`; legacy Memory Tool
+adapters delegate to it and do not carry a second encoding. The previous
+`projection-scope-v1` string encoding is not accepted as a fallback. Existing
+short-lived credentials expire or fail scope comparison; a durable provider
+must purge/reissue v1 credentials during deployment rather than migrate them
+silently.
 
 ### 4.8 Context handle issuance — through Coordinator, self-resolving Scope
 
@@ -846,7 +870,17 @@ The default implementation in `Agent.Memory.Projection` returns:
 
 **Critical**: The 60-second default must NOT apply to `McpSessionOperation` ContextHandles. A Session setup handle that expires in 60 seconds would make `ctx_recall` unusable after any brief pause.
 
-**Expired batch reprepare**: if the same `OriginBindingHash` retries after expiry, the store throws `IdentityConflict`. Clients must use a new `OperationId` (new origin binding). The store does not support expired-batch reprepare — this is by design to prevent indefinite credential accumulation.
+**Expired batch reprepare**: a batch is idempotently reusable only when its
+stored artifact set is complete and every artifact is still `Active` with
+`ExpiresAt > now`. If any Handle or Grant is missing, non-Active, or expired,
+the canonical Store atomically removes that batch's artifact index, identity
+plan, active-quota counters, and remaining invalid artifacts before issuing a
+fresh batch. This applies both to an identical plan retry and to a new plan
+under the same idempotency identity. A complete, active batch still rejects a
+different plan with `IdentityConflict`.
+
+This cleanup is performed only on the recall/issuance write path. Resolver and
+expand reads remain read-pure and never mutate Store state.
 
 **E2E test**: verify that artifacts prepared during a handler execution that subsequently fails serialization are not usable after their expiry window.
 
@@ -955,7 +989,7 @@ Actual expired-state persistence is handled by an independent cleanup/retention 
 - Expand tools achieve true zero security artifact store writes
 - Recall tools' credential issuance is the only write path
 - Read behavior is observationally identical (expired artifacts still appear expired)
-- Durable providers are responsible for bounded retention and expiry cleanup; the development in-memory store may retain expired entries until disposal
+- Durable providers are responsible for bounded retention and background expiry cleanup; the development in-memory store may retain expired entries until a matching issuance retry or disposal
 
 **E2E test**: verify that reading an expired grant during expand produces zero store writes, and the grant appears as expired in the result.
 

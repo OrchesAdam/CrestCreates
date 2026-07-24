@@ -115,7 +115,7 @@ internal abstract class AgentMemoryToolHandlerBase
             || value is not IAgentToolInvocationFactSink facts)
             return;
 
-        var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, Principal);
+        var scopeFingerprint = AgentMemoryToolScopeFingerprint.Compute(scope, Principal);
         var branchFacts = new AgentToolAuditFact[]
         {
             new AgentToolAuditFact { Code = "memory.scope-fingerprint", Value = scopeFingerprint, Kind = AgentToolAuditFactKind.BranchInvariant },

@@ -45,7 +45,7 @@ internal sealed class AgentMemoryHistoryResourceHandleIssuer : IAgentMemoryHisto
             ResourceKind = resourceKind,
             ResourceId = sourceId,
             Principal = principal,
-            ScopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal),
+            ScopeFingerprint = AgentMemoryToolScopeFingerprint.Compute(scope, principal),
             IsUnscoped = false,
             IssuingInvocationId = hostBatchKey.HostOperationId,
             IssuedAt = now,

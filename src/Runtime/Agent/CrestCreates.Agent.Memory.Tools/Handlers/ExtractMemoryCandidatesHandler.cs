@@ -80,7 +80,7 @@ internal sealed class ExtractMemoryCandidatesHandler : AgentMemoryToolHandlerBas
             });
         }
         var now = _time.GetUtcNow();
-        var scopeFingerprint = AgentMemoryScopeFingerprint.Compute(scope, principal);
+        var scopeFingerprint = AgentMemoryToolScopeFingerprint.Compute(scope, principal);
         var candidateHandles = candidates.Select(candidate => new AgentMemoryResourceHandle
         {
             HandleId = AgentMemorySecurityArtifactIdGenerator.Create("hnd"), ResourceKind = AgentMemoryResourceKind.Candidate,
