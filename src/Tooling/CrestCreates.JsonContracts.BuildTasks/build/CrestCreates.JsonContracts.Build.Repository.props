@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="$(MSBuildThisFileDirectory)..\..\..\Core\CrestCreates.Core.Abstractions\bin\$(Configuration)\net10.0\CrestCreates.Core.Abstractions.dll" />
+  </ItemGroup>
+  <PropertyGroup>
+    <_CrestCreatesJsonContractsRepositoryTransportImported>true</_CrestCreatesJsonContractsRepositoryTransportImported>
+    <CrestCreatesJsonContractsSelectedTransport Condition="'$(CrestCreatesJsonContractsSelectedTransport)' == ''">Repository</CrestCreatesJsonContractsSelectedTransport>
+    <CrestCreatesJsonContractsSelectedTaskAssembly Condition="'$(CrestCreatesJsonContractsSelectedTaskAssembly)' == ''">$(MSBuildThisFileDirectory)..\bin\$(Configuration)\net10.0\CrestCreates.JsonContracts.BuildTasks.dll</CrestCreatesJsonContractsSelectedTaskAssembly>
+    <CrestCreatesJsonContractsToolPath Condition="'$(CrestCreatesJsonContractsToolPath)' == ''">$(MSBuildThisFileDirectory)..\..\CrestCreates.JsonContracts.BuildTasks.Core\bin\$(Configuration)\net10.0\CrestCreates.JsonContracts.Tool.dll</CrestCreatesJsonContractsToolPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(_CrestCreatesJsonContractsPackageTransportImported)' == 'true'">
+    <_CrestCreatesJsonContractsTransportConflict>true</_CrestCreatesJsonContractsTransportConflict>
+  </PropertyGroup>
+  <Import Project="$(MSBuildThisFileDirectory)CrestCreates.JsonContracts.Build.Common.props"
+          Condition="'$(_CrestCreatesJsonContractsPropsImported)' != 'true'" />
+  <PropertyGroup>
+    <_CrestCreatesJsonContractsPropsImported>true</_CrestCreatesJsonContractsPropsImported>
+  </PropertyGroup>
+</Project>

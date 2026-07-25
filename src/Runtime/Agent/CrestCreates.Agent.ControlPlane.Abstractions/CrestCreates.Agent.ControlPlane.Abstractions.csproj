@@ -16,5 +16,11 @@
     <ProjectReference Include="../../../Runtime/Agent/CrestCreates.Agent.DraftContracts/CrestCreates.Agent.DraftContracts.csproj" />
     <ProjectReference Include="../../../Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
     <ProjectReference Include="../../../Core/CrestCreates.Core.Abstractions/CrestCreates.Core.Abstractions.csproj" />
+    <ProjectReference Include="../../../Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all"
+                      ExcludeAssets="runtime" />
   </ItemGroup>
+  <Import Project="..\..\..\Tooling\CrestCreates.JsonContracts.BuildTasks\build\CrestCreates.JsonContracts.Build.Repository.props" />
+  <Import Project="..\..\..\Tooling\CrestCreates.JsonContracts.BuildTasks\build\CrestCreates.JsonContracts.Build.Repository.targets" />
 </Project>

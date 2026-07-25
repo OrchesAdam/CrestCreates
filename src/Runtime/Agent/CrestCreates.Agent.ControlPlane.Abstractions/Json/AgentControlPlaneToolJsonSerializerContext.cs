@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Core.Abstractions.Identity;
+using CrestCreates.Core.Abstractions.Serialization;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorPackage;
@@ -15,141 +16,118 @@ namespace CrestCreates.Agent.ControlPlane.Abstractions.Json;
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     GenerationMode = JsonSourceGenerationMode.Metadata)]
 
-// ── Wave 1 — Context/Read ──────────────────────────────────────────────
-[JsonSerializable(typeof(AgentToolResult<MetadataContextPack>))]
-[JsonSerializable(typeof(MetadataContextPackRequest))]
-[JsonSerializable(typeof(AgentToolResult<DescriptorInfo>))]
-[JsonSerializable(typeof(DescriptorRef))]
-[JsonSerializable(typeof(AgentToolResult<DescriptorSearchResult>))]
-[JsonSerializable(typeof(DescriptorSearchRequest))]
-[JsonSerializable(typeof(AgentToolResult<DescriptorRelationshipsResult>))]
-[JsonSerializable(typeof(AgentToolResult<TopologySummaryResult>))]
+[JsonContractSurface(
+    typeof(IAgentControlPlaneToolService),
+    ExcludedParameterTypes = new[] { typeof(AgentToolInvocationContext) })]
+[JsonContractSurface(typeof(IAgentToolManifestProvider))]
 
-// ── Wave 2 — Draft ─────────────────────────────────────────────────────
-[JsonSerializable(typeof(AgentToolResult<AgentDescriptorDraftDto>))]
-[JsonSerializable(typeof(CreateDescriptorDraftRequest))]
-[JsonSerializable(typeof(UpdateDescriptorDraftRequest))]
-[JsonSerializable(typeof(AgentToolResult<DescriptorDraftListResult>))]
-[JsonSerializable(typeof(DraftAbstractions.DraftQuery))]
-[JsonSerializable(typeof(AgentToolResult<DraftComparisonResult>))]
-[JsonSerializable(typeof(AgentDescriptorDraftDto))]
-[JsonSerializable(typeof(AgentDraftPayloadDto))]
-[JsonSerializable(typeof(AgentDraftPayloadPatchDto))]
-[JsonSerializable(typeof(AgentCapabilityDraftPayloadDto))]
-[JsonSerializable(typeof(AgentCapabilityDraftPayloadPatchDto))]
-[JsonSerializable(typeof(AgentWorkflowDraftPayloadDto))]
-[JsonSerializable(typeof(AgentWorkflowDraftPayloadPatchDto))]
-[JsonSerializable(typeof(AgentHumanTaskDraftPayloadDto))]
-[JsonSerializable(typeof(AgentHumanTaskDraftPayloadPatchDto))]
-[JsonSerializable(typeof(AgentFormDraftPayloadDto))]
-[JsonSerializable(typeof(AgentFormDraftPayloadPatchDto))]
-[JsonSerializable(typeof(AgentEventDraftPayloadDto))]
-[JsonSerializable(typeof(AgentEventDraftPayloadPatchDto))]
-[JsonSerializable(typeof(AgentSchemaDraftPayloadDto))]
-[JsonSerializable(typeof(AgentSchemaDraftPayloadPatchDto))]
-[JsonSerializable(typeof(DescriptorSummaryDto))]
-[JsonSerializable(typeof(AgentCapabilityDraftChangedField))]
-[JsonSerializable(typeof(AgentWorkflowDraftChangedField))]
-[JsonSerializable(typeof(AgentHumanTaskDraftChangedField))]
-[JsonSerializable(typeof(AgentFormDraftChangedField))]
-[JsonSerializable(typeof(AgentEventDraftChangedField))]
-[JsonSerializable(typeof(AgentSchemaDraftChangedField))]
+// ── Explicit extras: types outside the tool surface that need direct serialization ──
 
-// ── Wave 3 — Review ────────────────────────────────────────────────────
-[JsonSerializable(typeof(AgentToolResult<AgentReviewResultDto>))]
-[JsonSerializable(typeof(AgentToolResult<DraftAbstractions.DescriptorDraftValidationResult>))]
-[JsonSerializable(typeof(AgentToolResult<ReviewResultListResult>))]
-[JsonSerializable(typeof(AgentToolResult<DiagnosticExplanation>))]
-[JsonSerializable(typeof(ExplainDiagnosticsRequest))]
-[JsonSerializable(typeof(AgentReviewResultDto))]
-[JsonSerializable(typeof(AgentProposedInventorySummaryDto))]
-[JsonSerializable(typeof(AgentTopologySummaryDto))]
-[JsonSerializable(typeof(AgentMaterializationSummaryDto))]
-[JsonSerializable(typeof(AgentImpactAnalysisSummaryDto))]
-[JsonSerializable(typeof(AgentCompatibilitySummaryDto))]
-[JsonSerializable(typeof(AgentGovernanceSummaryDto))]
+// ── Wave 1 — Context/Read: request types not in surface ──
+[JsonContractExplicitRoot(typeof(MetadataContextPackRequest))]
 
-// ── Wave 4 — Fix Proposal ──────────────────────────────────────────────
-[JsonSerializable(typeof(AgentToolResult<FixProposalListResult>))]
-[JsonSerializable(typeof(AgentToolResult<FixProposal>))]
-[JsonSerializable(typeof(ApplyFixProposalRequest))]
+// ── Wave 2 — Draft: DTOs not in surface ──
+[JsonContractExplicitRoot(typeof(AgentDescriptorDraftDto))]
+[JsonContractExplicitRoot(typeof(AgentDraftPayloadDto))]
+[JsonContractExplicitRoot(typeof(AgentDraftPayloadPatchDto))]
+[JsonContractExplicitRoot(typeof(AgentCapabilityDraftPayloadDto))]
+[JsonContractExplicitRoot(typeof(AgentCapabilityDraftPayloadPatchDto))]
+[JsonContractExplicitRoot(typeof(AgentWorkflowDraftPayloadDto))]
+[JsonContractExplicitRoot(typeof(AgentWorkflowDraftPayloadPatchDto))]
+[JsonContractExplicitRoot(typeof(AgentHumanTaskDraftPayloadDto))]
+[JsonContractExplicitRoot(typeof(AgentHumanTaskDraftPayloadPatchDto))]
+[JsonContractExplicitRoot(typeof(AgentFormDraftPayloadDto))]
+[JsonContractExplicitRoot(typeof(AgentFormDraftPayloadPatchDto))]
+[JsonContractExplicitRoot(typeof(AgentEventDraftPayloadDto))]
+[JsonContractExplicitRoot(typeof(AgentEventDraftPayloadPatchDto))]
+[JsonContractExplicitRoot(typeof(AgentSchemaDraftPayloadDto))]
+[JsonContractExplicitRoot(typeof(AgentSchemaDraftPayloadPatchDto))]
+[JsonContractExplicitRoot(typeof(DescriptorSummaryDto))]
+[JsonContractExplicitRoot(typeof(AgentCapabilityDraftChangedField))]
+[JsonContractExplicitRoot(typeof(AgentWorkflowDraftChangedField))]
+[JsonContractExplicitRoot(typeof(AgentHumanTaskDraftChangedField))]
+[JsonContractExplicitRoot(typeof(AgentFormDraftChangedField))]
+[JsonContractExplicitRoot(typeof(AgentEventDraftChangedField))]
+[JsonContractExplicitRoot(typeof(AgentSchemaDraftChangedField))]
 
-// ── Wave 5 — Package Preview ───────────────────────────────────────────
-[JsonSerializable(typeof(AgentToolResult<PackageEvidencePreview>))]
-[JsonSerializable(typeof(AgentToolResult<ActivationReadinessPreview>))]
-[JsonSerializable(typeof(AgentToolResult<DraftAbstractions.DescriptorPackagePreview>))]
+// ── Wave 3 — Review: DTOs not in surface ──
+[JsonContractExplicitRoot(typeof(AgentReviewResultDto))]
+[JsonContractExplicitRoot(typeof(AgentProposedInventorySummaryDto))]
+[JsonContractExplicitRoot(typeof(AgentTopologySummaryDto))]
+[JsonContractExplicitRoot(typeof(AgentMaterializationSummaryDto))]
+[JsonContractExplicitRoot(typeof(AgentImpactAnalysisSummaryDto))]
+[JsonContractExplicitRoot(typeof(AgentCompatibilitySummaryDto))]
+[JsonContractExplicitRoot(typeof(AgentGovernanceSummaryDto))]
 
-// ── Wave 6 — Activation Handoff ────────────────────────────────────────
-[JsonSerializable(typeof(AgentToolResult<ActivationRequest>))]
-[JsonSerializable(typeof(SubmitActivationRequestRequest))]
+// ── Wave 4 — Fix Proposal: DTOs not in surface ──
 
-// ── Wave 6.5 — Activation Models (Phase 7e) ──────────────────────────
-[JsonSerializable(typeof(ActivationBindingSnapshot))]
-[JsonSerializable(typeof(BindingHashes))]
-[JsonSerializable(typeof(DescriptorActivationActorKind))]
-[JsonSerializable(typeof(DescriptorActivationAuditRecord))]
-[JsonSerializable(typeof(DescriptorActivationDecision))]
-[JsonSerializable(typeof(DescriptorActivationEligibility))]
-[JsonSerializable(typeof(DescriptorActivationPolicy))]
-[JsonSerializable(typeof(DescriptorActivationReviewDecision))]
-[JsonSerializable(typeof(DescriptorActivationReviewOutcome))]
-[JsonSerializable(typeof(DescriptorActivationReviewTaskInput))]
-[JsonSerializable(typeof(ActivationEvidenceRecheckResult))]
-[JsonSerializable(typeof(ActivationEvidenceDrift))]
-[JsonSerializable(typeof(RuntimeActivationGateResult))]
-[JsonSerializable(typeof(ResolvedBindingArtifacts))]
+// ── Wave 5 — Package Preview: DTOs not in surface ──
 
-// ── Wave 7 — Manifest Query ────────────────────────────────────────────
-[JsonSerializable(typeof(AgentToolDescriptor))]
-[JsonSerializable(typeof(IReadOnlyList<AgentToolDescriptor>))]
+// ── Wave 6 — Activation Handoff: DTOs not in surface ──
 
-// ── Wave 8 — Review Report (Phase 7d) ──────────────────────────────────
-[JsonSerializable(typeof(AgentToolResult<DescriptorReviewReportDto>))]
-[JsonSerializable(typeof(DescriptorReviewReportDto))]
-[JsonSerializable(typeof(DescriptorReviewReportSectionDto))]
-[JsonSerializable(typeof(DescriptorReviewReportItemDto))]
-[JsonSerializable(typeof(DescriptorReviewRecommendationDto))]
-[JsonSerializable(typeof(DescriptorReviewReportBuildRequest))]
-[JsonSerializable(typeof(DescriptorReviewReportSectionKind))]
-[JsonSerializable(typeof(DescriptorReviewRecommendationKind))]
-[JsonSerializable(typeof(DescriptorReviewReportFormat))]
-[JsonSerializable(typeof(FixProposalKind))]
-[JsonSerializable(typeof(FixProposalApplicability))]
-[JsonSerializable(typeof(FixProposalActionSafetyLevel))]
-[JsonSerializable(typeof(System.Text.Json.JsonElement))]
+// ── Wave 6.5 — Activation Models (Phase 7e) ──
+[JsonContractExplicitRoot(typeof(ActivationBindingSnapshot))]
+[JsonContractExplicitRoot(typeof(BindingHashes))]
+[JsonContractExplicitRoot(typeof(DescriptorActivationActorKind))]
+[JsonContractExplicitRoot(typeof(DescriptorActivationAuditRecord))]
+[JsonContractExplicitRoot(typeof(DescriptorActivationDecision))]
+[JsonContractExplicitRoot(typeof(DescriptorActivationEligibility))]
+[JsonContractExplicitRoot(typeof(DescriptorActivationPolicy))]
+[JsonContractExplicitRoot(typeof(DescriptorActivationReviewDecision))]
+[JsonContractExplicitRoot(typeof(DescriptorActivationReviewOutcome))]
+[JsonContractExplicitRoot(typeof(DescriptorActivationReviewTaskInput))]
+[JsonContractExplicitRoot(typeof(ActivationEvidenceRecheckResult))]
+[JsonContractExplicitRoot(typeof(ActivationEvidenceDrift))]
+[JsonContractExplicitRoot(typeof(RuntimeActivationGateResult))]
+[JsonContractExplicitRoot(typeof(ResolvedBindingArtifacts))]
 
-// ── Stable upstream value objects ──────────────────────────────────────
-[JsonSerializable(typeof(DescriptorKind))]
-[JsonSerializable(typeof(DescriptorState))]
-[JsonSerializable(typeof(RelationshipKind))]
-[JsonSerializable(typeof(DescriptorStableHashes))]
-[JsonSerializable(typeof(DescriptorRelationship))]
-[JsonSerializable(typeof(DraftAbstractions.DescriptorDraftOperation))]
-[JsonSerializable(typeof(DraftAbstractions.DescriptorDraftStatus))]
-[JsonSerializable(typeof(DraftAbstractions.DescriptorDraftAuthorKind))]
-[JsonSerializable(typeof(DraftAbstractions.DescriptorDraftDiagnostic))]
-[JsonSerializable(typeof(DescriptorPackageEvidence))]
+// ── Wave 7 — Manifest Query: DTOs not in surface ──
+[JsonContractExplicitRoot(typeof(IReadOnlyList<AgentToolDescriptor>))]
 
-// ── Base types not covered by wave sections above ──────────────────────
-[JsonSerializable(typeof(AgentToolResultStatus))]
-[JsonSerializable(typeof(AgentToolDiagnostic))]
-[JsonSerializable(typeof(AgentToolInvocationAuditRecord))]
-[JsonSerializable(typeof(AgentToolCategory))]
-[JsonSerializable(typeof(AgentToolActorKind))]
-[JsonSerializable(typeof(AgentToolPermissionRequirement))]
-[JsonSerializable(typeof(AgentToolAuthorizationMode))]
-[JsonSerializable(typeof(DraftDifference))]
-[JsonSerializable(typeof(DraftDifferenceKind))]
-[JsonSerializable(typeof(DiagnosticExplanationEntry))]
-[JsonSerializable(typeof(FixProposalAction))]
-[JsonSerializable(typeof(FixProposalActionKind))]
-[JsonSerializable(typeof(FixProposalRiskLevel))]
-[JsonSerializable(typeof(ActivationRequestStatus))]
-[JsonSerializable(typeof(ActivationReadinessBlocker))]
+// ── Wave 8 — Review Report (Phase 7d): DTOs not in surface ──
+[JsonContractExplicitRoot(typeof(DescriptorReviewReportSectionDto))]
+[JsonContractExplicitRoot(typeof(DescriptorReviewReportItemDto))]
+[JsonContractExplicitRoot(typeof(DescriptorReviewRecommendationDto))]
+[JsonContractExplicitRoot(typeof(DescriptorReviewReportBuildRequest))]
+[JsonContractExplicitRoot(typeof(DescriptorReviewReportSectionKind))]
+[JsonContractExplicitRoot(typeof(DescriptorReviewRecommendationKind))]
+[JsonContractExplicitRoot(typeof(FixProposalKind))]
+[JsonContractExplicitRoot(typeof(FixProposalApplicability))]
+[JsonContractExplicitRoot(typeof(FixProposalActionSafetyLevel))]
+[JsonContractExplicitRoot(typeof(System.Text.Json.JsonElement))]
 
-// ── Core identity types used in diagnostics ───────────────────────────
-[JsonSerializable(typeof(DiagnosticCode))]
-[JsonSerializable(typeof(SeverityLevel))]
+// ── Stable upstream value objects ──
+[JsonContractExplicitRoot(typeof(DescriptorKind))]
+[JsonContractExplicitRoot(typeof(DescriptorState))]
+[JsonContractExplicitRoot(typeof(RelationshipKind))]
+[JsonContractExplicitRoot(typeof(DescriptorStableHashes))]
+[JsonContractExplicitRoot(typeof(DescriptorRelationship))]
+[JsonContractExplicitRoot(typeof(DraftAbstractions.DescriptorDraftOperation))]
+[JsonContractExplicitRoot(typeof(DraftAbstractions.DescriptorDraftStatus))]
+[JsonContractExplicitRoot(typeof(DraftAbstractions.DescriptorDraftAuthorKind))]
+[JsonContractExplicitRoot(typeof(DraftAbstractions.DescriptorDraftDiagnostic))]
+[JsonContractExplicitRoot(typeof(DescriptorPackageEvidence))]
+
+// ── Base types not covered by wave sections above ──
+[JsonContractExplicitRoot(typeof(AgentToolResultStatus))]
+[JsonContractExplicitRoot(typeof(AgentToolDiagnostic))]
+[JsonContractExplicitRoot(typeof(AgentToolInvocationAuditRecord))]
+[JsonContractExplicitRoot(typeof(AgentToolCategory))]
+[JsonContractExplicitRoot(typeof(AgentToolActorKind))]
+[JsonContractExplicitRoot(typeof(AgentToolPermissionRequirement))]
+[JsonContractExplicitRoot(typeof(AgentToolAuthorizationMode))]
+[JsonContractExplicitRoot(typeof(DraftDifference))]
+[JsonContractExplicitRoot(typeof(DraftDifferenceKind))]
+[JsonContractExplicitRoot(typeof(DiagnosticExplanationEntry))]
+[JsonContractExplicitRoot(typeof(FixProposalAction))]
+[JsonContractExplicitRoot(typeof(FixProposalActionKind))]
+[JsonContractExplicitRoot(typeof(FixProposalRiskLevel))]
+[JsonContractExplicitRoot(typeof(ActivationRequestStatus))]
+[JsonContractExplicitRoot(typeof(ActivationReadinessBlocker))]
+
+// ── Core identity types used in diagnostics ──
+[JsonContractExplicitRoot(typeof(DiagnosticCode))]
+[JsonContractExplicitRoot(typeof(SeverityLevel))]
 
 public sealed partial class AgentControlPlaneToolJsonSerializerContext
     : JsonSerializerContext

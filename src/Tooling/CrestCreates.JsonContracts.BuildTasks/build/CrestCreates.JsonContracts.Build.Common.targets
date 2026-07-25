@@ -1,0 +1,146 @@
+<Project>
+  <UsingTask TaskName="CrestCreates.JsonContracts.BuildTasks.Tasks.WriteJsonContractInputManifest"
+             AssemblyFile="$(CrestCreatesJsonContractsSelectedTaskAssembly)" />
+  <UsingTask TaskName="CrestCreates.JsonContracts.BuildTasks.Tasks.GenerateJsonContracts"
+             AssemblyFile="$(CrestCreatesJsonContractsSelectedTaskAssembly)" />
+  <Target Name="SetCrestCreatesJsonContractPaths"
+          BeforeTargets="PrepareCrestCreatesJsonContractInputs">
+    <PropertyGroup Condition="'$(CrestCreatesJsonContractGenerationEnabled)' == 'true'">
+      <CrestCreatesJsonContractGeneratedFile Condition="'$(CrestCreatesJsonContractGeneratedFile)' == ''">$(IntermediateOutputPath)CrestCreates.JsonContracts.g.cs</CrestCreatesJsonContractGeneratedFile>
+      <CrestCreatesJsonContractInputManifest Condition="'$(CrestCreatesJsonContractInputManifest)' == ''">$(IntermediateOutputPath)CrestCreates.JsonContracts.inputs.json</CrestCreatesJsonContractInputManifest>
+      <CrestCreatesJsonContractGenerationStamp Condition="'$(CrestCreatesJsonContractGenerationStamp)' == ''">$(IntermediateOutputPath)CrestCreates.JsonContracts.stamp</CrestCreatesJsonContractGenerationStamp>
+      <CrestCreatesJsonContractTemporaryDirectory Condition="'$(CrestCreatesJsonContractTemporaryDirectory)' == ''">$(IntermediateOutputPath)CrestCreates.JsonContracts.tmp</CrestCreatesJsonContractTemporaryDirectory>
+    </PropertyGroup>
+  </Target>
+
+  <PropertyGroup>
+    <CrestCreatesJsonContractGenerationDependsOn>
+      ResolveReferences;
+      $(CrestCreatesJsonContractGenerationDependsOn)
+    </CrestCreatesJsonContractGenerationDependsOn>
+  </PropertyGroup>
+
+  <Target Name="PrepareCrestCreatesJsonContractAllowedOutputRoot"
+          BeforeTargets="ValidateCrestCreatesJsonContractPaths">
+    <PropertyGroup>
+      <CrestCreatesJsonContractAllowedOutputRoot Condition="'$(CrestCreatesJsonContractAllowedOutputRoot)' == ''">$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)'))</CrestCreatesJsonContractAllowedOutputRoot>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="ValidateCrestCreatesJsonContractPaths"
+          BeforeTargets="GenerateCrestCreatesJsonContracts"
+          Condition="'$(CrestCreatesJsonContractGenerationEnabled)' == 'true'">
+    <Error Condition="'$(CrestCreatesJsonContractAllowedOutputRoot)' == ''"
+           Text="CrestCreatesJsonContractAllowedOutputRoot is not set." />
+    <Error Condition="!$([System.IO.Path]::IsPathRooted('$(CrestCreatesJsonContractAllowedOutputRoot)'))"
+           Text="CrestCreatesJsonContractAllowedOutputRoot must be a rooted path: '$(CrestCreatesJsonContractAllowedOutputRoot)'" />
+  </Target>
+
+  <Target Name="ValidateCrestCreatesJsonContractTransport"
+          BeforeTargets="PrepareCrestCreatesJsonContractInputs"
+          Condition="'$(CrestCreatesJsonContractGenerationEnabled)' == 'true'">
+    <Error Condition="'$(_CrestCreatesJsonContractsPackageTransportImported)' == 'true' AND '$(_CrestCreatesJsonContractsRepositoryTransportImported)' == 'true'"
+           Code="CJC014"
+           Text="Both Package and Repository transports are imported for CrestCreates.JsonContracts. Remove one transport import." />
+    <Error Condition="'$(_CrestCreatesJsonContractsImportConflict)' == 'true'"
+           Code="CJC014"
+           Text="Props and Targets from different transports are imported for CrestCreates.JsonContracts." />
+    <Error Condition="'$(_CrestCreatesJsonContractsPackageTransportImported)' != 'true' AND '$(_CrestCreatesJsonContractsRepositoryTransportImported)' != 'true'"
+           Code="CJC014"
+           Text="No transport is imported for CrestCreates.JsonContracts. Import either Build.props or Build.Repository.props." />
+    <Error Condition="'$(CrestCreatesJsonContractsSelectedTaskAssembly)' == ''"
+           Code="CJC014"
+           Text="CrestCreatesJsonContractsSelectedTaskAssembly is not set. Exactly one transport must provide the task assembly path." />
+    <Error Condition="'$(_CrestCreatesJsonContractsPropsImported)' != 'true'"
+           Code="CJC014"
+           Text="Common.props was not imported for CrestCreates.JsonContracts." />
+    <Error Condition="'$(_CrestCreatesJsonContractsTargetsImported)' != 'true'"
+           Code="CJC014"
+           Text="Common.targets was not imported for CrestCreates.JsonContracts." />
+    <Error Condition="!Exists('$(CrestCreatesJsonContractsSelectedTaskAssembly)')"
+           Code="CJC014"
+           Text="Task assembly not found: '$(CrestCreatesJsonContractsSelectedTaskAssembly)'" />
+  </Target>
+
+  <Target Name="PrepareCrestCreatesJsonContractInputs"
+          DependsOnTargets="ValidateCrestCreatesJsonContractPaths;ValidateCrestCreatesJsonContractTransport"
+          BeforeTargets="GenerateCrestCreatesJsonContracts"
+          Condition="'$(CrestCreatesJsonContractGenerationEnabled)' == 'true'">
+    <ItemGroup>
+      <CrestCreatesJsonContractCompileSources Include="@(Compile)"
+              Condition="'%(Identity)' != '$(CrestCreatesJsonContractGeneratedFile)'">
+        <NormalizedPath>$([System.IO.Path]::GetFullPath('%(Identity)'))</NormalizedPath>
+      </CrestCreatesJsonContractCompileSources>
+    </ItemGroup>
+    <MakeDir Directories="$(CrestCreatesJsonContractTemporaryDirectory)" />
+  </Target>
+
+  <Target Name="WriteCrestCreatesJsonContractInputManifest"
+          DependsOnTargets="PrepareCrestCreatesJsonContractInputs"
+          BeforeTargets="GenerateCrestCreatesJsonContracts"
+          Condition="'$(CrestCreatesJsonContractGenerationEnabled)' == 'true' AND '$(DesignTimeBuild)' != 'true'">
+    <CrestCreates.JsonContracts.BuildTasks.Tasks.WriteJsonContractInputManifest
+        SourceFiles="@(CrestCreatesJsonContractCompileSources)"
+        ReferencePaths="@(ReferencePath)"
+        OutputPath="$(CrestCreatesJsonContractInputManifest)"
+        AllowedOutputRoot="$(CrestCreatesJsonContractAllowedOutputRoot)"
+        TemporaryDirectory="$(CrestCreatesJsonContractTemporaryDirectory)"
+        AssemblyName="$(AssemblyName)"
+        LangVersion="$(LangVersion)"
+        DefineConstants="$(DefineConstants)"
+        Nullable="$(Nullable)"
+        AllowUnsafeBlocks="$(AllowUnsafeBlocks)"
+        ImplicitUsings="$(ImplicitUsings)"
+        TargetFramework="$(TargetFramework)"
+        ManifestAccessibility="$(CrestCreatesJsonContractManifestAccessibility)"
+        TaskSemanticVersion="$(CrestCreatesJsonContractsTaskSemanticVersion)"
+        ToolPath="$(CrestCreatesJsonContractsToolPath)" />
+  </Target>
+
+  <Target Name="GenerateCrestCreatesJsonContracts"
+          DependsOnTargets="ValidateCrestCreatesJsonContractPaths;ValidateCrestCreatesJsonContractTransport;PrepareCrestCreatesJsonContractInputs;WriteCrestCreatesJsonContractInputManifest"
+          BeforeTargets="CoreCompile"
+          Condition="'$(CrestCreatesJsonContractGenerationEnabled)' == 'true' AND '$(DesignTimeBuild)' != 'true'">
+    <CrestCreates.JsonContracts.BuildTasks.Tasks.GenerateJsonContracts
+        SourceFiles="@(CrestCreatesJsonContractCompileSources)"
+        ReferencePaths="@(ReferencePath)"
+        OutputPath="$(CrestCreatesJsonContractGeneratedFile)"
+        AllowedOutputRoot="$(CrestCreatesJsonContractAllowedOutputRoot)"
+        TemporaryDirectory="$(CrestCreatesJsonContractTemporaryDirectory)"
+        AssemblyName="$(AssemblyName)"
+        LangVersion="$(LangVersion)"
+        DefineConstants="$(DefineConstants)"
+        Nullable="$(Nullable)"
+        AllowUnsafeBlocks="$(AllowUnsafeBlocks)"
+        TargetFramework="$(TargetFramework)"
+        ManifestAccessibility="$(CrestCreatesJsonContractManifestAccessibility)"
+        TaskSemanticVersion="$(CrestCreatesJsonContractsTaskSemanticVersion)"
+        ToolPath="$(CrestCreatesJsonContractsToolPath)">
+      <Output TaskParameter="GeneratedContextCount" PropertyName="CrestCreatesJsonContractGeneratedContextCount" />
+      <Output TaskParameter="GeneratedSurfaceRootCount" PropertyName="CrestCreatesJsonContractGeneratedSurfaceRootCount" />
+      <Output TaskParameter="GeneratedExplicitRootCount" PropertyName="CrestCreatesJsonContractGeneratedExplicitRootCount" />
+      <Output TaskParameter="OutputChanged" PropertyName="CrestCreatesJsonContractOutputChanged" />
+    </CrestCreates.JsonContracts.BuildTasks.Tasks.GenerateJsonContracts>
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(CrestCreatesJsonContractGenerationStamp)'))" />
+    <WriteLinesToFile File="$(CrestCreatesJsonContractGenerationStamp)"
+                      Lines="$(CrestCreatesJsonContractGeneratedContextCount);$(CrestCreatesJsonContractGeneratedSurfaceRootCount);$(CrestCreatesJsonContractGeneratedExplicitRootCount)"
+                      Overwrite="true" />
+  </Target>
+
+  <Target Name="IncludeCrestCreatesJsonContractGeneratedSource"
+          AfterTargets="GenerateCrestCreatesJsonContracts"
+          Condition="'$(CrestCreatesJsonContractGenerationEnabled)' == 'true' AND Exists('$(CrestCreatesJsonContractGeneratedFile)')">
+    <ItemGroup>
+      <Compile Include="$(CrestCreatesJsonContractGeneratedFile)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="CleanCrestCreatesJsonContracts"
+          AfterTargets="Clean"
+          Condition="'$(CrestCreatesJsonContractGenerationEnabled)' == 'true'">
+    <Delete Files="$(CrestCreatesJsonContractGeneratedFile);$(CrestCreatesJsonContractInputManifest);$(CrestCreatesJsonContractGenerationStamp)"
+            Condition="Exists('$(CrestCreatesJsonContractGeneratedFile)') OR Exists('$(CrestCreatesJsonContractInputManifest)') OR Exists('$(CrestCreatesJsonContractGenerationStamp)')" />
+    <RemoveDir Directories="$(CrestCreatesJsonContractTemporaryDirectory)"
+               Condition="Exists('$(CrestCreatesJsonContractTemporaryDirectory)')" />
+  </Target>
+</Project>

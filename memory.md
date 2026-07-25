@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-24 (Phase 8c+ scope identity and credential retry closure)
+Last Updated: 2026-07-25 (Issue #58 Control Plane JSON Contract Root Generation)
 
 ## Purpose
 
@@ -13,6 +13,17 @@ This file records the current platform status for CrestCreates so future threads
 No approved-but-unimplemented design is currently recorded here.
 
 ## Completed Features
+
+### Issue #58 — Control Plane JSON Contract Root Generation
+
+Status: Implemented / NativeAOT-verified
+Mainline: explicit surface → pre-CoreCompile task → STJ SG
+Package: direct opt-in, no runtime leakage
+Control Plane manifest: Internal
+Explicit Extras: DescriptorActivationReviewDecision, CanonicalHash, DescriptorReviewReportFormat, DraftComparisonResult, DescriptorDraftFieldChange, DescriptorDraftFieldChangeKind, DescriptorDraftValidationResult, DescriptorDraftValidationSeverity, AgentToolInvocationContext, AgentToolDescriptor, AgentToolResult<string>, MetadataContextPackRequest, DescriptorDraftDto, DescriptorDraftFieldDto, DescriptorDraftFieldChangeDto, DescriptorDraftValidationEntryDto, DescriptorActivationReadinessPreview, DescriptorActivationRequest, DescriptorActivationReviewDecision, DescriptorActivationActorKind, DescriptorActivationReviewOutcome, DescriptorPackagePreview, PackageEvidencePreview, FixProposal, FixProposalListResult, ApplyFixProposalRequest, AgentReviewResultDto, ReviewResultListResult, ExplainDiagnosticsRequest, DiagnosticExplanation, CanonicalHash, DescriptorReviewReportDto, DescriptorReviewReportFormat, DescriptorSearchRequest, DescriptorSearchResult, DescriptorInfo, DescriptorRelationshipsResult, TopologySummaryResult, DescriptorRef, DraftQuery, CreateDescriptorDraftRequest, UpdateDescriptorDraftRequest, SubmitActivationRequestRequest, DescriptorDraftListResult, AgentDescriptorDraftDto, DescriptorPackagePreview, PackageEvidencePreview, AgentToolResult<MetadataContextPack>
+Evidence: unit (55), MSBuild (14), package (14), Control Plane (500), boundary (46), Agent/MCP regression (0 failures), linux-x64 native publish-link-run (1)
+Approved deviation: [JsonContractExplicitRoot] replaces [JsonSerializable] for explicit extras in user source — STJ source generator cannot process two partial class declarations with [JsonSerializable] on the same type (constraint #322). User source declares [JsonContractSurface] + [JsonSourceGenerationOptions] + [JsonContractExplicitRoot]; generated source declares the partial class with ALL [JsonSerializable] attributes (surface roots + explicit extras). STJ only sees one declaration with [JsonSerializable], avoiding duplicate hint name collision.
+Approved deviation: Split-process model (thin task DLL + dotnet exec Tool) replaces single BuildTasks DLL with Roslyn refs — MSBuild plugin ALC cannot resolve Roslyn transitive dependencies (constraint #299).
 
 ### Phase 8c+ — MCP Context/Memory Projection Review Closure
 
