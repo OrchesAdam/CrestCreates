@@ -155,7 +155,7 @@ public sealed class ProcurementCapabilityDescriptorProvider : IDescriptorProvide
 public sealed class StubCurrentUser : ICurrentUser
 {
     public string Id => "system";
-    public string? UserName => "System";
+    public string UserName => "System";
     public string? Email => null;
     public string TenantId => string.Empty;
     public Guid? OrganizationId => null;
