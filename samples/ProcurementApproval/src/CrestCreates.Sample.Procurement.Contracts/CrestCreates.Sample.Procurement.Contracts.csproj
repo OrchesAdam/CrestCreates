@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata.Mcp.Abstractions/CrestCreates.Metadata.Mcp.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata.AgentTool.Abstractions/CrestCreates.Metadata.AgentTool.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.DynamicApi.Abstractions/CrestCreates.DynamicApi.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Integrations/CrestCreates.Mcp.Abstractions/CrestCreates.Mcp.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions/CrestCreates.Agent.Tools.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

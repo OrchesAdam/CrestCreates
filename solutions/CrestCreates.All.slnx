@@ -289,6 +289,13 @@
   <Project Path="../src/Tooling/CrestCreates.JsonContracts.BuildTasks.Core/CrestCreates.JsonContracts.BuildTasks.Core.csproj" />
   <Project Path="../src/Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj" />
   <Project Path="../tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture.Tests/CrestCreates.CapabilityEndpoint.AotFixture.Tests.csproj" />
+  <Project Path="../samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Application/CrestCreates.Sample.Procurement.Application.csproj" />
+  <Project Path="../samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Contracts/CrestCreates.Sample.Procurement.Contracts.csproj" />
+  <Project Path="../samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Domain/CrestCreates.Sample.Procurement.Domain.csproj" />
+  <Project Path="../samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Host/CrestCreates.Sample.Procurement.Host.csproj" />
+  <Project Path="../samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.AotFixture.Tests/CrestCreates.Sample.Procurement.AotFixture.Tests.csproj" />
+  <Project Path="../samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.E2E.Tests/CrestCreates.Sample.Procurement.E2E.Tests.csproj" />
+  <Project Path="../samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.Tests/CrestCreates.Sample.Procurement.Tests.csproj" />
     <Project Path="../src/Integrations/CrestCreates.Mcp.Abstractions/CrestCreates.Mcp.Abstractions.csproj" />
     <Project Path="../src/Integrations/CrestCreates.Mcp/CrestCreates.Mcp.csproj" />
     <Project Path="../src/Integrations/CrestCreates.Mcp.Memory/CrestCreates.Mcp.Memory.csproj" />
