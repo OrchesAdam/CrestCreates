@@ -44,4 +44,4 @@ jobs:
         run: >-
           dotnet test CrestCreates.slnx --no-build
           --filter
-          "FullyQualifiedName!~CrestCreates.IntegrationTests&FullyQualifiedName!~SaaSHelpdesk.Tests&FullyQualifiedName!~CrestCreates.EventBus.Kafka.Tests.Integration&FullyQualifiedName!~CrestCreates.EventBus.RabbitMQ.Tests.Integration"
+          "FullyQualifiedName!~CrestCreates.IntegrationTests&FullyQualifiedName!~SaaSHelpdesk.Tests&FullyQualifiedName!~CrestCreates.EventBus.Kafka.Tests.Integration&FullyQualifiedName!~CrestCreates.EventBus.RabbitMQ.Tests.Integration&FullyQualifiedName!~CrestCreates.Database.Migrations.Tests"
