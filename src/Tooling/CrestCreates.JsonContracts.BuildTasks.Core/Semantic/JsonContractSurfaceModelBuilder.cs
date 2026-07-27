@@ -59,15 +59,24 @@ public sealed class JsonContractSurfaceModelBuilder
         CSharpCompilation compilation,
         List<JsonContractContextModel> contexts)
     {
-        if (!type.DerivesFrom(contextBaseSymbol))
-            return;
-
         var surfaceAttributes = type.GetAttributes()
             .Where(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, markerSymbol))
             .ToList();
 
         if (surfaceAttributes.Count == 0)
             return;
+
+        if (!type.DerivesFrom(contextBaseSymbol))
+        {
+            _diagnostics.Add(new JsonContractDiagnostic
+            {
+                Id = JsonContractDiagnosticIds.InvalidContext,
+                Message = $"Marked type '{type.ToDisplayString()}' must derive from JsonSerializerContext.",
+                Severity = JsonContractDiagnosticSeverity.Error,
+                ContextMetadataName = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            }.WithLocation(type.Locations.FirstOrDefault()));
+            return;
+        }
 
         if (!type.IsPartial())
         {
@@ -203,9 +212,9 @@ public sealed class JsonContractSurfaceModelBuilder
         return $"Required symbol(s) unresolved: {string.Join(", ", missing)}. Ensure System.Text.Json and CrestCreates.Core.Abstractions are referenced.";
     }
 
-    private static HashSet<INamedTypeSymbol> GetExcludedParameterTypes(AttributeData attr, CSharpCompilation compilation)
+    private static HashSet<ITypeSymbol> GetExcludedParameterTypes(AttributeData attr, CSharpCompilation compilation)
     {
-        var result = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
+        var result = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
 
         foreach (var namedArg in attr.NamedArguments)
         {
@@ -217,7 +226,7 @@ public sealed class JsonContractSurfaceModelBuilder
 
             foreach (var elem in namedArg.Value.Values)
             {
-                if (elem.Value is INamedTypeSymbol excludedType)
+                if (elem.Value is ITypeSymbol excludedType)
                     result.Add(excludedType);
             }
         }

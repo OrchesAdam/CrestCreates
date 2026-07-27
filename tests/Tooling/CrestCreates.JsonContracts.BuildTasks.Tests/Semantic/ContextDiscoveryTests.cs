@@ -59,6 +59,26 @@ public class ContextDiscoveryTests : JsonContractCompilationTestBase
     }
 
     [Fact]
+    public void Fail_NonJsonSerializerContext()
+    {
+        var source = (Path: "NotAContext.cs", Text: """
+            using CrestCreates.Core.Abstractions.Serialization;
+
+            public interface IService { }
+
+            [JsonContractSurface(typeof(IService))]
+            public partial class NotAJsonSerializerContext { }
+            """);
+        var result = JsonContractTestHelper.BuildModel("TestAssembly", [source], GetDefaultReferences());
+
+        JsonContractDiagnosticAssertions.ShouldHaveDiagnostic(
+            result.Diagnostics,
+            JsonContractDiagnosticIds.InvalidContext,
+            contextMetadataName: "global::NotAJsonSerializerContext");
+        result.Model!.Contexts.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Fail_NestedOrGenericContext()
     {
         var source = JsonContractTestSources.InvalidContext();

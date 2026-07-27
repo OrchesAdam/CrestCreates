@@ -26,7 +26,7 @@ public sealed class JsonContractSurfaceWalker
         INamedTypeSymbol valueTaskSymbol,
         INamedTypeSymbol markerSymbol,
         INamedTypeSymbol serializableSymbol,
-        HashSet<INamedTypeSymbol> excludedParameterTypes,
+        HashSet<ITypeSymbol> excludedParameterTypes,
         string contextMetadataName)
     {
         _diagnostics.Clear();
@@ -216,6 +216,20 @@ public sealed class JsonContractSurfaceWalker
             return;
         }
 
+        if (type is IPointerTypeSymbol or IFunctionPointerTypeSymbol)
+        {
+            _diagnostics.Add(new JsonContractDiagnostic
+            {
+                Id = JsonContractDiagnosticIds.ByRefPointerOrRefLikeParameter,
+                Message = $"Root type '{type.ToDisplayString()}' is a pointer or function pointer. Pointer types are not supported.",
+                Severity = JsonContractDiagnosticSeverity.Error,
+                ContextMetadataName = contextMetadataName,
+                OffendingType = type.ToDisplayString(s_canonicalFormat),
+                MethodSignature = method.ToDisplayString(s_canonicalFormat),
+            });
+            return;
+        }
+
         if (type is INamedTypeSymbol namedType)
         {
             if (namedType.IsUnboundGenericType || (namedType.Arity > 0 && namedType.TypeArguments.Any(t => t.TypeKind == TypeKind.TypeParameter)))
@@ -288,12 +302,6 @@ public sealed class JsonContractSurfaceWalker
         }
     }
 
-    private static bool IsExactSymbolMatch(ITypeSymbol type, INamedTypeSymbol target)
-    {
-        if (type is not INamedTypeSymbol namedType)
-            return false;
-
-        return SymbolEqualityComparer.Default.Equals(namedType.OriginalDefinition, target.OriginalDefinition)
-            && namedType.Arity == target.Arity;
-    }
+    private static bool IsExactSymbolMatch(ITypeSymbol type, ITypeSymbol target) =>
+        SymbolEqualityComparer.Default.Equals(type, target);
 }

@@ -36,16 +36,16 @@
     <Error Condition="'$(_CrestCreatesJsonContractAllowedOutputRoot)' == '' OR !$([System.IO.Path]::IsPathRooted('$(_CrestCreatesJsonContractAllowedOutputRoot)'))"
            Code="CJC012"
            Text="IntermediateOutputPath must resolve to an absolute allowed output root." />
-    <Error Condition="'$(_CrestCreatesJsonContractGeneratedRelative)' == '..' OR $([System.String]::Copy('$(_CrestCreatesJsonContractGeneratedRelative)').StartsWith('../')) OR $([System.String]::Copy('$(_CrestCreatesJsonContractGeneratedRelative)').StartsWith('..\'))"
+    <Error Condition="$([System.IO.Path]::IsPathRooted('$(_CrestCreatesJsonContractGeneratedRelative)')) OR '$(_CrestCreatesJsonContractGeneratedRelative)' == '..' OR $([System.String]::Copy('$(_CrestCreatesJsonContractGeneratedRelative)').StartsWith('../')) OR $([System.String]::Copy('$(_CrestCreatesJsonContractGeneratedRelative)').StartsWith('..\'))"
            Code="CJC012"
            Text="Generated source must be inside IntermediateOutputPath: '$(CrestCreatesJsonContractGeneratedFile)'." />
-    <Error Condition="'$(_CrestCreatesJsonContractManifestRelative)' == '..' OR $([System.String]::Copy('$(_CrestCreatesJsonContractManifestRelative)').StartsWith('../')) OR $([System.String]::Copy('$(_CrestCreatesJsonContractManifestRelative)').StartsWith('..\'))"
+    <Error Condition="$([System.IO.Path]::IsPathRooted('$(_CrestCreatesJsonContractManifestRelative)')) OR '$(_CrestCreatesJsonContractManifestRelative)' == '..' OR $([System.String]::Copy('$(_CrestCreatesJsonContractManifestRelative)').StartsWith('../')) OR $([System.String]::Copy('$(_CrestCreatesJsonContractManifestRelative)').StartsWith('..\'))"
            Code="CJC012"
            Text="Input manifest must be inside IntermediateOutputPath: '$(CrestCreatesJsonContractInputManifest)'." />
-    <Error Condition="'$(_CrestCreatesJsonContractStampRelative)' == '..' OR $([System.String]::Copy('$(_CrestCreatesJsonContractStampRelative)').StartsWith('../')) OR $([System.String]::Copy('$(_CrestCreatesJsonContractStampRelative)').StartsWith('..\'))"
+    <Error Condition="$([System.IO.Path]::IsPathRooted('$(_CrestCreatesJsonContractStampRelative)')) OR '$(_CrestCreatesJsonContractStampRelative)' == '..' OR $([System.String]::Copy('$(_CrestCreatesJsonContractStampRelative)').StartsWith('../')) OR $([System.String]::Copy('$(_CrestCreatesJsonContractStampRelative)').StartsWith('..\'))"
            Code="CJC012"
            Text="Generation stamp must be inside IntermediateOutputPath: '$(CrestCreatesJsonContractGenerationStamp)'." />
-    <Error Condition="'$(_CrestCreatesJsonContractTemporaryRelative)' == '..' OR $([System.String]::Copy('$(_CrestCreatesJsonContractTemporaryRelative)').StartsWith('../')) OR $([System.String]::Copy('$(_CrestCreatesJsonContractTemporaryRelative)').StartsWith('..\'))"
+    <Error Condition="$([System.IO.Path]::IsPathRooted('$(_CrestCreatesJsonContractTemporaryRelative)')) OR '$(_CrestCreatesJsonContractTemporaryRelative)' == '..' OR $([System.String]::Copy('$(_CrestCreatesJsonContractTemporaryRelative)').StartsWith('../')) OR $([System.String]::Copy('$(_CrestCreatesJsonContractTemporaryRelative)').StartsWith('..\'))"
            Code="CJC012"
            Text="Temporary directory must be inside IntermediateOutputPath: '$(CrestCreatesJsonContractTemporaryDirectory)'." />
   </Target>

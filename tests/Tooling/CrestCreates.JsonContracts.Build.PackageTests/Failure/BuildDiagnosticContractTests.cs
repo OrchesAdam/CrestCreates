@@ -74,6 +74,25 @@ public sealed class OutputPathBoundaryContractTests(JsonContractBuildFixture fix
     public Task Fail_TemporaryDirectoryOutsideIntermediateOutputPath() =>
         AssertRejectedAsync(new ConsumerSpec("Repository", s_sources, TemporaryDirectory: "../escaped.tmp"), "escaped.tmp");
 
+    [Fact]
+    public void Target_PathValidationRejectsRootedRelativeForAllOwnedPaths()
+    {
+        var targets = File.ReadAllText(Fixture.CommonTargetsPath);
+
+        foreach (var relativeProperty in new[]
+        {
+            "_CrestCreatesJsonContractGeneratedRelative",
+            "_CrestCreatesJsonContractManifestRelative",
+            "_CrestCreatesJsonContractStampRelative",
+            "_CrestCreatesJsonContractTemporaryRelative",
+        })
+        {
+            targets.Should().Contain(
+                $"$([System.IO.Path]::IsPathRooted('$({relativeProperty})'))",
+                $"{relativeProperty} must reject Windows cross-volume rooted relative results before side effects");
+        }
+    }
+
     private async Task AssertRejectedAsync(ConsumerSpec spec, string escapedName)
     {
         var project = await CreateRepositoryConsumerAsync(spec);

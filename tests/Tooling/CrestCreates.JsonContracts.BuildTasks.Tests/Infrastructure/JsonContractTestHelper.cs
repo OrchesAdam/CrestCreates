@@ -10,13 +10,15 @@ public static class JsonContractTestHelper
     public static JsonContractTestCompilation BuildModel(
         string assemblyName,
         IEnumerable<(string Path, string Text)> sourceFiles,
-        IEnumerable<string>? referencePaths = null)
+        IEnumerable<string>? referencePaths = null,
+        bool allowUnsafeBlocks = false)
     {
         var compilationFactory = new JsonContractCompilationTestBase();
         var compilation = compilationFactory.CreateCompilation(
             assemblyName,
             sourceFiles,
-            referencePaths);
+            referencePaths,
+            allowUnsafeBlocks: allowUnsafeBlocks);
 
         var builder = new JsonContractSurfaceModelBuilder();
         var model = builder.Build(compilation);
