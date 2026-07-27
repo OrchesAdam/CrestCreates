@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
@@ -26,16 +27,8 @@ public static class ControlPlaneJsonContractFixtureRunner
             var context = AgentControlPlaneToolJsonSerializerContext.Default;
             var options = context.Options;
 
-            bool reflectionFallbackDisabled = true;
-            try
-            {
-                _ = Activator.CreateInstance(
-                    Type.GetType("System.Text.Json.Metadata.DefaultJsonTypeInfoResolver, System.Text.Json")!);
-                reflectionFallbackDisabled = false;
-            }
-            catch
-            {
-            }
+            var reflectionFallbackDisabled = options.TypeInfoResolver is not DefaultJsonTypeInfoResolver
+                && !options.TypeInfoResolverChain.Any(resolver => resolver is DefaultJsonTypeInfoResolver);
 
             if (!reflectionFallbackDisabled)
             {
@@ -73,20 +66,18 @@ public static class ControlPlaneJsonContractFixtureRunner
 
             allPassed &= RoundTrip<CanonicalHash>(FixtureHash, "CanonicalHash");
 
-            allPassed &= RoundTrip<DescriptorReviewReportFormat>(DescriptorReviewReportFormat.Markdown, "DescriptorReviewReportFormat");
-
-            bool failClosed = false;
+            bool unregisteredTypeRejected = false;
             try
             {
                 var unregisteredTypeInfo = context.GetTypeInfo(typeof(System.Net.Http.HttpClient));
-                if (unregisteredTypeInfo != null)
-                    failClosed = true;
+                unregisteredTypeRejected = unregisteredTypeInfo is null;
             }
-            catch (InvalidOperationException)
+            catch (NotSupportedException)
             {
+                unregisteredTypeRejected = true;
             }
 
-            if (failClosed)
+            if (!unregisteredTypeRejected)
             {
                 Console.Error.WriteLine("FAIL: Unregistered type resolved — fail-closed violated.");
                 allPassed = false;

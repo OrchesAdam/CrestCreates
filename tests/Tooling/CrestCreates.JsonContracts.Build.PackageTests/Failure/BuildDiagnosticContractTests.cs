@@ -42,3 +42,46 @@ public class TransportConflictContractTests(JsonContractBuildFixture fixture) : 
         (result.StandardOutput + result.StandardError).Should().Contain("CJC014");
     }
 }
+
+public sealed class OutputPathBoundaryContractTests(JsonContractBuildFixture fixture) : JsonContractContractTestBase(fixture)
+{
+    private static readonly string[] s_sources =
+    [
+        """
+        using System.Text.Json.Serialization;
+        using CrestCreates.Core.Abstractions.Serialization;
+        [JsonContractSurface(typeof(IService))]
+        public partial class TestContext : JsonSerializerContext { }
+        """,
+        """
+        public interface IService { Task<string> GetAsync(CancellationToken cancellationToken); }
+        """
+    ];
+
+    [Fact]
+    public Task Fail_GeneratedPathOutsideIntermediateOutputPath() =>
+        AssertRejectedAsync(new ConsumerSpec("Repository", s_sources, GeneratedFile: "../escaped.g.cs"), "escaped.g.cs");
+
+    [Fact]
+    public Task Fail_InputManifestOutsideIntermediateOutputPath() =>
+        AssertRejectedAsync(new ConsumerSpec("Repository", s_sources, InputManifest: "../escaped.inputs.json"), "escaped.inputs.json");
+
+    [Fact]
+    public Task Fail_GenerationStampOutsideIntermediateOutputPath() =>
+        AssertRejectedAsync(new ConsumerSpec("Repository", s_sources, GenerationStamp: "../escaped.stamp"), "escaped.stamp");
+
+    [Fact]
+    public Task Fail_TemporaryDirectoryOutsideIntermediateOutputPath() =>
+        AssertRejectedAsync(new ConsumerSpec("Repository", s_sources, TemporaryDirectory: "../escaped.tmp"), "escaped.tmp");
+
+    private async Task AssertRejectedAsync(ConsumerSpec spec, string escapedName)
+    {
+        var project = await CreateRepositoryConsumerAsync(spec);
+
+        var result = await BuildAsync(project);
+
+        result.ExitCode.Should().NotBe(0);
+        (result.StandardOutput + result.StandardError).Should().Contain("CJC012");
+        File.Exists(Path.Combine(Path.GetDirectoryName(project.ProjectDirectory)!, escapedName)).Should().BeFalse();
+    }
+}

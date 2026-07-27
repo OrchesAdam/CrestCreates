@@ -19,6 +19,7 @@ public sealed class JsonContractBuildFixture : IAsyncLifetime
     public string CommonTargetsPath { get; private set; } = string.Empty;
     public string CoreAbstractionsPath { get; private set; } = string.Empty;
     public string PackagePath { get; private set; } = string.Empty;
+    public string CoreAbstractionsPackagePath { get; private set; } = string.Empty;
 
     public async Task InitializeAsync()
     {
@@ -64,6 +65,18 @@ public sealed class JsonContractBuildFixture : IAsyncLifetime
     public async Task PackAsync()
     {
         if (File.Exists(PackagePath)) return;
+
+        var coreAbstractionsProject = Path.Combine(RepositoryRoot, "src", "Core", "CrestCreates.Core.Abstractions");
+        var corePack = await DotNetProcess.RunAsync(
+            coreAbstractionsProject,
+            $"pack --configuration Debug --no-build --disable-build-servers -p:PackageVersion=1.0.0 -p:SuppressDependenciesWhenPacking=true -o \"{FeedDirectory}\"",
+            timeout: TimeSpan.FromMinutes(3));
+        if (corePack.ExitCode != 0)
+            throw new InvalidOperationException($"Failed to pack Core.Abstractions: {corePack.StandardError}{corePack.StandardOutput}");
+
+        CoreAbstractionsPackagePath = Path.Combine(FeedDirectory, "CrestCreates.Core.Abstractions.1.0.0.nupkg");
+        if (!File.Exists(CoreAbstractionsPackagePath))
+            throw new InvalidOperationException($"Core.Abstractions package not found at {CoreAbstractionsPackagePath}");
 
         var taskProjectDir = Path.Combine(RepositoryRoot, "src", "Tooling", "CrestCreates.JsonContracts.BuildTasks");
         var result = await DotNetProcess.RunAsync(taskProjectDir, "pack --configuration Debug --disable-build-servers", timeout: TimeSpan.FromMinutes(3));

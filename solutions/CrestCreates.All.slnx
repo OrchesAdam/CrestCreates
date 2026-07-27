@@ -302,6 +302,7 @@
   <Project Path="../tests/Integrations/CrestCreates.Mcp.Memory.AotFixture.Tests/CrestCreates.Mcp.Memory.AotFixture.Tests.csproj" />
   <Project Path="../tests/Integrations/CrestCreates.Mcp.Memory.AotFixture/CrestCreates.Mcp.Memory.AotFixture.csproj" />
   <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.csproj" />
+  <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.Tests/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.Tests.csproj" />
   <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions.Tests/CrestCreates.Agent.Tools.Abstractions.Tests.csproj" />
   <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture.Tests/CrestCreates.Agent.Tools.AotFixture.Tests.csproj" />
   <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture/CrestCreates.Agent.Tools.AotFixture.csproj" />

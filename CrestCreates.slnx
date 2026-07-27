@@ -266,6 +266,7 @@
   <Folder Name="/tests/Runtime/" />
   <Folder Name="/tests/Runtime/Agent/">
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.csproj" />
+    <Project Path="tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.Tests/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.Tests.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.DraftContracts.Tests/CrestCreates.Agent.DraftContracts.Tests.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Memory.Tests/CrestCreates.Agent.Memory.Tests.csproj" />

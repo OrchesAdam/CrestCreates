@@ -155,5 +155,5 @@ jobs:
       - name: Publish — MCP Memory AotFixture (NativeAOT)
         run: dotnet publish tests/Integrations/CrestCreates.Mcp.Memory.AotFixture -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
 
-      - name: Publish — ControlPlane JsonContracts AotFixture (NativeAOT)
-        run: dotnet publish tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
+      - name: Test — ControlPlane JsonContracts AotFixture (NativeAOT publish/link/run)
+        run: dotnet test tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.Tests --no-build

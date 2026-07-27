@@ -1,3 +1,5 @@
+using System.Text.Json;
+using CrestCreates.JsonContracts.BuildTasks.Generation;
 using Microsoft.Build.Framework;
 
 namespace CrestCreates.JsonContracts.BuildTasks.Tasks;
@@ -23,22 +25,15 @@ public sealed class WriteJsonContractInputManifest : ITask
     public string AssemblyName { get; set; } = string.Empty;
 
     public string LangVersion { get; set; } = "latest";
-
     public string DefineConstants { get; set; } = string.Empty;
-
     public string Nullable { get; set; } = "enable";
-
     public bool AllowUnsafeBlocks { get; set; }
-
     public string ImplicitUsings { get; set; } = "enable";
-
     public string TargetFramework { get; set; } = string.Empty;
-
     public string ManifestAccessibility { get; set; } = "Internal";
-
     public string TaskSemanticVersion { get; set; } = string.Empty;
-
-    public string? ToolPath { get; set; }
+    [Required]
+    public string TaskAssemblyPath { get; set; } = string.Empty;
 
     [Output]
     public bool OutputChanged { get; set; }
@@ -48,133 +43,95 @@ public sealed class WriteJsonContractInputManifest : ITask
 
     public bool Execute()
     {
-        if (string.IsNullOrWhiteSpace(OutputPath))
+        if (string.IsNullOrWhiteSpace(OutputPath)
+            || string.IsNullOrWhiteSpace(AllowedOutputRoot)
+            || string.IsNullOrWhiteSpace(TemporaryDirectory))
         {
-            BuildEngine.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
-                "WriteJsonContractInputManifest: OutputPath is required.", null, "CrestCreates.JsonContracts.BuildTasks"));
+            LogPathError("OutputPath, AllowedOutputRoot, and TemporaryDirectory are required.");
             return false;
         }
-
-        if (string.IsNullOrWhiteSpace(TemporaryDirectory))
-        {
-            BuildEngine.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
-                "WriteJsonContractInputManifest: TemporaryDirectory is required.", null, "CrestCreates.JsonContracts.BuildTasks"));
-            return false;
-        }
-
-        var normalizedOutput = Path.GetFullPath(OutputPath);
-        var normalizedAllowed = Path.GetFullPath(AllowedOutputRoot);
-        var normalizedTemp = Path.GetFullPath(TemporaryDirectory);
-
-        if (!IsPathContained(normalizedOutput, normalizedAllowed))
-        {
-            BuildEngine.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
-                $"OutputPath '{OutputPath}' is outside AllowedOutputRoot '{AllowedOutputRoot}'.",
-                null, "CrestCreates.JsonContracts.BuildTasks"));
-            return false;
-        }
-
-        var toolExe = ResolveToolPath();
-        if (toolExe == null)
-        {
-            BuildEngine.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
-                "Cannot find CrestCreates.JsonContracts.Tool executable.",
-                null, "CrestCreates.JsonContracts.BuildTasks"));
-            return false;
-        }
-
-        var manifestPath = Path.Combine(normalizedTemp, $"manifest-input-{Guid.NewGuid():N}.json");
 
         try
         {
-            WriteManifestRequest(manifestPath);
+            var output = Path.GetFullPath(OutputPath);
+            var allowedRoot = Path.GetFullPath(AllowedOutputRoot);
+            var temporaryDirectory = Path.GetFullPath(TemporaryDirectory);
 
-            var exitCode = RunTool(toolExe, $"manifest \"{manifestPath}\" \"{normalizedOutput}\"");
-            if (exitCode != 0)
+            if (!AllowedOutputPath.Contains(allowedRoot, output))
             {
-                BuildEngine.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
-                    $"Tool exited with code {exitCode}.",
-                    null, "CrestCreates.JsonContracts.BuildTasks"));
+                LogPathError($"OutputPath '{OutputPath}' is outside AllowedOutputRoot '{AllowedOutputRoot}'.");
                 return false;
             }
 
-            OutputChanged = true;
+            if (!AllowedOutputPath.Contains(allowedRoot, temporaryDirectory))
+            {
+                LogPathError($"TemporaryDirectory '{TemporaryDirectory}' is outside AllowedOutputRoot '{AllowedOutputRoot}'.");
+                return false;
+            }
+
+            var bytes = WriteManifest(allowedRoot, temporaryDirectory);
+            OutputChanged = WriteIfChangedFile.WriteIfChanged(output, bytes, temporaryDirectory);
             return true;
         }
-        finally
+        catch (Exception exception)
         {
-            try { if (File.Exists(manifestPath)) File.Delete(manifestPath); } catch { }
+            LogPathError($"WriteJsonContractInputManifest failed: {exception.GetType().Name}: {exception.Message}");
+            return false;
         }
     }
 
-    private string? ResolveToolPath()
+    private byte[] WriteManifest(string allowedRoot, string temporaryDirectory)
     {
-        if (!string.IsNullOrEmpty(ToolPath) && File.Exists(ToolPath))
-            return ToolPath;
+        var sources = SourceFiles
+            .Select(item => Path.GetFullPath(item.ItemSpec).Replace('\\', '/'))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+        var references = ReferencePaths
+            .Select(item => Path.GetFullPath(item.ItemSpec).Replace('\\', '/'))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
 
-        var taskAssemblyDir = Path.GetDirectoryName(typeof(WriteJsonContractInputManifest).Assembly.Location);
-        if (taskAssemblyDir == null) return null;
-
-        var candidates = new[]
-        {
-            Path.Combine(taskAssemblyDir, "CrestCreates.JsonContracts.Tool.dll"),
-            Path.Combine(taskAssemblyDir, "..", "CrestCreates.JsonContracts.Tool", "CrestCreates.JsonContracts.Tool.dll"),
-        };
-
-        foreach (var c in candidates)
-        {
-            var full = Path.GetFullPath(c);
-            if (File.Exists(full)) return full;
-        }
-
-        return null;
+        using var stream = new MemoryStream();
+        using var writer = new Utf8JsonWriter(stream);
+        writer.WriteStartObject();
+        writer.WriteStartArray("sourcePaths");
+        foreach (var source in sources)
+            writer.WriteStringValue(source);
+        writer.WriteEndArray();
+        writer.WriteStartArray("referencePaths");
+        foreach (var reference in references)
+            writer.WriteStringValue(reference);
+        writer.WriteEndArray();
+        writer.WriteString("assemblyName", AssemblyName);
+        writer.WriteString("langVersion", LangVersion);
+        writer.WriteString("defineConstants", DefineConstants);
+        writer.WriteString("nullable", Nullable);
+        writer.WriteBoolean("allowUnsafeBlocks", AllowUnsafeBlocks);
+        writer.WriteString("implicitUsings", ImplicitUsings);
+        writer.WriteString("allowedOutputRoot", allowedRoot.Replace('\\', '/'));
+        writer.WriteString("temporaryDirectory", temporaryDirectory.Replace('\\', '/'));
+        writer.WriteString("manifestAccessibility", ManifestAccessibility);
+        writer.WriteString("targetFramework", TargetFramework);
+        writer.WriteString("taskSemanticVersion", TaskSemanticVersion);
+        writer.WriteString("taskAssemblyIdentity", ResolveTaskAssemblyIdentity());
+        writer.WriteEndObject();
+        writer.Flush();
+        return stream.ToArray();
     }
 
-    private void WriteManifestRequest(string manifestPath)
+    private string ResolveTaskAssemblyIdentity()
     {
-        var sourcePaths = SourceFiles.Select(s => s.ItemSpec).OrderBy(p => p, StringComparer.Ordinal).ToList();
-        var refPaths = ReferencePaths.Select(r => r.ItemSpec).OrderBy(p => p, StringComparer.Ordinal).ToList();
-        var defineConstantsList = DefineConstants
-            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToList();
+        if (string.IsNullOrWhiteSpace(TaskAssemblyPath))
+            return string.Empty;
 
-        var manifest = new
-        {
-            AssemblyName,
-            SourceFiles = sourcePaths,
-            ReferencePaths = refPaths,
-            LangVersion,
-            DefineConstants = defineConstantsList,
-            Nullable,
-            AllowUnsafeBlocks,
-            ManifestAccessibility,
-        };
-
-        var json = System.Text.Json.JsonSerializer.Serialize(manifest);
-        File.WriteAllText(manifestPath, json);
+        var fullPath = Path.GetFullPath(TaskAssemblyPath);
+        return File.Exists(fullPath)
+            ? System.Reflection.AssemblyName.GetAssemblyName(fullPath).FullName ?? Path.GetFileName(fullPath)
+            : Path.GetFileName(fullPath);
     }
 
-    private static int RunTool(string toolDll, string arguments)
-    {
-        var psi = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = "dotnet",
-            Arguments = $"exec \"{toolDll}\" {arguments}",
-            UseShellExecute = false,
-            RedirectStandardOutput = false,
-            RedirectStandardError = false,
-            CreateNoWindow = true,
-        };
-
-        using var process = System.Diagnostics.Process.Start(psi);
-        if (process == null) return -1;
-        process.WaitForExit();
-        return process.ExitCode;
-    }
-
-    private static bool IsPathContained(string candidate, string root)
-    {
-        var relative = Path.GetRelativePath(root, candidate);
-        return !relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative);
-    }
+    private void LogPathError(string message) =>
+        BuildEngine?.LogErrorEvent(new BuildErrorEventArgs(
+            "CJC012", null, null, 0, 0, 0, 0, message, null,
+            "CrestCreates.JsonContracts.BuildTasks"));
 }

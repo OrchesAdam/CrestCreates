@@ -1,20 +1,55 @@
+using CrestCreates.Core.Abstractions.Serialization;
+using FluentAssertions;
+
 namespace CrestCreates.JsonContracts.BuildTasks.Tests.Contracts;
 
-/// <summary>Case IDs: foundation for H01-H05, B02-B04</summary>
-public class JsonContractSurfaceAttributeTests
+public sealed class JsonContractSurfaceAttributeTests
 {
-    [Fact(Skip = AcceptanceSkeleton.Pending)]
-    public void JsonContractSurfaceAttribute_TargetsClassOnly() { }
+    [Fact]
+    public void JsonContractSurfaceAttribute_TargetsClassOnly()
+    {
+        var usage = typeof(JsonContractSurfaceAttribute)
+            .GetCustomAttributes(typeof(AttributeUsageAttribute), inherit: false)
+            .Cast<AttributeUsageAttribute>()
+            .Single();
 
-    [Fact(Skip = AcceptanceSkeleton.Pending)]
-    public void JsonContractSurfaceAttribute_AllowsMultipleAndIsNotInherited() { }
+        usage.ValidOn.Should().Be(AttributeTargets.Class);
+    }
 
-    [Fact(Skip = AcceptanceSkeleton.Pending)]
-    public void JsonContractSurfaceAttribute_PreservesSurfaceType() { }
+    [Fact]
+    public void JsonContractSurfaceAttribute_AllowsMultipleAndIsNotInherited()
+    {
+        var usage = typeof(JsonContractSurfaceAttribute)
+            .GetCustomAttributes(typeof(AttributeUsageAttribute), inherit: false)
+            .Cast<AttributeUsageAttribute>()
+            .Single();
 
-    [Fact(Skip = AcceptanceSkeleton.Pending)]
-    public void JsonContractSurfaceAttribute_DefaultExcludedParameterTypesIsEmpty() { }
+        usage.AllowMultiple.Should().BeTrue();
+        usage.Inherited.Should().BeFalse();
+    }
 
-    [Fact(Skip = AcceptanceSkeleton.Pending)]
-    public void JsonContractSurfaceAttribute_PreservesConfiguredExcludedParameterTypes() { }
+    [Fact]
+    public void JsonContractSurfaceAttribute_PreservesSurfaceType()
+    {
+        new JsonContractSurfaceAttribute(typeof(IDisposable)).SurfaceType
+            .Should().Be(typeof(IDisposable));
+    }
+
+    [Fact]
+    public void JsonContractSurfaceAttribute_DefaultExcludedParameterTypesIsEmpty()
+    {
+        new JsonContractSurfaceAttribute(typeof(IDisposable)).ExcludedParameterTypes
+            .Should().BeEmpty();
+    }
+
+    [Fact]
+    public void JsonContractSurfaceAttribute_PreservesConfiguredExcludedParameterTypes()
+    {
+        var attribute = new JsonContractSurfaceAttribute(typeof(IDisposable))
+        {
+            ExcludedParameterTypes = [typeof(CancellationToken), typeof(IServiceProvider)]
+        };
+
+        attribute.ExcludedParameterTypes.Should().Equal(typeof(CancellationToken), typeof(IServiceProvider));
+    }
 }

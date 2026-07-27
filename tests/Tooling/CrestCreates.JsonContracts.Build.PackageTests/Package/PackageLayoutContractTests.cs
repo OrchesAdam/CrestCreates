@@ -49,6 +49,10 @@ public class PackageLayoutContractTests(JsonContractBuildFixture fixture) : Json
 
             var libDlls = files.Where(f => f.StartsWith("lib/")).ToList();
             libDlls.Should().BeEmpty("no lib/ content — this is a build-time-only package");
+
+            var nuspec = Directory.GetFiles(extractDir, "*.nuspec", SearchOption.AllDirectories).Single();
+            File.ReadAllText(nuspec).Should().NotContain("<dependency ",
+                "the self-contained build package must restore from an isolated feed without runtime dependencies");
         }
         finally
         {
@@ -103,7 +107,7 @@ public class LocalFeedConsumerContractTests(JsonContractBuildFixture fixture) : 
         }
         """;
 
-    [Fact(Skip = "Requires CrestCreates.Core.Abstractions NuGet package in local feed")]
+    [Fact]
     public async Task Pack_LocalFeedConsumerGetsTaskAndTargetsOnly()
     {
         var spec = new ConsumerSpec(Transport: "Package", SourceFiles: [s_surfaceContext, s_serviceInterface]);

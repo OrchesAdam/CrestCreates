@@ -63,18 +63,18 @@ public sealed class GenerateJsonContracts : ITask
         var normalizedAllowed = Path.GetFullPath(AllowedOutputRoot);
         var normalizedTemp = Path.GetFullPath(TemporaryDirectory);
 
-        if (!IsPathContained(normalizedOutput, normalizedAllowed))
+        if (!AllowedOutputPath.Contains(normalizedAllowed, normalizedOutput))
         {
-            BuildEngine.LogErrorEvent(new BuildErrorEventArgs(
+            BuildEngine?.LogErrorEvent(new BuildErrorEventArgs(
                 "CJC012", null, null, 0, 0, 0, 0,
                 $"OutputPath '{OutputPath}' is outside AllowedOutputRoot '{AllowedOutputRoot}'.",
                 null, "CrestCreates.JsonContracts.BuildTasks"));
             return false;
         }
 
-        if (!IsPathContained(normalizedTemp, normalizedAllowed))
+        if (!AllowedOutputPath.Contains(normalizedAllowed, normalizedTemp))
         {
-            BuildEngine.LogErrorEvent(new BuildErrorEventArgs(
+            BuildEngine?.LogErrorEvent(new BuildErrorEventArgs(
                 "CJC012", null, null, 0, 0, 0, 0,
                 $"TemporaryDirectory '{TemporaryDirectory}' is outside AllowedOutputRoot '{AllowedOutputRoot}'.",
                 null, "CrestCreates.JsonContracts.BuildTasks"));
@@ -84,7 +84,7 @@ public sealed class GenerateJsonContracts : ITask
         var toolExe = ResolveToolPath();
         if (toolExe == null)
         {
-            BuildEngine.LogErrorEvent(new BuildErrorEventArgs(
+            BuildEngine?.LogErrorEvent(new BuildErrorEventArgs(
                 "CJC012", null, null, 0, 0, 0, 0,
                 "Cannot find CrestCreates.JsonContracts.Tool executable.",
                 null, "CrestCreates.JsonContracts.BuildTasks"));
@@ -96,7 +96,7 @@ public sealed class GenerateJsonContracts : ITask
 
         try
         {
-            WriteRequest(requestPath, normalizedOutput, normalizedAllowed, normalizedTemp);
+            WriteRequest(requestPath);
 
             var exitCode = RunTool(toolExe, $"generate \"{requestPath}\" \"{responsePath}\"");
             
@@ -108,7 +108,7 @@ public sealed class GenerateJsonContracts : ITask
 
             if (exitCode != 0)
             {
-                BuildEngine.LogErrorEvent(new BuildErrorEventArgs(
+                BuildEngine?.LogErrorEvent(new BuildErrorEventArgs(
                     "CJC012", null, null, 0, 0, 0, 0,
                     $"Tool exited with code {exitCode}.",
                     null, "CrestCreates.JsonContracts.BuildTasks"));
@@ -119,7 +119,7 @@ public sealed class GenerateJsonContracts : ITask
         }
         catch (Exception ex)
         {
-            BuildEngine.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
+            BuildEngine?.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
                 $"GenerateJsonContracts failed: {ex.GetType().Name}: {ex.Message}", null, "CrestCreates.JsonContracts.BuildTasks"));
             return false;
         }
@@ -134,19 +134,19 @@ public sealed class GenerateJsonContracts : ITask
     {
         if (string.IsNullOrWhiteSpace(OutputPath))
         {
-            BuildEngine.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
+            BuildEngine?.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
                 "GenerateJsonContracts: OutputPath is required.", null, "CrestCreates.JsonContracts.BuildTasks"));
             return false;
         }
         if (string.IsNullOrWhiteSpace(AllowedOutputRoot))
         {
-            BuildEngine.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
+            BuildEngine?.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
                 "GenerateJsonContracts: AllowedOutputRoot is required.", null, "CrestCreates.JsonContracts.BuildTasks"));
             return false;
         }
         if (string.IsNullOrWhiteSpace(TemporaryDirectory))
         {
-            BuildEngine.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
+            BuildEngine?.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
                 "GenerateJsonContracts: TemporaryDirectory is required.", null, "CrestCreates.JsonContracts.BuildTasks"));
             return false;
         }
@@ -176,7 +176,7 @@ public sealed class GenerateJsonContracts : ITask
         return null;
     }
 
-    private void WriteRequest(string requestPath, string normalizedOutput, string normalizedAllowed, string normalizedTemp)
+    private void WriteRequest(string requestPath)
     {
         var sourcePaths = SourceFiles
             .Select(s => s.ItemSpec)
@@ -215,9 +215,6 @@ public sealed class GenerateJsonContracts : ITask
         writer.WriteString("Nullable", Nullable);
         writer.WriteBoolean("AllowUnsafeBlocks", AllowUnsafeBlocks);
         writer.WriteString("ManifestAccessibility", ManifestAccessibility);
-        writer.WriteString("OutputPath", normalizedOutput);
-        writer.WriteString("AllowedOutputRoot", normalizedAllowed);
-        writer.WriteString("TemporaryDirectory", normalizedTemp);
         writer.WriteEndObject();
         writer.Flush();
     }
@@ -272,9 +269,9 @@ public sealed class GenerateJsonContracts : ITask
         foreach (var d in diagnostics)
         {
             if (d.Severity == "Error")
-                BuildEngine.LogErrorEvent(new BuildErrorEventArgs(d.Id, null, d.FilePath, d.Line, d.Column, 0, 0, d.Message, null, "CrestCreates.JsonContracts.BuildTasks"));
+                BuildEngine?.LogErrorEvent(new BuildErrorEventArgs(d.Id, null, d.FilePath, d.Line, d.Column, 0, 0, d.Message, null, "CrestCreates.JsonContracts.BuildTasks"));
             else if (d.Severity == "Warning")
-                BuildEngine.LogWarningEvent(new BuildWarningEventArgs(d.Id, null, d.FilePath, d.Line, d.Column, 0, 0, d.Message, null, "CrestCreates.JsonContracts.BuildTasks"));
+                BuildEngine?.LogWarningEvent(new BuildWarningEventArgs(d.Id, null, d.FilePath, d.Line, d.Column, 0, 0, d.Message, null, "CrestCreates.JsonContracts.BuildTasks"));
         }
 
         if (diagnostics.Any(d => d.Severity == "Error"))
@@ -288,7 +285,7 @@ public sealed class GenerateJsonContracts : ITask
             }
             catch (Exception ex)
             {
-                BuildEngine.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
+                BuildEngine?.LogErrorEvent(new BuildErrorEventArgs("CJC012", null, null, 0, 0, 0, 0,
                     $"Failed to write generated source: {ex.Message}", null, "CrestCreates.JsonContracts.BuildTasks"));
                 return false;
             }
@@ -349,16 +346,10 @@ public sealed class GenerateJsonContracts : ITask
         {
             var msg = string.Join(" | ", new[] { stdout, stderr }.Where(s => !string.IsNullOrEmpty(s)));
             if (string.IsNullOrEmpty(msg)) msg = "(no output)";
-            BuildEngine.LogErrorEvent(new BuildErrorEventArgs("CJC013", null, null, 0, 0, 0, 0,
+            BuildEngine?.LogErrorEvent(new BuildErrorEventArgs("CJC013", null, null, 0, 0, 0, 0,
                 $"Tool error (exit={process.ExitCode}): {msg}", null, "GenerateJsonContracts"));
         }
         return process.ExitCode;
-    }
-
-    private static bool IsPathContained(string candidate, string root)
-    {
-        var relative = Path.GetRelativePath(root, candidate);
-        return !relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative);
     }
 
     private sealed class ToolDiagnostic

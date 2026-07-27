@@ -19,13 +19,24 @@ public static class ConsumerProjectBuilder
         var csproj = new StringBuilder();
         csproj.AppendLine("<Project Sdk=\"Microsoft.NET.Sdk\">");
         csproj.AppendLine("  <PropertyGroup>");
-        csproj.AppendLine($"    <TargetFramework>{spec.TargetFramework}</TargetFramework>");
+        if (spec.TargetFramework.Contains(';', StringComparison.Ordinal))
+            csproj.AppendLine($"    <TargetFrameworks>{spec.TargetFramework}</TargetFrameworks>");
+        else
+            csproj.AppendLine($"    <TargetFramework>{spec.TargetFramework}</TargetFramework>");
         csproj.AppendLine($"    <ImplicitUsings>{spec.ImplicitUsings}</ImplicitUsings>");
         csproj.AppendLine($"    <Nullable>{spec.Nullable}</Nullable>");
         csproj.AppendLine($"    <LangVersion>{spec.LangVersion}</LangVersion>");
         csproj.AppendLine($"    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>");
         if (spec.ManifestAccessibility != "Internal")
             csproj.AppendLine($"    <CrestCreatesJsonContractManifestAccessibility>{spec.ManifestAccessibility}</CrestCreatesJsonContractManifestAccessibility>");
+        if (spec.GeneratedFile is not null)
+            csproj.AppendLine($"    <CrestCreatesJsonContractGeneratedFile>{spec.GeneratedFile}</CrestCreatesJsonContractGeneratedFile>");
+        if (spec.InputManifest is not null)
+            csproj.AppendLine($"    <CrestCreatesJsonContractInputManifest>{spec.InputManifest}</CrestCreatesJsonContractInputManifest>");
+        if (spec.GenerationStamp is not null)
+            csproj.AppendLine($"    <CrestCreatesJsonContractGenerationStamp>{spec.GenerationStamp}</CrestCreatesJsonContractGenerationStamp>");
+        if (spec.TemporaryDirectory is not null)
+            csproj.AppendLine($"    <CrestCreatesJsonContractTemporaryDirectory>{spec.TemporaryDirectory}</CrestCreatesJsonContractTemporaryDirectory>");
         csproj.AppendLine("  </PropertyGroup>");
 
         csproj.AppendLine("  <ItemGroup>");
@@ -36,12 +47,16 @@ public static class ConsumerProjectBuilder
         if (spec.Transport == "Package" && feedDirectory != null)
         {
             csproj.AppendLine("  <ItemGroup>");
+            csproj.AppendLine("    <PackageReference Include=\"CrestCreates.Core.Abstractions\" Version=\"1.0.0\" />");
             csproj.AppendLine($"    <PackageReference Include=\"CrestCreates.JsonContracts.Build\" Version=\"{packageVersion ?? "1.0.0"}\" PrivateAssets=\"all\" />");
             csproj.AppendLine("  </ItemGroup>");
 
             var nugetConfig = new StringBuilder();
             nugetConfig.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
             nugetConfig.AppendLine("<configuration>");
+            nugetConfig.AppendLine("  <config>");
+            nugetConfig.AppendLine($"    <add key=\"globalPackagesFolder\" value=\"{Path.Combine(Path.GetDirectoryName(feedDirectory)!, "packages")}\" />");
+            nugetConfig.AppendLine("  </config>");
             nugetConfig.AppendLine("  <packageSources>");
             nugetConfig.AppendLine("    <clear />");
             nugetConfig.AppendLine($"    <add key=\"local-feed\" value=\"{feedDirectory}\" />");

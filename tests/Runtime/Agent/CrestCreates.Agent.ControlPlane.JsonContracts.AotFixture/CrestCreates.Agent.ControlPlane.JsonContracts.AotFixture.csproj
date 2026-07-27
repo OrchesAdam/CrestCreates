@@ -11,8 +11,5 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
-    <ProjectReference Include="../../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj"
-                      ReferenceOutputAssembly="false"
-                      PrivateAssets="all" />
   </ItemGroup>
 </Project>

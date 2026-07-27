@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="SelfContained;RuntimeIdentifier;RuntimeIdentifiers">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -10,7 +10,13 @@
     <OutputType>Exe</OutputType>
     <UseAppHost>false</UseAppHost>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <PublishAot>false</PublishAot>
+    <PublishTrimmed>false</PublishTrimmed>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <SelfContained>false</SelfContained>
+    <RuntimeIdentifier></RuntimeIdentifier>
+    <RuntimeIdentifiers></RuntimeIdentifiers>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,7 +29,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Core\CrestCreates.Core.Abstractions\CrestCreates.Core.Abstractions.csproj" PrivateAssets="all" />
+    <ProjectReference Remove="..\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" />
+    <ProjectReference Remove="..\..\Framework\Modules\CrestCreates.ModuleDiagnostics\CrestCreates.ModuleDiagnostics.csproj" />
   </ItemGroup>
 
 </Project>

@@ -52,6 +52,9 @@ public class IncrementalContractTests : JsonContractContractTestBase
 
         var manifest1 = ReadInputManifest(project);
         manifest1.Should().Contain("Source0");
+        manifest1.Should().Contain("\"implicitUsings\":\"enable\"");
+        manifest1.Should().Contain("\"taskSemanticVersion\":\"1.0.0\"");
+        manifest1.Should().Contain("\"taskAssemblyIdentity\":");
 
         var sourceFile = Path.Combine(project.ProjectDirectory, "Source1.cs");
         await File.WriteAllTextAsync(sourceFile, s_serviceInterfaceWithExtra);
@@ -88,7 +91,27 @@ public class IncrementalContractTests : JsonContractContractTestBase
     [Fact]
     public async Task Build_SourceDeletionInvalidatesGeneration()
     {
-        var spec = new ConsumerSpec("Repository", [s_surfaceContext, s_serviceInterfaceWithExtra]);
+        var spec = new ConsumerSpec(
+            "Repository",
+            [
+                s_surfaceContext,
+                """
+                using System.Threading;
+                using System.Threading.Tasks;
+                public partial interface ITestService
+                {
+                    Task<string> GetAsync(string id, CancellationToken ct = default);
+                }
+                """,
+                """
+                using System.Threading;
+                using System.Threading.Tasks;
+                public partial interface ITestService
+                {
+                    Task<int> CountAsync(CancellationToken ct = default);
+                }
+                """
+            ]);
         var project = await CreateRepositoryConsumerAsync(spec);
 
         var build1 = await BuildAsync(project);
@@ -97,11 +120,13 @@ public class IncrementalContractTests : JsonContractContractTestBase
         var source1 = ReadGeneratedSource(project);
         source1.Should().Contain("Int32");
 
-        var sourceFile = Path.Combine(project.ProjectDirectory, "Source1.cs");
+        var sourceFile = Path.Combine(project.ProjectDirectory, "Source2.cs");
         File.Delete(sourceFile);
-        await File.WriteAllTextAsync(sourceFile, s_serviceInterface);
+        var projectXml = await File.ReadAllTextAsync(project.ProjectFile);
+        projectXml = projectXml.Replace("    <Compile Include=\"Source2.cs\" />" + Environment.NewLine, string.Empty, StringComparison.Ordinal);
+        await File.WriteAllTextAsync(project.ProjectFile, projectXml);
 
-        var build2 = await RebuildAsync(project);
+        var build2 = await BuildAsync(project);
         build2.ExitCode.Should().Be(0, build2.StandardError);
 
         var source2 = ReadGeneratedSource(project);
@@ -124,6 +149,7 @@ public class IncrementalContractTests : JsonContractContractTestBase
 
         var snapshot2 = SnapshotGeneratedFile(project);
         snapshot2.Content.Should().Equal(snapshot1.Content);
+        snapshot2.LastWriteTimeUtc.Should().Be(snapshot1.LastWriteTimeUtc);
     }
 
     [Fact]

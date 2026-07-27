@@ -112,10 +112,9 @@ public class ControlPlaneManifestContractTests
     {
         var explicitRoots = GetExplicitRootTypes();
 
-        explicitRoots.Should().Contain(typeof(DescriptorStableHashes),
-            "DescriptorStableHashes is an explicit extra root for canonical hash parsing");
-        explicitRoots.Should().Contain(typeof(DescriptorActivationReviewDecision),
-            "DescriptorActivationReviewDecision is an explicit extra root for activation review");
+        explicitRoots.Should().BeEquivalentTo(
+            [typeof(DescriptorActivationReviewDecision), typeof(CanonicalHash)],
+            "the repository-wide direct-use ledger proves exactly these two non-surface roots");
     }
 
     [Fact]
@@ -151,6 +150,9 @@ public class ControlPlaneManifestContractTests
             "DescriptorActivationReviewDecision is a member-only DTO, not a surface root");
         surfaceRoots.Should().NotContain(typeof(DescriptorStableHashes),
             "DescriptorStableHashes is a member-only DTO, not a surface root");
+
+        GetExplicitRootTypes().Should().NotContain(typeof(DescriptorStableHashes),
+            "DescriptorStableHashes is transitive metadata, not a direct serialization root");
     }
 
     [Fact]

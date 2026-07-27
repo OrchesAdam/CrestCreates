@@ -18,12 +18,12 @@ public sealed class JsonContractSurfaceModelBuilder
         var serializableSymbol = compilation.GetTypeByMetadataName(JsonContractSymbolNames.JsonSerializableAttribute);
         var explicitRootSymbol = compilation.GetTypeByMetadataName(JsonContractSymbolNames.JsonContractExplicitRootAttribute);
 
-        if (markerSymbol is null || contextSymbol is null || serializableSymbol is null)
+        if (markerSymbol is null || contextSymbol is null || serializableSymbol is null || explicitRootSymbol is null)
         {
             _diagnostics.Add(new JsonContractDiagnostic
             {
                 Id = JsonContractDiagnosticIds.RequiredSymbolUnresolved,
-                Message = BuildRequiredSymbolMessage(markerSymbol, contextSymbol, serializableSymbol),
+                Message = BuildRequiredSymbolMessage(markerSymbol, contextSymbol, serializableSymbol, explicitRootSymbol),
                 Severity = JsonContractDiagnosticSeverity.Error,
             });
 
@@ -192,12 +192,14 @@ public sealed class JsonContractSurfaceModelBuilder
     private static string BuildRequiredSymbolMessage(
         INamedTypeSymbol? marker,
         INamedTypeSymbol? context,
-        INamedTypeSymbol? serializable)
+        INamedTypeSymbol? serializable,
+        INamedTypeSymbol? explicitRoot)
     {
         var missing = new List<string>();
         if (marker is null) missing.Add(JsonContractSymbolNames.MarkerAttribute);
         if (context is null) missing.Add(JsonContractSymbolNames.JsonSerializerContext);
         if (serializable is null) missing.Add(JsonContractSymbolNames.JsonSerializableAttribute);
+        if (explicitRoot is null) missing.Add(JsonContractSymbolNames.JsonContractExplicitRootAttribute);
         return $"Required symbol(s) unresolved: {string.Join(", ", missing)}. Ensure System.Text.Json and CrestCreates.Core.Abstractions are referenced.";
     }
 

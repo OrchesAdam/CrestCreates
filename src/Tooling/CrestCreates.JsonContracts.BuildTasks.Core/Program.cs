@@ -1,8 +1,7 @@
 using CrestCreates.JsonContracts.BuildTasks;
-using CrestCreates.JsonContracts.BuildTasks.Generation;
-using CrestCreates.JsonContracts.BuildTasks.Incremental;
 using CrestCreates.JsonContracts.BuildTasks.Semantic;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace CrestCreates.JsonContracts.BuildTasks.Tool;
 
@@ -15,24 +14,16 @@ internal static class Program
             Console.Error.WriteLine("Usage: CrestCreates.JsonContracts.Tool <command> <args>");
             Console.Error.WriteLine("Commands:");
             Console.Error.WriteLine("  generate <request-path> <response-path>");
-            Console.Error.WriteLine("  manifest <request-path> <output-path>");
             return 2;
         }
 
         var command = args[0];
 
-        var jsonOptions = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true,
-            WriteIndented = false,
-        };
-
         try
         {
             return command switch
             {
-                "generate" => ExecuteGenerate(args, jsonOptions),
-                "manifest" => ExecuteManifest(args, jsonOptions),
+                "generate" => ExecuteGenerate(args),
                 _ => Fail($"Unknown command: {command}")
             };
         }
@@ -43,7 +34,7 @@ internal static class Program
         }
     }
 
-    private static int ExecuteGenerate(string[] args, JsonSerializerOptions jsonOptions)
+    private static int ExecuteGenerate(string[] args)
     {
         if (args.Length < 3)
         {
@@ -55,7 +46,7 @@ internal static class Program
         var responsePath = args[2];
 
         var json = File.ReadAllText(requestPath);
-        var request = JsonSerializer.Deserialize<GenerateRequest>(json, jsonOptions);
+        var request = JsonSerializer.Deserialize(json, ToolJsonSerializerContext.Default.GenerateRequest);
         if (request == null)
         {
             Console.Error.WriteLine("Failed to deserialize request.");
@@ -89,16 +80,7 @@ internal static class Program
 
         byte[]? generatedBytes = null;
         if (!diagnostics.Any(d => d.Severity == "Error") && result.GeneratedSource != null)
-        {
             generatedBytes = System.Text.Encoding.UTF8.GetBytes(result.GeneratedSource);
-
-            if (!string.IsNullOrEmpty(request.OutputPath) && !string.IsNullOrEmpty(request.TemporaryDirectory))
-            {
-                var normalizedOutput = Path.GetFullPath(request.OutputPath);
-                var normalizedTemp = Path.GetFullPath(request.TemporaryDirectory);
-                WriteIfChangedFile.WriteIfChanged(normalizedOutput, generatedBytes, normalizedTemp);
-            }
-        }
 
         var response = new GenerateResponse
         {
@@ -109,83 +91,10 @@ internal static class Program
             ExplicitRootCount = result.ExplicitRootCount,
         };
 
-        var responseJson = JsonSerializer.Serialize(response, jsonOptions);
+        var responseJson = JsonSerializer.Serialize(response, ToolJsonSerializerContext.Default.GenerateResponse);
         File.WriteAllText(responsePath, responseJson);
 
         return diagnostics.Any(d => d.Severity == "Error") ? 1 : 0;
-    }
-
-    private static int ExecuteManifest(string[] args, JsonSerializerOptions jsonOptions)
-    {
-        if (args.Length < 3)
-        {
-            Console.Error.WriteLine("Usage: manifest <request-path> <output-path>");
-            return 2;
-        }
-
-        var requestPath = args[1];
-        var outputPath = args[2];
-
-        var json = File.ReadAllText(requestPath);
-        var request = JsonSerializer.Deserialize<ManifestRequest>(json, jsonOptions);
-        if (request == null)
-        {
-            Console.Error.WriteLine("Failed to deserialize manifest request.");
-            return 4;
-        }
-
-        var sourcePaths = request.SourceFiles ?? [];
-        var refPaths = request.ReferencePaths ?? [];
-        var defineConstants = request.DefineConstants ?? [];
-
-        var sources = new List<(string Path, string Text)>();
-        foreach (var p in sourcePaths)
-        {
-            try
-            {
-                sources.Add((p, File.ReadAllText(p)));
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Cannot read source file '{p}': {ex.Message}");
-                return 4;
-            }
-        }
-
-        var compilation = JsonContractCompilationFactory.Create(
-            request.AssemblyName ?? "",
-            sources,
-            refPaths,
-            request.LangVersion ?? "latest",
-            defineConstants,
-            request.Nullable ?? "enable",
-            request.AllowUnsafeBlocks);
-
-        var modelBuilder = new JsonContractSurfaceModelBuilder();
-        var model = modelBuilder.Build(compilation);
-
-        var manifest = new JsonContractInputManifest
-        {
-            SourcePaths = sourcePaths,
-            ReferencePaths = refPaths,
-            LangVersion = request.LangVersion ?? "latest",
-            DefineConstants = string.Join(";", defineConstants),
-            Nullable = request.Nullable ?? "enable",
-            AllowUnsafeBlocks = request.AllowUnsafeBlocks,
-            ManifestAccessibility = request.ManifestAccessibility ?? "Internal",
-        };
-
-        var manifestBytes = JsonContractInputManifestWriter.WriteManifest(manifest);
-        var manifestJson = System.Text.Encoding.UTF8.GetString(manifestBytes);
-
-        var normalizedOutput = Path.GetFullPath(outputPath);
-        var dir = Path.GetDirectoryName(normalizedOutput);
-        if (!string.IsNullOrEmpty(dir))
-            Directory.CreateDirectory(dir);
-
-        File.WriteAllText(normalizedOutput, manifestJson);
-
-        return 0;
     }
 
     private static int Fail(string message)
@@ -205,9 +114,6 @@ internal sealed class GenerateRequest
     public string? Nullable { get; set; }
     public bool AllowUnsafeBlocks { get; set; }
     public string? ManifestAccessibility { get; set; }
-    public string? OutputPath { get; set; }
-    public string? AllowedOutputRoot { get; set; }
-    public string? TemporaryDirectory { get; set; }
 }
 
 internal sealed class SourceDto
@@ -235,14 +141,7 @@ internal sealed class ToolDiagnosticDto
     public int Column { get; set; }
 }
 
-internal sealed class ManifestRequest
-{
-    public string? AssemblyName { get; set; }
-    public List<string>? SourceFiles { get; set; }
-    public List<string>? ReferencePaths { get; set; }
-    public string? LangVersion { get; set; }
-    public List<string>? DefineConstants { get; set; }
-    public string? Nullable { get; set; }
-    public bool AllowUnsafeBlocks { get; set; }
-    public string? ManifestAccessibility { get; set; }
-}
+[JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true, WriteIndented = false)]
+[JsonSerializable(typeof(GenerateRequest))]
+[JsonSerializable(typeof(GenerateResponse))]
+internal sealed partial class ToolJsonSerializerContext : JsonSerializerContext;

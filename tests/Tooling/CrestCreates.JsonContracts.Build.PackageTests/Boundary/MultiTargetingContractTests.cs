@@ -32,7 +32,7 @@ public class MultiTargetingContractTests : JsonContractContractTestBase
     {
         var spec = new ConsumerSpec("Repository", [s_surfaceContext, s_serviceInterface])
         {
-            TargetFramework = "net10.0"
+            TargetFramework = "net10.0;net10.0-windows"
         };
         var project = await CreateRepositoryConsumerAsync(spec);
 
@@ -41,7 +41,10 @@ public class MultiTargetingContractTests : JsonContractContractTestBase
 
         var objDir = Path.Combine(project.ProjectDirectory, "obj", "Debug");
         var net10Generated = Path.Combine(objDir, "net10.0", "CrestCreates.JsonContracts.g.cs");
+        var windowsGenerated = Path.Combine(objDir, "net10.0-windows", "CrestCreates.JsonContracts.g.cs");
         File.Exists(net10Generated).Should().BeTrue();
+        File.Exists(windowsGenerated).Should().BeTrue();
+        Path.GetFullPath(net10Generated).Should().NotBe(Path.GetFullPath(windowsGenerated));
     }
 
     [Fact]
