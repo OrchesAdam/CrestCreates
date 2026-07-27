@@ -25,6 +25,9 @@ public sealed class AgentMemoryToolAotFixtureTests
             File.SetUnixFileMode(executable, File.GetUnixFileMode(executable) | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
             var execution = await RunAsync(executable, string.Empty);
             execution.ExitCode.Should().Be(0, execution.Output);
+            execution.Output.Should().Contain("agent_memory_build_pack: OK");
+            execution.Output.Should().Contain("agent_memory_expand_source: OK");
+            execution.Output.Should().Contain("agent_memory_curation_replay: OK");
             execution.Output.Should().Contain("AGENT_MEMORY_TOOL_NATIVEAOT_PIPELINE_OK");
         }
         finally { if (Directory.Exists(output)) Directory.Delete(output, true); }

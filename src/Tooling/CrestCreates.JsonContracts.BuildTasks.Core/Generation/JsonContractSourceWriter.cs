@@ -76,6 +76,7 @@ public static class JsonContractSourceWriter
         sb.AppendLine($"        {{");
 
         WriteManifestSet(sb, "SurfaceRootTypes", context.SurfaceRoots, manifestAccess);
+        WriteManifestSet(sb, "BindingRootTypes", context.BindingRoots, manifestAccess);
         WriteManifestSet(sb, "ExplicitRootTypes", context.ExplicitRoots, manifestAccess);
         WriteManifestSet(sb, "AllDirectRootTypes", context.AllDirectRoots, manifestAccess);
 
@@ -106,11 +107,21 @@ public static class JsonContractSourceWriter
 
     private static string BuildProvenanceComment(JsonContractRootModel root)
     {
-        if (root.Provenance.MethodSignatures.Count == 0)
+        var origins = root.Provenance.Origins
+            .OrderBy(origin => origin.Identity, StringComparer.Ordinal)
+            .ToList();
+
+        if (origins.Count == 0 || origins.All(origin => origin.SourceKind == JsonContractRootSourceKind.Explicit))
             return $"// Explicit extra: {root.FullMetadataName}";
 
-        var methods = string.Join(", ", root.Provenance.MethodSignatures);
-        return $"// Surface root: {root.FullMetadataName} from {root.Provenance.DeclaringSurface}::{methods}";
+        var sourceLabel = origins.Any(origin => origin.SourceKind is JsonContractRootSourceKind.AgentToolInput
+            or JsonContractRootSourceKind.AgentToolOutput
+            or JsonContractRootSourceKind.McpToolInput
+            or JsonContractRootSourceKind.McpToolOutput)
+            ? "Binding root"
+            : "Surface root";
+
+        return $"// {sourceLabel}: {root.FullMetadataName} from {string.Join(", ", origins.Select(origin => origin.ToDisplayString()))}";
     }
 
     private static string StripGlobalPrefix(string ns)

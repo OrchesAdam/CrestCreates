@@ -2,6 +2,7 @@ using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Abstractions.Registry;
+using CrestCreates.Metadata.AgentTool;
 using CrestCreates.Schema.Abstractions;
 using System.Runtime.CompilerServices;
 
@@ -21,6 +22,8 @@ internal static class AgentMemoryToolDescriptorProviders
         {
             DescriptorProviderRegistry.Register<SchemaDescriptor>(new Schemas());
             DescriptorProviderRegistry.Register<CapabilityDescriptor>(new Capabilities());
+            DescriptorProviderRegistry.Register<AgentCapabilityToolDescriptor>(
+                new AgentMemoryToolSpecifications_GeneratedAgentToolProvider());
         }
     }
 

@@ -114,10 +114,12 @@ internal static class MemoryToolFixtureRunner
             execution.Set("aot-build");
             var build = await InvokeAsync(services, AgentMemoryToolCapabilityIds.BuildPack, new BuildInput { MemoryHandles = [issued.Handles!.Handles[0].HandleId], Kinds = [], Tags = [], MaximumCount = 4, CharacterBudget = 1024, MinimumConfidence = "unknown" }, FixtureJsonContext.Default.BuildInput);
             if (!build.IsSuccess) return 2;
+            Console.WriteLine("agent_memory_build_pack: OK");
             var grant = build.StructuredOutput!.Value.GetProperty("Items")[0].GetProperty("SourceGrants")[0].GetProperty("GrantId").GetString();
             execution.Set("aot-expand");
             var expanded = await InvokeAsync(services, AgentMemoryToolCapabilityIds.ExpandSource, new ExpandInput { GrantId = grant!, MaximumCharacters = 1024 }, FixtureJsonContext.Default.ExpandInput);
             if (!expanded.IsSuccess || expanded.StructuredOutput!.Value.GetProperty("SanitizedContent").GetString()?.Contains("adjacent", StringComparison.Ordinal) == true) return 3;
+            Console.WriteLine("agent_memory_expand_source: OK");
             var historyHandle = await services.GetRequiredService<IAgentMemoryHistoryResourceHandleIssuer>().IssueAsync(
                 new AgentMemoryHostArtifactBatchKey { HostOperationId = "aot-history", OperationFingerprint = HostHash("aot-history-plan"), ArtifactPurpose = "history" },
                 principal, AgentMemoryHistorySourceKind.Conversation, conversation.ConversationId);
@@ -134,6 +136,7 @@ internal static class MemoryToolFixtureRunner
             if (!promoted.IsSuccess) return 6;
             var replay = await InvokeAsync(services, AgentMemoryToolCapabilityIds.PromoteCandidate, new CandidateInput { CandidateHandle = candidateHandle!, Explanation = "aot" }, FixtureJsonContext.Default.CandidateInput);
             if (!replay.IsSuccess) return 7;
+            Console.WriteLine("agent_memory_curation_replay: OK");
             Console.WriteLine("AGENT_MEMORY_TOOL_NATIVEAOT_PIPELINE_OK");
             return 0;
         }

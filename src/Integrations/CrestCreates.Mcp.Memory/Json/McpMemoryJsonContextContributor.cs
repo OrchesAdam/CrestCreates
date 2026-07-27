@@ -10,17 +10,8 @@ internal sealed class McpMemoryJsonContextContributor : IMcpToolJsonContextContr
 {
     public string ContributorId => "mcp-memory";
 
-    public IReadOnlySet<Type> BindingRootTypes => _bindingRootTypes;
-
-    private static readonly IReadOnlySet<Type> _bindingRootTypes = new HashSet<Type>
-    {
-        typeof(RecallAgentContextInput),
-        typeof(RecallAgentContextResult),
-        typeof(BuildAgentMemoryPackInput),
-        typeof(BuildAgentMemoryPackResult),
-        typeof(ExpandAgentMemorySourceInput),
-        typeof(ExpandAgentMemorySourceResult),
-    };
+    public IReadOnlySet<Type> BindingRootTypes =>
+        McpMemoryJsonSerializerContext.McpMemoryJsonSerializerContextRootManifest.BindingRootTypes;
 
     public void Contribute(McpJsonContextBuilder builder)
     {
@@ -37,7 +28,7 @@ internal sealed class McpMemoryJsonContextContributor : IMcpToolJsonContextContr
         builder.AddBinding("memory_source_expand_input", context.ExpandAgentMemorySourceInput, ContributorId);
         builder.AddBinding("memory_source_expand_output", context.ExpandAgentMemorySourceResult, ContributorId);
 
-        foreach (var rootType in _bindingRootTypes)
+        foreach (var rootType in BindingRootTypes)
             builder.AddBindingRootOwnership(rootType, ContributorId);
     }
 

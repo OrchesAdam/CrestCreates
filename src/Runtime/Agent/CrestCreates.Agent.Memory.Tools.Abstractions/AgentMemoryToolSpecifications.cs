@@ -4,7 +4,7 @@ using CrestCreates.Metadata.AgentTool;
 
 namespace CrestCreates.Agent.Memory.Tools;
 
-[AgentToolSpecs]
+[AgentToolSpecs(GenerateDescriptorProviderRegistration = false)]
 public static partial class AgentMemoryToolSpecifications
 {
     [AgentToolSpec(AgentMemoryToolCapabilityIds.BuildPack, DescriptorId = "agent-tool:agent.memory.build-pack", CapabilityVersion = 1,

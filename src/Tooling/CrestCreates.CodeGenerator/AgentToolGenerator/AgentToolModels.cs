@@ -33,4 +33,5 @@ internal sealed class AgentToolContainerModel
     public string Name { get; set; } = string.Empty;
     public ImmutableArray<AgentToolSpecModel> Specs { get; set; }
     public ImmutableArray<Diagnostic> Diagnostics { get; set; }
+    public bool GenerateDescriptorProviderRegistration { get; set; } = true;
 }

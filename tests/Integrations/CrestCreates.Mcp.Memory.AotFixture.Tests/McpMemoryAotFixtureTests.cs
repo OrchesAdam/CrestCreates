@@ -39,6 +39,10 @@ public sealed class McpMemoryAotFixtureTests
             }
             var execution = await RunAsync(executable, string.Empty);
             execution.ExitCode.Should().Be(0, execution.Output);
+            execution.Output.Should().Contain("ctx_recall: OK");
+            execution.Output.Should().Contain("ctx_expand: OK");
+            execution.Output.Should().Contain("memory_recall: OK");
+            execution.Output.Should().Contain("memory_source_expand: OK");
             execution.Output.Should().Contain("MCP_MEMORY_NATIVEAOT_PIPELINE_OK");
         }
         finally

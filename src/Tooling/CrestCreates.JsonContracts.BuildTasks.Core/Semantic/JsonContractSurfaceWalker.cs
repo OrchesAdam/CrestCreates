@@ -81,7 +81,18 @@ public sealed class JsonContractSurfaceWalker
             var unwrappedReturn = UnwrapTask(returnType, taskSymbol, valueTaskSymbol);
             if (unwrappedReturn is not null)
             {
-                AddRoot(unwrappedReturn, declaringInterface, method, roots, contextMetadataName, isReturn: true);
+                AddRoot(
+                    unwrappedReturn,
+                    new JsonContractRootOrigin
+                    {
+                        SourceKind = JsonContractRootSourceKind.InterfaceReturn,
+                        DeclaringSurface = declaringInterface.ToDisplayString(s_canonicalFormat),
+                        MemberSignature = method.ToDisplayString(s_canonicalFormat),
+                        RoleName = "ReturnType",
+                        Location = method.Locations.FirstOrDefault(),
+                    },
+                    roots,
+                    contextMetadataName);
             }
 
             foreach (var param in method.Parameters)
@@ -110,7 +121,18 @@ public sealed class JsonContractSurfaceWalker
                 if (excludedParameterTypes.Any(e => IsExactSymbolMatch(paramType, e)))
                     continue;
 
-                AddRoot(paramType, declaringInterface, method, roots, contextMetadataName, isReturn: false);
+                AddRoot(
+                    paramType,
+                    new JsonContractRootOrigin
+                    {
+                        SourceKind = JsonContractRootSourceKind.InterfaceParameter,
+                        DeclaringSurface = declaringInterface.ToDisplayString(s_canonicalFormat),
+                        MemberSignature = method.ToDisplayString(s_canonicalFormat),
+                        RoleName = param.Name,
+                        Location = param.Locations.FirstOrDefault(),
+                    },
+                    roots,
+                    contextMetadataName);
             }
         }
 
@@ -197,79 +219,15 @@ public sealed class JsonContractSurfaceWalker
 
     private void AddRoot(
         ITypeSymbol type,
-        INamedTypeSymbol declaringInterface,
-        IMethodSymbol method,
+        JsonContractRootOrigin origin,
         Dictionary<ITypeSymbol, JsonContractRootModel> roots,
-        string contextMetadataName,
-        bool isReturn)
+        string contextMetadataName)
     {
-        if (type is IErrorTypeSymbol)
+        var diagnostic = JsonContractRootValidator.Validate(type, origin, contextMetadataName);
+        if (diagnostic is not null)
         {
-            _diagnostics.Add(new JsonContractDiagnostic
-            {
-                Id = JsonContractDiagnosticIds.UnresolvedPreCoreCompileRoot,
-                Message = $"Root type '{type.ToDisplayString()}' is unresolved. Move the contract to a referenced assembly, add an earlier MSBuild compile source, or retain an explicit visible root.",
-                Severity = JsonContractDiagnosticSeverity.Error,
-                ContextMetadataName = contextMetadataName,
-                OffendingType = type.ToDisplayString(s_canonicalFormat),
-            });
+            _diagnostics.Add(diagnostic);
             return;
-        }
-
-        if (type is IPointerTypeSymbol or IFunctionPointerTypeSymbol)
-        {
-            _diagnostics.Add(new JsonContractDiagnostic
-            {
-                Id = JsonContractDiagnosticIds.ByRefPointerOrRefLikeParameter,
-                Message = $"Root type '{type.ToDisplayString()}' is a pointer or function pointer. Pointer types are not supported.",
-                Severity = JsonContractDiagnosticSeverity.Error,
-                ContextMetadataName = contextMetadataName,
-                OffendingType = type.ToDisplayString(s_canonicalFormat),
-                MethodSignature = method.ToDisplayString(s_canonicalFormat),
-            });
-            return;
-        }
-
-        if (type is INamedTypeSymbol namedType)
-        {
-            if (namedType.IsUnboundGenericType || (namedType.Arity > 0 && namedType.TypeArguments.Any(t => t.TypeKind == TypeKind.TypeParameter)))
-            {
-                _diagnostics.Add(new JsonContractDiagnostic
-                {
-                    Id = JsonContractDiagnosticIds.InvalidRoot,
-                    Message = $"Root type '{type.ToDisplayString()}' is an open generic. Only closed generic types are supported.",
-                    Severity = JsonContractDiagnosticSeverity.Error,
-                    ContextMetadataName = contextMetadataName,
-                    OffendingType = type.ToDisplayString(s_canonicalFormat),
-                });
-                return;
-            }
-
-            if (namedType.IsRefLikeType)
-            {
-                _diagnostics.Add(new JsonContractDiagnostic
-                {
-                    Id = JsonContractDiagnosticIds.ByRefPointerOrRefLikeParameter,
-                    Message = $"Root type '{type.ToDisplayString()}' is a ref-like struct. Ref-like types are not supported.",
-                    Severity = JsonContractDiagnosticSeverity.Error,
-                    ContextMetadataName = contextMetadataName,
-                    OffendingType = type.ToDisplayString(s_canonicalFormat),
-                });
-                return;
-            }
-
-            if (namedType.DeclaredAccessibility != Accessibility.Public && namedType.DeclaredAccessibility != Accessibility.Internal)
-            {
-                _diagnostics.Add(new JsonContractDiagnostic
-                {
-                    Id = JsonContractDiagnosticIds.InaccessibleRoot,
-                    Message = $"Root type '{type.ToDisplayString()}' is not accessible (accessibility: {namedType.DeclaredAccessibility}).",
-                    Severity = JsonContractDiagnosticSeverity.Error,
-                    ContextMetadataName = contextMetadataName,
-                    OffendingType = type.ToDisplayString(s_canonicalFormat),
-                });
-                return;
-            }
         }
 
         var normalizedType = JsonContractRootNormalizer.Normalize(type);
@@ -282,24 +240,23 @@ public sealed class JsonContractSurfaceWalker
                 FullMetadataName = normalizedType.ToDisplayString(s_canonicalFormat),
                 Provenance = new JsonContractRootProvenance
                 {
-                    DeclaringSurface = declaringInterface.ToDisplayString(s_canonicalFormat),
-                    MethodSignatures = [method.ToDisplayString(s_canonicalFormat)],
-                    IsReturnRoot = isReturn,
+                    Origins = [origin],
                 },
             };
         }
         else
         {
-            var sig = method.ToDisplayString(s_canonicalFormat);
-            if (!existing.Provenance.MethodSignatures.Contains(sig))
-            {
-                existing.Provenance.MethodSignatures.Add(sig);
-                existing.Provenance.MethodSignatures.Sort(StringComparer.Ordinal);
-            }
-
-            if (isReturn)
-                existing.Provenance.IsReturnRoot = true;
+            AddOrigin(existing.Provenance, origin);
         }
+    }
+
+    private static void AddOrigin(JsonContractRootProvenance provenance, JsonContractRootOrigin origin)
+    {
+        if (provenance.Origins.Any(existing => existing.Identity == origin.Identity))
+            return;
+
+        provenance.Origins.Add(origin);
+        provenance.Origins.Sort((left, right) => string.Compare(left.Identity, right.Identity, StringComparison.Ordinal));
     }
 
     private static bool IsExactSymbolMatch(ITypeSymbol type, ITypeSymbol target) =>

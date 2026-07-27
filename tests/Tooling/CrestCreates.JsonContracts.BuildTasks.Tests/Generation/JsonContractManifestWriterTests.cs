@@ -27,6 +27,7 @@ public sealed class JsonContractManifestWriterTests : JsonContractCompilationTes
         output.Should().Contain("SurfaceRootTypes");
         output.Should().Contain("ExplicitRootTypes");
         output.Should().Contain("AllDirectRootTypes");
+        output.Should().Contain("BindingRootTypes");
         output.Split("typeof(global::SurfaceDto)").Length.Should().BeGreaterThan(2);
         output.Split("typeof(global::ExplicitDto)").Length.Should().BeGreaterThan(2);
     }

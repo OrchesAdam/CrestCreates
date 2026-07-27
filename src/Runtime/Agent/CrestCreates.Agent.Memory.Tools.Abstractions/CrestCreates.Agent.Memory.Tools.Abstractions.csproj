@@ -5,10 +5,24 @@
     <Nullable>enable</Nullable>
     <RootNamespace>CrestCreates.Agent.Memory.Tools</RootNamespace>
     <AssemblyName>CrestCreates.Agent.Memory.Tools.Abstractions</AssemblyName>
+    <CrestCreatesJsonContractManifestAccessibility>Public</CrestCreatesJsonContractManifestAccessibility>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.Agent.Memory.Tools" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../CrestCreates.Agent.Tools.Abstractions/CrestCreates.Agent.Tools.Abstractions.csproj" />
     <ProjectReference Include="../CrestCreates.Agent.Memory.Abstractions/CrestCreates.Agent.Memory.Abstractions.csproj" />
     <ProjectReference Include="../CrestCreates.Agent.Memory.Projection.Abstractions/CrestCreates.Agent.Memory.Projection.Abstractions.csproj" />
+    <ProjectReference Include="../../../Core/CrestCreates.Core.Abstractions/CrestCreates.Core.Abstractions.csproj" />
+    <ProjectReference Include="../../../Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../../Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all"
+                      ExcludeAssets="runtime" />
   </ItemGroup>
+  <Import Project="../../../Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.props" />
+  <Import Project="../../../Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.targets" />
 </Project>
