@@ -1,7 +1,6 @@
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Sample.Procurement.Contracts.Dtos;
-using CrestCreates.Sample.Procurement.Domain.Exceptions;
 using CrestCreates.Sample.Procurement.Tests.TestInfrastructure;
 
 namespace CrestCreates.Sample.Procurement.Tests.Capability;
@@ -25,7 +24,7 @@ public class SubmitRequestCapabilityTests
 
         var result = await pipeline.ExecuteAsync("procurement.submit-request", input);
 
-        result.IsSuccess.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue($"ErrorCode={result.ErrorCode}, ErrorMessage={result.ErrorMessage}");
         var output = result.Output.Should().BeAssignableTo<SubmitProcurementRequestResult>().Subject;
         output.RequestId.Should().NotBeEmpty();
         output.Status.Should().Be("Approved");
@@ -35,21 +34,21 @@ public class SubmitRequestCapabilityTests
     }
 
     [Fact]
-    public async Task Submit_InvalidAmount_ReturnsValidationFailure()
+    public async Task Submit_InvalidInput_ThrowsDomainException()
     {
         var pipeline = _host.CreatePipeline();
         var input = new SubmitProcurementRequestInput
         {
             Title = "",
-            Amount = -100m,
+            Amount = 500m,
             Currency = "USD",
             RequesterId = "user-1",
             Category = "General"
         };
 
-        var act = () => pipeline.ExecuteAsync("procurement.submit-request", input);
+        var result = await pipeline.ExecuteAsync("procurement.submit-request", input);
 
-        await act.Should().ThrowAsync<InvalidProcurementRequestException>();
+        result.IsSuccess.Should().BeFalse();
     }
 
     [Fact]

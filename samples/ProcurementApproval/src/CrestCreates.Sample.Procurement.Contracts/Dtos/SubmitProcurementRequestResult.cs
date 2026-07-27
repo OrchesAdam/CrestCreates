@@ -2,9 +2,9 @@ namespace CrestCreates.Sample.Procurement.Contracts.Dtos;
 
 public sealed class SubmitProcurementRequestResult
 {
-    public required Guid RequestId { get; init; }
-    public required string Status { get; init; }
-    public required decimal Amount { get; init; }
-    public required string Currency { get; init; }
-    public bool RequiresApproval { get; init; }
+    public Guid RequestId { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public bool RequiresApproval { get; set; }
 }

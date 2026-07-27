@@ -19,10 +19,9 @@
     <ProjectReference Include="../../../../src/Framework/Web/CrestCreates.AspNetCore/CrestCreates.AspNetCore.csproj" />
     <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Authorization/CrestCreates.Authorization.csproj" />
     <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Schema/CrestCreates.Schema.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Workflow/CrestCreates.Workflow/CrestCreates.Workflow.csproj" />
     <ProjectReference Include="../../../../src/Runtime/HumanTask/CrestCreates.HumanTask/CrestCreates.HumanTask.csproj" />
-    <ProjectReference Include="../../../../src/Integrations/CrestCreates.Mcp/CrestCreates.Mcp.csproj" />
-    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
     <ProjectReference Include="../../../../src/Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
   </ItemGroup>

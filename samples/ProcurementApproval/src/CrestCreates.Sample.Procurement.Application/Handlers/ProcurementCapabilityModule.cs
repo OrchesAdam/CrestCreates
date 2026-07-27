@@ -11,5 +11,6 @@ public sealed class ProcurementCapabilityModule : ICapabilityHandlerModule
         resolver.Register("procurement.submit-request", new SubmitProcurementRequestHandler());
         resolver.Register("procurement.approve-request", new ApproveProcurementRequestHandler());
         resolver.Register("procurement.reject-request", new RejectProcurementRequestHandler());
+        resolver.Register("procurement.get-request", new GetProcurementRequestHandler());
     }
 }

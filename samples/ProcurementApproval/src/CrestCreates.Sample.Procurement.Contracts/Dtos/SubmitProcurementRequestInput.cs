@@ -2,10 +2,10 @@ namespace CrestCreates.Sample.Procurement.Contracts.Dtos;
 
 public sealed class SubmitProcurementRequestInput
 {
-    public required string Title { get; init; }
-    public string Description { get; init; } = string.Empty;
-    public required decimal Amount { get; init; }
-    public required string Currency { get; init; }
-    public required string RequesterId { get; init; }
-    public required string Category { get; init; }
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public string RequesterId { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
 }

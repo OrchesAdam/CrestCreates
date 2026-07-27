@@ -9,6 +9,6 @@ public static partial class ProcurementEndpoints
     [Post("procurement.submit-request", "requests", Body = typeof(SubmitProcurementRequestInput), SuccessStatusCode = 201)]
     public sealed partial class SubmitRequest { }
 
-    [Get("procurement.get-request", "requests/{requestId:guid}")]
+    [Get("procurement.get-request", "requests/{requestId:guid}", Input = typeof(Guid))]
     public sealed partial class GetRequest { }
 }
