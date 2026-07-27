@@ -43,16 +43,26 @@ contributor. All eight explicit MCP binding keys, root ownership, resolver
 composition, and schema/CLR parity remain unchanged. Nested DTOs/enums remain
 STJ transitive metadata rather than binding roots.
 
-Repository guards require the production Agent/MCP contributors to consume a
-generated `RootManifest.BindingRootTypes` and prohibit handwritten `typeof`
-root declarations in those contributors. The three externally bound Contexts
-(Control Plane, Agent Memory, MCP Memory) are explicitly classified and use
-the BuildTask mainline. No runtime scan, reflection serializer, or
-`DefaultJsonTypeInfoResolver` fallback was added.
+The repository guard builds Roslyn semantic models for candidate production
+projects. It discovers concrete Agent/MCP Contributors through `AllInterfaces`,
+discovers every Tool-Spec-backed `JsonSerializerContext` through exact
+attribute symbols, and requires the classification ledger to pair each Context,
+Contributor, adapter, and generated Manifest. `BindingRootTypes` must directly
+return the paired generated Manifest; unrelated diagnostic `typeof` expressions
+remain legal. The current Tool-Spec ledger contains Agent Memory and MCP Memory;
+Control Plane remains governed by its separate #58 interface-surface contract.
+No runtime scan, reflection serializer, or `DefaultJsonTypeInfoResolver`
+fallback was added.
+
+Interface, Agent Tool, MCP Tool, and Explicit roots now pass through one
+`JsonContractRootValidator`. Provenance uses structured
+`JsonContractRootSourceKind` values rather than adapter/role strings, and a
+parameterized contract test proves the same illegal ref-like root produces the
+same diagnostic across all three surface adapters.
 
 Executable evidence:
 
-- JSON BuildTasks semantic/writer/incremental tests: 83 passing.
+- JSON BuildTasks semantic/writer/incremental tests: 87 passing.
 - JSON Build Package/MSBuild contracts: 29 passing, including clean package,
   Global Usings, incremental deletion, multi-TFM, path, and accessibility gates.
 - CodeGenerator tests: 278 passing.
@@ -66,6 +76,8 @@ Executable evidence:
   expand, curation replay markers and final sentinel; MCP Memory 1 passing with
   all four tool markers and final sentinel. CI executes both test-owned
   publish/link/run gates rather than treating `dotnet publish` as sufficient.
+  PR CI and post-merge Full Validation call the same Contract and NativeAOT
+  gate scripts so the accepted evidence cannot drift after merge.
 - Canonical `CrestCreates.slnx` build: 0 errors.
 
 Spec: `docs/superpowers/specs/2026-07-27-agent-mcp-tool-json-contract-root-unification-design.md`

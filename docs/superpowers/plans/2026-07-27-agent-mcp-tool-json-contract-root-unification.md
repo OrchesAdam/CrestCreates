@@ -64,6 +64,7 @@ identity, binding keys, resolver composition, wire shape, or NativeAOT behavior.
 | B06 | `RemovingSpec_RemovesStaleRoot` | #58 incremental chain handles deletion |
 | B07 | `GeneratedBindingManifest_IsOrdinalStable` | deterministic output |
 | B08 | `AgentMemoryPublicManifest_IsConsumableAndImmutable` | cross-assembly use is safe |
+| B09 | `Provenance_UsesStronglyTypedSourceKinds` | adapter/role provenance cannot drift as strings |
 
 ### 2.3 Failure cases
 
@@ -72,8 +73,8 @@ identity, binding keys, resolver composition, wire shape, or NativeAOT behavior.
 | F01 | `Fail_UnsupportedSurfaceAdapter` | `CJC002` |
 | F02 | `Fail_OpenGenericToolSpecRoot` | `CJC005` |
 | F03 | `Fail_UnresolvedToolSpecRoot` | `CJC007` |
-| F04 | repository handwritten contributor guard | architecture failure |
-| F05 | repository handwritten Context-root guard | architecture failure |
+| F04 | semantic repository contributor ownership guard | indirect/handwritten roots fail without banning unrelated `typeof` |
+| F05 | semantic Tool Context classification guard | new Tool Context must enter the ownership ledger |
 | F06 | existing duplicate ownership test | startup failure unchanged |
 | F07 | every-root JsonTypeInfo test | missing metadata fails |
 | F08 | snapshot/parity tests | wire/converter drift fails |
@@ -359,9 +360,18 @@ The guard is ownership-aware and limited to concrete implementations of
 `IAgentToolJsonContextContributor` and `IMcpToolJsonContextContributor` plus
 their paired marked Contexts.
 
-Add a classification ledger asserting that the only production externally
-bound Contexts are Control Plane, Agent Memory, and MCP Memory; later additions
-must explicitly choose generated or justified non-generated ownership.
+Add a classification ledger asserting that every production Tool-Spec-backed
+Context is paired with its concrete Contributor, adapter, and generated
+Manifest. The current Tool-Spec ledger contains Agent Memory and MCP Memory;
+Control Plane is an interface-surface Context governed by #58 and does not own
+an Agent/MCP Tool Contributor. Later Tool Contexts must enter the ledger.
+
+Use Roslyn syntax and semantic models rather than interface-declaration string
+matching. Identify concrete contributors via exact `AllInterfaces`, discover
+Tool Contexts via the `JsonSerializerContext` inheritance chain plus exact
+`JsonContractSurface` and Agent/MCP container attributes, and constrain only
+the `BindingRootTypes` property to directly return its paired generated
+Manifest. Unrelated `typeof` usage remains legal.
 
 ### Tests
 
@@ -464,3 +474,20 @@ rtk rg -n "AcceptanceSkeleton.Pending|Fact\\(Skip" tests/Tooling tests/Runtime/A
 Commit intentionally scoped files, push
 `feature/issue-62-unify-agent-mcp-json-contract-roots`, create a PR linked with
 `Closes #62`, and comment the requirement/test/AOT evidence on the PR.
+
+## 13. PR review closure
+
+The post-implementation PR review added three durability requirements, all
+kept inside the approved architecture:
+
+1. PR CI and post-merge Full Validation invoke the same shared scripts for
+   Agent Memory Contract/E2E, JsonContracts BuildTasks/Package, and Agent/MCP
+   Memory NativeAOT publish-link-run gates.
+2. Repository enforcement uses Roslyn ownership discovery and an explicit
+   Context/Contributor/Manifest ledger; it no longer uses fixed source paths or
+   bans every `typeof` in a Contributor file.
+3. Interface, Agent, MCP, and Explicit roots use one shared validator and
+   structured `JsonContractRootSourceKind` provenance. The cross-adapter
+   diagnostic contract is parameterized.
+
+These are implementation review corrections, not Spec deviations.

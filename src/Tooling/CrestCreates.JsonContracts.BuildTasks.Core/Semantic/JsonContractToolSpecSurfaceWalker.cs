@@ -22,7 +22,8 @@ public sealed class JsonContractToolSpecSurfaceWalker
     public List<JsonContractRootModel> WalkSurface(
         INamedTypeSymbol container,
         INamedTypeSymbol specAttribute,
-        string adapterName,
+        JsonContractRootSourceKind inputSourceKind,
+        JsonContractRootSourceKind outputSourceKind,
         string contextMetadataName)
     {
         _diagnostics.Clear();
@@ -38,8 +39,8 @@ public sealed class JsonContractToolSpecSurfaceWalker
             if (attribute is null)
                 continue;
 
-            AddNamedRoot(attribute, "InputType", container, spec, adapterName, contextMetadataName, roots);
-            AddNamedRoot(attribute, "OutputType", container, spec, adapterName, contextMetadataName, roots);
+            AddNamedRoot(attribute, "InputType", inputSourceKind, container, spec, contextMetadataName, roots);
+            AddNamedRoot(attribute, "OutputType", outputSourceKind, container, spec, contextMetadataName, roots);
         }
 
         var result = roots.Values.ToList();
@@ -50,9 +51,9 @@ public sealed class JsonContractToolSpecSurfaceWalker
     private void AddNamedRoot(
         AttributeData attribute,
         string role,
+        JsonContractRootSourceKind sourceKind,
         INamedTypeSymbol container,
         INamedTypeSymbol spec,
-        string adapterName,
         string contextMetadataName,
         Dictionary<ITypeSymbol, JsonContractRootModel> roots)
     {
@@ -63,11 +64,22 @@ public sealed class JsonContractToolSpecSurfaceWalker
         if (argument.Value.Value is not ITypeSymbol type)
             return;
 
-        if (!ValidateRoot(type, contextMetadataName, spec, role))
+        var origin = new JsonContractRootOrigin
+        {
+            SourceKind = sourceKind,
+            DeclaringSurface = container.ToDisplayString(s_format),
+            DeclarationName = spec.Name,
+            RoleName = role,
+            Location = spec.Locations.FirstOrDefault(),
+        };
+        var diagnostic = JsonContractRootValidator.Validate(type, origin, contextMetadataName);
+        if (diagnostic is not null)
+        {
+            _diagnostics.Add(diagnostic);
             return;
+        }
 
         var normalized = JsonContractRootNormalizer.Normalize(type);
-        var declaration = $"{adapterName}:{container.ToDisplayString(s_format)}::{spec.Name}.{role}";
 
         if (!roots.TryGetValue(normalized, out var root))
         {
@@ -77,94 +89,18 @@ public sealed class JsonContractToolSpecSurfaceWalker
                 FullMetadataName = normalized.ToDisplayString(s_format),
                 Provenance = new JsonContractRootProvenance
                 {
-                    DeclaringSurface = container.ToDisplayString(s_format),
-                    Declarations = [declaration],
-                    IsReturnRoot = role == "OutputType",
+                    Origins = [origin],
                 },
             };
             roots.Add(normalized, root);
             return;
         }
 
-        if (!root.Provenance.Declarations.Contains(declaration))
+        if (!root.Provenance.Origins.Any(existing => existing.Identity == origin.Identity))
         {
-            root.Provenance.Declarations.Add(declaration);
-            root.Provenance.Declarations.Sort(StringComparer.Ordinal);
+            root.Provenance.Origins.Add(origin);
+            root.Provenance.Origins.Sort((left, right) =>
+                string.Compare(left.Identity, right.Identity, StringComparison.Ordinal));
         }
-
-        if (role == "OutputType")
-            root.Provenance.IsReturnRoot = true;
     }
-
-    private bool ValidateRoot(
-        ITypeSymbol type,
-        string contextMetadataName,
-        INamedTypeSymbol spec,
-        string role)
-    {
-        if (type is IErrorTypeSymbol)
-        {
-            Report(JsonContractDiagnosticIds.UnresolvedPreCoreCompileRoot,
-                $"Tool spec root '{type.ToDisplayString()}' is unresolved. Move the contract to a referenced assembly or an earlier MSBuild compile source.",
-                type, contextMetadataName, spec, role);
-            return false;
-        }
-
-        if (type is IPointerTypeSymbol or IFunctionPointerTypeSymbol)
-        {
-            Report(JsonContractDiagnosticIds.ByRefPointerOrRefLikeParameter,
-                $"Tool spec root '{type.ToDisplayString()}' is a pointer or function pointer and is not supported.",
-                type, contextMetadataName, spec, role);
-            return false;
-        }
-
-        if (type is not INamedTypeSymbol namedType)
-            return true;
-
-        if (namedType.IsUnboundGenericType
-            || namedType.Arity > 0 && namedType.TypeArguments.Any(argument => argument.TypeKind == TypeKind.TypeParameter))
-        {
-            Report(JsonContractDiagnosticIds.InvalidRoot,
-                $"Tool spec root '{type.ToDisplayString()}' is an open generic. Only closed generic roots are supported.",
-                type, contextMetadataName, spec, role);
-            return false;
-        }
-
-        if (namedType.IsRefLikeType)
-        {
-            Report(JsonContractDiagnosticIds.ByRefPointerOrRefLikeParameter,
-                $"Tool spec root '{type.ToDisplayString()}' is ref-like and is not supported.",
-                type, contextMetadataName, spec, role);
-            return false;
-        }
-
-        if (namedType.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal))
-        {
-            Report(JsonContractDiagnosticIds.InaccessibleRoot,
-                $"Tool spec root '{type.ToDisplayString()}' is not accessible.",
-                type, contextMetadataName, spec, role);
-            return false;
-        }
-
-        return true;
-    }
-
-    private void Report(
-        string id,
-        string message,
-        ITypeSymbol type,
-        string contextMetadataName,
-        INamedTypeSymbol spec,
-        string role)
-        => _diagnostics.Add(new JsonContractDiagnostic
-        {
-            Id = id,
-            Message = message,
-            Severity = JsonContractDiagnosticSeverity.Error,
-            ContextMetadataName = contextMetadataName,
-            SurfaceMetadataName = spec.ToDisplayString(s_format),
-            OffendingType = type.ToDisplayString(s_format),
-            ParameterName = role,
-        }.WithLocation(spec.Locations.FirstOrDefault()));
-
 }

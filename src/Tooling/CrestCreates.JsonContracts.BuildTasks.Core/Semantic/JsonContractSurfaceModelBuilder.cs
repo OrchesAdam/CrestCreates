@@ -188,7 +188,8 @@ public sealed class JsonContractSurfaceModelBuilder
                 var walkedRoots = walker.WalkSurface(
                     surfaceType,
                     agentAdapter ? agentToolSpecSymbol! : mcpToolSpecSymbol!,
-                    agentAdapter ? "AgentToolSpec" : "McpToolSpec",
+                    agentAdapter ? JsonContractRootSourceKind.AgentToolInput : JsonContractRootSourceKind.McpToolInput,
+                    agentAdapter ? JsonContractRootSourceKind.AgentToolOutput : JsonContractRootSourceKind.McpToolOutput,
                     metadataName);
                 _diagnostics.AddRange(walker.Diagnostics);
                 surfaceRoots.AddRange(walkedRoots);
@@ -283,22 +284,13 @@ public sealed class JsonContractSurfaceModelBuilder
             }
             else
             {
-                foreach (var sig in root.Provenance.MethodSignatures)
+                foreach (var origin in root.Provenance.Origins)
                 {
-                    if (!existing.Provenance.MethodSignatures.Contains(sig))
-                    {
-                        existing.Provenance.MethodSignatures.Add(sig);
-                    }
+                    if (!existing.Provenance.Origins.Any(candidate => candidate.Identity == origin.Identity))
+                        existing.Provenance.Origins.Add(origin);
                 }
-                existing.Provenance.MethodSignatures.Sort(StringComparer.Ordinal);
-                foreach (var declaration in root.Provenance.Declarations)
-                {
-                    if (!existing.Provenance.Declarations.Contains(declaration))
-                        existing.Provenance.Declarations.Add(declaration);
-                }
-                existing.Provenance.Declarations.Sort(StringComparer.Ordinal);
-                if (root.Provenance.IsReturnRoot)
-                    existing.Provenance.IsReturnRoot = true;
+                existing.Provenance.Origins.Sort((left, right) =>
+                    string.Compare(left.Identity, right.Identity, StringComparison.Ordinal));
             }
         }
 
@@ -315,10 +307,7 @@ public sealed class JsonContractSurfaceModelBuilder
             IsExplicitExtra = root.IsExplicitExtra,
             Provenance = new JsonContractRootProvenance
             {
-                DeclaringSurface = root.Provenance.DeclaringSurface,
-                MethodSignatures = [.. root.Provenance.MethodSignatures],
-                Declarations = [.. root.Provenance.Declarations],
-                IsReturnRoot = root.Provenance.IsReturnRoot,
+                Origins = [.. root.Provenance.Origins],
             },
         };
 
@@ -339,16 +328,17 @@ public sealed class JsonContractSurfaceModelBuilder
             if (typeArg.Value is not ITypeSymbol rootType)
                 continue;
 
-            if (rootType is IErrorTypeSymbol)
+            var origin = new JsonContractRootOrigin
             {
-                diagnostics.Add(new JsonContractDiagnostic
-                {
-                    Id = JsonContractDiagnosticIds.UnresolvedPreCoreCompileRoot,
-                    Message = $"Explicit root type '{rootType.ToDisplayString()}' is unresolved. Move the contract to a referenced assembly, add an earlier MSBuild compile source, or retain an explicit visible root.",
-                    Severity = JsonContractDiagnosticSeverity.Error,
-                    ContextMetadataName = contextMetadataName,
-                    OffendingType = rootType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                });
+                SourceKind = JsonContractRootSourceKind.Explicit,
+                DeclaringSurface = contextMetadataName,
+                RoleName = "ExplicitRoot",
+                Location = attr.ApplicationSyntaxReference?.GetSyntax().GetLocation(),
+            };
+            var diagnostic = JsonContractRootValidator.Validate(rootType, origin, contextMetadataName);
+            if (diagnostic is not null)
+            {
+                diagnostics.Add(diagnostic);
                 continue;
             }
 
@@ -361,9 +351,7 @@ public sealed class JsonContractSurfaceModelBuilder
                 IsExplicitExtra = true,
                 Provenance = new JsonContractRootProvenance
                 {
-                    DeclaringSurface = contextMetadataName,
-                    MethodSignatures = [],
-                    IsReturnRoot = false,
+                    Origins = [origin],
                 },
             });
         }
@@ -391,6 +379,13 @@ public sealed class JsonContractSurfaceModelBuilder
             else
             {
                 existing.IsExplicitExtra = true;
+                foreach (var origin in root.Provenance.Origins)
+                {
+                    if (!existing.Provenance.Origins.Any(candidate => candidate.Identity == origin.Identity))
+                        existing.Provenance.Origins.Add(origin);
+                }
+                existing.Provenance.Origins.Sort((left, right) =>
+                    string.Compare(left.Identity, right.Identity, StringComparison.Ordinal));
             }
         }
 

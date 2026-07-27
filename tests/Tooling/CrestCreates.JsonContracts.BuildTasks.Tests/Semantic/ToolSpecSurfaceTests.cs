@@ -1,5 +1,6 @@
 using CrestCreates.JsonContracts.BuildTasks.Diagnostics;
 using CrestCreates.JsonContracts.BuildTasks.Generation;
+using CrestCreates.JsonContracts.BuildTasks.Model;
 using CrestCreates.JsonContracts.BuildTasks.Tests.Infrastructure;
 using FluentAssertions;
 
@@ -38,7 +39,9 @@ public sealed class ToolSpecSurfaceTests : JsonContractCompilationTestBase
         var roots = result.Model!.Contexts.Single().BindingRoots;
         roots.Should().HaveCount(2);
         roots.Single(root => root.FullMetadataName == "global::InputDto")
-            .Provenance.Declarations.Should().HaveCount(2);
+            .Provenance.Origins.Should().OnlyContain(origin => origin.SourceKind == JsonContractRootSourceKind.McpToolInput);
+        roots.Single(root => root.FullMetadataName == "global::InputDto")
+            .Provenance.Origins.Should().HaveCount(2);
     }
 
     [Fact]
@@ -97,7 +100,10 @@ public sealed class ToolSpecSurfaceTests : JsonContractCompilationTestBase
         context.SurfaceRoots.Select(root => root.FullMetadataName).Should().Contain("global::InterfaceDto");
         context.BindingRoots.Select(root => root.FullMetadataName).Should().NotContain("global::InterfaceDto");
         context.BindingRoots.Single(root => root.FullMetadataName == "global::InputDto")
-            .Provenance.MethodSignatures.Should().BeEmpty("binding provenance must not absorb interface provenance");
+            .Provenance.Origins.Should().OnlyContain(origin =>
+                origin.SourceKind == JsonContractRootSourceKind.AgentToolInput
+                || origin.SourceKind == JsonContractRootSourceKind.AgentToolOutput,
+                "binding provenance must not absorb interface provenance");
     }
 
     [Fact]
@@ -127,6 +133,44 @@ public sealed class ToolSpecSurfaceTests : JsonContractCompilationTestBase
     {
         Build(AgentSource("typeof(MissingDto)", "typeof(OutputDto)"))
             .Diagnostics.Should().Contain(diagnostic => diagnostic.Id == JsonContractDiagnosticIds.UnresolvedPreCoreCompileRoot);
+    }
+
+    [Theory]
+    [InlineData("Interface")]
+    [InlineData("Agent")]
+    [InlineData("Mcp")]
+    public void RefLikeRoot_UsesSameDiagnosticAcrossAllSurfaceAdapters(string adapter)
+    {
+        var source = adapter switch
+        {
+            "Interface" => InterfaceSource("System.Span<int>"),
+            "Agent" => AgentSource("typeof(System.Span<int>)", "typeof(OutputDto)"),
+            "Mcp" => McpSource(inputExpression: "typeof(System.Span<int>)"),
+            _ => throw new ArgumentOutOfRangeException(nameof(adapter)),
+        };
+
+        Build(source).Diagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == JsonContractDiagnosticIds.ByRefPointerOrRefLikeParameter);
+    }
+
+    [Fact]
+    public void Provenance_UsesStronglyTypedSourceKinds()
+    {
+        var agent = Build(AgentSource(
+            "typeof(InputDto)",
+            "typeof(OutputDto)",
+            additionalContextAttribute: "[JsonContractExplicitRoot(typeof(InputDto))]"));
+        var mcp = Build(McpSource());
+
+        agent.Model!.Contexts.Single().BindingRoots.SelectMany(root => root.Provenance.Origins)
+            .Select(origin => origin.SourceKind)
+            .Should().BeEquivalentTo(new[] { JsonContractRootSourceKind.AgentToolInput, JsonContractRootSourceKind.AgentToolOutput });
+        agent.Model.Contexts.Single().AllDirectRoots.Single(root => root.FullMetadataName == "global::InputDto")
+            .Provenance.Origins.Select(origin => origin.SourceKind)
+            .Should().BeEquivalentTo(new[] { JsonContractRootSourceKind.AgentToolInput, JsonContractRootSourceKind.Explicit });
+        mcp.Model!.Contexts.Single().BindingRoots.SelectMany(root => root.Provenance.Origins)
+            .Select(origin => origin.SourceKind)
+            .Should().BeEquivalentTo(new[] { JsonContractRootSourceKind.McpToolInput, JsonContractRootSourceKind.McpToolOutput });
     }
 
     private static JsonContractTestCompilation Build((string Path, string Text) source)
@@ -171,7 +215,24 @@ public sealed class ToolSpecSurfaceTests : JsonContractCompilationTestBase
             public partial class TestContext : JsonSerializerContext { }
             """);
 
-    private static (string Path, string Text) McpSource(bool includeSharedSpec = false)
+    private static (string Path, string Text) InterfaceSource(string rootType)
+        => ("Interface.cs", $$"""
+            using System.Text.Json.Serialization;
+            using CrestCreates.Core.Abstractions.Serialization;
+
+            public interface IService
+            {
+                {{rootType}} Get();
+            }
+
+            [JsonContractSurface(typeof(IService))]
+            public partial class TestContext : JsonSerializerContext { }
+            """);
+
+    private static (string Path, string Text) McpSource(
+        bool includeSharedSpec = false,
+        string inputExpression = "typeof(InputDto)",
+        string outputExpression = "typeof(OutputDto)")
         => ("McpToolSpec.cs", $$"""
             using System;
             using System.Text.Json.Serialization;
@@ -194,7 +255,7 @@ public sealed class ToolSpecSurfaceTests : JsonContractCompilationTestBase
             [CrestCreates.Mcp.McpToolSpecs]
             public static class McpSpecs
             {
-                [CrestCreates.Mcp.McpToolSpec("one", InputType = typeof(InputDto), OutputType = typeof(OutputDto))]
+                [CrestCreates.Mcp.McpToolSpec("one", InputType = {{inputExpression}}, OutputType = {{outputExpression}})]
                 public sealed class One { }
                 {{(includeSharedSpec ? "[CrestCreates.Mcp.McpToolSpec(\"two\", InputType = typeof(InputDto), OutputType = typeof(OutputDto))] public sealed class Two { }" : string.Empty)}}
             }
