@@ -10,8 +10,15 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CrestCreates.Sample.Procurement.Host\CrestCreates.Sample.Procurement.Host.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Sample.Procurement.Contracts\CrestCreates.Sample.Procurement.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\CrestCreates.Sample.Procurement.Domain\CrestCreates.Sample.Procurement.Domain.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="FluentAssertions" />
   </ItemGroup>
 
   <ItemGroup>

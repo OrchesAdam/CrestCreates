@@ -1,4 +1,6 @@
-using FluentAssertions;
+using System.Text.Json;
+using CrestCreates.Sample.Procurement.Contracts.Dtos;
+using CrestCreates.Sample.Procurement.Contracts.Json;
 
 namespace CrestCreates.Sample.Procurement.Tests.JsonContract;
 
@@ -16,8 +18,8 @@ public class JsonContractTests
             Category = "General"
         };
 
-        var json = System.Text.Json.JsonSerializer.Serialize(input, ProcurementJsonContext.Default.SubmitProcurementRequestInput);
-        var deserialized = System.Text.Json.JsonSerializer.Deserialize(json, ProcurementJsonContext.Default.SubmitProcurementRequestInput);
+        var json = JsonSerializer.Serialize(input, ProcurementJsonContext.Default.SubmitProcurementRequestInput);
+        var deserialized = JsonSerializer.Deserialize(json, ProcurementJsonContext.Default.SubmitProcurementRequestInput);
 
         deserialized.Should().BeEquivalentTo(input);
     }
