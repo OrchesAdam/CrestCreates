@@ -64,7 +64,8 @@ Executable evidence:
 - Dependency/architecture boundaries: 49 passing.
 - linux-x64 NativeAOT publish-link-run: Agent Memory 1 passing with build,
   expand, curation replay markers and final sentinel; MCP Memory 1 passing with
-  all four tool markers and final sentinel.
+  all four tool markers and final sentinel. CI executes both test-owned
+  publish/link/run gates rather than treating `dotnet publish` as sufficient.
 - Canonical `CrestCreates.slnx` build: 0 errors.
 
 Spec: `docs/superpowers/specs/2026-07-27-agent-mcp-tool-json-contract-root-unification-design.md`

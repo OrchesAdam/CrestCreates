@@ -111,6 +111,8 @@ jobs:
           dotnet test tests/Runtime/Agent/CrestCreates.Agent.Tools.E2E.Tests --no-build
           dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Projection.Tests --no-build
           dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.ReadCore.Tests --no-build
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.Tests --no-build
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.E2E.Tests --no-build
 
       - name: Test — Runtime / Eventing
         run: |
@@ -152,8 +154,11 @@ jobs:
       - name: Publish — Agent.Tools AotFixture (NativeAOT)
         run: dotnet publish tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
 
-      - name: Publish — MCP Memory AotFixture (NativeAOT)
-        run: dotnet publish tests/Integrations/CrestCreates.Mcp.Memory.AotFixture -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
+      - name: Test — Agent Memory Tools AotFixture (NativeAOT publish/link/run)
+        run: dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.AotFixture.Tests --no-build
+
+      - name: Test — MCP Memory AotFixture (NativeAOT publish/link/run)
+        run: dotnet test tests/Integrations/CrestCreates.Mcp.Memory.AotFixture.Tests --no-build
 
       - name: Test — ControlPlane JsonContracts AotFixture (NativeAOT publish/link/run)
         run: dotnet test tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.Tests --no-build
