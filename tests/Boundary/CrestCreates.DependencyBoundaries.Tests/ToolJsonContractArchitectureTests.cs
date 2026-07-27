@@ -116,29 +116,70 @@ public sealed class ToolJsonContractArchitectureTests
             "Sample.GeneratedContext.GeneratedContextRootManifest"));
     }
 
+    [Fact]
+    public void ContributorDiscovery_FollowsInterfaceAcrossProjectBaseClass()
+    {
+        const string baseProjectSource = """
+            namespace Contracts;
+            public abstract class AgentContributorBase
+                : global::CrestCreates.Agent.Tools.IAgentToolJsonContextContributor
+            {
+            }
+            """;
+        const string derivedProjectSource = """
+            namespace Feature;
+            internal sealed class NewContributor : global::Contracts.AgentContributorBase
+            {
+                public System.Collections.Generic.IReadOnlyCollection<System.Type> BindingRootTypes
+                    => new System.Type[] { typeof(string) };
+            }
+            """;
+
+        var analysis = AnalyzeProductionProjects(
+        [
+            [("ProjectA/AgentContributorBase.cs", baseProjectSource)],
+            [("ProjectB/NewContributor.cs", derivedProjectSource)],
+        ]);
+        var contributor = Assert.Single(analysis.Contributors);
+
+        Assert.Equal("Feature.NewContributor", contributor.MetadataName);
+        Assert.False(ReturnsGeneratedBindingManifest(
+            contributor.BindingRootProperty,
+            "Feature.GeneratedContext.GeneratedContextRootManifest"));
+    }
+
     private static RepositoryAnalysis AnalyzeRepository(string root)
     {
         var sourceRoot = Path.Combine(root, "src");
-        var candidateSources = new Dictionary<string, string>(StringComparer.Ordinal);
+        var productionProjects = Directory
+            .EnumerateFiles(sourceRoot, "*.csproj", SearchOption.AllDirectories)
+            .Select(projectPath =>
+            {
+                var projectDirectory = Path.GetDirectoryName(projectPath)!;
+                return Directory.EnumerateFiles(projectDirectory, "*.cs", SearchOption.AllDirectories)
+                    .Where(path => IsProductionSourcePath(projectDirectory, path))
+                    .Select(path => (Path: path, Text: File.ReadAllText(path)))
+                    .ToArray();
+            })
+            .ToArray();
 
-        foreach (var projectPath in Directory.EnumerateFiles(sourceRoot, "*.csproj", SearchOption.AllDirectories))
+        return AnalyzeProductionProjects(productionProjects, includeGuardSymbols: false);
+    }
+
+    private static RepositoryAnalysis AnalyzeProductionProjects(
+        IEnumerable<IEnumerable<(string Path, string Text)>> projects,
+        bool includeGuardSymbols = true)
+    {
+        var productionSources = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var project in projects)
         {
-            var projectDirectory = Path.GetDirectoryName(projectPath)!;
-            var sources = Directory.EnumerateFiles(projectDirectory, "*.cs", SearchOption.AllDirectories)
-                .Where(path => IsProductionSourcePath(projectDirectory, path))
-                .Select(path => (Path: path, Text: File.ReadAllText(path)))
-                .ToArray();
-
-            if (!sources.Any(source => IsToolJsonContractCandidate(source.Text)))
-                continue;
-
-            foreach (var source in sources)
-                candidateSources[source.Path] = source.Text;
+            foreach (var source in project)
+                productionSources[source.Path] = source.Text;
         }
 
         var analysis = AnalyzeSources(
-            candidateSources.Select(source => (source.Key, source.Value)),
-            includeGuardSymbols: false);
+            productionSources.Select(source => (source.Key, source.Value)),
+            includeGuardSymbols);
         analysis.Deduplicate();
         return analysis;
     }
@@ -278,11 +319,6 @@ public sealed class ToolJsonContractArchitectureTests
     private static string GetMetadataName(INamedTypeSymbol type)
         => type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
             .Replace("global::", string.Empty, StringComparison.Ordinal);
-
-    private static bool IsToolJsonContractCandidate(string source)
-        => source.Contains("IAgentToolJsonContextContributor", StringComparison.Ordinal)
-            || source.Contains("IMcpToolJsonContextContributor", StringComparison.Ordinal)
-            || source.Contains("JsonContractSurface", StringComparison.Ordinal);
 
     private static bool IsProductionSourcePath(string projectDirectory, string path)
     {

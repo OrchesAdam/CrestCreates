@@ -43,8 +43,11 @@ contributor. All eight explicit MCP binding keys, root ownership, resolver
 composition, and schema/CLR parity remain unchanged. Nested DTOs/enums remain
 STJ transitive metadata rather than binding roots.
 
-The repository guard builds Roslyn semantic models for candidate production
-projects. It discovers concrete Agent/MCP Contributors through `AllInterfaces`,
+The repository guard builds one Roslyn compilation over all production source
+projects without a text prefilter and analyzes every source tree semantically.
+It discovers concrete Agent/MCP Contributors through `AllInterfaces`, including
+implementations that inherit the interface only through a base class declared
+in another project,
 discovers every Tool-Spec-backed `JsonSerializerContext` through exact
 attribute symbols, and requires the classification ledger to pair each Context,
 Contributor, adapter, and generated Manifest. `BindingRootTypes` must directly

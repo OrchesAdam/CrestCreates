@@ -367,7 +367,10 @@ Control Plane is an interface-surface Context governed by #58 and does not own
 an Agent/MCP Tool Contributor. Later Tool Contexts must enter the ledger.
 
 Use Roslyn syntax and semantic models rather than interface-declaration string
-matching. Identify concrete contributors via exact `AllInterfaces`, discover
+matching or project-level text prefilters. Compile all production source into
+the repository guard so a concrete Contributor is found even when its interface
+is inherited through a base class in another project. Identify concrete
+contributors via exact `AllInterfaces`, discover
 Tool Contexts via the `JsonSerializerContext` inheritance chain plus exact
 `JsonContractSurface` and Agent/MCP container attributes, and constrain only
 the `BindingRootTypes` property to directly return its paired generated
@@ -485,7 +488,9 @@ kept inside the approved architecture:
    Memory NativeAOT publish-link-run gates.
 2. Repository enforcement uses Roslyn ownership discovery and an explicit
    Context/Contributor/Manifest ledger; it no longer uses fixed source paths or
-   bans every `typeof` in a Contributor file.
+   project-level text prefilters, and it does not ban every `typeof` in a
+   Contributor file. A composition test covers an abstract base Contributor in
+   one project and a concrete handwritten-root implementation in another.
 3. Interface, Agent, MCP, and Explicit roots use one shared validator and
    structured `JsonContractRootSourceKind` provenance. The cross-adapter
    diagnostic contract is parameterized.
