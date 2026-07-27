@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <CrestCreatesJsonContractGenerationEnabled Condition="'$(CrestCreatesJsonContractGenerationEnabled)' == ''">true</CrestCreatesJsonContractGenerationEnabled>
+    <CrestCreatesJsonContractManifestAccessibility Condition="'$(CrestCreatesJsonContractManifestAccessibility)' == ''">Internal</CrestCreatesJsonContractManifestAccessibility>
+    <CrestCreatesJsonContractGenerationDependsOn Condition="'$(CrestCreatesJsonContractGenerationDependsOn)' == ''"></CrestCreatesJsonContractGenerationDependsOn>
+    <CrestCreatesJsonContractsTaskSemanticVersion Condition="'$(CrestCreatesJsonContractsTaskSemanticVersion)' == ''">1.0.0</CrestCreatesJsonContractsTaskSemanticVersion>
+  </PropertyGroup>
+</Project>

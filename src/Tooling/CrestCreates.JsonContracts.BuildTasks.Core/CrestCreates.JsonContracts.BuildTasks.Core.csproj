@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="SelfContained;RuntimeIdentifier;RuntimeIdentifiers">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>CrestCreates.JsonContracts.Tool</AssemblyName>
+    <RootNamespace>CrestCreates.JsonContracts.BuildTasks</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <UseAppHost>false</UseAppHost>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <PublishAot>false</PublishAot>
+    <PublishTrimmed>false</PublishTrimmed>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <SelfContained>false</SelfContained>
+    <RuntimeIdentifier></RuntimeIdentifier>
+    <RuntimeIdentifiers></RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.JsonContracts.BuildTasks.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.Common" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Remove="..\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" />
+    <ProjectReference Remove="..\..\Framework\Modules\CrestCreates.ModuleDiagnostics\CrestCreates.ModuleDiagnostics.csproj" />
+  </ItemGroup>
+
+</Project>

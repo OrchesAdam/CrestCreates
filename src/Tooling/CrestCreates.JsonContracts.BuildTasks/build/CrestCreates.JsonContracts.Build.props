@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <_CrestCreatesJsonContractsPackageTransportImported>true</_CrestCreatesJsonContractsPackageTransportImported>
+    <CrestCreatesJsonContractsSelectedTransport Condition="'$(CrestCreatesJsonContractsSelectedTransport)' == ''">Package</CrestCreatesJsonContractsSelectedTransport>
+    <CrestCreatesJsonContractsSelectedTaskAssembly Condition="'$(CrestCreatesJsonContractsSelectedTaskAssembly)' == ''">$(MSBuildThisFileDirectory)..\tasks\net10.0\CrestCreates.JsonContracts.BuildTasks.dll</CrestCreatesJsonContractsSelectedTaskAssembly>
+    <CrestCreatesJsonContractsToolPath Condition="'$(CrestCreatesJsonContractsToolPath)' == ''">$(MSBuildThisFileDirectory)..\tools\net10.0\CrestCreates.JsonContracts.Tool.dll</CrestCreatesJsonContractsToolPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(_CrestCreatesJsonContractsRepositoryTransportImported)' == 'true'">
+    <_CrestCreatesJsonContractsTransportConflict>true</_CrestCreatesJsonContractsTransportConflict>
+  </PropertyGroup>
+  <Import Project="$(MSBuildThisFileDirectory)CrestCreates.JsonContracts.Build.Common.props"
+          Condition="'$(_CrestCreatesJsonContractsPropsImported)' != 'true'" />
+  <PropertyGroup>
+    <_CrestCreatesJsonContractsPropsImported>true</_CrestCreatesJsonContractsPropsImported>
+  </PropertyGroup>
+</Project>

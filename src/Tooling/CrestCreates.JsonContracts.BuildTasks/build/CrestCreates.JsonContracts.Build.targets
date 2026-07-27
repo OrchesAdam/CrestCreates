@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <_CrestCreatesJsonContractsPackageTargetsImported>true</_CrestCreatesJsonContractsPackageTargetsImported>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(_CrestCreatesJsonContractsRepositoryTargetsImported)' == 'true'">
+    <_CrestCreatesJsonContractsImportConflict>true</_CrestCreatesJsonContractsImportConflict>
+  </PropertyGroup>
+  <Import Project="$(MSBuildThisFileDirectory)CrestCreates.JsonContracts.Build.Common.targets"
+          Condition="'$(_CrestCreatesJsonContractsTargetsImported)' != 'true'" />
+  <PropertyGroup>
+    <_CrestCreatesJsonContractsTargetsImported>true</_CrestCreatesJsonContractsTargetsImported>
+  </PropertyGroup>
+</Project>

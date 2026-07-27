@@ -179,6 +179,8 @@
   </Folder>
   <Folder Name="/src/Tooling/">
     <Project Path="src/Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj" />
+    <Project Path="src/Tooling/CrestCreates.JsonContracts.BuildTasks.Core/CrestCreates.JsonContracts.BuildTasks.Core.csproj" />
+    <Project Path="src/Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj" />
     <Project Path="src/Tooling/CrestCreates.Metadata.Analyzers/CrestCreates.Metadata.Analyzers.csproj" />
     <Project Path="src/Tooling/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj" />
   </Folder>
@@ -263,6 +265,8 @@
   </Folder>
   <Folder Name="/tests/Runtime/" />
   <Folder Name="/tests/Runtime/Agent/">
+    <Project Path="tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.csproj" />
+    <Project Path="tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.Tests/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.Tests.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.DraftContracts.Tests/CrestCreates.Agent.DraftContracts.Tests.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Memory.Tests/CrestCreates.Agent.Memory.Tests.csproj" />
@@ -305,5 +309,7 @@
     <Project Path="tests/Tooling/CrestCreates.BuildTasks.Tests/CrestCreates.BuildTasks.Tests.csproj" />
     <Project Path="tests/Tooling/CrestCreates.CodeGenerator.Tests/CrestCreates.CodeGenerator.Tests.csproj" />
     <Project Path="tests/Tooling/CrestCreates.Agent.DraftContractGenerator.Tests/CrestCreates.Agent.DraftContractGenerator.Tests.csproj" />
+    <Project Path="tests/Tooling/CrestCreates.JsonContracts.Build.PackageTests/CrestCreates.JsonContracts.Build.PackageTests.csproj" />
+    <Project Path="tests/Tooling/CrestCreates.JsonContracts.BuildTasks.Tests/CrestCreates.JsonContracts.BuildTasks.Tests.csproj" />
   </Folder>
 </Solution>

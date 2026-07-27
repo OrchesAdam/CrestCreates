@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="SelfContained;RuntimeIdentifier;RuntimeIdentifiers">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>CrestCreates.JsonContracts.BuildTasks</AssemblyName>
+    <RootNamespace>CrestCreates.JsonContracts.BuildTasks</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <PackageId>CrestCreates.JsonContracts.Build</PackageId>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <GenerateDependencyFile>true</GenerateDependencyFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <PublishAot>false</PublishAot>
+    <PublishTrimmed>false</PublishTrimmed>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <SelfContained>false</SelfContained>
+    <RuntimeIdentifier></RuntimeIdentifier>
+    <RuntimeIdentifiers></RuntimeIdentifiers>
+    <_BuildTasksCoreOutputPath>..\CrestCreates.JsonContracts.BuildTasks.Core\bin\$(Configuration)\net10.0\</_BuildTasksCoreOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Build.Framework" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.Build.Utilities.Core" PrivateAssets="all" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Remove="..\CrestCreates.CodeGenerator\CrestCreates.CodeGenerator.csproj" />
+    <ProjectReference Remove="..\..\Framework\Modules\CrestCreates.ModuleDiagnostics\CrestCreates.ModuleDiagnostics.csproj" />
+    <ProjectReference Include="..\CrestCreates.JsonContracts.BuildTasks.Core\CrestCreates.JsonContracts.BuildTasks.Core.csproj" ReferenceOutputAssembly="false" ExcludeAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="build\**\*" Pack="true" PackagePath="build" />
+  </ItemGroup>
+
+  <Target Name="_PackTaskAndToolFiles" BeforeTargets="_GetPackageFiles" DependsOnTargets="Build">
+    <PropertyGroup>
+      <_TaskAssemblyPath>$([System.IO.Path]::GetFullPath('$(OutputPath)CrestCreates.JsonContracts.BuildTasks.dll'))</_TaskAssemblyPath>
+      <_TaskDepsPath>$([System.IO.Path]::GetFullPath('$(OutputPath)CrestCreates.JsonContracts.BuildTasks.deps.json'))</_TaskDepsPath>
+      <_CoreOutputPath>$([System.IO.Path]::GetFullPath('$(_BuildTasksCoreOutputPath)'))</_CoreOutputPath>
+    </PropertyGroup>
+    <ItemGroup>
+      <None Include="$(_TaskAssemblyPath)" Pack="true" PackagePath="tasks\net10.0" />
+      <None Include="$(_TaskDepsPath)" Pack="true" PackagePath="tasks\net10.0" />
+      <None Include="$(_CoreOutputPath)**\*"
+            Exclude="$(_CoreOutputPath)**\*.pdb"
+            Pack="true"
+            PackagePath="tools\net10.0\%(RecursiveDir)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

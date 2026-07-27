@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-24 (Phase 8c+ scope identity and credential retry closure)
+Last Updated: 2026-07-27 (Issue #58 review closure)
 
 ## Purpose
 
@@ -13,6 +13,17 @@ This file records the current platform status for CrestCreates so future threads
 No approved-but-unimplemented design is currently recorded here.
 
 ## Completed Features
+
+### Issue #58 — Control Plane JSON Contract Root Generation
+
+Status: Implemented / NativeAOT-verified
+Mainline: explicit surface → pre-CoreCompile task → STJ SG
+Package: direct opt-in, no runtime leakage
+Control Plane manifest: Internal
+Explicit Extras: DescriptorActivationReviewDecision, CanonicalHash. Repository-wide direct-use ledger proves these are the only direct serialization roots outside the marked surfaces; nested DTOs, enums, and value objects are STJ transitive metadata.
+Evidence: BuildTasks unit (65), Package/MSBuild contract (28, including isolated local-feed PackageReference-only first build), Control Plane (500), boundary (46), Agent/MCP regression (0 failures), linux-x64 NativeAOT publish-link-run (1 with both scenario markers and final sentinel)
+Approved deviation: [JsonContractExplicitRoot] replaces [JsonSerializable] for explicit extras in user source — STJ source generator cannot process two partial class declarations with [JsonSerializable] on the same type (constraint #322). User source declares [JsonContractSurface] + [JsonSourceGenerationOptions] + [JsonContractExplicitRoot]; generated source declares the partial class with ALL [JsonSerializable] attributes (surface roots + explicit extras). STJ only sees one declaration with [JsonSerializable], avoiding duplicate hint name collision.
+Approved deviation: Split-process model (thin task DLL + dotnet exec Tool) replaces single BuildTasks DLL with Roslyn refs — MSBuild plugin ALC cannot resolve Roslyn transitive dependencies (constraint #299).
 
 ### Phase 8c+ — MCP Context/Memory Projection Review Closure
 
