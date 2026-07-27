@@ -1,33 +1,8 @@
 using System.Text.Json.Serialization;
+using CrestCreates.Core.Abstractions.Serialization;
 
 namespace CrestCreates.Agent.Memory.Tools;
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
-[JsonSerializable(typeof(BuildAgentMemoryPackInput))]
-[JsonSerializable(typeof(ExpandAgentMemorySourceInput))]
-[JsonSerializable(typeof(CompressAgentHistoryInput))]
-[JsonSerializable(typeof(ExtractMemoryCandidatesInput))]
-[JsonSerializable(typeof(PromoteMemoryCandidateInput))]
-[JsonSerializable(typeof(RejectMemoryCandidateInput))]
-[JsonSerializable(typeof(SupersedeMemoryItemInput))]
-[JsonSerializable(typeof(BuildAgentMemoryPackResult))]
-[JsonSerializable(typeof(ExpandAgentMemorySourceResult))]
-[JsonSerializable(typeof(CompressAgentHistoryResult))]
-[JsonSerializable(typeof(ExtractMemoryCandidatesResult))]
-[JsonSerializable(typeof(PromoteMemoryCandidateResult))]
-[JsonSerializable(typeof(RejectMemoryCandidateResult))]
-[JsonSerializable(typeof(SupersedeMemoryItemResult))]
-[JsonSerializable(typeof(AgentMemoryToolItemDto))]
-[JsonSerializable(typeof(AgentMemoryToolCandidateDto))]
-[JsonSerializable(typeof(AgentMemoryToolBlockDto))]
-[JsonSerializable(typeof(AgentMemoryToolCanonicalHashDto))]
-[JsonSerializable(typeof(AgentMemorySourceGrantDto))]
-[JsonSerializable(typeof(AgentMemoryToolDiagnosticDto))]
-[JsonSerializable(typeof(AgentMemoryToolOperationStatus))]
-[JsonSerializable(typeof(AgentMemoryToolMemoryStatus))]
-[JsonSerializable(typeof(AgentMemoryToolCandidateStatus))]
-[JsonSerializable(typeof(AgentMemoryToolKind))]
-[JsonSerializable(typeof(AgentMemoryToolConfidence))]
-[JsonSerializable(typeof(AgentMemoryToolSourceKind))]
-[JsonSerializable(typeof(AgentMemoryToolDiagnosticSeverity))]
+[JsonContractSurface(typeof(AgentMemoryToolSpecifications))]
 public partial class AgentMemoryToolJsonSerializerContext : JsonSerializerContext;

@@ -11,4 +11,8 @@ public static class JsonContractSymbolNames
     public const string Task1 = "System.Threading.Tasks.Task`1";
     public const string ValueTask = "System.Threading.Tasks.ValueTask";
     public const string ValueTask1 = "System.Threading.Tasks.ValueTask`1";
+    public const string AgentToolSpecsAttribute = "CrestCreates.Agent.Tools.AgentToolSpecsAttribute";
+    public const string AgentToolSpecAttribute = "CrestCreates.Agent.Tools.AgentToolSpecAttribute";
+    public const string McpToolSpecsAttribute = "CrestCreates.Mcp.McpToolSpecsAttribute";
+    public const string McpToolSpecAttribute = "CrestCreates.Mcp.McpToolSpecAttribute";
 }

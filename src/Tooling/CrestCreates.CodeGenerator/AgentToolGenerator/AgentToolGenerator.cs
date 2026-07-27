@@ -40,6 +40,7 @@ public sealed class AgentToolGenerator : IIncrementalGenerator
     {
         var symbol = (INamedTypeSymbol)context.TargetSymbol;
         var syntax = (ClassDeclarationSyntax)context.TargetNode;
+        var containerAttribute = context.Attributes[0];
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         var specs = ImmutableArray.CreateBuilder<AgentToolSpecModel>();
 
@@ -161,6 +162,10 @@ public sealed class AgentToolGenerator : IIncrementalGenerator
         {
             Namespace = symbol.ContainingNamespace.IsGlobalNamespace ? string.Empty : symbol.ContainingNamespace.ToDisplayString(),
             Name = symbol.Name,
+            GenerateDescriptorProviderRegistration = GetBool(
+                containerAttribute,
+                "GenerateDescriptorProviderRegistration",
+                fallback: true),
             Specs = specs.ToImmutable(),
             Diagnostics = diagnostics.ToImmutable()
         };
@@ -268,6 +273,12 @@ public sealed class AgentToolGenerator : IIncrementalGenerator
     {
         var value = attribute.NamedArguments.FirstOrDefault(pair => pair.Key == name).Value.Value;
         return value is long number ? number : fallback;
+    }
+
+    private static bool GetBool(AttributeData attribute, string name, bool fallback)
+    {
+        var value = attribute.NamedArguments.FirstOrDefault(pair => pair.Key == name).Value.Value;
+        return value is bool flag ? flag : fallback;
     }
 
     private static ITypeSymbol? GetType(AttributeData attribute, string name)

@@ -76,6 +76,7 @@ public static class JsonContractSourceWriter
         sb.AppendLine($"        {{");
 
         WriteManifestSet(sb, "SurfaceRootTypes", context.SurfaceRoots, manifestAccess);
+        WriteManifestSet(sb, "BindingRootTypes", context.BindingRoots, manifestAccess);
         WriteManifestSet(sb, "ExplicitRootTypes", context.ExplicitRoots, manifestAccess);
         WriteManifestSet(sb, "AllDirectRootTypes", context.AllDirectRoots, manifestAccess);
 
@@ -106,6 +107,9 @@ public static class JsonContractSourceWriter
 
     private static string BuildProvenanceComment(JsonContractRootModel root)
     {
+        if (root.Provenance.Declarations.Count > 0)
+            return $"// Binding root: {root.FullMetadataName} from {string.Join(", ", root.Provenance.Declarations)}";
+
         if (root.Provenance.MethodSignatures.Count == 0)
             return $"// Explicit extra: {root.FullMetadataName}";
 

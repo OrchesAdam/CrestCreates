@@ -17,6 +17,10 @@ public sealed class JsonContractSurfaceModelBuilder
         var contextSymbol = compilation.GetTypeByMetadataName(JsonContractSymbolNames.JsonSerializerContext);
         var serializableSymbol = compilation.GetTypeByMetadataName(JsonContractSymbolNames.JsonSerializableAttribute);
         var explicitRootSymbol = compilation.GetTypeByMetadataName(JsonContractSymbolNames.JsonContractExplicitRootAttribute);
+        var agentToolSpecsSymbol = compilation.GetTypeByMetadataName(JsonContractSymbolNames.AgentToolSpecsAttribute);
+        var agentToolSpecSymbol = compilation.GetTypeByMetadataName(JsonContractSymbolNames.AgentToolSpecAttribute);
+        var mcpToolSpecsSymbol = compilation.GetTypeByMetadataName(JsonContractSymbolNames.McpToolSpecsAttribute);
+        var mcpToolSpecSymbol = compilation.GetTypeByMetadataName(JsonContractSymbolNames.McpToolSpecAttribute);
 
         if (markerSymbol is null || contextSymbol is null || serializableSymbol is null || explicitRootSymbol is null)
         {
@@ -38,7 +42,9 @@ public sealed class JsonContractSurfaceModelBuilder
 
         foreach (var type in compilation.SourceModule.GlobalNamespace.GetAllTypes())
         {
-            CollectContexts(type, markerSymbol, contextSymbol, serializableSymbol, explicitRootSymbol, compilation, contexts);
+            CollectContexts(type, markerSymbol, contextSymbol, serializableSymbol, explicitRootSymbol,
+                agentToolSpecsSymbol, agentToolSpecSymbol, mcpToolSpecsSymbol, mcpToolSpecSymbol,
+                compilation, contexts);
         }
 
         contexts.Sort((a, b) => string.Compare(a.FullMetadataName, b.FullMetadataName, StringComparison.Ordinal));
@@ -56,6 +62,10 @@ public sealed class JsonContractSurfaceModelBuilder
         INamedTypeSymbol contextBaseSymbol,
         INamedTypeSymbol serializableSymbol,
         INamedTypeSymbol explicitRootSymbol,
+        INamedTypeSymbol? agentToolSpecsSymbol,
+        INamedTypeSymbol? agentToolSpecSymbol,
+        INamedTypeSymbol? mcpToolSpecsSymbol,
+        INamedTypeSymbol? mcpToolSpecSymbol,
         CSharpCompilation compilation,
         List<JsonContractContextModel> contexts)
     {
@@ -119,6 +129,7 @@ public sealed class JsonContractSurfaceModelBuilder
         var simpleName = type.Name;
 
         var surfaceRoots = new List<JsonContractRootModel>();
+        var bindingRoots = new List<JsonContractRootModel>();
 
         var cancellationTokenSymbol = compilation.GetTypeByMetadataName(JsonContractSymbolNames.CancellationToken);
         var taskSymbol = compilation.GetTypeByMetadataName(JsonContractSymbolNames.Task);
@@ -141,37 +152,62 @@ public sealed class JsonContractSurfaceModelBuilder
                 continue;
             }
 
-            if (surfaceType.TypeKind != TypeKind.Interface || surfaceType.IsUnboundGenericType)
+            if (surfaceType.TypeKind == TypeKind.Interface && !surfaceType.IsUnboundGenericType)
             {
-                _diagnostics.Add(new JsonContractDiagnostic
-                {
-                    Id = JsonContractDiagnosticIds.InvalidSurface,
-                    Message = $"Surface type '{surfaceType.ToDisplayString()}' must be a closed interface.",
-                    Severity = JsonContractDiagnosticSeverity.Error,
-                    ContextMetadataName = metadataName,
-                    SurfaceMetadataName = surfaceType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                }.WithLocation(attr.ApplicationSyntaxReference?.GetSyntax().GetLocation()));
+                if (cancellationTokenSymbol is null || task1Symbol is null || valueTask1Symbol is null)
+                    continue;
+
+                var excludedParamTypes = GetExcludedParameterTypes(attr, compilation);
+
+                var walker = new JsonContractSurfaceWalker();
+                var walkedRoots = walker.WalkSurface(
+                    surfaceType, type,
+                    cancellationTokenSymbol, task1Symbol, valueTask1Symbol,
+                    markerSymbol, serializableSymbol,
+                    excludedParamTypes,
+                    metadataName);
+
+                _diagnostics.AddRange(walker.Diagnostics);
+                surfaceRoots.AddRange(walkedRoots);
                 continue;
             }
 
-            if (cancellationTokenSymbol is null || task1Symbol is null || valueTask1Symbol is null)
+            var validToolSpecContainer = surfaceType.IsStatic
+                && surfaceType.ContainingType is null
+                && surfaceType.Arity == 0;
+            var agentAdapter = validToolSpecContainer
+                && agentToolSpecsSymbol is not null && agentToolSpecSymbol is not null
+                && surfaceType.GetAttributes().Any(candidate => SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, agentToolSpecsSymbol));
+            var mcpAdapter = validToolSpecContainer
+                && mcpToolSpecsSymbol is not null && mcpToolSpecSymbol is not null
+                && surfaceType.GetAttributes().Any(candidate => SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, mcpToolSpecsSymbol));
+
+            if (agentAdapter ^ mcpAdapter)
+            {
+                var walker = new JsonContractToolSpecSurfaceWalker();
+                var walkedRoots = walker.WalkSurface(
+                    surfaceType,
+                    agentAdapter ? agentToolSpecSymbol! : mcpToolSpecSymbol!,
+                    agentAdapter ? "AgentToolSpec" : "McpToolSpec",
+                    metadataName);
+                _diagnostics.AddRange(walker.Diagnostics);
+                surfaceRoots.AddRange(walkedRoots);
+                bindingRoots.AddRange(walkedRoots.Select(CloneRoot));
                 continue;
+            }
 
-            var excludedParamTypes = GetExcludedParameterTypes(attr, compilation);
-
-            var walker = new JsonContractSurfaceWalker();
-            var walkedRoots = walker.WalkSurface(
-                surfaceType, type,
-                cancellationTokenSymbol, task1Symbol, valueTask1Symbol,
-                markerSymbol, serializableSymbol,
-                excludedParamTypes,
-                metadataName);
-
-            _diagnostics.AddRange(walker.Diagnostics);
-            surfaceRoots.AddRange(walkedRoots);
+            _diagnostics.Add(new JsonContractDiagnostic
+            {
+                Id = JsonContractDiagnosticIds.InvalidSurface,
+                Message = $"Surface type '{surfaceType.ToDisplayString()}' must be a closed interface or an exact Agent/MCP Tool-Spec container.",
+                Severity = JsonContractDiagnosticSeverity.Error,
+                ContextMetadataName = metadataName,
+                SurfaceMetadataName = surfaceType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            }.WithLocation(attr.ApplicationSyntaxReference?.GetSyntax().GetLocation()));
         }
 
         surfaceRoots = DeduplicateRoots(surfaceRoots);
+        bindingRoots = DeduplicateRoots(bindingRoots);
 
         var explicitRoots = CollectExplicitRoots(type, explicitRootSymbol, metadataName);
         _diagnostics.AddRange(explicitRoots.Diagnostics);
@@ -191,6 +227,7 @@ public sealed class JsonContractSurfaceModelBuilder
             ContextSimpleName = simpleName,
             DeclaredAccessibility = declaredAccessibility,
             SurfaceRoots = surfaceRoots,
+            BindingRoots = bindingRoots,
             ExplicitRoots = explicitRootList,
             AllDirectRoots = allDirectRoots,
             ManifestAccessibility = manifestAccessibility,
@@ -254,6 +291,12 @@ public sealed class JsonContractSurfaceModelBuilder
                     }
                 }
                 existing.Provenance.MethodSignatures.Sort(StringComparer.Ordinal);
+                foreach (var declaration in root.Provenance.Declarations)
+                {
+                    if (!existing.Provenance.Declarations.Contains(declaration))
+                        existing.Provenance.Declarations.Add(declaration);
+                }
+                existing.Provenance.Declarations.Sort(StringComparer.Ordinal);
                 if (root.Provenance.IsReturnRoot)
                     existing.Provenance.IsReturnRoot = true;
             }
@@ -263,6 +306,21 @@ public sealed class JsonContractSurfaceModelBuilder
         result.Sort((a, b) => string.Compare(a.FullMetadataName, b.FullMetadataName, StringComparison.Ordinal));
         return result;
     }
+
+    private static JsonContractRootModel CloneRoot(JsonContractRootModel root)
+        => new()
+        {
+            RootType = root.RootType,
+            FullMetadataName = root.FullMetadataName,
+            IsExplicitExtra = root.IsExplicitExtra,
+            Provenance = new JsonContractRootProvenance
+            {
+                DeclaringSurface = root.Provenance.DeclaringSurface,
+                MethodSignatures = [.. root.Provenance.MethodSignatures],
+                Declarations = [.. root.Provenance.Declarations],
+                IsReturnRoot = root.Provenance.IsReturnRoot,
+            },
+        };
 
     private (List<JsonContractRootModel> Roots, List<JsonContractDiagnostic> Diagnostics) CollectExplicitRoots(
         INamedTypeSymbol contextType,

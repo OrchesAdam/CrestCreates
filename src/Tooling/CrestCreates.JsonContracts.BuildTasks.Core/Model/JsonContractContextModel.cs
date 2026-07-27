@@ -10,6 +10,7 @@ public sealed class JsonContractContextModel
     public string ContextSimpleName { get; init; } = string.Empty;
     public string DeclaredAccessibility { get; init; } = "internal";
     public List<JsonContractRootModel> SurfaceRoots { get; init; } = [];
+    public List<JsonContractRootModel> BindingRoots { get; init; } = [];
     public List<JsonContractRootModel> ExplicitRoots { get; init; } = [];
     public List<JsonContractRootModel> AllDirectRoots { get; init; } = [];
     public JsonContractManifestAccessibility ManifestAccessibility { get; set; }

@@ -3,7 +3,15 @@ using CrestCreates.Metadata.AgentTool;
 namespace CrestCreates.Agent.Tools;
 
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-public sealed class AgentToolSpecsAttribute : Attribute;
+public sealed class AgentToolSpecsAttribute : Attribute
+{
+    /// <summary>
+    /// Controls emission of the concrete Metadata registry module initializer.
+    /// Layered declaration assemblies can disable it and let their paired runtime
+    /// assembly register the still-generated descriptor provider explicitly.
+    /// </summary>
+    public bool GenerateDescriptorProviderRegistration { get; set; } = true;
+}
 
 public enum AgentToolRiskFloor
 {

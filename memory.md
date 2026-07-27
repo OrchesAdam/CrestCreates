@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-27 (Issue #58 review closure)
+Last Updated: 2026-07-27 (Issue #62 Agent/MCP Tool JSON root unification)
 
 ## Purpose
 
@@ -13,6 +13,62 @@ This file records the current platform status for CrestCreates so future threads
 No approved-but-unimplemented design is currently recorded here.
 
 ## Completed Features
+
+### Issue #62 — Agent/MCP Tool JSON Contract Root Unification
+
+Status: Implemented / NativeAOT-verified
+
+Mainline:
+
+```text
+[AgentToolSpec] / [McpToolSpec] InputType + OutputType
+    → pre-CoreCompile JSON Contract Tool-Spec adapter
+    → generated JsonSerializable attributes + immutable BindingRootTypes
+    → official STJ Source Generator
+    → existing explicit Agent/MCP contributor composition
+```
+
+Agent Memory now derives 14 exact binding roots from its seven Tool specs. The
+authoritative declarations and capability IDs live in
+`Agent.Memory.Tools.Abstractions` beside the Context-visible contracts; the old
+runtime assembly provides type forwarders. The generated descriptor provider
+is registered explicitly by the paired runtime assembly, so Abstractions does
+not reference the concrete Metadata registry. Its Public FrozenSet manifest is
+consumed across the assembly boundary by the unchanged contributor identity
+(`agent-memory-tools`, order 200, module `agent-memory-tools`).
+
+MCP Memory derives six unique roots from four Tool specs, deduplicating the two
+shared expand pairs. Its Internal manifest is consumed by the existing
+contributor. All eight explicit MCP binding keys, root ownership, resolver
+composition, and schema/CLR parity remain unchanged. Nested DTOs/enums remain
+STJ transitive metadata rather than binding roots.
+
+Repository guards require the production Agent/MCP contributors to consume a
+generated `RootManifest.BindingRootTypes` and prohibit handwritten `typeof`
+root declarations in those contributors. The three externally bound Contexts
+(Control Plane, Agent Memory, MCP Memory) are explicitly classified and use
+the BuildTask mainline. No runtime scan, reflection serializer, or
+`DefaultJsonTypeInfoResolver` fallback was added.
+
+Executable evidence:
+
+- JSON BuildTasks semantic/writer/incremental tests: 83 passing.
+- JSON Build Package/MSBuild contracts: 29 passing, including clean package,
+  Global Usings, incremental deletion, multi-TFM, path, and accessibility gates.
+- CodeGenerator tests: 278 passing.
+- Control Plane regression: 500 passing.
+- Agent Tool runtime: 116 passing; Agent Memory Tool contracts: 21 passing;
+  generated Agent Memory E2E: 1 passing.
+- MCP runtime: 66 passing; MCP Memory contracts: 31 passing; real MCP E2E:
+  28 passing.
+- Dependency/architecture boundaries: 49 passing.
+- linux-x64 NativeAOT publish-link-run: Agent Memory 1 passing with build,
+  expand, curation replay markers and final sentinel; MCP Memory 1 passing with
+  all four tool markers and final sentinel.
+- Canonical `CrestCreates.slnx` build: 0 errors.
+
+Spec: `docs/superpowers/specs/2026-07-27-agent-mcp-tool-json-contract-root-unification-design.md`
+Plan: `docs/superpowers/plans/2026-07-27-agent-mcp-tool-json-contract-root-unification.md`
 
 ### Issue #58 — Control Plane JSON Contract Root Generation
 

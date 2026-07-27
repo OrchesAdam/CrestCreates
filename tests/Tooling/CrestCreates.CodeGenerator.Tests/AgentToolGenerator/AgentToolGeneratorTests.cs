@@ -65,6 +65,28 @@ public static partial class OrderTools
         generated.Should().Contain("JsonTypeInfo<global::Demo.InputDto>");
         generated.Should().Contain("output.GetType() != typeof(global::Demo.OutputDto)");
         generated.Should().Contain("AgentToolBindingRegistry.Register");
+        generated.Should().Contain("CrestCreates.Metadata.DescriptorProviderRegistry.Register");
+    }
+
+    [Fact]
+    public void Layered_declaration_can_omit_concrete_registry_registration_but_keeps_provider_and_bindings()
+    {
+        var result = Run(@"
+public sealed class InputDto { public string Value { get; set; } }
+public sealed class OutputDto { public string Value { get; set; } }
+[CrestCreates.Agent.Tools.AgentToolSpecs(GenerateDescriptorProviderRegistration = false)]
+public static partial class LayeredTools
+{
+    [CrestCreates.Agent.Tools.AgentToolSpec(""layered"", InputType = typeof(InputDto), OutputType = typeof(OutputDto), Description = ""Layered."", BudgetCategory = ""b"", AllowedAgentRoles = new[] { ""r"" })]
+    public sealed class Tool { }
+}");
+
+        result.CompilationSuccess.Should().BeTrue(string.Join("\n", result.Diagnostics));
+        var generated = Generated(result);
+        generated.Should().Contain("LayeredTools_GeneratedAgentToolProvider");
+        generated.Should().Contain("AgentToolBindingRegistry.Register");
+        generated.Should().NotContain("DescriptorProviderRegistry");
+        generated.Should().NotContain("using CrestCreates.Metadata;");
     }
 
     [Fact]
@@ -435,7 +457,7 @@ using System.Threading.Tasks;
 namespace CrestCreates.Agent.Tools
 {
     public enum AgentToolRiskFloor { Inherit = 0, Low = 1, Medium = 2, High = 3, Critical = 4 }
-    [AttributeUsage(AttributeTargets.Class)] public sealed class AgentToolSpecsAttribute : Attribute { }
+    [AttributeUsage(AttributeTargets.Class)] public sealed class AgentToolSpecsAttribute : Attribute { public bool GenerateDescriptorProviderRegistration { get; set; } = true; }
     [AttributeUsage(AttributeTargets.Class)]
     public sealed class AgentToolSpecAttribute : Attribute
     {
@@ -492,6 +514,7 @@ namespace CrestCreates.Metadata.AgentTool
 namespace CrestCreates.Metadata.Abstractions
 {
     public enum VersionSelectionMode { Exact = 0, Latest = 1, Compatible = 2 }
+    public interface IDescriptorProvider<T> { IReadOnlyList<T> GetDescriptors(); }
 }
 namespace CrestCreates.Metadata.Abstractions.DescriptorCapability
 {
@@ -503,8 +526,7 @@ namespace CrestCreates.Metadata.Abstractions.DescriptorCapability
 }
 namespace CrestCreates.Metadata
 {
-    public interface IDescriptorProvider<T> { IReadOnlyList<T> GetDescriptors(); }
-    public static class DescriptorProviderRegistry { public static void Register<T>(IDescriptorProvider<T> provider) { } }
+    public static class DescriptorProviderRegistry { public static void Register<T>(CrestCreates.Metadata.Abstractions.IDescriptorProvider<T> provider) { } }
 }
 ";
 }
