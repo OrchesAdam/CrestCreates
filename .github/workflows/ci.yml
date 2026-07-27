@@ -37,11 +37,123 @@ jobs:
       - name: Build
         run: dotnet build CrestCreates.slnx --no-restore
 
-      - name: Test
-        # Keep service-backed integration suites out of the default CI gate.
-        # They require PostgreSQL, Kafka, or RabbitMQ containers and belong in
-        # an explicitly provisioned integration workflow.
-        run: >-
-          dotnet test CrestCreates.slnx --no-build
-          --filter
-          "FullyQualifiedName!~CrestCreates.IntegrationTests&FullyQualifiedName!~SaaSHelpdesk.Tests&FullyQualifiedName!~CrestCreates.EventBus.Kafka.Tests.Integration&FullyQualifiedName!~CrestCreates.EventBus.RabbitMQ.Tests.Integration&FullyQualifiedName!~CrestCreates.Database.Migrations.Tests&FullyQualifiedName!~CrestCreates.MongoDB.Tests&FullyQualifiedName!~CrestCreates.Mcp.AotFixture.Tests"
+      # ── Core ──
+      - name: Test — Core
+        run: dotnet test tests/Core/CrestCreates.Core.Abstractions.Tests --no-build
+
+      # ── Framework ──
+      - name: Test — Framework / DDD
+        run: |
+          dotnet test tests/Framework/Ddd/CrestCreates.Domain.Tests --no-build
+          dotnet test tests/Framework/Ddd/CrestCreates.Application.Tests --no-build
+
+      - name: Test — Framework / Infrastructure
+        run: |
+          dotnet test tests/Framework/Infrastructure/CrestCreates.Infrastructure.Tests --no-build
+          dotnet test tests/Framework/Infrastructure/CrestCreates.Localization.Tests --no-build
+          dotnet test tests/Framework/Infrastructure/CrestCreates.Logging.Tests --no-build
+          dotnet test tests/Framework/Infrastructure/CrestCreates.VirtualFileSystem.Tests --no-build
+
+      - name: Test — Framework / API (DynamicApi + Capability)
+        run: |
+          dotnet test tests/Framework/Api/CrestCreates.DynamicApi.Tests --no-build
+          dotnet test tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture.Tests --no-build
+          dotnet test tests/Framework/Api/CrestCreates.CompatibilityProjection.E2E.Tests --no-build
+
+      - name: Test — Framework / Web
+        run: dotnet test tests/Framework/Web/CrestCreates.Web.Tests --no-build
+
+      - name: Test — Framework / Modules
+        run: |
+          dotnet test tests/Framework/Modules/CrestCreates.FileManagement.Tests --no-build
+          dotnet test tests/Framework/Modules/CrestCreates.Form.Tests --no-build
+          dotnet test tests/Framework/Modules/CrestCreates.ModuleDiagnostics.Tests --no-build
+          dotnet test tests/Framework/Modules/CrestCreates.Organization.Tests --no-build
+          dotnet test tests/Framework/Modules/CrestCreates.Scheduling.Tests --no-build
+
+      - name: Test — Framework / Testing
+        run: |
+          dotnet test tests/Framework/Testing/CrestCreates.TestBase.Tests --no-build
+          dotnet test tests/Framework/Testing/CrestCreates.Samples.Tests --no-build
+
+      # ── Metadata ──
+      - name: Test — Metadata / Core
+        run: |
+          dotnet test tests/Metadata/Core/CrestCreates.Metadata.Tests --no-build
+          dotnet test tests/Metadata/Core/CrestCreates.Metadata.ContextPack.Tests --no-build
+          dotnet test tests/Metadata/Core/CrestCreates.Schema.Tests --no-build
+          dotnet test tests/Metadata/Core/CrestCreates.Snapshot.Tests --no-build
+
+      - name: Test — Metadata / Draft
+        run: |
+          dotnet test tests/Metadata/Draft/CrestCreates.DescriptorDraft.Tests --no-build
+          dotnet test tests/Metadata/Draft/CrestCreates.Draft.Tests --no-build
+
+      # ── Runtime ──
+      - name: Test — Runtime / Capability
+        run: dotnet test tests/Runtime/Capability/CrestCreates.Capability.Tests --no-build
+
+      - name: Test — Runtime / Workflow & HumanTask
+        run: |
+          dotnet test tests/Runtime/Workflow/CrestCreates.Workflow.Tests --no-build
+          dotnet test tests/Runtime/HumanTask/CrestCreates.HumanTask.Tests --no-build
+
+      - name: Test — Runtime / Agent
+        run: |
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests --no-build
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.DraftContracts.Tests --no-build
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tests --no-build
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Llm.Tests --no-build
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests --no-build
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.Prompting.Tests --no-build
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions.Tests --no-build
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.Tools.Tests --no-build
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.Tools.E2E.Tests --no-build
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Projection.Tests --no-build
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.ReadCore.Tests --no-build
+
+      - name: Test — Runtime / Eventing
+        run: |
+          dotnet test tests/Runtime/Eventing/CrestCreates.Event.Tests --no-build
+          dotnet test tests/Runtime/Eventing/CrestCreates.EventBus.Tests --no-build
+
+      - name: Test — Runtime / Audit & DistributedTransaction
+        run: |
+          dotnet test tests/Runtime/Audit/CrestCreates.AuditLogging.Tests --no-build
+          dotnet test tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.Tests --no-build
+
+      # ── Tooling ──
+      - name: Test — Tooling (CodeGenerator + BuildTasks + JsonContracts)
+        run: |
+          dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --no-build
+          dotnet test tests/Tooling/CrestCreates.BuildTasks.Tests --no-build
+          dotnet test tests/Tooling/CrestCreates.Agent.DraftContractGenerator.Tests --no-build
+          dotnet test tests/Tooling/CrestCreates.JsonContracts.BuildTasks.Tests --no-build
+          dotnet test tests/Tooling/CrestCreates.JsonContracts.Build.PackageTests --no-build
+
+      # ── Integrations ──
+      - name: Test — Integrations (MCP)
+        run: |
+          dotnet test tests/Integrations/CrestCreates.Mcp.Tests --no-build
+          dotnet test tests/Integrations/CrestCreates.Mcp.E2E.Tests --no-build
+          dotnet test tests/Integrations/CrestCreates.Mcp.Memory.Tests --no-build
+
+      # ── Boundary ──
+      - name: Test — Dependency Boundaries
+        run: dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --no-build
+
+      # ── AOT fixture publish — validates Tier 2 NativeAOT-verified mainline ──
+      - name: Publish — CapabilityEndpoint AotFixture (NativeAOT)
+        run: dotnet publish tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
+
+      - name: Publish — MCP AotFixture (NativeAOT)
+        run: dotnet publish tests/Integrations/CrestCreates.Mcp.AotFixture -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
+
+      - name: Publish — Agent.Tools AotFixture (NativeAOT)
+        run: dotnet publish tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
+
+      - name: Publish — MCP Memory AotFixture (NativeAOT)
+        run: dotnet publish tests/Integrations/CrestCreates.Mcp.Memory.AotFixture -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
+
+      - name: Publish — ControlPlane JsonContracts AotFixture (NativeAOT)
+        run: dotnet publish tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
