@@ -23,6 +23,7 @@ internal sealed class AuditMiddleware : ICapabilityPipelineMiddleware
         var sw = Stopwatch.StartNew();
         CapabilityExecutionResult? result = null;
         Exception? unhandledException = null;
+        CapabilityFailureException? capabilityFailure = null;
         bool cancelled = false;
 
         try
@@ -33,6 +34,11 @@ internal sealed class AuditMiddleware : ICapabilityPipelineMiddleware
         catch (OperationCanceledException)
         {
             cancelled = true;
+            throw;
+        }
+        catch (CapabilityFailureException ex)
+        {
+            capabilityFailure = ex;
             throw;
         }
         catch (Exception ex)
@@ -49,6 +55,7 @@ internal sealed class AuditMiddleware : ICapabilityPipelineMiddleware
                 var errorCode = cancelled
                     ? "CANCELLED"
                     : result?.ErrorCode
+                      ?? capabilityFailure?.ErrorCode
                       ?? (unhandledException is not null ? "UNHANDLED_EXCEPTION" : null);
 
                 await _auditStore.RecordAsync(new CapabilityExecutionRecord

@@ -71,7 +71,7 @@ public sealed class ProjectionCompositionAcceptanceTests
         SetIdentity(client, "tenant-a", "requester-a", "procurement-requester");
         var submitted = await SubmitHttpAsync(client, "HTTP to compatibility", 1_500m);
 
-        var response = await client.GetAsync($"/api/procurement/{submitted.RequestId}");
+        var response = await client.GetAsync($"/api/procurement/query/{submitted.RequestId}");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var data = await ReadCompatibilityDataAsync(response);
         data.GetProperty("requestId").GetGuid().Should().Be(submitted.RequestId);
@@ -79,39 +79,21 @@ public sealed class ProjectionCompositionAcceptanceTests
     }
 
     [Fact]
-    public async Task CompatibilitySubmit_HttpGet_ReturnsSameEntity()
-    {
-        using var factory = new ProcurementWebApplicationFactory();
-        using var client = factory.CreateClient();
-        SetIdentity(client, "tenant-a", "compat-user", "procurement-requester");
-        var response = await client.GetAsync(
-            "/api/procurement/submit?Title=Compatibility+submit&Description=Shared+state&Amount=2500&Currency=USD&Category=General");
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var data = await ReadCompatibilityDataAsync(response);
-        var requestId = data.GetProperty("requestId").GetGuid();
-
-        var native = await GetHttpAsync(client, requestId);
-        native.RequestId.Should().Be(requestId);
-        native.Title.Should().Be("Compatibility submit");
-        native.RequesterId.Should().Be("compat-user");
-    }
-
-    [Fact]
-    public async Task CompatibilityApprove_NativeGet_ReturnsApprovedState()
+    public async Task CompatibilityProjection_ExposesGetOnly_AndMutationsAreNotMapped()
     {
         using var factory = new ProcurementWebApplicationFactory();
         using var client = factory.CreateClient();
         SetIdentity(client, "tenant-a", "requester-a", "procurement-requester");
-        var submitted = await SubmitHttpAsync(client, "Compatibility approval", 30_000m);
+        var submitted = await SubmitHttpAsync(client, "Compatibility query", 2_500m);
 
-        SetIdentity(client, "tenant-a", "manager-a", "procurement-manager");
-        var response = await client.GetAsync(
-            $"/api/procurement/approve?RequestId={submitted.RequestId}&Comment=Approved");
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var native = await GetHttpAsync(client, submitted.RequestId);
-        native.Status.Should().Be("Approved");
-        native.ApproverId.Should().Be("manager-a");
+        (await client.GetAsync($"/api/procurement/query/{submitted.RequestId}"))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.GetAsync("/api/procurement/submit"))
+            .StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await client.GetAsync("/api/procurement/approve"))
+            .StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await client.GetAsync("/api/procurement/reject"))
+            .StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     internal static async Task<SubmitProcurementRequestResult> SubmitHttpAsync(
@@ -480,7 +462,7 @@ public sealed class WorkflowTenantAndSchemaAcceptanceTests
             .Should().BeOfType<InMemoryCapabilityAuditStore>()
             .Which.GetRecords().Should().Contain(record =>
                 record.Source == InvocationSource.HumanTask
-                && record.CapabilityId == ProcurementContractIds.ApproveCapability);
+                && record.CapabilityId == ProcurementContractIds.ApplyApprovalDecisionCapability);
     }
 
     [Fact]
@@ -545,10 +527,9 @@ public sealed class WorkflowTenantAndSchemaAcceptanceTests
             ProcurementContractIds.GetCapability,
             ProcurementContractIds.ApproveCapability,
             ProcurementContractIds.RejectCapability,
-            "compat.appservice.procurement.submit",
-            "compat.appservice.procurement.get",
-            "compat.appservice.procurement.approve",
-            "compat.appservice.procurement.reject");
+            ProcurementContractIds.ApplyApprovalDecisionCapability,
+            ProcurementContractIds.ApplyRejectionDecisionCapability,
+            "compat.appservice.procurement.get");
         ProcurementJsonContext.Default.SubmitProcurementRequestInput.Should().NotBeNull();
         ProcurementJsonContext.Default.SubmitProcurementRequestResult.Should().NotBeNull();
         ProcurementJsonContext.Default.GetProcurementRequestInput.Should().NotBeNull();

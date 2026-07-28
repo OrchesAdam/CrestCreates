@@ -359,6 +359,7 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
         // CEP014: Scalar input names must be valid C# identifiers for body+scalar binding.
         // For Level 1 specs, the Body is defined by a [CapabilityEndpointInput] with Source=Body.
         var hasBody = false;
+        var bodyRequired = true;
         var bodyTypeName = string.Empty;
         INamedTypeSymbol? bodyTypeSymbol = null;
         foreach (var attr in classSymbol.GetAttributes())
@@ -378,6 +379,7 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
             if (sourceValue == 3) // Body
             {
                 hasBody = true;
+                bodyRequired = GetNamedBoolArg(attr.NamedArguments, "Required", defaultValue: true);
                 if (attr.ConstructorArguments.Length > 0
                     && attr.ConstructorArguments[0].Value is INamedTypeSymbol bts)
                 {
@@ -386,6 +388,22 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                 }
                 break;
             }
+        }
+
+        var hasScalarInput = classSymbol.GetAttributes().Any(attr =>
+            attr.AttributeClass?.ToDisplayString() == InputAttributeMetadataName
+            && GetNamedIntArg(attr.NamedArguments, "Source", defaultValue: 0) != 3);
+        if (hasBody
+            && !bodyRequired
+            && hasScalarInput
+            && bodyTypeSymbol is not null
+            && !CanMaterializeOptionalBody(bodyTypeSymbol))
+        {
+            builder.Add(Diagnostic.Create(
+                CapabilityEndpointDiagnostics.OptionalBodyCannotBeMaterialized,
+                location,
+                bodyTypeName,
+                classSymbol.Name));
         }
 
         if (hasBody)
@@ -1149,11 +1167,24 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
                 Required = required,
                 CapabilityInputPath = capabilityInputPath,
                 TargetProperty = targetProperty,
-                IsEnum = typeSymbol?.TypeKind == TypeKind.Enum
+                IsEnum = typeSymbol?.TypeKind == TypeKind.Enum,
+                CanMaterializeWhenOptional = typeSymbol is not null
+                    && CanMaterializeOptionalBody(typeSymbol)
             });
         }
 
         return builder.ToImmutable();
+    }
+
+    private static bool CanMaterializeOptionalBody(INamedTypeSymbol typeSymbol)
+    {
+        if (typeSymbol.TypeKind == TypeKind.Struct)
+            return true;
+        if (typeSymbol.TypeKind != TypeKind.Class || typeSymbol.IsAbstract)
+            return false;
+        return typeSymbol.InstanceConstructors.Any(constructor =>
+            constructor.DeclaredAccessibility == Accessibility.Public
+            && constructor.Parameters.Length == 0);
     }
 
     // ================================================================

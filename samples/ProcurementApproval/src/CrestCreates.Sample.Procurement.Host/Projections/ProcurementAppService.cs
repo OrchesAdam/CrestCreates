@@ -6,7 +6,7 @@ using CrestCreates.Sample.Procurement.Contracts.Dtos;
 namespace CrestCreates.Sample.Procurement.Host.Projections;
 
 [CrestService]
-[CapabilityCompatibilityProjection(RoutePrefix = "api/procurement")]
+[CapabilityCompatibilityProjection(RoutePrefix = "api/procurement/query")]
 public sealed class ProcurementAppService
 {
     private readonly ProcurementApplicationService _application;
@@ -20,36 +20,12 @@ public sealed class ProcurementAppService
         _execution = execution;
     }
 
-    public Task<SubmitProcurementRequestResult> SubmitAsync(
-        SubmitProcurementRequestInput input,
-        CancellationToken cancellationToken = default)
-    {
-        var context = RequiredContext();
-        return _application.SubmitAsync(
-            input,
-            context.TenantId!,
-            context.UserId!,
-            cancellationToken);
-    }
-
     public Task<ProcurementRequestResult> GetAsync(Guid requestId)
     {
         var context = RequiredContext();
         return Task.FromResult(_application.Get(
             new GetProcurementRequestInput { RequestId = requestId },
             context.TenantId!));
-    }
-
-    public Task<ProcurementRequestResult> ApproveAsync(ApproveProcurementRequestInput input)
-    {
-        var context = RequiredContext();
-        return Task.FromResult(_application.Approve(input, context.TenantId!, context.UserId!));
-    }
-
-    public Task<ProcurementRequestResult> RejectAsync(RejectProcurementRequestInput input)
-    {
-        var context = RequiredContext();
-        return Task.FromResult(_application.Reject(input, context.TenantId!, context.UserId!));
     }
 
     private CapabilityExecutionContext RequiredContext()

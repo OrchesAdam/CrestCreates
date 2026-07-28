@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using CrestCreates.CodeGenerator.CapabilityEndpointGenerator;
 using CrestCreates.CodeGenerator.Tests.TestHelpers;
@@ -917,6 +918,45 @@ namespace TestNs
         var result = Run(source);
         result.Diagnostics.Should().Contain(d => d.Id == "CEP021"
             && d.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Theory]
+    [InlineData("public sealed record PositionalInput(Guid Id);", "PositionalInput")]
+    [InlineData("public sealed class PrivateCtorInput { private PrivateCtorInput() { } public Guid Id { get; set; } }", "PrivateCtorInput")]
+    [InlineData("public abstract class AbstractInput { public Guid Id { get; set; } }", "AbstractInput")]
+    [InlineData("public interface InterfaceInput { Guid Id { get; set; } }", "InterfaceInput")]
+    public void CEP022_Fires_When_OptionalBody_CannotBeMaterialized(
+        string typeDeclaration,
+        string typeName)
+    {
+        var source = $@"
+using System;
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{{
+    {typeDeclaration}
+
+    [CapabilityEndpointSpecs]
+    public static partial class TestEndpoints
+    {{
+        [CapabilityEndpointSpec(""test.get"", CapabilityEndpointHttpMethod.Get, ""items/{{id}}"")]
+        [CapabilityEndpointInput(typeof({typeName}), Name = ""body"", Source = CapabilityEndpointParameterSource.Body, Required = false)]
+        [CapabilityEndpointInput(typeof(Guid), Name = ""id"", Source = CapabilityEndpointParameterSource.Route, TargetProperty = nameof({typeName}.Id))]
+        public sealed class GetItem {{ }}
+    }}
+}}
+";
+
+        var result = Run(source);
+
+        result.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CEP022"
+            && diagnostic.Severity == DiagnosticSeverity.Error);
+        var binding = result.GeneratedSources.Single(item => item.FileName.EndsWith("_Bindings.g.cs"))
+            .SourceText;
+        binding.Should().Contain("CEP022: Optional body type");
+        binding.Should().NotContain($"new global::TestNs.{typeName}()");
     }
 
     // ================================================================

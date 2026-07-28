@@ -1,23 +1,23 @@
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Sample.Procurement.Contracts;
 using CrestCreates.Sample.Procurement.Contracts.Dtos;
+using CrestCreates.Sample.Procurement.Domain;
 using CrestCreates.Sample.Procurement.Domain.Entities;
 using CrestCreates.Sample.Procurement.Domain.ValueObjects;
-using CrestCreates.Workflow.Abstractions;
 
 namespace CrestCreates.Sample.Procurement.Application;
 
 public sealed class ProcurementApplicationService
 {
     private readonly InMemoryProcurementRequestStore _store;
-    private readonly IWorkflowEngine _workflow;
+    private readonly IProcurementApprovalOrchestrator _approval;
 
     public ProcurementApplicationService(
         InMemoryProcurementRequestStore store,
-        IWorkflowEngine workflow)
+        IProcurementApprovalOrchestrator approval)
     {
         _store = store;
-        _workflow = workflow;
+        _approval = approval;
     }
 
     public async Task<SubmitProcurementRequestResult> SubmitAsync(
@@ -35,20 +35,28 @@ public sealed class ProcurementApplicationService
             requesterId,
             input.Category);
         request.Submit();
-        _store.Add(tenantId, request);
 
         if (request.RequiresApproval)
         {
-            var workflow = await _workflow.ExecuteAsync(
-                ProcurementContractIds.ApprovalWorkflow,
-                new Dictionary<string, object?>
-                {
-                    ["tenantId"] = tenantId,
-                    ["requestId"] = request.Id,
-                    ["requesterId"] = requesterId
-                },
+            var lease = await _approval.StartAsync(
+                request.Id,
+                tenantId,
+                requesterId,
                 ct).ConfigureAwait(false);
-            request.AttachWorkflow(workflow.InstanceId);
+            try
+            {
+                request.AttachWorkflow(lease.WorkflowInstanceId);
+                _store.Add(tenantId, request);
+            }
+            catch
+            {
+                await _approval.RollbackAsync(lease, ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+        else
+        {
+            _store.Add(tenantId, request);
         }
 
         return new SubmitProcurementRequestResult
@@ -69,7 +77,7 @@ public sealed class ProcurementApplicationService
         return Map(request);
     }
 
-    public ProcurementRequestResult Approve(
+    public ProcurementRequestResult ApplyApprovalDecision(
         ApproveProcurementRequestInput input,
         string tenantId,
         string approverId)
@@ -83,11 +91,15 @@ public sealed class ProcurementApplicationService
                 "CAPABILITY_FORBIDDEN",
                 "A requester cannot approve their own procurement request.");
         }
+        if (request.Status == ProcurementRequestStatus.Approved)
+            return Map(request);
+        if (request.Status == ProcurementRequestStatus.Rejected)
+            throw DecisionConflict(input.RequestId, "approve", request.Status);
         request.Approve(approverId, input.Comment);
         return Map(request);
     }
 
-    public ProcurementRequestResult Reject(
+    public ProcurementRequestResult ApplyRejectionDecision(
         RejectProcurementRequestInput input,
         string tenantId,
         string approverId)
@@ -95,6 +107,10 @@ public sealed class ProcurementApplicationService
         RequireContext(tenantId, approverId);
         var request = _store.GetById(tenantId, input.RequestId)
             ?? throw NotFound(input.RequestId);
+        if (request.Status == ProcurementRequestStatus.Rejected)
+            return Map(request);
+        if (request.Status == ProcurementRequestStatus.Approved)
+            throw DecisionConflict(input.RequestId, "reject", request.Status);
         request.Reject(approverId, input.Reason);
         return Map(request);
     }
@@ -120,6 +136,14 @@ public sealed class ProcurementApplicationService
         => new(
             "CAPABILITY_RESOURCE_NOT_FOUND",
             $"Procurement request '{requestId}' is unavailable.");
+
+    private static CapabilityFailureException DecisionConflict(
+        Guid requestId,
+        string decision,
+        ProcurementRequestStatus status)
+        => new(
+            "CAPABILITY_DECISION_CONFLICT",
+            $"Procurement request '{requestId}' cannot be {decision}d from status '{status}'.");
 
     private static void RequireContext(string tenantId, string userId)
     {

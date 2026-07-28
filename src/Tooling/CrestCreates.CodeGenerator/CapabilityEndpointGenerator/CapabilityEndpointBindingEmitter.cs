@@ -161,7 +161,18 @@ internal static class CapabilityEndpointBindingEmitter
         if (optional)
         {
             // Route/query/header input still needs a DTO when the optional body is absent.
-            sb.AppendLine($"        model ??= new {typeOfExpr}();");
+            if (bodyInput.CanMaterializeWhenOptional)
+            {
+                sb.AppendLine($"        model ??= new {typeOfExpr}();");
+            }
+            else
+            {
+                sb.AppendLine("        if (model is null)");
+                sb.AppendLine("            throw new InvalidOperationException(");
+                sb.AppendLine($"                \"CEP022: Optional body type '{typeOfExpr}' cannot be materialized.\");");
+                sb.AppendLine("        return model;");
+                return;
+            }
         }
         sb.AppendLine();
 

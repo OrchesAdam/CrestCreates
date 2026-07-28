@@ -185,6 +185,41 @@ public class HumanTaskRuntimeTests
     }
 
     [Fact]
+    public async Task CompleteAsync_WhenEventDispatchFails_RestoresRetryableState()
+    {
+        var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1,
+            CompletionCondition.Approve));
+        var eventBus = new Mock<ILocalEventBus>();
+        eventBus.Setup(bus => bus.PublishAsync(
+                It.IsAny<HumanTaskCompletedEvent>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("decision failed"));
+        var (runtime, store, _, _) = CreateRuntime(registry, eventBus);
+        var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
+        {
+            HumanTaskId = "ht_01"
+        });
+        var request = new HumanTaskCompletionRequest
+        {
+            HumanTaskInstanceId = instance.Id,
+            Outcome = "Approve"
+        };
+
+        await runtime.Invoking(value => value.CompleteAsync(request))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("decision failed");
+
+        var retryable = await store.GetByIdAsync(instance.Id);
+        retryable!.Status.Should().Be(HumanTaskInstanceStatus.Created);
+        retryable.Outcome.Should().BeNull();
+        retryable.CompletedAt.Should().BeNull();
+
+        eventBus.Reset();
+        var completed = await runtime.CompleteAsync(request);
+        completed.Status.Should().Be(HumanTaskInstanceStatus.Completed);
+    }
+
+    [Fact]
     public async Task CancelAsync_Cancels_Instance()
     {
         var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1));

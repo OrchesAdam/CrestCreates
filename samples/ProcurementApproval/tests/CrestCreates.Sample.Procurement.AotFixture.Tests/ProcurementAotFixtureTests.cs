@@ -91,6 +91,14 @@ public class ProcurementAotFixtureTests
         result.Output.Should().Contain("CRESTCREATES_PROCUREMENT_SAMPLE_OK");
     }
 
+    [Fact]
+    public async Task NativeAot_HttpSubmitAndGet_UseRealEndpoint()
+    {
+        var result = await NativeAotRun.Value;
+
+        result.Output.Should().Contain("CRESTCREATES_PROCUREMENT_HTTP_OK");
+    }
+
     private static async Task<NativeAotRunResult> RunNativeAotScenarioAsync()
     {
         var repositoryRoot = FindRepositoryRoot();

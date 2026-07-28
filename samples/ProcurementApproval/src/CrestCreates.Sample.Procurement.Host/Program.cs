@@ -8,6 +8,7 @@ using CrestCreates.Capability.Abstractions;
 using CrestCreates.DynamicApi;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.Form;
+using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
@@ -48,6 +49,10 @@ var humanTaskRegistry = new HumanTaskRegistry(new RegistryValidationEngine<Human
 humanTaskRegistry.Build([new ProcurementDescriptorProvider<HumanTaskDescriptor>([ProcurementDescriptorCatalog.ApprovalHumanTask])]);
 var workflowRegistry = new WorkflowRegistry(new RegistryValidationEngine<WorkflowDescriptor>([]));
 workflowRegistry.Build([new ProcurementDescriptorProvider<WorkflowDescriptor>([ProcurementDescriptorCatalog.ApprovalWorkflow])]);
+var formRegistry = new FormRegistry(new RegistryValidationEngine<FormDescriptor>([]));
+formRegistry.Build([new ProcurementDescriptorProvider<FormDescriptor>([ProcurementDescriptorCatalog.ApprovalForm])]);
+var humanTaskInstanceStore = new InMemoryHumanTaskInstanceStore();
+var workflowInstanceStore = new InMemoryWorkflowInstanceStore();
 
 builder.Services.AddCapabilityRuntime();
 builder.Services.AddInMemoryCapabilityAudit();
@@ -59,11 +64,19 @@ builder.Services.AddCrestCompatibilityProjection();
 builder.Services.AddCrestOpenApi();
 builder.Services.AddScoped<ProcurementAppService>();
 builder.Services.AddScoped<ProcurementApprovalTaskService>();
+builder.Services.AddScoped<IProcurementApprovalOrchestrator>(sp =>
+    sp.GetRequiredService<ProcurementApprovalTaskService>());
+builder.Services.AddSingleton<ProcurementDecisionReconciliationStore>();
 
 builder.Services.AddSingleton<ISchemaRegistry>(schemaRegistry);
 builder.Services.AddSingleton<ICapabilityRegistry>(capabilityRegistry);
 builder.Services.AddSingleton<IHumanTaskRegistry>(humanTaskRegistry);
 builder.Services.AddSingleton<IWorkflowRegistry>(workflowRegistry);
+builder.Services.AddSingleton<IFormRegistry>(formRegistry);
+builder.Services.AddSingleton(humanTaskInstanceStore);
+builder.Services.AddSingleton<IHumanTaskInstanceStore>(humanTaskInstanceStore);
+builder.Services.AddSingleton(workflowInstanceStore);
+builder.Services.AddSingleton<IWorkflowInstanceStore>(workflowInstanceStore);
 builder.Services.AddFormKernel();
 builder.Services.AddHumanTaskRuntime();
 builder.Services.AddScoped<ILocalEventHandler<HumanTaskCompletedEvent>, ProcurementHumanTaskDecisionHandler>();
@@ -71,7 +84,12 @@ builder.Services.AddWorkflowEngine();
 builder.Services.AddScoped<ILocalEventBus, ProcurementLocalEventBus>();
 
 builder.Services.AddSingleton<ICapabilityHandlerRegistry, ProcurementHandlerRegistry>();
-builder.Services.AddSingleton<IDescriptorLookup, EmptyDescriptorLookup>();
+builder.Services.AddSingleton<IDescriptorLookup>(new ProcurementDescriptorLookup(
+    ProcurementDescriptorCatalog.Schemas.Cast<IDescriptor>()
+        .Concat(ProcurementDescriptorCatalog.NativeCapabilities)
+        .Append(ProcurementDescriptorCatalog.ApprovalForm)
+        .Append(ProcurementDescriptorCatalog.ApprovalHumanTask)
+        .Append(ProcurementDescriptorCatalog.ApprovalWorkflow)));
 builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<SampleExecutionIdentity>();
@@ -118,7 +136,15 @@ app.MapCrestOpenApi();
 
 if (goldenScenario)
 {
-    return await ProcurementGoldenScenario.RunAsync(app.Services);
+    await app.StartAsync();
+    try
+    {
+        return await ProcurementGoldenScenario.RunAsync(app);
+    }
+    finally
+    {
+        await app.StopAsync();
+    }
 }
 
 await app.RunAsync();
@@ -131,13 +157,10 @@ public sealed class ProcurementHandlerRegistry : ICapabilityHandlerRegistry
         ["procurement.submit-request"] = typeof(SubmitProcurementRequestHandler),
         ["procurement.approve-request"] = typeof(ApproveProcurementRequestHandler),
         ["procurement.reject-request"] = typeof(RejectProcurementRequestHandler),
+        ["procurement.request.apply-approval"] = typeof(ApplyApprovalDecisionHandler),
+        ["procurement.request.apply-rejection"] = typeof(ApplyRejectionDecisionHandler),
         ["procurement.get-request"] = typeof(GetProcurementRequestHandler),
     };
-}
-
-public sealed class EmptyDescriptorLookup : IDescriptorLookup
-{
-    public bool Exists(DescriptorRef descriptorRef) => false;
 }
 
 public partial class Program;

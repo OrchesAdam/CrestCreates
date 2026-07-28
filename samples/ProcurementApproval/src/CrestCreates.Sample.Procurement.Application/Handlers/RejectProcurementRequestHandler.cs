@@ -9,13 +9,18 @@ public sealed class RejectProcurementRequestHandler : ICapabilityContextAwareHan
     public Task<object?> InvokeAsync(object? input, CancellationToken ct)
         => throw new InvalidOperationException("Capability execution context is required.");
 
-    public Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
+    public async Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
     {
+        var input = (RejectProcurementRequestInput)context.Input!;
+        var approval = context.ServiceProvider.GetRequiredService<IProcurementApprovalOrchestrator>();
+        await approval.CompleteDecisionAsync(
+            input.RequestId,
+            "Reject",
+            input.Reason,
+            ct).ConfigureAwait(false);
         var service = context.ServiceProvider.GetRequiredService<ProcurementApplicationService>();
-        object result = service.Reject(
-            (RejectProcurementRequestInput)context.Input!,
-            context.TenantId ?? string.Empty,
-            context.UserId ?? string.Empty);
-        return Task.FromResult<object?>(result);
+        return service.Get(
+            new GetProcurementRequestInput { RequestId = input.RequestId },
+            context.TenantId ?? string.Empty);
     }
 }

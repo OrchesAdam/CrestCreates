@@ -1,3 +1,4 @@
+using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
@@ -5,6 +6,8 @@ using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Sample.Procurement.Contracts;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
+
+#pragma warning disable CC1001 // Sample descriptors are registered imperatively below and verified through ProcurementDescriptorLookup tests.
 
 namespace CrestCreates.Sample.Procurement.Host;
 
@@ -80,8 +83,53 @@ public static class ProcurementDescriptorCatalog
             CapabilityRiskLevel.High,
             ProcurementContractIds.RejectInputSchema,
             ProcurementContractIds.RequestOutputSchema,
+            ["procurement.approve"]),
+        Capability(
+            ProcurementContractIds.ApplyApprovalDecisionCapability,
+            "apply-approval-decision",
+            CapabilityKind.Command,
+            CapabilityRiskLevel.High,
+            ProcurementContractIds.ApproveInputSchema,
+            ProcurementContractIds.RequestOutputSchema,
+            ["procurement.approve"]),
+        Capability(
+            ProcurementContractIds.ApplyRejectionDecisionCapability,
+            "apply-rejection-decision",
+            CapabilityKind.Command,
+            CapabilityRiskLevel.High,
+            ProcurementContractIds.RejectInputSchema,
+            ProcurementContractIds.RequestOutputSchema,
             ["procurement.approve"])
     ];
+
+    public static FormDescriptor ApprovalForm { get; } = new()
+    {
+        Id = ProcurementContractIds.ApprovalForm,
+        Name = "Procurement approval form",
+        Version = 1,
+        State = DescriptorState.Active,
+        Schema = new VersionedDescriptorRef<SchemaDescriptor>(
+            ProcurementContractIds.ApproveInputSchema,
+            1),
+        Fields =
+        [
+            new FormFieldDescriptor
+            {
+                SchemaFieldName = "requestId",
+                Label = "Request",
+                ControlType = "hidden",
+                IsReadOnly = true,
+                Order = 0
+            },
+            new FormFieldDescriptor
+            {
+                SchemaFieldName = "comment",
+                Label = "Decision comment",
+                ControlType = "textarea",
+                Order = 1
+            }
+        ]
+    };
 
     public static HumanTaskDescriptor ApprovalHumanTask { get; } = new()
     {
@@ -89,7 +137,7 @@ public static class ProcurementDescriptorCatalog
         Name = "Procurement approval",
         Version = 1,
         State = DescriptorState.Active,
-        Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("form_procurement_approval", 1),
+        Interaction = new VersionedDescriptorRef<IInteractionDescriptor>(ProcurementContractIds.ApprovalForm, 1),
         AssigneeStrategy = AssigneeStrategy.CandidateGroup,
         Outcomes =
         [
@@ -201,3 +249,20 @@ public sealed class ProcurementDescriptorProvider<T>(IReadOnlyList<T> descriptor
 {
     public IReadOnlyList<T> GetDescriptors() => descriptors;
 }
+
+public sealed class ProcurementDescriptorLookup(IEnumerable<IDescriptor> descriptors)
+    : IDescriptorLookup
+{
+    private readonly HashSet<(string Namespace, string Id, int Version)> _descriptors = descriptors
+        .Select(descriptor => (descriptor.Namespace, descriptor.Id,
+            descriptor is IVersionedDescriptor versioned ? versioned.Version : 0))
+        .ToHashSet();
+
+    public bool Exists(DescriptorRef descriptorRef)
+        => descriptorRef.Version is int version
+            ? _descriptors.Contains((descriptorRef.Namespace, descriptorRef.Id, version))
+            : _descriptors.Any(item => string.Equals(item.Namespace, descriptorRef.Namespace, StringComparison.Ordinal)
+                && string.Equals(item.Id, descriptorRef.Id, StringComparison.Ordinal));
+}
+
+#pragma warning restore CC1001

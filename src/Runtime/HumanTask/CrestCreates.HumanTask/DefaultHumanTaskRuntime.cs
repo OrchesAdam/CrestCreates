@@ -90,6 +90,11 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
 
         CompletionOutcomeMatcher.Resolve(descriptor, request.Outcome);
 
+        var previousStatus = instance.Status;
+        var previousOutcome = instance.Outcome;
+        var previousOutput = instance.Output;
+        var previousCompletedAt = instance.CompletedAt;
+
         instance.Status = HumanTaskInstanceStatus.Completed;
         instance.Outcome = request.Outcome;
         instance.Output = request.Result;
@@ -99,14 +104,38 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         // If it does, DO NOT publish — let exception propagate.
         await _store.SaveAsync(instance, ct).ConfigureAwait(false);
 
-        await _eventBus.PublishAsync(new HumanTaskCompletedEvent
+        try
         {
-            HumanTaskId = instance.HumanTaskId,
-            HumanTaskInstanceId = instance.Id,
-            HumanTaskVersion = instance.HumanTaskVersion,
-            Outcome = request.Outcome,
-            Result = request.Result
-        }, ct).ConfigureAwait(false);
+            await _eventBus.PublishAsync(new HumanTaskCompletedEvent
+            {
+                HumanTaskId = instance.HumanTaskId,
+                HumanTaskInstanceId = instance.Id,
+                HumanTaskVersion = instance.HumanTaskVersion,
+                Outcome = request.Outcome,
+                Result = request.Result
+            }, ct).ConfigureAwait(false);
+        }
+        catch (Exception dispatchException)
+        {
+            instance.Status = previousStatus;
+            instance.Outcome = previousOutcome;
+            instance.Output = previousOutput;
+            instance.CompletedAt = previousCompletedAt;
+
+            try
+            {
+                await _store.SaveAsync(instance, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception rollbackException)
+            {
+                throw new AggregateException(
+                    $"HumanTask '{instance.Id}' completion dispatch and rollback both failed.",
+                    dispatchException,
+                    rollbackException);
+            }
+
+            throw;
+        }
 
         return instance;
     }

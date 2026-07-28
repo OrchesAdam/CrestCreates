@@ -171,30 +171,24 @@ class ProcurementE2ETests(unittest.TestCase):
         self.assertEqual(get_data["status"], "Approved")
         self.assertEqual(get_data["title"], "Workflow Test")
 
-    def test_10_compatibility_projection_submit(self):
-        status, data = _get(
-            "/api/procurement/submit"
-            "?title=CompatTest&amount=3000&currency=USD"
-            "&category=General")
-        self.assertEqual(status, 200)
-        self.assertIsNotNone(data)
-        self.assertIn("data", data)
-
-    def test_11_compatibility_projection_approve(self):
-        _, submit_data = _submit(title="Compat Approve", amount=40000)
+    def test_10_compatibility_projection_get_reads_native_state(self):
+        _, submit_data = _submit(title="Compat Query", amount=3000)
         request_id = submit_data["requestId"]
 
-        status, data = _get(
-            f"/api/procurement/approve"
-            f"?requestId={request_id}&comment=OK",
-            user="cfo-004", roles="procurement-manager")
+        status, data = _get(f"/api/procurement/query/{request_id}")
         self.assertEqual(status, 200)
         self.assertIsNotNone(data)
         self.assertIn("data", data)
-        get_status, entity = _get(f"/api/procurement/requests/{request_id}")
-        self.assertEqual(get_status, 200)
-        self.assertEqual(entity["status"], "Approved")
-        self.assertEqual(entity["approverId"], "cfo-004")
+        self.assertEqual(data["data"]["requestId"], request_id)
+        self.assertEqual(data["data"]["title"], "Compat Query")
+
+    def test_11_compatibility_mutations_are_not_mapped(self):
+        for path in (
+                "/api/procurement/submit",
+                "/api/procurement/approve",
+                "/api/procurement/reject"):
+            status, _ = _get(path, user="cfo-004", roles="procurement-manager")
+            self.assertEqual(status, 404, path)
 
 
 if __name__ == "__main__":
