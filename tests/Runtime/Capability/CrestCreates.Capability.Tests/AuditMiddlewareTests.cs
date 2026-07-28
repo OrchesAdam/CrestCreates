@@ -99,6 +99,28 @@ public class AuditMiddlewareTests
     }
 
     [Fact]
+    public async Task CapabilityFailureException_AuditPreservesCanonicalErrorCode()
+    {
+        var auditStore = new InMemoryCapabilityAuditStore();
+        var middleware = new AuditMiddleware(auditStore, TestLogger);
+        var context = new CapabilityExecutionContext
+        {
+            ServiceProvider = null!,
+            CapabilityId = "test.canonical-failure",
+            CapabilityName = "Canonical failure",
+            CapabilityVersion = 1,
+            InvocationSource = InvocationSource.Http
+        };
+
+        var act = () => middleware.InvokeAsync(context, _ =>
+            throw new CapabilityFailureException("CAPABILITY_RESOURCE_NOT_FOUND", "Unavailable."));
+
+        await act.Should().ThrowAsync<CapabilityFailureException>();
+        auditStore.GetRecords().Should().ContainSingle().Which.ErrorCode
+            .Should().Be("CAPABILITY_RESOURCE_NOT_FOUND");
+    }
+
+    [Fact]
     public async Task InvokeAsync_Cancelled_RecordsCancelledStatus()
     {
         var auditStore = new InMemoryCapabilityAuditStore();

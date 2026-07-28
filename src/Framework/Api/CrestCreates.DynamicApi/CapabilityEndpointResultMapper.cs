@@ -83,6 +83,13 @@ internal static class CapabilityEndpointResultMapper
         {
             "UNAUTHORIZED" => Results.Forbid(),
             "CAPABILITY_NOT_FOUND" => Results.NotFound(),
+            "CAPABILITY_RESOURCE_NOT_FOUND" => Results.NotFound(),
+            "CAPABILITY_FORBIDDEN" => Results.StatusCode(StatusCodes.Status403Forbidden),
+            "CAPABILITY_INVOCATION_SOURCE_FORBIDDEN" => Results.StatusCode(StatusCodes.Status403Forbidden),
+            "CAPABILITY_DECISION_CONFLICT" => Results.StatusCode(StatusCodes.Status409Conflict),
+            "CAPABILITY_DECISION_STATE_INVALID" => Results.StatusCode(StatusCodes.Status409Conflict),
+            CapabilityExecutionErrorCodes.DependencyUnavailable =>
+                Results.StatusCode(StatusCodes.Status503ServiceUnavailable),
              "CAPABILITY_VALIDATION_FAILED" => Results.Problem(statusCode: 400, detail: result.ErrorMessage),
             "RATE_LIMIT_EXCEEDED" => Results.StatusCode(429),
             _ => Results.Problem(detail: result.ErrorMessage)

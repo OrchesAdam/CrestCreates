@@ -28,6 +28,10 @@ public sealed class HumanTaskInstance : ISnapshotable<HumanTaskInstance>
     public DateTimeOffset? CompletedAt { get; set; }
     public DateTimeOffset? CancelledAt { get; set; }
 
+    public string? CompletionDispatchError { get; set; }
+    public DateTimeOffset? CompletionDispatchFailedAt { get; set; }
+    public int CompletionDispatchAttemptCount { get; set; }
+
     public string? CancellationReason { get; set; }
 
     public IReadOnlyList<string> CandidateUserIds { get; set; } = Array.Empty<string>();
@@ -58,6 +62,9 @@ public sealed class HumanTaskInstance : ISnapshotable<HumanTaskInstance>
             CreatedAt = CreatedAt,
             CompletedAt = CompletedAt,
             CancelledAt = CancelledAt,
+            CompletionDispatchError = CompletionDispatchError,
+            CompletionDispatchFailedAt = CompletionDispatchFailedAt,
+            CompletionDispatchAttemptCount = CompletionDispatchAttemptCount,
             CancellationReason = CancellationReason,
             ConcurrencyStamp = ConcurrencyStamp,
             UpdatedAt = UpdatedAt,

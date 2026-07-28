@@ -47,7 +47,8 @@ public class HumanTaskRuntimeTests
         Mock<ILocalEventBus> eventBusMock, Mock<IHumanTaskAssigneeResolver> resolverMock)
         CreateRuntime(HumanTaskRegistry registry,
             Mock<ILocalEventBus>? busMock = null,
-            Mock<IHumanTaskAssigneeResolver>? resolverMock = null)
+            Mock<IHumanTaskAssigneeResolver>? resolverMock = null,
+            IHumanTaskCompletionFailurePolicy? completionFailurePolicy = null)
     {
         var store = new InMemoryHumanTaskInstanceStore();
         var eventBus = busMock ?? new Mock<ILocalEventBus>();
@@ -63,7 +64,12 @@ public class HumanTaskRuntimeTests
                 .ReturnsAsync(new HumanTaskAssigneeResolution());
         }
 
-        var runtime = new DefaultHumanTaskRuntime(registry, store, eventBus.Object, resolver.Object);
+        var runtime = new DefaultHumanTaskRuntime(
+            registry,
+            store,
+            eventBus.Object,
+            resolver.Object,
+            completionFailurePolicy);
         return (runtime, store, eventBus, resolver);
     }
 
@@ -182,6 +188,135 @@ public class HumanTaskRuntimeTests
             HumanTaskInstanceId = instance.Id,
             Outcome = "Approve"
         })).Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task CompletionFailureState_IsExplicitlyRecoverable()
+    {
+        var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1,
+            CompletionCondition.Approve));
+        var eventBus = new Mock<ILocalEventBus>();
+        eventBus.Setup(bus => bus.PublishAsync(
+                It.IsAny<HumanTaskCompletedEvent>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("decision failed"));
+        var (runtime, store, _, _) = CreateRuntime(registry, eventBus);
+        var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
+        {
+            HumanTaskId = "ht_01"
+        });
+        var request = new HumanTaskCompletionRequest
+        {
+            HumanTaskInstanceId = instance.Id,
+            Outcome = "Approve"
+        };
+
+        await runtime.Invoking(value => value.CompleteAsync(request))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("decision failed");
+
+        var failed = await store.GetByIdAsync(instance.Id);
+        failed!.Status.Should().Be(HumanTaskInstanceStatus.CompletionDispatchFailed);
+        failed.Outcome.Should().Be("Approve");
+        failed.CompletedAt.Should().NotBeNull();
+        failed.CompletionDispatchError.Should().Contain("decision failed");
+        failed.CompletionDispatchFailedAt.Should().NotBeNull();
+        failed.CompletionDispatchAttemptCount.Should().Be(1);
+
+        await runtime.Invoking(value => value.CompleteAsync(request))
+            .Should().ThrowAsync<HumanTaskCompletionRecoveryRequiredException>();
+        eventBus.Verify(bus => bus.PublishAsync(
+            It.IsAny<HumanTaskCompletedEvent>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SecondSubscriberFailure_DoesNotReplayFirstSubscriberSideEffect()
+    {
+        var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1,
+            CompletionCondition.Approve));
+        var bus = new CheckpointingCompletionBus(failWithCancellation: false);
+        var store = new InMemoryHumanTaskInstanceStore();
+        var resolver = new DefaultHumanTaskAssigneeResolver();
+        var runtime = new DefaultHumanTaskRuntime(
+            registry,
+            store,
+            bus,
+            resolver,
+            new CheckpointingCompletionFailurePolicy(bus));
+        var instance = await runtime.CreateAsync(new HumanTaskCreationRequest
+        {
+            HumanTaskId = "ht_01"
+        });
+        var request = new HumanTaskCompletionRequest
+        {
+            HumanTaskInstanceId = instance.Id,
+            Outcome = "Approve"
+        };
+
+        await runtime.Invoking(value => value.CompleteAsync(request))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("second subscriber failed");
+
+        var completed = await runtime.CompleteAsync(request);
+
+        completed.Status.Should().Be(HumanTaskInstanceStatus.Completed);
+        bus.FirstSubscriberSideEffectCount.Should().Be(1);
+        bus.SecondSubscriberAttemptCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Retry_DoesNotRepublishAlreadyCommittedHandlers()
+    {
+        var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1,
+            CompletionCondition.Approve));
+        var bus = new CheckpointingCompletionBus(failWithCancellation: false);
+        var store = new InMemoryHumanTaskInstanceStore();
+        var runtime = new DefaultHumanTaskRuntime(
+            registry,
+            store,
+            bus,
+            new DefaultHumanTaskAssigneeResolver(),
+            new CheckpointingCompletionFailurePolicy(bus));
+        var task = await runtime.CreateAsync(new HumanTaskCreationRequest { HumanTaskId = "ht_01" });
+        var request = new HumanTaskCompletionRequest
+        {
+            HumanTaskInstanceId = task.Id,
+            Outcome = "Approve"
+        };
+
+        await runtime.Invoking(value => value.CompleteAsync(request))
+            .Should().ThrowAsync<InvalidOperationException>();
+        await runtime.CompleteAsync(request);
+
+        bus.ExecutedHandlerIndexes.Should().Equal(0, 1);
+    }
+
+    [Fact]
+    public async Task CancellationAfterPartialDispatch_DoesNotResetTaskToCreated()
+    {
+        var registry = CreateRegistry(CreateDescriptor("ht_01", "manager.approval", 1,
+            CompletionCondition.Approve));
+        var bus = new CheckpointingCompletionBus(failWithCancellation: true);
+        var store = new InMemoryHumanTaskInstanceStore();
+        var runtime = new DefaultHumanTaskRuntime(
+            registry,
+            store,
+            bus,
+            new DefaultHumanTaskAssigneeResolver());
+        var task = await runtime.CreateAsync(new HumanTaskCreationRequest { HumanTaskId = "ht_01" });
+
+        await runtime.Invoking(value => value.CompleteAsync(new HumanTaskCompletionRequest
+            {
+                HumanTaskInstanceId = task.Id,
+                Outcome = "Approve"
+            }))
+            .Should().ThrowAsync<OperationCanceledException>();
+
+        var failed = await store.GetByIdAsync(task.Id);
+        failed!.Status.Should().Be(HumanTaskInstanceStatus.CompletionDispatchFailed);
+        failed.Outcome.Should().Be("Approve");
+        bus.FirstSubscriberSideEffectCount.Should().Be(1);
     }
 
     [Fact]
@@ -403,6 +538,53 @@ public class HumanTaskRuntimeTests
         instance.OrganizationUnitId.Should().Be("org-dept-1");
         instance.PositionId.Should().Be("pos-manager");
         instance.Status.Should().Be(HumanTaskInstanceStatus.Assigned);
+    }
+}
+
+sealed class CheckpointingCompletionFailurePolicy(CheckpointingCompletionBus bus)
+    : IHumanTaskCompletionFailurePolicy
+{
+    public Task RecoverAsync(
+        HumanTaskInstance instance,
+        HumanTaskCompletedEvent completion,
+        CancellationToken cancellationToken = default)
+        => bus.PublishAsync(completion, cancellationToken);
+}
+
+sealed class CheckpointingCompletionBus(bool failWithCancellation) : ILocalEventBus
+{
+    int _nextHandlerIndex;
+    bool _hasFailed;
+
+    public int FirstSubscriberSideEffectCount { get; private set; }
+    public int SecondSubscriberAttemptCount { get; private set; }
+    public List<int> ExecutedHandlerIndexes { get; } = [];
+
+    public Task PublishAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
+        => PublishAsync((HumanTaskCompletedEvent)@event, cancellationToken);
+
+    public Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+        where TEvent : ILocalEvent
+    {
+        if (_nextHandlerIndex == 0)
+        {
+            FirstSubscriberSideEffectCount++;
+            ExecutedHandlerIndexes.Add(0);
+            _nextHandlerIndex = 1;
+        }
+
+        SecondSubscriberAttemptCount++;
+        if (!_hasFailed)
+        {
+            _hasFailed = true;
+            if (failWithCancellation)
+                throw new OperationCanceledException("second subscriber cancelled");
+            throw new InvalidOperationException("second subscriber failed");
+        }
+
+        ExecutedHandlerIndexes.Add(1);
+        _nextHandlerIndex = 2;
+        return Task.CompletedTask;
     }
 }
 

@@ -45,6 +45,8 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddTransient<TenantMiddleware>();
         services.TryAddTransient<AuthorizationMiddleware>();
         services.TryAddTransient<ValidationMiddleware>();
+        services.TryAddSingleton<ICapabilityInputValidationPolicy,
+            AllowUnknownCapabilityInputPropertiesPolicy>();
         services.TryAddTransient<IdempotencyMiddleware>();
         services.TryAddTransient<MetricsMiddleware>();
         services.TryAddTransient<EventPublishingMiddleware>();

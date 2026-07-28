@@ -158,6 +158,22 @@ internal static class CapabilityEndpointBindingEmitter
         sb.AppendLine($"                \"No JsonTypeInfo registered for {typeOfExpr}. Add [JsonSerializable(typeof({typeOfExpr}))] to your JsonSerializerContext.\");");
         sb.AppendLine($"        var model = await CapabilityEndpointBodyReader.ReadNativeBodyAsync<{typeOfExpr}>(");
         sb.AppendLine($"            context, jsonTypeInfo, {optional.ToString().ToLowerInvariant()}, ct);");
+        if (optional)
+        {
+            // Route/query/header input still needs a DTO when the optional body is absent.
+            if (bodyInput.CanMaterializeWhenOptional)
+            {
+                sb.AppendLine($"        model ??= new {typeOfExpr}();");
+            }
+            else
+            {
+                sb.AppendLine("        if (model is null)");
+                sb.AppendLine("            throw new InvalidOperationException(");
+                sb.AppendLine($"                \"CEP022: Optional body type '{typeOfExpr}' cannot be materialized.\");");
+                sb.AppendLine("        return model;");
+                return;
+            }
+        }
         sb.AppendLine();
 
         // Assign route values to model properties

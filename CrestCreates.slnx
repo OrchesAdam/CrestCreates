@@ -24,6 +24,18 @@
     <Project Path="samples/SaaSHelpdesk/SaaSHelpdesk.Tests/SaaSHelpdesk.Tests.csproj" />
     <Project Path="samples/SaaSHelpdesk/SaaSHelpdesk.Web/SaaSHelpdesk.Web.csproj" />
   </Folder>
+  <Folder Name="/samples/ProcurementApproval/" />
+  <Folder Name="/samples/ProcurementApproval/src/">
+    <Project Path="samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Application/CrestCreates.Sample.Procurement.Application.csproj" />
+    <Project Path="samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Contracts/CrestCreates.Sample.Procurement.Contracts.csproj" />
+    <Project Path="samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Domain/CrestCreates.Sample.Procurement.Domain.csproj" />
+    <Project Path="samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Host/CrestCreates.Sample.Procurement.Host.csproj" />
+  </Folder>
+  <Folder Name="/samples/ProcurementApproval/tests/">
+    <Project Path="samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.AotFixture.Tests/CrestCreates.Sample.Procurement.AotFixture.Tests.csproj" />
+    <Project Path="samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.E2E.Tests/CrestCreates.Sample.Procurement.E2E.Tests.csproj" />
+    <Project Path="samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.Tests/CrestCreates.Sample.Procurement.Tests.csproj" />
+  </Folder>
   <Folder Name="/src/" />
   <Folder Name="/src/Core/">
     <Project Path="src/Core/CrestCreates.Core.Abstractions/CrestCreates.Core.Abstractions.csproj" />

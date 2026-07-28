@@ -136,4 +136,10 @@ public sealed class InMemoryHumanTaskInstanceStore : IHumanTaskInstanceStore
 
         return Task.FromResult((IReadOnlyList<HumanTaskInstance>)results);
     }
+
+    public IReadOnlyList<HumanTaskInstance> GetAll()
+        => _instances.Values.Select(instance => instance.Snapshot()).ToArray();
+
+    public bool TryRemove(string instanceId)
+        => _instances.TryRemove(instanceId, out _);
 }

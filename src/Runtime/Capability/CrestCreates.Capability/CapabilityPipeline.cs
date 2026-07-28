@@ -108,6 +108,14 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
         {
             return CapabilityExecutionResult.Timeout(DateTimeOffset.UtcNow - startedAt);
         }
+        catch (CapabilityFailureException ex)
+        {
+            return CapabilityExecutionResult.Failure(
+                ex.ErrorCode,
+                ex.Message,
+                DateTimeOffset.UtcNow - startedAt,
+                ex.Issues);
+        }
         catch (Exception ex)
         {
             return CapabilityExecutionResult.Failure(

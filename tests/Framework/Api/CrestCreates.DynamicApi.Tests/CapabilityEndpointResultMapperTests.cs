@@ -155,4 +155,18 @@ public class CapabilityEndpointResultMapperTests
         // Assert
         httpResult.Should().NotBeNull();
     }
+
+    [Fact]
+    public void Map_CapabilityDependencyUnavailable_Returns503()
+    {
+        var result = CapabilityExecutionResult.Failure(
+            "CAPABILITY_DEPENDENCY_UNAVAILABLE",
+            "A required dependency is unavailable",
+            TimeSpan.FromMilliseconds(50));
+        var httpResult = CapabilityEndpointResultMapper.Map(
+            result,
+            new CapabilityEndpointOutputMapping());
+        httpResult.Should().BeAssignableTo<IStatusCodeHttpResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+    }
 }

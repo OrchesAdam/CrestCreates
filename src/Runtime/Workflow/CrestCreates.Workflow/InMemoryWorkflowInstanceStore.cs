@@ -68,4 +68,10 @@ public sealed class InMemoryWorkflowInstanceStore : IWorkflowInstanceStore
 
         return Task.FromResult(matches.SingleOrDefault()?.Snapshot());
     }
+
+    public IReadOnlyList<WorkflowInstance> GetAll()
+        => _instances.Values.Select(instance => instance.Snapshot()).ToArray();
+
+    public bool TryRemove(string instanceId)
+        => _instances.TryRemove(instanceId, out _);
 }

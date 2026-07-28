@@ -222,6 +222,17 @@ internal static class CapabilityEndpointDiagnostics
         isEnabledByDefault: true);
 
     /// <summary>
+    /// CEP022: Optional body combined with scalar assignment requires a constructible DTO.
+    /// </summary>
+    public static readonly DiagnosticDescriptor OptionalBodyCannotBeMaterialized = new(
+        id: CapabilityEndpointDiagnosticCodes.OptionalBodyCannotBeMaterializedValue,
+        title: "Optional body type cannot be materialized",
+        messageFormat: "Optional body type '{0}' on endpoint spec '{1}' must be a non-abstract class or value type with a public parameterless constructor because route, query, or header values are assigned when the body is absent.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    /// <summary>
     /// Helper to create a <see cref="Diagnostic"/> from a descriptor.
     /// </summary>
     public static Diagnostic Create(DiagnosticDescriptor descriptor, Location? location, params object[] args)

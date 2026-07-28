@@ -19,6 +19,7 @@ public sealed class HumanTaskStepExecutor : IWorkflowStepExecutor
         {
             HumanTaskId = target.HumanTask.Id,
             Version = target.HumanTask.Version,
+            TenantId = context.Instance.TenantId,
             WorkflowInstanceId = context.Instance.InstanceId,
             WorkflowStepId = context.Step.Id,
             Input = context.Instance.Variables

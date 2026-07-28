@@ -67,6 +67,8 @@ internal sealed class CapabilityEndpointInputRecord
     /// whether to generate Enum.Parse or return null for unsupported types.
     /// </summary>
     public bool IsEnum { get; init; } = false;
+
+    public bool CanMaterializeWhenOptional { get; init; } = true;
 }
 
 /// <summary>

@@ -76,6 +76,13 @@ jobs:
           dotnet test tests/Framework/Testing/CrestCreates.TestBase.Tests --no-build
           dotnet test tests/Framework/Testing/CrestCreates.Samples.Tests --no-build
 
+      # ── Golden Samples ──
+      - name: Test — Procurement Approval Golden Sample
+        run: |
+          dotnet test samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.Tests --no-build
+          dotnet test samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.E2E.Tests --no-build
+          dotnet test samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.AotFixture.Tests --no-build
+
       # ── Metadata ──
       - name: Test — Metadata / Core
         run: |

@@ -247,6 +247,40 @@ namespace TestNs
     }
 
     [Fact]
+    public void OptionalBodyAndRouteEndpoint_MaterializesDtoWhenBodyIsAbsent()
+    {
+        var source = @"
+using System;
+using CrestCreates.DynamicApi;
+
+namespace TestNs
+{
+    public sealed class GetItemInput
+    {
+        public Guid Id { get; set; }
+    }
+
+    [CapabilityEndpointSpecs]
+    public static partial class ItemEndpoints
+    {
+        [CapabilityEndpointSpec(""items.get"", CapabilityEndpointHttpMethod.Get, ""items/{id}"")]
+        [CapabilityEndpointInput(typeof(GetItemInput), Name = ""body"", Source = CapabilityEndpointParameterSource.Body, Required = false)]
+        [CapabilityEndpointInput(typeof(Guid), Name = ""id"", Source = CapabilityEndpointParameterSource.Route, TargetProperty = nameof(GetItemInput.Id))]
+        public sealed class GetItemSpec { }
+    }
+}
+";
+
+        var result = Run(source);
+        Assert.NotEmpty(result.GeneratedSources);
+
+        var bindingFile = result.GetSourceByFileName("ItemEndpoints_Bindings.g.cs");
+        Assert.NotNull(bindingFile);
+        Assert.Contains("model ??= new global::TestNs.GetItemInput();", bindingFile!.SourceText);
+        Assert.Contains("model.Id = Guid.Parse(", bindingFile.SourceText);
+    }
+
+    [Fact]
     public void MultipleEndpointsInOneContainer_GeneratesAllEndpoints()
     {
         var source = @"

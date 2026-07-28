@@ -1794,6 +1794,69 @@ Status: Completed.
 - ExtractRouteTokens / NormalizeRoutePattern parsing logic sync → shared RouteTemplateParser
 - GetByCapability sorting stability → add when context pack / graph display needs it
 
+### Issue #65 — Procurement Approval Projection / Exposure Golden Sample (2026-07-28)
+
+**Status**: ✅ Complete — third-round failure-recovery protocol closure
+
+**Single business chain**:
+
+```text
+HTTP / MCP / Agent / HumanTask
+    -> ICapabilityDispatcher
+    -> CapabilityPipeline
+    -> ProcurementApplicationService
+    -> tenant-scoped ProcurementRequest Store
+
+Compatibility GET
+    -> generated Compatibility capability
+    -> the same dispatcher, pipeline, application service, and Store
+```
+
+**Closed review findings**:
+
+- HTTP and Compatibility now share `ProcurementApplicationService`, domain transitions, and the `(TenantId, RequestId)` store; Compatibility no longer fabricates results.
+- MCP exposes only source-generated `procurement_get_request`; invocation enters the dispatcher with `InvocationSource.Mcp`, validates schemas, and fails closed across tenants.
+- Agent exposes only source-generated Get and Submit tools. Submit requires approval and budget, uses the invocation lease/fingerprint replay gate, dispatches exactly once, and records `InvocationSource.Agent`; Approve/Reject are absent from the active snapshot.
+- High-value Submit creates a suspended Workflow instance and pending HumanTask. HumanTask completion dispatches Approve/Reject through the Capability Pipeline with `InvocationSource.HumanTask` and resumes the workflow.
+- Sample identity is derived from deterministic `X-Sample-Tenant`, `X-Sample-User`, and `X-Sample-Roles` headers. Request DTOs cannot supply requester/approver identity; self-approval and cross-tenant reads fail closed.
+- Real Schema descriptors cover Submit/Get/Approve/Reject and their outputs. HTTP binding records source-generated `InputJson`; unknown input properties are rejected before the handler, and MCP/Agent output contracts are checked against source-generated `JsonTypeInfo`.
+- Missing entities use canonical `CAPABILITY_RESOURCE_NOT_FOUND`; HTTP maps it deterministically to 404, while MCP/Agent retain safe projection-specific failure contracts.
+- `CapabilityEndpointGenerator` now materializes an optional body DTO when route/query/header values must be assigned, so route-only GETs do not silently dispatch null input.
+- The former duplicated test Capability Host and permissive smoke tests were moved to `99_RecycleBin/PR66LegacyProcurementTests`; active tests consume the production descriptor providers and isolated `WebApplicationFactory` stores.
+- Approval now has one authoritative path: HTTP Approve/Reject completes the correlated pending HumanTask; the HumanTask event dispatches internal `procurement.request.apply-approval` / `procurement.request.apply-rejection` capabilities, which accept only `InvocationSource.HumanTask`; workflow continuation then reaches its terminal state. No public projection mutates the aggregate independently.
+- Compatibility is deliberately read-only. Its active snapshot contains only `compat.appservice.procurement.get`; Submit/Approve/Reject routes are not generated, eliminating mutating GETs, permission downgrade, and a second write surface.
+- High-value Submit does not persist its aggregate until the workflow is suspended with exactly one correlated pending HumanTask. Workflow or task startup failures roll back only runtime instances matching `(TenantId, RequestId)` and return the generic `CAPABILITY_DEPENDENCY_UNAVAILABLE`, leaving no orphan request or cross-tenant cleanup risk.
+- HumanTask completion never pretends that external subscriber side effects were rolled back. Dispatch failures retain outcome/output and enter explicit `CompletionDispatchFailed`; the default Runtime refuses blind replay. An explicit `IHumanTaskCompletionFailurePolicy` is required for recovery.
+- The Procurement InMemory failure policy checkpoints each completion handler. HTTP retries with the same terminal decision resume at the failed handler, do not replay the already committed Apply Decision handler, and complete the Workflow. An opposite decision remains a conflict.
+- Workflow execution now accepts a typed `WorkflowExecutionRequest.TenantId`; `WorkflowInstance.TenantId` flows through `HumanTaskStepExecutor` into `HumanTaskInstance.TenantId`. Procurement authorization, query, and cleanup use these typed fields rather than a `tenantId` workflow-variable convention.
+- Capability input validation remains forward-compatible by default. Strict unknown-property rejection is selected explicitly by `ProcurementInputValidationPolicy`, rather than changing every Capability contract globally.
+- Procurement Contracts references MCP and Agent Tool abstractions only. `McpToolJsonContractRegistry` moved to `CrestCreates.Mcp.Abstractions`, with a type forward in the Runtime assembly for compatibility.
+- `AuditMiddleware` preserves `CapabilityFailureException.ErrorCode`; protocol results and audit evidence now use the same canonical NotFound/Forbidden code.
+- `form_procurement_approval` is a registered Form descriptor and the HumanTask interaction reference is validated through the real descriptor lookup.
+- Optional body materialization now emits `CEP022` for positional records without a public parameterless constructor, private constructors, abstract inputs, and interfaces, instead of generating opaque invalid `new T()` code.
+- CI directly executes the Procurement acceptance, independent-process E2E, and NativeAOT fixture test projects.
+
+**NativeAOT evidence**:
+
+- `CrestCreates.Sample.Procurement.Host --golden-scenario` starts the real Kestrel host on an ephemeral port and uses `HttpClient` for generated endpoint/body/route binding, HTTP result mapping, and native/Compatibility serialization before executing MCP, Workflow/HumanTask, and governed Agent paths. It prints `CRESTCREATES_PROCUREMENT_HTTP_OK` and `CRESTCREATES_PROCUREMENT_SAMPLE_OK`, then exits 0.
+- `scripts/run-nativeaot-golden-scenario.sh` publishes with `CrestCreatesPublishMode=aot`, executes the native binary with `--golden-scenario`, asserts the sentinel, and cleans its temporary directory with a trap.
+- The AOT fixture invokes that publish-link-run script; it no longer treats ordinary `JsonTypeInfo` tests or publish-only success as NativeAOT verification.
+
+**Verification evidence**:
+
+- Procurement acceptance: 36 passed, including same-HTTP decision recovery, opposite-decision conflict, tenant-scoped rollback, typed HumanTask tenant propagation, and Contracts dependency checks.
+- Independent managed Host process E2E: 1 passed.
+- Python HTTP E2E through `pipx run pytest`: 11 passed.
+- Procurement NativeAOT fixture: 9 passed, including real HTTP endpoint and both native sentinels.
+- Capability Runtime: 144 passed.
+- HumanTask Runtime: 55 passed.
+- Workflow Runtime: 68 passed.
+- Dynamic API: 73 passed.
+- MCP Runtime: 66 passed; MCP E2E: 28 passed.
+- Agent Tools Runtime: 116 passed.
+- Dependency Boundaries: 50 passed.
+- CodeGenerator: 283 passed.
+
 ## Recommended Next Thread Entry Prompt
 
 If a future thread should resume from this state, use a prompt like:
