@@ -9,18 +9,31 @@ Usage:
 """
 
 import json
+import os
 import unittest
 import urllib.request
 import urllib.error
 
-BASE_URL = "http://localhost:5000"
+BASE_URL = os.environ.get("PROCUREMENT_BASE_URL", "http://localhost:5000")
 
 
-def _post(path: str, body: dict) -> tuple[int, dict | None]:
+def _identity_headers(user="requester-001", roles="procurement-requester",
+                      tenant="tenant-e2e") -> dict[str, str]:
+    return {
+        "X-Sample-Tenant": tenant,
+        "X-Sample-User": user,
+        "X-Sample-Roles": roles,
+    }
+
+
+def _post(path: str, body: dict, *, user="requester-001",
+          roles="procurement-requester", tenant="tenant-e2e") -> tuple[int, dict | None]:
     data = json.dumps(body).encode()
+    headers = _identity_headers(user, roles, tenant)
+    headers["Content-Type"] = "application/json"
     req = urllib.request.Request(
         f"{BASE_URL}{path}", data=data, method="POST",
-        headers={"Content-Type": "application/json"},
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(req) as resp:
@@ -32,8 +45,11 @@ def _post(path: str, body: dict) -> tuple[int, dict | None]:
             return e.code, None
 
 
-def _get(path: str) -> tuple[int, dict | None]:
-    req = urllib.request.Request(f"{BASE_URL}{path}", method="GET")
+def _get(path: str, *, user="requester-001", roles="procurement-requester",
+         tenant="tenant-e2e") -> tuple[int, dict | None]:
+    req = urllib.request.Request(
+        f"{BASE_URL}{path}", method="GET",
+        headers=_identity_headers(user, roles, tenant))
     try:
         with urllib.request.urlopen(req) as resp:
             return resp.status, json.loads(resp.read())
@@ -45,7 +61,9 @@ def _get(path: str) -> tuple[int, dict | None]:
 
 
 def _get_text(path: str) -> tuple[int, str]:
-    req = urllib.request.Request(f"{BASE_URL}{path}", method="GET")
+    req = urllib.request.Request(
+        f"{BASE_URL}{path}", method="GET",
+        headers=_identity_headers())
     try:
         with urllib.request.urlopen(req) as resp:
             return resp.status, resp.read().decode()
@@ -54,12 +72,11 @@ def _get_text(path: str) -> tuple[int, str]:
 
 
 def _submit(title="Test", amount=5000, currency="USD",
-            requester_id="user-001", category="General",
+            category="General",
             description="") -> tuple[int, dict | None]:
     return _post("/api/procurement/requests", {
         "title": title, "amount": amount, "currency": currency,
-        "requesterId": requester_id, "category": category,
-        "description": description,
+        "category": category, "description": description,
     })
 
 
@@ -111,8 +128,9 @@ class ProcurementE2ETests(unittest.TestCase):
 
         status, data = _post(
             f"/api/procurement/requests/{request_id}/approve",
-            {"approverId": "cfo-001", "comment": "Budget approved"})
-        self.assertIn(status, (200, 201))
+            {"comment": "Budget approved"},
+            user="cfo-001", roles="procurement-manager")
+        self.assertEqual(status, 200)
         self.assertIsNotNone(data)
         self.assertEqual(data["status"], "Approved")
         self.assertEqual(data["approverId"], "cfo-001")
@@ -124,27 +142,28 @@ class ProcurementE2ETests(unittest.TestCase):
 
         status, data = _post(
             f"/api/procurement/requests/{request_id}/reject",
-            {"approverId": "cfo-002", "reason": "Over budget"})
-        self.assertIn(status, (200, 201))
+            {"reason": "Over budget"},
+            user="cfo-002", roles="procurement-manager")
+        self.assertEqual(status, 200)
         self.assertIsNotNone(data)
         self.assertEqual(data["status"], "Rejected")
         self.assertEqual(data["approverId"], "cfo-002")
 
     def test_08_get_nonexistent_request(self):
         fake_id = "00000000-0000-0000-0000-000000000000"
-        status, data = _get(f"/api/procurement/requests/{fake_id}")
-        self.assertIn(status, (200, 404))
-        if status == 200 and data:
-            self.assertEqual(data.get("status"), "NotFound")
+        status, _ = _get(f"/api/procurement/requests/{fake_id}")
+        self.assertEqual(status, 404)
 
     def test_09_full_workflow_submit_approve_get(self):
         _, submit_data = _submit(title="Workflow Test", amount=20000)
         request_id = submit_data["requestId"]
         self.assertEqual(submit_data["status"], "PendingApproval")
 
-        _, approve_data = _post(
+        approve_status, approve_data = _post(
             f"/api/procurement/requests/{request_id}/approve",
-            {"approverId": "cfo-003", "comment": "OK"})
+            {"comment": "OK"},
+            user="cfo-003", roles="procurement-manager")
+        self.assertEqual(approve_status, 200)
         self.assertEqual(approve_data["status"], "Approved")
 
         status, get_data = _get(f"/api/procurement/requests/{request_id}")
@@ -156,7 +175,7 @@ class ProcurementE2ETests(unittest.TestCase):
         status, data = _get(
             "/api/procurement/submit"
             "?title=CompatTest&amount=3000&currency=USD"
-            "&requesterId=user-002&category=General")
+            "&category=General")
         self.assertEqual(status, 200)
         self.assertIsNotNone(data)
         self.assertIn("data", data)
@@ -167,10 +186,15 @@ class ProcurementE2ETests(unittest.TestCase):
 
         status, data = _get(
             f"/api/procurement/approve"
-            f"?requestId={request_id}&approverId=cfo-004&comment=OK")
+            f"?requestId={request_id}&comment=OK",
+            user="cfo-004", roles="procurement-manager")
         self.assertEqual(status, 200)
         self.assertIsNotNone(data)
         self.assertIn("data", data)
+        get_status, entity = _get(f"/api/procurement/requests/{request_id}")
+        self.assertEqual(get_status, 200)
+        self.assertEqual(entity["status"], "Approved")
+        self.assertEqual(entity["approverId"], "cfo-004")
 
 
 if __name__ == "__main__":

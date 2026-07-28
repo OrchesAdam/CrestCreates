@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using CrestCreates.Sample.Procurement.Contracts.Dtos;
 using CrestCreates.Sample.Procurement.Contracts.Json;
@@ -9,6 +10,8 @@ namespace CrestCreates.Sample.Procurement.AotFixture.Tests;
 
 public class ProcurementAotFixtureTests
 {
+    private static readonly Lazy<Task<NativeAotRunResult>> NativeAotRun = new(RunNativeAotScenarioAsync);
+
     [Fact]
     public void JsonTypeInfo_ResolvesSubmitRequestInput()
     {
@@ -45,7 +48,6 @@ public class ProcurementAotFixtureTests
             Title = "Office Supplies",
             Amount = 500m,
             Currency = "USD",
-            RequesterId = "user-1",
             Category = "General"
         };
 
@@ -72,4 +74,74 @@ public class ProcurementAotFixtureTests
 
         deserialized.Should().BeEquivalentTo(result);
     }
+
+    [Fact]
+    public async Task NativeAotBinary_RunsGoldenScenarioAndExits()
+    {
+        var result = await NativeAotRun.Value;
+
+        result.ExitCode.Should().Be(0, result.Output);
+    }
+
+    [Fact]
+    public async Task NativeAotBinary_PrintsSuccessSentinel()
+    {
+        var result = await NativeAotRun.Value;
+
+        result.Output.Should().Contain("CRESTCREATES_PROCUREMENT_SAMPLE_OK");
+    }
+
+    private static async Task<NativeAotRunResult> RunNativeAotScenarioAsync()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var scriptPath = Path.Combine(
+            repositoryRoot,
+            "samples",
+            "ProcurementApproval",
+            "scripts",
+            "run-nativeaot-golden-scenario.sh");
+        var startInfo = new ProcessStartInfo("bash")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            WorkingDirectory = repositoryRoot
+        };
+        startInfo.ArgumentList.Add(scriptPath);
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start NativeAOT gate.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(12));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync();
+            throw new TimeoutException("NativeAOT golden scenario exceeded the twelve-minute gate timeout.");
+        }
+        var output = string.Concat(await stdout, Environment.NewLine, await stderr);
+        return new NativeAotRunResult(process.ExitCode, output);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        for (var current = new DirectoryInfo(AppContext.BaseDirectory);
+             current is not null;
+             current = current.Parent)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "CrestCreates.slnx")))
+            {
+                return current.FullName;
+            }
+        }
+
+        throw new InvalidOperationException("Could not locate the CrestCreates repository root.");
+    }
+
+    private sealed record NativeAotRunResult(int ExitCode, string Output);
 }

@@ -35,7 +35,7 @@ public sealed class ValidationMiddlewareJsonInputTests
 
         capabilities.Setup(registry => registry.GetByVersion(capability.Id, 1)).Returns(capability);
         schemas.Setup(registry => registry.GetByVersion("input", 2)).Returns(schema);
-        validator.Setup(instance => instance.Validate(schema, inputJson))
+        validator.Setup(instance => instance.Validate(schema, inputJson, true))
             .Returns(SchemaValidationResult.Success());
 
         var middleware = new ValidationMiddleware(validator.Object, capabilities.Object, schemas.Object);
@@ -54,7 +54,7 @@ public sealed class ValidationMiddlewareJsonInputTests
 
         result.IsSuccess.Should().BeTrue();
         validator.Verify(instance => instance.Validate(schema, It.IsAny<object?>()), Times.Never);
-        validator.Verify(instance => instance.Validate(schema, inputJson), Times.Once);
+        validator.Verify(instance => instance.Validate(schema, inputJson, true), Times.Once);
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public sealed class ValidationMiddlewareJsonInputTests
 
         capabilities.Setup(registry => registry.GetByVersion(capability.Id, 1)).Returns(capability);
         schemas.Setup(registry => registry.GetByVersion("input", 1)).Returns(schema);
-        validator.Setup(instance => instance.Validate(schema, It.IsAny<object?>()))
+        validator.Setup(instance => instance.Validate(schema, It.IsAny<object?>(), true))
             .Returns(SchemaValidationResult.Failure([
                 new SchemaValidationError
                 {

@@ -1,42 +1,20 @@
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Sample.Procurement.Contracts.Dtos;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Sample.Procurement.Application.Handlers;
 
-public sealed class GetProcurementRequestHandler : ICapabilityHandlerInvoker
+public sealed class GetProcurementRequestHandler : ICapabilityContextAwareHandlerInvoker
 {
-    private readonly InMemoryProcurementRequestStore _store;
-
-    public GetProcurementRequestHandler(InMemoryProcurementRequestStore store)
-    {
-        _store = store;
-    }
-
     public Task<object?> InvokeAsync(object? input, CancellationToken ct)
+        => throw new InvalidOperationException("Capability execution context is required.");
+
+    public Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
     {
-        var requestId = (Guid)input!;
-        var request = _store.GetById(requestId);
-
-        if (request is null)
-        {
-            return Task.FromResult<object?>(new ProcurementRequestResult
-            {
-                RequestId = requestId,
-                Status = "NotFound"
-            });
-        }
-
-        return Task.FromResult<object?>(new ProcurementRequestResult
-        {
-            Id = request.Id,
-            RequestId = request.Id,
-            Title = request.Title,
-            Description = request.Description,
-            Amount = request.Amount.Amount,
-            Currency = request.Amount.Currency,
-            RequesterId = request.RequesterId,
-            Category = request.Category,
-            Status = request.Status.ToString()
-        });
+        var service = context.ServiceProvider.GetRequiredService<ProcurementApplicationService>();
+        object result = service.Get(
+            (GetProcurementRequestInput)context.Input!,
+            context.TenantId ?? string.Empty);
+        return Task.FromResult<object?>(result);
     }
 }

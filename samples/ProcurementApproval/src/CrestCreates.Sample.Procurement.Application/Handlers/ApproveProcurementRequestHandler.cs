@@ -1,46 +1,21 @@
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Sample.Procurement.Contracts.Dtos;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Sample.Procurement.Application.Handlers;
 
-public sealed class ApproveProcurementRequestHandler : ICapabilityHandlerInvoker
+public sealed class ApproveProcurementRequestHandler : ICapabilityContextAwareHandlerInvoker
 {
-    private readonly InMemoryProcurementRequestStore _store;
-
-    public ApproveProcurementRequestHandler(InMemoryProcurementRequestStore store)
-    {
-        _store = store;
-    }
-
     public Task<object?> InvokeAsync(object? input, CancellationToken ct)
+        => throw new InvalidOperationException("Capability execution context is required.");
+
+    public Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
     {
-        var dto = (ApproveProcurementRequestInput)input!;
-        var request = _store.GetById(dto.RequestId);
-
-        if (request is null)
-        {
-            return Task.FromResult<object?>(new ProcurementRequestResult
-            {
-                RequestId = dto.RequestId,
-                Status = "NotFound"
-            });
-        }
-
-        request.Approve(dto.ApproverId, dto.Comment);
-
-        return Task.FromResult<object?>(new ProcurementRequestResult
-        {
-            Id = request.Id,
-            RequestId = request.Id,
-            Title = request.Title,
-            Description = request.Description,
-            Amount = request.Amount.Amount,
-            Currency = request.Amount.Currency,
-            RequesterId = request.RequesterId,
-            Category = request.Category,
-            Status = request.Status.ToString(),
-            ApproverId = dto.ApproverId,
-            ApprovedAt = DateTime.UtcNow
-        });
+        var service = context.ServiceProvider.GetRequiredService<ProcurementApplicationService>();
+        object result = service.Approve(
+            (ApproveProcurementRequestInput)context.Input!,
+            context.TenantId ?? string.Empty,
+            context.UserId ?? string.Empty);
+        return Task.FromResult<object?>(result);
     }
 }

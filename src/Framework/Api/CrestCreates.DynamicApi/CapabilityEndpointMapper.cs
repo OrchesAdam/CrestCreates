@@ -1,5 +1,6 @@
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -35,6 +36,13 @@ internal static class CapabilityEndpointMapper
                     {
                         ctx.CausationId = context.TraceIdentifier;
                         ctx.IdempotencyKey = ResolveIdempotencyKey(context);
+                        if (input is not null)
+                        {
+                            var typeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve(context, input.GetType())
+                                ?? throw new InvalidOperationException(
+                                    $"No JsonTypeInfo is registered for capability input '{input.GetType()}'.");
+                            ctx.InputJson = JsonSerializer.SerializeToElement(input, typeInfo);
+                        }
                         ctx.Items["HttpTraceIdentifier"] = context.TraceIdentifier;
                         ctx.Items["CapabilityEndpointId"] = descriptor.Id;
                     },

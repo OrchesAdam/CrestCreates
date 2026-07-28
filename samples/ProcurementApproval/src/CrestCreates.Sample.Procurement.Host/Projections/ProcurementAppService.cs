@@ -1,46 +1,69 @@
+using CrestCreates.Capability.Abstractions;
 using CrestCreates.Domain.Shared.Attributes;
+using CrestCreates.Sample.Procurement.Application;
 using CrestCreates.Sample.Procurement.Contracts.Dtos;
 
 namespace CrestCreates.Sample.Procurement.Host.Projections;
 
 [CrestService]
 [CapabilityCompatibilityProjection(RoutePrefix = "api/procurement")]
-public class ProcurementAppService
+public sealed class ProcurementAppService
 {
-    public Task<SubmitProcurementRequestResult> SubmitAsync(SubmitProcurementRequestInput input)
+    private readonly ProcurementApplicationService _application;
+    private readonly ICapabilityExecutionContextAccessor _execution;
+
+    public ProcurementAppService(
+        ProcurementApplicationService application,
+        ICapabilityExecutionContextAccessor execution)
     {
-        var result = new SubmitProcurementRequestResult
-        {
-            RequestId = Guid.NewGuid(),
-            Status = input.Amount > 10000m ? "PendingApproval" : "Approved",
-            Amount = input.Amount,
-            Currency = input.Currency,
-            RequiresApproval = input.Amount > 10000m
-        };
-        return Task.FromResult(result);
+        _application = application;
+        _execution = execution;
+    }
+
+    public Task<SubmitProcurementRequestResult> SubmitAsync(
+        SubmitProcurementRequestInput input,
+        CancellationToken cancellationToken = default)
+    {
+        var context = RequiredContext();
+        return _application.SubmitAsync(
+            input,
+            context.TenantId!,
+            context.UserId!,
+            cancellationToken);
+    }
+
+    public Task<ProcurementRequestResult> GetAsync(Guid requestId)
+    {
+        var context = RequiredContext();
+        return Task.FromResult(_application.Get(
+            new GetProcurementRequestInput { RequestId = requestId },
+            context.TenantId!));
     }
 
     public Task<ProcurementRequestResult> ApproveAsync(ApproveProcurementRequestInput input)
     {
-        var result = new ProcurementRequestResult
-        {
-            RequestId = input.RequestId,
-            Status = "Approved",
-            ApproverId = input.ApproverId,
-            ApprovedAt = DateTime.UtcNow
-        };
-        return Task.FromResult(result);
+        var context = RequiredContext();
+        return Task.FromResult(_application.Approve(input, context.TenantId!, context.UserId!));
     }
 
     public Task<ProcurementRequestResult> RejectAsync(RejectProcurementRequestInput input)
     {
-        var result = new ProcurementRequestResult
+        var context = RequiredContext();
+        return Task.FromResult(_application.Reject(input, context.TenantId!, context.UserId!));
+    }
+
+    private CapabilityExecutionContext RequiredContext()
+    {
+        var context = _execution.Current;
+        if (context is null
+            || string.IsNullOrWhiteSpace(context.TenantId)
+            || string.IsNullOrWhiteSpace(context.UserId))
         {
-            RequestId = input.RequestId,
-            Status = "Rejected",
-            ApproverId = input.ApproverId,
-            RejectedAt = DateTime.UtcNow
-        };
-        return Task.FromResult(result);
+            throw new CapabilityFailureException(
+                "CAPABILITY_CONTEXT_REQUIRED",
+                "A trusted tenant and user context is required.");
+        }
+
+        return context;
     }
 }

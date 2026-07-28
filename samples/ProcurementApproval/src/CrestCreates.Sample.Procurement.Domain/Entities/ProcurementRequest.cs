@@ -18,6 +18,7 @@ public class ProcurementRequest : AuditedAggregateRoot<Guid>
     public string? ApproverId { get; private set; }
     public string? ApprovalComment { get; private set; }
     public string? RejectionReason { get; private set; }
+    public string? WorkflowInstanceId { get; private set; }
     public DateTime? ApprovedAt { get; private set; }
     public DateTime? RejectedAt { get; private set; }
 
@@ -46,15 +47,39 @@ public class ProcurementRequest : AuditedAggregateRoot<Guid>
         Amount = amount;
         RequesterId = requesterId;
         Category = category;
-        Status = amount.IsAboveThreshold(ApprovalThreshold) ? ProcurementRequestStatus.PendingApproval : ProcurementRequestStatus.Approved;
+        Status = ProcurementRequestStatus.Draft;
+    }
+
+    public void Submit()
+    {
+        if (Status != ProcurementRequestStatus.Draft)
+            throw new InvalidProcurementRequestException($"Cannot submit request in status {Status}.");
+
+        Status = Amount.IsAboveThreshold(ApprovalThreshold)
+            ? ProcurementRequestStatus.PendingApproval
+            : ProcurementRequestStatus.Approved;
 
         AddDomainEvent(new ProcurementRequestSubmittedEvent(Id, Title, Amount.Amount, Amount.Currency, RequesterId, Category, Status));
+    }
+
+    public void AttachWorkflow(string workflowInstanceId)
+    {
+        if (Status != ProcurementRequestStatus.PendingApproval)
+            throw new InvalidProcurementRequestException("Only pending requests may be attached to an approval workflow.");
+        if (string.IsNullOrWhiteSpace(workflowInstanceId))
+            throw new InvalidProcurementRequestException("WorkflowInstanceId is required.");
+        if (WorkflowInstanceId is not null && !string.Equals(WorkflowInstanceId, workflowInstanceId, StringComparison.Ordinal))
+            throw new InvalidProcurementRequestException("The request is already attached to another workflow.");
+
+        WorkflowInstanceId = workflowInstanceId;
     }
 
     public void Approve(string approverId, string comment)
     {
         if (Status != ProcurementRequestStatus.PendingApproval)
             throw new InvalidProcurementRequestException($"Cannot approve request in status {Status}.");
+        if (string.Equals(RequesterId, approverId, StringComparison.Ordinal))
+            throw new InvalidProcurementRequestException("A requester cannot approve their own procurement request.");
 
         ApproverId = approverId;
         ApprovalComment = comment;

@@ -63,8 +63,8 @@ public sealed class ValidationMiddleware : ICapabilityPipelineMiddleware
         }
 
         var result = context.InputJson.HasValue
-            ? _validator.Validate(schemaDescriptor, context.InputJson.Value)
-            : _validator.Validate(schemaDescriptor, context.Input);
+            ? _validator.Validate(schemaDescriptor, context.InputJson.Value, rejectUnknownProperties: true)
+            : _validator.Validate(schemaDescriptor, context.Input, rejectUnknownProperties: true);
         if (!result.IsValid)
         {
             var errorMessages = string.Join("; ", result.Errors.Select(e => e.Message));

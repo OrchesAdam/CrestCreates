@@ -3,6 +3,7 @@ using CrestCreates.Sample.Procurement.Contracts.Dtos;
 
 namespace CrestCreates.Sample.Procurement.Contracts.Json;
 
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(SubmitProcurementRequestInput))]
 [JsonSerializable(typeof(SubmitProcurementRequestResult))]
 [JsonSerializable(typeof(ApproveProcurementRequestInput))]
