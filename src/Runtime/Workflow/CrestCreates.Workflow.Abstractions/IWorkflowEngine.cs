@@ -10,4 +10,9 @@ public interface IWorkflowEngine
         string workflowId,
         Dictionary<string, object?>? inputVariables = null,
         CancellationToken ct = default);
+
+    Task<WorkflowInstance> ExecuteAsync(
+        WorkflowExecutionRequest request,
+        CancellationToken ct = default)
+        => ExecuteAsync(request.WorkflowId, request.InputVariables, ct);
 }

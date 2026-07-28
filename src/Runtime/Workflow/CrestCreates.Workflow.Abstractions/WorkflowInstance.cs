@@ -6,6 +6,7 @@ namespace CrestCreates.Workflow.Abstractions;
 public sealed class WorkflowInstance : ISnapshotable<WorkflowInstance>
 {
     public string InstanceId { get; init; } = Guid.NewGuid().ToString("N");
+    public string? TenantId { get; init; }
     public VersionedDescriptorRef<WorkflowDescriptor> Workflow { get; init; }
     public WorkflowInstanceStatus Status { get; set; } = WorkflowInstanceStatus.Running;
     public string? CurrentStepId { get; set; }
@@ -25,6 +26,7 @@ public sealed class WorkflowInstance : ISnapshotable<WorkflowInstance>
         return new WorkflowInstance
         {
             InstanceId = InstanceId,
+            TenantId = TenantId,
             Workflow = Workflow,
             Status = Status,
             CurrentStepId = CurrentStepId,

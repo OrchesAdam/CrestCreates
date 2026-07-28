@@ -8,6 +8,23 @@
 
 **Tech Stack:** .NET 10, ASP.NET Core Minimal API, System.Text.Json source generation, CrestCreates Capability Pipeline, CrestCreates Workflow + HumanTask, CrestCreates MCP Tool Projection, CrestCreates Agent Tool Projection, xUnit 2.9.3, FluentAssertions, Moq, AutoFixture
 
+## Approved Final Scope Amendment (2026-07-28)
+
+The implemented and reviewed Golden Sample deliberately uses a smaller business surface than the original delivery sketch below. This amendment supersedes the original capability, projection, DTO, and file matrices wherever they conflict.
+
+- Public business capabilities: Submit (create-and-submit), Get, Approve, and Reject.
+- Internal decision capabilities: Apply Approval and Apply Rejection; both require `InvocationSource.HumanTask`.
+- Native HTTP: `POST /api/procurement/requests`, `GET /api/procurement/requests/{id}`, and the two decision POST routes.
+- Compatibility: Get only.
+- MCP: Get only.
+- Agent: Get and governed Submit only.
+- Quotes, separate Draft/Create, List, Compare, separate Submit, and Cancel are outside this Issue's final boundary.
+- Approval has one authoritative chain: HTTP completes the HumanTask, checkpointed completion dispatch applies the decision, and Workflow continuation completes the runtime instance.
+- HumanTask completion dispatch failures remain explicit as `CompletionDispatchFailed`; the default Runtime does not replay possibly committed subscribers. The Sample registers an InMemory checkpoint recovery policy.
+- Workflow and HumanTask instances propagate TenantId through typed runtime fields; startup rollback matches `(TenantId, RequestId)`.
+- Contracts reference only MCP/Agent abstractions. Runtime projects remain Host composition dependencies.
+- Capability unknown-property validation remains permissive by default and is made strict by the Sample's explicit input-validation policy.
+
 ## Global Constraints
 
 - **Single execution mainline:** All business execution must go through `ICapabilityDispatcher` → `CapabilityPipeline` → Handler. No Projection may call Handler directly.

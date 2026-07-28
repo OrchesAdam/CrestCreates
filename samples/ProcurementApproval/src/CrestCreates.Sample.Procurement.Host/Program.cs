@@ -5,6 +5,7 @@ using CrestCreates.Agent.Tools;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Capability.Middleware;
 using CrestCreates.DynamicApi;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.Form;
@@ -55,6 +56,9 @@ var humanTaskInstanceStore = new InMemoryHumanTaskInstanceStore();
 var workflowInstanceStore = new InMemoryWorkflowInstanceStore();
 
 builder.Services.AddCapabilityRuntime();
+builder.Services.Replace(ServiceDescriptor.Singleton<
+    ICapabilityInputValidationPolicy,
+    ProcurementInputValidationPolicy>());
 builder.Services.AddInMemoryCapabilityAudit();
 builder.Services.AddSingleton<ICapabilityHandlerModule>(new ProcurementCapabilityModule());
 builder.Services.AddSingleton<InMemoryProcurementRequestStore>(store);
@@ -81,7 +85,10 @@ builder.Services.AddFormKernel();
 builder.Services.AddHumanTaskRuntime();
 builder.Services.AddScoped<ILocalEventHandler<HumanTaskCompletedEvent>, ProcurementHumanTaskDecisionHandler>();
 builder.Services.AddWorkflowEngine();
-builder.Services.AddScoped<ILocalEventBus, ProcurementLocalEventBus>();
+builder.Services.AddScoped<ProcurementLocalEventBus>();
+builder.Services.AddScoped<ILocalEventBus>(sp =>
+    sp.GetRequiredService<ProcurementLocalEventBus>());
+builder.Services.AddScoped<IHumanTaskCompletionFailurePolicy, ProcurementHumanTaskCompletionFailurePolicy>();
 
 builder.Services.AddSingleton<ICapabilityHandlerRegistry, ProcurementHandlerRegistry>();
 builder.Services.AddSingleton<IDescriptorLookup>(new ProcurementDescriptorLookup(

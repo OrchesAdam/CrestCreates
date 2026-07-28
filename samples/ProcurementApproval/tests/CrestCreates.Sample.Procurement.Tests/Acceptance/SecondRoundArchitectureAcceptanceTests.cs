@@ -14,6 +14,7 @@ using CrestCreates.Sample.Procurement.Application.Handlers;
 using CrestCreates.Sample.Procurement.Contracts;
 using CrestCreates.Sample.Procurement.Contracts.Dtos;
 using CrestCreates.Sample.Procurement.Contracts.Json;
+using CrestCreates.Sample.Procurement.Domain;
 using CrestCreates.Sample.Procurement.Host;
 using CrestCreates.Sample.Procurement.Tests.TestInfrastructure;
 using CrestCreates.Workflow;
@@ -256,6 +257,56 @@ public sealed class WorkflowAtomicityAcceptanceTests
         workflow!.Status.Should().Be(WorkflowInstanceStatus.Suspended);
         pending.Should().ContainSingle();
         workflow.WaitingHumanTaskId.Should().Be(pending[0].Id);
+        workflow.TenantId.Should().Be("tenant-a");
+        pending[0].TenantId.Should().Be("tenant-a");
+    }
+
+    [Fact]
+    public async Task WorkflowRollback_IsScopedByTenantAndRequestId()
+    {
+        using var factory = new ProcurementWebApplicationFactory(services =>
+        {
+            services.RemoveAll<IWorkflowEngine>();
+            services.AddScoped<IWorkflowEngine, CreateThenFailWorkflowEngine>();
+        });
+        _ = factory.CreateClient();
+        var requestId = Guid.NewGuid();
+        var workflows = factory.Services.GetRequiredService<InMemoryWorkflowInstanceStore>();
+        var tasks = factory.Services.GetRequiredService<InMemoryHumanTaskInstanceStore>();
+#pragma warning disable CC1001 // Synthetic cross-tenant rollback fixture; production descriptor is registered by the Host.
+        var tenantBWorkflow = new WorkflowInstance
+        {
+            InstanceId = "tenant-b-workflow",
+            TenantId = "tenant-b",
+            Workflow = new VersionedDescriptorRef<WorkflowDescriptor>(
+                ProcurementContractIds.ApprovalWorkflow,
+                1),
+            Status = WorkflowInstanceStatus.Suspended,
+            WaitingHumanTaskId = "tenant-b-task",
+            Variables = new Dictionary<string, object?> { ["requestId"] = requestId }
+        };
+#pragma warning restore CC1001
+        await workflows.SaveAsync(tenantBWorkflow);
+        await tasks.SaveAsync(new HumanTaskInstance
+        {
+            Id = "tenant-b-task",
+            HumanTaskId = "ht_procurement_approval",
+            HumanTaskVersion = 1,
+            TenantId = "tenant-b",
+            WorkflowInstanceId = tenantBWorkflow.InstanceId,
+            Status = HumanTaskInstanceStatus.Created,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        using var scope = factory.Services.CreateScope();
+        var start = () => scope.ServiceProvider.GetRequiredService<ProcurementApprovalTaskService>()
+            .StartAsync(requestId, "tenant-a", "requester-a");
+
+        await start.Should().ThrowAsync<CapabilityFailureException>()
+            .Where(exception => exception.ErrorCode == "CAPABILITY_DEPENDENCY_UNAVAILABLE");
+        workflows.GetAll().Should().ContainSingle(instance =>
+            instance.InstanceId == tenantBWorkflow.InstanceId);
+        tasks.GetAll().Should().ContainSingle(task => task.Id == "tenant-b-task");
     }
 
     private static Task<HttpResponseMessage> SubmitRawAsync(HttpClient client, string title)
@@ -295,6 +346,44 @@ public sealed class WorkflowAtomicityAcceptanceTests
             CancellationToken ct = default)
             => throw new NotSupportedException();
     }
+
+    private sealed class CreateThenFailWorkflowEngine(
+        InMemoryWorkflowInstanceStore workflows,
+        InMemoryHumanTaskInstanceStore tasks) : IWorkflowEngine
+    {
+        public Task<WorkflowInstance> ExecuteAsync(
+            string workflowId,
+            Dictionary<string, object?>? inputVariables = null,
+            CancellationToken ct = default)
+            => throw new NotSupportedException("Typed workflow execution is required.");
+
+        public async Task<WorkflowInstance> ExecuteAsync(
+            WorkflowExecutionRequest request,
+            CancellationToken ct = default)
+        {
+            var workflow = new WorkflowInstance
+            {
+                InstanceId = "tenant-a-workflow",
+                TenantId = request.TenantId,
+                Workflow = new VersionedDescriptorRef<WorkflowDescriptor>(request.WorkflowId, 1),
+                Status = WorkflowInstanceStatus.Suspended,
+                WaitingHumanTaskId = "tenant-a-task",
+                Variables = new Dictionary<string, object?>(request.InputVariables)
+            };
+            await workflows.SaveAsync(workflow, ct);
+            await tasks.SaveAsync(new HumanTaskInstance
+            {
+                Id = "tenant-a-task",
+                HumanTaskId = "ht_procurement_approval",
+                HumanTaskVersion = 1,
+                TenantId = request.TenantId,
+                WorkflowInstanceId = workflow.InstanceId,
+                Status = HumanTaskInstanceStatus.Created,
+                CreatedAt = DateTimeOffset.UtcNow
+            }, ct);
+            throw new InvalidOperationException("Synthetic post-create workflow failure.");
+        }
+    }
 }
 
 public sealed class DecisionRecoveryAndAuditAcceptanceTests
@@ -327,9 +416,7 @@ public sealed class DecisionRecoveryAndAuditAcceptanceTests
         aggregate.Status.ToString().Should().Be("PendingApproval");
         var taskAfterFailure = await services.GetRequiredService<IHumanTaskInstanceStore>()
             .GetByIdAsync(pending[0].Id);
-        taskAfterFailure!.Status.Should().BeOneOf(
-            HumanTaskInstanceStatus.Created,
-            HumanTaskInstanceStatus.Assigned);
+        taskAfterFailure!.Status.Should().Be(HumanTaskInstanceStatus.CompletionDispatchFailed);
         var workflowAfterFailure = await services.GetRequiredService<IWorkflowInstanceStore>()
             .GetAsync(aggregate.WorkflowInstanceId!);
         workflowAfterFailure!.Status.Should().Be(WorkflowInstanceStatus.Suspended);
@@ -378,9 +465,7 @@ public sealed class DecisionRecoveryAndAuditAcceptanceTests
             .WithMessage("Synthetic continuation failure.");
         var task = await services.GetRequiredService<IHumanTaskInstanceStore>()
             .GetByIdAsync(pending[0].Id);
-        task!.Status.Should().BeOneOf(
-            HumanTaskInstanceStatus.Created,
-            HumanTaskInstanceStatus.Assigned);
+        task!.Status.Should().Be(HumanTaskInstanceStatus.CompletionDispatchFailed);
         var workflow = await services.GetRequiredService<IWorkflowInstanceStore>()
             .GetAsync(aggregate.WorkflowInstanceId!);
         workflow!.Status.Should().Be(WorkflowInstanceStatus.Suspended);
@@ -391,6 +476,40 @@ public sealed class DecisionRecoveryAndAuditAcceptanceTests
         reconciliation.ObservedTaskStatus.Should().Be(HumanTaskInstanceStatus.Completed);
         reconciliation.ObservedWorkflowStatus.Should().Be(WorkflowInstanceStatus.Suspended);
         reconciliation.ErrorCode.Should().Be("PROCUREMENT_DECISION_CONTINUATION_FAILED");
+    }
+
+    [Fact]
+    public Task HttpApprove_WhenContinuationFails_CanRetrySameHttpRequest()
+        => AssertHttpDecisionRetryAsync("approve", "Approve");
+
+    [Fact]
+    public Task HttpReject_WhenContinuationFails_CanRetrySameHttpRequest()
+        => AssertHttpDecisionRetryAsync("reject", "Reject");
+
+    [Fact]
+    public Task MatchingTerminalDecision_CanResumePendingHumanTask()
+        => AssertHttpDecisionRetryAsync("approve", "Approve");
+
+    [Fact]
+    public async Task OppositeTerminalDecision_RemainsConflict()
+    {
+        using var factory = CreateFailOnceContinuationFactory();
+        using var client = factory.CreateClient();
+        ProjectionCompositionAcceptanceTests.SetIdentity(
+            client, "tenant-a", "requester-a", "procurement-requester");
+        var submitted = await ProjectionCompositionAcceptanceTests.SubmitHttpAsync(
+            client, "Opposite decision conflict", 30_000m);
+        ProjectionCompositionAcceptanceTests.SetIdentity(
+            client, "tenant-a", "manager-a", "procurement-manager");
+
+        using var first = await PostDecisionAsync(client, submitted.RequestId, "approve", "Approve");
+        first.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        using var opposite = await PostDecisionAsync(client, submitted.RequestId, "reject", "Reject");
+
+        opposite.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        factory.Services.GetRequiredService<InMemoryProcurementRequestStore>()
+            .GetById("tenant-a", submitted.RequestId)!.Status
+            .Should().Be(ProcurementRequestStatus.Approved);
     }
 
     [Fact]
@@ -475,6 +594,86 @@ public sealed class DecisionRecoveryAndAuditAcceptanceTests
         return result.Output.Should().BeOfType<SubmitProcurementRequestResult>().Subject;
     }
 
+    private static async Task AssertHttpDecisionRetryAsync(string route, string outcome)
+    {
+        using var factory = CreateFailOnceContinuationFactory();
+        using var client = factory.CreateClient();
+        ProjectionCompositionAcceptanceTests.SetIdentity(
+            client, "tenant-a", "requester-a", "procurement-requester");
+        var submitted = await ProjectionCompositionAcceptanceTests.SubmitHttpAsync(
+            client, $"Recover {outcome}", 30_000m);
+        var aggregate = factory.Services.GetRequiredService<InMemoryProcurementRequestStore>()
+            .GetById("tenant-a", submitted.RequestId)!;
+        var workflowId = aggregate.WorkflowInstanceId!;
+        var workflow = await factory.Services.GetRequiredService<IWorkflowInstanceStore>()
+            .GetAsync(workflowId);
+        var taskId = workflow!.WaitingHumanTaskId!;
+        ProjectionCompositionAcceptanceTests.SetIdentity(
+            client, "tenant-a", "manager-a", "procurement-manager");
+
+        using var first = await PostDecisionAsync(client, submitted.RequestId, route, outcome);
+        first.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        aggregate.Status.ToString().Should().Be(outcome == "Approve" ? "Approved" : "Rejected");
+        (await factory.Services.GetRequiredService<IHumanTaskInstanceStore>()
+                .GetByIdAsync(taskId))!.Status
+            .Should().Be(HumanTaskInstanceStatus.CompletionDispatchFailed);
+        (await factory.Services.GetRequiredService<IWorkflowInstanceStore>()
+                .GetAsync(workflowId))!.Status
+            .Should().Be(WorkflowInstanceStatus.Suspended);
+
+        using var retry = await PostDecisionAsync(client, submitted.RequestId, route, outcome);
+
+        retry.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await factory.Services.GetRequiredService<IHumanTaskInstanceStore>()
+                .GetByIdAsync(taskId))!.Status
+            .Should().Be(HumanTaskInstanceStatus.Completed);
+        (await factory.Services.GetRequiredService<IWorkflowInstanceStore>()
+                .GetAsync(workflowId))!.Status
+            .Should().Be(WorkflowInstanceStatus.Completed);
+        factory.Services.GetRequiredService<ICapabilityAuditStore>()
+            .Should().BeOfType<InMemoryCapabilityAuditStore>()
+            .Which.GetRecords().Should().ContainSingle(record =>
+                record.Source == InvocationSource.HumanTask
+                && record.CapabilityId == (outcome == "Approve"
+                    ? ProcurementContractIds.ApplyApprovalDecisionCapability
+                    : ProcurementContractIds.ApplyRejectionDecisionCapability)
+                && record.IsSuccess);
+    }
+
+    private static Task<HttpResponseMessage> PostDecisionAsync(
+        HttpClient client,
+        Guid requestId,
+        string route,
+        string outcome)
+    {
+        HttpContent content = outcome == "Approve"
+            ? JsonContent.Create(
+                new ApproveProcurementRequestInput { Comment = "recover" },
+                ProcurementJsonContext.Default.ApproveProcurementRequestInput)
+            : JsonContent.Create(
+                new RejectProcurementRequestInput { Reason = "recover" },
+                ProcurementJsonContext.Default.RejectProcurementRequestInput);
+        return client.PostAsync($"/api/procurement/requests/{requestId}/{route}", content);
+    }
+
+    private static ProcurementWebApplicationFactory CreateFailOnceContinuationFactory()
+        => new(services =>
+        {
+            var original = services.Last(descriptor =>
+                descriptor.ServiceType == typeof(IWorkflowContinuationService));
+            services.RemoveAll<IWorkflowContinuationService>();
+            services.AddSingleton<FailOnceContinuationGate>();
+            services.AddScoped<IWorkflowContinuationService>(provider =>
+            {
+                var inner = (IWorkflowContinuationService)ActivatorUtilities.CreateInstance(
+                    provider,
+                    original.ImplementationType!);
+                return new FailOnceContinuationService(
+                    inner,
+                    provider.GetRequiredService<FailOnceContinuationGate>());
+            });
+        });
+
     private sealed class FailOnceDecisionModule : ICapabilityHandlerModule
     {
         public string Id => "procurement";
@@ -500,6 +699,25 @@ public sealed class DecisionRecoveryAndAuditAcceptanceTests
             WorkflowContinuationRequest request,
             CancellationToken ct = default)
             => throw new InvalidOperationException("Synthetic continuation failure.");
+    }
+
+    private sealed class FailOnceContinuationService(
+        IWorkflowContinuationService inner,
+        FailOnceContinuationGate gate) : IWorkflowContinuationService
+    {
+        public Task ContinueAsync(
+            WorkflowContinuationRequest request,
+            CancellationToken ct = default)
+        {
+            if (Interlocked.Increment(ref gate.Attempts) == 1)
+                throw new InvalidOperationException("Synthetic continuation failure.");
+            return inner.ContinueAsync(request, ct);
+        }
+    }
+
+    private sealed class FailOnceContinuationGate
+    {
+        public int Attempts;
     }
 
     private sealed class FailOnceDecisionHandler(ICapabilityContextAwareHandlerInvoker inner)

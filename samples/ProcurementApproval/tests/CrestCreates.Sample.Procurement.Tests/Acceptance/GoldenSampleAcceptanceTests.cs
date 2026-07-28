@@ -537,4 +537,14 @@ public sealed class WorkflowTenantAndSchemaAcceptanceTests
         ProcurementJsonContext.Default.RejectProcurementRequestInput.Should().NotBeNull();
         ProcurementJsonContext.Default.ProcurementRequestResult.Should().NotBeNull();
     }
+
+    [Fact]
+    public void Contracts_DoesNotReferenceMcpOrAgentRuntimeAssemblies()
+    {
+        typeof(ProcurementContractIds).Assembly
+            .GetReferencedAssemblies()
+            .Select(reference => reference.Name)
+            .Should().NotContain("CrestCreates.Mcp").And
+            .NotContain("CrestCreates.Agent.Tools");
+    }
 }

@@ -26,6 +26,25 @@ public sealed class WorkflowEngine : IWorkflowEngine
         string workflowId,
         Dictionary<string, object?>? inputVariables = null,
         CancellationToken ct = default)
+        => await ExecuteCoreAsync(workflowId, null, inputVariables, ct).ConfigureAwait(false);
+
+    public async Task<WorkflowInstance> ExecuteAsync(
+        WorkflowExecutionRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await ExecuteCoreAsync(
+            request.WorkflowId,
+            request.TenantId,
+            request.InputVariables,
+            ct).ConfigureAwait(false);
+    }
+
+    private async Task<WorkflowInstance> ExecuteCoreAsync(
+        string workflowId,
+        string? tenantId,
+        Dictionary<string, object?>? inputVariables,
+        CancellationToken ct)
     {
         var descriptor = _registry.GetById(workflowId);
         if (descriptor == null)
@@ -33,7 +52,8 @@ public sealed class WorkflowEngine : IWorkflowEngine
 
         var instance = new WorkflowInstance
         {
-            Workflow = new VersionedDescriptorRef<WorkflowDescriptor>(descriptor.Id, descriptor.Version)
+            Workflow = new VersionedDescriptorRef<WorkflowDescriptor>(descriptor.Id, descriptor.Version),
+            TenantId = tenantId
         };
 
         if (inputVariables != null)

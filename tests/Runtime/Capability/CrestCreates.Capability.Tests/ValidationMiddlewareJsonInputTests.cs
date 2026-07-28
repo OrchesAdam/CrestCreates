@@ -35,7 +35,7 @@ public sealed class ValidationMiddlewareJsonInputTests
 
         capabilities.Setup(registry => registry.GetByVersion(capability.Id, 1)).Returns(capability);
         schemas.Setup(registry => registry.GetByVersion("input", 2)).Returns(schema);
-        validator.Setup(instance => instance.Validate(schema, inputJson, true))
+        validator.Setup(instance => instance.Validate(schema, inputJson, false))
             .Returns(SchemaValidationResult.Success());
 
         var middleware = new ValidationMiddleware(validator.Object, capabilities.Object, schemas.Object);
@@ -54,7 +54,7 @@ public sealed class ValidationMiddlewareJsonInputTests
 
         result.IsSuccess.Should().BeTrue();
         validator.Verify(instance => instance.Validate(schema, It.IsAny<object?>()), Times.Never);
-        validator.Verify(instance => instance.Validate(schema, inputJson, true), Times.Once);
+        validator.Verify(instance => instance.Validate(schema, inputJson, false), Times.Once);
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public sealed class ValidationMiddlewareJsonInputTests
 
         capabilities.Setup(registry => registry.GetByVersion(capability.Id, 1)).Returns(capability);
         schemas.Setup(registry => registry.GetByVersion("input", 1)).Returns(schema);
-        validator.Setup(instance => instance.Validate(schema, It.IsAny<object?>(), true))
+        validator.Setup(instance => instance.Validate(schema, It.IsAny<object?>(), false))
             .Returns(SchemaValidationResult.Failure([
                 new SchemaValidationError
                 {
@@ -99,5 +99,47 @@ public sealed class ValidationMiddlewareJsonInputTests
 
         result.Issues.Should().ContainSingle().Which.Should().Be(
             new CapabilityExecutionIssue("FIELD_REQUIRED", "Name is required.", "name"));
+    }
+
+    [Fact]
+    public async Task Unknown_property_rejection_requires_explicit_policy()
+    {
+        var validator = new Mock<ISchemaValidator>(MockBehavior.Strict);
+        var capabilities = new Mock<ICapabilityRegistry>();
+        var schemas = new Mock<ISchemaRegistry>();
+        var policy = new Mock<ICapabilityInputValidationPolicy>();
+        var schema = new SchemaDescriptor { Id = "input", Name = "Input", Version = 1 };
+        var capability = new CapabilityDescriptor
+        {
+            Id = "orders.create",
+            Name = "Create order",
+            Version = 1,
+            InputSchema = new VersionedDescriptorRef<SchemaDescriptor>("input", 1)
+        };
+        using var json = JsonDocument.Parse("{\"name\":\"strict\",\"extension\":true}");
+        var input = json.RootElement.Clone();
+        capabilities.Setup(registry => registry.GetByVersion(capability.Id, 1)).Returns(capability);
+        schemas.Setup(registry => registry.GetByVersion(schema.Id, 1)).Returns(schema);
+        policy.Setup(value => value.RejectUnknownProperties(capability, schema)).Returns(true);
+        validator.Setup(value => value.Validate(schema, input, true))
+            .Returns(SchemaValidationResult.Success());
+        var middleware = new ValidationMiddleware(
+            validator.Object,
+            capabilities.Object,
+            schemas.Object,
+            policy.Object);
+
+        var result = await middleware.InvokeAsync(
+            new CapabilityExecutionContext
+            {
+                ServiceProvider = null!,
+                CapabilityId = capability.Id,
+                CapabilityVersion = 1,
+                InputJson = input
+            },
+            _ => Task.FromResult(CapabilityExecutionResult.Success(null, TimeSpan.Zero)));
+
+        result.IsSuccess.Should().BeTrue();
+        validator.Verify(value => value.Validate(schema, input, true), Times.Once);
     }
 }

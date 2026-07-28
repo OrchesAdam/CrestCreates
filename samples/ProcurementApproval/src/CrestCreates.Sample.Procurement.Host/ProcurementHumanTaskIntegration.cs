@@ -33,6 +33,7 @@ public sealed record ProcurementDecisionReconciliation(
 public sealed class ProcurementDecisionReconciliationStore
 {
     private readonly ConcurrentDictionary<string, ProcurementDecisionReconciliation> _records = new();
+    private readonly ConcurrentDictionary<string, int> _nextHandlerIndexes = new();
 
     public void RecordFailure(
         HumanTaskCompletedEvent completed,
@@ -78,6 +79,12 @@ public sealed class ProcurementDecisionReconciliationStore
 
     public ProcurementDecisionReconciliation? Get(string humanTaskInstanceId)
         => _records.GetValueOrDefault(humanTaskInstanceId);
+
+    public int GetNextHandlerIndex(string humanTaskInstanceId)
+        => _nextHandlerIndexes.GetValueOrDefault(humanTaskInstanceId);
+
+    public void MarkHandlerCompleted(string humanTaskInstanceId, int nextHandlerIndex)
+        => _nextHandlerIndexes[humanTaskInstanceId] = nextHandlerIndex;
 }
 
 public sealed class ProcurementDecisionDispatchException(
@@ -106,8 +113,13 @@ public sealed class ProcurementLocalEventBus(
 
         try
         {
-            foreach (var handler in services.GetServices<ILocalEventHandler<HumanTaskCompletedEvent>>())
-                await handler.HandleAsync(completed, cancellationToken).ConfigureAwait(false);
+            var handlers = services.GetServices<ILocalEventHandler<HumanTaskCompletedEvent>>().ToArray();
+            var nextHandlerIndex = reconciliation.GetNextHandlerIndex(completed.HumanTaskInstanceId);
+            for (var index = nextHandlerIndex; index < handlers.Length; index++)
+            {
+                await handlers[index].HandleAsync(completed, cancellationToken).ConfigureAwait(false);
+                reconciliation.MarkHandlerCompleted(completed.HumanTaskInstanceId, index + 1);
+            }
             await RequireCompletedWorkflowAsync(completed, cancellationToken).ConfigureAwait(false);
             reconciliation.MarkResolved(completed.HumanTaskInstanceId);
         }
@@ -164,6 +176,16 @@ public sealed class ProcurementLocalEventBus(
     }
 }
 
+public sealed class ProcurementHumanTaskCompletionFailurePolicy(
+    ProcurementLocalEventBus eventBus) : IHumanTaskCompletionFailurePolicy
+{
+    public Task RecoverAsync(
+        HumanTaskInstance instance,
+        HumanTaskCompletedEvent completion,
+        CancellationToken cancellationToken = default)
+        => eventBus.PublishAsync(completion, cancellationToken);
+}
+
 public sealed class ProcurementHumanTaskDecisionHandler(
     IHumanTaskInstanceStore tasks,
     ICapabilityDispatcher dispatcher,
@@ -180,8 +202,8 @@ public sealed class ProcurementHumanTaskDecisionHandler(
             ?? throw new InvalidOperationException("Completed HumanTask instance is unavailable.");
         var variables = task.Input as Dictionary<string, object?>
             ?? throw new InvalidOperationException("Procurement workflow variables are unavailable.");
-        var expectedTenant = RequiredString(variables, "tenantId");
-        if (!string.Equals(expectedTenant, tenant.CurrentTenantId, StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(task.TenantId)
+            || !string.Equals(task.TenantId, tenant.CurrentTenantId, StringComparison.Ordinal))
             throw new UnauthorizedAccessException("The HumanTask belongs to another tenant.");
         if (!currentUser.IsInRole("procurement-manager"))
             throw new UnauthorizedAccessException("The procurement-manager role is required.");
@@ -261,21 +283,26 @@ public sealed class ProcurementApprovalTaskService(
         try
         {
             workflow = await workflowEngine.ExecuteAsync(
-                ProcurementContractIds.ApprovalWorkflow,
-                new Dictionary<string, object?>
+                new WorkflowExecutionRequest
                 {
-                    ["tenantId"] = tenantId,
-                    ["requestId"] = requestId,
-                    ["requesterId"] = requesterId
+                    WorkflowId = ProcurementContractIds.ApprovalWorkflow,
+                    TenantId = tenantId,
+                    InputVariables = new Dictionary<string, object?>
+                    {
+                        ["requestId"] = requestId,
+                        ["requesterId"] = requesterId
+                    }
                 },
                 cancellationToken).ConfigureAwait(false);
             var pending = await tasks.GetPendingByWorkflowAsync(
                 workflow.InstanceId,
                 cancellationToken).ConfigureAwait(false);
             if (workflow.Status != WorkflowInstanceStatus.Suspended
+                || !string.Equals(workflow.TenantId, tenantId, StringComparison.Ordinal)
                 || string.IsNullOrWhiteSpace(workflow.WaitingHumanTaskId)
                 || pending.Count != 1
-                || !string.Equals(pending[0].Id, workflow.WaitingHumanTaskId, StringComparison.Ordinal))
+                || !string.Equals(pending[0].Id, workflow.WaitingHumanTaskId, StringComparison.Ordinal)
+                || !string.Equals(pending[0].TenantId, tenantId, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
                     "Approval workflow must suspend with exactly one correlated pending HumanTask.");
@@ -285,11 +312,11 @@ public sealed class ProcurementApprovalTaskService(
         }
         catch (Exception exception)
         {
-            RollbackCreatedRuntime(requestId, workflow?.InstanceId);
+            RollbackCreatedRuntime(tenantId, requestId, workflow?.InstanceId);
             if (exception is OperationCanceledException)
                 throw;
             throw new CapabilityFailureException(
-                "PROCUREMENT_APPROVAL_WORKFLOW_UNAVAILABLE",
+                CapabilityExecutionErrorCodes.DependencyUnavailable,
                 $"The approval workflow could not be established: {exception.Message}");
         }
     }
@@ -316,7 +343,21 @@ public sealed class ProcurementApprovalTaskService(
             ?? throw new CapabilityFailureException(
                 "CAPABILITY_RESOURCE_NOT_FOUND",
                 $"Procurement request '{requestId}' is unavailable.");
-        if (request.Status != ProcurementRequestStatus.PendingApproval
+        var isApproval = string.Equals(outcome, "Approve", StringComparison.OrdinalIgnoreCase);
+        var isRejection = string.Equals(outcome, "Reject", StringComparison.OrdinalIgnoreCase);
+        var matchingTerminalDecision =
+            request.Status == ProcurementRequestStatus.Approved && isApproval
+            || request.Status == ProcurementRequestStatus.Rejected && isRejection;
+        var oppositeTerminalDecision =
+            request.Status == ProcurementRequestStatus.Approved && isRejection
+            || request.Status == ProcurementRequestStatus.Rejected && isApproval;
+        if (oppositeTerminalDecision)
+        {
+            throw new CapabilityFailureException(
+                "CAPABILITY_DECISION_CONFLICT",
+                $"Procurement request '{requestId}' already has the opposite decision.");
+        }
+        if ((request.Status != ProcurementRequestStatus.PendingApproval && !matchingTerminalDecision)
             || string.IsNullOrWhiteSpace(request.WorkflowInstanceId))
         {
             throw new CapabilityFailureException(
@@ -334,17 +375,34 @@ public sealed class ProcurementApprovalTaskService(
                 "The approval workflow is not suspended on a HumanTask.");
         }
 
-        var pending = await tasks.GetPendingByWorkflowAsync(workflow.InstanceId, cancellationToken)
+        var task = await tasks.GetByIdAsync(workflow.WaitingHumanTaskId, cancellationToken)
             .ConfigureAwait(false);
-        if (pending.Count != 1
-            || !string.Equals(pending[0].Id, workflow.WaitingHumanTaskId, StringComparison.Ordinal))
+        if (task is null
+            || !string.Equals(task.WorkflowInstanceId, workflow.InstanceId, StringComparison.Ordinal)
+            || !string.Equals(task.TenantId, tenantId, StringComparison.Ordinal))
         {
             throw new CapabilityFailureException(
                 "CAPABILITY_DECISION_STATE_INVALID",
-                "Exactly one correlated pending HumanTask is required.");
+                "The workflow waiting HumanTask is unavailable or belongs to another tenant.");
         }
 
-        await CompleteAsync(pending[0].Id, outcome, comment, cancellationToken)
+        if (matchingTerminalDecision
+            && task.Status != HumanTaskInstanceStatus.CompletionDispatchFailed)
+            throw DecisionStateInvalid("A terminal decision can resume only from an explicit completion failure.");
+        if (task.Status == HumanTaskInstanceStatus.CompletionDispatchFailed
+            && !string.Equals(task.Outcome, outcome, StringComparison.OrdinalIgnoreCase))
+            throw new CapabilityFailureException(
+                "CAPABILITY_DECISION_CONFLICT",
+                "The requested decision conflicts with the failed HumanTask completion outcome.");
+        if (task.Status != HumanTaskInstanceStatus.CompletionDispatchFailed)
+        {
+            var pending = await tasks.GetPendingByWorkflowAsync(workflow.InstanceId, cancellationToken)
+                .ConfigureAwait(false);
+            if (pending.Count != 1 || pending[0].Id != task.Id)
+                throw DecisionStateInvalid("Exactly one correlated pending HumanTask is required.");
+        }
+
+        await CompleteAsync(task.Id, outcome, comment, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -358,10 +416,9 @@ public sealed class ProcurementApprovalTaskService(
             ?? throw new InvalidOperationException("HumanTask is unavailable.");
         var variables = task.Input as Dictionary<string, object?>
             ?? throw new InvalidOperationException("Procurement workflow variables are unavailable.");
-        var taskTenant = variables["tenantId"]?.ToString();
         var requesterId = variables["requesterId"]?.ToString();
-        if (string.IsNullOrWhiteSpace(taskTenant)
-            || !string.Equals(taskTenant, tenant.CurrentTenantId, StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(task.TenantId)
+            || !string.Equals(task.TenantId, tenant.CurrentTenantId, StringComparison.Ordinal))
             throw Forbidden("The HumanTask belongs to another tenant.");
         if (!currentUser.IsInRole("procurement-manager"))
             throw Forbidden("The procurement-manager role is required.");
@@ -376,11 +433,16 @@ public sealed class ProcurementApprovalTaskService(
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private void RollbackCreatedRuntime(Guid requestId, string? workflowInstanceId)
+    private void RollbackCreatedRuntime(
+        string tenantId,
+        Guid requestId,
+        string? workflowInstanceId)
     {
         var workflowIds = inMemoryWorkflows.GetAll()
-            .Where(instance => string.Equals(instance.InstanceId, workflowInstanceId, StringComparison.Ordinal)
-                || MatchesRequest(instance, requestId))
+            .Where(instance =>
+                (string.Equals(instance.TenantId, tenantId, StringComparison.Ordinal)
+                 && string.Equals(instance.InstanceId, workflowInstanceId, StringComparison.Ordinal))
+                || MatchesRequest(instance, tenantId, requestId))
             .Select(instance => instance.InstanceId)
             .ToHashSet(StringComparer.Ordinal);
         foreach (var task in inMemoryTasks.GetAll()
@@ -391,9 +453,16 @@ public sealed class ProcurementApprovalTaskService(
             inMemoryWorkflows.TryRemove(instanceId);
     }
 
-    private static bool MatchesRequest(WorkflowInstance instance, Guid requestId)
-        => instance.Variables.TryGetValue("requestId", out var value)
+    private static bool MatchesRequest(
+        WorkflowInstance instance,
+        string tenantId,
+        Guid requestId)
+        => string.Equals(instance.TenantId, tenantId, StringComparison.Ordinal)
+            && instance.Variables.TryGetValue("requestId", out var value)
             && (value is Guid id ? id == requestId : Guid.TryParse(value?.ToString(), out id) && id == requestId);
+
+    private static CapabilityFailureException DecisionStateInvalid(string message)
+        => new("CAPABILITY_DECISION_STATE_INVALID", message);
 
     private static CapabilityFailureException Forbidden(string message)
         => new("CAPABILITY_FORBIDDEN", message);

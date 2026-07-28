@@ -203,7 +203,7 @@ public class CapabilityPipelineDescriptorOverloadTests
         capabilityRegistry.Setup(r => r.GetByName("cap_test")).Returns(v2Descriptor);
 
         schemaRegistry.Setup(s => s.GetByVersion("schema_test", 1)).Returns(schemaDescriptor);
-        validator.Setup(v => v.Validate(schemaDescriptor, "payload", true))
+        validator.Setup(v => v.Validate(schemaDescriptor, "payload", false))
             .Returns(SchemaValidationResult.Success());
 
         var middleware = new ValidationMiddleware(

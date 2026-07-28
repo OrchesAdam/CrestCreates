@@ -5,5 +5,6 @@ public enum HumanTaskInstanceStatus
     Created,
     Assigned,
     Completed,
-    Cancelled
+    Cancelled,
+    CompletionDispatchFailed
 }

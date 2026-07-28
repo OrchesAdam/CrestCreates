@@ -16,15 +16,19 @@ public sealed class ValidationMiddleware : ICapabilityPipelineMiddleware
     private readonly ISchemaValidator? _validator;
     private readonly ICapabilityRegistry _capabilityRegistry;
     private readonly ISchemaRegistry? _schemaRegistry;
+    private readonly ICapabilityInputValidationPolicy _inputValidationPolicy;
 
     public ValidationMiddleware(
         ISchemaValidator? validator,
         ICapabilityRegistry capabilityRegistry,
-        ISchemaRegistry? schemaRegistry = null)
+        ISchemaRegistry? schemaRegistry = null,
+        ICapabilityInputValidationPolicy? inputValidationPolicy = null)
     {
         _validator = validator;
         _capabilityRegistry = capabilityRegistry;
         _schemaRegistry = schemaRegistry;
+        _inputValidationPolicy = inputValidationPolicy
+            ?? AllowUnknownCapabilityInputPropertiesPolicy.Instance;
     }
 
     public Task<CapabilityExecutionResult> InvokeAsync(
@@ -62,9 +66,18 @@ public sealed class ValidationMiddleware : ICapabilityPipelineMiddleware
                 TimeSpan.Zero));
         }
 
+        var rejectUnknownProperties = _inputValidationPolicy.RejectUnknownProperties(
+            capDescriptor,
+            schemaDescriptor);
         var result = context.InputJson.HasValue
-            ? _validator.Validate(schemaDescriptor, context.InputJson.Value, rejectUnknownProperties: true)
-            : _validator.Validate(schemaDescriptor, context.Input, rejectUnknownProperties: true);
+            ? _validator.Validate(
+                schemaDescriptor,
+                context.InputJson.Value,
+                rejectUnknownProperties)
+            : _validator.Validate(
+                schemaDescriptor,
+                context.Input,
+                rejectUnknownProperties);
         if (!result.IsValid)
         {
             var errorMessages = string.Join("; ", result.Errors.Select(e => e.Message));

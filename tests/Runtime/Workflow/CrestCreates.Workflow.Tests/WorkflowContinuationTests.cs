@@ -336,6 +336,7 @@ public class WorkflowContinuationTests
         };
         var instance = new WorkflowInstance
         {
+            TenantId = "tenant-a",
             Workflow = new VersionedDescriptorRef<WorkflowDescriptor>("wf_01", 1),
             Variables = { ["request"] = "test-data" }
         };
@@ -350,6 +351,7 @@ public class WorkflowContinuationTests
             r => r.CreateAsync(
                 It.Is<HumanTaskCreationRequest>(req =>
                     req.HumanTaskId == "ht_01" &&
+                    req.TenantId == "tenant-a" &&
                     req.WorkflowInstanceId == instance.InstanceId &&
                     req.WorkflowStepId == "step_01" &&
                     req.Input != null),

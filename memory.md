@@ -1796,7 +1796,7 @@ Status: Completed.
 
 ### Issue #65 — Procurement Approval Projection / Exposure Golden Sample (2026-07-28)
 
-**Status**: ✅ Complete — second-round composition invariant closure
+**Status**: ✅ Complete — third-round failure-recovery protocol closure
 
 **Single business chain**:
 
@@ -1825,8 +1825,12 @@ Compatibility GET
 - The former duplicated test Capability Host and permissive smoke tests were moved to `99_RecycleBin/PR66LegacyProcurementTests`; active tests consume the production descriptor providers and isolated `WebApplicationFactory` stores.
 - Approval now has one authoritative path: HTTP Approve/Reject completes the correlated pending HumanTask; the HumanTask event dispatches internal `procurement.request.apply-approval` / `procurement.request.apply-rejection` capabilities, which accept only `InvocationSource.HumanTask`; workflow continuation then reaches its terminal state. No public projection mutates the aggregate independently.
 - Compatibility is deliberately read-only. Its active snapshot contains only `compat.appservice.procurement.get`; Submit/Approve/Reject routes are not generated, eliminating mutating GETs, permission downgrade, and a second write surface.
-- High-value Submit does not persist its aggregate until the workflow is suspended with exactly one correlated pending HumanTask. Workflow or task startup failures roll back the in-memory workflow/task lease and return `PROCUREMENT_APPROVAL_WORKFLOW_UNAVAILABLE`, leaving no orphan request or runtime instance.
-- HumanTask completion rolls back the task state when decision dispatch or workflow continuation fails, so retry remains possible. The sample reconciliation store records the failed decision attempt and observed aggregate/task/workflow state until a successful retry resolves it.
+- High-value Submit does not persist its aggregate until the workflow is suspended with exactly one correlated pending HumanTask. Workflow or task startup failures roll back only runtime instances matching `(TenantId, RequestId)` and return the generic `CAPABILITY_DEPENDENCY_UNAVAILABLE`, leaving no orphan request or cross-tenant cleanup risk.
+- HumanTask completion never pretends that external subscriber side effects were rolled back. Dispatch failures retain outcome/output and enter explicit `CompletionDispatchFailed`; the default Runtime refuses blind replay. An explicit `IHumanTaskCompletionFailurePolicy` is required for recovery.
+- The Procurement InMemory failure policy checkpoints each completion handler. HTTP retries with the same terminal decision resume at the failed handler, do not replay the already committed Apply Decision handler, and complete the Workflow. An opposite decision remains a conflict.
+- Workflow execution now accepts a typed `WorkflowExecutionRequest.TenantId`; `WorkflowInstance.TenantId` flows through `HumanTaskStepExecutor` into `HumanTaskInstance.TenantId`. Procurement authorization, query, and cleanup use these typed fields rather than a `tenantId` workflow-variable convention.
+- Capability input validation remains forward-compatible by default. Strict unknown-property rejection is selected explicitly by `ProcurementInputValidationPolicy`, rather than changing every Capability contract globally.
+- Procurement Contracts references MCP and Agent Tool abstractions only. `McpToolJsonContractRegistry` moved to `CrestCreates.Mcp.Abstractions`, with a type forward in the Runtime assembly for compatibility.
 - `AuditMiddleware` preserves `CapabilityFailureException.ErrorCode`; protocol results and audit evidence now use the same canonical NotFound/Forbidden code.
 - `form_procurement_approval` is a registered Form descriptor and the HumanTask interaction reference is validated through the real descriptor lookup.
 - Optional body materialization now emits `CEP022` for positional records without a public parameterless constructor, private constructors, abstract inputs, and interfaces, instead of generating opaque invalid `new T()` code.
@@ -1840,14 +1844,17 @@ Compatibility GET
 
 **Verification evidence**:
 
-- Procurement acceptance: 30 passed, including authoritative HTTP approval/rejection, workflow-start rollback, HumanTask decision recovery, audit-code correlation, and descriptor-reference checks.
+- Procurement acceptance: 36 passed, including same-HTTP decision recovery, opposite-decision conflict, tenant-scoped rollback, typed HumanTask tenant propagation, and Contracts dependency checks.
 - Independent managed Host process E2E: 1 passed.
 - Python HTTP E2E through `pipx run pytest`: 11 passed.
 - Procurement NativeAOT fixture: 9 passed, including real HTTP endpoint and both native sentinels.
-- Capability Runtime: 143 passed.
-- HumanTask Runtime: 52 passed.
+- Capability Runtime: 144 passed.
+- HumanTask Runtime: 55 passed.
 - Workflow Runtime: 68 passed.
-- Dynamic API: 72 passed.
+- Dynamic API: 73 passed.
+- MCP Runtime: 66 passed; MCP E2E: 28 passed.
+- Agent Tools Runtime: 116 passed.
+- Dependency Boundaries: 50 passed.
 - CodeGenerator: 283 passed.
 
 ## Recommended Next Thread Entry Prompt
