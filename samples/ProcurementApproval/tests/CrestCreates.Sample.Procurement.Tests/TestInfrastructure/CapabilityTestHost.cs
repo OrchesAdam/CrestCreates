@@ -6,6 +6,7 @@ using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Abstractions.Registry;
 using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Metadata.Registry;
+using CrestCreates.Sample.Procurement.Application;
 using CrestCreates.Sample.Procurement.Application.Handlers;
 using CrestCreates.Schema.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
@@ -39,7 +40,8 @@ internal sealed class CapabilityTestHost
         var services = new ServiceCollection();
 
         var handlerResolver = new CapabilityHandlerResolver();
-        var module = new ProcurementCapabilityModule();
+        var store = new InMemoryProcurementRequestStore();
+        var module = new ProcurementCapabilityModule(store);
         module.Apply(handlerResolver);
         services.AddSingleton<ICapabilityHandlerResolver>(handlerResolver);
 

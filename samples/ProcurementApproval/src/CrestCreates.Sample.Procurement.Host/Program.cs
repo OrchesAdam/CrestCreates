@@ -9,6 +9,8 @@ using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Metadata.Registry;
 using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.OpenApi;
+using CrestCreates.Sample.Procurement.Application;
 using CrestCreates.Sample.Procurement.Application.Handlers;
 using CrestCreates.Sample.Procurement.Host.Json;
 using CrestCreates.Sample.Procurement.Host.Projections;
@@ -17,10 +19,14 @@ using CrestCreates.Schema.Abstractions;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var store = new InMemoryProcurementRequestStore();
+
 builder.Services.AddCapabilityRuntime();
-builder.Services.AddSingleton<ICapabilityHandlerModule>(new ProcurementCapabilityModule());
+builder.Services.AddSingleton<ICapabilityHandlerModule>(new ProcurementCapabilityModule(store));
+builder.Services.AddSingleton<InMemoryProcurementRequestStore>(store);
 builder.Services.AddCrestCapabilityEndpoints();
 builder.Services.AddCrestCompatibilityProjection();
+builder.Services.AddCrestOpenApi();
 builder.Services.AddTransient<ProcurementAppService>();
 
 builder.Services.AddSingleton<ISchemaRegistry>(sp =>
@@ -53,6 +59,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =
 var app = builder.Build();
 
 app.MapCrestCapabilityEndpoints();
+app.MapCrestOpenApi();
 
 app.Run();
 

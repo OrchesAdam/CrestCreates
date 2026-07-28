@@ -7,7 +7,14 @@ namespace CrestCreates.Sample.Procurement.Application.Handlers;
 
 public sealed class SubmitProcurementRequestHandler : ICapabilityHandlerInvoker
 {
-    public async Task<object?> InvokeAsync(object? input, CancellationToken ct)
+    private readonly InMemoryProcurementRequestStore _store;
+
+    public SubmitProcurementRequestHandler(InMemoryProcurementRequestStore store)
+    {
+        _store = store;
+    }
+
+    public Task<object?> InvokeAsync(object? input, CancellationToken ct)
     {
         var dto = (SubmitProcurementRequestInput)input!;
         var money = new Money(dto.Amount, dto.Currency);
@@ -19,13 +26,15 @@ public sealed class SubmitProcurementRequestHandler : ICapabilityHandlerInvoker
             dto.RequesterId,
             dto.Category);
 
-        return new SubmitProcurementRequestResult
+        _store.Add(request);
+
+        return Task.FromResult<object?>(new SubmitProcurementRequestResult
         {
             RequestId = request.Id,
             Status = request.Status.ToString(),
             Amount = request.Amount.Amount,
             Currency = request.Amount.Currency,
             RequiresApproval = request.RequiresApproval
-        };
+        });
     }
 }

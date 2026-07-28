@@ -13,9 +13,21 @@ public class ApproveRequestCapabilityTests
     public async Task Approve_PendingRequest_ReturnsSuccess()
     {
         var pipeline = _host.CreatePipeline();
+        var submitInput = new SubmitProcurementRequestInput
+        {
+            Title = "Big Order",
+            Amount = 20000,
+            Currency = "USD",
+            RequesterId = "user-1",
+            Category = "Equipment"
+        };
+        var submitResult = await pipeline.ExecuteAsync("procurement.submit-request", submitInput);
+        var submitOutput = submitResult.Output.Should().BeAssignableTo<SubmitProcurementRequestResult>().Subject;
+        var requestId = submitOutput.RequestId;
+
         var input = new ApproveProcurementRequestInput
         {
-            RequestId = Guid.NewGuid(),
+            RequestId = requestId,
             ApproverId = "approver-1",
             Comment = "Approved - within budget"
         };
@@ -30,29 +42,43 @@ public class ApproveRequestCapabilityTests
     }
 
     [Fact]
-    public async Task Approve_AlreadyApprovedRequest_ReturnsValidationFailure()
+    public async Task Approve_NonExistentRequest_ReturnsNotFound()
     {
         var pipeline = _host.CreatePipeline();
         var input = new ApproveProcurementRequestInput
         {
             RequestId = Guid.NewGuid(),
             ApproverId = "approver-1",
-            Comment = "Already approved"
+            Comment = "N/A"
         };
 
         var result = await pipeline.ExecuteAsync("procurement.approve-request", input);
 
         result.IsSuccess.Should().BeTrue();
+        var output = result.Output.Should().BeAssignableTo<ProcurementRequestResult>().Subject;
+        output.Status.Should().Be("NotFound");
     }
 
     [Fact]
     public async Task Reject_PendingRequest_ReturnsSuccess()
     {
         var pipeline = _host.CreatePipeline();
+        var submitInput = new SubmitProcurementRequestInput
+        {
+            Title = "Expensive Item",
+            Amount = 50000,
+            Currency = "EUR",
+            RequesterId = "user-2",
+            Category = "IT"
+        };
+        var submitResult = await pipeline.ExecuteAsync("procurement.submit-request", submitInput);
+        var submitOutput = submitResult.Output.Should().BeAssignableTo<SubmitProcurementRequestResult>().Subject;
+        var requestId = submitOutput.RequestId;
+
         var input = new RejectProcurementRequestInput
         {
-            RequestId = Guid.NewGuid(),
-            ApproverId = "approver-1",
+            RequestId = requestId,
+            ApproverId = "approver-2",
             Reason = "Over budget limit"
         };
 
@@ -61,7 +87,7 @@ public class ApproveRequestCapabilityTests
         result.IsSuccess.Should().BeTrue();
         var output = result.Output.Should().BeAssignableTo<ProcurementRequestResult>().Subject;
         output.Status.Should().Be("Rejected");
-        output.ApproverId.Should().Be("approver-1");
+        output.ApproverId.Should().Be("approver-2");
         output.RejectedAt.Should().NotBeNull();
     }
 }

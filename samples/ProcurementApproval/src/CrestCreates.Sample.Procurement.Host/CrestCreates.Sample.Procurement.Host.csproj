@@ -16,6 +16,7 @@
     <ProjectReference Include="..\CrestCreates.Sample.Procurement.Application\CrestCreates.Sample.Procurement.Application.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
     <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
     <ProjectReference Include="../../../../src/Framework/Web/CrestCreates.AspNetCore/CrestCreates.AspNetCore.csproj" />
     <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Authorization/CrestCreates.Authorization.csproj" />
     <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
