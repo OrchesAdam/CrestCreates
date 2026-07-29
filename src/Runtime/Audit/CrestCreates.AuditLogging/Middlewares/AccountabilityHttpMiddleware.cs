@@ -2,7 +2,6 @@ using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Accountability.Abstractions.Identity;
 using CrestCreates.Accountability.Abstractions.Recording;
-using CrestCreates.AuditLogging.Abstractions.Http;
 using CrestCreates.AuditLogging.Abstractions.MethodAccountability;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.AspNetCore.Http;
@@ -83,22 +82,19 @@ public sealed class AccountabilityHttpMiddleware : IMiddleware
             var duration = Stopwatch.GetElapsedTime(started);
             var requestCancelled = failure is OperationCanceledException || context.RequestAborted.IsCancellationRequested;
             var statusCode = requestCancelled ? 499 : failure is null ? context.Response.StatusCode : 500;
-            var rejection = context.Features.Get<IAccountabilityHttpRejectionFeature>();
             var outcome = requestCancelled
                 ? new AuditOutcome { Status = "cancelled", Code = "HTTP_CANCELLED" }
-                : rejection is not null
-                    ? new AuditOutcome { Status = "rejected", Code = rejection.Code }
-                    : new AuditOutcome
-                    {
-                        Status = statusCode is >= 200 and < 400 ? "succeeded" : "failed",
-                        Code = failure is not null
-                            ? "UNHANDLED_EXCEPTION"
-                            : statusCode is >= 500
+                : new AuditOutcome
+                {
+                    Status = statusCode is >= 200 and < 400 ? "succeeded" : "failed",
+                    Code = failure is not null
+                        ? "UNHANDLED_EXCEPTION"
+                        : statusCode is >= 500
+                            ? $"HTTP_{statusCode}"
+                            : statusCode is >= 400
                                 ? $"HTTP_{statusCode}"
-                                : statusCode is >= 400
-                                    ? $"HTTP_{statusCode}"
-                                    : null
-                    };
+                                : null
+                };
 
             var method = context.Request.Method.ToUpperInvariant();
             var routeTemplate = (context.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText;

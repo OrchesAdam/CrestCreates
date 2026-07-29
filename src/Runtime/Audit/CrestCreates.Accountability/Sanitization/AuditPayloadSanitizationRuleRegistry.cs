@@ -41,6 +41,8 @@ public sealed class AuditPayloadSanitizationRuleRegistry
         {
             throw new AuditSanitizationException("AUDIT_SANITIZATION_RULE_FAILED", "Payload", exception);
         }
+        if (sanitized is null)
+            throw new AuditSanitizationException("AUDIT_SANITIZED_OUTPUT_INVALID", "Payload");
         if (!string.Equals(payload.Kind, sanitized.Kind, StringComparison.Ordinal)
             || payload.Version != sanitized.Version)
             throw new AuditSanitizationException("AUDIT_SANITIZER_REWROTE_PROTECTED_FACT", "Payload");

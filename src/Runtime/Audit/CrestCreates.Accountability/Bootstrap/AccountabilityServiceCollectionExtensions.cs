@@ -17,6 +17,7 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace CrestCreates.Accountability.Bootstrap;
 
@@ -26,12 +27,14 @@ public static class AccountabilityServiceCollectionExtensions
         this IServiceCollection services,
         Action<AccountabilityOptions>? configure = null)
     {
-        var options = new AccountabilityOptions();
-        configure?.Invoke(options);
         // Accountability owns its canonical hash dependency. Producers must not
         // have to register unrelated Metadata services to make the foundation valid.
         services.AddDescriptorStableHash();
-        services.TryAddSingleton(options);
+        services.AddOptions<AccountabilityOptions>();
+        if (configure is not null)
+            services.Configure(configure);
+        services.TryAddSingleton<AccountabilityOptions>(sp =>
+            sp.GetRequiredService<IOptions<AccountabilityOptions>>().Value);
         services.TryAddSingleton<IAccountabilityRuntimeMarker, AccountabilityRuntimeMarker>();
         services.TryAddSingleton<AuditEnvelopeValidator>();
         services.TryAddSingleton<IAuditOperationContextAccessor, AuditOperationContextAccessor>();

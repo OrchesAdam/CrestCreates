@@ -1744,7 +1744,7 @@ database sinks must reuse it.
 ```text
 HttpAccountabilityAdapterTests
   EmitsSucceededForCompletedSuccess
-  EmitsRejectedOnlyForTypedFrameworkRejection
+  NoBuiltInHttpRejectedPathWithoutTypedFirstPartyProducer
   Generic4xxIsFailedWithStableStatusCode
   FiveHundredWithoutExceptionIsFailed
   RequestAbortIsCancelled

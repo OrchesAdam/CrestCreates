@@ -38,6 +38,7 @@ using CrestCreates.Schema;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 var goldenScenario = args.Contains("--golden-scenario", StringComparer.Ordinal);
@@ -111,6 +112,10 @@ builder.Services.AddSingleton<IDescriptorLookup>(new ProcurementDescriptorLookup
         .Append(ProcurementDescriptorCatalog.ApprovalWorkflow)));
 builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddAuthentication(SampleAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, SampleAuthenticationHandler>(
+        SampleAuthenticationHandler.SchemeName,
+        _ => { });
 builder.Services.AddScoped<SampleExecutionIdentity>();
 builder.Services.AddScoped<ICurrentUser>(sp => sp.GetRequiredService<SampleExecutionIdentity>());
 builder.Services.AddScoped<ITenantContext>(sp => sp.GetRequiredService<SampleExecutionIdentity>());
@@ -150,6 +155,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =
 
 var app = builder.Build();
 
+app.UseAuthentication();
 app.UseAccountabilityHttpAudit();
 app.MapCrestCapabilityEndpoints();
 app.MapCrestOpenApi();

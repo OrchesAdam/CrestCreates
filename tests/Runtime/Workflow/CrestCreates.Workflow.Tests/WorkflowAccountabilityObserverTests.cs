@@ -329,7 +329,22 @@ public sealed class WorkflowAccountabilityObserverTests
         public ValueTask<AuditRecordResult> RecordAsync(AuditEnvelope envelope, CancellationToken cancellationToken = default)
         {
             Envelopes.Add(envelope);
-            return ValueTask.FromResult(new AuditRecordResult { AuditId = envelope.AuditId, Status = AuditRecordStatus.Recorded, ProcessedAt = DateTimeOffset.UtcNow });
+            return ValueTask.FromResult(new AuditRecordResult
+            {
+                AuditId = envelope.AuditId,
+                Status = AuditRecordStatus.Recorded,
+                ProcessedAt = DateTimeOffset.UtcNow,
+                SinkResults =
+                [
+                    new CrestCreates.Accountability.Abstractions.Sinks.AuditSinkWriteResult
+                    {
+                        SinkId = "test",
+                        AuditId = envelope.AuditId,
+                        Integrity = Hash,
+                        Status = CrestCreates.Accountability.Abstractions.Sinks.AuditSinkWriteStatus.Accepted
+                    }
+                ]
+            });
         }
     }
 

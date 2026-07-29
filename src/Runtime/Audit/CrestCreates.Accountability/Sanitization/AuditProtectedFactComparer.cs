@@ -7,6 +7,16 @@ public static class AuditProtectedFactComparer
 {
     public static bool AreEqual(AuditEnvelope left, AuditEnvelope right)
     {
+        if (left.Actor is null || right.Actor is null
+            || left.Action is null || right.Action is null
+            || left.Target is null || right.Target is null
+            || left.Outcome is null || right.Outcome is null
+            || left.Runtime is null || right.Runtime is null
+            || left.Descriptors is null || right.Descriptors is null
+            || left.Evidence.IsDefault || right.Evidence.IsDefault
+            || left.Runtime.References.IsDefault || right.Runtime.References.IsDefault)
+            return false;
+
         return left.ContractVersion == right.ContractVersion
             && string.Equals(left.AuditId, right.AuditId, StringComparison.Ordinal)
             && left.OccurredAt == right.OccurredAt

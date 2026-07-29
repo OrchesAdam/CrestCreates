@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-29 (Issue #39 Phase 9a PR #67 review findings remediated and re-verified)
+Last Updated: 2026-07-29 (Issue #39 Phase 9a PR #67 second-round findings remediated and re-verified)
 
 ## Purpose
 
@@ -76,7 +76,7 @@ scenario could not be repeated inside this review sandbox because the required
 socket escalation was rejected; the previously recorded publish-and-run gate is
 therefore retained rather than replaced by a false new run claim.
 
-PR #67 second review closure (2026-07-29): the default Platform and first-party
+PR #67 first code-review closure (2026-07-29): the default Platform and first-party
 HTTP pipeline now uses `AccountabilityHttpMiddleware`; legacy `UseAuditLogging`
 is compatibility opt-in and `AuditLogWriter` no longer persists `AuditLog`
 directly. In-memory Duplicate results no longer expose `ExistingIntegrity`;
@@ -94,6 +94,24 @@ Final focused evidence is green: Accountability 95, AuditLogging 58, Capability
 Procurement NativeAOT fixture 9 tests. A fresh linux-x64 native publish/link/run
 emitted `CRESTCREATES_PROCUREMENT_HTTP_OK`,
 `CRESTCREATES_PROCUREMENT_SAMPLE_OK`, and `CRESTCREATES_ACCOUNTABILITY_OK`.
+
+PR #67 second code-review closure (2026-07-29): first-party Platform and
+LibraryManagement pipelines authenticate before opening the HTTP Accountability
+scope. The Procurement golden mainline now uses a real header authentication
+scheme and proves that the trusted NameIdentifier becomes the HTTP actor, is
+inherited by Capability, and remains the Workflow initiating actor; anonymous
+requests remain anonymous. `AuditRecordResult.IsAccepted` is derived exclusively
+from Accepted/Duplicate sink results. Invalid sanitizer and typed-rule output is
+rejected at the trust boundary without being misclassified as an internal
+Recorder failure. Caller cancellation wins the sink fan-out race, WriteTimeout is
+validated at startup, and composable `IOptions<AccountabilityOptions>` removes
+the previous first-registration-wins behavior. The deferred test-only HTTP
+rejection feature was retired, and the Spec §18 ledger now scans through §18.7
+with explicit Procurement/NativeAOT E01/E02 guards. Fresh evidence is green:
+Accountability Abstractions 13, Accountability Runtime 111, AuditLogging 58,
+Capability 171, Workflow 101, Platform Web 97, Boundary 79, Procurement 41, and
+Procurement NativeAOT 9 tests; the canonical single-node build completed all 228
+projects with zero errors.
 
 Spec: `docs/superpowers/specs/2026-07-28-phase-9a-accountability-runtime-foundation-design.md`
 Plan: `docs/superpowers/plans/2026-07-29-phase-9a-accountability-runtime-foundation.md`

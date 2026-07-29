@@ -349,6 +349,28 @@ public class AuditMiddlewareTests
     }
 
     [Fact]
+    public async Task CapabilityDoesNotExposeAuditRecordIdFromStatusAlone()
+    {
+        var context = Context();
+        var result = await CreateMiddleware(new StatusOnlyRecorder()).InvokeAsync(context, _ =>
+            Task.FromResult(CapabilityExecutionResult.Success(null, TimeSpan.Zero)));
+
+        result.AuditRecordId.Should().BeNull();
+        context.AuditRecordId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CapabilityExposesAuditRecordIdFromAcceptedSinkOnly()
+    {
+        var context = Context();
+        var result = await CreateMiddleware(new CaptureRecorder()).InvokeAsync(context, _ =>
+            Task.FromResult(CapabilityExecutionResult.Success(null, TimeSpan.Zero)));
+
+        result.AuditRecordId.Should().Be("audit-1");
+        context.AuditRecordId.Should().Be("audit-1");
+    }
+
+    [Fact]
     public Task OuterCatchResultReceivesAcceptedAuditRecordId()
         => new CapabilityEndToEndTests().E2E_HandlerThrows_RecordsUnhandledException();
 
@@ -385,9 +407,27 @@ public class AuditMiddlewareTests
         public ValueTask<AuditRecordResult> RecordAsync(AuditEnvelope envelope, CancellationToken cancellationToken = default)
         {
             Envelope = envelope;
-            return ValueTask.FromResult(new AuditRecordResult { AuditId = "audit-1", Status = AuditRecordStatus.Recorded, ProcessedAt = DateTimeOffset.UtcNow });
+            return ValueTask.FromResult(AcceptedResult("audit-1"));
         }
     }
+
+    private static AuditRecordResult AcceptedResult(string auditId)
+        => new()
+        {
+            AuditId = auditId,
+            Status = AuditRecordStatus.Recorded,
+            ProcessedAt = DateTimeOffset.UtcNow,
+            SinkResults =
+            [
+                new CrestCreates.Accountability.Abstractions.Sinks.AuditSinkWriteResult
+                {
+                    SinkId = "test",
+                    AuditId = auditId,
+                    Integrity = TestHash,
+                    Status = CrestCreates.Accountability.Abstractions.Sinks.AuditSinkWriteStatus.Accepted
+                }
+            ]
+        };
 
     private sealed class ThrowingRecorder : IAuditRecorder
     {
@@ -406,6 +446,19 @@ public class AuditMiddlewareTests
                 Status = AuditRecordStatus.Rejected,
                 ProcessedAt = DateTimeOffset.UtcNow,
                 Issues = [new AuditRecordIssue("TEST_REJECTION")]
+            });
+    }
+
+    private sealed class StatusOnlyRecorder : IAuditRecorder
+    {
+        public ValueTask<AuditRecordResult> RecordAsync(
+            AuditEnvelope envelope,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(new AuditRecordResult
+            {
+                AuditId = envelope.AuditId,
+                Status = AuditRecordStatus.Recorded,
+                ProcessedAt = DateTimeOffset.UtcNow
             });
     }
 

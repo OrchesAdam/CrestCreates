@@ -198,8 +198,8 @@ public static class CrestCreatesWebApplicationExtensions
         app.UseExceptionHandling();
         app.UseRouting();
         app.UseMultiTenancy();
-        app.UseAccountabilityHttpAudit();
         app.UseAuthentication();
+        app.UseAccountabilityHttpAudit();
         app.UseTenantBoundary();
         app.UseAuthorization();
 

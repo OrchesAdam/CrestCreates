@@ -24,8 +24,8 @@ public sealed record AuditRecordResult
     public ImmutableArray<AuditSinkFailure> SinkFailures { get; init; } = [];
     public ImmutableArray<AuditRecordIssue> Issues { get; init; } = [];
 
-    public bool IsAccepted => Status == AuditRecordStatus.Recorded
-        || SinkResults.Any(x => x.Status is AuditSinkWriteStatus.Accepted or AuditSinkWriteStatus.Duplicate);
+    public bool IsAccepted => SinkResults.Any(x =>
+        x.Status is AuditSinkWriteStatus.Accepted or AuditSinkWriteStatus.Duplicate);
 }
 
 public sealed record AuditRecordIssue(string Code, string? Path = null);

@@ -101,6 +101,34 @@ public sealed class AuditSanitizationRuleRegistryTests
     }
 
     [Fact]
+    public async Task PayloadRuleReturningNullIsRejected()
+    {
+        var sanitizer = new DefaultAuditSanitizer(
+            new AuditPayloadSanitizationRuleRegistry([new NullPayloadRule("payload.null")]),
+            new AuditDataArtifactSanitizationRuleRegistry([]));
+        var result = await CreateRecorder(sanitizer).RecordAsync(CreateEnvelope() with
+        {
+            Payload = Payload("payload.null")
+        });
+
+        result.Status.Should().Be(AuditRecordStatus.Rejected);
+        result.Issues.Should().ContainSingle(x => x.Code == "AUDIT_SANITIZED_OUTPUT_INVALID");
+    }
+
+    [Fact]
+    public async Task ArtifactRuleReturningNullIsRejected()
+    {
+        var sanitizer = new DefaultAuditSanitizer(
+            new AuditPayloadSanitizationRuleRegistry([]),
+            new AuditDataArtifactSanitizationRuleRegistry([new NullArtifactRule("artifact.null")]));
+        var result = await CreateRecorder(sanitizer).RecordAsync(CreateEnvelope(
+            new AuditDataArtifact { Kind = "artifact.null" }));
+
+        result.Status.Should().Be(AuditRecordStatus.Rejected);
+        result.Issues.Should().ContainSingle(x => x.Code == "AUDIT_SANITIZED_OUTPUT_INVALID");
+    }
+
+    [Fact]
     public void DuplicateKindOwnersFailAtConstruction()
     {
         var action = () => new AuditPayloadSanitizationRuleRegistry([new Rule("same", 1), new Rule("same", 2)]);
@@ -166,7 +194,7 @@ public sealed class AuditSanitizationRuleRegistryTests
         second.Envelope.DataSnapshot!.Artifacts.Should().Equal(first.Envelope.DataSnapshot.Artifacts);
     }
 
-    private static DefaultAuditSanitizer CreateSanitizer(params ArtifactRule[] rules)
+    private static DefaultAuditSanitizer CreateSanitizer(params IAuditDataArtifactSanitizationRule[] rules)
         => new(
             new AuditPayloadSanitizationRuleRegistry([]),
             new AuditDataArtifactSanitizationRuleRegistry(rules));
@@ -242,6 +270,13 @@ public sealed class AuditSanitizationRuleRegistryTests
         }
     }
 
+    private sealed class NullPayloadRule(string kind) : IAuditPayloadSanitizationRule
+    {
+        public string Kind { get; } = kind;
+        public int RuleVersion => 1;
+        public AuditPayload Sanitize(AuditPayload payload) => null!;
+    }
+
     private sealed class ArtifactRule(string kind, ICollection<string> order) : IAuditDataArtifactSanitizationRule
     {
         public string Kind { get; } = kind;
@@ -261,6 +296,13 @@ public sealed class AuditSanitizationRuleRegistryTests
         public string Kind { get; } = kind;
         public int RuleVersion => 1;
         public AuditDataArtifact Sanitize(AuditDataArtifact artifact) => artifact with { Kind = "artifact.changed" };
+    }
+
+    private sealed class NullArtifactRule(string kind) : IAuditDataArtifactSanitizationRule
+    {
+        public string Kind { get; } = kind;
+        public int RuleVersion => 1;
+        public AuditDataArtifact Sanitize(AuditDataArtifact artifact) => null!;
     }
 
     private sealed class FixedHasher : IAuditIntegrityHasher

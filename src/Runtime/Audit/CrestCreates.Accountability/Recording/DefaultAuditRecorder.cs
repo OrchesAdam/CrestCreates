@@ -77,7 +77,19 @@ public sealed class DefaultAuditRecorder : IAuditRecorder
             if (!sanitizedStructuralValidation.IsValid)
                 return Rejected(candidate.AuditId, sanitizedStructuralValidation.Issues);
 
-            var sanitized = Snapshot(sanitizedResult.Envelope);
+            AuditEnvelope sanitized;
+            try
+            {
+                var sanitizerOutputValidation = _validator.ValidateSafeSnapshot(sanitizedResult.Envelope);
+                if (!sanitizerOutputValidation.IsValid)
+                    return Rejected(candidate.AuditId, sanitizerOutputValidation.Issues);
+                sanitized = Snapshot(sanitizedResult.Envelope);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "Accountability sanitizer returned an unreadable output for {AuditId}", candidate.AuditId);
+                return Rejected(candidate.AuditId, [new("AUDIT_SANITIZED_OUTPUT_INVALID")]);
+            }
             if (sanitized.Sanitization is not null || sanitized.Integrity is not null)
                 return Rejected(candidate.AuditId, [new("AUDIT_SANITIZED_OUTPUT_INVALID", sanitized.Sanitization is not null ? "Sanitization" : "Integrity")]);
             if (!AuditProtectedFactComparer.AreEqual(candidate, sanitized))
@@ -174,6 +186,8 @@ public sealed class DefaultAuditRecorder : IAuditRecorder
         {
             throw;
         }
+
+        callerCancellation.ThrowIfCancellationRequested();
 
         var results = ImmutableArray.CreateBuilder<AuditSinkWriteResult>();
         var failures = ImmutableArray.CreateBuilder<AuditSinkFailure>();

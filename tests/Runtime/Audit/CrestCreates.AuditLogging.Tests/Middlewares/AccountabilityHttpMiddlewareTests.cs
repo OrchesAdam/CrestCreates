@@ -8,7 +8,6 @@ using CrestCreates.Accountability.Abstractions.Recording;
 using CrestCreates.Accountability.Context;
 using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Abstractions.MethodAccountability;
-using CrestCreates.AuditLogging.Abstractions.Http;
 using CrestCreates.MultiTenancy.Abstract;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -110,17 +109,16 @@ public sealed class AccountabilityHttpMiddlewareTests
     public Task EmitsSucceededForCompletedSuccess() => EmitsSafeSuccessFactWithoutBody();
 
     [Fact]
-    public async Task EmitsRejectedOnlyForTypedFrameworkRejection()
+    public async Task NoBuiltInHttpRejectedPathWithoutTypedFirstPartyProducer()
     {
         var recorder = new CaptureRecorder();
         var context = new DefaultHttpContext();
         context.Request.Method = HttpMethods.Post;
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
-        context.Features.Set<IAccountabilityHttpRejectionFeature>(new RejectionFeature("AUTH_FORBIDDEN"));
 
         await CreateMiddleware(recorder).InvokeAsync(context, _ => Task.CompletedTask);
 
-        recorder.Envelope!.Outcome.Should().Be(new AuditOutcome { Status = "rejected", Code = "AUTH_FORBIDDEN" });
+        recorder.Envelope!.Outcome.Should().Be(new AuditOutcome { Status = "failed", Code = "HTTP_403" });
     }
 
     [Fact]
@@ -273,7 +271,7 @@ public sealed class AccountabilityHttpMiddlewareTests
         {
             Envelope = envelope;
             if (Throw) throw new InvalidOperationException("recorder");
-            return ValueTask.FromResult(new AuditRecordResult { AuditId = envelope.AuditId, Status = AuditRecordStatus.Recorded, ProcessedAt = DateTimeOffset.UtcNow });
+            return ValueTask.FromResult(TestAuditRecordResults.Accepted(envelope.AuditId));
         }
     }
 
@@ -294,8 +292,6 @@ public sealed class AccountabilityHttpMiddlewareTests
         public void SetTenantId(string tenantId) { }
         private sealed class Noop : IDisposable { public void Dispose() { } }
     }
-
-    private sealed record RejectionFeature(string Code) : IAccountabilityHttpRejectionFeature;
 
     private sealed class ManualTimeProvider(DateTimeOffset initial) : TimeProvider
     {

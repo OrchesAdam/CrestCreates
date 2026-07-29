@@ -289,6 +289,42 @@ public sealed class DefaultAuditRecorderTests
     }
 
     [Fact]
+    public Task SanitizerNullActorIsRejectedNotInternalFailure()
+        => AssertInvalidSanitizerOutputAsync(candidate => candidate with { Actor = null! });
+
+    [Fact]
+    public Task SanitizerNullActionIsRejectedNotInternalFailure()
+        => AssertInvalidSanitizerOutputAsync(candidate => candidate with { Action = null! });
+
+    [Fact]
+    public Task SanitizerNullTargetIsRejectedNotInternalFailure()
+        => AssertInvalidSanitizerOutputAsync(candidate => candidate with { Target = null! });
+
+    [Fact]
+    public Task SanitizerNullOutcomeIsRejectedNotInternalFailure()
+        => AssertInvalidSanitizerOutputAsync(candidate => candidate with { Outcome = null! });
+
+    [Fact]
+    public Task SanitizerNullArtifactIsRejectedNotInternalFailure()
+        => AssertInvalidSanitizerOutputAsync(candidate => candidate with
+        {
+            DataSnapshot = new AuditDataSnapshot
+            {
+                CapturePolicyId = "test",
+                CapturePolicyVersion = 1,
+                Artifacts = [null!]
+            }
+        });
+
+    [Fact]
+    public Task InvalidSanitizerOutputCallsNoSink()
+        => SanitizerNullActorIsRejectedNotInternalFailure();
+
+    [Fact]
+    public Task InvalidSanitizerOutputNeverReturnsRecorderInternalFailure()
+        => SanitizerNullArtifactIsRejectedNotInternalFailure();
+
+    [Fact]
     public async Task RejectedSanitizerRewriteCallsNoSink()
     {
         var sink = new RecordingSink("a");
@@ -392,6 +428,41 @@ public sealed class DefaultAuditRecorderTests
     }
 
     [Fact]
+    public async Task CallerCancellationWinsWhenAllSinksCompleteAsCancelled()
+    {
+        var sinkA = new CancellationControlledSink("a");
+        var sinkB = new CancellationControlledSink("b");
+        var recorder = CreateRecorder(
+            [sinkB, sinkA],
+            options: new AccountabilityOptions { WriteTimeout = TimeSpan.FromSeconds(5) });
+        using var cancellation = new CancellationTokenSource();
+        var attempt = recorder.RecordAsync(CreateEnvelope(), cancellation.Token).AsTask();
+        await Task.WhenAll(sinkA.Started, sinkB.Started);
+
+        cancellation.Cancel();
+
+        var action = async () => await attempt;
+        await action.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task RecorderTimeoutDoesNotMasqueradeAsCallerCancellation()
+    {
+        var recorder = CreateRecorder(
+            [new RecordingSink("a", hang: true)],
+            options: new AccountabilityOptions { WriteTimeout = TimeSpan.FromMilliseconds(30) });
+
+        var result = await recorder.RecordAsync(CreateEnvelope(), CancellationToken.None);
+
+        result.Status.Should().Be(AuditRecordStatus.Failed);
+        result.SinkFailures.Should().ContainSingle(x => x.Code == "AUDIT_SINK_TIMEOUT");
+    }
+
+    [Fact]
+    public Task CallerCancellationIsNeverAggregatedAsSinkTimeout()
+        => CallerCancellationWinsWhenAllSinksCompleteAsCancelled();
+
+    [Fact]
     public async Task ProcessedAtIsAfterSinkAggregationCompletes()
     {
         var clock = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
@@ -472,6 +543,18 @@ public sealed class DefaultAuditRecorderTests
         result.SinkResults.Should().BeEmpty();
         result.SinkFailures.Should().ContainSingle(x =>
             x.SinkId == "provider" && x.Code == "AUDIT_SINK_RESULT_IDENTITY_MISMATCH");
+    }
+
+    private static async Task AssertInvalidSanitizerOutputAsync(
+        Func<AuditEnvelope, AuditEnvelope> transform)
+    {
+        var sink = new RecordingSink("a");
+        var result = await CreateRecorder([sink], new TransformingSanitizer(transform))
+            .RecordAsync(CreateEnvelope());
+
+        result.Status.Should().Be(AuditRecordStatus.Rejected);
+        result.Issues.Should().NotContain(x => x.Code == "AUDIT_RECORDER_INTERNAL_FAILURE");
+        sink.Calls.Should().Be(0);
     }
 
     private static AuditEnvelope CreateEnvelope()
@@ -566,6 +649,24 @@ public sealed class DefaultAuditRecorderTests
                     Tags = AuditTagMap.Empty
                 },
                 Stamp = new AuditSanitizationStamp { PolicyId = "test", PolicyVersion = 1, AppliedRuleIds = [] }
+            });
+    }
+
+    private sealed class TransformingSanitizer(
+        Func<AuditEnvelope, AuditEnvelope> transform) : IAuditSanitizer
+    {
+        public ValueTask<AuditSanitizationResult> SanitizeAsync(
+            AuditEnvelope candidate,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(new AuditSanitizationResult
+            {
+                Envelope = transform(candidate),
+                Stamp = new AuditSanitizationStamp
+                {
+                    PolicyId = "test",
+                    PolicyVersion = 1,
+                    AppliedRuleIds = []
+                }
             });
     }
 
@@ -728,6 +829,26 @@ public sealed class DefaultAuditRecorderTests
                 Integrity = envelope.Integrity!,
                 Status = AuditSinkWriteStatus.Accepted
             });
+        }
+    }
+
+    private sealed class CancellationControlledSink : IAuditSink
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public CancellationControlledSink(string id) => Id = id;
+
+        public string Id { get; }
+        public Task Started => _started.Task;
+
+        public ValueTask<AuditSinkWriteResult> WriteAsync(
+            AuditEnvelope envelope,
+            CancellationToken cancellationToken = default)
+        {
+            _started.TrySetResult();
+            var completion = new TaskCompletionSource<AuditSinkWriteResult>();
+            cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken));
+            return new ValueTask<AuditSinkWriteResult>(completion.Task);
         }
     }
 

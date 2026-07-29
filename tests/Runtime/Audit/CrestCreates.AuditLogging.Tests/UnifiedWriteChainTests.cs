@@ -656,12 +656,7 @@ caused by: password=""supersecret\"", token=""tok-xyz""",
             CancellationToken cancellationToken = default)
         {
             Envelope = envelope;
-            return ValueTask.FromResult(new AuditRecordResult
-            {
-                AuditId = envelope.AuditId,
-                Status = AuditRecordStatus.Recorded,
-                ProcessedAt = DateTimeOffset.UtcNow
-            });
+            return ValueTask.FromResult(TestAuditRecordResults.Accepted(envelope.AuditId));
         }
     }
 

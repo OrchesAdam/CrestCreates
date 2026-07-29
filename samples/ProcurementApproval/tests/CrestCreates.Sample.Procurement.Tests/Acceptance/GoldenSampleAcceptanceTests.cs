@@ -103,6 +103,81 @@ public sealed class ProjectionCompositionAcceptanceTests
     }
 
     [Fact]
+    public async Task AuthenticatedHttpFactUsesNameIdentifier()
+    {
+        using var factory = new ProcurementWebApplicationFactory();
+        using var client = factory.CreateClient();
+        SetIdentity(client, "tenant-a", "requester-a", "procurement-requester");
+
+        await SubmitHttpAsync(client, "Authenticated HTTP actor", 25_000m);
+
+        var http = factory.Services.GetRequiredService<InMemoryAuditSink>().GetRecords().Single(record =>
+            record.Action.Kind == AuditActionKinds.HttpRequest
+            && record.Target.Id == "POST /api/procurement/requests");
+        http.Actor.Should().BeEquivalentTo(new AuditActor
+        {
+            Kind = "user",
+            Id = "requester-a",
+            DisplayName = "requester-a"
+        });
+    }
+
+    [Fact]
+    public async Task AuthenticatedHttpCapabilityInheritsUserActor()
+    {
+        using var factory = new ProcurementWebApplicationFactory();
+        using var client = factory.CreateClient();
+        SetIdentity(client, "tenant-a", "requester-a", "procurement-requester");
+
+        await SubmitHttpAsync(client, "Authenticated capability actor", 25_000m);
+
+        var records = factory.Services.GetRequiredService<InMemoryAuditSink>().GetRecords();
+        var http = records.Single(record =>
+            record.Action.Kind == AuditActionKinds.HttpRequest
+            && record.Target.Id == "POST /api/procurement/requests");
+        var capability = records.Single(record =>
+            record.Action.Kind == AuditActionKinds.CapabilityExecute
+            && record.Target.Id == ProcurementContractIds.SubmitCapability);
+        capability.Actor.Should().Be(http.Actor);
+        capability.Actor.Should().BeEquivalentTo(new AuditActor
+        {
+            Kind = "user",
+            Id = "requester-a",
+            DisplayName = "requester-a"
+        });
+    }
+
+    [Fact]
+    public async Task AuthenticatedWorkflowOriginPreservesUserActor()
+    {
+        using var factory = new ProcurementWebApplicationFactory();
+        using var client = factory.CreateClient();
+        SetIdentity(client, "tenant-a", "requester-a", "procurement-requester");
+
+        await SubmitHttpAsync(client, "Authenticated workflow origin", 25_000m);
+
+        var workflow = factory.Services.GetRequiredService<InMemoryAuditSink>().GetRecords().Single(record =>
+            record.Action.Kind == "workflow.lifecycle"
+            && record.Action.Name == "workflow.started");
+        workflow.Actor.Kind.Should().Be("workflow");
+        workflow.Actor.InitiatedBy.Should().Be(new AuditActorReference("user", "requester-a"));
+    }
+
+    [Fact]
+    public async Task AnonymousRequestStillUsesAnonymousActor()
+    {
+        using var factory = new ProcurementWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/not-a-real-endpoint");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var http = factory.Services.GetRequiredService<InMemoryAuditSink>().GetRecords().Single(record =>
+            record.Action.Kind == AuditActionKinds.HttpRequest);
+        http.Actor.Should().Be(new AuditActor { Kind = "anonymous", Id = "anonymous" });
+    }
+
+    [Fact]
     public async Task CompatibilityProjection_ExposesGetOnly_AndMutationsAreNotMapped()
     {
         using var factory = new ProcurementWebApplicationFactory();

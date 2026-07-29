@@ -37,6 +37,10 @@ public sealed class AccountabilityCompositionValidator : IBootstrapValidator, IH
     {
         if (_marker is null || _recorder is null)
             return Failure("ACCOUNTABILITY_FOUNDATION_MISSING", "Accountability runtime is not registered.");
+        if (_options.WriteTimeout <= TimeSpan.Zero
+            || _options.WriteTimeout == Timeout.InfiniteTimeSpan
+            || _options.WriteTimeout.TotalMilliseconds > uint.MaxValue - 1d)
+            return Failure("ACCOUNTABILITY_WRITE_TIMEOUT_INVALID", "Accountability WriteTimeout must be finite, positive, and supported by CancellationTokenSource.");
         if (_options.RequireAtLeastOneSink && _sinks.Count == 0)
             return Failure("ACCOUNTABILITY_SINK_REQUIRED", "Accountability requires at least one sink.");
         var duplicate = _sinks.GroupBy(x => x.Id, StringComparer.Ordinal).FirstOrDefault(x => x.Count() > 1);

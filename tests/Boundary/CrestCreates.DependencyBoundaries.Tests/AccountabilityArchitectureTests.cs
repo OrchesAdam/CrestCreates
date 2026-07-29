@@ -164,7 +164,7 @@ public sealed class AccountabilityArchitectureTests
             "docs/superpowers/specs/2026-07-28-phase-9a-accountability-runtime-foundation-design.md"));
         var required = spec
             .SkipWhile(line => line != "### 18.1 Contract and validation")
-            .TakeWhile(line => line != "### 18.7 Procurement mainline and NativeAOT")
+            .TakeWhile(line => line != "## 19. Implementation Slices")
             .Select(line => Regex.Match(line, @"^  (?<name>[A-Z][A-Za-z0-9]*)$"))
             .Where(match => match.Success)
             .Select(match => match.Groups["name"].Value)
@@ -184,6 +184,29 @@ public sealed class AccountabilityArchitectureTests
 
         Assert.True(required.Length > 100, "Spec §18 acceptance ledger unexpectedly contains too few tests.");
         Assert.Empty(missing);
+    }
+
+    [Fact]
+    public void ProcurementMainlineAndNativeAotAcceptanceTestsAreGuarded()
+    {
+        var required = new[]
+        {
+            "PlatformHttpCapabilitySharesAccountabilityCorrelation",
+            "NativeAotBinary_RunsGoldenScenarioAndExits",
+            "NativeAotBinary_PrintsSuccessSentinel",
+            "NativeAot_HttpSubmitAndGet_UseRealEndpoint"
+        };
+        var testSources = Directory
+            .EnumerateFiles(RepositoryPath("samples/ProcurementApproval/tests"), "*.cs", SearchOption.AllDirectories)
+            .Select(File.ReadAllText)
+            .ToArray();
+
+        foreach (var name in required)
+        {
+            Assert.Contains(testSources, source => Regex.IsMatch(source,
+                $@"\[(?:Fact|Theory)\][\s\S]{{0,800}}?public\s+(?:async\s+)?(?:Task(?:<[^>]+>)?|void)\s+{Regex.Escape(name)}\s*\(",
+                RegexOptions.CultureInvariant));
+        }
     }
 
     [Fact]
@@ -264,6 +287,17 @@ public sealed class AccountabilityArchitectureTests
     }
 
     [Fact]
+    public void UseCrestWebAuthenticatesBeforeAccountability()
+    {
+        var source = File.ReadAllText(RepositoryPath(
+            "src/Platform/CrestCreates.Web/CrestCreatesWebApplicationExtensions.cs"));
+
+        Assert.True(
+            source.IndexOf("app.UseAuthentication();", StringComparison.Ordinal)
+            < source.IndexOf("app.UseAccountabilityHttpAudit();", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void LegacyAuditLoggingIsNotEnabledByDefault()
     {
         var source = File.ReadAllText(RepositoryPath(
@@ -271,6 +305,17 @@ public sealed class AccountabilityArchitectureTests
 
         Assert.Contains("app.UseAccountabilityHttpAudit();", source, StringComparison.Ordinal);
         Assert.DoesNotContain("app.UseAuditLogging();", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LibraryManagementAuthenticatesBeforeAccountability()
+    {
+        var source = File.ReadAllText(RepositoryPath(
+            "samples/LibraryManagement/LibraryManagement.Web/Program.cs"));
+
+        Assert.True(
+            source.IndexOf("app.UseAuthentication();", StringComparison.Ordinal)
+            < source.IndexOf("app.UseAccountabilityHttpAudit();", StringComparison.Ordinal));
     }
 
     [Fact]

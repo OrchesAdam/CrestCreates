@@ -255,12 +255,7 @@ public sealed class MethodAccountabilityContractTests
         public ValueTask<AuditRecordResult> RecordAsync(AuditEnvelope envelope, CancellationToken cancellationToken = default)
         {
             Envelopes.Add(envelope);
-            return ValueTask.FromResult(new AuditRecordResult
-            {
-                AuditId = envelope.AuditId,
-                Status = AuditRecordStatus.Recorded,
-                ProcessedAt = DateTimeOffset.UtcNow
-            });
+            return ValueTask.FromResult(TestAuditRecordResults.Accepted(envelope.AuditId));
         }
     }
 

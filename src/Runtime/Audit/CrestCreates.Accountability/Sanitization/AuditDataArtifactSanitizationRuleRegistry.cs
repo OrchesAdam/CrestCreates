@@ -41,6 +41,8 @@ public sealed class AuditDataArtifactSanitizationRuleRegistry
         {
             throw new AuditSanitizationException("AUDIT_SANITIZATION_RULE_FAILED", "DataSnapshot.Artifacts", exception);
         }
+        if (sanitized is null)
+            throw new AuditSanitizationException("AUDIT_SANITIZED_OUTPUT_INVALID", "DataSnapshot.Artifacts");
         if (!string.Equals(artifact.Kind, sanitized.Kind, StringComparison.Ordinal))
             throw new AuditSanitizationException("AUDIT_SANITIZER_REWROTE_PROTECTED_FACT", "DataSnapshot.Artifacts.Kind");
         return sanitized;
