@@ -38,7 +38,7 @@ public sealed class DefaultAuditSanitizer : IAuditSanitizer
         if (snapshot is not null)
         {
             var artifacts = ImmutableArray.CreateBuilder<AuditDataArtifact>(snapshot.Artifacts.Length);
-            foreach (var artifact in snapshot.Artifacts)
+            foreach (var artifact in snapshot.Artifacts.OrderBy(x => x.Kind, StringComparer.Ordinal))
             {
                 var sanitized = _artifactRules.Sanitize(artifact);
                 artifacts.Add(sanitized);

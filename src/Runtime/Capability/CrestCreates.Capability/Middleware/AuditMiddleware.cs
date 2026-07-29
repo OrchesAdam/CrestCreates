@@ -132,7 +132,7 @@ internal sealed class AuditMiddleware : ICapabilityPipelineMiddleware
             CausationId = context.CausationId,
             ParentAuditId = context.ParentAuditId,
             Actor = actor,
-            Action = new AuditAction { Kind = "capability.execute", Name = context.CapabilityName },
+            Action = new AuditAction { Kind = "capability.execute", Name = context.CapabilityId },
             Target = new AuditTarget { Kind = "capability", Id = context.CapabilityId, Version = context.CapabilityVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) },
             Outcome = new AuditOutcome { Status = status, Code = errorCode },
             Runtime = new AuditRuntimeContext

@@ -22,6 +22,171 @@ namespace CrestCreates.Accountability.Tests.Recording;
 public sealed class DefaultAuditRecorderTests
 {
     [Fact]
+    public Task ValidatesBeforeSanitizing()
+        => MalformedCandidateCallsNoSanitizerOrSink();
+
+    [Fact]
+    public async Task SanitizesBeforeAnySink()
+    {
+        var order = new List<string>();
+        var recorder = CreateRecorder([new OrderedSink("sink", order)], new OrderedSanitizer(order));
+
+        await recorder.RecordAsync(CreateEnvelope());
+
+        order.Should().Equal("sanitize", "sink");
+    }
+
+    [Fact]
+    public Task ValidatesSanitizedSnapshot()
+        => SanitizerCannotPrepopulateRecorderOwnedFields();
+
+    [Fact]
+    public Task ComputesHashWithCanonicalHashRuntime()
+        => RecordsAcceptedSinkWithStructuredHash();
+
+    [Fact]
+    public void ExcludesIntegrityAndAttemptMetadataFromHash()
+    {
+        var writer = new AccountabilityCanonicalProjectionWriter();
+        var envelope = CreateEnvelope();
+        var withIntegrity = envelope with { Integrity = new FixedHasher().Compute(envelope) };
+
+        Project(writer, withIntegrity).Should().Be(Project(writer, envelope));
+        typeof(AuditEnvelope).GetProperty("ProcessedAt").Should().BeNull();
+        typeof(AuditEnvelope).GetProperty("RecordedAt").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task IncludesSanitizationStampInHash()
+    {
+        var hasher = new CapturingHasher();
+        await CreateRecorder([new RecordingSink("a")], hasher: hasher).RecordAsync(CreateEnvelope());
+
+        hasher.Envelope.Should().NotBeNull();
+        hasher.Envelope!.Sanitization.Should().NotBeNull();
+        hasher.Envelope.Sanitization!.PolicyId.Should().Be("test");
+    }
+
+    [Fact]
+    public Task OrdersSinksByStableIdAndAttemptsAll()
+        => AllSinksAreAttemptedWithinOneTotalBudget();
+
+    [Fact]
+    public async Task AggregatesRecordedPartialFailedNoSinkRejected()
+    {
+        var recorded = await CreateRecorder([new RecordingSink("a")]).RecordAsync(CreateEnvelope());
+        var partial = await CreateRecorder([new RecordingSink("a"), new RecordingSink("b", throwSynchronously: true)])
+            .RecordAsync(CreateEnvelope());
+        var failed = await CreateRecorder([new RecordingSink("a", throwSynchronously: true)]).RecordAsync(CreateEnvelope());
+        var noSink = await CreateRecorder([]).RecordAsync(CreateEnvelope());
+        var rejected = await CreateRecorder([]).RecordAsync(CreateEnvelope() with { Evidence = default });
+
+        recorded.Status.Should().Be(AuditRecordStatus.Recorded);
+        partial.Status.Should().Be(AuditRecordStatus.PartiallyRecorded);
+        failed.Status.Should().Be(AuditRecordStatus.Failed);
+        noSink.Status.Should().Be(AuditRecordStatus.NoSinkConfigured);
+        rejected.Status.Should().Be(AuditRecordStatus.Rejected);
+    }
+
+    [Fact]
+    public Task ConflictIsPreservedInRecordResult()
+        => ConflictIsPreservedAndIsNotProviderFailure();
+
+    [Fact]
+    public Task ConflictIsNotReportedAsProviderFailure()
+        => ConflictIsPreservedAndIsNotProviderFailure();
+
+    [Fact]
+    public async Task RejectedResultContainsStableIssueCodes()
+    {
+        var result = await CreateRecorder([]).RecordAsync(CreateEnvelope() with { Tags = null! });
+
+        result.Status.Should().Be(AuditRecordStatus.Rejected);
+        result.Issues.Should().ContainSingle(x =>
+            x.Code == "AUDIT_NULL_IMMUTABLE_DICTIONARY" && x.Path == "Tags");
+    }
+
+    [Fact]
+    public async Task AcceptedSinkIdsAreDerivedNotDuplicated()
+    {
+        var result = await CreateRecorder([new RecordingSink("accepted")]).RecordAsync(CreateEnvelope());
+
+        result.SinkResults.Where(x => x.Status is AuditSinkWriteStatus.Accepted or AuditSinkWriteStatus.Duplicate)
+            .Select(x => x.SinkId).Should().Equal("accepted");
+        typeof(AuditRecordResult).GetProperty("AcceptedSinkIds").Should().BeNull();
+    }
+
+    [Fact]
+    public void MultiSinkHasNoFalseGlobalRecordedTime()
+    {
+        typeof(AuditEnvelope).GetProperty("RecordedAt").Should().BeNull();
+        typeof(AuditSinkWriteResult).GetProperty("FirstAcceptedAt").Should().NotBeNull();
+    }
+
+    [Fact]
+    public Task ProcessedAtIsAttemptMetadataNotFactMetadata()
+        => ProcessedAtIsAfterSinkAggregationCompletes();
+
+    [Fact]
+    public Task SinkCannotReturnDifferentSinkId()
+        => AssertSinkIdentityMismatchAsync(result => result with { SinkId = "different" });
+
+    [Fact]
+    public Task SinkCannotReturnDifferentAuditId()
+        => AssertSinkIdentityMismatchAsync(result => result with { AuditId = "different" });
+
+    [Fact]
+    public Task SinkCannotReturnDifferentIntegrity()
+        => AssertSinkIdentityMismatchAsync(result => result with
+        {
+            Integrity = result.Integrity with { Value = "different" }
+        });
+
+    [Fact]
+    public Task SanitizerCannotRewriteProtectedFactFields()
+        => SanitizerCannotRewriteTargetVersion();
+
+    [Fact]
+    public async Task SanitizerMayMinimizePresentationFields()
+    {
+        var sink = new CapturingSink("capture");
+        var envelope = CreateEnvelope() with
+        {
+            Actor = new AuditActor { Kind = "user", Id = "user-1", DisplayName = "Sensitive name" },
+            Outcome = new AuditOutcome { Status = "succeeded", SafeSummary = "presentation" },
+            Tags = AuditTagMap.Empty.Add("presentation", "remove")
+        };
+
+        var result = await CreateRecorder([sink], new MinimizingSanitizer()).RecordAsync(envelope);
+
+        result.IsAccepted.Should().BeTrue();
+        sink.Envelope!.Actor.DisplayName.Should().BeNull();
+        sink.Envelope.Outcome.SafeSummary.Should().BeNull();
+        sink.Envelope.Tags.Should().BeEmpty();
+    }
+
+    [Fact]
+    public Task SanitizerRewriteRejectionCallsNoSink()
+        => RejectedSanitizerRewriteCallsNoSink();
+
+    [Fact]
+    public async Task DoesNotMutateProducerCandidate()
+    {
+        var candidate = CreateEnvelope() with
+        {
+            Actor = new AuditActor { Kind = "user", Id = "user-1", DisplayName = "Original" },
+            Tags = AuditTagMap.Empty.Add("keep", "producer")
+        };
+
+        await CreateRecorder([new RecordingSink("a")], new MinimizingSanitizer()).RecordAsync(candidate);
+
+        candidate.Actor.DisplayName.Should().Be("Original");
+        candidate.Tags.Should().ContainKey("keep");
+        candidate.Sanitization.Should().BeNull();
+        candidate.Integrity.Should().BeNull();
+    }
+
+    [Fact]
     public async Task RecordsAcceptedSinkWithStructuredHash()
     {
         var sink = new RecordingSink("a");
@@ -49,6 +214,78 @@ public sealed class DefaultAuditRecorderTests
         first.IsAccepted.Should().BeTrue();
         second.SinkResults.Should().ContainSingle(x => x.Status == AuditSinkWriteStatus.Conflict);
         second.SinkFailures.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task IdenticalReplayThroughRecorderIsAcceptedDuplicate()
+    {
+        var sink = new InMemoryAuditSink("a");
+        var recorder = CreateRecorder([sink]);
+
+        var first = await recorder.RecordAsync(CreateEnvelope());
+        var replay = await recorder.RecordAsync(CreateEnvelope());
+
+        first.IsAccepted.Should().BeTrue();
+        replay.Status.Should().Be(AuditRecordStatus.Recorded);
+        replay.IsAccepted.Should().BeTrue();
+        replay.SinkResults.Should().ContainSingle(x =>
+            x.Status == AuditSinkWriteStatus.Duplicate
+            && x.ExistingIntegrity == null);
+    }
+
+    [Fact]
+    public Task NullTagsIsRejected()
+        => AssertMalformedRejectedAsync(CreateEnvelope() with { Tags = null! }, "Tags");
+
+    [Fact]
+    public Task DefaultRuntimeReferencesIsRejected()
+        => AssertMalformedRejectedAsync(
+            CreateEnvelope() with { Runtime = AuditRuntimeContext.Empty with { References = default } },
+            "Runtime.References");
+
+    [Fact]
+    public Task DefaultDescriptorItemsIsRejected()
+        => AssertMalformedRejectedAsync(
+            CreateEnvelope() with { Descriptors = AuditDescriptorContext.Empty with { Items = default } },
+            "Descriptors.Items");
+
+    [Fact]
+    public Task DefaultEvidenceIsRejected()
+        => AssertMalformedRejectedAsync(CreateEnvelope() with { Evidence = default }, "Evidence");
+
+    [Fact]
+    public Task DefaultArtifactArrayIsRejected()
+        => AssertMalformedRejectedAsync(
+            CreateEnvelope() with
+            {
+                DataSnapshot = new AuditDataSnapshot
+                {
+                    CapturePolicyId = "test",
+                    CapturePolicyVersion = 1,
+                    Artifacts = default
+                }
+            },
+            "DataSnapshot.Artifacts");
+
+    [Fact]
+    public async Task MalformedCandidateNeverBecomesRecorderInternalFailure()
+    {
+        var result = await CreateRecorder([]).RecordAsync(CreateEnvelope() with { Evidence = default });
+        result.Status.Should().Be(AuditRecordStatus.Rejected);
+        result.Issues.Should().NotContain(x => x.Code == "AUDIT_RECORDER_INTERNAL_FAILURE");
+    }
+
+    [Fact]
+    public async Task MalformedCandidateCallsNoSanitizerOrSink()
+    {
+        var sanitizer = new CountingSanitizer();
+        var sink = new RecordingSink("a");
+        var result = await CreateRecorder([sink], sanitizer).RecordAsync(
+            CreateEnvelope() with { Runtime = AuditRuntimeContext.Empty with { References = default } });
+
+        result.Status.Should().Be(AuditRecordStatus.Rejected);
+        sanitizer.Calls.Should().Be(0);
+        sink.Calls.Should().Be(0);
     }
 
     [Fact]
@@ -140,6 +377,32 @@ public sealed class DefaultAuditRecorderTests
     }
 
     [Fact]
+    public async Task MidFanOutCallerCancellationCancelsAttemptAfterStartingAllSinks()
+    {
+        var started = new ConcurrentBag<string>();
+        var recorder = CreateRecorder(
+            [new RecordingSink("a", started, hang: true), new RecordingSink("b", started)],
+            options: new AccountabilityOptions { WriteTimeout = TimeSpan.FromSeconds(5) });
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        var action = () => recorder.RecordAsync(CreateEnvelope(), cancellation.Token).AsTask();
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+        started.Should().BeEquivalentTo("a", "b");
+    }
+
+    [Fact]
+    public async Task ProcessedAtIsAfterSinkAggregationCompletes()
+    {
+        var clock = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+        var recorder = CreateRecorder([new AdvancingSink("a", clock)], timeProvider: clock);
+
+        var result = await recorder.RecordAsync(CreateEnvelope());
+
+        result.ProcessedAt.Should().Be(DateTimeOffset.UnixEpoch.AddMinutes(1));
+    }
+
+    [Fact]
     public async Task SynchronousSinkThrowDoesNotPreventLaterSinkStart()
     {
         var started = new ConcurrentBag<string>();
@@ -172,7 +435,8 @@ public sealed class DefaultAuditRecorderTests
         IEnumerable<IAuditSink> sinks,
         IAuditSanitizer? sanitizer = null,
         AccountabilityOptions? options = null,
-        IAuditIntegrityHasher? hasher = null)
+        IAuditIntegrityHasher? hasher = null,
+        TimeProvider? timeProvider = null)
     {
         var writer = new AccountabilityCanonicalProjectionWriter();
         return new DefaultAuditRecorder(
@@ -182,7 +446,32 @@ public sealed class DefaultAuditRecorderTests
             writer,
             sinks,
             options ?? new AccountabilityOptions(),
-            TimeProvider.System);
+            timeProvider ?? TimeProvider.System);
+    }
+
+    private static async Task AssertMalformedRejectedAsync(AuditEnvelope envelope, string path)
+    {
+        var sanitizer = new CountingSanitizer();
+        var sink = new RecordingSink("a");
+        var result = await CreateRecorder([sink], sanitizer).RecordAsync(envelope);
+
+        result.Status.Should().Be(AuditRecordStatus.Rejected);
+        result.Issues.Should().Contain(x => x.Path == path);
+        result.Issues.Should().NotContain(x => x.Code == "AUDIT_RECORDER_INTERNAL_FAILURE");
+        sanitizer.Calls.Should().Be(0);
+        sink.Calls.Should().Be(0);
+    }
+
+    private static async Task AssertSinkIdentityMismatchAsync(
+        Func<AuditSinkWriteResult, AuditSinkWriteResult> rewrite)
+    {
+        var result = await CreateRecorder([new RewritingResultSink("provider", rewrite)])
+            .RecordAsync(CreateEnvelope());
+
+        result.Status.Should().Be(AuditRecordStatus.Failed);
+        result.SinkResults.Should().BeEmpty();
+        result.SinkFailures.Should().ContainSingle(x =>
+            x.SinkId == "provider" && x.Code == "AUDIT_SINK_RESULT_IDENTITY_MISMATCH");
     }
 
     private static AuditEnvelope CreateEnvelope()
@@ -248,6 +537,60 @@ public sealed class DefaultAuditRecorderTests
             });
     }
 
+    private sealed class OrderedSanitizer(ICollection<string> order) : IAuditSanitizer
+    {
+        public ValueTask<AuditSanitizationResult> SanitizeAsync(
+            AuditEnvelope candidate,
+            CancellationToken cancellationToken = default)
+        {
+            order.Add("sanitize");
+            return ValueTask.FromResult(new AuditSanitizationResult
+            {
+                Envelope = candidate,
+                Stamp = new AuditSanitizationStamp { PolicyId = "test", PolicyVersion = 1, AppliedRuleIds = [] }
+            });
+        }
+    }
+
+    private sealed class MinimizingSanitizer : IAuditSanitizer
+    {
+        public ValueTask<AuditSanitizationResult> SanitizeAsync(
+            AuditEnvelope candidate,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(new AuditSanitizationResult
+            {
+                Envelope = candidate with
+                {
+                    Actor = candidate.Actor with { DisplayName = null },
+                    Outcome = candidate.Outcome with { SafeSummary = null },
+                    Tags = AuditTagMap.Empty
+                },
+                Stamp = new AuditSanitizationStamp { PolicyId = "test", PolicyVersion = 1, AppliedRuleIds = [] }
+            });
+    }
+
+    private sealed class CountingSanitizer : IAuditSanitizer
+    {
+        public int Calls { get; private set; }
+
+        public ValueTask<AuditSanitizationResult> SanitizeAsync(
+            AuditEnvelope candidate,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return ValueTask.FromResult(new AuditSanitizationResult
+            {
+                Envelope = candidate,
+                Stamp = new AuditSanitizationStamp
+                {
+                    PolicyId = "test",
+                    PolicyVersion = 1,
+                    AppliedRuleIds = []
+                }
+            });
+        }
+    }
+
     private sealed class RewritingSanitizer : IAuditSanitizer
     {
         public ValueTask<AuditSanitizationResult> SanitizeAsync(AuditEnvelope candidate, CancellationToken cancellationToken = default)
@@ -306,6 +649,103 @@ public sealed class DefaultAuditRecorderTests
             if (_throwSynchronously) throw new InvalidOperationException("sync failure");
             if (_hang) return new ValueTask<AuditSinkWriteResult>(Task.Delay(Timeout.Infinite, cancellationToken).ContinueWith<AuditSinkWriteResult>(_ => throw new OperationCanceledException(), TaskScheduler.Default));
             return ValueTask.FromResult(new AuditSinkWriteResult { SinkId = Id, AuditId = envelope.AuditId, Integrity = envelope.Integrity!, Status = AuditSinkWriteStatus.Accepted });
+        }
+    }
+
+    private sealed class OrderedSink(string id, ICollection<string> order) : IAuditSink
+    {
+        public string Id { get; } = id;
+
+        public ValueTask<AuditSinkWriteResult> WriteAsync(
+            AuditEnvelope envelope,
+            CancellationToken cancellationToken = default)
+        {
+            order.Add("sink");
+            return ValueTask.FromResult(new AuditSinkWriteResult
+            {
+                SinkId = Id,
+                AuditId = envelope.AuditId,
+                Integrity = envelope.Integrity!,
+                Status = AuditSinkWriteStatus.Accepted
+            });
+        }
+    }
+
+    private sealed class CapturingSink(string id) : IAuditSink
+    {
+        public string Id { get; } = id;
+        public AuditEnvelope? Envelope { get; private set; }
+
+        public ValueTask<AuditSinkWriteResult> WriteAsync(
+            AuditEnvelope envelope,
+            CancellationToken cancellationToken = default)
+        {
+            Envelope = envelope;
+            return ValueTask.FromResult(new AuditSinkWriteResult
+            {
+                SinkId = Id,
+                AuditId = envelope.AuditId,
+                Integrity = envelope.Integrity!,
+                Status = AuditSinkWriteStatus.Accepted
+            });
+        }
+    }
+
+    private sealed class RewritingResultSink(
+        string id,
+        Func<AuditSinkWriteResult, AuditSinkWriteResult> rewrite) : IAuditSink
+    {
+        public string Id { get; } = id;
+
+        public ValueTask<AuditSinkWriteResult> WriteAsync(
+            AuditEnvelope envelope,
+            CancellationToken cancellationToken = default)
+        {
+            var valid = new AuditSinkWriteResult
+            {
+                SinkId = Id,
+                AuditId = envelope.AuditId,
+                Integrity = envelope.Integrity!,
+                Status = AuditSinkWriteStatus.Accepted
+            };
+            return ValueTask.FromResult(rewrite(valid));
+        }
+    }
+
+    private sealed class AdvancingSink(string id, ManualTimeProvider timeProvider) : IAuditSink
+    {
+        public string Id { get; } = id;
+
+        public ValueTask<AuditSinkWriteResult> WriteAsync(
+            AuditEnvelope envelope,
+            CancellationToken cancellationToken = default)
+        {
+            timeProvider.Advance(TimeSpan.FromMinutes(1));
+            return ValueTask.FromResult(new AuditSinkWriteResult
+            {
+                SinkId = Id,
+                AuditId = envelope.AuditId,
+                Integrity = envelope.Integrity!,
+                Status = AuditSinkWriteStatus.Accepted
+            });
+        }
+    }
+
+    private sealed class ManualTimeProvider(DateTimeOffset initial) : TimeProvider
+    {
+        private DateTimeOffset _now = initial;
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(TimeSpan value) => _now += value;
+    }
+
+    private sealed class CapturingHasher : FixedHasher
+    {
+        public AuditEnvelope? Envelope { get; private set; }
+
+        public override CanonicalHash Compute(AuditEnvelope sanitizedCanonicalEnvelope)
+        {
+            Envelope = sanitizedCanonicalEnvelope;
+            return base.Compute(sanitizedCanonicalEnvelope);
         }
     }
 }

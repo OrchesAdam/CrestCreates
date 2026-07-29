@@ -37,6 +37,7 @@ builder.Services.AddCrestLogging(builder.Configuration);
 builder.Services.Configure<AuditLoggingOptions>(
     builder.Configuration.GetSection(AuditLoggingOptions.SectionName));
 builder.Services.AddScoped<AuditLoggingMiddleware>();
+builder.Services.AddScoped<AccountabilityHttpMiddleware>();
 builder.Services.AddScoped<IAuditLogRedactor, AuditLogRedactor>();
 builder.Services.AddScoped<IAuditLogWriter, AuditLogWriter>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
@@ -94,9 +95,9 @@ var app = builder.Build();
 
 app.UseCrestRequestLogging();
 app.UseExceptionHandling();
-app.UseAuditLogging();
 app.UseHttpsRedirection();
 app.UseMultiTenancy();
+app.UseAccountabilityHttpAudit();
 app.UseAuthentication();
 app.UseTenantBoundary();
 app.UseAuthorization();

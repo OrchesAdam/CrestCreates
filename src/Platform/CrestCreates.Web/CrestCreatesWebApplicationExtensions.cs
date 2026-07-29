@@ -84,6 +84,7 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddCrestLogging(configuration);
         services.Configure<AuditLoggingOptions>(configuration.GetSection(AuditLoggingOptions.SectionName));
         services.AddScoped<AuditLoggingMiddleware>();
+        services.AddScoped<AccountabilityHttpMiddleware>();
         services.AddScoped<IAuditLogRedactor, AuditLogRedactor>();
         services.AddScoped<IAuditLogWriter, AuditLogWriter>();
         services.AddScoped<IAuditLogService, AuditLogService>();
@@ -195,9 +196,9 @@ public static class CrestCreatesWebApplicationExtensions
 
         app.UseCrestRequestLogging();
         app.UseExceptionHandling();
-        app.UseAuditLogging();
         app.UseRouting();
         app.UseMultiTenancy();
+        app.UseAccountabilityHttpAudit();
         app.UseAuthentication();
         app.UseTenantBoundary();
         app.UseAuthorization();

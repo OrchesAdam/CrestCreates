@@ -158,7 +158,7 @@ public static class ProcurementGoldenScenario
             var capabilityFact = httpFact is null ? null : accountabilityRecords.FirstOrDefault(record =>
                 record.CorrelationId == httpFact.CorrelationId
                 && record.Action.Kind == "capability.execute"
-                && record.Action.Name == "submit-request");
+                && record.Action.Name == "procurement.submit-request");
             var workflowStarted = httpFact is null ? null : accountabilityRecords.FirstOrDefault(record =>
                 record.CorrelationId == httpFact.CorrelationId && record.Action.Name == "workflow.started");
             var workflowSuspended = httpFact is null ? null : accountabilityRecords.FirstOrDefault(record =>

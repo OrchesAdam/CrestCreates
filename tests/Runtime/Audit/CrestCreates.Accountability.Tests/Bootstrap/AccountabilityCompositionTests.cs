@@ -11,6 +11,18 @@ namespace CrestCreates.Accountability.Tests.Bootstrap;
 public sealed class AccountabilityCompositionTests
 {
     [Fact]
+    public Task LibraryDefaultDoesNotRequireSink()
+        => AddAccountabilityWithoutSinkIsAllowedWhenRequireSinkFalse();
+
+    [Fact]
+    public Task FirstPartyProductionHostsRequireAtLeastOneSink()
+        => RequiredSinkMissingFailsDuringStartup();
+
+    [Fact]
+    public Task DevelopmentHostRegistersInMemorySinkExplicitly()
+        => RequiredSinkPassesWhenContractSinkExists();
+
+    [Fact]
     public async Task AddAccountabilityWithoutSinkIsAllowedWhenRequireSinkFalse()
     {
         var services = new ServiceCollection();

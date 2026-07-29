@@ -156,7 +156,7 @@ public class AuditLoggingMiddlewareTests
     }
 
     [Fact]
-    public async Task InvokeAsync_ShouldRethrow_WhenHideErrorsIsFalse_AndWriteFails()
+    public async Task AuditFailureDoesNotReplaceHttpOutcome()
     {
         var mockWriter = new Mock<IAuditLogWriter>();
         mockWriter.Setup(w => w.WriteAsync(It.IsAny<AuditContext>()))
@@ -179,8 +179,8 @@ public class AuditLoggingMiddlewareTests
 
         var action = () => middleware.InvokeAsync(context, _ => Task.CompletedTask);
 
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("persist failed");
+        await action.Should().NotThrowAsync();
+        context.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
     }
 
     // Helper method to throw an exception - used to verify original stack trace is preserved

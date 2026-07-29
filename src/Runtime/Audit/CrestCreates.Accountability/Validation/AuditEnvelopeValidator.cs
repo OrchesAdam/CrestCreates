@@ -10,6 +10,35 @@ namespace CrestCreates.Accountability.Validation;
 
 public sealed class AuditEnvelopeValidator
 {
+    public AuditValidationResult ValidateStructure(AuditEnvelope envelope)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        var issues = ImmutableArray.CreateBuilder<AuditRecordIssue>();
+
+        if (envelope.Runtime is null)
+            issues.Add(new("AUDIT_REQUIRED_FIELD_MISSING", "Runtime"));
+        else if (envelope.Runtime.References.IsDefault)
+            issues.Add(new("AUDIT_DEFAULT_IMMUTABLE_ARRAY", "Runtime.References"));
+
+        if (envelope.Descriptors is null)
+            issues.Add(new("AUDIT_REQUIRED_FIELD_MISSING", "Descriptors"));
+        else if (envelope.Descriptors.Items.IsDefault)
+            issues.Add(new("AUDIT_DEFAULT_IMMUTABLE_ARRAY", "Descriptors.Items"));
+
+        if (envelope.Evidence.IsDefault)
+            issues.Add(new("AUDIT_DEFAULT_IMMUTABLE_ARRAY", "Evidence"));
+        if (envelope.Tags is null)
+            issues.Add(new("AUDIT_NULL_IMMUTABLE_DICTIONARY", "Tags"));
+        if (envelope.DataSnapshot is { Artifacts.IsDefault: true })
+            issues.Add(new("AUDIT_DEFAULT_IMMUTABLE_ARRAY", "DataSnapshot.Artifacts"));
+        if (envelope.Sanitization is { AppliedRuleIds.IsDefault: true })
+            issues.Add(new("AUDIT_DEFAULT_IMMUTABLE_ARRAY", "Sanitization.AppliedRuleIds"));
+
+        return issues.Count == 0
+            ? AuditValidationResult.Valid
+            : new AuditValidationResult { Issues = issues.ToImmutable() };
+    }
+
     public AuditValidationResult ValidateCandidate(AuditEnvelope envelope)
         => Validate(envelope, candidate: true);
 
@@ -19,6 +48,10 @@ public sealed class AuditEnvelopeValidator
     private static AuditValidationResult Validate(AuditEnvelope envelope, bool candidate)
     {
         ArgumentNullException.ThrowIfNull(envelope);
+        var structural = new AuditEnvelopeValidator().ValidateStructure(envelope);
+        if (!structural.IsValid)
+            return structural;
+
         var issues = ImmutableArray.CreateBuilder<AuditRecordIssue>();
 
         CheckRequired(envelope, issues);
@@ -35,6 +68,7 @@ public sealed class AuditEnvelopeValidator
     private static void CheckRequired(AuditEnvelope envelope, ImmutableArray<AuditRecordIssue>.Builder issues)
     {
         if (envelope.ContractVersion != 1) issues.Add(new("AUDIT_INVALID_CONTRACT_VERSION", "ContractVersion"));
+        if (envelope.OccurredAt == default) issues.Add(new("AUDIT_REQUIRED_FIELD_MISSING", "OccurredAt"));
         CheckIdentifier(envelope.AuditId, "AuditId", issues);
         CheckIdentifier(envelope.CorrelationId, "CorrelationId", issues);
         CheckText(envelope.Actor?.Kind, "Actor.Kind", issues);
@@ -89,8 +123,6 @@ public sealed class AuditEnvelopeValidator
             CheckOptionalIdentifier(envelope.Runtime.RequestId, "Runtime.RequestId", issues);
             CheckOptionalIdentifier(envelope.Runtime.TraceId, "Runtime.TraceId", issues);
             CheckOptionalIdentifier(envelope.Runtime.SpanId, "Runtime.SpanId", issues);
-            if (envelope.Runtime.References.IsDefault)
-                issues.Add(new("AUDIT_DEFAULT_IMMUTABLE_ARRAY", "Runtime.References"));
             foreach (var reference in envelope.Runtime.References)
             {
                 if (reference is null)
@@ -106,8 +138,6 @@ public sealed class AuditEnvelopeValidator
         if (envelope.Descriptors is not null)
         {
             CheckOptionalIdentifier(envelope.Descriptors.SnapshotId, "Descriptors.SnapshotId", issues);
-            if (envelope.Descriptors.Items.IsDefault)
-                issues.Add(new("AUDIT_DEFAULT_IMMUTABLE_ARRAY", "Descriptors.Items"));
             foreach (var reference in envelope.Descriptors.Items)
             {
                 if (reference is null)
@@ -123,12 +153,6 @@ public sealed class AuditEnvelopeValidator
             }
             AddDuplicateIssues(envelope.Descriptors.Items.Where(x => x is not null).Select(x => x.Kind + "\u001f" + x.Id + "\u001f" + x.Version), "Descriptors.Items", issues);
         }
-        if (envelope.Evidence.IsDefault)
-            issues.Add(new("AUDIT_DEFAULT_IMMUTABLE_ARRAY", "Evidence"));
-        if (envelope.Tags is null)
-            issues.Add(new("AUDIT_NULL_IMMUTABLE_DICTIONARY", "Tags"));
-        if (envelope.Sanitization is { AppliedRuleIds.IsDefault: true })
-            issues.Add(new("AUDIT_DEFAULT_IMMUTABLE_ARRAY", "Sanitization.AppliedRuleIds"));
         if (envelope.Sanitization is { } stamp)
         {
             CheckIdentifier(stamp.PolicyId, "Sanitization.PolicyId", issues);
@@ -199,8 +223,6 @@ public sealed class AuditEnvelopeValidator
 
         if (envelope.DataSnapshot is { } snapshot)
         {
-            if (snapshot.Artifacts.IsDefault)
-                issues.Add(new("AUDIT_DEFAULT_IMMUTABLE_ARRAY", "DataSnapshot.Artifacts"));
             if (snapshot.Artifacts.Length > AuditContractLimits.MaxDataArtifacts)
                 issues.Add(new("AUDIT_LIMIT_EXCEEDED", "DataSnapshot.Artifacts"));
             CheckText(snapshot.CapturePolicyId, "DataSnapshot.CapturePolicyId", issues);
@@ -231,6 +253,11 @@ public sealed class AuditEnvelopeValidator
                     }
                 }
             }
+
+            AddDuplicateIssues(
+                snapshot.Artifacts.Where(x => x is not null).Select(x => x.Kind),
+                "DataSnapshot.Artifacts.Kind",
+                issues);
         }
     }
 

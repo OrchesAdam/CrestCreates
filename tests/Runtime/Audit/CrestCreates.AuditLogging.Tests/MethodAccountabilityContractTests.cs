@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -148,6 +149,91 @@ public sealed class MethodAccountabilityContractTests
         contexts.Current!.EnclosingAuditId.Should().Be("http-audit");
     }
 
+    [Fact]
+    public async Task EmitsOneFactPerInvocation()
+    {
+        var recorder = new CapturingRecorder();
+        var runtime = new AuditedMethodAccountabilityRuntime(
+            recorder,
+            new AuditOperationContextAccessor(),
+            new TestIdentityGenerator());
+        var state = runtime.Enter(Descriptor("tests.one"));
+        runtime.SetOutcome(state, new AuditedMethodInvocationOutcome { Kind = AuditedMethodOutcomeKind.Succeeded });
+        await runtime.ExitAsync(state);
+        recorder.Envelopes.Should().ContainSingle();
+    }
+
+    [Fact]
+    public Task LinksToHttpOrEnclosingMethodScope()
+        => MethodAuditIdEnclosesNestedFactsWhileParentRemainsHttpFact();
+
+    [Fact]
+    public async Task MultipleMethodsNeverOverwrite()
+    {
+        var recorder = new CapturingRecorder();
+        var runtime = new AuditedMethodAccountabilityRuntime(
+            recorder,
+            new AuditOperationContextAccessor(),
+            new TestIdentityGenerator());
+        foreach (var method in new[] { "tests.one", "tests.two" })
+        {
+            var state = runtime.Enter(Descriptor(method));
+            runtime.SetOutcome(state, new AuditedMethodInvocationOutcome { Kind = AuditedMethodOutcomeKind.Succeeded });
+            await runtime.ExitAsync(state);
+        }
+
+        recorder.Envelopes.Select(x => x.Target.Id).Should().Equal("tests.one", "tests.two");
+        recorder.Envelopes.Select(x => x.AuditId).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task StandaloneMethodCreatesRootFact()
+    {
+        var recorder = new CapturingRecorder();
+        var runtime = new AuditedMethodAccountabilityRuntime(
+            recorder,
+            new AuditOperationContextAccessor(),
+            new TestIdentityGenerator());
+        var state = runtime.Enter(Descriptor("tests.root"));
+        runtime.SetOutcome(state, new AuditedMethodInvocationOutcome { Kind = AuditedMethodOutcomeKind.Succeeded });
+        await runtime.ExitAsync(state);
+
+        recorder.Envelope!.CausationId.Should().BeNull();
+        recorder.Envelope.ParentAuditId.Should().BeNull();
+        recorder.Envelope.CorrelationId.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void DoesNotReflectionSerializeArgumentsOrResult()
+    {
+        typeof(AuditedMethodInvocationDescriptor).GetProperties()
+            .Should().NotContain(property => property.PropertyType == typeof(object));
+        typeof(AuditedMethodInvocationOutcome).GetProperties()
+            .Should().NotContain(property => property.PropertyType == typeof(object)
+                || typeof(Exception).IsAssignableFrom(property.PropertyType));
+    }
+
+    [Fact]
+    public async Task AlwaysDisposesScope()
+    {
+        var recorder = new CapturingRecorder();
+        var contexts = new AuditOperationContextAccessor();
+        var runtime = new AuditedMethodAccountabilityRuntime(recorder, contexts, new TestIdentityGenerator());
+        var state = runtime.Enter(Descriptor("tests.scope"));
+        contexts.Current.Should().NotBeNull();
+        runtime.SetOutcome(state, new AuditedMethodInvocationOutcome { Kind = AuditedMethodOutcomeKind.Succeeded });
+        await runtime.ExitAsync(state);
+        contexts.Current.Should().BeNull();
+    }
+
+    private static AuditedMethodInvocationDescriptor Descriptor(string methodId)
+        => new()
+        {
+            MethodId = methodId,
+            ActionName = methodId,
+            StartedAt = DateTimeOffset.UtcNow
+        };
+
     private sealed class ThrowingRecorder : IAuditRecorder
     {
         public int Calls { get; private set; }
@@ -163,11 +249,12 @@ public sealed class MethodAccountabilityContractTests
 
     private sealed class CapturingRecorder : IAuditRecorder
     {
-        public AuditEnvelope? Envelope { get; private set; }
+        public List<AuditEnvelope> Envelopes { get; } = [];
+        public AuditEnvelope? Envelope => Envelopes.LastOrDefault();
 
         public ValueTask<AuditRecordResult> RecordAsync(AuditEnvelope envelope, CancellationToken cancellationToken = default)
         {
-            Envelope = envelope;
+            Envelopes.Add(envelope);
             return ValueTask.FromResult(new AuditRecordResult
             {
                 AuditId = envelope.AuditId,

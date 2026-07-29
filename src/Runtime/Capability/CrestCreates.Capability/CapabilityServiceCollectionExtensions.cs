@@ -51,6 +51,8 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddTransient<IdempotencyMiddleware>();
         services.TryAddTransient<MetricsMiddleware>();
         services.TryAddTransient<EventPublishingMiddleware>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IBootstrapValidator, CapabilityAccountabilityCompositionValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, CapabilityAccountabilityCompositionValidator>());
 
         // Compatibility resolver for legacy generated providers. Explicitly
         // selected generated modules replace this registration with a Host-
@@ -115,9 +117,6 @@ public static class CapabilityServiceCollectionExtensions
         // Bootstrap Validators
         services.AddSingleton<IBootstrapValidator, CapabilityHandlerValidator>();
         services.AddSingleton<IBootstrapValidator, CapabilitySchemaValidator>();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IBootstrapValidator, CapabilityAccountabilityCompositionValidator>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, CapabilityAccountabilityCompositionValidator>());
-
         // Capability Registry (for binding status contributors)
         services.TryAddSingleton<ICapabilityRegistry, CapabilityRegistry>();
         services.TryAddSingleton<IRegistryValidationEngine<CapabilityDescriptor>,

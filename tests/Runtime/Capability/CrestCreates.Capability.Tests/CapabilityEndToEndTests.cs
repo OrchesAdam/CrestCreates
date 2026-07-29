@@ -218,7 +218,7 @@ public class CapabilityEndToEndTests
         var r = audit.GetRecords()[0];
         r.Runtime.ExecutionId.Should().NotBeNullOrEmpty();
         r.Target.Id.Should().Be("test.echo");
-        r.Action.Name.Should().Be("Echo");
+        r.Action.Name.Should().Be("test.echo");
         r.Descriptors.Items.Single().Version.Should().Be(1);
         r.TenantId.Should().Be("t1");
         r.CorrelationId.Should().NotBeNullOrEmpty();
@@ -279,7 +279,7 @@ public class CapabilityEndToEndTests
     }
 
     [Fact]
-    public async Task E2E_IdDifferentFromName_PreservesBoth()
+    public async Task E2E_IdDifferentFromDisplayName_UsesStableIdForActionAndTarget()
     {
         var (_, pipeline, audit, resolver) = CreateE2EPipeline(
             new CapabilityDescriptor { Id = "echo.v2", Name = "Echo Command", Version = 1,
@@ -291,7 +291,7 @@ public class CapabilityEndToEndTests
         result.IsSuccess.Should().BeTrue();
         var records = audit.GetRecords();
         records[0].Target.Id.Should().Be("echo.v2");
-        records[0].Action.Name.Should().Be("Echo Command");
+        records[0].Action.Name.Should().Be("echo.v2");
     }
 
     [Fact]

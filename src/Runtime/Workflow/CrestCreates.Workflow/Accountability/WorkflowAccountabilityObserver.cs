@@ -53,6 +53,7 @@ internal sealed class WorkflowAccountabilityObserver : IWorkflowLifecycleObserve
         {
             AuditId = lifecycleEvent.AuditId,
             OccurredAt = lifecycleEvent.OccurredAt,
+            TenantId = lifecycleEvent.TenantId,
             CorrelationId = lifecycleEvent.CorrelationId ?? lifecycleEvent.Origin?.CorrelationId ?? string.Empty,
             CausationId = lifecycleEvent.CausationId,
             ParentAuditId = lifecycleEvent.ParentAuditId,

@@ -4,6 +4,7 @@ using System.Text.Json;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Accountability.Abstractions.Json;
 using CrestCreates.Accountability.Abstractions.Semantics;
+using CrestCreates.Accountability.Abstractions.Sinks;
 using FluentAssertions;
 using Xunit;
 
@@ -47,7 +48,7 @@ public sealed class AuditEnvelopeContractTests
     }
 
     [Fact]
-    public void PreservesUnknownStableStringKinds()
+    public void PreservesUnknownStableExtensionKinds()
     {
         var actor = new AuditActor { Kind = "extension.actor", Id = "a-1" };
         var action = new AuditAction { Kind = "extension.action", Name = "do" };
@@ -59,7 +60,7 @@ public sealed class AuditEnvelopeContractTests
     }
 
     [Fact]
-    public void GeneratedJsonContextRoundTripsEnvelope()
+    public void RoundTripsWithGeneratedJsonTypeInfo()
     {
         var envelope = CreateEnvelope();
         var json = JsonSerializer.Serialize(envelope, AccountabilityJsonSerializerContext.Default.AuditEnvelope);
@@ -70,6 +71,27 @@ public sealed class AuditEnvelopeContractTests
         restored.CorrelationId.Should().Be(envelope.CorrelationId);
         restored.Actor.Kind.Should().Be(envelope.Actor.Kind);
         restored.Tags.Should().BeEquivalentTo(envelope.Tags);
+    }
+
+    [Fact]
+    public void AccountabilityJsonContextHasNoHandwrittenTransitiveRootLedger()
+    {
+        AccountabilityJsonSerializerContext.AccountabilityJsonSerializerContextRootManifest
+            .ExplicitRootTypes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void GeneratedManifestOwnsAuditSinkDirectRoots()
+    {
+        AccountabilityJsonSerializerContext.AccountabilityJsonSerializerContextRootManifest
+            .SurfaceRootTypes.Should().BeEquivalentTo([typeof(AuditEnvelope), typeof(AuditSinkWriteResult)]);
+    }
+
+    [Fact]
+    public void CancellationTokenIsExcludedFromContractSurface()
+    {
+        AccountabilityJsonSerializerContext.AccountabilityJsonSerializerContextRootManifest
+            .AllDirectRootTypes.Should().NotContain(typeof(CancellationToken));
     }
 
     [Fact]

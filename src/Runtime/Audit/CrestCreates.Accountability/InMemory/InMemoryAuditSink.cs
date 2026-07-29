@@ -35,7 +35,9 @@ public sealed class InMemoryAuditSink : IAuditSink
                     SinkId = Id,
                     AuditId = envelope.AuditId,
                     Integrity = envelope.Integrity!,
-                    ExistingIntegrity = existing.Integrity,
+                    ExistingIntegrity = status == AuditSinkWriteStatus.Conflict
+                        ? existing.Integrity
+                        : null,
                     Status = status,
                     FirstAcceptedAt = existing.FirstAcceptedAt
                 });

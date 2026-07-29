@@ -25,6 +25,46 @@ public class CapabilityServiceCollectionExtensionsTests
     }
 
     [Fact]
+    public async Task CapabilityPipelineHostWithoutAccountabilityFailsDuringStartup()
+    {
+        var services = new ServiceCollection();
+        services.AddCapabilityPipeline();
+        using var provider = services.BuildServiceProvider();
+        var validator = provider.GetServices<IHostedService>()
+            .Single(service => service.GetType().Name == "CapabilityAccountabilityCompositionValidator");
+
+        var action = () => validator.StartAsync(CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*CAPABILITY_ACCOUNTABILITY_FOUNDATION_MISSING*");
+    }
+
+    [Fact]
+    public void CapabilityRuntimeRegistersSingleCompositionValidator()
+    {
+        var services = new ServiceCollection();
+        services.AddCapabilityRuntime();
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetServices<IHostedService>()
+            .Should().ContainSingle(service =>
+                service.GetType().Name == "CapabilityAccountabilityCompositionValidator");
+    }
+
+    [Fact]
+    public async Task CapabilityPipelineWithAccountabilityStartsSuccessfully()
+    {
+        var services = new ServiceCollection();
+        services.AddCapabilityPipeline();
+        services.AddAccountability();
+        using var provider = services.BuildServiceProvider();
+        var validator = provider.GetServices<IHostedService>()
+            .Single(service => service.GetType().Name == "CapabilityAccountabilityCompositionValidator");
+
+        await validator.StartAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task CapabilityHostWithAccountabilityPassesStartupValidation()
     {
         var services = new ServiceCollection();

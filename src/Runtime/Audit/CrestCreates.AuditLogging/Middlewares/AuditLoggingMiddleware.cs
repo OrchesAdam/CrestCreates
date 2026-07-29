@@ -128,10 +128,6 @@ namespace CrestCreates.AuditLogging.Middlewares
                 catch (Exception writeEx)
                 {
                     _logger.LogWarning(writeEx, "Failed to persist audit log for {RequestPath}", requestPath);
-                    if (!_options.HideErrors)
-                    {
-                        throw;
-                    }
                 }
 
                 AuditContext.ClearCurrent();
@@ -196,6 +192,7 @@ namespace CrestCreates.AuditLogging.Middlewares
 
     public static class AuditLoggingMiddlewareExtensions
     {
+        [Obsolete("Compatibility-only HTTP observation middleware. Use UseAccountabilityHttpAudit for the framework mainline.")]
         public static IApplicationBuilder UseAuditLogging(this IApplicationBuilder builder)
         {
             return builder.UseMiddleware<AuditLoggingMiddleware>();

@@ -82,6 +82,27 @@ public sealed class ProjectionCompositionAcceptanceTests
     }
 
     [Fact]
+    public async Task PlatformHttpCapabilitySharesAccountabilityCorrelation()
+    {
+        using var factory = new ProcurementWebApplicationFactory();
+        using var client = factory.CreateClient();
+        SetIdentity(client, "tenant-a", "requester-a", "procurement-requester");
+
+        await SubmitHttpAsync(client, "Accountability chain", 25_000m);
+
+        var records = factory.Services.GetRequiredService<InMemoryAuditSink>().GetRecords();
+        var http = records.Single(record =>
+            record.Action.Kind == AuditActionKinds.HttpRequest
+            && record.Target.Id == "POST /api/procurement/requests");
+        var capability = records.Single(record =>
+            record.Action.Kind == AuditActionKinds.CapabilityExecute
+            && record.Target.Id == ProcurementContractIds.SubmitCapability);
+        capability.CorrelationId.Should().Be(http.CorrelationId);
+        capability.CausationId.Should().Be(http.Runtime.ExecutionId);
+        capability.ParentAuditId.Should().Be(http.AuditId);
+    }
+
+    [Fact]
     public async Task CompatibilityProjection_ExposesGetOnly_AndMutationsAreNotMapped()
     {
         using var factory = new ProcurementWebApplicationFactory();

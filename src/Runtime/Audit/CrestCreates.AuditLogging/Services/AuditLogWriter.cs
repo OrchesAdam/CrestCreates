@@ -1,4 +1,8 @@
+using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Identity;
+using CrestCreates.Accountability.Abstractions.Recording;
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.AuditLogging.Context;
 using Microsoft.Extensions.Logging;
@@ -10,40 +14,81 @@ namespace CrestCreates.AuditLogging.Services
     /// </summary>
     public class AuditLogWriter : IAuditLogWriter
     {
-        private readonly IAuditLogService _auditLogService;
-        private readonly IAuditLogRedactor _redactor;
+        private readonly IAuditRecorder _recorder;
+        private readonly IAuditIdentityGenerator _identity;
+        private readonly TimeProvider _timeProvider;
         private readonly ILogger<AuditLogWriter> _logger;
 
         public AuditLogWriter(
-            IAuditLogService auditLogService,
-            IAuditLogRedactor redactor,
-            ILogger<AuditLogWriter> logger)
+            IAuditRecorder recorder,
+            IAuditIdentityGenerator identity,
+            ILogger<AuditLogWriter> logger,
+            TimeProvider? timeProvider = null)
         {
-            _auditLogService = auditLogService;
-            _redactor = redactor;
+            _recorder = recorder;
+            _identity = identity;
             _logger = logger;
+            _timeProvider = timeProvider ?? TimeProvider.System;
         }
 
         public async Task WriteAsync(AuditContext context)
         {
-            // 统一脱敏：在落库前对所有敏感字段进行脱敏处理
-            await _redactor.RedactAsync(context);
+            ArgumentNullException.ThrowIfNull(context);
+            var occurredAt = _timeProvider.GetUtcNow();
+            var method = string.IsNullOrWhiteSpace(context.HttpMethod)
+                ? "UNKNOWN"
+                : context.HttpMethod.ToUpperInvariant();
+            var endpointIdentity = $"{method} <legacy-unmatched>";
+            var status = context.IsException || context.HttpStatusCode >= 400
+                ? "failed"
+                : "succeeded";
+            var code = context.IsException
+                ? "UNHANDLED_EXCEPTION"
+                : context.HttpStatusCode >= 400
+                    ? $"HTTP_{context.HttpStatusCode}"
+                    : null;
+            var actor = string.IsNullOrWhiteSpace(context.UserId)
+                ? new AuditActor { Kind = "unknown", Id = "unknown" }
+                : new AuditActor { Kind = "user", Id = context.UserId };
+            var startedAt = new DateTimeOffset(context.StartTime.ToUniversalTime());
+            var duration = occurredAt - startedAt;
+            if (duration < TimeSpan.Zero)
+                duration = TimeSpan.Zero;
+
+            var envelope = new AuditEnvelope
+            {
+                AuditId = _identity.CreateAuditId(),
+                OccurredAt = occurredAt,
+                TenantId = context.TenantId,
+                CorrelationId = _identity.CreateOperationId(),
+                Actor = actor,
+                Action = new AuditAction { Kind = "http.request", Name = endpointIdentity },
+                Target = new AuditTarget { Kind = "http.endpoint", Id = endpointIdentity },
+                Outcome = new AuditOutcome { Status = status, Code = code },
+                Runtime = new AuditRuntimeContext
+                {
+                    InvocationSource = "http",
+                    ExecutionId = _identity.CreateOperationId(),
+                    RequestId = context.TraceId,
+                    Duration = duration,
+                    References = []
+                },
+                Descriptors = AuditDescriptorContext.Empty,
+                Evidence = [],
+                Tags = AuditTagMap.Empty
+            };
 
             try
             {
-                var auditLog = context.ToAuditLog();
-                await _auditLogService.CreateAsync(auditLog);
+                var result = await _recorder.RecordAsync(envelope, CancellationToken.None);
                 _logger.LogDebug(
-                    "Audit log written: {HttpMethod} {Url} -> {Status} ({Duration}ms)",
-                    context.HttpMethod,
-                    context.Url,
-                    auditLog.Status,
-                    auditLog.Duration);
+                    "Legacy audit observation exported to Accountability: {Endpoint} -> {Status}",
+                    endpointIdentity,
+                    result.Status);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to write audit log for {Url}", context.Url);
-                throw;
+                _logger.LogWarning(ex, "Failed to export legacy audit observation for {Endpoint}", endpointIdentity);
             }
         }
     }

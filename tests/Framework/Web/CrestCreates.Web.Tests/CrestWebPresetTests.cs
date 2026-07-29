@@ -3,6 +3,7 @@ using CrestCreates.DynamicApi;
 using CrestCreates.ModuleDiagnostics.Modules;
 using CrestCreates.ModuleDiagnostics.Stores;
 using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.Web;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
@@ -37,6 +38,17 @@ public class CrestWebPresetTests
         });
 
         builder.Services.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void AddCrestWeb_ShouldRegisterAccountabilityHttpMainline()
+    {
+        var builder = WebApplication.CreateBuilder();
+
+        builder.AddCrestWeb(options => options.UseOpenIddict(false));
+
+        builder.Services.Should().ContainSingle(descriptor =>
+            descriptor.ServiceType == typeof(AccountabilityHttpMiddleware));
     }
 
     [Fact]

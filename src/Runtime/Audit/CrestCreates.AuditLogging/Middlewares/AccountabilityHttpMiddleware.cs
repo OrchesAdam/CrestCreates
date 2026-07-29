@@ -100,9 +100,11 @@ public sealed class AccountabilityHttpMiddleware : IMiddleware
                                     : null
                     };
 
-            var route = (context.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText
-                ?? context.Request.Path.Value
-                ?? "/";
+            var method = context.Request.Method.ToUpperInvariant();
+            var routeTemplate = (context.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText;
+            var endpointIdentity = string.IsNullOrWhiteSpace(routeTemplate)
+                ? $"{method} <unmatched>"
+                : $"{method} {NormalizeRouteTemplate(routeTemplate)}";
             var envelope = new AuditEnvelope
             {
                 AuditId = auditId,
@@ -111,8 +113,8 @@ public sealed class AccountabilityHttpMiddleware : IMiddleware
                 CorrelationId = correlation,
                 CausationId = null,
                 Actor = actor,
-                Action = new AuditAction { Kind = "http.request", Name = $"{context.Request.Method} {route}" },
-                Target = new AuditTarget { Kind = "http.endpoint", Id = route },
+                Action = new AuditAction { Kind = "http.request", Name = endpointIdentity },
+                Target = new AuditTarget { Kind = "http.endpoint", Id = endpointIdentity },
                 Outcome = outcome,
                 Runtime = new AuditRuntimeContext
                 {
@@ -135,7 +137,7 @@ public sealed class AccountabilityHttpMiddleware : IMiddleware
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Accountability HTTP post-fact recording failed for {Route}", route);
+                _logger.LogWarning(ex, "Accountability HTTP post-fact recording failed for {Endpoint}", endpointIdentity);
             }
             finally
             {
@@ -152,6 +154,14 @@ public sealed class AccountabilityHttpMiddleware : IMiddleware
         return string.IsNullOrWhiteSpace(id)
             ? new AuditActor { Kind = "unknown", Id = "unknown" }
             : new AuditActor { Kind = "user", Id = id, DisplayName = principal.Identity.Name };
+    }
+
+    private static string NormalizeRouteTemplate(string routeTemplate)
+    {
+        var normalized = routeTemplate.Trim();
+        if (!normalized.StartsWith('/'))
+            normalized = "/" + normalized;
+        return normalized.Length > 1 ? normalized.TrimEnd('/') : normalized;
     }
 }
 

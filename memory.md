@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-29 (Issue #39 Phase 9a Accountability runtime implemented and verified)
+Last Updated: 2026-07-29 (Issue #39 Phase 9a PR #67 review findings remediated and re-verified)
 
 ## Purpose
 
@@ -75,6 +75,25 @@ linux-x64 ELF NativeAOT artifact, and static evidence that the real Application
 scenario could not be repeated inside this review sandbox because the required
 socket escalation was rejected; the previously recorded publish-and-run gate is
 therefore retained rather than replaced by a false new run claim.
+
+PR #67 second review closure (2026-07-29): the default Platform and first-party
+HTTP pipeline now uses `AccountabilityHttpMiddleware`; legacy `UseAuditLogging`
+is compatibility opt-in and `AuditLogWriter` no longer persists `AuditLog`
+directly. In-memory Duplicate results no longer expose `ExistingIntegrity`;
+Recorder performs a non-enumerating structural preflight before validation and
+snapshotting; Workflow facts preserve TenantId; `AddCapabilityPipeline` owns the
+startup validator; the Accountability JSON context contains only the generated
+`IAuditSink` contract surface; unmatched HTTP routes never persist raw paths;
+artifact sanitization rejects duplicate Kinds before rules and executes in
+ordinal order; ProcessedAt is completion metadata; and Capability Action.Name is
+the stable CapabilityId. The runner-free sink suite now covers acceptance,
+duplicate/conflict metadata, snapshots, concurrency, and deterministic reads.
+Boundary CI parses Spec §18 and fails if any named acceptance test disappears.
+Final focused evidence is green: Accountability 95, AuditLogging 58, Capability
+169, Workflow 101, Boundary 76, Platform Web 93, Procurement acceptance 37, and
+Procurement NativeAOT fixture 9 tests. A fresh linux-x64 native publish/link/run
+emitted `CRESTCREATES_PROCUREMENT_HTTP_OK`,
+`CRESTCREATES_PROCUREMENT_SAMPLE_OK`, and `CRESTCREATES_ACCOUNTABILITY_OK`.
 
 Spec: `docs/superpowers/specs/2026-07-28-phase-9a-accountability-runtime-foundation-design.md`
 Plan: `docs/superpowers/plans/2026-07-29-phase-9a-accountability-runtime-foundation.md`

@@ -50,52 +50,62 @@ public sealed class DefaultAuditRecorder : IAuditRecorder
     {
         ArgumentNullException.ThrowIfNull(envelope);
         cancellationToken.ThrowIfCancellationRequested();
-        var processedAt = _timeProvider.GetUtcNow();
         AuditEnvelope candidate;
         try
         {
+            var structuralValidation = _validator.ValidateStructure(envelope);
+            if (!structuralValidation.IsValid)
+                return Rejected(envelope.AuditId, structuralValidation.Issues);
+
+            var candidateValidation = _validator.ValidateCandidate(envelope);
+            if (!candidateValidation.IsValid)
+                return Rejected(envelope.AuditId, candidateValidation.Issues);
+
             candidate = Snapshot(envelope);
             if (candidate.Sanitization is not null)
-                return Rejected(candidate.AuditId, processedAt, [new("AUDIT_SANITIZATION_STAMP_SUPPLIED", "Sanitization")]);
+                return Rejected(candidate.AuditId, [new("AUDIT_SANITIZATION_STAMP_SUPPLIED", "Sanitization")]);
             if (candidate.Integrity is not null)
-                return Rejected(candidate.AuditId, processedAt, [new("AUDIT_INVALID_HASH_METADATA", "Integrity")]);
-            var candidateValidation = _validator.ValidateCandidate(candidate);
-            if (!candidateValidation.IsValid)
-                return Rejected(candidate.AuditId, processedAt, candidateValidation.Issues);
+                return Rejected(candidate.AuditId, [new("AUDIT_INVALID_HASH_METADATA", "Integrity")]);
 
             if (_projectionWriter.MeasureBytes(candidate) > AuditContractLimits.MaxCandidateEnvelopeBytes)
-                return Rejected(candidate.AuditId, processedAt, [new("AUDIT_LIMIT_EXCEEDED", "CandidateEnvelope")]);
+                return Rejected(candidate.AuditId, [new("AUDIT_LIMIT_EXCEEDED", "CandidateEnvelope")]);
 
             var sanitizedResult = await _sanitizer.SanitizeAsync(candidate, cancellationToken).ConfigureAwait(false);
+            if (sanitizedResult?.Envelope is null)
+                return Rejected(candidate.AuditId, [new("AUDIT_SANITIZED_OUTPUT_INVALID")]);
+            var sanitizedStructuralValidation = _validator.ValidateStructure(sanitizedResult.Envelope);
+            if (!sanitizedStructuralValidation.IsValid)
+                return Rejected(candidate.AuditId, sanitizedStructuralValidation.Issues);
+
             var sanitized = Snapshot(sanitizedResult.Envelope);
             if (sanitized.Sanitization is not null || sanitized.Integrity is not null)
-                return Rejected(candidate.AuditId, processedAt, [new("AUDIT_SANITIZED_OUTPUT_INVALID", sanitized.Sanitization is not null ? "Sanitization" : "Integrity")]);
+                return Rejected(candidate.AuditId, [new("AUDIT_SANITIZED_OUTPUT_INVALID", sanitized.Sanitization is not null ? "Sanitization" : "Integrity")]);
             if (!AuditProtectedFactComparer.AreEqual(candidate, sanitized))
-                return Rejected(candidate.AuditId, processedAt, [new("AUDIT_SANITIZER_REWROTE_PROTECTED_FACT")]);
+                return Rejected(candidate.AuditId, [new("AUDIT_SANITIZER_REWROTE_PROTECTED_FACT")]);
             if (!AuditSanitizerOutputComparer.IsAllowed(candidate, sanitized))
-                return Rejected(candidate.AuditId, processedAt, [new("AUDIT_SANITIZER_REWROTE_PROTECTED_FACT")]);
+                return Rejected(candidate.AuditId, [new("AUDIT_SANITIZER_REWROTE_PROTECTED_FACT")]);
             if (sanitizedResult.Stamp is null
                 || string.IsNullOrWhiteSpace(sanitizedResult.Stamp.PolicyId)
                 || sanitizedResult.Stamp.PolicyVersion <= 0
                 || sanitizedResult.Stamp.AppliedRuleIds.IsDefault)
-                return Rejected(candidate.AuditId, processedAt, [new("AUDIT_SANITIZATION_STAMP_INVALID", "Sanitization")]);
+                return Rejected(candidate.AuditId, [new("AUDIT_SANITIZATION_STAMP_INVALID", "Sanitization")]);
 
             sanitized = sanitized with { Sanitization = null, Integrity = null };
 
             var safeValidation = _validator.ValidateSafeSnapshot(sanitized);
             if (!safeValidation.IsValid)
-                return Rejected(candidate.AuditId, processedAt, safeValidation.Issues);
+                return Rejected(candidate.AuditId, safeValidation.Issues);
 
             sanitized = sanitized with { Sanitization = sanitizedResult.Stamp };
             var stampedValidation = _validator.ValidateSafeSnapshot(sanitized);
             if (!stampedValidation.IsValid)
-                return Rejected(candidate.AuditId, processedAt, stampedValidation.Issues);
+                return Rejected(candidate.AuditId, stampedValidation.Issues);
             if (_projectionWriter.MeasureBytes(sanitized) > AuditContractLimits.MaxSafeEnvelopeBytes)
-                return Rejected(candidate.AuditId, processedAt, [new("AUDIT_MAX_SAFE_ENVELOPE_BYTES_EXCEEDED")]);
+                return Rejected(candidate.AuditId, [new("AUDIT_MAX_SAFE_ENVELOPE_BYTES_EXCEEDED")]);
 
             var hash = _hasher.Compute(sanitized);
             sanitized = sanitized with { Integrity = hash };
-            return await FanOutAsync(sanitized, hash, processedAt, cancellationToken).ConfigureAwait(false);
+            return await FanOutAsync(sanitized, hash, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -103,7 +113,7 @@ public sealed class DefaultAuditRecorder : IAuditRecorder
         }
         catch (AuditSanitizationException ex)
         {
-            return Rejected(envelope.AuditId, processedAt, [new(ex.Code, ex.Path)]);
+            return Rejected(envelope.AuditId, [new(ex.Code, ex.Path)]);
         }
         catch (Exception exception)
         {
@@ -112,7 +122,7 @@ public sealed class DefaultAuditRecorder : IAuditRecorder
             {
                 AuditId = envelope.AuditId,
                 Status = AuditRecordStatus.Failed,
-                ProcessedAt = processedAt,
+                ProcessedAt = _timeProvider.GetUtcNow(),
                 Issues = [new("AUDIT_RECORDER_INTERNAL_FAILURE")]
             };
         }
@@ -121,7 +131,6 @@ public sealed class DefaultAuditRecorder : IAuditRecorder
     private async ValueTask<AuditRecordResult> FanOutAsync(
         AuditEnvelope envelope,
         CrestCreates.Metadata.Abstractions.CanonicalHashing.CanonicalHash hash,
-        DateTimeOffset processedAt,
         CancellationToken callerCancellation)
     {
         if (_sinks.IsDefaultOrEmpty)
@@ -130,7 +139,7 @@ public sealed class DefaultAuditRecorder : IAuditRecorder
             {
                 AuditId = envelope.AuditId,
                 Status = AuditRecordStatus.NoSinkConfigured,
-                ProcessedAt = processedAt,
+                ProcessedAt = _timeProvider.GetUtcNow(),
                 RecordHash = hash,
                 Issues = _options.RequireAtLeastOneSink ? [new("AUDIT_NO_SINK_CONFIGURED")] : []
             };
@@ -205,7 +214,7 @@ public sealed class DefaultAuditRecorder : IAuditRecorder
         {
             AuditId = envelope.AuditId,
             Status = status,
-            ProcessedAt = processedAt,
+            ProcessedAt = _timeProvider.GetUtcNow(),
             RecordHash = hash,
             SinkResults = results.ToImmutable(),
             SinkFailures = failures.ToImmutable()
@@ -218,8 +227,14 @@ public sealed class DefaultAuditRecorder : IAuditRecorder
         catch (Exception ex) { return WriteAttempt.Failure(sink.Id, ex); }
     }
 
-    private static AuditRecordResult Rejected(string auditId, DateTimeOffset processedAt, ImmutableArray<AuditRecordIssue> issues)
-        => new() { AuditId = auditId, Status = AuditRecordStatus.Rejected, ProcessedAt = processedAt, Issues = issues };
+    private AuditRecordResult Rejected(string? auditId, ImmutableArray<AuditRecordIssue> issues)
+        => new()
+        {
+            AuditId = auditId ?? string.Empty,
+            Status = AuditRecordStatus.Rejected,
+            ProcessedAt = _timeProvider.GetUtcNow(),
+            Issues = issues
+        };
 
     private static AuditEnvelope Snapshot(AuditEnvelope value)
     {
@@ -232,9 +247,8 @@ public sealed class DefaultAuditRecorder : IAuditRecorder
                     : x with { SanitizedValue = x.SanitizedValue is { } element ? element.Clone() : null }).ToImmutableArray()
             }
             : null;
-        var tags = value.Tags is null
-            ? AuditTagMap.Empty
-            : value.Tags.OrderBy(x => x.Key, StringComparer.Ordinal).ToImmutableSortedDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+        var tags = value.Tags.OrderBy(x => x.Key, StringComparer.Ordinal)
+            .ToImmutableSortedDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
         return value with { Payload = payload, DataSnapshot = data, Tags = tags };
     }
 
