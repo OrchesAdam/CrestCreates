@@ -3,6 +3,12 @@ using System.Text.Json.Serialization;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Authorization.Abstractions;
+using CrestCreates.Accountability.Bootstrap;
+using CrestCreates.Accountability.Abstractions.Sinks;
+using CrestCreates.Accountability.InMemory;
+using CrestCreates.AuditLogging.Abstractions.MethodAccountability;
+using CrestCreates.AuditLogging.Interceptors;
+using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Middleware;
@@ -19,6 +25,7 @@ using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Metadata.Registry;
 using CrestCreates.Mcp;
 using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.MultiTenancy;
 using CrestCreates.OpenApi;
 using CrestCreates.Sample.Procurement.Application;
 using CrestCreates.Sample.Procurement.Application.Handlers;
@@ -56,10 +63,15 @@ var humanTaskInstanceStore = new InMemoryHumanTaskInstanceStore();
 var workflowInstanceStore = new InMemoryWorkflowInstanceStore();
 
 builder.Services.AddCapabilityRuntime();
+builder.Services.AddMultiTenancy();
+builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = true);
+builder.Services.AddTransient<AccountabilityHttpMiddleware>();
+builder.Services.AddSingleton<InMemoryAuditSink>();
+builder.Services.AddSingleton<IAuditSink>(sp => sp.GetRequiredService<InMemoryAuditSink>());
+builder.Services.AddScoped<IAuditedMethodAccountabilityRuntime, AuditedMethodAccountabilityRuntime>();
 builder.Services.Replace(ServiceDescriptor.Singleton<
     ICapabilityInputValidationPolicy,
     ProcurementInputValidationPolicy>());
-builder.Services.AddInMemoryCapabilityAudit();
 builder.Services.AddSingleton<ICapabilityHandlerModule>(new ProcurementCapabilityModule());
 builder.Services.AddSingleton<InMemoryProcurementRequestStore>(store);
 builder.Services.AddScoped<ProcurementApplicationService>();
@@ -138,6 +150,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =
 
 var app = builder.Build();
 
+app.UseAccountabilityHttpAudit();
 app.MapCrestCapabilityEndpoints();
 app.MapCrestOpenApi();
 

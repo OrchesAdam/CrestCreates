@@ -12,6 +12,7 @@ using CrestCreates.Agent.Memory.Projection.DescriptorProviders;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Agent.Tools;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Metadata;
@@ -58,6 +59,7 @@ public sealed partial class AgentMemoryToolPipelineE2ETests
         builder.Services.AddSingleton<IAgentToolGovernanceAuditor, DevelopmentInMemoryAgentToolGovernanceAuditor>();
         builder.Services.AddAgentMemoryRuntime();
         builder.Services.AddCapabilityRuntime();
+        builder.Services.AddAccountability();
         builder.Services.AddCrestAgentTools();
         builder.Services.AddAgentMemoryTools();
 

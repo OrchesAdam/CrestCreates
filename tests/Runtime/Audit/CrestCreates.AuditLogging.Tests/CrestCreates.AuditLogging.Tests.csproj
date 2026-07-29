@@ -25,6 +25,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.Accountability.Abstractions/CrestCreates.Accountability.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.Accountability/CrestCreates.Accountability.csproj" />
   </ItemGroup>
 
 </Project>

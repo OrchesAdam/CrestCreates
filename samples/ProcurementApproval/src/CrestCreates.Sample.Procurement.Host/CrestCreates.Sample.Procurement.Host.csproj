@@ -25,6 +25,7 @@
     <ProjectReference Include="../../../../src/Runtime/Workflow/CrestCreates.Workflow/CrestCreates.Workflow.csproj" />
     <ProjectReference Include="../../../../src/Runtime/HumanTask/CrestCreates.HumanTask/CrestCreates.HumanTask.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.Accountability/CrestCreates.Accountability.csproj" />
     <ProjectReference Include="../../../../src/Integrations/CrestCreates.Mcp/CrestCreates.Mcp.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Abstractions/CrestCreates.Agent.Abstractions.csproj" />

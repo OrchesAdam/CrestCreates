@@ -4,6 +4,7 @@ using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Activation;
 using CrestCreates.Agent.Memory;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Middleware;
@@ -181,6 +182,7 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
             builder.Use<EventPublishingMiddleware>();
         });
         services.AddCapabilityRuntime();
+        services.AddAccountability();
 
         // ── HumanTask Runtime ──────────────────────────────────────────
         // TryAddSingleton defaults — will NOT override SQLite stores registered earlier

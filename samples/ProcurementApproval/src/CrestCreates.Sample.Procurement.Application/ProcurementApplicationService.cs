@@ -4,6 +4,7 @@ using CrestCreates.Sample.Procurement.Contracts.Dtos;
 using CrestCreates.Sample.Procurement.Domain;
 using CrestCreates.Sample.Procurement.Domain.Entities;
 using CrestCreates.Sample.Procurement.Domain.ValueObjects;
+using CrestCreates.AuditLogging.Interceptors;
 
 namespace CrestCreates.Sample.Procurement.Application;
 
@@ -20,6 +21,7 @@ public sealed class ProcurementApplicationService
         _approval = approval;
     }
 
+    [AuditedMo("procurement.submit")]
     public async Task<SubmitProcurementRequestResult> SubmitAsync(
         SubmitProcurementRequestInput input,
         string tenantId,

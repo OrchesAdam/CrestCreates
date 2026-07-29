@@ -6,6 +6,7 @@ using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.ReadCore;
 using CrestCreates.Agent.Memory.Stores;
 using CrestCreates.Agent.Memory.Tools;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
@@ -102,6 +103,7 @@ public sealed class McpMemoryToolInvocationE2ETests
 
         // Capability runtime + generated handlers
         builder.Services.AddCapabilityRuntime();
+        builder.Services.AddAccountability();
         builder.Services.TryAddEnumerable(
             ServiceDescriptor.Singleton<ICapabilityHandlerModule>(
                 GeneratedCapabilityHandlerModule.Instance));
@@ -834,6 +836,7 @@ public sealed class McpMemoryToolInvocationE2ETests
         builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
 
         builder.Services.AddCapabilityRuntime();
+        builder.Services.AddAccountability();
         builder.Services.TryAddEnumerable(
             ServiceDescriptor.Singleton<ICapabilityHandlerModule>(
                 GeneratedCapabilityHandlerModule.Instance));

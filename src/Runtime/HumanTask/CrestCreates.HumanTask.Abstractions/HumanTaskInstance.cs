@@ -31,6 +31,7 @@ public sealed class HumanTaskInstance : ISnapshotable<HumanTaskInstance>
     public string? CompletionDispatchError { get; set; }
     public DateTimeOffset? CompletionDispatchFailedAt { get; set; }
     public int CompletionDispatchAttemptCount { get; set; }
+    public string? CompletionEventId { get; set; }
 
     public string? CancellationReason { get; set; }
 
@@ -65,6 +66,7 @@ public sealed class HumanTaskInstance : ISnapshotable<HumanTaskInstance>
             CompletionDispatchError = CompletionDispatchError,
             CompletionDispatchFailedAt = CompletionDispatchFailedAt,
             CompletionDispatchAttemptCount = CompletionDispatchAttemptCount,
+            CompletionEventId = CompletionEventId,
             CancellationReason = CancellationReason,
             ConcurrencyStamp = ConcurrencyStamp,
             UpdatedAt = UpdatedAt,

@@ -6,6 +6,13 @@
     <RootNamespace>CrestCreates.AuditLogging.Abstractions</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Rougamo.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Rougamo.Extensions.DependencyInjection.Microsoft" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CrestCreates.Accountability.Abstractions/CrestCreates.Accountability.Abstractions.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="CrestCreates.AuditLogging" />
     <InternalsVisibleTo Include="CrestCreates.AuditLogging.Tests" />
   </ItemGroup>

@@ -146,6 +146,8 @@
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.Kafka/CrestCreates.EventBus.Kafka.csproj" />
   </Folder>
   <Folder Name="/src/Runtime/Audit/">
+    <Project Path="../src/Runtime/Audit/CrestCreates.Accountability.Abstractions/CrestCreates.Accountability.Abstractions.csproj" />
+    <Project Path="../src/Runtime/Audit/CrestCreates.Accountability/CrestCreates.Accountability.csproj" />
     <Project Path="../src/Runtime/Audit/CrestCreates.AuditLogging.Abstractions/CrestCreates.AuditLogging.Abstractions.csproj" />
     <Project Path="../src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
   </Folder>
@@ -187,6 +189,9 @@
   <Folder Name="/tests/" />
   <Folder Name="/tests/Boundary/">
     <Project Path="../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/CrestCreates.DependencyBoundaries.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Shared/">
+    <Project Path="../tests/Shared/CrestCreates.Accountability.Testing/CrestCreates.Accountability.Testing.csproj" />
   </Folder>
   <Folder Name="/tests/Core/">
     <Project Path="../tests/Core/CrestCreates.Core.Abstractions.Tests/CrestCreates.Core.Abstractions.Tests.csproj" />
@@ -268,6 +273,8 @@
     <Project Path="../tests/Runtime/Eventing/CrestCreates.EventBus.Local.Tests.Integration/CrestCreates.EventBus.Local.Tests.Integration.csproj" />
   </Folder>
   <Folder Name="/tests/Runtime/Audit/">
+    <Project Path="../tests/Runtime/Audit/CrestCreates.Accountability.Abstractions.Tests/CrestCreates.Accountability.Abstractions.Tests.csproj" />
+    <Project Path="../tests/Runtime/Audit/CrestCreates.Accountability.Tests/CrestCreates.Accountability.Tests.csproj" />
     <Project Path="../tests/Runtime/Audit/CrestCreates.AuditLogging.Tests/CrestCreates.AuditLogging.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Runtime/DistributedTransaction/">

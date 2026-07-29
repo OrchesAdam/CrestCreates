@@ -80,6 +80,13 @@ jobs:
           dotnet test tests/Framework/Testing/CrestCreates.TestBase.Tests --no-build
           dotnet test tests/Framework/Testing/CrestCreates.Samples.Tests --no-build
 
+      # ── Golden Samples ──
+      - name: Test — Procurement Approval Golden Sample
+        run: |
+          dotnet test samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.Tests --no-build
+          dotnet test samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.E2E.Tests --no-build
+          dotnet test samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.AotFixture.Tests --no-build
+
       # ── Metadata tests ──
       - name: Test — Metadata / Core
         run: |
@@ -123,6 +130,8 @@ jobs:
 
       - name: Test — Runtime / Audit & DistributedTransaction
         run: |
+          dotnet test tests/Runtime/Audit/CrestCreates.Accountability.Abstractions.Tests --no-build
+          dotnet test tests/Runtime/Audit/CrestCreates.Accountability.Tests --no-build
           dotnet test tests/Runtime/Audit/CrestCreates.AuditLogging.Tests --no-build
           dotnet test tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.Tests --no-build
 

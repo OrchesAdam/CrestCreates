@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Mcp;
@@ -42,6 +43,7 @@ try
     builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
     builder.Services.AddScoped<FixtureEchoHandler>();
     builder.Services.AddCapabilityRuntime();
+    builder.Services.AddAccountability();
     builder.Services.AddCrestMcpToolProjection(options =>
         options.SerializerOptions.TypeInfoResolver = McpFixtureJsonContext.Default);
 

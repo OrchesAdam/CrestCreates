@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-27 (Issue #62 Agent/MCP Tool JSON root unification)
+Last Updated: 2026-07-29 (Issue #39 Phase 9a Accountability runtime implemented and verified)
 
 ## Purpose
 
@@ -10,7 +10,74 @@ This file records the current platform status for CrestCreates so future threads
 
 ## Approved Designs
 
-No approved-but-unimplemented design is currently recorded here.
+### Issue #39 — Phase 9a Accountability Runtime Foundation
+
+Status: Implemented / focused + NativeAOT-verified; canonical Release build green;
+repository-wide test gate remains environment-blocked by unrelated suites
+
+Approved mainline:
+
+```text
+HTTP / AOP / resolved Capability / committed Workflow transition
+    → producer-owned immutable AuditEnvelope
+    → validate candidate
+    → sanitize + protected-fact equality
+    → validate safe snapshot
+    → existing Canonical Hash Runtime
+    → explicit IAuditSink fan-out
+```
+
+The contract separates direct CausationId, enclosing ParentAuditId, and
+lifecycle PreviousAuditId; keeps Actor authority separate from technical
+Runtime execution; preserves Conflict, provider failure, and recorder rejection
+as different results; and has no global RecordedAt. Append-only AuditLog and
+Capability stores remain unwired compatibility APIs rather than sinks.
+
+Implementation is ordered into four TDD PR slices: contract/generated JSON;
+recorder/sanitizer/hash/in-memory sink; HTTP/AOP/Capability adapters; then
+HumanTask trigger identity, Workflow lifecycle, Procurement composition, and
+linux-x64 NativeAOT publish-link-run. The approved execution plan also fixes a
+runner-free shared sink-contract Testing boundary, concurrent one-budget sink
+fan-out, producer-owned Host startup validation, Application-assembly Rougamo
+weaving on the real submit method, and a Workflow-owned post-commit notification
+budget. Mandatory implementation details also include an AuditLogging
+type-forward for the moved `AuditedMoAttribute`, a fully typed opaque AOP
+bridge, ordinal Tags normalization, prompt-return async provider contracts, and
+AuditLogging producer registration through its existing Module mainline.
+
+Executable evidence: Accountability contract/boundary tests pass; recorder,
+sanitizer, hash, sink, context, HTTP, AOP, Capability, Workflow, and HumanTask
+focused suites pass; the Procurement Debug golden scenario and the repository
+NativeAOT publish-and-run fixture both emit
+`CRESTCREATES_PROCUREMENT_SAMPLE_OK` and `CRESTCREATES_ACCOUNTABILITY_OK`. The real
+`ProcurementApplicationService.SubmitAsync` method is woven in its Application
+assembly, and the sample uses the shared in-memory authoritative Accountability
+sink. The canonical `CrestCreates.slnx` Release build completed with zero errors.
+The full Release test run completed but remains non-green only in unrelated
+Docker-backed integration/dependency suites; the Phase 9a Procurement acceptance
+suite is green at 36/36 after migrating assertions from the retired append-only
+Capability store to `AuditEnvelope` facts. This is recorded explicitly as an
+environment-blocked repository gate, not as a false zero-failure claim.
+
+Post-implementation audit closure (2026-07-29): the review removed the remaining
+Capability legacy-store write fallback; preserved accepted AuditRecordId on outer
+exception/cancellation paths; made canonical JsonElement projection ordinal;
+completed sanitizer protected-field enforcement; centralized Workflow lifecycle
+EventId/AuditId allocation and one-run causality; propagated trusted Agent/MCP
+identity context without inventing principals; made AOP recording strictly
+post-fact; and migrated all discovered Capability/Workflow producer Hosts and AOT
+fixtures to the required Accountability Foundation. The audit also added executable
+startup-composition, synchronous-failure fan-out, Workflow notification-budget,
+and Agent/MCP identity tests. Review evidence includes a zero-error 228-project
+canonical build, green boundary/focused/Procurement suites, a newly generated
+linux-x64 ELF NativeAOT artifact, and static evidence that the real Application
+`SubmitAsync` method was processed by Fody. The native binary's loopback-listener
+scenario could not be repeated inside this review sandbox because the required
+socket escalation was rejected; the previously recorded publish-and-run gate is
+therefore retained rather than replaced by a false new run claim.
+
+Spec: `docs/superpowers/specs/2026-07-28-phase-9a-accountability-runtime-foundation-design.md`
+Plan: `docs/superpowers/plans/2026-07-29-phase-9a-accountability-runtime-foundation.md`
 
 ## Completed Features
 

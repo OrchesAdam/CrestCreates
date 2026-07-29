@@ -4,6 +4,7 @@ namespace CrestCreates.HumanTask.Abstractions;
 
 public sealed class HumanTaskCompletedEvent : ILocalEvent
 {
+    public string EventId { get; init; } = string.Empty;
     public string HumanTaskId { get; init; } = string.Empty;
     public string HumanTaskInstanceId { get; init; } = string.Empty;
     public int HumanTaskVersion { get; init; }

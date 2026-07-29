@@ -1,3 +1,4 @@
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Event;
 using CrestCreates.Event.Abstractions;
@@ -7,6 +8,7 @@ using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Bootstrap;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -107,12 +109,14 @@ public class WorkflowContinuationTests
         var executorRegistry = new DefaultStepExecutorRegistry(capExecutor, htExecutor);
         var store = new InMemoryWorkflowInstanceStore();
         var stateMachine = new DefaultWorkflowStateMachine();
-        var eventPublisher = new WorkflowLifecycleEventPublisher();
+        var eventPublisher = WorkflowTestAccountability.CreatePublisher();
+        var events = WorkflowTestAccountability.CreateEvents();
+        var contexts = WorkflowTestAccountability.CreateContexts();
         var executionRunner = new WorkflowExecutionRunner(
-            registry, executorRegistry, store, stateMachine, eventPublisher);
-        var engine = new WorkflowEngine(registry, store, executionRunner, eventPublisher);
+            registry, executorRegistry, store, stateMachine, eventPublisher, events);
+        var engine = new WorkflowEngine(registry, store, executionRunner, eventPublisher, contexts, events);
         var continuation = new WorkflowContinuationService(
-            store, stateMachine, registry, executionRunner, eventPublisher);
+            store, stateMachine, registry, executionRunner, eventPublisher, contexts, events);
         return (engine, continuation, store);
     }
 
@@ -434,12 +438,15 @@ public class WorkflowContinuationTests
         ICapabilityPipeline capabilityPipeline)
     {
         var services = new ServiceCollection();
+        services.AddLogging();
         services.AddSingleton<IWorkflowRegistry>(workflowRegistry);
         services.AddSingleton<IHumanTaskRegistry>(humanTaskRegistry);
         services.AddSingleton(capabilityPipeline);
         services.AddSingleton<IEventValidator, PassThroughEventValidator>();
         services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
         services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
+        services.AddDescriptorStableHash();
+        services.AddAccountability();
         services.AddHumanTaskRuntime();
         services.AddWorkflowEngine();
 
@@ -508,15 +515,17 @@ public class WorkflowContinuationTests
 
         var wfStore = new InMemoryWorkflowInstanceStore();
         var stateMachine = new DefaultWorkflowStateMachine();
-        var eventPublisher = new WorkflowLifecycleEventPublisher();
+        var eventPublisher = WorkflowTestAccountability.CreatePublisher();
+        var events = WorkflowTestAccountability.CreateEvents();
+        var contexts = WorkflowTestAccountability.CreateContexts();
         var capExecutor = new CapabilityStepExecutor(pipeline);
         var htExecutor = new HumanTaskStepExecutor(htRuntime);
         var executorRegistry = new DefaultStepExecutorRegistry(capExecutor, htExecutor);
         var executionRunner = new WorkflowExecutionRunner(
-            wfRegistry, executorRegistry, wfStore, stateMachine, eventPublisher);
-        var engine = new WorkflowEngine(wfRegistry, wfStore, executionRunner, eventPublisher);
+            wfRegistry, executorRegistry, wfStore, stateMachine, eventPublisher, events);
+        var engine = new WorkflowEngine(wfRegistry, wfStore, executionRunner, eventPublisher, contexts, events);
         var continuation = new WorkflowContinuationService(
-            wfStore, stateMachine, wfRegistry, executionRunner, eventPublisher);
+            wfStore, stateMachine, wfRegistry, executionRunner, eventPublisher, contexts, events);
 
         // Start workflow → suspends at HumanTask step (step_01, index 0)
         var instance = await engine.ExecuteAsync("wf_dup");

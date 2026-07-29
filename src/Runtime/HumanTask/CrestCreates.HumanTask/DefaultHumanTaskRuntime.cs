@@ -105,6 +105,12 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
                     $"'{instance.Outcome}' and cannot recover as '{request.Outcome}'.");
             }
 
+            if (string.IsNullOrWhiteSpace(instance.CompletionEventId))
+            {
+                instance.CompletionEventId = Guid.NewGuid().ToString("N");
+                await _store.SaveAsync(instance, CancellationToken.None).ConfigureAwait(false);
+            }
+
             var persistedCompletion = CreateCompletedEvent(
                 instance,
                 instance.Outcome!,
@@ -114,7 +120,7 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
                 await _completionFailurePolicy.RecoverAsync(
                     instance,
                     persistedCompletion,
-                    ct).ConfigureAwait(false);
+                    CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception recoveryException)
             {
@@ -133,6 +139,7 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         instance.Outcome = request.Outcome;
         instance.Output = request.Result;
         instance.CompletedAt = DateTimeOffset.UtcNow;
+        instance.CompletionEventId ??= Guid.NewGuid().ToString("N");
 
         // Phase 5b: SaveAsync may throw RuntimeConcurrencyException.
         // If it does, DO NOT publish — let exception propagate.
@@ -142,7 +149,7 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         {
             await _eventBus.PublishAsync(
                 CreateCompletedEvent(instance, request.Outcome, request.Result),
-                ct).ConfigureAwait(false);
+                CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception dispatchException)
         {
@@ -184,6 +191,7 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         object? result)
         => new()
         {
+            EventId = instance.CompletionEventId ?? string.Empty,
             HumanTaskId = instance.HumanTaskId,
             HumanTaskInstanceId = instance.Id,
             HumanTaskVersion = instance.HumanTaskVersion,

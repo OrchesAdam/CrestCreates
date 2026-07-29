@@ -3,6 +3,9 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using CrestCreates.Agent.Tools;
+using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Semantics;
+using CrestCreates.Accountability.InMemory;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -177,11 +180,11 @@ public sealed class McpProjectionAcceptanceTests
 
         outcome.IsError.Should().BeFalse();
         outcome.StructuredContent!.Value.GetProperty("requestId").GetGuid().Should().Be(submitted.RequestId);
-        factory.Services.GetRequiredService<ICapabilityAuditStore>()
-            .Should().BeOfType<InMemoryCapabilityAuditStore>()
-            .Which.GetRecords().Should().Contain(record =>
-                record.Source == InvocationSource.Mcp
-                && record.CapabilityId == ProcurementContractIds.GetCapability);
+        factory.Services.GetRequiredService<InMemoryAuditSink>()
+            .GetRecords().Where(record => record.Runtime is { InvocationSource: AuditInvocationSources.Mcp }
+                && record.Action is { Kind: AuditActionKinds.CapabilityExecute }
+                && record.Target is { Kind: "capability", Id: ProcurementContractIds.GetCapability })
+            .Should().NotBeEmpty();
     }
 
     [Fact]
@@ -319,8 +322,8 @@ public sealed class AgentGovernanceAcceptanceTests
 
         outcome.IsSuccess.Should().BeTrue();
         store.Count.Should().Be(before + 1);
-        AgentAudit(harness.Factory).Should().ContainSingle(record =>
-            record.CapabilityId == ProcurementContractIds.SubmitCapability);
+        AgentAudit(harness.Factory).Where(record => record.Target is { Kind: "capability", Id: ProcurementContractIds.SubmitCapability })
+            .Should().ContainSingle();
     }
 
     [Fact]
@@ -354,8 +357,8 @@ public sealed class AgentGovernanceAcceptanceTests
         first.IsSuccess.Should().BeTrue();
         replay.IsSuccess.Should().BeTrue();
         store.Count.Should().Be(before + 1);
-        AgentAudit(harness.Factory).Should().ContainSingle(record =>
-            record.CapabilityId == ProcurementContractIds.SubmitCapability);
+        AgentAudit(harness.Factory).Where(record => record.Target is { Kind: "capability", Id: ProcurementContractIds.SubmitCapability })
+            .Should().ContainSingle();
     }
 
     private static Harness CreateHarness(string invocationId)
@@ -391,11 +394,11 @@ public sealed class AgentGovernanceAcceptanceTests
             approvalEvidence);
     }
 
-    private static IReadOnlyList<CapabilityExecutionRecord> AgentAudit(ProcurementWebApplicationFactory factory)
-        => factory.Services.GetRequiredService<ICapabilityAuditStore>()
-            .Should().BeOfType<InMemoryCapabilityAuditStore>()
-            .Which.GetRecords()
-            .Where(record => record.Source == InvocationSource.Agent)
+    private static IReadOnlyList<AuditEnvelope> AgentAudit(ProcurementWebApplicationFactory factory)
+        => factory.Services.GetRequiredService<InMemoryAuditSink>()
+            .GetRecords()
+            .Where(record => record.Action?.Kind == AuditActionKinds.CapabilityExecute
+                && record.Runtime?.InvocationSource == AuditInvocationSources.Agent)
             .ToArray();
 
     private sealed record Harness(
@@ -458,11 +461,11 @@ public sealed class WorkflowTenantAndSchemaAcceptanceTests
         var completed = await services.GetRequiredService<IWorkflowInstanceStore>()
             .GetAsync(workflow.InstanceId);
         completed!.Status.Should().Be(WorkflowInstanceStatus.Completed);
-        factory.Services.GetRequiredService<ICapabilityAuditStore>()
-            .Should().BeOfType<InMemoryCapabilityAuditStore>()
-            .Which.GetRecords().Should().Contain(record =>
-                record.Source == InvocationSource.HumanTask
-                && record.CapabilityId == ProcurementContractIds.ApplyApprovalDecisionCapability);
+        factory.Services.GetRequiredService<InMemoryAuditSink>()
+            .GetRecords().Where(record => record.Runtime is { InvocationSource: AuditInvocationSources.HumanTask }
+                && record.Action is { Kind: AuditActionKinds.CapabilityExecute }
+                && record.Target is { Kind: "capability", Id: ProcurementContractIds.ApplyApprovalDecisionCapability })
+            .Should().NotBeEmpty();
     }
 
     [Fact]

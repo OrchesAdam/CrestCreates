@@ -7,6 +7,7 @@ using CrestCreates.Application.Permissions;
 using CrestCreates.Application.Tenants;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.AuditLogging.Middlewares;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.AspNetCore;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
@@ -40,6 +41,7 @@ builder.Services.AddScoped<IAuditLogRedactor, AuditLogRedactor>();
 builder.Services.AddScoped<IAuditLogWriter, AuditLogWriter>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddAuditLogging();
+builder.Services.AddAccountability();
 
 builder.Services.AddCrestOpenApi();
 builder.Services.AddOpenIddictServer(options =>

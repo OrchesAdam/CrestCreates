@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using CrestCreates.Agent.Tools;
+using CrestCreates.Accountability.InMemory;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -142,18 +143,59 @@ public static class ProcurementGoldenScenario
             if (!first.IsSuccess || !replay.IsSuccess || store.Count != before + 1)
                 return 7;
 
-            var sources = services.GetRequiredService<ICapabilityAuditStore>()
-                .As<InMemoryCapabilityAuditStore>()
-                .GetRecords()
-                .Select(record => record.Source)
-                .ToHashSet();
-            if (!sources.Contains(InvocationSource.Http)
-                || !sources.Contains(InvocationSource.Mcp)
-                || !sources.Contains(InvocationSource.Agent)
-                || !sources.Contains(InvocationSource.HumanTask))
+            var accountabilityRecords = services.GetRequiredService<InMemoryAuditSink>().GetRecords();
+            var sources = accountabilityRecords
+                .Select(record => record.Runtime.InvocationSource)
+                .ToHashSet(StringComparer.Ordinal);
+            if (!sources.Contains("http")
+                || !sources.Contains("mcp")
+                || !sources.Contains("agent")
+                || !sources.Contains("human-task"))
                 return 8;
 
+            var httpFact = accountabilityRecords.FirstOrDefault(record =>
+                record.Action.Kind == "http.request" && record.Action.Name.StartsWith("POST ", StringComparison.Ordinal));
+            var capabilityFact = httpFact is null ? null : accountabilityRecords.FirstOrDefault(record =>
+                record.CorrelationId == httpFact.CorrelationId
+                && record.Action.Kind == "capability.execute"
+                && record.Action.Name == "submit-request");
+            var workflowStarted = httpFact is null ? null : accountabilityRecords.FirstOrDefault(record =>
+                record.CorrelationId == httpFact.CorrelationId && record.Action.Name == "workflow.started");
+            var workflowSuspended = httpFact is null ? null : accountabilityRecords.FirstOrDefault(record =>
+                record.CorrelationId == httpFact.CorrelationId && record.Action.Name == "workflow.suspended");
+            var methodFact = httpFact is null ? null : accountabilityRecords.FirstOrDefault(record =>
+                record.CorrelationId == httpFact.CorrelationId && record.Action.Kind == "method.invoke");
+            if (httpFact is null || capabilityFact is null || workflowStarted is null
+                || workflowSuspended is null || methodFact is null)
+            {
+                foreach (var record in accountabilityRecords.OrderBy(record => record.OccurredAt))
+                    Console.Error.WriteLine($"ACCOUNTABILITY_RECORD action={record.Action.Kind}/{record.Action.Name} source={record.Runtime.InvocationSource} correlation={record.CorrelationId} causation={record.CausationId} parent={record.ParentAuditId} previous={record.PreviousAuditId}");
+                return 9;
+            }
+            if (accountabilityRecords.Any(record => record.Payload is not null || record.DataSnapshot is not null))
+                return 10;
+            var mainCorrelation = httpFact.CorrelationId;
+            var mainChain = accountabilityRecords
+                .Where(record => string.Equals(record.CorrelationId, mainCorrelation, StringComparison.Ordinal))
+                .ToArray();
+            var mainIds = mainChain.Select(record => record.AuditId).ToHashSet(StringComparer.Ordinal);
+            if (!mainIds.Contains(capabilityFact.AuditId)
+                || !mainIds.Contains(workflowStarted.AuditId)
+                || !mainIds.Contains(workflowSuspended.AuditId)
+                || !mainIds.Contains(methodFact.AuditId))
+            {
+                return 11;
+            }
+            if (!string.Equals(capabilityFact.CausationId, httpFact.Runtime.ExecutionId, StringComparison.Ordinal)
+                || !string.Equals(methodFact.CausationId, capabilityFact.Runtime.ExecutionId, StringComparison.Ordinal)
+                || !string.Equals(methodFact.ParentAuditId, capabilityFact.AuditId, StringComparison.Ordinal)
+                || !string.Equals(workflowStarted.CausationId, methodFact.Runtime.ExecutionId, StringComparison.Ordinal)
+                || !string.Equals(workflowStarted.ParentAuditId, methodFact.AuditId, StringComparison.Ordinal)
+                || !string.Equals(workflowSuspended.PreviousAuditId, workflowStarted.AuditId, StringComparison.Ordinal))
+                return 12;
+
             Console.WriteLine("CRESTCREATES_PROCUREMENT_SAMPLE_OK");
+            Console.WriteLine("CRESTCREATES_ACCOUNTABILITY_OK");
             return 0;
         }
         catch (Exception exception)

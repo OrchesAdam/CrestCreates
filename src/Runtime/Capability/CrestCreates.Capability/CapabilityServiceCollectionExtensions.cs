@@ -9,6 +9,7 @@ using CrestCreates.Metadata.Bootstrap;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace CrestCreates.Capability;
 
@@ -111,12 +112,11 @@ public static class CapabilityServiceCollectionExtensions
         services.TryAddSingleton<ICapabilityResolver, DefaultCapabilityResolver>();
         services.TryAddSingleton<ICapabilityVersionResolver, DefaultCapabilityVersionResolver>();
 
-        // Audit — default NoOp
-        services.TryAddSingleton<ICapabilityAuditStore, NullCapabilityAuditStore>();
-
         // Bootstrap Validators
         services.AddSingleton<IBootstrapValidator, CapabilityHandlerValidator>();
         services.AddSingleton<IBootstrapValidator, CapabilitySchemaValidator>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IBootstrapValidator, CapabilityAccountabilityCompositionValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, CapabilityAccountabilityCompositionValidator>());
 
         // Capability Registry (for binding status contributors)
         services.TryAddSingleton<ICapabilityRegistry, CapabilityRegistry>();
@@ -137,6 +137,7 @@ public static class CapabilityServiceCollectionExtensions
         return services;
     }
 
+    [Obsolete("Compatibility-only append store. It is not an Accountability sink and does not participate in the runtime mainline.")]
     public static IServiceCollection AddInMemoryCapabilityAudit(this IServiceCollection services)
     {
         services.Replace(ServiceDescriptor.Singleton<ICapabilityAuditStore, InMemoryCapabilityAuditStore>());

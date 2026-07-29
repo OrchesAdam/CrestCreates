@@ -11,6 +11,7 @@ using CrestCreates.AspNetCore;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.AspNetCore.Middlewares;
 using CrestCreates.AuditLogging.Middlewares;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.Authorization;
@@ -87,6 +88,7 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddScoped<IAuditLogWriter, AuditLogWriter>();
         services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddAuditLogging();
+        services.AddAccountability();
 
         services.AddCrestOpenApi();
         services.AddModuleDiagnostics();

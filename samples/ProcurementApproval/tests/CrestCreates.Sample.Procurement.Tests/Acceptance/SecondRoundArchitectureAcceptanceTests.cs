@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Semantics;
+using CrestCreates.Accountability.InMemory;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Form.Abstractions;
@@ -183,13 +186,13 @@ public sealed class AuthoritativeDecisionPathAcceptanceTests
     }
 
     private static void AssertOneAuthoritativeDispatch(IServiceProvider services, string capabilityId)
-        => services.GetRequiredService<ICapabilityAuditStore>()
-            .Should().BeOfType<InMemoryCapabilityAuditStore>()
-            .Which.GetRecords()
-            .Should().ContainSingle(record =>
-                record.Source == InvocationSource.HumanTask
-                && record.CapabilityId == capabilityId
-                && record.IsSuccess);
+        => services.GetRequiredService<InMemoryAuditSink>()
+            .GetRecords()
+            .Where(record => record.Action is { Kind: AuditActionKinds.CapabilityExecute }
+                && record.Target is { Kind: "capability", Id: var id } && id == capabilityId
+                && record.Runtime is { InvocationSource: AuditInvocationSources.HumanTask }
+                && record.Outcome is { Status: AuditOutcomeStatuses.Succeeded })
+            .Should().ContainSingle();
 
     private sealed record PendingRuntimeState(
         string WorkflowInstanceId,
@@ -523,11 +526,11 @@ public sealed class DecisionRecoveryAndAuditAcceptanceTests
         using var response = await client.GetAsync($"/api/procurement/requests/{Guid.NewGuid()}");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        factory.Services.GetRequiredService<ICapabilityAuditStore>()
-            .Should().BeOfType<InMemoryCapabilityAuditStore>()
-            .Which.GetRecords().Should().ContainSingle(record =>
-                record.CapabilityId == ProcurementContractIds.GetCapability
-                && record.ErrorCode == "CAPABILITY_RESOURCE_NOT_FOUND");
+        factory.Services.GetRequiredService<InMemoryAuditSink>()
+            .GetRecords().Where(record => record.Action is { Kind: AuditActionKinds.CapabilityExecute }
+                && record.Target is { Kind: "capability", Id: ProcurementContractIds.GetCapability }
+                && record.Outcome is { Code: "CAPABILITY_RESOURCE_NOT_FOUND" })
+            .Should().ContainSingle();
     }
 
     [Fact]
@@ -550,11 +553,11 @@ public sealed class DecisionRecoveryAndAuditAcceptanceTests
             content);
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        factory.Services.GetRequiredService<ICapabilityAuditStore>()
-            .Should().BeOfType<InMemoryCapabilityAuditStore>()
-            .Which.GetRecords().Should().Contain(record =>
-                record.CapabilityId == ProcurementContractIds.ApproveCapability
-                && record.ErrorCode == "CAPABILITY_FORBIDDEN");
+        factory.Services.GetRequiredService<InMemoryAuditSink>()
+            .GetRecords().Where(record => record.Action is { Kind: AuditActionKinds.CapabilityExecute }
+                && record.Target is { Kind: "capability", Id: ProcurementContractIds.ApproveCapability }
+                && record.Outcome is { Code: "CAPABILITY_FORBIDDEN" })
+            .Should().NotBeEmpty();
     }
 
     [Fact]
@@ -630,14 +633,15 @@ public sealed class DecisionRecoveryAndAuditAcceptanceTests
         (await factory.Services.GetRequiredService<IWorkflowInstanceStore>()
                 .GetAsync(workflowId))!.Status
             .Should().Be(WorkflowInstanceStatus.Completed);
-        factory.Services.GetRequiredService<ICapabilityAuditStore>()
-            .Should().BeOfType<InMemoryCapabilityAuditStore>()
-            .Which.GetRecords().Should().ContainSingle(record =>
-                record.Source == InvocationSource.HumanTask
-                && record.CapabilityId == (outcome == "Approve"
+        factory.Services.GetRequiredService<InMemoryAuditSink>()
+            .GetRecords().Where(record => record.Runtime is { InvocationSource: AuditInvocationSources.HumanTask }
+                && record.Action is { Kind: AuditActionKinds.CapabilityExecute }
+                && record.Target is { Kind: "capability", Id: var capabilityId }
+                && capabilityId == (outcome == "Approve"
                     ? ProcurementContractIds.ApplyApprovalDecisionCapability
                     : ProcurementContractIds.ApplyRejectionDecisionCapability)
-                && record.IsSuccess);
+                && record.Outcome is { Status: AuditOutcomeStatuses.Succeeded })
+            .Should().ContainSingle();
     }
 
     private static Task<HttpResponseMessage> PostDecisionAsync(

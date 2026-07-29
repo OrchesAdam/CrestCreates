@@ -1,6 +1,8 @@
 using System.Buffers;
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text.Json;
+using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability.Abstractions;
@@ -1178,6 +1180,17 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolOutputPreflightReceiptSink preflightReceipts)
     {
         context.CausationId = execution.CausationId;
+        context.AccountabilityActor = new AuditActor
+        {
+            Kind = "agent",
+            Id = execution.AgentId,
+            InitiatedBy = string.IsNullOrWhiteSpace(context.UserId)
+                ? null
+                : new AuditActorReference("user", context.UserId)
+        };
+        context.AccountabilityRuntimeReferences = ImmutableArray.Create(
+            new AuditRuntimeReference("agent-session", execution.ExecutionId),
+            new AuditRuntimeReference("agent-invocation", execution.InvocationId));
         context.IdempotencyKey = _idempotency.Build(fingerprint);
         context.InputJson = arguments.Clone();
         context.Items[AgentCapabilityContextItemNames.ToolDescriptorId] = entry.Descriptor.Id;

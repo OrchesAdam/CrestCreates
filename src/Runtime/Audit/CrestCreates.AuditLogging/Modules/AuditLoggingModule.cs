@@ -1,9 +1,15 @@
 using Microsoft.Extensions.DependencyInjection;
 using CrestCreates.Modularity;
-using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.Domain.Shared.Attributes;
+using CrestCreates.AuditLogging.Middlewares;
+using CrestCreates.AuditLogging.Interceptors;
+using CrestCreates.AuditLogging.Abstractions.MethodAccountability;
+using CrestCreates.AuditLogging.Bootstrap;
+using CrestCreates.Metadata.Abstractions.Bootstrap;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace CrestCreates.AuditLogging.Modules
 {
@@ -17,6 +23,10 @@ namespace CrestCreates.AuditLogging.Modules
             services.AddScoped<AuditLoggingMiddleware>();
             services.AddScoped<IAuditLogService, AuditLogService>();
             services.AddScoped<IAuditLogWriter, AuditLogWriter>();
+            services.AddScoped<AccountabilityHttpMiddleware>();
+            services.AddScoped<IAuditedMethodAccountabilityRuntime, AuditedMethodAccountabilityRuntime>();
+            services.TryAddEnumerable(ServiceDescriptor.Singleton<IBootstrapValidator, AuditLoggingAccountabilityCompositionValidator>());
+            services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AuditLoggingAccountabilityCompositionValidator>());
         }
     }
 }

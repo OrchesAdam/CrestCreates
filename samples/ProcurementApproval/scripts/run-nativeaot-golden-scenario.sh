@@ -19,7 +19,7 @@ echo "=== Running Golden Scenario ==="
 SCENARIO_OUTPUT=$("$PUBLISH_DIR/CrestCreates.Sample.Procurement.Host" --golden-scenario)
 printf '%s\n' "$SCENARIO_OUTPUT"
 
-if ! grep -Fq "CRESTCREATES_PROCUREMENT_SAMPLE_OK" <<<"$SCENARIO_OUTPUT"; then
+if ! grep -Fq "CRESTCREATES_ACCOUNTABILITY_OK" <<<"$SCENARIO_OUTPUT"; then
   echo "Golden scenario did not emit the success sentinel." >&2
   exit 1
 fi

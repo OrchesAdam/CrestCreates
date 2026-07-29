@@ -126,6 +126,8 @@ jobs:
 
       - name: Test — Runtime / Audit & DistributedTransaction
         run: |
+          dotnet test tests/Runtime/Audit/CrestCreates.Accountability.Abstractions.Tests --no-build
+          dotnet test tests/Runtime/Audit/CrestCreates.Accountability.Tests --no-build
           dotnet test tests/Runtime/Audit/CrestCreates.AuditLogging.Tests --no-build
           dotnet test tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.Tests --no-build
 
