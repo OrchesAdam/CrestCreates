@@ -195,11 +195,11 @@ public static class CrestCreatesWebApplicationExtensions
         }
 
         app.UseCrestRequestLogging();
-        app.UseExceptionHandling();
         app.UseRouting();
         app.UseMultiTenancy();
         app.UseAuthentication();
         app.UseAccountabilityHttpAudit();
+        app.UseExceptionHandling();
         app.UseTenantBoundary();
         app.UseAuthorization();
 

@@ -298,6 +298,17 @@ public sealed class AccountabilityArchitectureTests
     }
 
     [Fact]
+    public void UseCrestWebConvertsExceptionsInsideAccountabilityScope()
+    {
+        var source = File.ReadAllText(RepositoryPath(
+            "src/Platform/CrestCreates.Web/CrestCreatesWebApplicationExtensions.cs"));
+
+        Assert.True(
+            source.IndexOf("app.UseAccountabilityHttpAudit();", StringComparison.Ordinal)
+            < source.IndexOf("app.UseExceptionHandling();", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void LegacyAuditLoggingIsNotEnabledByDefault()
     {
         var source = File.ReadAllText(RepositoryPath(
@@ -316,6 +327,17 @@ public sealed class AccountabilityArchitectureTests
         Assert.True(
             source.IndexOf("app.UseAuthentication();", StringComparison.Ordinal)
             < source.IndexOf("app.UseAccountabilityHttpAudit();", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void LibraryManagementConvertsExceptionsInsideAccountabilityScope()
+    {
+        var source = File.ReadAllText(RepositoryPath(
+            "samples/LibraryManagement/LibraryManagement.Web/Program.cs"));
+
+        Assert.True(
+            source.IndexOf("app.UseAccountabilityHttpAudit();", StringComparison.Ordinal)
+            < source.IndexOf("app.UseExceptionHandling();", StringComparison.Ordinal));
     }
 
     [Fact]

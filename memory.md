@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-29 (Issue #39 Phase 9a PR #67 second-round findings remediated and re-verified)
+Last Updated: 2026-07-30 (Issue #39 Phase 9a PR #67 third-round findings remediated and re-verified)
 
 ## Purpose
 
@@ -112,6 +112,20 @@ Accountability Abstractions 13, Accountability Runtime 111, AuditLogging 58,
 Capability 171, Workflow 101, Platform Web 97, Boundary 79, Procurement 41, and
 Procurement NativeAOT 9 tests; the canonical single-node build completed all 228
 projects with zero errors.
+
+PR #67 third code-review closure (2026-07-30): the standard Platform and
+LibraryManagement middleware order now opens the authenticated Accountability
+scope before entering global exception handling. Business exceptions are
+therefore converted and written to the final HTTP response before the immutable
+HTTP fact is materialized, while Capability/Method/Workflow children still see
+the request Actor and CorrelationId. A real TestServer composition proves the
+400/403/404/500 mappings, terminal observation ordering, authenticated child
+context, and that recorder failure cannot replace the converted response.
+Descriptor protected-field comparison now compares SnapshotId, structured
+SnapshotHash, and ordered descriptor Items structurally, accepting equivalent
+sanitizer snapshots while rejecting mutations and reordering. Fresh evidence is
+green: Platform Web 104, Accountability Runtime 114, Boundary 81, Procurement
+NativeAOT 9, and the canonical 228-project build with zero errors.
 
 Spec: `docs/superpowers/specs/2026-07-28-phase-9a-accountability-runtime-foundation-design.md`
 Plan: `docs/superpowers/plans/2026-07-29-phase-9a-accountability-runtime-foundation.md`

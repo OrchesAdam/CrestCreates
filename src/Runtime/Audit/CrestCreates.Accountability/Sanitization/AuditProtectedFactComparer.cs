@@ -13,6 +13,7 @@ public static class AuditProtectedFactComparer
             || left.Outcome is null || right.Outcome is null
             || left.Runtime is null || right.Runtime is null
             || left.Descriptors is null || right.Descriptors is null
+            || left.Descriptors.Items.IsDefault || right.Descriptors.Items.IsDefault
             || left.Evidence.IsDefault || right.Evidence.IsDefault
             || left.Runtime.References.IsDefault || right.Runtime.References.IsDefault)
             return false;
@@ -33,7 +34,7 @@ public static class AuditProtectedFactComparer
             && string.Equals(left.Outcome.Status, right.Outcome.Status, StringComparison.Ordinal)
             && string.Equals(left.Outcome.Code, right.Outcome.Code, StringComparison.Ordinal)
             && RuntimeEquals(left.Runtime, right.Runtime)
-            && left.Descriptors == right.Descriptors
+            && DescriptorContextEquals(left.Descriptors, right.Descriptors)
             && left.Evidence.SequenceEqual(right.Evidence);
     }
 
@@ -53,5 +54,10 @@ public static class AuditProtectedFactComparer
             && string.Equals(left.SpanId, right.SpanId, StringComparison.Ordinal)
             && left.Duration == right.Duration
             && left.References.SequenceEqual(right.References);
+
+    private static bool DescriptorContextEquals(AuditDescriptorContext left, AuditDescriptorContext right)
+        => string.Equals(left.SnapshotId, right.SnapshotId, StringComparison.Ordinal)
+            && Equals(left.SnapshotHash, right.SnapshotHash)
+            && left.Items.SequenceEqual(right.Items);
 
 }

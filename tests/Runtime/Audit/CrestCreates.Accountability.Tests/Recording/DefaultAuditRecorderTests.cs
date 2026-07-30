@@ -170,6 +170,71 @@ public sealed class DefaultAuditRecorderTests
         => RejectedSanitizerRewriteCallsNoSink();
 
     [Fact]
+    public async Task EquivalentDescriptorSnapshotFromSanitizerIsAccepted()
+    {
+        var sink = new RecordingSink("a");
+        var envelope = CreateEnvelope() with { Descriptors = CreateDescriptorContext() };
+        var sanitizer = new TransformingSanitizer(candidate => candidate with
+        {
+            Descriptors = candidate.Descriptors with
+            {
+                SnapshotHash = candidate.Descriptors.SnapshotHash! with { },
+                Items = candidate.Descriptors.Items.Select(item => item with
+                {
+                    ContractHash = item.ContractHash! with { }
+                }).ToImmutableArray()
+            }
+        });
+
+        var result = await CreateRecorder([sink], sanitizer).RecordAsync(envelope);
+
+        result.IsAccepted.Should().BeTrue();
+        sink.Calls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task DescriptorItemMutationIsRejected()
+    {
+        var sink = new RecordingSink("a");
+        var sanitizer = new TransformingSanitizer(candidate => candidate with
+        {
+            Descriptors = candidate.Descriptors with
+            {
+                Items = candidate.Descriptors.Items.SetItem(
+                    0,
+                    candidate.Descriptors.Items[0] with { Id = "descriptor-mutated" })
+            }
+        });
+
+        var result = await CreateRecorder([sink], sanitizer).RecordAsync(
+            CreateEnvelope() with { Descriptors = CreateDescriptorContext() });
+
+        result.Status.Should().Be(AuditRecordStatus.Rejected);
+        result.Issues.Should().Contain(x => x.Code == "AUDIT_SANITIZER_REWROTE_PROTECTED_FACT");
+        sink.Calls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DescriptorItemReorderingIsRejected()
+    {
+        var sink = new RecordingSink("a");
+        var sanitizer = new TransformingSanitizer(candidate => candidate with
+        {
+            Descriptors = candidate.Descriptors with
+            {
+                Items = [candidate.Descriptors.Items[1], candidate.Descriptors.Items[0]]
+            }
+        });
+
+        var result = await CreateRecorder([sink], sanitizer).RecordAsync(
+            CreateEnvelope() with { Descriptors = CreateDescriptorContext() });
+
+        result.Status.Should().Be(AuditRecordStatus.Rejected);
+        result.Issues.Should().Contain(x => x.Code == "AUDIT_SANITIZER_REWROTE_PROTECTED_FACT");
+        sink.Calls.Should().Be(0);
+    }
+
+    [Fact]
     public async Task DoesNotMutateProducerCandidate()
     {
         var candidate = CreateEnvelope() with
@@ -571,6 +636,44 @@ public sealed class DefaultAuditRecorderTests
             Descriptors = AuditDescriptorContext.Empty,
             Evidence = [],
             Tags = AuditTagMap.Empty
+        };
+
+    private static AuditDescriptorContext CreateDescriptorContext()
+        => new()
+        {
+            SnapshotId = "snapshot-1",
+            SnapshotHash = CreateDescriptorHash("snapshot"),
+            Items =
+            [
+                new AuditDescriptorReference
+                {
+                    Kind = "capability",
+                    Id = "capability-1",
+                    Version = 1,
+                    ContractHash = CreateDescriptorHash("capability")
+                },
+                new AuditDescriptorReference
+                {
+                    Kind = "workflow",
+                    Id = "workflow-1",
+                    Version = 2,
+                    ContractHash = CreateDescriptorHash("workflow")
+                }
+            ]
+        };
+
+    private static CanonicalHash CreateDescriptorHash(string value)
+        => new()
+        {
+            Value = value,
+            Algorithm = "SHA-256",
+            AlgorithmVersion = "sha256-canonical-json-v1",
+            ArtifactKind = "Descriptor",
+            DescriptorKind = "test",
+            Scope = "InternalFull",
+            Purpose = "Contract",
+            ContractVersion = "canonical-hash-v1",
+            CanonicalShapeVersion = "descriptor-v1"
         };
 
     private static string Project(AccountabilityCanonicalProjectionWriter projection, AuditEnvelope envelope)

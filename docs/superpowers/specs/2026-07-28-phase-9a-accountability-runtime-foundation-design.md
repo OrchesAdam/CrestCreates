@@ -1722,6 +1722,9 @@ DefaultAuditRecorderTests
   SanitizerCannotRewriteProtectedFactFields
   SanitizerMayMinimizePresentationFields
   SanitizerRewriteRejectionCallsNoSink
+  EquivalentDescriptorSnapshotFromSanitizerIsAccepted
+  DescriptorItemMutationIsRejected
+  DescriptorItemReorderingIsRejected
   DoesNotMutateProducerCandidate
 
 InMemoryAuditSinkContractTests
@@ -1754,6 +1757,15 @@ HttpAccountabilityAdapterTests
   DoesNotCaptureBodyHeadersIpOrUserAgentByDefault
   PreservesTenantActorAndCorrelation
   AuditFailureDoesNotReplaceHttpOutcome
+
+HttpTerminalOutcomeCompositionTests
+  ConvertedInvalidOperationExceptionProducesHttp400Fact
+  ConvertedKeyNotFoundExceptionProducesHttp404Fact
+  ConvertedPermissionExceptionProducesHttp403Fact
+  UnknownExceptionProducesHttp500Fact
+  AccountabilityFactIsRecordedAfterExceptionConversion
+  ConvertedExceptionPreservesAuthenticatedActorAndChildCorrelation
+  AuditFailureDoesNotReplaceConvertedErrorResponse
 
 AuditedMethodAccountabilityTests
   EmitsOneFactPerInvocation

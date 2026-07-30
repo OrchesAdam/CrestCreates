@@ -94,11 +94,11 @@ builder.Host.RegisterModules();
 var app = builder.Build();
 
 app.UseCrestRequestLogging();
-app.UseExceptionHandling();
 app.UseHttpsRedirection();
 app.UseMultiTenancy();
 app.UseAuthentication();
 app.UseAccountabilityHttpAudit();
+app.UseExceptionHandling();
 app.UseTenantBoundary();
 app.UseAuthorization();
 app.MapCrestOpenIddictEndpoints();
