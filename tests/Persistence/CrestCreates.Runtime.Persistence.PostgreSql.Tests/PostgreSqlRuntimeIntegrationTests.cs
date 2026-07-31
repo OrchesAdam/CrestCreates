@@ -184,6 +184,11 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         (await workflows.GetByWaitingHumanTaskAsync(tenantBTask.Key))!.Key.Should().Be(tenantBWorkflow.Key);
 
         var task = NewTask("tenant-a", "task-1", tenant.Key);
+        var coordinator2 = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
+        await coordinator2.ExecuteAsync(async cancellationToken =>
+        {
+            await tasks.AddAsync(task, cancellationToken);
+        });
         var receipt = NewReceipt(tenant, tenant, task, "op-1");
         (await receipts.AddAsync(receipt)).Status.Should().Be(WorkflowSuspensionReceiptWriteStatus.Accepted);
         (await receipts.AddAsync(receipt)).Status.Should().Be(WorkflowSuspensionReceiptWriteStatus.Duplicate);

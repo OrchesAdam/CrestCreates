@@ -41,7 +41,13 @@ public sealed class PostgreSqlRuntimeCrashTests(PostgreSqlRuntimeCollectionFixtu
         };
         workerProcess.Start();
         using var readyTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+        var stderrTask = workerProcess.StandardError.ReadToEndAsync(readyTimeout.Token);
         var marker = await workerProcess.StandardOutput.ReadLineAsync(readyTimeout.Token);
+        if (marker is null)
+        {
+            var stderr = await stderrTask;
+            throw new InvalidOperationException($"CrashWorker produced no marker. Stderr: {stderr}");
+        }
         marker.Should().Be($"COMMITTED {operationId}");
 
         workerProcess.Kill(entireProcessTree: true);
