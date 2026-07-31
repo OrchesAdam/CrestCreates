@@ -33,7 +33,7 @@ public sealed class PostgreSqlRuntimeCrashTests(PostgreSqlRuntimeCollectionFixtu
             StartInfo = new ProcessStartInfo
             {
                 FileName = "dotnet",
-                Arguments = $"\"{worker}\" \"{connectionBuilder.ConnectionString}\" {lease.Options.Schema} {operationId} {applicationName}",
+                Arguments = $"\"{worker}\" \"{connectionBuilder.ConnectionString}\" {lease.Options.Schema} {operationId} {applicationName} commit-without-response",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false
@@ -63,6 +63,59 @@ public sealed class PostgreSqlRuntimeCrashTests(PostgreSqlRuntimeCollectionFixtu
         task.Should().NotBeNull();
         receipt.Should().NotBeNull();
         receipt!.WorkflowToRevision.Should().Be(receipt.WorkflowFromRevision + 1);
+    }
+
+    [Fact]
+    public async Task CrashBetweenHumanTaskAndWorkflowWrite_ShouldExposeNoPartialSuspension()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        var root = FindRepositoryRoot();
+        var worker = Path.Combine(root,
+            "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker/bin/Debug/net10.0/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker.dll");
+        File.Exists(worker).Should().BeTrue("the CrashWorker is a CI-built test artifact");
+
+        var operationId = "crash-f01-" + Guid.NewGuid().ToString("N");
+        var applicationName = "phase9b-crash-f01-" + Guid.NewGuid().ToString("N");
+        var connectionBuilder = new NpgsqlConnectionStringBuilder(fixture.ConnectionString)
+        {
+            ApplicationName = applicationName
+        };
+        using var workerProcess = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                Arguments = $"\"{worker}\" \"{connectionBuilder.ConnectionString}\" {lease.Options.Schema} {operationId} {applicationName} crash-after-human-task-insert",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            }
+        };
+        workerProcess.Start();
+        using var readyTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+        var marker = await workerProcess.StandardOutput.ReadLineAsync(readyTimeout.Token);
+        marker.Should().Be("HUMAN_TASK_INSERTED");
+
+        workerProcess.Kill(entireProcessTree: true);
+        await workerProcess.WaitForExitAsync();
+        await WaitForBackendExitAsync(applicationName);
+
+        using var freshProvider = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .BuildServiceProvider();
+        var workflowKey = new RuntimeInstanceKey("crash", "workflow");
+        var taskKey = new RuntimeInstanceKey("crash", "task");
+        var workflow = await freshProvider.GetRequiredService<IWorkflowInstanceStore>().GetAsync(workflowKey);
+        var task = await freshProvider.GetRequiredService<IHumanTaskInstanceStore>().GetAsync(taskKey);
+        var receipt = await freshProvider.GetRequiredService<IWorkflowSuspensionReceiptStore>()
+            .GetAsync(new RuntimeTenantScope("crash"), operationId);
+
+        workflow.Should().NotBeNull();
+        workflow!.Status.Should().Be(WorkflowInstanceStatus.Running,
+            "the Workflow CAS was never executed, so the workflow must remain Running");
+        workflow.WaitingHumanTaskKey.Should().BeNull();
+        task.Should().BeNull("the HumanTask INSERT was rolled back with the aborted transaction");
+        receipt.Should().BeNull("the Receipt was never written");
     }
 
     private async Task WaitForBackendExitAsync(string applicationName)

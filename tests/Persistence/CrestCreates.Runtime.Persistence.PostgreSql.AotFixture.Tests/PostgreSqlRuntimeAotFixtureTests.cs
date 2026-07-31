@@ -45,7 +45,9 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
                 $"\"{postgres.GetConnectionString()}\" {schema}",
                 TimeSpan.FromMinutes(2));
             execution.ExitCode.Should().Be(0, execution.Output);
-            execution.Output.Should().Contain("PHASE9B_POSTGRES_NATIVEAOT_OK");
+            execution.Output.Should().Contain("PHASE9B_POSTGRES_SUSPENSION_OK");
+            execution.Output.Should().Contain("PHASE9B_POSTGRES_RECEIPT_DEDUP_OK");
+            execution.Output.Should().Contain("PHASE9B_POSTGRES_RECOVERY_OK");
         }
         finally
         {

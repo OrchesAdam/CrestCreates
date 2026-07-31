@@ -1,11 +1,11 @@
-using System.Security.Cryptography;
-using System.Text;
+using System.Text.Json;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions.Persistence;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Workflow.Abstractions;
 
@@ -22,18 +22,21 @@ internal sealed class WorkflowSuspensionCommitter
     private readonly IHumanTaskInstanceStore _humanTasks;
     private readonly IWorkflowSuspensionReceiptStore _receipts;
     private readonly IDescriptorSnapshotStore? _snapshots;
+    private readonly ICanonicalHashComputer _hashComputer;
 
     public WorkflowSuspensionCommitter(
         IRuntimeTransactionCoordinator transactions,
         IWorkflowInstanceStore workflows,
         IHumanTaskInstanceStore humanTasks,
         IWorkflowSuspensionReceiptStore receipts,
+        ICanonicalHashComputer hashComputer,
         IDescriptorSnapshotStore? snapshots = null)
     {
         _transactions = transactions;
         _workflows = workflows;
         _humanTasks = humanTasks;
         _receipts = receipts;
+        _hashComputer = hashComputer;
         _snapshots = snapshots;
     }
 
@@ -132,7 +135,7 @@ internal sealed class WorkflowSuspensionCommitter
         }
     }
 
-    private static WorkflowSuspensionReceipt CreateReceipt(
+    private WorkflowSuspensionReceipt CreateReceipt(
         WorkflowInstance workflowBefore,
         WorkflowInstance suspendedWorkflow,
         HumanTaskInstance humanTask,
@@ -153,47 +156,25 @@ internal sealed class WorkflowSuspensionCommitter
         };
     }
 
-    private static CanonicalHash BuildIntegrity(
+    private CanonicalHash BuildIntegrity(
         RuntimeTenantScope scope,
         string operationId,
         WorkflowInstance before,
         WorkflowInstance after,
         HumanTaskInstance task)
     {
-        var text = string.Join("\n",
-            scope.TenantId ?? "<host>",
-            operationId,
-            before.Key.InstanceId,
-            task.Key.InstanceId,
-            before.Revision,
-            before.Revision + 1,
-            PinText(after.WorkflowPin),
-            PinText(task.HumanTaskPin),
-            StateText(after.Variables),
-            StateText(after.StepVariables),
-            task.Input?.TypeId ?? "<none>",
-            task.Input?.SchemaRef?.FullId ?? "<none>",
-            task.Input?.JsonPayload ?? "<none>");
-        var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
-        return new CanonicalHash
-        {
-            Value = digest,
-            Algorithm = "SHA-256",
-            AlgorithmVersion = "runtime-suspension-v1",
-            ArtifactKind = "RuntimeSuspension",
-            Scope = "InternalFull",
-            Purpose = "Integrity",
-            ContractVersion = "canonical-hash-v1",
-            CanonicalShapeVersion = "runtime-suspension-v1"
-        };
+        var projection = CanonicalHashProjectionResult.Create(
+            new CanonicalHashMetadata
+            {
+                ArtifactKind = "RuntimeSuspension",
+                Purpose = "Integrity",
+                Scope = "InternalFull",
+                AlgorithmVersion = "sha256-canonical-json-v1",
+                ContractVersion = "canonical-hash-v1",
+                CanonicalShapeVersion = "runtime-suspension-v1"
+            },
+            writer => SuspensionIntegrityCanonicalWriter.Write(writer, scope, operationId, before, after, task));
+
+        return _hashComputer.ComputeFromProjection(projection);
     }
-
-    private static string PinText(CrestCreates.Metadata.Abstractions.Runtime.RuntimeDescriptorPin pin)
-        => string.Join("|", pin.Ref.Namespace, pin.Ref.Id, pin.Ref.Version, HashText(pin.ContractHash), HashText(pin.DefinitionHash), pin.SnapshotId ?? "");
-
-    private static string HashText(CanonicalHash hash)
-        => string.Join("|", hash.Value, hash.Algorithm, hash.AlgorithmVersion, hash.ArtifactKind, hash.DescriptorKind ?? "", hash.Scope, hash.Purpose, hash.ContractVersion, hash.CanonicalShapeVersion);
-
-    private static string StateText(IReadOnlyDictionary<string, CrestCreates.Runtime.Persistence.Abstractions.State.RuntimeStateValue> values)
-        => string.Join("\n", values.OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => string.Join("|", x.Key, x.Value.TypeId, x.Value.SchemaRef?.FullId ?? "", x.Value.JsonPayload)));
 }

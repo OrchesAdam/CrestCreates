@@ -6,6 +6,7 @@ using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using CrestCreates.Workflow.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,6 +31,9 @@ using var provider = new ServiceCollection()
 
 var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
 var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
+var receipts = provider.GetRequiredService<IWorkflowSuspensionReceiptStore>();
+var coordinator = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
+
 var workflow = new WorkflowInstance
 {
     Key = new RuntimeInstanceKey("aot", "workflow"),
@@ -50,11 +54,48 @@ var task = new HumanTaskInstance
     CreatedAt = DateTimeOffset.UnixEpoch
 };
 
-await workflows.AddAsync(workflow);
-await tasks.AddAsync(task);
+await coordinator.ExecuteAsync(async ct =>
+{
+    await workflows.AddAsync(workflow, ct);
+    await tasks.AddAsync(task, ct);
+});
+
 var restored = await workflows.GetAsync(workflow.Key);
 if (restored?.Variables["message"].JsonPayload != "\"native\"")
     return 3;
+
+var restoredTask = await tasks.GetAsync(task.Key);
+if (restoredTask is null)
+    return 4;
+
+var suspended = restored.Snapshot();
+suspended.Status = WorkflowInstanceStatus.Suspended;
+suspended.WaitingHumanTaskKey = task.Key;
+var receipt = new WorkflowSuspensionReceipt
+{
+    Scope = new RuntimeTenantScope("aot"),
+    SuspensionOperationId = "aot-suspend",
+    Integrity = Hash("aot-suspend", "Integrity"),
+    WorkflowKey = workflow.Key,
+    HumanTaskKey = task.Key,
+    WorkflowFromRevision = restored.Revision,
+    WorkflowToRevision = restored.Revision + 1,
+    WorkflowPin = restored.WorkflowPin,
+    HumanTaskPin = task.HumanTaskPin
+};
+await coordinator.ExecuteAsync(async ct =>
+{
+    (await receipts.AddAsync(receipt, ct)).Status.ShouldBeAccepted();
+    await workflows.UpdateAsync(suspended, restored.Revision, ct);
+});
+
+Console.WriteLine("PHASE9B_POSTGRES_SUSPENSION_OK");
+
+var duplicateResult = await receipts.AddAsync(receipt);
+if (duplicateResult.Status != WorkflowSuspensionReceiptWriteStatus.Duplicate)
+    return 5;
+
+Console.WriteLine("PHASE9B_POSTGRES_RECEIPT_DEDUP_OK");
 
 var envelope = new AuditEnvelope
 {
@@ -69,9 +110,23 @@ var envelope = new AuditEnvelope
 };
 var accepted = await provider.GetRequiredService<IAuditSink>().WriteAsync(envelope);
 if (accepted.Status != AuditSinkWriteStatus.Accepted)
-    return 4;
+    return 6;
 
-Console.WriteLine("PHASE9B_POSTGRES_NATIVEAOT_OK");
+var freshProvider = new ServiceCollection()
+    .AddCrestCreatesPostgreSqlRuntimePersistence(options)
+    .BuildServiceProvider();
+var freshWorkflows = freshProvider.GetRequiredService<IWorkflowInstanceStore>();
+var freshTasks = freshProvider.GetRequiredService<IHumanTaskInstanceStore>();
+var recoveredWorkflow = await freshWorkflows.GetAsync(workflow.Key);
+var recoveredTask = await freshTasks.GetAsync(task.Key);
+if (recoveredWorkflow?.Status != WorkflowInstanceStatus.Suspended)
+    return 7;
+if (recoveredWorkflow.WaitingHumanTaskKey != task.Key)
+    return 8;
+if (recoveredTask is null)
+    return 9;
+
+Console.WriteLine("PHASE9B_POSTGRES_RECOVERY_OK");
 return 0;
 
 static RuntimeDescriptorPin Pin(string @namespace, string id, string kind) => new()
@@ -93,3 +148,12 @@ static CanonicalHash Hash(string value, string purpose, string? descriptorKind =
     ContractVersion = "canonical-hash-v1",
     CanonicalShapeVersion = "phase9b-aot-v1"
 };
+
+internal static class ReceiptResultExtensions
+{
+    public static void ShouldBeAccepted(this WorkflowSuspensionReceiptWriteStatus status)
+    {
+        if (status != WorkflowSuspensionReceiptWriteStatus.Accepted)
+            throw new InvalidOperationException($"Expected accepted receipt, got '{status}'.");
+    }
+}

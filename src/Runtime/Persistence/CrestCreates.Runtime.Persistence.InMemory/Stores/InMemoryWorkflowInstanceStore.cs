@@ -11,19 +11,19 @@ public sealed class InMemoryWorkflowInstanceStore : IWorkflowInstanceStore
     internal InMemoryWorkflowInstanceStore(InMemoryRuntimeTransactionCoordinator coordinator) => _coordinator = coordinator;
 
     public Task AddAsync(WorkflowInstance instance, CancellationToken cancellationToken = default)
-        => _coordinator.ExecuteAsync(_ => { AddCore(instance); return ValueTask.CompletedTask; }, cancellationToken).AsTask();
+        => _coordinator.ExecuteAsync(_ => { using var guard = _coordinator.EnterStoreOperation(); AddCore(instance); return ValueTask.CompletedTask; }, cancellationToken).AsTask();
 
     public Task UpdateAsync(WorkflowInstance instance, long expectedRevision, CancellationToken cancellationToken = default)
-        => _coordinator.ExecuteAsync(_ => { UpdateCore(instance, expectedRevision); return ValueTask.CompletedTask; }, cancellationToken).AsTask();
+        => _coordinator.ExecuteAsync(_ => { using var guard = _coordinator.EnterStoreOperation(); UpdateCore(instance, expectedRevision); return ValueTask.CompletedTask; }, cancellationToken).AsTask();
 
     public Task<WorkflowInstance?> GetAsync(RuntimeInstanceKey key, CancellationToken cancellationToken = default)
-        => _coordinator.ExecuteAsync<WorkflowInstance?>(_ => ValueTask.FromResult(GetCore(key)), cancellationToken).AsTask();
+        => _coordinator.ExecuteAsync<WorkflowInstance?>(_ => { using var guard = _coordinator.EnterStoreOperation(); return ValueTask.FromResult(GetCore(key)); }, cancellationToken).AsTask();
 
     public Task<WorkflowInstance?> GetByWaitingHumanTaskAsync(RuntimeInstanceKey humanTaskKey, CancellationToken cancellationToken = default)
-        => _coordinator.ExecuteAsync<WorkflowInstance?>(_ => ValueTask.FromResult(_coordinator.CurrentState.Workflows.Values
+        => _coordinator.ExecuteAsync<WorkflowInstance?>(_ => { using var guard = _coordinator.EnterStoreOperation(); return ValueTask.FromResult(_coordinator.CurrentState.Workflows.Values
             .Where(w => w.Status == WorkflowInstanceStatus.Suspended && w.WaitingHumanTaskKey == humanTaskKey)
             .OrderBy(w => w.Key.TenantId, StringComparer.Ordinal).ThenBy(w => w.Key.InstanceId, StringComparer.Ordinal)
-            .Select(w => w.Snapshot()).SingleOrDefault()), cancellationToken).AsTask();
+            .Select(w => w.Snapshot()).SingleOrDefault()); }, cancellationToken).AsTask();
 
     private void AddCore(WorkflowInstance instance)
     {

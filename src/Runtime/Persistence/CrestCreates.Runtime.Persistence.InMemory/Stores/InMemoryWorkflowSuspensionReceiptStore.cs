@@ -1,4 +1,5 @@
 using CrestCreates.Workflow.Abstractions;
+using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.InMemory.Transactions;
 
@@ -12,16 +13,23 @@ internal sealed class InMemoryWorkflowSuspensionReceiptStore : IWorkflowSuspensi
         => _coordinator = coordinator;
 
     public Task<WorkflowSuspensionReceiptWriteResult> AddAsync(WorkflowSuspensionReceipt receipt, CancellationToken cancellationToken = default)
-        => _coordinator.ExecuteAsync(_ => ValueTask.FromResult(AddCore(receipt)), cancellationToken).AsTask();
+        => _coordinator.ExecuteAsync(_ => { using var guard = _coordinator.EnterStoreOperation(); return ValueTask.FromResult(AddCore(receipt)); }, cancellationToken).AsTask();
 
     public Task<WorkflowSuspensionReceipt?> GetAsync(RuntimeTenantScope scope, string suspensionOperationId, CancellationToken cancellationToken = default)
-        => _coordinator.ExecuteAsync(_ => ValueTask.FromResult(_coordinator.CurrentState.Receipts.TryGetValue((scope, suspensionOperationId), out var receipt) ? receipt : null), cancellationToken).AsTask();
+        => _coordinator.ExecuteAsync(_ => { using var guard = _coordinator.EnterStoreOperation(); return ValueTask.FromResult(_coordinator.CurrentState.Receipts.TryGetValue((scope, suspensionOperationId), out var receipt) ? receipt : null); }, cancellationToken).AsTask();
 
     private WorkflowSuspensionReceiptWriteResult AddCore(WorkflowSuspensionReceipt receipt)
     {
         ArgumentNullException.ThrowIfNull(receipt);
         receipt.Scope.EnsureValid();
         ArgumentException.ThrowIfNullOrWhiteSpace(receipt.SuspensionOperationId);
+
+        var workflowKey = receipt.WorkflowKey;
+        if (!_coordinator.CurrentState.Workflows.ContainsKey(workflowKey))
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                "Receipt references a non-existent Workflow instance.");
+
         var key = (receipt.Scope, receipt.SuspensionOperationId);
         if (_coordinator.CurrentState.Receipts.TryGetValue(key, out var existing))
         {

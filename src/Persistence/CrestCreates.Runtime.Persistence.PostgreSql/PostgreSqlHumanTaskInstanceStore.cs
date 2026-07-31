@@ -56,7 +56,7 @@ internal sealed class PostgreSqlHumanTaskInstanceStore : IHumanTaskInstanceStore
         var session = _coordinator.RequireSession();
         using var commandLease = session.EnterCommand();
         await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
-            $"insert into {_table} (tenant_scope_kind, tenant_id, instance_id, revision, status, human_task_pin_json, workflow_instance_id, workflow_step_id, suspension_operation_id, assignee_user_id, state_json, created_at, updated_at) values (@scope, @tenant, @id, 1, @status, @pin, @workflow, @step, @operation, @assignee, @state, @created, @updated);");
+            $"insert into {_table} (tenant_scope_kind, tenant_id, instance_id, revision, status, human_task_pin_json, workflow_instance_id, workflow_step_id, suspension_operation_id, assignee_user_id, state_json, completed_at, cancelled_at, created_at, updated_at) values (@scope, @tenant, @id, 1, @status, @pin, @workflow, @step, @operation, @assignee, @state, @completedAt, @cancelledAt, @created, @updated);");
         AddWriteParameters(command, Persisted(instance, 1), null);
         try
         {
@@ -80,7 +80,7 @@ internal sealed class PostgreSqlHumanTaskInstanceStore : IHumanTaskInstanceStore
         var session = _coordinator.RequireSession();
         using var commandLease = session.EnterCommand();
         await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
-            $"update {_table} set revision=@next, status=@status, human_task_pin_json=@pin, workflow_instance_id=@workflow, workflow_step_id=@step, suspension_operation_id=@operation, assignee_user_id=@assignee, state_json=@state, updated_at=@updated where tenant_scope_kind=@scope and tenant_id=@tenant and instance_id=@id and revision=@expected;");
+            $"update {_table} set revision=@next, status=@status, human_task_pin_json=@pin, workflow_instance_id=@workflow, workflow_step_id=@step, suspension_operation_id=@operation, assignee_user_id=@assignee, state_json=@state, completed_at=@completedAt, cancelled_at=@cancelledAt, updated_at=@updated where tenant_scope_kind=@scope and tenant_id=@tenant and instance_id=@id and revision=@expected;");
         AddWriteParameters(command, Persisted(instance, expectedRevision + 1), null);
         command.Parameters.AddWithValue("next", expectedRevision + 1);
         command.Parameters.AddWithValue("expected", expectedRevision);
@@ -177,6 +177,8 @@ internal sealed class PostgreSqlHumanTaskInstanceStore : IHumanTaskInstanceStore
         command.Parameters.AddWithValue("operation", (object?)operationId ?? DBNull.Value);
         command.Parameters.AddWithValue("assignee", (object?)instance.AssigneeUserId ?? DBNull.Value);
         PostgreSqlRuntimeStoreSupport.AddJson(command, "state", PostgreSqlRuntimeStoreSupport.Serialize(instance, PostgreSqlRuntimeJsonSerializerContext.Default.HumanTaskInstance));
+        command.Parameters.AddWithValue("completedAt", (object?)instance.CompletedAt ?? DBNull.Value);
+        command.Parameters.AddWithValue("cancelledAt", (object?)instance.CancelledAt ?? DBNull.Value);
         command.Parameters.AddWithValue("created", instance.CreatedAt);
         command.Parameters.AddWithValue("updated", instance.UpdatedAt ?? DateTimeOffset.UtcNow);
     }

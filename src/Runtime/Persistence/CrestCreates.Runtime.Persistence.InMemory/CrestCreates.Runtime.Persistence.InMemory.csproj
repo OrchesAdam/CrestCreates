@@ -12,4 +12,7 @@
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.InMemory.Tests" />
+  </ItemGroup>
 </Project>

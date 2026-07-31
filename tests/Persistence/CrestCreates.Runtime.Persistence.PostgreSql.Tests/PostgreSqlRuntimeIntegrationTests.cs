@@ -5,6 +5,7 @@ using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.Persistence;
 using CrestCreates.Metadata.Abstractions.Runtime;
+using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
@@ -244,6 +245,102 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
             .Should().Be(AuditSinkWriteStatus.Conflict);
     }
 
+    [Fact]
+    public async Task ConcurrentUseOfAmbientSession_ShouldFailClosed()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = BuildProvider(lease.Options);
+        var coordinator = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
+        var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
+        var workflow = NewWorkflow("tenant-a", "workflow-1");
+        var task1 = NewTask("tenant-a", "task-1", workflow.Key);
+        var task2 = NewTask("tenant-a", "task-2", workflow.Key);
+        await provider.GetRequiredService<IWorkflowInstanceStore>().AddAsync(workflow);
+
+        var act = async () =>
+        {
+            await coordinator.ExecuteAsync(async ct =>
+            {
+                await Task.WhenAll(
+                    tasks.AddAsync(task1, ct),
+                    tasks.AddAsync(task2, ct));
+            });
+        };
+
+        await act.Should().ThrowAsync<Exception>();
+    }
+
+    [Fact]
+    public async Task CompletedTask_ShouldAllowNewActiveTaskForSameWorkflowStep()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        var runner = new PostgreSqlRuntimeMigrationRunner(lease.Options);
+        await runner.ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = true });
+        using var provider = BuildProvider(lease.Options);
+        var tx = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
+        var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
+        var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
+        var workflow = NewWorkflow("tenant-a", "wf-1");
+        var task1 = NewTask("tenant-a", "task-1", workflow.Key);
+        task1.Status = HumanTaskInstanceStatus.Completed;
+        task1.CompletedAt = DateTimeOffset.UtcNow;
+
+        await tx.ExecuteAsync(async ct =>
+        {
+            await workflows.AddAsync(workflow, ct);
+            await tasks.AddAsync(task1, ct);
+        });
+
+        var task2 = NewTask("tenant-a", "task-2", workflow.Key);
+        var act = async () => await tx.ExecuteAsync(async ct => await tasks.AddAsync(task2, ct));
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task CancelledTask_ShouldAllowNewActiveTaskForSameWorkflowStep()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        var runner = new PostgreSqlRuntimeMigrationRunner(lease.Options);
+        await runner.ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = true });
+        using var provider = BuildProvider(lease.Options);
+        var tx = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
+        var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
+        var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
+        var workflow = NewWorkflow("tenant-a", "wf-1");
+        var task1 = NewTask("tenant-a", "task-1", workflow.Key);
+        task1.Status = HumanTaskInstanceStatus.Cancelled;
+        task1.CancelledAt = DateTimeOffset.UtcNow;
+
+        await tx.ExecuteAsync(async ct =>
+        {
+            await workflows.AddAsync(workflow, ct);
+            await tasks.AddAsync(task1, ct);
+        });
+
+        var task2 = NewTask("tenant-a", "task-2", workflow.Key);
+        var act = async () => await tx.ExecuteAsync(async ct => await tasks.AddAsync(task2, ct));
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task Receipt_WithMissingWorkflowOrTask_ShouldFail()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        var runner = new PostgreSqlRuntimeMigrationRunner(lease.Options);
+        await runner.ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = true });
+        using var provider = BuildProvider(lease.Options);
+        var tx = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
+        var receipts = provider.GetRequiredService<IWorkflowSuspensionReceiptStore>();
+        var workflow = NewWorkflow("tenant-a", "wf-1");
+        var task = NewTask("tenant-a", "task-1", workflow.Key);
+
+        var receipt = NewReceipt(workflow, workflow, task, "op-1");
+
+        var act = async () => await tx.ExecuteAsync(async ct => await receipts.AddAsync(receipt, ct));
+        await act.Should().ThrowAsync<RuntimePersistenceContractException>()
+            .Where(ex => ex.Code == RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+    }
+
     private static ServiceProvider BuildProvider(PostgreSqlRuntimePersistenceOptions options)
         => new ServiceCollection().AddCrestCreatesPostgreSqlRuntimePersistence(options).BuildServiceProvider();
 
@@ -275,13 +372,13 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         ]
     };
 
-    private static HumanTaskInstance NewTask(string? tenantId, string id, RuntimeInstanceKey workflowKey) => new()
+    private static HumanTaskInstance NewTask(string? tenantId, string id, RuntimeInstanceKey workflowKey, string? stepId = "review") => new()
     {
         Key = new RuntimeInstanceKey(tenantId, id),
         HumanTaskPin = Pin("humantask", "review", "HumanTask"),
         Status = HumanTaskInstanceStatus.Assigned,
         WorkflowKey = workflowKey,
-        WorkflowStepId = "review",
+        WorkflowStepId = stepId,
         AssigneeUserId = "reviewer",
         CandidateUserIds = ["reviewer", "backup"],
         CandidateRoleIds = ["approver"],

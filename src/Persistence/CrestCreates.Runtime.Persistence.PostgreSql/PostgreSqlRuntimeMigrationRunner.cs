@@ -301,6 +301,43 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 accepted_at timestamptz not null default clock_timestamp(),
                 primary key (sink_id, audit_id)
             );
+            """),
+        new RuntimeMigration("V004", "reciprocal_fks_and_active_step_lifecycle", """
+            alter table {schema}.runtime_human_task_instances
+                add column completed_at timestamptz null,
+                add column cancelled_at timestamptz null;
+
+            alter table {schema}.runtime_human_task_instances
+                add constraint fk_human_task_workflow
+                foreign key (tenant_scope_kind, tenant_id, workflow_instance_id)
+                references {schema}.runtime_workflow_instances (tenant_scope_kind, tenant_id, instance_id)
+                on delete restrict;
+
+            alter table {schema}.runtime_workflow_instances
+                add constraint fk_workflow_waiting_task
+                foreign key (tenant_scope_kind, tenant_id, waiting_instance_id)
+                references {schema}.runtime_human_task_instances (tenant_scope_kind, tenant_id, instance_id)
+                on delete restrict;
+
+            alter table {schema}.runtime_operation_receipts
+                add constraint fk_receipt_workflow
+                foreign key (tenant_scope_kind, tenant_id, workflow_instance_id)
+                references {schema}.runtime_workflow_instances (tenant_scope_kind, tenant_id, instance_id)
+                on delete restrict;
+
+            alter table {schema}.runtime_operation_receipts
+                add constraint fk_receipt_human_task
+                foreign key (tenant_scope_kind, tenant_id, human_task_instance_id)
+                references {schema}.runtime_human_task_instances (tenant_scope_kind, tenant_id, instance_id)
+                on delete restrict;
+
+            drop index if exists {schema}.ux_runtime_human_task_active_step;
+            create unique index ux_runtime_human_task_active_step
+                on {schema}.runtime_human_task_instances (tenant_scope_kind, tenant_id, workflow_instance_id, workflow_step_id)
+                where workflow_instance_id is not null
+                  and workflow_step_id is not null
+                  and completed_at is null
+                  and cancelled_at is null;
             """)
     ];
 }

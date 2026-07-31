@@ -15,14 +15,14 @@ internal sealed class InMemoryDescriptorSnapshotStore : IDescriptorSnapshotStore
         ArgumentNullException.ThrowIfNull(snapshot);
         var copy = snapshot.Snapshot();
         var fingerprint = Fingerprint(copy);
-        return _coordinator.ExecuteAsync(_ => ValueTask.FromResult(WriteCore(copy, fingerprint)), cancellationToken).AsTask();
+        return _coordinator.ExecuteAsync(_ => { using var guard = _coordinator.EnterStoreOperation(); return ValueTask.FromResult(WriteCore(copy, fingerprint)); }, cancellationToken).AsTask();
     }
 
     public Task<DescriptorSnapshot?> GetAsync(string snapshotId, CancellationToken cancellationToken = default)
-        => _coordinator.ExecuteAsync(_ => ValueTask.FromResult(_coordinator.CurrentState.Snapshots.TryGetValue(snapshotId, out var value) ? value.Snapshot.Snapshot() : null), cancellationToken).AsTask();
+        => _coordinator.ExecuteAsync(_ => { using var guard = _coordinator.EnterStoreOperation(); return ValueTask.FromResult(_coordinator.CurrentState.Snapshots.TryGetValue(snapshotId, out var value) ? value.Snapshot.Snapshot() : null); }, cancellationToken).AsTask();
 
     public Task<SnapshotEntry?> GetEntryAsync(string snapshotId, DescriptorRef descriptorRef, CancellationToken cancellationToken = default)
-        => _coordinator.ExecuteAsync(_ => ValueTask.FromResult(_coordinator.CurrentState.Snapshots.TryGetValue(snapshotId, out var value) ? value.Snapshot.Descriptors.FirstOrDefault(e => e.Ref == descriptorRef)?.Snapshot() : null), cancellationToken).AsTask();
+        => _coordinator.ExecuteAsync(_ => { using var guard = _coordinator.EnterStoreOperation(); return ValueTask.FromResult(_coordinator.CurrentState.Snapshots.TryGetValue(snapshotId, out var value) ? value.Snapshot.Descriptors.FirstOrDefault(e => e.Ref == descriptorRef)?.Snapshot() : null); }, cancellationToken).AsTask();
 
     private DescriptorSnapshotWriteResult WriteCore(DescriptorSnapshot copy, string fingerprint)
     {

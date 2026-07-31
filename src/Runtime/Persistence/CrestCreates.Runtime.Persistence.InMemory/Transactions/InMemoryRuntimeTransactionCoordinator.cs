@@ -16,6 +16,15 @@ internal sealed class InMemoryRuntimeTransactionCoordinator : IRuntimeTransactio
     internal InMemoryRuntimePersistenceState CurrentState
         => _accessor.Current?.StagedState ?? _committed;
 
+    internal IDisposable EnterStoreOperation()
+    {
+        var context = _accessor.Current
+            ?? throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                "An InMemory Runtime Store operation requires an ambient Runtime transaction.");
+        return context.EnterOperation();
+    }
+
     public async ValueTask ExecuteAsync(Func<CancellationToken, ValueTask> work, CancellationToken cancellationToken = default)
     {
         await ExecuteAsync<object?>(async ct => { await work(ct); return null; }, cancellationToken).ConfigureAwait(false);
@@ -27,8 +36,6 @@ internal sealed class InMemoryRuntimeTransactionCoordinator : IRuntimeTransactio
         var outer = _accessor.Current;
         if (outer is not null)
         {
-            // Nested calls intentionally join the outer staged state. Store
-            // operations remain serialized by the caller's transaction flow.
             return await work(cancellationToken).ConfigureAwait(false);
         }
 

@@ -9,6 +9,9 @@ using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Runtime.Persistence.InMemory;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using System.Buffers;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Xunit;
 
 namespace CrestCreates.Workflow.Tests;
@@ -73,7 +76,7 @@ public sealed class Phase9bWorkflowPersistenceContractTests
         var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
         var receipts = provider.GetRequiredService<IWorkflowSuspensionReceiptStore>();
         var coordinator = provider.GetRequiredService<CrestCreates.Runtime.Persistence.Abstractions.Transactions.IRuntimeTransactionCoordinator>();
-        var committer = new WorkflowSuspensionCommitter(coordinator, workflows, tasks, receipts);
+        var committer = new WorkflowSuspensionCommitter(coordinator, workflows, tasks, receipts, new TestCanonicalHashComputer());
         var workflow = New("tenant-a", "wf-atomic");
         await workflows.AddAsync(workflow);
         var before = (await workflows.GetAsync(workflow.Key))!;
@@ -101,7 +104,7 @@ public sealed class Phase9bWorkflowPersistenceContractTests
         var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
         var receipts = provider.GetRequiredService<IWorkflowSuspensionReceiptStore>();
         var coordinator = provider.GetRequiredService<CrestCreates.Runtime.Persistence.Abstractions.Transactions.IRuntimeTransactionCoordinator>();
-        var committer = new WorkflowSuspensionCommitter(coordinator, workflows, tasks, receipts);
+        var committer = new WorkflowSuspensionCommitter(coordinator, workflows, tasks, receipts, new TestCanonicalHashComputer());
         var workflow = New("tenant-a", "wf-rollback");
         await workflows.AddAsync(workflow);
         var before = (await workflows.GetAsync(workflow.Key))!;
@@ -157,4 +160,38 @@ public sealed class Phase9bWorkflowPersistenceContractTests
         ContractVersion = "canonical-hash-v1",
         CanonicalShapeVersion = "workflow-v1"
     };
+
+    private sealed class TestCanonicalHashComputer : ICanonicalHashComputer
+    {
+        public CanonicalHash ComputeContractHash(IDescriptor descriptor, CanonicalHashScope scope)
+            => throw new NotSupportedException();
+
+        public CanonicalHash ComputeDefinitionHash(IDescriptor descriptor, CanonicalHashScope scope)
+            => throw new NotSupportedException();
+
+        public CanonicalHash ComputeFromProjection(CanonicalHashProjectionResult projection)
+        {
+            var bufferWriter = new ArrayBufferWriter<byte>(4096);
+            using var jsonWriter = new Utf8JsonWriter(bufferWriter, new JsonWriterOptions
+            {
+                Indented = false,
+                SkipValidation = true
+            });
+            projection.WriteCanonicalJson(jsonWriter);
+            jsonWriter.Flush();
+
+            var hashBytes = SHA256.HashData(bufferWriter.WrittenSpan);
+            return new CanonicalHash
+            {
+                Value = Convert.ToHexString(hashBytes).ToLowerInvariant(),
+                Algorithm = "SHA-256",
+                AlgorithmVersion = projection.Metadata.AlgorithmVersion,
+                ArtifactKind = projection.Metadata.ArtifactKind,
+                Scope = projection.Metadata.Scope,
+                Purpose = projection.Metadata.Purpose,
+                ContractVersion = projection.Metadata.ContractVersion,
+                CanonicalShapeVersion = projection.Metadata.CanonicalShapeVersion
+            };
+        }
+    }
 }
