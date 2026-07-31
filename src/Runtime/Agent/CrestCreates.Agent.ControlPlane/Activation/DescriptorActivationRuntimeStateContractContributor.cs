@@ -1,4 +1,3 @@
-using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 
 namespace CrestCreates.Agent.ControlPlane.Activation;
@@ -7,15 +6,20 @@ public sealed class DescriptorActivationRuntimeStateContractContributor : IRunti
 {
     public void Contribute(IRuntimeStateContractBuilder builder)
     {
-        var roots = AgentControlPlaneToolJsonSerializerContext
-            .AgentControlPlaneToolJsonSerializerContextRootManifest.AllDirectRootTypes;
+        var taskInputRoots = new HashSet<Type>
+        {
+            typeof(CrestCreates.Agent.ControlPlane.Abstractions.Activation.DescriptorActivationReviewTaskInput)
+        };
         builder.Add(
             "crest.agent-control-plane/descriptor-activation-review-task-input/v1",
-            AgentControlPlaneToolJsonSerializerContext.Default.DescriptorActivationReviewTaskInput,
-            roots);
+            DescriptorActivationRuntimeStateJsonSerializerContext.Default.DescriptorActivationReviewTaskInput,
+            taskInputRoots);
+
+        var decisionRoots = CrestCreates.Agent.ControlPlane.Abstractions.Json.AgentControlPlaneToolJsonSerializerContext
+            .AgentControlPlaneToolJsonSerializerContextRootManifest.AllDirectRootTypes;
         builder.Add(
             "crest.agent-control-plane/descriptor-activation-review-decision/v1",
-            AgentControlPlaneToolJsonSerializerContext.Default.DescriptorActivationReviewDecision,
-            roots);
+            CrestCreates.Agent.ControlPlane.Abstractions.Json.AgentControlPlaneToolJsonSerializerContext.Default.DescriptorActivationReviewDecision,
+            decisionRoots);
     }
 }
