@@ -21,6 +21,11 @@ Tracks 1 and 2 share the same endpoint infrastructure: `MapCrestCapabilityEndpoi
 Add the following to your `Program.cs` or module `OnConfigureServices`:
 
 ```csharp
+// Accountability Foundation is required by the Capability producer.
+builder.Services.AddAccountability(options =>
+    options.RequireAtLeastOneSink = true);
+builder.Services.AddAuditSink<MyAuditSink>();
+
 // Minimal: pipeline + dispatcher + registries
 builder.Services.AddCapabilityRuntime();
 
@@ -39,6 +44,20 @@ app.MapCrestCapabilityEndpoints();
 - `AddCrestCompatibilityProjection()` — calls `AddCrestCapabilityEndpoints()` internally, registering `ICapabilityEndpointRegistry`, `CapabilityEndpointRegistryBootstrapper`, `ICapabilityEndpointResultContractRegistry`, and the validator/extractor for `CapabilityEndpointDescriptor`.
 
 `MapCrestCapabilityEndpoints()` bootstraps the registry, resolves bindings, and maps every active descriptor to a Minimal API route handler.
+
+`AddCapabilityPipeline()` also registers the Capability Accountability
+composition validator. Omitting `AddAccountability()` is a startup error, not a
+first-execution fallback. For development/tests, register the explicit
+`InMemoryAuditSink`; production Hosts should require and provide a durable
+contract-compliant sink.
+
+When a resolved execution is accepted by at least one sink,
+`CapabilityExecutionResult.AuditRecordId` identifies the Accountability fact.
+It remains null for rejected candidates, sink conflicts/failures, or a
+no-sink configuration.
+
+See `docs/Feature/Accountability/usage-guide.md` for host ordering, sink
+contracts, and cancellation semantics.
 
 ---
 

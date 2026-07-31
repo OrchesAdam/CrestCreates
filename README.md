@@ -72,6 +72,7 @@ dotnet test tests/Integrations/CrestCreates.Mcp.AotFixture.Tests/CrestCreates.Mc
 |---|---|
 | Unified Metadata Model | [Usage guide](docs/Feature/UnifiedMetadataModel/usage-guide.md) · [Architecture](docs/Feature/UnifiedMetadataModel/arch-design.md) |
 | Capability Exposure | [Usage guide](docs/Feature/CapabilityExposure/usage-guide.md) · [Architecture](docs/Feature/CapabilityExposure/arch-design.md) |
+| Accountability | [Usage guide](docs/Feature/Accountability/usage-guide.md) · [Architecture](docs/Feature/Accountability/arch-design.md) |
 | Form | [Usage guide](docs/Feature/Form/usage-guide.md) |
 | Organization | [Usage guide](docs/Feature/Organization/usage-guide.md) |
 | MCP | [Usage guide](docs/Feature/MCP/usage-guide.md) |

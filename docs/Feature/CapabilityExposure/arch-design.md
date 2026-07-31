@@ -1,7 +1,7 @@
 # Capability Projection and Exposure — Architecture Design
 
 > **Phase 8** overall architecture reference for Capability Endpoint Projection, AppService Compatibility, and future Agent/MCP Tool projection.
-> Last updated: 2026-07-14.
+> Last updated: 2026-07-31.
 
 ---
 
@@ -19,6 +19,27 @@ Phase 8 establishes a direct projection model. `CapabilityDescriptor` becomes th
 4. **Compatibility as a bridge, not a second path.** Existing `[CrestService]` AppServices can opt into the capability pipeline via a one-way compatibility projection. The legacy Dynamic API output is suppressed for projected services so that capability and legacy paths never dual-serve the same method.
 5. **Trimming-safe, NativeAOT-oriented.** Static registries, generated delegates, and `JsonTypeInfo<T>` overloads replace runtime reflection. The pipeline resolves handlers from compile-time registrations. Current deployment guarantee is `PublishTrimmed`; full NativeAOT is a future target.
 6. **Fail-closed by default.** Missing bindings, missing capabilities, diagnostic errors, and invalid states all cause startup failure or per-service generation suppression — never a silent fallback.
+
+### 2.1 Phase 9a Accountability composition
+
+Every resolved Capability execution that enters the shared Pipeline now emits a
+post-fact `capability.execute` `AuditEnvelope` through `IAuditRecorder`.
+`AddCapabilityPipeline()` and `AddCapabilityRuntime()` install a producer-owned
+startup validator, so a Host that enables Capability without
+`AddAccountability()` fails during startup.
+
+The Capability fact preserves the stable Capability ID, descriptor
+version/structured contract hash, effective Actor, invocation source,
+Correlation/Causation/Parent relationships, terminal outcome, and execution
+duration. `CapabilityExecutionResult.AuditRecordId` is exposed only when at
+least one contract-compliant sink returns Accepted or Duplicate.
+
+Descriptor resolution failure occurs before the resolved Capability Pipeline
+and is intentionally outside the `capability.execute` fact boundary. The
+enclosing HTTP, Agent governance, MCP protocol, or future dispatch-attempt fact
+owns that observation.
+
+See `docs/Feature/Accountability/arch-design.md`.
 
 ## 3. Core Principles
 

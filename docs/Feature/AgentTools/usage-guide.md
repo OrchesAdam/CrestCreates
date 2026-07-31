@@ -91,6 +91,27 @@ The existing scoped `ICurrentUser` and `ITenantContext` remain authoritative
 for user and tenant identity. Never copy these values from model-generated Tool
 arguments.
 
+### 2.1 Governance Audit and Accountability are different contracts
+
+An Agent Tool Host that dispatches through the Capability Runtime also registers
+the Phase 9a Accountability Foundation:
+
+```csharp
+services.AddAccountability(options =>
+    options.RequireAtLeastOneSink = true);
+services.AddAuditSink<MyAuditSink>();
+services.AddCapabilityRuntime();
+services.AddCrestAgentTools(...);
+```
+
+`IAgentToolGovernanceAuditor` remains the required pre-dispatch/finalization
+control protocol. It may block execution and fence reconciliation state.
+`IAuditRecorder` is a separate post-fact responsibility recorder used by the
+Capability execution. A best-effort Accountability sink must never be used to
+satisfy `AgentToolAuditMode.Required`.
+
+See `docs/Feature/Accountability/arch-design.md`.
+
 ## 3. Establish trusted Agent context
 
 The Host or future Agent orchestrator creates the scoped context:
