@@ -23,7 +23,8 @@ namespace CrestCreates.AuditLogging.Modules
             services.AddScoped<AuditLoggingMiddleware>();
             services.AddScoped<IAuditLogService, AuditLogService>();
             services.AddScoped<IAuditLogWriter, AuditLogWriter>();
-            services.AddScoped<AccountabilityHttpMiddleware>();
+            services.AddScoped<AccountabilityHttpTerminalObserverMiddleware>();
+            services.AddScoped<AccountabilityHttpOperationScopeMiddleware>();
             services.AddScoped<IAuditedMethodAccountabilityRuntime, AuditedMethodAccountabilityRuntime>();
             services.TryAddEnumerable(ServiceDescriptor.Singleton<IBootstrapValidator, AuditLoggingAccountabilityCompositionValidator>());
             services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AuditLoggingAccountabilityCompositionValidator>());

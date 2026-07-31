@@ -282,30 +282,26 @@ public sealed class AccountabilityArchitectureTests
         var source = File.ReadAllText(RepositoryPath(
             "src/Platform/CrestCreates.Web/CrestCreatesWebApplicationExtensions.cs"));
 
-        Assert.Contains("app.UseAccountabilityHttpAudit();", source, StringComparison.Ordinal);
+        Assert.Contains("app.UseAccountabilityHttpTerminalObserver();", source, StringComparison.Ordinal);
+        Assert.Contains("app.UseAccountabilityHttpOperationScope();", source, StringComparison.Ordinal);
         Assert.DoesNotContain("app.UseAuditLogging();", source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void UseCrestWebAuthenticatesBeforeAccountability()
+    public void UseCrestWebPreservesGlobalExceptionCoverageAndAuthenticatedOperationScope()
     {
         var source = File.ReadAllText(RepositoryPath(
             "src/Platform/CrestCreates.Web/CrestCreatesWebApplicationExtensions.cs"));
 
+        Assert.True(
+            source.IndexOf("app.UseAccountabilityHttpTerminalObserver();", StringComparison.Ordinal)
+            < source.IndexOf("app.UseExceptionHandling();", StringComparison.Ordinal));
+        Assert.True(
+            source.IndexOf("app.UseExceptionHandling();", StringComparison.Ordinal)
+            < source.IndexOf("app.UseRouting();", StringComparison.Ordinal));
         Assert.True(
             source.IndexOf("app.UseAuthentication();", StringComparison.Ordinal)
-            < source.IndexOf("app.UseAccountabilityHttpAudit();", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void UseCrestWebConvertsExceptionsInsideAccountabilityScope()
-    {
-        var source = File.ReadAllText(RepositoryPath(
-            "src/Platform/CrestCreates.Web/CrestCreatesWebApplicationExtensions.cs"));
-
-        Assert.True(
-            source.IndexOf("app.UseAccountabilityHttpAudit();", StringComparison.Ordinal)
-            < source.IndexOf("app.UseExceptionHandling();", StringComparison.Ordinal));
+            < source.IndexOf("app.UseAccountabilityHttpOperationScope();", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -314,30 +310,26 @@ public sealed class AccountabilityArchitectureTests
         var source = File.ReadAllText(RepositoryPath(
             "samples/LibraryManagement/LibraryManagement.Web/Program.cs"));
 
-        Assert.Contains("app.UseAccountabilityHttpAudit();", source, StringComparison.Ordinal);
+        Assert.Contains("app.UseAccountabilityHttpTerminalObserver();", source, StringComparison.Ordinal);
+        Assert.Contains("app.UseAccountabilityHttpOperationScope();", source, StringComparison.Ordinal);
         Assert.DoesNotContain("app.UseAuditLogging();", source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void LibraryManagementAuthenticatesBeforeAccountability()
+    public void LibraryManagementPreservesGlobalExceptionCoverageAndAuthenticatedOperationScope()
     {
         var source = File.ReadAllText(RepositoryPath(
             "samples/LibraryManagement/LibraryManagement.Web/Program.cs"));
 
+        Assert.True(
+            source.IndexOf("app.UseAccountabilityHttpTerminalObserver();", StringComparison.Ordinal)
+            < source.IndexOf("app.UseExceptionHandling();", StringComparison.Ordinal));
+        Assert.True(
+            source.IndexOf("app.UseExceptionHandling();", StringComparison.Ordinal)
+            < source.IndexOf("app.UseRouting();", StringComparison.Ordinal));
         Assert.True(
             source.IndexOf("app.UseAuthentication();", StringComparison.Ordinal)
-            < source.IndexOf("app.UseAccountabilityHttpAudit();", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void LibraryManagementConvertsExceptionsInsideAccountabilityScope()
-    {
-        var source = File.ReadAllText(RepositoryPath(
-            "samples/LibraryManagement/LibraryManagement.Web/Program.cs"));
-
-        Assert.True(
-            source.IndexOf("app.UseAccountabilityHttpAudit();", StringComparison.Ordinal)
-            < source.IndexOf("app.UseExceptionHandling();", StringComparison.Ordinal));
+            < source.IndexOf("app.UseAccountabilityHttpOperationScope();", StringComparison.Ordinal));
     }
 
     [Fact]

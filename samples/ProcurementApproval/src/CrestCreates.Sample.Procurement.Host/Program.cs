@@ -66,7 +66,8 @@ var workflowInstanceStore = new InMemoryWorkflowInstanceStore();
 builder.Services.AddCapabilityRuntime();
 builder.Services.AddMultiTenancy();
 builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = true);
-builder.Services.AddTransient<AccountabilityHttpMiddleware>();
+builder.Services.AddTransient<AccountabilityHttpTerminalObserverMiddleware>();
+builder.Services.AddTransient<AccountabilityHttpOperationScopeMiddleware>();
 builder.Services.AddSingleton<InMemoryAuditSink>();
 builder.Services.AddSingleton<IAuditSink>(sp => sp.GetRequiredService<InMemoryAuditSink>());
 builder.Services.AddScoped<IAuditedMethodAccountabilityRuntime, AuditedMethodAccountabilityRuntime>();
@@ -155,8 +156,9 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =
 
 var app = builder.Build();
 
+app.UseAccountabilityHttpTerminalObserver();
 app.UseAuthentication();
-app.UseAccountabilityHttpAudit();
+app.UseAccountabilityHttpOperationScope();
 app.MapCrestCapabilityEndpoints();
 app.MapCrestOpenApi();
 

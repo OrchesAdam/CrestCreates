@@ -54,7 +54,9 @@ public class CrestWebPresetTests
         builder.AddCrestWeb(options => options.UseOpenIddict(false));
 
         builder.Services.Should().ContainSingle(descriptor =>
-            descriptor.ServiceType == typeof(AccountabilityHttpMiddleware));
+            descriptor.ServiceType == typeof(AccountabilityHttpTerminalObserverMiddleware));
+        builder.Services.Should().Contain(descriptor =>
+            descriptor.ServiceType == typeof(AccountabilityHttpOperationScopeMiddleware));
     }
 
     [Fact]

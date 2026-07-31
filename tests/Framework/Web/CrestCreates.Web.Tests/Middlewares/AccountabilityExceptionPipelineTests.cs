@@ -15,6 +15,7 @@ using CrestCreates.AspNetCore.Middlewares;
 using CrestCreates.AuditLogging.Abstractions.MethodAccountability;
 using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.Authorization.Abstractions;
+using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
@@ -33,6 +34,18 @@ namespace CrestCreates.Web.Tests.Middlewares;
 
 public sealed class AccountabilityExceptionPipelineTests
 {
+    [Fact]
+    public async Task BusinessExceptionIsConvertedBeforeHttpFact()
+    {
+        await using var harness = await PipelineHarness.StartAsync();
+
+        var response = await harness.GetAsync("/invalid-operation");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        harness.Recorder.ConversionWasComplete.Should().BeTrue();
+        harness.Recorder.Envelope!.Outcome.Code.Should().Be("HTTP_400");
+    }
+
     [Fact]
     public async Task ConvertedInvalidOperationExceptionProducesHttp400Fact()
     {
@@ -138,6 +151,83 @@ public sealed class AccountabilityExceptionPipelineTests
         body.Should().Contain("Crest.Operation.Invalid");
     }
 
+    [Fact]
+    public async Task TenantResolverExceptionUsesGlobalErrorContract()
+    {
+        await using var harness = await PipelineHarness.StartAsync();
+
+        var response = await harness.GetAsync("/success", failTenantResolution: true);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        body.Should().Contain("Crest.InternalError");
+        harness.Recorder.Envelope!.Outcome.Code.Should().Be("HTTP_500");
+    }
+
+    [Fact]
+    public async Task AuthenticationHandlerExceptionUsesGlobalErrorContract()
+    {
+        await using var harness = await PipelineHarness.StartAsync();
+
+        var response = await harness.GetAsync("/success", failAuthentication: true);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        body.Should().Contain("Crest.InternalError");
+        harness.Recorder.Envelope!.Outcome.Code.Should().Be("HTTP_500");
+    }
+
+    [Fact]
+    public async Task PreScopeFailureProducesUnknownActorHttpFact()
+    {
+        await using var harness = await PipelineHarness.StartAsync();
+
+        await harness.GetAsync("/success", failTenantResolution: true);
+
+        harness.Recorder.Envelope!.Actor.Should().Be(
+            new AuditActor { Kind = "unknown", Id = "unknown" });
+        harness.Recorder.Envelope.TenantId.Should().BeNull();
+        harness.Probe.ChildCorrelationId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AuthenticatedBusinessRequestPushesChildScope()
+    {
+        await using var harness = await PipelineHarness.StartAsync();
+
+        var response = await harness.GetAsync("/success", authenticated: true);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        harness.Probe.ChildActor.Should().Be(
+            new AuditActor { Kind = "user", Id = "user-1", DisplayName = "user-1" });
+        harness.Probe.ChildTenantId.Should().Be("tenant-1");
+    }
+
+    [Fact]
+    public async Task TerminalObserverUsesSameAuditAndOperationIdsAsChildScope()
+    {
+        await using var harness = await PipelineHarness.StartAsync();
+
+        await harness.GetAsync("/success", authenticated: true);
+
+        harness.Probe.ChildCorrelationId.Should().Be(harness.Recorder.Envelope!.CorrelationId);
+        harness.Probe.ChildOperationId.Should().Be(harness.Recorder.Envelope.Runtime.ExecutionId);
+        harness.Probe.ChildEnclosingAuditId.Should().Be(harness.Recorder.Envelope.AuditId);
+    }
+
+    [Fact]
+    public async Task AuditFailureDoesNotReplacePreScopeErrorResponse()
+    {
+        await using var harness = await PipelineHarness.StartAsync();
+        harness.Recorder.Throw = true;
+
+        var response = await harness.GetAsync("/success", failAuthentication: true);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        body.Should().Contain("Crest.InternalError");
+    }
+
     private sealed class PipelineHarness : IAsyncDisposable
     {
         private readonly WebApplication _app;
@@ -181,11 +271,13 @@ public sealed class AccountabilityExceptionPipelineTests
                     _ => { });
             builder.Services.AddCrestExceptionHandling();
             builder.Services.AddAccountability();
-            builder.Services.AddScoped<AccountabilityHttpMiddleware>();
+            builder.Services.AddScoped<AccountabilityHttpTerminalObserverMiddleware>();
+            builder.Services.AddScoped<AccountabilityHttpOperationScopeMiddleware>();
             builder.Services.AddSingleton<TimeProvider>(clock);
             builder.Services.AddSingleton(conversion);
             builder.Services.AddSingleton(child);
             builder.Services.AddSingleton<ICurrentTenant, TestTenant>();
+            builder.Services.AddScoped<ITenantResolver, TestTenantResolver>();
             builder.Services.AddSingleton<IAuditedMethodAccountabilityRuntime, NoopMethodRuntime>();
             builder.Services.AddSingleton<CaptureRecorder>();
             builder.Services.Replace(ServiceDescriptor.Singleton<IAuditRecorder>(provider =>
@@ -194,10 +286,12 @@ public sealed class AccountabilityExceptionPipelineTests
                 new TrackingExceptionConverter(provider, conversion, clock)));
 
             var app = builder.Build();
-            app.UseRouting();
-            app.UseAuthentication();
-            app.UseAccountabilityHttpAudit();
+            app.UseAccountabilityHttpTerminalObserver();
             app.UseExceptionHandling();
+            app.UseRouting();
+            app.UseMultiTenancy();
+            app.UseAuthentication();
+            app.UseAccountabilityHttpOperationScope();
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapGet("/invalid-operation", _ => Task.FromException(new InvalidOperationException("invalid")));
@@ -211,6 +305,16 @@ public sealed class AccountabilityExceptionPipelineTests
                     child.ChildActor = ambient?.Actor;
                     return Task.FromException(new InvalidOperationException("child failed"));
                 });
+                endpoints.MapGet("/success", context =>
+                {
+                    var ambient = context.RequestServices.GetRequiredService<IAuditOperationContextAccessor>().Current;
+                    child.ChildCorrelationId = ambient?.CorrelationId;
+                    child.ChildOperationId = ambient?.OperationId;
+                    child.ChildEnclosingAuditId = ambient?.EnclosingAuditId;
+                    child.ChildActor = ambient?.Actor;
+                    child.ChildTenantId = ambient?.TenantId;
+                    return context.Response.WriteAsync("ok");
+                });
             });
             await app.StartAsync();
             return new PipelineHarness(
@@ -221,11 +325,19 @@ public sealed class AccountabilityExceptionPipelineTests
                 child);
         }
 
-        public async Task<HttpResponseMessage> GetAsync(string path, bool authenticated = false)
+        public async Task<HttpResponseMessage> GetAsync(
+            string path,
+            bool authenticated = false,
+            bool failTenantResolution = false,
+            bool failAuthentication = false)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, path);
             if (authenticated)
                 request.Headers.Add(TestAuthenticationHandler.UserHeader, "user-1");
+            if (failTenantResolution)
+                request.Headers.Add(PreScopeFailureProbe.TenantFailureHeader, "true");
+            if (failAuthentication)
+                request.Headers.Add(PreScopeFailureProbe.AuthenticationFailureHeader, "true");
             return await _client.SendAsync(request);
         }
 
@@ -302,7 +414,26 @@ public sealed class AccountabilityExceptionPipelineTests
     private sealed class ChildProbe
     {
         public string? ChildCorrelationId { get; set; }
+        public string? ChildOperationId { get; set; }
+        public string? ChildEnclosingAuditId { get; set; }
+        public string? ChildTenantId { get; set; }
         public AuditActor? ChildActor { get; set; }
+    }
+
+    private static class PreScopeFailureProbe
+    {
+        public const string TenantFailureHeader = "X-Test-Tenant-Failure";
+        public const string AuthenticationFailureHeader = "X-Test-Authentication-Failure";
+    }
+
+    private sealed class TestTenantResolver : ITenantResolver
+    {
+        public Task<TenantResolutionResult> ResolveAsync(HttpContext httpContext)
+        {
+            if (httpContext.Request.Headers.ContainsKey(PreScopeFailureProbe.TenantFailureHeader))
+                throw new Exception("tenant resolver failed");
+            return Task.FromResult(TenantResolutionResult.NotResolved("test"));
+        }
     }
 
     private sealed class ManualTimeProvider(DateTimeOffset initial) : TimeProvider
@@ -323,6 +454,8 @@ public sealed class AccountabilityExceptionPipelineTests
 
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
+            if (Request.Headers.ContainsKey(PreScopeFailureProbe.AuthenticationFailureHeader))
+                throw new Exception("authentication failed");
             var userId = Request.Headers[UserHeader].ToString();
             if (string.IsNullOrWhiteSpace(userId))
                 return Task.FromResult(AuthenticateResult.NoResult());

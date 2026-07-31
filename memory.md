@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-30 (Issue #39 Phase 9a PR #67 third-round findings remediated and re-verified)
+Last Updated: 2026-07-31 (Issue #39 Phase 9a PR #67 fourth-round global exception boundary remediated)
 
 ## Purpose
 
@@ -126,6 +126,23 @@ SnapshotHash, and ordered descriptor Items structurally, accepting equivalent
 sanitizer snapshots while rejecting mutations and reordering. Fresh evidence is
 green: Platform Web 104, Accountability Runtime 114, Boundary 81, Procurement
 NativeAOT 9, and the canonical 228-project build with zero errors.
+
+PR #67 fourth code-review closure (2026-07-31): the prior single HTTP middleware
+ordering was an interim fix and is superseded. HTTP root observation is now split
+into an outer terminal observer and an inner authenticated operation scope:
+`RequestLogging -> AccountabilityHttpTerminalObserver -> ExceptionHandling ->
+Routing -> MultiTenancy -> Authentication -> AccountabilityHttpOperationScope`.
+The terminal observer allocates the HTTP AuditId, OperationId, and CorrelationId
+before global exception handling and records only after the final response is
+available. The operation scope enriches the same request-local state with trusted
+Actor/Tenant data and exposes the same identities to Capability, method, and
+Workflow children. Tenant-resolution or authentication failures remain inside
+the unique `CrestErrorResponse` exception mainline and produce an HTTP fact with
+unknown Actor, null TenantId, and no child scope. Real TestServer cases cover
+business, tenant-resolver, and authentication failures, shared root/child
+identities, and recorder failure isolation. The affected AuditLogging and
+Platform Web projects compile in the restricted environment; test execution
+requires the socket-enabled CI runner.
 
 Spec: `docs/superpowers/specs/2026-07-28-phase-9a-accountability-runtime-foundation-design.md`
 Plan: `docs/superpowers/plans/2026-07-29-phase-9a-accountability-runtime-foundation.md`

@@ -192,7 +192,7 @@ namespace CrestCreates.AuditLogging.Middlewares
 
     public static class AuditLoggingMiddlewareExtensions
     {
-        [Obsolete("Compatibility-only HTTP observation middleware. Use UseAccountabilityHttpAudit for the framework mainline.")]
+        [Obsolete("Compatibility-only HTTP observation middleware. Use the Accountability HTTP terminal observer and operation scope for the framework mainline.")]
         public static IApplicationBuilder UseAuditLogging(this IApplicationBuilder builder)
         {
             return builder.UseMiddleware<AuditLoggingMiddleware>();

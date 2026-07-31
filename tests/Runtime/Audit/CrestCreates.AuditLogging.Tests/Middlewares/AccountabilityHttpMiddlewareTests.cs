@@ -238,18 +238,30 @@ public sealed class AccountabilityHttpMiddlewareTests
         return context;
     }
 
-    private static AccountabilityHttpMiddleware CreateMiddleware(
+    private static TestHttpAccountabilityPipeline CreateMiddleware(
         IAuditRecorder recorder,
         IAuditedMethodAccountabilityRuntime? runtime = null,
         TimeProvider? timeProvider = null)
         => new(
-            recorder,
-            new FixedIdentity(),
-            new TenantContext(),
-            NullLogger<AccountabilityHttpMiddleware>.Instance,
-            new AuditOperationContextAccessor(),
-            runtime ?? new TestMethodRuntime(),
-            timeProvider);
+            new AccountabilityHttpTerminalObserverMiddleware(
+                recorder,
+                new FixedIdentity(),
+                NullLogger<AccountabilityHttpTerminalObserverMiddleware>.Instance,
+                timeProvider),
+            new AccountabilityHttpOperationScopeMiddleware(
+                new TenantContext(),
+                new AuditOperationContextAccessor(),
+                runtime ?? new TestMethodRuntime()));
+
+    private sealed class TestHttpAccountabilityPipeline(
+        AccountabilityHttpTerminalObserverMiddleware terminalObserver,
+        AccountabilityHttpOperationScopeMiddleware operationScope)
+    {
+        public Task InvokeAsync(HttpContext context, RequestDelegate next)
+            => terminalObserver.InvokeAsync(
+                context,
+                innerContext => operationScope.InvokeAsync(innerContext, next));
+    }
 
     private sealed class TestMethodRuntime : IAuditedMethodAccountabilityRuntime
     {

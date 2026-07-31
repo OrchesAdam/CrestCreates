@@ -1,15 +1,11 @@
 using CrestCreates.Accountability.Abstractions.Contracts;
-using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Accountability.Abstractions.Identity;
 using CrestCreates.Accountability.Abstractions.Recording;
-using CrestCreates.AuditLogging.Abstractions.MethodAccountability;
-using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
-using System.Security.Claims;
 using System.Threading.Tasks;
 using System;
 using System.Threading;
@@ -17,55 +13,38 @@ using System.Threading;
 namespace CrestCreates.AuditLogging.Middlewares;
 
 /// <summary>
-/// Emits one safe post-fact HTTP claim without request/response body or header capture.
+/// Observes the terminal HTTP response outside global exception handling and emits one safe post-fact claim.
 /// </summary>
-public sealed class AccountabilityHttpMiddleware : IMiddleware
+public sealed class AccountabilityHttpTerminalObserverMiddleware : IMiddleware
 {
     private readonly IAuditRecorder _recorder;
     private readonly IAuditIdentityGenerator _identity;
-    private readonly ICurrentTenant _tenant;
-    private readonly ILogger<AccountabilityHttpMiddleware> _logger;
-    private readonly IAuditOperationContextAccessor _contexts;
-    private readonly IAuditedMethodAccountabilityRuntime _methodRuntime;
+    private readonly ILogger<AccountabilityHttpTerminalObserverMiddleware> _logger;
     private readonly TimeProvider _timeProvider;
 
-    public AccountabilityHttpMiddleware(
+    public AccountabilityHttpTerminalObserverMiddleware(
         IAuditRecorder recorder,
         IAuditIdentityGenerator identity,
-        ICurrentTenant tenant,
-        ILogger<AccountabilityHttpMiddleware> logger,
-        IAuditOperationContextAccessor contexts,
-        IAuditedMethodAccountabilityRuntime methodRuntime,
+        ILogger<AccountabilityHttpTerminalObserverMiddleware> logger,
         TimeProvider? timeProvider = null)
     {
         _recorder = recorder;
         _identity = identity;
-        _tenant = tenant;
         _logger = logger;
-        _contexts = contexts;
-        _methodRuntime = methodRuntime;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task InvokeAsync(HttpContext context, RequestDelegate next)
     {
-        using var methodRuntimeScope = AuditedMethodAccountabilityRuntimeContext.Push(_methodRuntime);
-        var started = Stopwatch.GetTimestamp();
-        var auditId = _identity.CreateAuditId();
-        var operationId = _identity.CreateOperationId();
-        var correlation = _identity.CreateOperationId();
-        var actor = ResolveActor(context.User);
-        var scope = _contexts.Push(new AuditOperationContext
+        var state = new AccountabilityHttpRequestState
         {
-            CorrelationId = correlation,
-            OperationId = operationId,
-            EnclosingAuditId = auditId,
-            Actor = actor,
-            TenantId = _tenant.Id,
-            InvocationSource = "http",
-            InitiatingOperationId = operationId,
-            InitiatingAuditId = auditId
-        });
+            AuditId = _identity.CreateAuditId(),
+            OperationId = _identity.CreateOperationId(),
+            CorrelationId = _identity.CreateOperationId(),
+            StartedTimestamp = Stopwatch.GetTimestamp()
+        };
+        context.Features.Set(state);
+
         Exception? failure = null;
         try
         {
@@ -79,7 +58,7 @@ public sealed class AccountabilityHttpMiddleware : IMiddleware
         finally
         {
             var occurredAt = _timeProvider.GetUtcNow();
-            var duration = Stopwatch.GetElapsedTime(started);
+            var duration = Stopwatch.GetElapsedTime(state.StartedTimestamp);
             var requestCancelled = failure is OperationCanceledException || context.RequestAborted.IsCancellationRequested;
             var statusCode = requestCancelled ? 499 : failure is null ? context.Response.StatusCode : 500;
             var outcome = requestCancelled
@@ -103,19 +82,19 @@ public sealed class AccountabilityHttpMiddleware : IMiddleware
                 : $"{method} {NormalizeRouteTemplate(routeTemplate)}";
             var envelope = new AuditEnvelope
             {
-                AuditId = auditId,
+                AuditId = state.AuditId,
                 OccurredAt = occurredAt,
-                TenantId = _tenant.Id,
-                CorrelationId = correlation,
+                TenantId = state.TenantId,
+                CorrelationId = state.CorrelationId,
                 CausationId = null,
-                Actor = actor,
+                Actor = state.Actor,
                 Action = new AuditAction { Kind = "http.request", Name = endpointIdentity },
                 Target = new AuditTarget { Kind = "http.endpoint", Id = endpointIdentity },
                 Outcome = outcome,
                 Runtime = new AuditRuntimeContext
                 {
                     InvocationSource = "http",
-                    ExecutionId = operationId,
+                    ExecutionId = state.OperationId,
                     RequestId = context.TraceIdentifier,
                     TraceId = Activity.Current?.TraceId.ToString(),
                     SpanId = Activity.Current?.SpanId.ToString(),
@@ -135,21 +114,7 @@ public sealed class AccountabilityHttpMiddleware : IMiddleware
             {
                 _logger.LogWarning(ex, "Accountability HTTP post-fact recording failed for {Endpoint}", endpointIdentity);
             }
-            finally
-            {
-                scope?.Dispose();
-            }
         }
-    }
-
-    private static AuditActor ResolveActor(ClaimsPrincipal principal)
-    {
-        if (principal.Identity?.IsAuthenticated != true)
-            return new AuditActor { Kind = "anonymous", Id = "anonymous" };
-        var id = principal.FindFirstValue(ClaimTypes.NameIdentifier);
-        return string.IsNullOrWhiteSpace(id)
-            ? new AuditActor { Kind = "unknown", Id = "unknown" }
-            : new AuditActor { Kind = "user", Id = id, DisplayName = principal.Identity.Name };
     }
 
     private static string NormalizeRouteTemplate(string routeTemplate)
@@ -161,8 +126,18 @@ public sealed class AccountabilityHttpMiddleware : IMiddleware
     }
 }
 
-public static class AccountabilityHttpMiddlewareExtensions
+internal sealed class AccountabilityHttpRequestState
 {
-    public static IApplicationBuilder UseAccountabilityHttpAudit(this IApplicationBuilder builder)
-        => builder.UseMiddleware<AccountabilityHttpMiddleware>();
+    public required string AuditId { get; init; }
+    public required string OperationId { get; init; }
+    public required string CorrelationId { get; init; }
+    public required long StartedTimestamp { get; init; }
+    public AuditActor Actor { get; set; } = new() { Kind = "unknown", Id = "unknown" };
+    public string? TenantId { get; set; }
+}
+
+public static class AccountabilityHttpTerminalObserverMiddlewareExtensions
+{
+    public static IApplicationBuilder UseAccountabilityHttpTerminalObserver(this IApplicationBuilder builder)
+        => builder.UseMiddleware<AccountabilityHttpTerminalObserverMiddleware>();
 }

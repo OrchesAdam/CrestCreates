@@ -37,7 +37,8 @@ builder.Services.AddCrestLogging(builder.Configuration);
 builder.Services.Configure<AuditLoggingOptions>(
     builder.Configuration.GetSection(AuditLoggingOptions.SectionName));
 builder.Services.AddScoped<AuditLoggingMiddleware>();
-builder.Services.AddScoped<AccountabilityHttpMiddleware>();
+builder.Services.AddScoped<AccountabilityHttpTerminalObserverMiddleware>();
+builder.Services.AddScoped<AccountabilityHttpOperationScopeMiddleware>();
 builder.Services.AddScoped<IAuditLogRedactor, AuditLogRedactor>();
 builder.Services.AddScoped<IAuditLogWriter, AuditLogWriter>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
@@ -94,11 +95,13 @@ builder.Host.RegisterModules();
 var app = builder.Build();
 
 app.UseCrestRequestLogging();
+app.UseAccountabilityHttpTerminalObserver();
+app.UseExceptionHandling();
 app.UseHttpsRedirection();
+app.UseRouting();
 app.UseMultiTenancy();
 app.UseAuthentication();
-app.UseAccountabilityHttpAudit();
-app.UseExceptionHandling();
+app.UseAccountabilityHttpOperationScope();
 app.UseTenantBoundary();
 app.UseAuthorization();
 app.MapCrestOpenIddictEndpoints();
