@@ -2,25 +2,33 @@ namespace CrestCreates.HumanTask.Abstractions;
 
 public interface IHumanTaskInstanceStore
 {
-    Task SaveAsync(HumanTaskInstance instance, CancellationToken ct = default);
-
-    Task<HumanTaskInstance?> GetByIdAsync(string instanceId, CancellationToken ct = default);
+    Task AddAsync(HumanTaskInstance instance, CancellationToken cancellationToken = default);
+    Task UpdateAsync(HumanTaskInstance instance, long expectedRevision, CancellationToken cancellationToken = default);
+    Task<HumanTaskInstance?> GetAsync(
+        CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeInstanceKey key,
+        CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<HumanTaskInstance>> GetPendingByAssigneeAsync(
-        string assigneeUserId, CancellationToken ct = default);
+        CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope scope,
+        string assigneeUserId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<HumanTaskInstance>> GetPendingByWorkflowAsync(
-        string workflowInstanceId, CancellationToken ct = default);
+        CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeInstanceKey workflowKey,
+        CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<HumanTaskInstance>> GetPendingByCandidateUserAsync(
-        string userId, CancellationToken ct = default);
+        CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope scope,
+        string userId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<HumanTaskInstance>> GetPendingByCandidateRoleAsync(
-        string roleId, CancellationToken ct = default);
+        CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope scope,
+        string roleId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<HumanTaskInstance>> GetPendingByOrganizationAsync(
-        string organizationUnitId, CancellationToken ct = default);
+        CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope scope,
+        string organizationUnitId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<HumanTaskInstance>> GetPendingByPositionAsync(
-        string positionId, CancellationToken ct = default);
+        CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope scope,
+        string positionId, CancellationToken cancellationToken = default);
 }

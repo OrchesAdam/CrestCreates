@@ -14,7 +14,6 @@ public static class HumanTaskServiceCollectionExtensions
 {
     public static IServiceCollection AddHumanTaskRuntime(this IServiceCollection services)
     {
-        services.TryAddSingleton<IHumanTaskInstanceStore, InMemoryHumanTaskInstanceStore>();
         services.TryAddScoped<IHumanTaskRuntime, DefaultHumanTaskRuntime>();
         services.TryAddScoped<IHumanTaskAssigneeResolver, DefaultHumanTaskAssigneeResolver>();
 

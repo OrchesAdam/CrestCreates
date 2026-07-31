@@ -1,26 +1,27 @@
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions.Runtime;
+using CrestCreates.Runtime.Persistence.Abstractions.Keys;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Snapshot.Abstractions;
 
 namespace CrestCreates.HumanTask.Abstractions;
 
 public sealed class HumanTaskInstance : ISnapshotable<HumanTaskInstance>
 {
-    public string Id { get; init; } = default!;
-    public string HumanTaskId { get; init; } = default!;
-    public int HumanTaskVersion { get; init; }
+    public RuntimeInstanceKey Key { get; init; } = new(null, Guid.NewGuid().ToString("N"));
+    public RuntimeDescriptorPin HumanTaskPin { get; init; } = CreateUnresolvedPin();
 
     public HumanTaskInstanceStatus Status { get; set; }
-
-    public string? TenantId { get; init; }
 
     public string? AssigneeUserId { get; set; }
     public string? AssigneeRoleId { get; set; }
 
-    public string? WorkflowInstanceId { get; init; }
+    public RuntimeInstanceKey? WorkflowKey { get; init; }
     public string? WorkflowStepId { get; init; }
 
-    public object? Input { get; init; }
-    public object? Output { get; set; }
+    public RuntimeStateValue? Input { get; init; }
+    public RuntimeStateValue? Output { get; set; }
 
     public string? Outcome { get; set; }
 
@@ -41,21 +42,25 @@ public sealed class HumanTaskInstance : ISnapshotable<HumanTaskInstance>
     public string? PositionId { get; set; }
     public string? AssigneeResolutionReason { get; set; }
 
-    public string ConcurrencyStamp { get; set; } = Guid.NewGuid().ToString("N");
+    public long Revision { get; internal set; }
     public DateTimeOffset? UpdatedAt { get; set; }
+
+    public string Id => Key.InstanceId;
+    public string? TenantId => Key.TenantId;
+    public string HumanTaskId => HumanTaskPin.Ref.Id;
+    public int HumanTaskVersion => HumanTaskPin.Ref.Version ?? 0;
+    public string? WorkflowInstanceId => WorkflowKey?.InstanceId;
 
     public HumanTaskInstance Snapshot()
     {
         return new HumanTaskInstance
         {
-            Id = Id,
-            HumanTaskId = HumanTaskId,
-            HumanTaskVersion = HumanTaskVersion,
+            Key = Key,
+            HumanTaskPin = HumanTaskPin,
             Status = Status,
-            TenantId = TenantId,
             AssigneeUserId = AssigneeUserId,
             AssigneeRoleId = AssigneeRoleId,
-            WorkflowInstanceId = WorkflowInstanceId,
+            WorkflowKey = WorkflowKey,
             WorkflowStepId = WorkflowStepId,
             Input = Input,
             Output = Output,
@@ -68,7 +73,7 @@ public sealed class HumanTaskInstance : ISnapshotable<HumanTaskInstance>
             CompletionDispatchAttemptCount = CompletionDispatchAttemptCount,
             CompletionEventId = CompletionEventId,
             CancellationReason = CancellationReason,
-            ConcurrencyStamp = ConcurrencyStamp,
+            Revision = Revision,
             UpdatedAt = UpdatedAt,
             CandidateUserIds = CandidateUserIds.ToArray(),
             CandidateRoleIds = CandidateRoleIds.ToArray(),
@@ -77,4 +82,24 @@ public sealed class HumanTaskInstance : ISnapshotable<HumanTaskInstance>
             AssigneeResolutionReason = AssigneeResolutionReason
         };
     }
+
+    private static RuntimeDescriptorPin CreateUnresolvedPin() => new()
+    {
+        Ref = new DescriptorRef("human-task", "unresolved", 1),
+        ContractHash = PlaceholderHash("Contract"),
+        DefinitionHash = PlaceholderHash("Definition")
+    };
+
+    private static CanonicalHash PlaceholderHash(string purpose) => new()
+    {
+        Value = "unresolved",
+        Algorithm = "unresolved",
+        AlgorithmVersion = "unresolved",
+        ArtifactKind = "Descriptor",
+        DescriptorKind = "HumanTask",
+        Scope = "InternalFull",
+        Purpose = purpose,
+        ContractVersion = "unresolved",
+        CanonicalShapeVersion = "unresolved"
+    };
 }

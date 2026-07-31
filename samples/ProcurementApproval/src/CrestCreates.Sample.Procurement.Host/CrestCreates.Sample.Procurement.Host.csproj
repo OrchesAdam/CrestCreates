@@ -23,6 +23,8 @@
     <ProjectReference Include="../../../../src/Framework/Modules/CrestCreates.Form/CrestCreates.Form.csproj" />
     <ProjectReference Include="../../../../src/Metadata/CrestCreates.Schema/CrestCreates.Schema.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Workflow/CrestCreates.Workflow/CrestCreates.Workflow.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Persistence/CrestCreates.Runtime.Persistence/CrestCreates.Runtime.Persistence.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Persistence/CrestCreates.Runtime.Persistence.InMemory/CrestCreates.Runtime.Persistence.InMemory.csproj" />
     <ProjectReference Include="../../../../src/Runtime/HumanTask/CrestCreates.HumanTask/CrestCreates.HumanTask.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.Accountability/CrestCreates.Accountability.csproj" />

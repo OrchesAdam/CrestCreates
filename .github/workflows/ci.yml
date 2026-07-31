@@ -87,6 +87,7 @@ jobs:
       - name: Test — Metadata / Core
         run: |
           dotnet test tests/Metadata/Core/CrestCreates.Metadata.Tests --no-build
+          dotnet test tests/Metadata/Core/CrestCreates.Metadata.Tests --no-build --filter "FullyQualifiedName~RuntimeDescriptorPin"
           dotnet test tests/Metadata/Core/CrestCreates.Metadata.ContextPack.Tests --no-build
           dotnet test tests/Metadata/Core/CrestCreates.Schema.Tests --no-build
           dotnet test tests/Metadata/Core/CrestCreates.Snapshot.Tests --no-build
@@ -102,8 +103,13 @@ jobs:
 
       - name: Test — Runtime / Workflow & HumanTask
         run: |
+          dotnet test tests/Runtime/Persistence/CrestCreates.Runtime.Persistence.Tests --no-build
+          dotnet test tests/Runtime/Persistence/CrestCreates.Runtime.Persistence.InMemory.Tests --no-build
           dotnet test tests/Runtime/Workflow/CrestCreates.Workflow.Tests --no-build
           dotnet test tests/Runtime/HumanTask/CrestCreates.HumanTask.Tests --no-build
+
+      - name: Test — Persistence / PostgreSQL direct Npgsql provider
+        run: dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build
 
       - name: Test — Runtime / Agent
         run: |

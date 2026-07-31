@@ -10,6 +10,8 @@ using CrestCreates.Metadata.Abstractions.Bootstrap;
 using CrestCreates.Metadata.Registry;
 using CrestCreates.Workflow.Abstractions;
 using CrestCreates.Workflow.Accountability;
+using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -20,8 +22,10 @@ public static class WorkflowServiceCollectionExtensions
 {
     public static IServiceCollection AddWorkflowEngine(this IServiceCollection services)
     {
-        services.TryAddSingleton<IWorkflowInstanceStore, InMemoryWorkflowInstanceStore>();
-        services.TryAddScoped<CapabilityStepExecutor>();
+        services.TryAddScoped<CapabilityStepExecutor>(sp =>
+            new CapabilityStepExecutor(
+                sp.GetRequiredService<CrestCreates.Capability.Abstractions.ICapabilityPipeline>(),
+                sp.GetService<IRuntimeStateContractRegistry>()));
         services.TryAddScoped<HumanTaskStepExecutor>();
         services.TryAddScoped<IWorkflowStepExecutorRegistry, DefaultStepExecutorRegistry>();
         services.TryAddScoped<WorkflowCompatibilityValidator>();
@@ -45,7 +49,15 @@ public static class WorkflowServiceCollectionExtensions
         services.TryAddScoped<IWorkflowLifecycleObserver, WorkflowAccountabilityObserver>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IBootstrapValidator, WorkflowAccountabilityCompositionValidator>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, WorkflowAccountabilityCompositionValidator>());
-        services.TryAddScoped<IWorkflowExecutionRunner, WorkflowExecutionRunner>();
+        services.TryAddScoped<IWorkflowExecutionRunner>(sp => new WorkflowExecutionRunner(
+            sp.GetRequiredService<IWorkflowRegistry>(),
+            sp.GetRequiredService<IWorkflowStepExecutorRegistry>(),
+            sp.GetRequiredService<IWorkflowInstanceStore>(),
+            sp.GetRequiredService<IWorkflowStateMachine>(),
+            sp.GetRequiredService<IWorkflowLifecycleEventPublisher>(),
+            sp.GetRequiredService<WorkflowLifecycleEventFactory>(),
+            sp.GetService<IRuntimeStateContractRegistry>(),
+            sp.GetService<IRuntimeTransactionCoordinator>()));
         services.TryAddScoped<IWorkflowContinuationService, WorkflowContinuationService>();
 
         services.TryAddScoped<IWorkflowEngine>(sp =>
@@ -55,7 +67,8 @@ public static class WorkflowServiceCollectionExtensions
                 sp.GetRequiredService<IWorkflowExecutionRunner>(),
                 sp.GetRequiredService<IWorkflowLifecycleEventPublisher>(),
                 sp.GetRequiredService<CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor>(),
-                sp.GetRequiredService<WorkflowLifecycleEventFactory>()));
+                sp.GetRequiredService<WorkflowLifecycleEventFactory>(),
+                sp.GetService<IDescriptorStableHashBuilder>()));
 
         services.TryAddEnumerable(ServiceDescriptor.Scoped<
             ILocalEventHandler<HumanTaskCompletedEvent>,

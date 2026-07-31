@@ -6,11 +6,17 @@
     <RootNamespace>CrestCreates.Workflow.Abstractions</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.Workflow" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.InMemory" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../../Audit/CrestCreates.Accountability.Abstractions/CrestCreates.Accountability.Abstractions.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Schema.Abstractions/CrestCreates.Schema.Abstractions.csproj" />
     <ProjectReference Include="../../Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
     <ProjectReference Include="../../HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
+    <ProjectReference Include="../../Persistence/CrestCreates.Runtime.Persistence.Abstractions/CrestCreates.Runtime.Persistence.Abstractions.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Snapshot.Abstractions/CrestCreates.Snapshot.Abstractions.csproj" />
   </ItemGroup>
 </Project>

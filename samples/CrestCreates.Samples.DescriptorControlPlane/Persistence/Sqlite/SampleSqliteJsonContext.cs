@@ -289,7 +289,11 @@ public sealed partial class SampleSqliteJsonContext : JsonSerializerContext
             StepId = d.StepId,
             StepName = d.StepName,
             Status = d.Status,
-            Output = UnwrapValue(d.Output),
+            Output = d.Output is null ? null : new CrestCreates.Runtime.Persistence.Abstractions.State.RuntimeStateValue
+            {
+                TypeId = d.Output.Type,
+                JsonPayload = d.Output.Payload.GetRawText(),
+            },
             ErrorMessage = d.ErrorMessage,
             ExecutedAt = d.ExecutedAt,
             Duration = d.Duration,

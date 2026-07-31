@@ -1,3 +1,5 @@
+using CrestCreates.Runtime.Persistence.Abstractions.Keys;
+
 namespace CrestCreates.HumanTask.Abstractions;
 
 public interface IHumanTaskRuntime
@@ -6,5 +8,5 @@ public interface IHumanTaskRuntime
 
     Task<HumanTaskInstance> CompleteAsync(HumanTaskCompletionRequest request, CancellationToken ct = default);
 
-    Task<HumanTaskInstance> CancelAsync(string instanceId, string reason, CancellationToken ct = default);
+    Task<HumanTaskInstance> CancelAsync(RuntimeInstanceKey humanTaskKey, string reason, CancellationToken ct = default);
 }

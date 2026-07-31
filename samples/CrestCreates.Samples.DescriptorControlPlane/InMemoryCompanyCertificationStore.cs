@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using CrestCreates.Metadata.Abstractions;
 
 namespace CrestCreates.Samples.DescriptorControlPlane;
 
@@ -46,7 +45,7 @@ public sealed class InMemoryCompanyCertificationStore : ICompanyCertificationSto
         CancellationToken cancellationToken = default)
     {
         if (!_records.TryGetValue(id, out var existing))
-            throw new RuntimeEntityNotFoundException($"CertificationRecord '{id}' not found.");
+            throw new CompanyCertificationNotFoundException(id);
         var updated = existing with
         {
             Status = CertificationStatus.Approved,
@@ -65,7 +64,7 @@ public sealed class InMemoryCompanyCertificationStore : ICompanyCertificationSto
         CancellationToken cancellationToken = default)
     {
         if (!_records.TryGetValue(id, out var existing))
-            throw new RuntimeEntityNotFoundException($"CertificationRecord '{id}' not found.");
+            throw new CompanyCertificationNotFoundException(id);
         var updated = existing with
         {
             Status = CertificationStatus.Rejected,

@@ -1,4 +1,8 @@
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Runtime.Persistence.Abstractions.Errors;
+using CrestCreates.Runtime.Persistence.Abstractions.Keys;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Workflow.Abstractions;
 
 namespace CrestCreates.Workflow;
@@ -11,6 +15,8 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
     private readonly IWorkflowStateMachine _stateMachine;
     private readonly IWorkflowLifecycleEventPublisher _eventPublisher;
     private readonly WorkflowLifecycleEventFactory _events;
+    private readonly IRuntimeStateContractRegistry? _stateRegistry;
+    private readonly IRuntimeTransactionCoordinator? _transactionCoordinator;
 
     public WorkflowExecutionRunner(
         IWorkflowRegistry registry,
@@ -18,7 +24,9 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
         IWorkflowInstanceStore store,
         IWorkflowStateMachine stateMachine,
         IWorkflowLifecycleEventPublisher eventPublisher,
-        WorkflowLifecycleEventFactory events)
+        WorkflowLifecycleEventFactory events,
+        IRuntimeStateContractRegistry? stateRegistry = null,
+        IRuntimeTransactionCoordinator? transactionCoordinator = null)
     {
         _registry = registry;
         _executorRegistry = executorRegistry;
@@ -26,6 +34,8 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
         _stateMachine = stateMachine;
         _eventPublisher = eventPublisher;
         _events = events;
+        _stateRegistry = stateRegistry;
+        _transactionCoordinator = transactionCoordinator;
     }
 
     public async Task<WorkflowInstance> RunAsync(
@@ -34,12 +44,18 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
         string? enclosingAuditId,
         CancellationToken ct)
     {
+        instance = instance.Snapshot();
         var descriptor = _registry.GetByVersion(instance.Workflow.Id, instance.Workflow.Version);
         if (descriptor == null)
             throw new InvalidOperationException(
                 $"Workflow '{instance.Workflow.Id}' version {instance.Workflow.Version} not found.");
 
-        return await ExecuteStepsAsync(instance, descriptor, workflowRunOperationId, enclosingAuditId, ct).ConfigureAwait(false);
+        if (_transactionCoordinator is null)
+            return await ExecuteStepsAsync(instance, descriptor, workflowRunOperationId, enclosingAuditId, ct).ConfigureAwait(false);
+
+        return await _transactionCoordinator.ExecuteAsync(
+            token => new ValueTask<WorkflowInstance>(ExecuteStepsAsync(instance, descriptor, workflowRunOperationId, enclosingAuditId, token)),
+            ct).ConfigureAwait(false);
     }
 
     private async Task<WorkflowInstance> ExecuteStepsAsync(
@@ -84,19 +100,20 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
                 var failedExceptionPreviousId = instance.LastLifecycleAuditId;
                 var failedExceptionIdentity = _events.AllocateLifecycleIdentity();
                 instance.LastLifecycleAuditId = failedExceptionIdentity.AuditId;
-                await _store.SaveAsync(instance, ct).ConfigureAwait(false);
+                await PersistUpdateAsync(instance, ct).ConfigureAwait(false);
                 await PublishEvent("workflow.failed", instance, descriptor, runOperationId, parentAuditId, failedFromStatus, failedExceptionPreviousId, failedExceptionIdentity, "WORKFLOW_STEP_EXECUTION_FAILED", step.Id, CancellationToken.None).ConfigureAwait(false);
                 return instance;
             }
 
             if (stepResult.Variables != null)
                 foreach (var kv in stepResult.Variables)
-                    instance.Variables[kv.Key] = kv.Value;
+                    instance.Variables[kv.Key] = CaptureState(kv.Value)
+                        ?? throw new RuntimeStateContractException("Workflow step variable cannot be untyped null.");
 
             instance.StepResults.Add(new WorkflowStepResult
             {
                 StepId = step.Id, StepName = step.Name,
-                Status = stepResult.Status, Output = stepResult.Output,
+                Status = stepResult.Status, Output = CaptureState(stepResult.Output),
                 ExecutedAt = DateTimeOffset.UtcNow,
                 Duration = DateTimeOffset.UtcNow - startedAt
             });
@@ -112,15 +129,17 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
                         throw new InvalidOperationException(
                             "Suspended HumanTask step must provide WaitingHumanTaskId.");
                     var suspendedFromStatus = instance.Status;
-                    instance.WaitingHumanTaskId = stepResult.WaitingHumanTaskId;
+                    instance.WaitingHumanTaskKey = new RuntimeInstanceKey(
+                        instance.TenantId,
+                        stepResult.WaitingHumanTaskId);
                     _stateMachine.ValidateTransition(instance.Status, WorkflowInstanceStatus.Suspended);
                     instance.Status = WorkflowInstanceStatus.Suspended;
                     instance.CurrentStepId = null;
-                    instance.CompletedAt = DateTimeOffset.UtcNow;
+                    instance.CompletedAt = null;
                     var suspendedPreviousId = instance.LastLifecycleAuditId;
                     var suspendedIdentity = _events.AllocateLifecycleIdentity();
                     instance.LastLifecycleAuditId = suspendedIdentity.AuditId;
-                    await _store.SaveAsync(instance, ct).ConfigureAwait(false);
+                    await PersistUpdateAsync(instance, ct).ConfigureAwait(false);
                     await PublishEvent("workflow.suspended", instance, descriptor, runOperationId, parentAuditId, suspendedFromStatus, suspendedPreviousId, suspendedIdentity, null, step.Id, CancellationToken.None).ConfigureAwait(false);
                     return instance;
 
@@ -135,7 +154,7 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
                     var failedPreviousId = instance.LastLifecycleAuditId;
                     var failedIdentity = _events.AllocateLifecycleIdentity();
                     instance.LastLifecycleAuditId = failedIdentity.AuditId;
-                    await _store.SaveAsync(instance, ct).ConfigureAwait(false);
+                    await PersistUpdateAsync(instance, ct).ConfigureAwait(false);
                     await PublishEvent("workflow.failed", instance, descriptor, runOperationId, parentAuditId, failedFromStatusForStep, failedPreviousId, failedIdentity, "WORKFLOW_STEP_FAILED", step.Id, CancellationToken.None).ConfigureAwait(false);
                     return instance;
             }
@@ -148,7 +167,7 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
         var completedPreviousAuditId = instance.LastLifecycleAuditId;
         var completedIdentity = _events.AllocateLifecycleIdentity();
         instance.LastLifecycleAuditId = completedIdentity.AuditId;
-        await _store.SaveAsync(instance, ct).ConfigureAwait(false);
+        await PersistUpdateAsync(instance, ct).ConfigureAwait(false);
         await PublishEvent("workflow.completed", instance, descriptor, runOperationId, parentAuditId, completedFromStatus, completedPreviousAuditId, completedIdentity, null, null, CancellationToken.None).ConfigureAwait(false);
         return instance;
     }
@@ -179,5 +198,34 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
             reasonCode,
             stepId,
             instance.WaitingHumanTaskId), ct);
+    }
+
+    private async Task PersistUpdateAsync(WorkflowInstance instance, CancellationToken ct)
+    {
+        var expectedRevision = instance.Revision;
+        await _store.UpdateAsync(instance, expectedRevision, ct).ConfigureAwait(false);
+        instance.Revision = expectedRevision + 1;
+    }
+
+    private RuntimeStateValue? CaptureState(object? value)
+    {
+        if (value is null)
+            return null;
+        if (value is RuntimeStateValue envelope)
+            return envelope;
+        if (value is IReadOnlyDictionary<string, object?> dictionary)
+        {
+            var bag = new RuntimeStateBag(dictionary.Select(pair =>
+            {
+                var captured = CaptureState(pair.Value)
+                    ?? throw new RuntimeStateContractException(
+                        $"Workflow state dictionary entry '{pair.Key}' cannot be an untyped null.");
+                return new KeyValuePair<string, RuntimeStateValue>(pair.Key, captured);
+            }));
+            return _stateRegistry?.Capture(bag)
+                ?? throw new RuntimeStateContractException("Runtime state registry is required for durable state capture.");
+        }
+        return _stateRegistry?.Capture(value)
+            ?? throw new RuntimeStateContractException("Runtime state registry is required for durable state capture.");
     }
 }

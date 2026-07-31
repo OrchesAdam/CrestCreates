@@ -6,10 +6,16 @@
     <RootNamespace>CrestCreates.HumanTask.Abstractions</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.HumanTask" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.InMemory" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Schema.Abstractions/CrestCreates.Schema.Abstractions.csproj" />
     <ProjectReference Include="../../Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
     <ProjectReference Include="../../Eventing/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
+    <ProjectReference Include="../../Persistence/CrestCreates.Runtime.Persistence.Abstractions/CrestCreates.Runtime.Persistence.Abstractions.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Snapshot.Abstractions/CrestCreates.Snapshot.Abstractions.csproj" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,8 @@
 using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Runtime.Persistence.Abstractions.Errors;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Workflow.Abstractions;
 
 namespace CrestCreates.Workflow;
@@ -14,6 +16,7 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
     private readonly IWorkflowLifecycleEventPublisher _eventPublisher;
     private readonly IAuditOperationContextAccessor _contexts;
     private readonly WorkflowLifecycleEventFactory _events;
+    private readonly IRuntimeStateContractRegistry? _stateRegistry;
 
     public WorkflowContinuationService(
         IWorkflowInstanceStore store,
@@ -22,7 +25,8 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         IWorkflowExecutionRunner executionRunner,
         IWorkflowLifecycleEventPublisher eventPublisher,
         IAuditOperationContextAccessor contexts,
-        WorkflowLifecycleEventFactory events)
+        WorkflowLifecycleEventFactory events,
+        IRuntimeStateContractRegistry? stateRegistry = null)
     {
         _store = store;
         _stateMachine = stateMachine;
@@ -31,12 +35,13 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         _eventPublisher = eventPublisher;
         _contexts = contexts;
         _events = events;
+        _stateRegistry = stateRegistry;
     }
 
     public async Task ContinueAsync(
         WorkflowContinuationRequest request, CancellationToken ct = default)
     {
-        var instance = await _store.GetByWaitingHumanTaskId(request.HumanTaskId, ct)
+        var instance = await _store.GetByWaitingHumanTaskAsync(request.HumanTaskKey, ct)
             .ConfigureAwait(false);
         if (instance == null)
             return;
@@ -83,10 +88,12 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
             ExecutedAt = DateTimeOffset.UtcNow
         });
 
-        instance.Variables["lastStepOutcome"] = request.Outcome;
-        instance.Variables["lastStepResult"] = request.Result;
+        instance.Variables["lastStepOutcome"] = _stateRegistry?.Capture(request.Outcome)
+            ?? throw new RuntimeStateContractException("Runtime state registry is required for continuation state capture.");
+        if (request.Result is not null)
+            instance.Variables["lastStepResult"] = request.Result;
         instance.StepIndex++;
-        instance.WaitingHumanTaskId = null;
+        instance.WaitingHumanTaskKey = null;
         instance.Status = WorkflowInstanceStatus.Running;
         var resumedPreviousId = instance.LastLifecycleAuditId;
         var resumedIdentity = _events.AllocateLifecycleIdentity();
@@ -94,13 +101,15 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
 
         try
         {
-            await _store.SaveAsync(instance, ct).ConfigureAwait(false);
+            var expectedRevision = instance.Revision;
+            await _store.UpdateAsync(instance, expectedRevision, ct).ConfigureAwait(false);
+            instance.Revision = expectedRevision + 1;
         }
         catch (RuntimeConcurrencyException)
         {
             // Another duplicate continuation already saved — re-query to check.
             // If WaitingHumanTaskId is already cleared (duplicate) → idempotent no-op.
-            var recheck = await _store.GetByWaitingHumanTaskId(request.HumanTaskId, ct)
+            var recheck = await _store.GetByWaitingHumanTaskAsync(request.HumanTaskKey, ct)
                 .ConfigureAwait(false);
             if (recheck == null)
                 return; // Duplicate: another continuation already cleared it
@@ -119,7 +128,7 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
             request.TriggerOperationId ?? request.CompletionEventId,
             request.TriggerAuditId,
             resumedPreviousId,
-            humanTaskInstanceId: request.HumanTaskInstanceId,
+            humanTaskInstanceId: request.HumanTaskKey.InstanceId,
             humanTaskCompletionEventId: request.CompletionEventId), CancellationToken.None).ConfigureAwait(false);
 
         await _executionRunner.RunAsync(instance, runOperationId, parent?.EnclosingAuditId, ct).ConfigureAwait(false);

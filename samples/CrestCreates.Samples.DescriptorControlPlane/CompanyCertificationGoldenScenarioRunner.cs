@@ -1,4 +1,6 @@
 using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Runtime.Persistence.Abstractions.Keys;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Workflow.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -61,6 +63,7 @@ public sealed class CompanyCertificationGoldenScenarioRunner
             var htStore = sp.GetRequiredService<IHumanTaskInstanceStore>();
             var wfStore = sp.GetRequiredService<IWorkflowInstanceStore>();
             var wfRegistry = sp.GetRequiredService<IWorkflowRegistry>();
+            var stateRegistry = sp.GetRequiredService<IRuntimeStateContractRegistry>();
 
             var submitInput = new CertificationSubmitInput(
                 "Acme Corp",
@@ -71,9 +74,9 @@ public sealed class CompanyCertificationGoldenScenarioRunner
 
             var instance = await engine.ExecuteAsync(
                 "wf_company_certification",
-                new Dictionary<string, object?>
+                new Dictionary<string, RuntimeStateValue>
                 {
-                    [nameof(CertificationSubmitInput)] = submitInput,
+                    [nameof(CertificationSubmitInput)] = stateRegistry.Capture(submitInput),
                 });
 
             report = report with
@@ -101,7 +104,7 @@ public sealed class CompanyCertificationGoldenScenarioRunner
             var maxTotalAttempts = 60;
             for (var totalAttempt = 0; totalAttempt < maxTotalAttempts; totalAttempt++)
             {
-                var wf = await wfStore.GetAsync(instance.InstanceId);
+                var wf = await wfStore.GetAsync(instance.Key);
                 if (wf is null) break;
 
                 // Terminal state?
@@ -140,10 +143,10 @@ public sealed class CompanyCertificationGoldenScenarioRunner
 
                 // Suspended on a HumanTask?
                 if (wf.Status == WorkflowInstanceStatus.Suspended
-                    && wf.WaitingHumanTaskId is not null
-                    && !completedHumanTaskInstanceIds.Contains(wf.WaitingHumanTaskId))
+                    && wf.WaitingHumanTaskKey is { } waitingTaskKey
+                    && !completedHumanTaskInstanceIds.Contains(waitingTaskKey.InstanceId))
                 {
-                    var htInstance = await htStore.GetByIdAsync(wf.WaitingHumanTaskId);
+                    var htInstance = await htStore.GetAsync(waitingTaskKey);
                     var humanTaskId = htInstance?.HumanTaskId;
 
                     if (humanTaskId is not null)
@@ -158,12 +161,12 @@ public sealed class CompanyCertificationGoldenScenarioRunner
                     // Complete with Approve
                     await htRuntime.CompleteAsync(new HumanTaskCompletionRequest
                     {
-                        HumanTaskInstanceId = wf.WaitingHumanTaskId,
+                        HumanTaskKey = waitingTaskKey,
                         Outcome = "Approve",
-                        Result = new CertificationReviewInput(
+                        Result = stateRegistry.Capture(new CertificationReviewInput(
                             CertificationId: null,
                             ReviewerNotes: "All documents verified",
-                            Decision: "Approve"),
+                            Decision: "Approve")),
                     });
                     completedCount++;
                     completedHumanTaskInstanceIds.Add(wf.WaitingHumanTaskId);

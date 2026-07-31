@@ -1,6 +1,7 @@
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.Agent.ControlPlane.Activation;
@@ -15,15 +16,18 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
     private readonly IHumanTaskRuntime _humanTaskRuntime;
     private readonly IDescriptorActivationRequestService _activationRequestService;
     private readonly ILogger<DefaultActivationReviewOrchestrator> _logger;
+    private readonly IRuntimeStateContractRegistry _stateRegistry;
 
     public DefaultActivationReviewOrchestrator(
         IHumanTaskRuntime humanTaskRuntime,
         IDescriptorActivationRequestService activationRequestService,
-        ILogger<DefaultActivationReviewOrchestrator> logger)
+        ILogger<DefaultActivationReviewOrchestrator> logger,
+        IRuntimeStateContractRegistry stateRegistry)
     {
         _humanTaskRuntime = humanTaskRuntime;
         _activationRequestService = activationRequestService;
         _logger = logger;
+        _stateRegistry = stateRegistry;
     }
 
     public async Task<AgentToolResult<string>> CreateActivationReviewTaskAsync(
@@ -80,8 +84,8 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
         {
             HumanTaskId = DescriptorActivationHumanTaskIds.ActivationReview,
             TenantId = activationRequest.TenantId,
-            Input = taskInput,
-            WorkflowInstanceId = null,
+            Input = _stateRegistry.Capture(taskInput),
+            WorkflowKey = null,
             WorkflowStepId = null
         };
 

@@ -16,6 +16,7 @@ namespace CrestCreates.Agent.ControlPlane.Abstractions.Json;
 
 // Direct serialization roots outside the marked tool surfaces.
 [JsonContractExplicitRoot(typeof(DescriptorActivationReviewDecision))]
+[JsonContractExplicitRoot(typeof(DescriptorActivationReviewTaskInput))]
 [JsonContractExplicitRoot(typeof(CanonicalHash))]
 public sealed partial class AgentControlPlaneToolJsonSerializerContext
     : JsonSerializerContext
