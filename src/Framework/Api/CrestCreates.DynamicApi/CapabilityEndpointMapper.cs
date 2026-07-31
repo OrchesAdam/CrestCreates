@@ -34,7 +34,6 @@ internal static class CapabilityEndpointMapper
                     capability, InvocationSource.Http, input,
                     ctx =>
                     {
-                        ctx.CausationId = context.TraceIdentifier;
                         ctx.IdempotencyKey = ResolveIdempotencyKey(context);
                         if (input is not null)
                         {

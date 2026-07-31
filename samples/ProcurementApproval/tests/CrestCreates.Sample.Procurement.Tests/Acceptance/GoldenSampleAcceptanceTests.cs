@@ -3,6 +3,9 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using CrestCreates.Agent.Tools;
+using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Semantics;
+using CrestCreates.Accountability.InMemory;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -76,6 +79,102 @@ public sealed class ProjectionCompositionAcceptanceTests
         var data = await ReadCompatibilityDataAsync(response);
         data.GetProperty("requestId").GetGuid().Should().Be(submitted.RequestId);
         data.GetProperty("title").GetString().Should().Be("HTTP to compatibility");
+    }
+
+    [Fact]
+    public async Task PlatformHttpCapabilitySharesAccountabilityCorrelation()
+    {
+        using var factory = new ProcurementWebApplicationFactory();
+        using var client = factory.CreateClient();
+        SetIdentity(client, "tenant-a", "requester-a", "procurement-requester");
+
+        await SubmitHttpAsync(client, "Accountability chain", 25_000m);
+
+        var records = factory.Services.GetRequiredService<InMemoryAuditSink>().GetRecords();
+        var http = records.Single(record =>
+            record.Action.Kind == AuditActionKinds.HttpRequest
+            && record.Target.Id == "POST /api/procurement/requests");
+        var capability = records.Single(record =>
+            record.Action.Kind == AuditActionKinds.CapabilityExecute
+            && record.Target.Id == ProcurementContractIds.SubmitCapability);
+        capability.CorrelationId.Should().Be(http.CorrelationId);
+        capability.CausationId.Should().Be(http.Runtime.ExecutionId);
+        capability.ParentAuditId.Should().Be(http.AuditId);
+    }
+
+    [Fact]
+    public async Task AuthenticatedHttpFactUsesNameIdentifier()
+    {
+        using var factory = new ProcurementWebApplicationFactory();
+        using var client = factory.CreateClient();
+        SetIdentity(client, "tenant-a", "requester-a", "procurement-requester");
+
+        await SubmitHttpAsync(client, "Authenticated HTTP actor", 25_000m);
+
+        var http = factory.Services.GetRequiredService<InMemoryAuditSink>().GetRecords().Single(record =>
+            record.Action.Kind == AuditActionKinds.HttpRequest
+            && record.Target.Id == "POST /api/procurement/requests");
+        http.Actor.Should().BeEquivalentTo(new AuditActor
+        {
+            Kind = "user",
+            Id = "requester-a",
+            DisplayName = "requester-a"
+        });
+    }
+
+    [Fact]
+    public async Task AuthenticatedHttpCapabilityInheritsUserActor()
+    {
+        using var factory = new ProcurementWebApplicationFactory();
+        using var client = factory.CreateClient();
+        SetIdentity(client, "tenant-a", "requester-a", "procurement-requester");
+
+        await SubmitHttpAsync(client, "Authenticated capability actor", 25_000m);
+
+        var records = factory.Services.GetRequiredService<InMemoryAuditSink>().GetRecords();
+        var http = records.Single(record =>
+            record.Action.Kind == AuditActionKinds.HttpRequest
+            && record.Target.Id == "POST /api/procurement/requests");
+        var capability = records.Single(record =>
+            record.Action.Kind == AuditActionKinds.CapabilityExecute
+            && record.Target.Id == ProcurementContractIds.SubmitCapability);
+        capability.Actor.Should().Be(http.Actor);
+        capability.Actor.Should().BeEquivalentTo(new AuditActor
+        {
+            Kind = "user",
+            Id = "requester-a",
+            DisplayName = "requester-a"
+        });
+    }
+
+    [Fact]
+    public async Task AuthenticatedWorkflowOriginPreservesUserActor()
+    {
+        using var factory = new ProcurementWebApplicationFactory();
+        using var client = factory.CreateClient();
+        SetIdentity(client, "tenant-a", "requester-a", "procurement-requester");
+
+        await SubmitHttpAsync(client, "Authenticated workflow origin", 25_000m);
+
+        var workflow = factory.Services.GetRequiredService<InMemoryAuditSink>().GetRecords().Single(record =>
+            record.Action.Kind == "workflow.lifecycle"
+            && record.Action.Name == "workflow.started");
+        workflow.Actor.Kind.Should().Be("workflow");
+        workflow.Actor.InitiatedBy.Should().Be(new AuditActorReference("user", "requester-a"));
+    }
+
+    [Fact]
+    public async Task AnonymousRequestStillUsesAnonymousActor()
+    {
+        using var factory = new ProcurementWebApplicationFactory();
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/not-a-real-endpoint");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var http = factory.Services.GetRequiredService<InMemoryAuditSink>().GetRecords().Single(record =>
+            record.Action.Kind == AuditActionKinds.HttpRequest);
+        http.Actor.Should().Be(new AuditActor { Kind = "anonymous", Id = "anonymous" });
     }
 
     [Fact]
@@ -177,11 +276,11 @@ public sealed class McpProjectionAcceptanceTests
 
         outcome.IsError.Should().BeFalse();
         outcome.StructuredContent!.Value.GetProperty("requestId").GetGuid().Should().Be(submitted.RequestId);
-        factory.Services.GetRequiredService<ICapabilityAuditStore>()
-            .Should().BeOfType<InMemoryCapabilityAuditStore>()
-            .Which.GetRecords().Should().Contain(record =>
-                record.Source == InvocationSource.Mcp
-                && record.CapabilityId == ProcurementContractIds.GetCapability);
+        factory.Services.GetRequiredService<InMemoryAuditSink>()
+            .GetRecords().Where(record => record.Runtime is { InvocationSource: AuditInvocationSources.Mcp }
+                && record.Action is { Kind: AuditActionKinds.CapabilityExecute }
+                && record.Target is { Kind: "capability", Id: ProcurementContractIds.GetCapability })
+            .Should().NotBeEmpty();
     }
 
     [Fact]
@@ -319,8 +418,8 @@ public sealed class AgentGovernanceAcceptanceTests
 
         outcome.IsSuccess.Should().BeTrue();
         store.Count.Should().Be(before + 1);
-        AgentAudit(harness.Factory).Should().ContainSingle(record =>
-            record.CapabilityId == ProcurementContractIds.SubmitCapability);
+        AgentAudit(harness.Factory).Where(record => record.Target is { Kind: "capability", Id: ProcurementContractIds.SubmitCapability })
+            .Should().ContainSingle();
     }
 
     [Fact]
@@ -354,8 +453,8 @@ public sealed class AgentGovernanceAcceptanceTests
         first.IsSuccess.Should().BeTrue();
         replay.IsSuccess.Should().BeTrue();
         store.Count.Should().Be(before + 1);
-        AgentAudit(harness.Factory).Should().ContainSingle(record =>
-            record.CapabilityId == ProcurementContractIds.SubmitCapability);
+        AgentAudit(harness.Factory).Where(record => record.Target is { Kind: "capability", Id: ProcurementContractIds.SubmitCapability })
+            .Should().ContainSingle();
     }
 
     private static Harness CreateHarness(string invocationId)
@@ -391,11 +490,11 @@ public sealed class AgentGovernanceAcceptanceTests
             approvalEvidence);
     }
 
-    private static IReadOnlyList<CapabilityExecutionRecord> AgentAudit(ProcurementWebApplicationFactory factory)
-        => factory.Services.GetRequiredService<ICapabilityAuditStore>()
-            .Should().BeOfType<InMemoryCapabilityAuditStore>()
-            .Which.GetRecords()
-            .Where(record => record.Source == InvocationSource.Agent)
+    private static IReadOnlyList<AuditEnvelope> AgentAudit(ProcurementWebApplicationFactory factory)
+        => factory.Services.GetRequiredService<InMemoryAuditSink>()
+            .GetRecords()
+            .Where(record => record.Action?.Kind == AuditActionKinds.CapabilityExecute
+                && record.Runtime?.InvocationSource == AuditInvocationSources.Agent)
             .ToArray();
 
     private sealed record Harness(
@@ -458,11 +557,11 @@ public sealed class WorkflowTenantAndSchemaAcceptanceTests
         var completed = await services.GetRequiredService<IWorkflowInstanceStore>()
             .GetAsync(workflow.InstanceId);
         completed!.Status.Should().Be(WorkflowInstanceStatus.Completed);
-        factory.Services.GetRequiredService<ICapabilityAuditStore>()
-            .Should().BeOfType<InMemoryCapabilityAuditStore>()
-            .Which.GetRecords().Should().Contain(record =>
-                record.Source == InvocationSource.HumanTask
-                && record.CapabilityId == ProcurementContractIds.ApplyApprovalDecisionCapability);
+        factory.Services.GetRequiredService<InMemoryAuditSink>()
+            .GetRecords().Where(record => record.Runtime is { InvocationSource: AuditInvocationSources.HumanTask }
+                && record.Action is { Kind: AuditActionKinds.CapabilityExecute }
+                && record.Target is { Kind: "capability", Id: ProcurementContractIds.ApplyApprovalDecisionCapability })
+            .Should().NotBeEmpty();
     }
 
     [Fact]

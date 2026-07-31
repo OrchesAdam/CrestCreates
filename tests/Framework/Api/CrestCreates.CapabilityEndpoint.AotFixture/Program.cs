@@ -1,3 +1,4 @@
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Middleware;
@@ -17,6 +18,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Register capability runtime (pipeline + dispatcher + resolver)
 builder.Services.AddCapabilityRuntime();
+builder.Services.AddAccountability();
 
 // Remove services that have unresolvable dependencies in our minimal test setup.
 builder.Services.RemoveAll<ValidationMiddleware>();

@@ -2,13 +2,17 @@ using CrestCreates.EventBus.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorBinding;
 using CrestCreates.Metadata.Abstractions.DescriptorRelationship;
 using CrestCreates.Metadata.Abstractions.Registry;
+using CrestCreates.Metadata.Abstractions.Bootstrap;
 using CrestCreates.Metadata.Registry;
 using CrestCreates.Workflow.Abstractions;
+using CrestCreates.Workflow.Accountability;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace CrestCreates.Workflow;
 
@@ -34,7 +38,13 @@ public static class WorkflowServiceCollectionExtensions
         services.AddSingleton<IDescriptorRelationshipExtractor, WorkflowRelationshipExtractor>();
 
         services.TryAddSingleton<IWorkflowStateMachine, DefaultWorkflowStateMachine>();
-        services.TryAddSingleton<IWorkflowLifecycleEventPublisher, WorkflowLifecycleEventPublisher>();
+        services.TryAddSingleton(new WorkflowPostCommitNotificationOptions());
+        services.TryAddSingleton<IWorkflowPostCommitNotificationBudget, DefaultWorkflowPostCommitNotificationBudget>();
+        services.TryAddScoped<WorkflowLifecycleEventFactory>();
+        services.TryAddScoped<IWorkflowLifecycleEventPublisher, WorkflowLifecycleEventPublisher>();
+        services.TryAddScoped<IWorkflowLifecycleObserver, WorkflowAccountabilityObserver>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IBootstrapValidator, WorkflowAccountabilityCompositionValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, WorkflowAccountabilityCompositionValidator>());
         services.TryAddScoped<IWorkflowExecutionRunner, WorkflowExecutionRunner>();
         services.TryAddScoped<IWorkflowContinuationService, WorkflowContinuationService>();
 
@@ -43,7 +53,9 @@ public static class WorkflowServiceCollectionExtensions
                 sp.GetRequiredService<IWorkflowRegistry>(),
                 sp.GetRequiredService<IWorkflowInstanceStore>(),
                 sp.GetRequiredService<IWorkflowExecutionRunner>(),
-                sp.GetRequiredService<IWorkflowLifecycleEventPublisher>()));
+                sp.GetRequiredService<IWorkflowLifecycleEventPublisher>(),
+                sp.GetRequiredService<CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor>(),
+                sp.GetRequiredService<WorkflowLifecycleEventFactory>()));
 
         services.TryAddEnumerable(ServiceDescriptor.Scoped<
             ILocalEventHandler<HumanTaskCompletedEvent>,

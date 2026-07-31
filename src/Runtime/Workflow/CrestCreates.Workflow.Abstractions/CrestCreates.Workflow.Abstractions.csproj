@@ -6,6 +6,7 @@
     <RootNamespace>CrestCreates.Workflow.Abstractions</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../Audit/CrestCreates.Accountability.Abstractions/CrestCreates.Accountability.Abstractions.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Schema.Abstractions/CrestCreates.Schema.Abstractions.csproj" />
     <ProjectReference Include="../../Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Tools;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
@@ -64,6 +65,7 @@ namespace CrestCreates.Agent.Tools.AotFixture
                 // service provider; registration is explicit and AOT-safe.
                 builder.Services.AddScoped<FixtureEchoHandler>();
                 builder.Services.AddCapabilityRuntime();
+                builder.Services.AddAccountability();
                 builder.Services.AddSingleton<ICapabilityHandlerModule>(GeneratedCapabilityHandlerModule.Instance);
                 GeneratedHandlerRegistry.RegisterServices(builder.Services);
                 builder.Services.AddCrestAgentTools(options =>

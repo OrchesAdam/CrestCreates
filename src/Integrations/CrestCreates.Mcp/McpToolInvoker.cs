@@ -1,4 +1,6 @@
+using System.Collections.Immutable;
 using System.Text.Json;
+using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Schema.Abstractions;
@@ -155,6 +157,14 @@ public sealed class McpToolInvoker : IMcpToolInvoker
         JsonElement arguments)
     {
         execution.CausationId = call.RequestId;
+        execution.AccountabilityActor = new AuditActor { Kind = "unknown", Id = "unknown" };
+        var references = ImmutableArray.CreateBuilder<AuditRuntimeReference>();
+        references.Add(new AuditRuntimeReference("mcp-request", call.RequestId));
+        references.Add(new AuditRuntimeReference("mcp-invocation", call.InvocationId));
+        if (!string.IsNullOrWhiteSpace(call.SessionId))
+            references.Add(new AuditRuntimeReference("mcp-session", call.SessionId));
+        references.Add(new AuditRuntimeReference("mcp-host", call.Host.HostId));
+        execution.AccountabilityRuntimeReferences = references.ToImmutable();
         execution.IdempotencyKey = _idempotencyKeys.Build(entry, call);
         execution.InputJson = arguments.Clone();
         execution.Items[McpCapabilityContextItemNames.ToolDescriptorId] = entry.Descriptor.Id;

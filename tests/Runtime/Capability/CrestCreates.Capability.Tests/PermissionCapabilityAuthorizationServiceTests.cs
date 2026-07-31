@@ -1,4 +1,5 @@
 using CrestCreates.Authorization.Abstractions;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Internal;
 using CrestCreates.Capability.Middleware;
@@ -158,6 +159,7 @@ public class PermissionCapabilityAuthorizationServiceTests
         services.AddSingleton<ICapabilityHandlerResolver>(handlerResolver);
 
         services.AddCapabilityRuntime();
+        services.AddAccountability();
 
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
         var registry = new CapabilityRegistry(engine);
@@ -210,6 +212,7 @@ public class PermissionCapabilityAuthorizationServiceTests
         services.AddSingleton<ICapabilityHandlerResolver>(handlerResolver);
 
         services.AddCapabilityRuntime();
+        services.AddAccountability();
 
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
         var registry = new CapabilityRegistry(engine);
@@ -256,6 +259,7 @@ public class PermissionCapabilityAuthorizationServiceTests
         services.AddSingleton<ICapabilityHandlerResolver>(handlerResolver);
 
         services.AddCapabilityRuntime();
+        services.AddAccountability();
 
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
         var registry = new CapabilityRegistry(engine);
@@ -282,6 +286,7 @@ public class PermissionCapabilityAuthorizationServiceTests
         services.AddSingleton<IPermissionChecker>(mockPermissionChecker.Object);
 
         services.AddCapabilityPipeline();
+        services.AddAccountability();
 
         var sp = services.BuildServiceProvider();
         using var scope = sp.CreateScope();
@@ -301,6 +306,7 @@ public class PermissionCapabilityAuthorizationServiceTests
         services.AddSingleton<IPermissionChecker>(mockPermissionChecker.Object);
 
         services.AddCapabilityRuntime();
+        services.AddAccountability();
 
         var sp = services.BuildServiceProvider();
         using var scope = sp.CreateScope();
@@ -334,6 +340,7 @@ public class PermissionCapabilityAuthorizationServiceTests
         services.AddSingleton<ICapabilityHandlerResolver>(handlerResolver);
 
         services.AddCapabilityRuntime();
+        services.AddAccountability();
 
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
         var registry = new CapabilityRegistry(engine);
@@ -375,6 +382,7 @@ public class PermissionCapabilityAuthorizationServiceTests
         services.AddSingleton<ICapabilityHandlerResolver>(handlerResolver);
 
         services.AddCapabilityRuntime();
+        services.AddAccountability();
 
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
         var registry = new CapabilityRegistry(engine);

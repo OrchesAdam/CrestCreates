@@ -1,3 +1,8 @@
+using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Recording;
+using CrestCreates.Accountability.Abstractions.Sinks;
+using CrestCreates.Accountability.Bootstrap;
+using CrestCreates.Accountability.InMemory;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Internal;
@@ -24,30 +29,31 @@ public class CapabilityEndToEndTests
         public IReadOnlyList<CapabilityDescriptor> GetDescriptors() => _descriptors;
     }
 
-    private static (CapabilityRegistry, ICapabilityPipeline, InMemoryCapabilityAuditStore, CapabilityHandlerResolver) CreateE2EPipeline(
+    private static (CapabilityRegistry, ICapabilityPipeline, InMemoryAuditSink, CapabilityHandlerResolver) CreateE2EPipeline(
         params CapabilityDescriptor[] descriptors)
     {
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
         var registry = new CapabilityRegistry(engine);
         registry.Build([new TestProvider(descriptors.ToList())]);
 
-        var auditStore = new InMemoryCapabilityAuditStore();
+        var auditSink = new InMemoryAuditSink();
         var resolver = new CapabilityHandlerResolver();
         var builder = new CapabilityPipelineBuilder();
         builder.Use<AuditMiddleware>();
 
         var services = new ServiceCollection();
         services.AddDescriptorStableHash();
+        services.AddAccountability();
+        services.AddSingleton<IAuditSink>(auditSink);
         services.AddSingleton<ICapabilityRegistry>(registry);
         services.AddSingleton<ICapabilityHandlerResolver>(resolver);
-        services.AddSingleton<ICapabilityAuditStore>(auditStore);
         services.AddSingleton(builder);
         services.AddTransient<AuditMiddleware>();
         services.AddTransient<ILogger<AuditMiddleware>>(_ => NullLogger<AuditMiddleware>.Instance);
         services.AddSingleton<ICapabilityPipeline, CapabilityPipeline>();
         var sp = services.BuildServiceProvider();
 
-        return (registry, sp.GetRequiredService<ICapabilityPipeline>(), auditStore, resolver);
+        return (registry, sp.GetRequiredService<ICapabilityPipeline>(), auditSink, resolver);
     }
 
     [Fact]
@@ -66,10 +72,10 @@ public class CapabilityEndToEndTests
         result.Output.Should().Be("ECHO: hello");
         var records = audit.GetRecords();
         records.Should().HaveCount(1);
-        records[0].IsSuccess.Should().BeTrue();
-        records[0].Duration.Should().BePositive();
+        records[0].Outcome.Status.Should().Be("succeeded");
+        records[0].Runtime.Duration.Should().BePositive();
         records[0].CorrelationId.Should().NotBeNullOrEmpty();
-        records[0].ExecutionId.Should().NotBeNullOrEmpty();
+        records[0].Runtime.ExecutionId.Should().NotBeNullOrEmpty();
     }
 
     [Fact]
@@ -96,7 +102,9 @@ public class CapabilityEndToEndTests
 
         var records = audit.GetRecords();
         records[0].TenantId.Should().Be("tenant_42");
-        records[0].UserId.Should().Be("user_77");
+        records[0].Actor.Kind.Should().Be("workflow");
+        records[0].Actor.Id.Should().Be("unknown",
+            "a workflow source without an explicit workflow identity must not borrow the human user identity");
     }
 
     [Fact]
@@ -120,9 +128,7 @@ public class CapabilityEndToEndTests
         resultAgent.IsSuccess.Should().BeTrue();
         var records = audit.GetRecords();
         records.Should().HaveCount(3);
-        records[0].Source.Should().Be(InvocationSource.Http);
-        records[1].Source.Should().Be(InvocationSource.Workflow);
-        records[2].Source.Should().Be(InvocationSource.Agent);
+        records.Select(x => x.Runtime.InvocationSource).Should().BeEquivalentTo("http", "workflow", "agent");
     }
 
     [Fact]
@@ -148,8 +154,8 @@ public class CapabilityEndToEndTests
         result.IsSuccess.Should().BeFalse();
         var records = audit.GetRecords();
         records.Should().HaveCount(1);
-        records[0].IsSuccess.Should().BeFalse();
-        records[0].ErrorCode.Should().Be("HANDLER_NOT_FOUND");
+        records[0].Outcome.Status.Should().Be("failed");
+        records[0].Outcome.Code.Should().Be("HANDLER_NOT_FOUND");
     }
 
     [Fact]
@@ -165,9 +171,10 @@ public class CapabilityEndToEndTests
 
         result.ErrorCode.Should().Be("PIPELINE_ERROR");
         result.IsSuccess.Should().BeFalse();
+        result.AuditRecordId.Should().NotBeNullOrWhiteSpace();
         var records = audit.GetRecords();
         records.Should().HaveCount(1);
-        records[0].ErrorCode.Should().Be("UNHANDLED_EXCEPTION");
+        records[0].Outcome.Code.Should().Be("UNHANDLED_EXCEPTION");
     }
 
     [Fact]
@@ -184,9 +191,10 @@ public class CapabilityEndToEndTests
         var result = await pipeline.ExecuteAsync("slow.handler", ct: cts.Token);
 
         result.Status.Should().Be(CapabilityExecutionStatus.TimedOut);
+        result.AuditRecordId.Should().NotBeNullOrWhiteSpace();
         var records = audit.GetRecords();
         records.Should().HaveCount(1);
-        records[0].ErrorCode.Should().Be("CANCELLED");
+        records[0].Outcome.Code.Should().Be("CANCELLED");
     }
 
     [Fact]
@@ -208,18 +216,17 @@ public class CapabilityEndToEndTests
 
         result.IsSuccess.Should().BeTrue();
         var r = audit.GetRecords()[0];
-        r.ExecutionId.Should().NotBeNullOrEmpty();
-        r.CapabilityId.Should().Be("test.echo");
-        r.CapabilityName.Should().Be("Echo");
-        r.CapabilityVersion.Should().Be(1);
+        r.Runtime.ExecutionId.Should().NotBeNullOrEmpty();
+        r.Target.Id.Should().Be("test.echo");
+        r.Action.Name.Should().Be("test.echo");
+        r.Descriptors.Items.Single().Version.Should().Be(1);
         r.TenantId.Should().Be("t1");
-        r.UserId.Should().Be("u1");
         r.CorrelationId.Should().NotBeNullOrEmpty();
-        r.Source.Should().Be(InvocationSource.Workflow);
-        r.IsSuccess.Should().BeTrue();
-        r.ErrorCode.Should().BeNull();
-        r.Duration.Should().BePositive();
-        r.Timestamp.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
+        r.Runtime.InvocationSource.Should().Be("workflow");
+        r.Outcome.Status.Should().Be("succeeded");
+        r.Outcome.Code.Should().BeNull();
+        r.Runtime.Duration.Should().BePositive();
+        r.OccurredAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -238,16 +245,12 @@ public class CapabilityEndToEndTests
 
         var records = audit.GetRecords();
         records.Should().HaveCount(2);
-        records[0].ExecutionId.Should().NotBe(records[1].ExecutionId);
+        records[0].Runtime.ExecutionId.Should().NotBe(records[1].Runtime.ExecutionId);
     }
 
     [Fact]
-    public async Task E2E_AuditStoreThrows_ExecutionStillSucceeds()
+    public async Task E2E_RecorderThrows_ExecutionStillSucceeds()
     {
-        var throwingStore = new Mock<ICapabilityAuditStore>();
-        throwingStore.Setup(s => s.RecordAsync(It.IsAny<CapabilityExecutionRecord>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Audit failure"));
-
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);
         var registry = new CapabilityRegistry(engine);
         registry.Build([new TestProvider([new CapabilityDescriptor { Id = "test.echo", Name = "Echo", Version = 1,
@@ -259,9 +262,10 @@ public class CapabilityEndToEndTests
 
         var services = new ServiceCollection();
         services.AddDescriptorStableHash();
+        services.AddAccountability();
+        services.AddSingleton<IAuditRecorder, ThrowingRecorder>();
         services.AddSingleton<ICapabilityRegistry>(registry);
         services.AddSingleton<ICapabilityHandlerResolver>(resolver);
-        services.AddSingleton<ICapabilityAuditStore>(throwingStore.Object);
         services.AddSingleton(builder);
         services.AddTransient<AuditMiddleware>();
         services.AddTransient<ILogger<AuditMiddleware>>(_ => NullLogger<AuditMiddleware>.Instance);
@@ -275,7 +279,7 @@ public class CapabilityEndToEndTests
     }
 
     [Fact]
-    public async Task E2E_IdDifferentFromName_PreservesBoth()
+    public async Task E2E_IdDifferentFromDisplayName_UsesStableIdForActionAndTarget()
     {
         var (_, pipeline, audit, resolver) = CreateE2EPipeline(
             new CapabilityDescriptor { Id = "echo.v2", Name = "Echo Command", Version = 1,
@@ -286,8 +290,8 @@ public class CapabilityEndToEndTests
         var result = await pipeline.ExecuteAsync("echo.v2");
         result.IsSuccess.Should().BeTrue();
         var records = audit.GetRecords();
-        records[0].CapabilityId.Should().Be("echo.v2");
-        records[0].CapabilityName.Should().Be("Echo Command");
+        records[0].Target.Id.Should().Be("echo.v2");
+        records[0].Action.Name.Should().Be("echo.v2");
     }
 
     [Fact]
@@ -354,5 +358,13 @@ public class CapabilityEndToEndTests
             await Task.Delay(5000, ct);
             return "done";
         }
+    }
+
+    private sealed class ThrowingRecorder : IAuditRecorder
+    {
+        public ValueTask<AuditRecordResult> RecordAsync(
+            AuditEnvelope envelope,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Audit failure");
     }
 }

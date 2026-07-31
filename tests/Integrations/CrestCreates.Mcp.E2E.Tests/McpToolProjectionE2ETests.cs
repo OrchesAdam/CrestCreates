@@ -1,4 +1,7 @@
 using System.Text.Json;
+using CrestCreates.Accountability.Abstractions.Sinks;
+using CrestCreates.Accountability.Bootstrap;
+using CrestCreates.Accountability.InMemory;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Generated;
@@ -48,7 +51,10 @@ public sealed class McpToolProjectionE2ETests
             ServiceDescriptor.Singleton<ICapabilityHandlerModule>(
                 GeneratedCapabilityHandlerModule.Instance));
         GeneratedHandlerRegistry.RegisterServices(builder.Services);
-        builder.Services.AddInMemoryCapabilityAudit();
+        builder.Services.AddAccountability();
+        builder.Services.AddSingleton<InMemoryAuditSink>();
+        builder.Services.AddSingleton<IAuditSink>(serviceProvider =>
+            serviceProvider.GetRequiredService<InMemoryAuditSink>());
         builder.Services.AddCrestMcpToolProjection(options =>
             options.SerializerOptions.TypeInfoResolver = E2EJsonContext.Default);
         using var host = builder.Build();
@@ -76,9 +82,8 @@ public sealed class McpToolProjectionE2ETests
         validationOutcome.IsError.Should().BeTrue();
         ((McpToolTextContent)validationOutcome.Content.Single()).Text.Should().Contain("Field 'value': required.");
         EchoHandler.InvocationCount.Should().Be(1);
-        host.Services.GetRequiredService<ICapabilityAuditStore>()
-            .Should().BeOfType<InMemoryCapabilityAuditStore>()
-            .Which.GetRecords().Should().HaveCount(2);
+        host.Services.GetRequiredService<InMemoryAuditSink>().GetRecords()
+            .Should().HaveCount(2);
     }
 
     private static SchemaDescriptor Schema(string id) => new()

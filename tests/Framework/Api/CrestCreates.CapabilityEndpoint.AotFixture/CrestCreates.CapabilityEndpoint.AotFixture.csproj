@@ -28,6 +28,7 @@
     <!-- Runtime dependencies -->
     <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
     <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.DynamicApi.Abstractions/CrestCreates.DynamicApi.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.Accountability/CrestCreates.Accountability.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />

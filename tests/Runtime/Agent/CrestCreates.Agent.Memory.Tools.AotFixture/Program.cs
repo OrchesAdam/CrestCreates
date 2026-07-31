@@ -11,6 +11,7 @@ using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Agent.Tools;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Metadata;
@@ -53,6 +54,7 @@ internal static class MemoryToolFixtureRunner
             builder.Services.AddSingleton<IAgentToolGovernanceAuditor, DevelopmentInMemoryAgentToolGovernanceAuditor>();
             builder.Services.AddAgentMemoryRuntime();
             builder.Services.AddCapabilityRuntime();
+            builder.Services.AddAccountability();
             builder.Services.AddCrestAgentTools();
             builder.Services.AddAgentMemoryTools();
             using var host = builder.Build();

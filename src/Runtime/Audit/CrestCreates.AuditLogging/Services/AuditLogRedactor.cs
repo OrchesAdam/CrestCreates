@@ -1,6 +1,8 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using CrestCreates.AuditLogging.Context;
@@ -49,10 +51,12 @@ public class AuditLogRedactor : IAuditLogRedactor
         try
         {
             using var document = JsonDocument.Parse(raw);
-            var sanitized = SanitizeElement(document.RootElement);
-#pragma warning disable IL2026
-            return JsonSerializer.Serialize(sanitized);
-#pragma warning restore IL2026
+            var buffer = new ArrayBufferWriter<byte>();
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                WriteSanitizedElement(document.RootElement, writer);
+            }
+            return Encoding.UTF8.GetString(buffer.WrittenSpan);
         }
         catch (JsonException)
         {
@@ -61,26 +65,29 @@ public class AuditLogRedactor : IAuditLogRedactor
         }
     }
 
-    private object? SanitizeElement(JsonElement element)
+    private void WriteSanitizedElement(JsonElement element, Utf8JsonWriter writer)
     {
-        return element.ValueKind switch
+        switch (element.ValueKind)
         {
-            JsonValueKind.Object => element.EnumerateObject()
-                .ToDictionary(
-                    property => property.Name,
-                    property => IsSensitive(property.Name)
-                        ? "***"
-                        : SanitizeElement(property.Value)),
-            JsonValueKind.Array => element.EnumerateArray()
-                .Select(SanitizeElement)
-                .ToList(),
-            JsonValueKind.String => element.GetString(),
-            JsonValueKind.Number => element.TryGetInt64(out var value) ? value : element.GetDecimal(),
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.Null => null,
-            _ => element.ToString()
-        };
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var property in element.EnumerateObject())
+                {
+                    writer.WritePropertyName(property.Name);
+                    if (IsSensitive(property.Name)) writer.WriteStringValue("***");
+                    else WriteSanitizedElement(property.Value, writer);
+                }
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in element.EnumerateArray()) WriteSanitizedElement(item, writer);
+                writer.WriteEndArray();
+                break;
+            default:
+                element.WriteTo(writer);
+                break;
+        }
     }
 
     private bool IsSensitive(string propertyName)

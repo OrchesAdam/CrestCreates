@@ -7,6 +7,7 @@ using CrestCreates.Application.Permissions;
 using CrestCreates.Application.Tenants;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.AuditLogging.Middlewares;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.AspNetCore;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
@@ -36,10 +37,13 @@ builder.Services.AddCrestLogging(builder.Configuration);
 builder.Services.Configure<AuditLoggingOptions>(
     builder.Configuration.GetSection(AuditLoggingOptions.SectionName));
 builder.Services.AddScoped<AuditLoggingMiddleware>();
+builder.Services.AddScoped<AccountabilityHttpTerminalObserverMiddleware>();
+builder.Services.AddScoped<AccountabilityHttpOperationScopeMiddleware>();
 builder.Services.AddScoped<IAuditLogRedactor, AuditLogRedactor>();
 builder.Services.AddScoped<IAuditLogWriter, AuditLogWriter>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddAuditLogging();
+builder.Services.AddAccountability();
 
 builder.Services.AddCrestOpenApi();
 builder.Services.AddOpenIddictServer(options =>
@@ -91,11 +95,13 @@ builder.Host.RegisterModules();
 var app = builder.Build();
 
 app.UseCrestRequestLogging();
+app.UseAccountabilityHttpTerminalObserver();
 app.UseExceptionHandling();
-app.UseAuditLogging();
 app.UseHttpsRedirection();
+app.UseRouting();
 app.UseMultiTenancy();
 app.UseAuthentication();
+app.UseAccountabilityHttpOperationScope();
 app.UseTenantBoundary();
 app.UseAuthorization();
 app.MapCrestOpenIddictEndpoints();

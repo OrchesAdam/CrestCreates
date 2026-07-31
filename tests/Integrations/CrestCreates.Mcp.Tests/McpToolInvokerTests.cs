@@ -32,6 +32,17 @@ public sealed class McpToolInvokerTests
         dispatcher.Descriptor.Should().BeSameAs(entry.Capability);
         dispatcher.Source.Should().Be(InvocationSource.Mcp);
         dispatcher.Context!.CausationId.Should().Be("request-1");
+        dispatcher.Context.AccountabilityActor!.Kind.Should().Be("unknown");
+        dispatcher.Context.AccountabilityActor.Id.Should().Be("unknown",
+            "MCP request identity is not a trusted client principal");
+        dispatcher.Context.AccountabilityRuntimeReferences.Should().Contain(reference =>
+            reference.Kind == "mcp-request" && reference.Id == "request-1");
+        dispatcher.Context.AccountabilityRuntimeReferences.Should().Contain(reference =>
+            reference.Kind == "mcp-invocation" && reference.Id == "logical-call");
+        dispatcher.Context.AccountabilityRuntimeReferences.Should().Contain(reference =>
+            reference.Kind == "mcp-session" && reference.Id == "session-1");
+        dispatcher.Context.AccountabilityRuntimeReferences.Should().Contain(reference =>
+            reference.Kind == "mcp-host" && reference.Id == "host");
         dispatcher.Context.InputJson!.Value.GetRawText().Should().Be("{}");
         dispatcher.Context.Items[McpCapabilityContextItemNames.HostId].Should().Be("host");
         dispatcher.Context.IdempotencyKey.Should().StartWith("mcp:v1:");

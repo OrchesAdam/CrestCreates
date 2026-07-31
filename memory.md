@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-27 (Issue #62 Agent/MCP Tool JSON root unification)
+Last Updated: 2026-07-31 (Issue #39 Phase 9a PR #67 fourth-round global exception boundary remediated)
 
 ## Purpose
 
@@ -10,7 +10,142 @@ This file records the current platform status for CrestCreates so future threads
 
 ## Approved Designs
 
-No approved-but-unimplemented design is currently recorded here.
+### Issue #39 — Phase 9a Accountability Runtime Foundation
+
+Status: Implemented / focused + NativeAOT-verified; canonical Release build green;
+repository-wide test gate remains environment-blocked by unrelated suites
+
+Approved mainline:
+
+```text
+HTTP / AOP / resolved Capability / committed Workflow transition
+    → producer-owned immutable AuditEnvelope
+    → validate candidate
+    → sanitize + protected-fact equality
+    → validate safe snapshot
+    → existing Canonical Hash Runtime
+    → explicit IAuditSink fan-out
+```
+
+The contract separates direct CausationId, enclosing ParentAuditId, and
+lifecycle PreviousAuditId; keeps Actor authority separate from technical
+Runtime execution; preserves Conflict, provider failure, and recorder rejection
+as different results; and has no global RecordedAt. Append-only AuditLog and
+Capability stores remain unwired compatibility APIs rather than sinks.
+
+Implementation is ordered into four TDD PR slices: contract/generated JSON;
+recorder/sanitizer/hash/in-memory sink; HTTP/AOP/Capability adapters; then
+HumanTask trigger identity, Workflow lifecycle, Procurement composition, and
+linux-x64 NativeAOT publish-link-run. The approved execution plan also fixes a
+runner-free shared sink-contract Testing boundary, concurrent one-budget sink
+fan-out, producer-owned Host startup validation, Application-assembly Rougamo
+weaving on the real submit method, and a Workflow-owned post-commit notification
+budget. Mandatory implementation details also include an AuditLogging
+type-forward for the moved `AuditedMoAttribute`, a fully typed opaque AOP
+bridge, ordinal Tags normalization, prompt-return async provider contracts, and
+AuditLogging producer registration through its existing Module mainline.
+
+Executable evidence: Accountability contract/boundary tests pass; recorder,
+sanitizer, hash, sink, context, HTTP, AOP, Capability, Workflow, and HumanTask
+focused suites pass; the Procurement Debug golden scenario and the repository
+NativeAOT publish-and-run fixture both emit
+`CRESTCREATES_PROCUREMENT_SAMPLE_OK` and `CRESTCREATES_ACCOUNTABILITY_OK`. The real
+`ProcurementApplicationService.SubmitAsync` method is woven in its Application
+assembly, and the sample uses the shared in-memory authoritative Accountability
+sink. The canonical `CrestCreates.slnx` Release build completed with zero errors.
+The full Release test run completed but remains non-green only in unrelated
+Docker-backed integration/dependency suites; the Phase 9a Procurement acceptance
+suite is green at 36/36 after migrating assertions from the retired append-only
+Capability store to `AuditEnvelope` facts. This is recorded explicitly as an
+environment-blocked repository gate, not as a false zero-failure claim.
+
+Post-implementation audit closure (2026-07-29): the review removed the remaining
+Capability legacy-store write fallback; preserved accepted AuditRecordId on outer
+exception/cancellation paths; made canonical JsonElement projection ordinal;
+completed sanitizer protected-field enforcement; centralized Workflow lifecycle
+EventId/AuditId allocation and one-run causality; propagated trusted Agent/MCP
+identity context without inventing principals; made AOP recording strictly
+post-fact; and migrated all discovered Capability/Workflow producer Hosts and AOT
+fixtures to the required Accountability Foundation. The audit also added executable
+startup-composition, synchronous-failure fan-out, Workflow notification-budget,
+and Agent/MCP identity tests. Review evidence includes a zero-error 228-project
+canonical build, green boundary/focused/Procurement suites, a newly generated
+linux-x64 ELF NativeAOT artifact, and static evidence that the real Application
+`SubmitAsync` method was processed by Fody. The native binary's loopback-listener
+scenario could not be repeated inside this review sandbox because the required
+socket escalation was rejected; the previously recorded publish-and-run gate is
+therefore retained rather than replaced by a false new run claim.
+
+PR #67 first code-review closure (2026-07-29): the default Platform and first-party
+HTTP pipeline now uses `AccountabilityHttpMiddleware`; legacy `UseAuditLogging`
+is compatibility opt-in and `AuditLogWriter` no longer persists `AuditLog`
+directly. In-memory Duplicate results no longer expose `ExistingIntegrity`;
+Recorder performs a non-enumerating structural preflight before validation and
+snapshotting; Workflow facts preserve TenantId; `AddCapabilityPipeline` owns the
+startup validator; the Accountability JSON context contains only the generated
+`IAuditSink` contract surface; unmatched HTTP routes never persist raw paths;
+artifact sanitization rejects duplicate Kinds before rules and executes in
+ordinal order; ProcessedAt is completion metadata; and Capability Action.Name is
+the stable CapabilityId. The runner-free sink suite now covers acceptance,
+duplicate/conflict metadata, snapshots, concurrency, and deterministic reads.
+Boundary CI parses Spec §18 and fails if any named acceptance test disappears.
+Final focused evidence is green: Accountability 95, AuditLogging 58, Capability
+169, Workflow 101, Boundary 76, Platform Web 93, Procurement acceptance 37, and
+Procurement NativeAOT fixture 9 tests. A fresh linux-x64 native publish/link/run
+emitted `CRESTCREATES_PROCUREMENT_HTTP_OK`,
+`CRESTCREATES_PROCUREMENT_SAMPLE_OK`, and `CRESTCREATES_ACCOUNTABILITY_OK`.
+
+PR #67 second code-review closure (2026-07-29): first-party Platform and
+LibraryManagement pipelines authenticate before opening the HTTP Accountability
+scope. The Procurement golden mainline now uses a real header authentication
+scheme and proves that the trusted NameIdentifier becomes the HTTP actor, is
+inherited by Capability, and remains the Workflow initiating actor; anonymous
+requests remain anonymous. `AuditRecordResult.IsAccepted` is derived exclusively
+from Accepted/Duplicate sink results. Invalid sanitizer and typed-rule output is
+rejected at the trust boundary without being misclassified as an internal
+Recorder failure. Caller cancellation wins the sink fan-out race, WriteTimeout is
+validated at startup, and composable `IOptions<AccountabilityOptions>` removes
+the previous first-registration-wins behavior. The deferred test-only HTTP
+rejection feature was retired, and the Spec §18 ledger now scans through §18.7
+with explicit Procurement/NativeAOT E01/E02 guards. Fresh evidence is green:
+Accountability Abstractions 13, Accountability Runtime 111, AuditLogging 58,
+Capability 171, Workflow 101, Platform Web 97, Boundary 79, Procurement 41, and
+Procurement NativeAOT 9 tests; the canonical single-node build completed all 228
+projects with zero errors.
+
+PR #67 third code-review closure (2026-07-30): the standard Platform and
+LibraryManagement middleware order now opens the authenticated Accountability
+scope before entering global exception handling. Business exceptions are
+therefore converted and written to the final HTTP response before the immutable
+HTTP fact is materialized, while Capability/Method/Workflow children still see
+the request Actor and CorrelationId. A real TestServer composition proves the
+400/403/404/500 mappings, terminal observation ordering, authenticated child
+context, and that recorder failure cannot replace the converted response.
+Descriptor protected-field comparison now compares SnapshotId, structured
+SnapshotHash, and ordered descriptor Items structurally, accepting equivalent
+sanitizer snapshots while rejecting mutations and reordering. Fresh evidence is
+green: Platform Web 104, Accountability Runtime 114, Boundary 81, Procurement
+NativeAOT 9, and the canonical 228-project build with zero errors.
+
+PR #67 fourth code-review closure (2026-07-31): the prior single HTTP middleware
+ordering was an interim fix and is superseded. HTTP root observation is now split
+into an outer terminal observer and an inner authenticated operation scope:
+`RequestLogging -> AccountabilityHttpTerminalObserver -> ExceptionHandling ->
+Routing -> MultiTenancy -> Authentication -> AccountabilityHttpOperationScope`.
+The terminal observer allocates the HTTP AuditId, OperationId, and CorrelationId
+before global exception handling and records only after the final response is
+available. The operation scope enriches the same request-local state with trusted
+Actor/Tenant data and exposes the same identities to Capability, method, and
+Workflow children. Tenant-resolution or authentication failures remain inside
+the unique `CrestErrorResponse` exception mainline and produce an HTTP fact with
+unknown Actor, null TenantId, and no child scope. Real TestServer cases cover
+business, tenant-resolver, and authentication failures, shared root/child
+identities, and recorder failure isolation. The affected AuditLogging and
+Platform Web projects compile in the restricted environment; test execution
+requires the socket-enabled CI runner.
+
+Spec: `docs/superpowers/specs/2026-07-28-phase-9a-accountability-runtime-foundation-design.md`
+Plan: `docs/superpowers/plans/2026-07-29-phase-9a-accountability-runtime-foundation.md`
 
 ## Completed Features
 

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.Tools;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
@@ -46,6 +47,7 @@ public sealed class McpMemoryToolE2ETests
         // Register pre-built BEFORE AddCapabilityRuntime
         services.AddSingleton<ICapabilityRegistry>(capabilities);
         services.AddCapabilityRuntime();
+        services.AddAccountability();
         var provider = services.BuildServiceProvider();
 
         var resolved = provider.GetRequiredService<ICapabilityRegistry>();
@@ -88,6 +90,7 @@ public sealed class McpMemoryToolE2ETests
         builder.Services.AddSingleton<ISchemaRegistry>(schemas);
         builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
         builder.Services.AddCapabilityRuntime();
+        builder.Services.AddAccountability();
         builder.Services.AddCrestMcpToolProjection(options =>
         {
             options.SerializerOptions.TypeInfoResolver = MemoryE2EJsonContext.Default;
@@ -292,6 +295,7 @@ public sealed class McpMemoryToolE2ETests
         builder.Services.AddSingleton<ISchemaRegistry>(schemas);
         builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
         builder.Services.AddCapabilityRuntime();
+        builder.Services.AddAccountability();
         builder.Services.AddCrestMcpToolProjection(options =>
         {
             options.SerializerOptions.TypeInfoResolver = MemoryE2EJsonContext.Default;

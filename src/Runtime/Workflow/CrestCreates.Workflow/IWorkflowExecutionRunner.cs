@@ -4,5 +4,9 @@ namespace CrestCreates.Workflow;
 
 internal interface IWorkflowExecutionRunner
 {
-    Task<WorkflowInstance> RunAsync(WorkflowInstance instance, CancellationToken ct);
+    Task<WorkflowInstance> RunAsync(
+        WorkflowInstance instance,
+        string workflowRunOperationId,
+        string? enclosingAuditId,
+        CancellationToken ct);
 }

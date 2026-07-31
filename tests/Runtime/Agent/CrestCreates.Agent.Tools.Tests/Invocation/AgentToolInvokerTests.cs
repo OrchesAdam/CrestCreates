@@ -30,6 +30,29 @@ public sealed class AgentToolInvokerTests
     }
 
     [Fact]
+    public async Task Invoke_PropagatesTrustedAgentIdentityAndRuntimeReferences()
+    {
+        var harness = CreateHarness();
+        harness.Execution.CurrentValue = harness.Execution.CurrentValue! with
+        {
+            CausationId = "agent-decision-1"
+        };
+
+        var result = await harness.Invoker.InvokeAsync(new AgentToolInvocationRequest(harness.ToolName));
+
+        result.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
+        var context = harness.Dispatcher.LastContext!;
+        context.CausationId.Should().Be("agent-decision-1");
+        context.AccountabilityActor!.Kind.Should().Be("agent");
+        context.AccountabilityActor.Id.Should().Be("agent-1");
+        context.AccountabilityActor.InitiatedBy.Should().BeEquivalentTo(new { Kind = "user", Id = "user-1" });
+        context.AccountabilityRuntimeReferences.Should().Contain(reference =>
+            reference.Kind == "agent-session" && reference.Id == "execution-1");
+        context.AccountabilityRuntimeReferences.Should().Contain(reference =>
+            reference.Kind == "agent-invocation" && reference.Id == "invocation-1");
+    }
+
+    [Fact]
     public async Task Invoke_ChangedCallOriginForSameLogicalInvocationConflictsBeforeDispatch()
     {
         var harness = CreateHarness(automaticAllowed: true);
@@ -662,7 +685,11 @@ public sealed class AgentToolInvokerTests
             CancellationToken ct = default)
         {
             CallCount++;
-            var context = new CapabilityExecutionContext { ServiceProvider = EmptyServiceProvider.Instance };
+            var context = new CapabilityExecutionContext
+            {
+                ServiceProvider = EmptyServiceProvider.Instance,
+                UserId = "user-1"
+            };
             LastContext = context;
             configureContext?.Invoke(context);
             return Task.FromResult(result);

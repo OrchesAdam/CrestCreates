@@ -25,4 +25,5 @@ public static class CanonicalHashArtifactNames
     public const string AgentMemoryCandidateOutput = "AgentMemoryCandidateOutput";
     public const string AgentMemoryCandidateState = "AgentMemoryCandidateState";
     public const string AgentMemoryItemState = "AgentMemoryItemState";
+    public const string AccountabilityRecord = "AccountabilityRecord";
 }

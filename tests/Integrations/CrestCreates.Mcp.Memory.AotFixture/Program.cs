@@ -7,6 +7,7 @@ using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.Stores;
 using CrestCreates.Agent.Memory.Tools;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
@@ -65,6 +66,7 @@ internal static class McpMemoryAotFixtureRunner
             builder.Services.AddSingleton<IPermissionChecker, AotPermissionChecker>();
             builder.Services.AddAgentMemoryRuntime();
             builder.Services.AddCapabilityRuntime();
+            builder.Services.AddAccountability();
             builder.Services.AddCrestMcpToolProjection(options =>
             {
                 options.SerializerOptions.TypeInfoResolver = McpMemoryAotJsonContext.Default;

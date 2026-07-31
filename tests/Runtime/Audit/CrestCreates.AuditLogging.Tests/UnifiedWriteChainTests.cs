@@ -1,6 +1,9 @@
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Identity;
+using CrestCreates.Accountability.Abstractions.Recording;
 using CrestCreates.AuditLogging.Context;
 using CrestCreates.AuditLogging.Interceptors;
 using CrestCreates.AuditLogging.Middlewares;
@@ -185,20 +188,13 @@ public class UnifiedWriteChainTests
     }
 
     [Fact]
-    public async Task UnifiedWriter_ShouldCallAuditLogServiceCreateOnce()
+    public async Task AuditLogWriterDoesNotDirectlyPersistLegacyAuditLog()
     {
-        // Given
-        var createCallCount = 0;
-        var mockRepository = new Mock<IRepository<AuditLog, Guid>>();
-        mockRepository.Setup(r => r.AddAsync(It.IsAny<AuditLog>(), It.IsAny<CancellationToken>()))
-            .Callback(() => createCallCount++)
-            .ReturnsAsync((AuditLog a, CancellationToken _) => a);
-
-        var auditLogService = new AuditLogService(mockRepository.Object);
-        var mockRedactor = new Mock<IAuditLogRedactor>();
-        mockRedactor.Setup(r => r.RedactAsync(It.IsAny<AuditContext>()))
-            .Returns(Task.CompletedTask);
-        var auditLogWriter = new AuditLogWriter(auditLogService, mockRedactor.Object, NullLogger<AuditLogWriter>.Instance);
+        var recorder = new CaptureRecorder();
+        var auditLogWriter = new AuditLogWriter(
+            recorder,
+            new FixedIdentity(),
+            NullLogger<AuditLogWriter>.Instance);
 
         var context = new AuditContext
         {
@@ -213,11 +209,16 @@ public class UnifiedWriteChainTests
             ExtraProperties = new Dictionary<string, object>()
         };
 
-        // When
         await auditLogWriter.WriteAsync(context);
 
-        // Then: IAuditLogService.CreateAsync is called exactly once per request
-        createCallCount.Should().Be(1, "Writer should call service.CreateAsync exactly once per request");
+        recorder.Envelope.Should().NotBeNull();
+        recorder.Envelope!.Action.Should().Be(new AuditAction
+        {
+            Kind = "http.request",
+            Name = "GET <legacy-unmatched>"
+        });
+        recorder.Envelope.Target.Id.Should().Be("GET <legacy-unmatched>");
+        recorder.Envelope.Target.Id.Should().NotContain("/api/test");
     }
 
     [Fact]
@@ -428,18 +429,13 @@ public class UnifiedWriteChainTests
     }
 
     [Fact]
-    public async Task WriteChain_ShouldPersistRedactedAuditLog_NotRawData()
+    public async Task AuditLogWriterDoesNotCaptureBodyParametersReturnOrExtraProperties()
     {
-        // Given
-        AuditLog? capturedAuditLog = null;
-        var mockRepository = new Mock<IRepository<AuditLog, Guid>>();
-        mockRepository.Setup(r => r.AddAsync(It.IsAny<AuditLog>(), It.IsAny<CancellationToken>()))
-            .Callback<AuditLog, CancellationToken>((a, _) => capturedAuditLog = a)
-            .ReturnsAsync((AuditLog a, CancellationToken _) => a);
-
-        var auditLogService = new AuditLogService(mockRepository.Object);
-        var redactor = new AuditLogRedactor(new OptionsWrapper<AuditLoggingOptions>(new AuditLoggingOptions()));
-        var auditLogWriter = new AuditLogWriter(auditLogService, redactor, NullLogger<AuditLogWriter>.Instance);
+        var recorder = new CaptureRecorder();
+        var auditLogWriter = new AuditLogWriter(
+            recorder,
+            new FixedIdentity(),
+            NullLogger<AuditLogWriter>.Instance);
 
         var context = new AuditContext
         {
@@ -462,21 +458,12 @@ public class UnifiedWriteChainTests
             }
         };
 
-        // When
         await auditLogWriter.WriteAsync(context);
 
-        // Then: Verify the AuditLog passed to repository is already redacted
-        capturedAuditLog.Should().NotBeNull();
-        capturedAuditLog!.Parameters.Should().Contain("\"accessToken\":\"***\"");
-        capturedAuditLog.Parameters.Should().NotContain("tok-123");
-        capturedAuditLog.ReturnValue.Should().Contain("\"secretKey\":\"***\"");
-        capturedAuditLog.ReturnValue.Should().NotContain("sk-456");
-        capturedAuditLog.ExtraProperties.Should().ContainKey("connectionString");
-        // ExtraProperties is Dictionary<string, object>; string values deserialize as JsonElement in EF Core
-        var connValue = capturedAuditLog.ExtraProperties["connectionString"];
-        connValue.ToString().Should().Be("***");
-        var normalValue = capturedAuditLog.ExtraProperties["normalField"];
-        normalValue.ToString().Should().Be("visible");
+        recorder.Envelope.Should().NotBeNull();
+        recorder.Envelope!.Payload.Should().BeNull();
+        recorder.Envelope.DataSnapshot.Should().BeNull();
+        recorder.Envelope.ToString().Should().NotContain("tok-123").And.NotContain("sk-456").And.NotContain("Server=localhost");
     }
 
     [Fact]
@@ -551,18 +538,13 @@ caused by: password=""supersecret\"", token=""tok-xyz""",
     }
 
     [Fact]
-    public async Task WriteChain_ShouldPersistRedactedExceptionContext()
+    public async Task AuditLogWriterDoesNotCaptureExceptionMessageOrStack()
     {
-        // Given
-        AuditLog? capturedAuditLog = null;
-        var mockRepository = new Mock<IRepository<AuditLog, Guid>>();
-        mockRepository.Setup(r => r.AddAsync(It.IsAny<AuditLog>(), It.IsAny<CancellationToken>()))
-            .Callback<AuditLog, CancellationToken>((a, _) => capturedAuditLog = a)
-            .ReturnsAsync((AuditLog a, CancellationToken _) => a);
-
-        var auditLogService = new AuditLogService(mockRepository.Object);
-        var redactor = new AuditLogRedactor(new OptionsWrapper<AuditLoggingOptions>(new AuditLoggingOptions()));
-        var auditLogWriter = new AuditLogWriter(auditLogService, redactor, NullLogger<AuditLogWriter>.Instance);
+        var recorder = new CaptureRecorder();
+        var auditLogWriter = new AuditLogWriter(
+            recorder,
+            new FixedIdentity(),
+            NullLogger<AuditLogWriter>.Instance);
 
         var context = new AuditContext
         {
@@ -579,16 +561,15 @@ caused by: password=""supersecret\"", token=""tok-xyz""",
             ExtraProperties = new Dictionary<string, object>()
         };
 
-        // When
         await auditLogWriter.WriteAsync(context);
 
-        // Then: Verify the AuditLog passed to repository has redacted exception context
-        capturedAuditLog.Should().NotBeNull();
-        capturedAuditLog!.ExceptionMessage.Should().Contain("***");
-        capturedAuditLog.ExceptionMessage.Should().NotContain("P@ssw0rd");
-        capturedAuditLog.ExceptionMessage.Should().NotContain("rt-999");
-        capturedAuditLog.ExceptionStackTrace.Should().Contain("***");
-        capturedAuditLog.ExceptionStackTrace.Should().NotContain("P@ssw0rd");
+        recorder.Envelope.Should().NotBeNull();
+        recorder.Envelope!.Outcome.Should().Be(new AuditOutcome
+        {
+            Status = "failed",
+            Code = "UNHANDLED_EXCEPTION"
+        });
+        recorder.Envelope.ToString().Should().NotContain("P@ssw0rd").And.NotContain("rt-999");
     }
 
     private static AuditLogRedactor CreateRedactor()
@@ -664,5 +645,25 @@ caused by: password=""supersecret\"", token=""tok-xyz""",
         public string Id { get; }
         public string Name { get; }
         public string? ConnectionString => null;
+    }
+
+    private sealed class CaptureRecorder : IAuditRecorder
+    {
+        public AuditEnvelope? Envelope { get; private set; }
+
+        public ValueTask<AuditRecordResult> RecordAsync(
+            AuditEnvelope envelope,
+            CancellationToken cancellationToken = default)
+        {
+            Envelope = envelope;
+            return ValueTask.FromResult(TestAuditRecordResults.Accepted(envelope.AuditId));
+        }
+    }
+
+    private sealed class FixedIdentity : IAuditIdentityGenerator
+    {
+        private int _value;
+        public string CreateAuditId() => $"audit-{Interlocked.Increment(ref _value)}";
+        public string CreateOperationId() => $"operation-{Interlocked.Increment(ref _value)}";
     }
 }

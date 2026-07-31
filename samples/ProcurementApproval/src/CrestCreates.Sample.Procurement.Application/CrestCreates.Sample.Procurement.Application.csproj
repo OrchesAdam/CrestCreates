@@ -11,12 +11,16 @@
     <ProjectReference Include="..\CrestCreates.Sample.Procurement.Domain\CrestCreates.Sample.Procurement.Domain.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.AuditLogging.Abstractions/CrestCreates.AuditLogging.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
     <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Application/CrestCreates.Application.csproj" />
     <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Authorization/CrestCreates.Authorization.csproj" />
     <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Workflow/CrestCreates.Workflow.Abstractions/CrestCreates.Workflow.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Rougamo.Fody" />
   </ItemGroup>
 
 </Project>

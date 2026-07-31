@@ -1,8 +1,14 @@
 using System.Reflection;
+using System.Threading;
 using CrestCreates.DynamicApi;
 using CrestCreates.ModuleDiagnostics.Modules;
 using CrestCreates.ModuleDiagnostics.Stores;
 using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.AuditLogging.Middlewares;
+using CrestCreates.Accountability.Bootstrap;
+using CrestCreates.Accountability.InMemory;
+using CrestCreates.Accountability.Recording;
+using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.Web;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
@@ -10,6 +16,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace CrestCreates.Web.Tests;
@@ -37,6 +44,75 @@ public class CrestWebPresetTests
         });
 
         builder.Services.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void AddCrestWeb_ShouldRegisterAccountabilityHttpMainline()
+    {
+        var builder = WebApplication.CreateBuilder();
+
+        builder.AddCrestWeb(options => options.UseOpenIddict(false));
+
+        builder.Services.Should().ContainSingle(descriptor =>
+            descriptor.ServiceType == typeof(AccountabilityHttpTerminalObserverMiddleware));
+        builder.Services.Should().Contain(descriptor =>
+            descriptor.ServiceType == typeof(AccountabilityHttpOperationScopeMiddleware));
+    }
+
+    [Fact]
+    public void ProductionHostCanRequireSinkAfterAddCrestWeb()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.AddCrestWeb(options => options.UseOpenIddict(false));
+
+        builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = true);
+        using var provider = builder.Services.BuildServiceProvider();
+
+        provider.GetRequiredService<AccountabilityOptions>()
+            .RequireAtLeastOneSink.Should().BeTrue();
+    }
+
+    [Fact]
+    public void CrestWebAccountabilityConfigurationIsNotFirstCallWins()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.AddCrestWeb(options => options.UseOpenIddict(false));
+        builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = true);
+        builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = false);
+        using var provider = builder.Services.BuildServiceProvider();
+
+        provider.GetRequiredService<AccountabilityOptions>()
+            .RequireAtLeastOneSink.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ProductionHostWithoutRequiredSinkFailsStartup()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.AddCrestWeb(options => options.UseOpenIddict(false));
+        builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = true);
+        using var provider = builder.Services.BuildServiceProvider();
+        var validator = provider.GetServices<IHostedService>()
+            .Single(service => service.GetType().Name == "AccountabilityCompositionValidator");
+
+        await validator.Invoking(service => service.StartAsync(CancellationToken.None))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*ACCOUNTABILITY_SINK_REQUIRED*");
+    }
+
+    [Fact]
+    public async Task DevelopmentHostExplicitlyRegistersInMemorySink()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.AddCrestWeb(options => options.UseOpenIddict(false));
+        builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = true);
+        builder.Services.AddSingleton<IAuditSink>(new InMemoryAuditSink());
+        using var provider = builder.Services.BuildServiceProvider();
+        var validator = provider.GetServices<IHostedService>()
+            .Single(service => service.GetType().Name == "AccountabilityCompositionValidator");
+
+        await validator.Invoking(service => service.StartAsync(CancellationToken.None))
+            .Should().NotThrowAsync();
     }
 
     [Fact]

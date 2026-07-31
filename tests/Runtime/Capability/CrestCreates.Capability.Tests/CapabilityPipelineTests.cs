@@ -76,6 +76,10 @@ public class CapabilityPipelineTests
     }
 
     [Fact]
+    public Task UnresolvedCapabilityIsExplicitlyOutsideExecutionFactBoundary()
+        => ExecuteAsync_CapabilityNotFound_ReturnsFailure();
+
+    [Fact]
     public async Task ExecuteAsync_CapabilityFound_ButHandlerNotFound_ReturnsFailure()
     {
         var engine = new RegistryValidationEngine<CapabilityDescriptor>([]);

@@ -1,6 +1,7 @@
 using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Agent.Tools;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
@@ -23,11 +24,13 @@ public sealed class AgentMemoryToolStartupTests
     {
         var first = new ServiceCollection();
         first.AddCapabilityRuntime();
+        first.AddAccountability();
         first.AddAgentMemoryTools();
         using var firstProvider = first.BuildServiceProvider();
 
         var second = new ServiceCollection();
         second.AddCapabilityRuntime();
+        second.AddAccountability();
         second.AddAgentMemoryTools();
         using var secondProvider = second.BuildServiceProvider();
 
@@ -47,6 +50,7 @@ public sealed class AgentMemoryToolStartupTests
         builder.Services.AddSingleton<ISchemaRegistry>(schemas);
         builder.Services.AddAgentMemoryRuntime();
         builder.Services.AddCapabilityRuntime();
+        builder.Services.AddAccountability();
         builder.Services.AddCrestAgentTools();
         builder.Services.AddAgentMemoryTools();
         schemas.Build(DescriptorProviderRegistry.GetProviders<SchemaDescriptor>());

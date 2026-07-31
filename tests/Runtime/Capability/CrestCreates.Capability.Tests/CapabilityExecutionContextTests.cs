@@ -8,7 +8,7 @@ namespace CrestCreates.Capability.Tests;
 public class CapabilityExecutionContextTests
 {
     [Fact]
-    public void Context_Defaults_CorrelationId_To_New_Guid()
+    public void Context_DoesNotInventCorrelationIdBeforePipelineComposition()
     {
         var ctx = new CapabilityExecutionContext
         {
@@ -18,8 +18,7 @@ public class CapabilityExecutionContextTests
             CapabilityContractHash = "abc123"
         };
 
-        ctx.CorrelationId.Should().NotBeNullOrEmpty();
-        ctx.CorrelationId.Length.Should().Be(32);
+        ctx.CorrelationId.Should().BeEmpty();
     }
 
     [Fact]

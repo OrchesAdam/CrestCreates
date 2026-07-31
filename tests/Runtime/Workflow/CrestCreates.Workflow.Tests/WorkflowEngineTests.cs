@@ -59,10 +59,12 @@ public class WorkflowEngineTests
         var executorRegistry = new DefaultStepExecutorRegistry(capExecutor, htExecutor);
         var store = new InMemoryWorkflowInstanceStore();
         var stateMachine = new DefaultWorkflowStateMachine();
-        var eventPublisher = new WorkflowLifecycleEventPublisher();
+        var eventPublisher = WorkflowTestAccountability.CreatePublisher();
+        var events = WorkflowTestAccountability.CreateEvents();
+        var contexts = WorkflowTestAccountability.CreateContexts();
         var executionRunner = new WorkflowExecutionRunner(
-            registry, executorRegistry, store, stateMachine, eventPublisher);
-        return new WorkflowEngine(registry, store, executionRunner, eventPublisher);
+            registry, executorRegistry, store, stateMachine, eventPublisher, events);
+        return new WorkflowEngine(registry, store, executionRunner, eventPublisher, contexts, events);
     }
 
     private class MockCapabilityPipeline : ICapabilityPipeline

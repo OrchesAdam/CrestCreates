@@ -22,7 +22,9 @@ internal sealed class HumanTaskCompletedWorkflowSubscriber
             {
                 HumanTaskId = evt.HumanTaskInstanceId,
                 Outcome = evt.Outcome,
-                Result = evt.Result
+                Result = evt.Result,
+                CompletionEventId = evt.EventId,
+                TriggerOperationId = evt.EventId
             }, ct);
     }
 }

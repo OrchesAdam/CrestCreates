@@ -1,4 +1,6 @@
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Accountability.Abstractions.Context;
+using CrestCreates.Accountability.Abstractions.Identity;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,12 +56,23 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
         Action<CapabilityExecutionContext>? configureContext = null,
         CancellationToken ct = default)
     {
+        var contractHash = _hashBuilder.Build(descriptor).ContractHash;
+        var operationContext = _serviceProvider.GetService<IAuditOperationContextAccessor>()?.Current;
+        var rootCorrelationId = _serviceProvider.GetService<IAuditIdentityGenerator>()?.CreateOperationId()
+            ?? Guid.NewGuid().ToString("N");
         var context = new CapabilityExecutionContext
         {
             CapabilityId = descriptor.Id,
             CapabilityName = descriptor.Name,
             CapabilityVersion = descriptor.Version,
-            CapabilityContractHash = _hashBuilder.Build(descriptor).ContractHash.Value,
+            CapabilityContractHash = contractHash.Value,
+            AccountabilityContract = contractHash,
+            CorrelationId = operationContext?.CorrelationId ?? rootCorrelationId,
+            CausationId = operationContext?.OperationId,
+            ParentAuditId = operationContext?.EnclosingAuditId,
+            AccountabilityActor = operationContext?.Actor,
+            InvocationSource = ParseInvocationSource(operationContext?.InvocationSource),
+            TenantId = operationContext?.TenantId,
             Input = input,
             CancellationToken = ct,
             ServiceProvider = _serviceProvider
@@ -106,7 +119,7 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
         }
         catch (OperationCanceledException)
         {
-            return CapabilityExecutionResult.Timeout(DateTimeOffset.UtcNow - startedAt);
+            return CapabilityExecutionResult.Timeout(DateTimeOffset.UtcNow - startedAt, context.AuditRecordId);
         }
         catch (CapabilityFailureException ex)
         {
@@ -114,16 +127,31 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
                 ex.ErrorCode,
                 ex.Message,
                 DateTimeOffset.UtcNow - startedAt,
-                ex.Issues);
+                ex.Issues,
+                context.AuditRecordId);
         }
         catch (Exception ex)
         {
             return CapabilityExecutionResult.Failure(
                 "PIPELINE_ERROR",
                 ex.Message,
-                DateTimeOffset.UtcNow - startedAt);
+                DateTimeOffset.UtcNow - startedAt,
+                auditRecordId: context.AuditRecordId);
         }
     }
+
+    private static InvocationSource ParseInvocationSource(string? value)
+        => value switch
+        {
+            "http" => InvocationSource.Http,
+            "workflow" => InvocationSource.Workflow,
+            "human-task" => InvocationSource.HumanTask,
+            "agent" => InvocationSource.Agent,
+            "mcp" => InvocationSource.Mcp,
+            "integration" => InvocationSource.Event,
+            "system" => InvocationSource.Internal,
+            _ => InvocationSource.Internal
+        };
 
     private async Task<object?> InvokeWithContextAccessorAsync(
         ICapabilityContextAwareHandlerInvoker invoker,

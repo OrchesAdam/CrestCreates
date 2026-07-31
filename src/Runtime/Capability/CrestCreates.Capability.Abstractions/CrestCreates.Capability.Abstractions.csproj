@@ -6,6 +6,9 @@
     <RootNamespace>CrestCreates.Capability.Abstractions</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../Audit/CrestCreates.Accountability.Abstractions/CrestCreates.Accountability.Abstractions.csproj" />
+    <InternalsVisibleTo Include="CrestCreates.Capability" />
+    <InternalsVisibleTo Include="CrestCreates.Capability.Tests" />
     <InternalsVisibleTo Include="CrestCreates.DynamicApi.Tests" />
   </ItemGroup>
   <ItemGroup>

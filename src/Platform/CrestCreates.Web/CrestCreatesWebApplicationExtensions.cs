@@ -11,6 +11,7 @@ using CrestCreates.AspNetCore;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.AspNetCore.Middlewares;
 using CrestCreates.AuditLogging.Middlewares;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.Authorization;
@@ -83,10 +84,13 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddCrestLogging(configuration);
         services.Configure<AuditLoggingOptions>(configuration.GetSection(AuditLoggingOptions.SectionName));
         services.AddScoped<AuditLoggingMiddleware>();
+        services.AddScoped<AccountabilityHttpTerminalObserverMiddleware>();
+        services.AddScoped<AccountabilityHttpOperationScopeMiddleware>();
         services.AddScoped<IAuditLogRedactor, AuditLogRedactor>();
         services.AddScoped<IAuditLogWriter, AuditLogWriter>();
         services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddAuditLogging();
+        services.AddAccountability();
 
         services.AddCrestOpenApi();
         services.AddModuleDiagnostics();
@@ -192,11 +196,12 @@ public static class CrestCreatesWebApplicationExtensions
         }
 
         app.UseCrestRequestLogging();
+        app.UseAccountabilityHttpTerminalObserver();
         app.UseExceptionHandling();
-        app.UseAuditLogging();
         app.UseRouting();
         app.UseMultiTenancy();
         app.UseAuthentication();
+        app.UseAccountabilityHttpOperationScope();
         app.UseTenantBoundary();
         app.UseAuthorization();
 

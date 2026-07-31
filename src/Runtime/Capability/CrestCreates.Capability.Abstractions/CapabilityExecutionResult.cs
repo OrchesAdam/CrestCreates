@@ -7,7 +7,7 @@ public sealed class CapabilityExecutionResult
     public TimeSpan Duration { get; init; }
     public string? ErrorCode { get; init; }
     public string? ErrorMessage { get; init; }
-    public string? AuditRecordId { get; init; }
+    public string? AuditRecordId { get; internal set; }
     public IReadOnlyList<string> EmittedEventIds { get; init; } = Array.Empty<string>();
     public IReadOnlyList<CapabilityExecutionIssue> Issues { get; init; } = Array.Empty<CapabilityExecutionIssue>();
 
@@ -27,20 +27,23 @@ public sealed class CapabilityExecutionResult
         string errorCode,
         string errorMessage,
         TimeSpan duration,
-        IReadOnlyList<CapabilityExecutionIssue>? issues = null)
+        IReadOnlyList<CapabilityExecutionIssue>? issues = null,
+        string? auditRecordId = null)
         => new()
         {
             Status = CapabilityExecutionStatus.Failed,
             ErrorCode = errorCode,
             ErrorMessage = errorMessage,
             Duration = duration,
-            Issues = issues ?? Array.Empty<CapabilityExecutionIssue>()
+            Issues = issues ?? Array.Empty<CapabilityExecutionIssue>(),
+            AuditRecordId = auditRecordId
         };
 
-    public static CapabilityExecutionResult Timeout(TimeSpan duration)
+    public static CapabilityExecutionResult Timeout(TimeSpan duration, string? auditRecordId = null)
         => new()
         {
             Status = CapabilityExecutionStatus.TimedOut,
-            Duration = duration
+            Duration = duration,
+            AuditRecordId = auditRecordId
         };
 }

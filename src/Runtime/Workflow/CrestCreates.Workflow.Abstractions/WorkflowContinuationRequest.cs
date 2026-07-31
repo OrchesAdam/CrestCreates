@@ -15,4 +15,7 @@ public sealed class WorkflowContinuationRequest
 
     public string Outcome { get; init; } = string.Empty;
     public object? Result { get; init; }
+    public string? CompletionEventId { get; init; }
+    public string? TriggerOperationId { get; init; }
+    public string? TriggerAuditId { get; init; }
 }

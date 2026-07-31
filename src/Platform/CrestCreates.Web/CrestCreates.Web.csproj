@@ -19,6 +19,7 @@
     <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
     <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.Logging/CrestCreates.Logging.csproj" />
     <ProjectReference Include="../../Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
+    <ProjectReference Include="../../Runtime/Audit/CrestCreates.Accountability/CrestCreates.Accountability.csproj" />
     <ProjectReference Include="../../Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
     <ProjectReference Include="../../Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
     <ProjectReference Include="../../Framework/Web/CrestCreates.HealthCheck.AspNetCore/CrestCreates.HealthCheck.AspNetCore.csproj" />

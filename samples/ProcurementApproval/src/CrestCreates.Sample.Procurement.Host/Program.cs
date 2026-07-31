@@ -3,6 +3,12 @@ using System.Text.Json.Serialization;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Authorization.Abstractions;
+using CrestCreates.Accountability.Bootstrap;
+using CrestCreates.Accountability.Abstractions.Sinks;
+using CrestCreates.Accountability.InMemory;
+using CrestCreates.AuditLogging.Abstractions.MethodAccountability;
+using CrestCreates.AuditLogging.Interceptors;
+using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Middleware;
@@ -19,6 +25,7 @@ using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Metadata.Registry;
 using CrestCreates.Mcp;
 using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.MultiTenancy;
 using CrestCreates.OpenApi;
 using CrestCreates.Sample.Procurement.Application;
 using CrestCreates.Sample.Procurement.Application.Handlers;
@@ -31,6 +38,7 @@ using CrestCreates.Schema;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 var goldenScenario = args.Contains("--golden-scenario", StringComparer.Ordinal);
@@ -56,10 +64,16 @@ var humanTaskInstanceStore = new InMemoryHumanTaskInstanceStore();
 var workflowInstanceStore = new InMemoryWorkflowInstanceStore();
 
 builder.Services.AddCapabilityRuntime();
+builder.Services.AddMultiTenancy();
+builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = true);
+builder.Services.AddTransient<AccountabilityHttpTerminalObserverMiddleware>();
+builder.Services.AddTransient<AccountabilityHttpOperationScopeMiddleware>();
+builder.Services.AddSingleton<InMemoryAuditSink>();
+builder.Services.AddSingleton<IAuditSink>(sp => sp.GetRequiredService<InMemoryAuditSink>());
+builder.Services.AddScoped<IAuditedMethodAccountabilityRuntime, AuditedMethodAccountabilityRuntime>();
 builder.Services.Replace(ServiceDescriptor.Singleton<
     ICapabilityInputValidationPolicy,
     ProcurementInputValidationPolicy>());
-builder.Services.AddInMemoryCapabilityAudit();
 builder.Services.AddSingleton<ICapabilityHandlerModule>(new ProcurementCapabilityModule());
 builder.Services.AddSingleton<InMemoryProcurementRequestStore>(store);
 builder.Services.AddScoped<ProcurementApplicationService>();
@@ -99,6 +113,10 @@ builder.Services.AddSingleton<IDescriptorLookup>(new ProcurementDescriptorLookup
         .Append(ProcurementDescriptorCatalog.ApprovalWorkflow)));
 builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddAuthentication(SampleAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, SampleAuthenticationHandler>(
+        SampleAuthenticationHandler.SchemeName,
+        _ => { });
 builder.Services.AddScoped<SampleExecutionIdentity>();
 builder.Services.AddScoped<ICurrentUser>(sp => sp.GetRequiredService<SampleExecutionIdentity>());
 builder.Services.AddScoped<ITenantContext>(sp => sp.GetRequiredService<SampleExecutionIdentity>());
@@ -138,6 +156,9 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =
 
 var app = builder.Build();
 
+app.UseAccountabilityHttpTerminalObserver();
+app.UseAuthentication();
+app.UseAccountabilityHttpOperationScope();
 app.MapCrestCapabilityEndpoints();
 app.MapCrestOpenApi();
 
