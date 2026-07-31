@@ -1,10 +1,12 @@
 using System.Collections.ObjectModel;
+using System.Text.Json.Serialization;
 
 namespace CrestCreates.Runtime.Persistence.Abstractions.State;
 
 public sealed record RuntimeStateBag
 {
-    public RuntimeStateBag(IEnumerable<KeyValuePair<string, RuntimeStateValue>> values)
+    [JsonConstructor]
+    public RuntimeStateBag(IReadOnlyDictionary<string, RuntimeStateValue> values)
     {
         ArgumentNullException.ThrowIfNull(values);
 
@@ -22,6 +24,11 @@ public sealed record RuntimeStateBag
         }
 
         Values = new ReadOnlyDictionary<string, RuntimeStateValue>(ordered);
+    }
+
+    public RuntimeStateBag(IEnumerable<KeyValuePair<string, RuntimeStateValue>> values)
+        : this(values.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal))
+    {
     }
 
     public IReadOnlyDictionary<string, RuntimeStateValue> Values { get; }
