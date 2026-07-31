@@ -43,6 +43,10 @@ internal sealed class PostgreSqlRuntimeTransactionCoordinator : IRuntimeTransact
                 {
                     await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
                 }
+                catch (PostgresException)
+                {
+                    throw;
+                }
                 catch (Exception)
                 {
                     throw new RuntimeTransactionCommitUnknownException(
